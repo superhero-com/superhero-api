@@ -11,6 +11,11 @@ export class Token {
   network_id: string;
 
   @Column({
+    nullable: true,
+  })
+  factory_address: string;
+
+  @Column({
     unique: true,
   })
   address: string;
@@ -24,6 +29,11 @@ export class Token {
     default: 0,
   })
   price: number;
+
+  @Column({
+    default: 0,
+  })
+  sell_price: number;
 
   @Column({
     default: 0,
