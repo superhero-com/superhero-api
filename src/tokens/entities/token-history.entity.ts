@@ -6,52 +6,12 @@ import {
 } from 'typeorm';
 
 @Entity()
-export class Token {
+export class TokenHistory {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({
-    default: 'ae_mainnet', // || 'ae_uat'
-  })
-  network_id: string;
-
-  @Column({
-    nullable: true,
-  })
-  factory_address: string;
-
   @Column()
   sale_address: string;
-
-  @Column({
-    default: null,
-  })
-  owner_address: string;
-
-  /**
-   * Basic Token Info
-   */
-  @Column({
-    default: null,
-  })
-  address: string;
-
-  @Column()
-  name: string;
-
-  @Column()
-  symbol: string;
-
-  @Column({
-    default: 18,
-    type: 'bigint',
-  })
-  decimals: string;
-
-  @Column({
-    default: 10000,
-  })
-  rank: number;
 
   @Column({
     default: 0,

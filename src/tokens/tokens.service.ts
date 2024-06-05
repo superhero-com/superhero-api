@@ -3,13 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { Token } from './entities/token.entity';
-import { Encoded } from '@aeternity/aepp-sdk';
+import { TokenHistory } from './entities/token-history.entity';
 
 @Injectable()
 export class TokensService {
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
+
+    @InjectRepository(TokenHistory)
+    private tokenHistoriesRepository: Repository<TokenHistory>,
   ) {
     console.log('TokensService created');
   }
@@ -30,14 +33,10 @@ export class TokensService {
     await this.tokensRepository.delete(id);
   }
 
-  async save(token: {
-    name: string;
-    address: Encoded.ContractAddress;
-    factory_address: Encoded.ContractAddress;
-  }) {
+  async save(token: Partial<Token>) {
     console.log('++saveNewToken', token.name);
     const tokenExists = await this.tokensRepository.findOneBy({
-      address: token.address,
+      sale_address: token.sale_address,
     });
 
     if (tokenExists) {
@@ -45,5 +44,28 @@ export class TokensService {
     }
 
     this.tokensRepository.save(token);
+  }
+
+  async update(sale_address, data: Partial<Token>) {
+    const tokenExists = await this.tokensRepository.findOneBy({
+      sale_address,
+    });
+
+    if (!tokenExists) {
+      return;
+    }
+    const result = await this.tokensRepository.update(tokenExists.id, data);
+
+    console.log('==========');
+    console.log('update', result);
+    if (data.price) {
+      this.tokenHistoriesRepository.save({
+        sale_address,
+        price: data.price,
+        sell_price: data.sell_price,
+        market_cap: data.market_cap,
+        total_supply: data.total_supply,
+      });
+    }
   }
 }
