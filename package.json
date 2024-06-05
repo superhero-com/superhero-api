@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@aeternity/aepp-sdk": "^13.3.2",
-    "token-sale-sdk": "git+ssh://git@github.com/aeternity/token-sale-sdk#f8f96d2088d197380e981a9b7a36245332b61851",
     "@nestjs/common": "^10.0.0",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
@@ -29,8 +28,10 @@
     "@nestjs/typeorm": "^10.0.2",
     "camelcase-keys-deep": "^0.1.0",
     "mysql2": "^3.9.9",
+    "nestjs-typeorm-paginate": "^4.0.4",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
+    "token-sale-sdk": "git+ssh://git@github.com/aeternity/token-sale-sdk#f8f96d2088d197380e981a9b7a36245332b61851",
     "typeorm": "^0.3.20",
     "ws": "^8.17.0"
   },

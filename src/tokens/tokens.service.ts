@@ -21,8 +21,8 @@ export class TokensService {
     return this.tokensRepository.find();
   }
 
-  findByAddress(address: string): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ address });
+  findByAddress(sale_address: string): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ sale_address });
   }
 
   findOne(id: number): Promise<Token | null> {
