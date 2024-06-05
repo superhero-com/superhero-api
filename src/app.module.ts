@@ -1,23 +1,19 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AeModule } from './ae/ae.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { DATABASE_CONFIG } from './configs/database';
 import { TokenSaleModule } from './token-sale/token-sale.module';
 import { TokensModule } from './tokens/tokens.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot(),
     TypeOrmModule.forRoot({
-      type: 'mysql',
-      host: '127.0.0.1',
-      port: 3306,
-      username: 'root',
-      password: '',
-      database: 'tokenae_scan',
+      ...DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
-      // shouldn't be used in production - otherwise you can lose production data.
-      synchronize: true,
     }),
     AeModule,
     TokenSaleModule,
