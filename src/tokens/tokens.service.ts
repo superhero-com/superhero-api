@@ -21,8 +21,12 @@ export class TokensService {
     return this.tokensRepository.find();
   }
 
-  findByAddress(sale_address: string): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ sale_address });
+  findByAddress(address: string): Promise<Token | null> {
+    return this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.address = :address', { address })
+      .orWhere('token.sale_address = :address', { address })
+      .getOne();
   }
 
   findOne(id: number): Promise<Token | null> {

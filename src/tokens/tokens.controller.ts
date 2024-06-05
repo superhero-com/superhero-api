@@ -45,11 +45,11 @@ export class TokensController {
     return paginate<Token>(queryBuilder, { page, limit });
   }
 
-  @Get(':saleAddress')
+  @Get(':address')
   @ApiResponse({
     type: TokenDto,
   })
-  findOne(@Param('saleAddress') saleAddress: string) {
-    return this.tokensService.findByAddress(saleAddress);
+  findOne(@Param('address') address: string) {
+    return this.tokensService.findByAddress(address);
   }
 }
