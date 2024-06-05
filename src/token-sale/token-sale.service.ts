@@ -175,7 +175,7 @@ export class TokenSaleService {
       total_supply: total_supply?.toString(),
     };
 
-    console.log('TokenSaleService->loadTokenData', tokenData);
+    // console.log('TokenSaleService->loadTokenData', tokenData);
     this.tokensService.update(saleAddress, tokenData);
   }
 }
