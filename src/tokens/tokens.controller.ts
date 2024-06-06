@@ -24,6 +24,8 @@ export class TokensController {
     private readonly tokensService: TokensService,
   ) {}
 
+  @ApiQuery({ name: 'search', type: 'string', required: false })
+  @ApiQuery({ name: 'factory_address', type: 'string', required: false })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -36,6 +38,8 @@ export class TokensController {
   @ApiOkResponsePaginated(TokenDto)
   @Get()
   async listAll(
+    @Query('search') search = undefined,
+    @Query('factory_address') factory_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
     @Query('order_by') orderBy: string = 'market_cap',
@@ -43,6 +47,14 @@ export class TokensController {
   ): Promise<Pagination<Token>> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
     queryBuilder.orderBy(`token.${orderBy}`, orderDirection);
+    if (search) {
+      queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
+    }
+    if (factory_address) {
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address,
+      });
+    }
     return paginate<Token>(queryBuilder, { page, limit });
   }
 
