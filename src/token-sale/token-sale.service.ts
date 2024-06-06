@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { Encoded } from '@aeternity/aepp-sdk';
+import BigNumber from 'bignumber.js';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
 import {
@@ -149,30 +150,30 @@ export class TokenSaleService {
     const [total_supply] = await Promise.all([
       contractInstance
         .total_supply?.()
-        .then((res) => res.decodedResult)
-        .catch(() => '0'),
+        .then((res) => new BigNumber(res.decodedResult))
+        .catch(() => new BigNumber('0')),
     ]);
 
     const [tokenMetaInfo, price, sell_price] = await Promise.all([
       instance.metaInfo(),
       instance
         .price(1)
-        .then((res: string) => res || '0')
-        .catch(() => '0'),
+        .then((res: string) => new BigNumber(res || '0'))
+        .catch(() => new BigNumber('0')),
       instance
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .sellReturn?.('1' as string)
-        .then((res: string) => res || '0')
-        .catch(() => '0'),
+        .then((res: string) => new BigNumber(res || '0'))
+        .catch(() => new BigNumber('0')),
     ]);
 
     const tokenData = {
       ...(tokenMetaInfo?.token || {}),
       price,
       sell_price,
-      market_cap: Number(Number(price) * Number(total_supply)).toString(),
-      total_supply: total_supply?.toString(),
+      total_supply,
+      market_cap: total_supply.multipliedBy(price),
     };
 
     // console.log('TokenSaleService->loadTokenData', tokenData);

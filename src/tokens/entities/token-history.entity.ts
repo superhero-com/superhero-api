@@ -1,3 +1,5 @@
+import BigNumber from 'bignumber.js';
+import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
 import {
   Entity,
   Column,
@@ -14,24 +16,32 @@ export class TokenHistory {
   sale_address: string;
 
   @Column({
-    default: 0,
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
   })
-  price: string;
-
-  @Column({
-    default: 0,
-  })
-  sell_price: string;
-
-  @Column({
-    default: 0,
-  })
-  market_cap: string;
+  price: BigNumber;
 
   @Column({
     default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
   })
-  total_supply: string;
+  sell_price: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  market_cap: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  total_supply: BigNumber;
 
   @CreateDateColumn({
     type: 'timestamp',
