@@ -81,5 +81,18 @@ export class TokensService {
         total_supply: data.total_supply,
       });
     }
+
+    this.updateTokensRanking();
+  }
+
+  async updateTokensRanking() {
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('tokens')
+      .orderBy('tokens.market_cap', 'DESC')
+      .getMany();
+
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { rank: index + 1 });
+    });
   }
 }
