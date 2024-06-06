@@ -6,7 +6,7 @@ import {
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import { ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
@@ -15,7 +15,7 @@ import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
 
-@Controller('tokens')
+@Controller('api/tokens')
 @ApiTags('Tokens')
 export class TokensController {
   constructor(
@@ -32,9 +32,10 @@ export class TokensController {
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
+  @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
   @Get()
-  async findAll(
+  async listAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
     @Query('order_by') orderBy: string = 'market_cap',
@@ -45,11 +46,12 @@ export class TokensController {
     return paginate<Token>(queryBuilder, { page, limit });
   }
 
+  @ApiOperation({ operationId: 'findByAddress' })
   @Get(':address')
   @ApiResponse({
     type: TokenDto,
   })
-  findOne(@Param('address') address: string) {
+  findByAddress(@Param('address') address: string) {
     return this.tokensService.findByAddress(address);
   }
 }
