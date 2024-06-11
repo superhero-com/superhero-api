@@ -21,7 +21,7 @@ export class TokensGateway implements OnModuleInit {
 
   @SubscribeMessage('tokenUpdate')
   handleTokenUpdate(@MessageBody() payload: any): string {
-    console.log('handleTokenUpdate', payload);
+    // console.log('handleTokenUpdate', payload);
     this.server.emit('tokenUpdate', payload);
     return 'Done!';
   }

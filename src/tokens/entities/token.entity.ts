@@ -6,6 +6,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { IPriceDto } from '../dto/price.dto';
 
 @Entity()
 export class Token {
@@ -63,6 +64,12 @@ export class Token {
   price: BigNumber;
 
   @Column({
+    type: 'json',
+    nullable: true,
+  })
+  price_data!: IPriceDto;
+
+  @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,
@@ -70,11 +77,23 @@ export class Token {
   sell_price: BigNumber;
 
   @Column({
+    type: 'json',
+    nullable: true,
+  })
+  sell_price_data!: IPriceDto;
+
+  @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,
   })
   market_cap: BigNumber;
+
+  @Column({
+    type: 'json',
+    nullable: true,
+  })
+  market_cap_data!: IPriceDto;
 
   @Column({
     default: 0n,
