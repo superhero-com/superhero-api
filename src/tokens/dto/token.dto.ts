@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PriceDto } from './price.dto';
 
 export class TokenDto {
   @ApiProperty()
@@ -38,10 +39,17 @@ export class TokenDto {
   price: string;
 
   @ApiProperty()
+  price_data: PriceDto;
+
+  @ApiProperty()
   sell_price: string;
+  @ApiProperty()
+  sell_price_data: PriceDto;
 
   @ApiProperty()
   market_cap: string;
+  @ApiProperty()
+  market_cap_data: PriceDto;
 
   @ApiProperty()
   total_supply: string;

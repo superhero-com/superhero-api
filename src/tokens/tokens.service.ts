@@ -75,9 +75,9 @@ export class TokensService {
     if (data.price) {
       this.tokenHistoriesRepository.save({
         sale_address,
-        price: data.price,
-        sell_price: data.sell_price,
-        market_cap: data.market_cap,
+        price: data.price_data,
+        sell_price: data.sell_price_data,
+        market_cap: data.market_cap_data,
         total_supply: data.total_supply,
       });
     }

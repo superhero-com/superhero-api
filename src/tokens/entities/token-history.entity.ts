@@ -1,11 +1,12 @@
-import BigNumber from 'bignumber.js';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
 import {
-  Entity,
   Column,
-  PrimaryGeneratedColumn,
   CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
 } from 'typeorm';
+import { IPriceDto } from '../dto/price.dto';
+import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
+import BigNumber from 'bignumber.js';
 
 @Entity()
 export class TokenHistory {
@@ -16,25 +17,22 @@ export class TokenHistory {
   sale_address: string;
 
   @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
+    type: 'json',
+    nullable: true,
   })
-  price: BigNumber;
+  price!: IPriceDto;
 
   @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
+    type: 'json',
+    nullable: true,
   })
-  sell_price: BigNumber;
+  sell_price!: IPriceDto;
 
   @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
+    type: 'json',
+    nullable: true,
   })
-  market_cap: BigNumber;
+  market_cap!: IPriceDto;
 
   @Column({
     default: 0n,

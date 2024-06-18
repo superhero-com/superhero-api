@@ -14,6 +14,7 @@ import { IToken, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
 import { TokensService } from 'src/tokens/tokens.service';
 import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
+import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 
 type RoomToken = Partial<IToken> & {
   symbol: string;
@@ -46,6 +47,7 @@ export class TokenSaleService {
     private tokensService: TokensService,
     private aeSdkService: AeSdkService,
     private websocketService: WebSocketService,
+    private coinGeckoService: CoinGeckoService,
   ) {
     this.aeSdkService.sdk.selectNode(NETWORKS[this.activeNetworkId].name);
 
@@ -168,12 +170,25 @@ export class TokenSaleService {
         .catch(() => new BigNumber('0')),
     ]);
 
+    const market_cap = total_supply.multipliedBy(price);
+
+    const [price_data, sell_price_data, market_cap_data] = await Promise.all([
+      this.coinGeckoService.getPriceData(price),
+      this.coinGeckoService.getPriceData(sell_price),
+      this.coinGeckoService.getPriceData(market_cap),
+    ]);
+
+    console.log('price_data', price_data);
+
     const tokenData = {
       ...(tokenMetaInfo?.token || {}),
       price,
       sell_price,
+      sell_price_data,
       total_supply,
-      market_cap: total_supply.multipliedBy(price),
+      price_data,
+      market_cap,
+      market_cap_data,
     };
 
     // console.log('TokenSaleService->loadTokenData', tokenData);
