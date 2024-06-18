@@ -41,7 +41,7 @@ export class TokensController {
     @Query('search') search = undefined,
     @Query('factory_address') factory_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<Token>> {
