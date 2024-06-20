@@ -14,11 +14,6 @@ export class Token {
   id: number;
 
   @Column({
-    default: 'ae_mainnet', // || 'ae_uat'
-  })
-  network_id: string;
-
-  @Column({
     nullable: true,
   })
   factory_address: string;

@@ -36,9 +36,8 @@ export const ROOM_FACTORY_CONTRACTS: IRoomFactoryContracts = {
   ],
   [NETWORK_ID_TESTNET]: [
     {
-      contractId: 'ct_2CsftTPuMWAdnmvhWLV8uJbq86jPsR1s3QgS6JyFPokGk17Scb',
-      description:
-        'spread 10%, buy(x) = 0.01 + 0.0000001x, sell(x) = 0.009 + 0.00000009x',
+      contractId: 'ct_2bp1EgvpSxndaiz5GNvoeSJgYBEF7zHGmgMu8pX2rArjB7oofL',
+      description: 'affiliation integration ',
     },
   ],
 };

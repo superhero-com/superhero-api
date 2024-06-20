@@ -157,7 +157,10 @@ export class TokenSaleService {
     ]);
 
     const [tokenMetaInfo, price, sell_price] = await Promise.all([
-      instance.metaInfo(),
+      instance.metaInfo().catch((e) => {
+        console.error('TokenSaleService->loadTokenData', saleAddress, e);
+        return { token: {} };
+      }),
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
@@ -172,6 +175,7 @@ export class TokenSaleService {
 
     const market_cap = total_supply.multipliedBy(price);
 
+    console.log('loading prices for', saleAddress, tokenMetaInfo);
     const [price_data, sell_price_data, market_cap_data] = await Promise.all([
       this.coinGeckoService.getPriceData(price),
       this.coinGeckoService.getPriceData(sell_price),

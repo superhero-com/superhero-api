@@ -36,7 +36,7 @@
     "pg": "^8.12.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "token-sale-sdk": "git+ssh://git@github.com/aeternity/token-sale-sdk#f8f96d2088d197380e981a9b7a36245332b61851",
+    "token-sale-sdk": "git+ssh://git@github.com/aeternity/token-sale-sdk#f12377fd66887b5fde302e99fd9dc0909ec9db1d",
     "typeorm": "^0.3.20",
     "ws": "^8.17.0"
   },
