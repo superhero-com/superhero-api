@@ -30,6 +30,7 @@ export class TokensService {
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
+      .orWhere('token.name = :address', { address })
       .getOne();
   }
 
@@ -74,6 +75,7 @@ export class TokensService {
 
     if (data.price) {
       this.tokenHistoriesRepository.save({
+        token: tokenExists,
         sale_address,
         price: data.price_data,
         sell_price: data.sell_price_data,

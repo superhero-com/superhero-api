@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { TokenHistory } from './entities/token-history.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -30,6 +30,11 @@ export class HistoricalController {
   })
   // startDate
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
   @Get(':address')
   async findByAddress(
     @Param('address') address: string,
@@ -38,8 +43,9 @@ export class HistoricalController {
     @Query('convertTo') convertTo: string = 'ae',
   ) {
     const date = startDate ? moment(startDate) : moment().subtract(1, 'month');
+    const token = await this.tokensService.findByAddress(address);
     return this.tokenHistoryService.getHistoricalData({
-      address,
+      token,
       interval,
       startDate: date,
       endDate: moment(),

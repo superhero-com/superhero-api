@@ -4,14 +4,19 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
+import { TokenHistory } from './token-history.entity';
 
 @Entity()
 export class Token {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @OneToMany(() => TokenHistory, (tokenHistory) => tokenHistory.token)
+  histories: TokenHistory[];
 
   @Column({
     nullable: true,

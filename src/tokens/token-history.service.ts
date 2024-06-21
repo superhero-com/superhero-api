@@ -5,9 +5,10 @@ import { TokenHistory } from './entities/token-history.entity';
 import { HistoricalDataDto, QuoteDto } from './dto/historical-data.dto';
 import { Moment } from 'moment';
 import BigNumber from 'bignumber.js';
+import { Token } from './entities/token.entity';
 
 export interface IGetHistoricalDataProps {
-  address: string;
+  token: Token;
   interval: string;
   startDate: Moment;
   endDate: Moment;
@@ -27,8 +28,8 @@ export class TokenHistoryService {
     const { interval, startDate } = props;
     const data = await this.tokenHistoryRepository
       .createQueryBuilder('token_history')
-      .where('token_history.sale_address = :address', {
-        address: props.address,
+      .where('token_history.tokenId = :tokenId', {
+        tokenId: props.token.id,
       })
       // .where('token_history.created_at >= :start', {
       //   start: start.toISOString(),

@@ -2,16 +2,21 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
 import BigNumber from 'bignumber.js';
+import { Token } from './token.entity';
 
 @Entity()
 export class TokenHistory {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @ManyToOne(() => Token, (token) => token.histories)
+  token: Token;
 
   @Column()
   sale_address: string;
