@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export interface IPriceDto {
+  ae: number;
   usd: number;
   eur: number;
   aud: number;
