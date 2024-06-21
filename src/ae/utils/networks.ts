@@ -30,6 +30,9 @@ export const NETWORKS = {
   [NETWORK_ID_TESTNET]: NETWORK_TESTNET,
 };
 
+export const ACTIVE_NETWORK: INetwork =
+  NETWORKS[process.env.AE_NETWORK_ID || NETWORK_ID_MAINNET];
+
 export interface INetwork {
   url: string;
   name: string;

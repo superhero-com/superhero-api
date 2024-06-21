@@ -3,18 +3,13 @@ import { Injectable } from '@nestjs/common';
 import { Encoded } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
+import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import {
-  INetworkTypes,
-  NETWORKS,
-  NETWORK_ID_MAINNET,
-  NETWORK_ID_TESTNET,
-} from 'src/ae/utils/networks';
+import { ACTIVE_NETWORK, NETWORK_ID_TESTNET } from 'src/ae/utils/networks';
 import { IToken, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
 import { TokensService } from 'src/tokens/tokens.service';
 import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 
 type RoomToken = Partial<IToken> & {
   symbol: string;
@@ -31,13 +26,7 @@ export interface ITokenSaleFactory {
 
 @Injectable()
 export class TokenSaleService {
-  tokenSaleFactories: Record<
-    INetworkTypes,
-    Record<Encoded.ContractAddress, ITokenSaleFactory>
-  > = {
-    [NETWORK_ID_MAINNET]: {},
-    [NETWORK_ID_TESTNET]: {},
-  };
+  tokenSaleFactories: Record<Encoded.ContractAddress, ITokenSaleFactory> = {};
 
   activeNetworkId = NETWORK_ID_TESTNET;
 
@@ -49,17 +38,14 @@ export class TokenSaleService {
     private websocketService: WebSocketService,
     private coinGeckoService: CoinGeckoService,
   ) {
-    this.aeSdkService.sdk.selectNode(NETWORKS[this.activeNetworkId].name);
-
     console.log('TokenSaleService created v2');
     this.loadFactories();
 
     websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
-        const tokenSalesContracts = Object.values(
-          this.tokenSaleFactories[this.activeNetworkId],
-        ).map((factory: ITokenSaleFactory) =>
-          factory.tokens.map((token) => token.saleAddress),
+        const tokenSalesContracts = Object.values(this.tokenSaleFactories).map(
+          (factory: ITokenSaleFactory) =>
+            factory.tokens.map((token) => token.saleAddress),
         );
 
         // merge all contracts
@@ -101,18 +87,18 @@ export class TokenSaleService {
       bondingCurveAddress,
       tokens,
     };
-    this.tokenSaleFactories[this.activeNetworkId][address] = tokenSaleFactory;
+    this.tokenSaleFactories[address] = tokenSaleFactory;
     return tokenSaleFactory;
   }
 
   async loadFactories() {
     console.log('TokenSaleService->loadFactories');
-    const contracts = ROOM_FACTORY_CONTRACTS[this.activeNetworkId];
+    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
     console.log('TokenSaleService->loadFactories done');
-    const factories = this.tokenSaleFactories[this.activeNetworkId];
+    const factories = this.tokenSaleFactories;
     Object.values(factories).forEach((factory: ITokenSaleFactory) => {
       factory.tokens.forEach((token) => {
         this.loadTokenData(token.saleAddress);
@@ -123,7 +109,7 @@ export class TokenSaleService {
   async getTokenSaleRoomFactory(
     saleAddress: Encoded.ContractAddress,
   ): Promise<ITokenSaleFactory> {
-    const factories = this.tokenSaleFactories[this.activeNetworkId];
+    const factories = this.tokenSaleFactories;
     const tokenSaleRoomFactory = Object.values(factories).find(
       (factory: ITokenSaleFactory) =>
         factory.tokens.find((token) => token.saleAddress === saleAddress),

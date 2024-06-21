@@ -16,6 +16,7 @@ import {
   ITransaction,
   WebSocketChannelName,
 } from './utils/types';
+import { ACTIVE_NETWORK } from './utils/networks';
 
 @Injectable()
 export class WebSocketService {
@@ -34,23 +35,13 @@ export class WebSocketService {
   };
 
   constructor() {
-    console.log('WebSocketService created');
-
-    this.connect('wss://testnet.aeternity.io/mdw/v2/websocket');
+    this.connect(ACTIVE_NETWORK.websocketUrl);
   }
 
   handleWebsocketOpen() {
-    console.log(
-      'WebSocketService->handleWebsocketOpen:',
-      this.subscribersQueue,
-    );
     this.isWsConnected = true;
     try {
       this.subscribersQueue.forEach((message) => {
-        console.log(
-          'this.wsClient.send(JSON.stringify(message))',
-          JSON.stringify(message),
-        );
         this.wsClient.send(JSON.stringify(message));
       });
     } catch (error) {
@@ -135,7 +126,6 @@ export class WebSocketService {
   }
 
   subscribeForKeyBlocksUpdates(callback: (payload: ITopHeader) => void) {
-    console.log('subscribeForKeyBlocksUpdates');
     return this.subscribeForChannel(
       {
         op: WEB_SOCKET_SUBSCRIBE,
