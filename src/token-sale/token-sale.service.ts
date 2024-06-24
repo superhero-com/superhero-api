@@ -9,7 +9,9 @@ import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { IToken, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
 import { TokensService } from 'src/tokens/tokens.service';
-import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
+// import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
+const { initRoomFactory, initTokenSale } = require('token-sale-sdk');
+// import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
 import { TokenSaleDataSyncService } from './token-sale-data-sync.service';
 
 type RoomToken = Partial<IToken> & {
@@ -19,7 +21,7 @@ type RoomToken = Partial<IToken> & {
 };
 
 export interface ITokenSaleFactory {
-  factory: RoomFactory;
+  factory: any;
   address: Encoded.ContractAddress;
   bondingCurveAddress: Encoded.ContractAddress;
   tokens: RoomToken[];
