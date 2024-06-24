@@ -48,10 +48,21 @@ export class TokensService {
     });
 
     if (tokenExists) {
-      return;
+      return tokenExists;
     }
 
-    this.tokensRepository.save(token);
+    return this.tokensRepository.save(token);
+  }
+
+  async checkIfTokenHasHistory(token: Token) {
+    const tokenHistory = await this.tokenHistoriesRepository
+      .createQueryBuilder('token_history')
+      .where('token_history.tokenId = :tokenId', {
+        tokenId: token.id,
+      })
+      .getExists();
+
+    return tokenHistory;
   }
 
   async update(sale_address, data: Partial<Token>) {

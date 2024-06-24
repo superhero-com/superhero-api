@@ -44,6 +44,13 @@ export class TokenHistory {
     type: 'numeric',
     transformer: BigNumberTransformer,
   })
+  volume: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
   total_supply: BigNumber;
 
   @CreateDateColumn({

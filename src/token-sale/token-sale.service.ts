@@ -5,11 +5,12 @@ import BigNumber from 'bignumber.js';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { ACTIVE_NETWORK, NETWORK_ID_TESTNET } from 'src/ae/utils/networks';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { IToken, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
 import { TokensService } from 'src/tokens/tokens.service';
 import { RoomFactory, initRoomFactory, initTokenSale } from 'token-sale-sdk';
+import { TokenSaleDataSyncService } from './token-sale-data-sync.service';
 
 type RoomToken = Partial<IToken> & {
   symbol: string;
@@ -28,15 +29,12 @@ export interface ITokenSaleFactory {
 export class TokenSaleService {
   tokenSaleFactories: Record<Encoded.ContractAddress, ITokenSaleFactory> = {};
 
-  activeNetworkId = NETWORK_ID_TESTNET;
-
-  initRoomFactory: typeof initRoomFactory;
-
   constructor(
     private tokensService: TokensService,
     private aeSdkService: AeSdkService,
     private websocketService: WebSocketService,
     private coinGeckoService: CoinGeckoService,
+    private tokenSaleDataSyncService: TokenSaleDataSyncService,
   ) {
     console.log('TokenSaleService created v2');
     this.loadFactories();
@@ -68,18 +66,24 @@ export class TokenSaleService {
       factory.listRegisteredTokens(),
     ]);
     const tokens: RoomToken[] = [];
-    Array.from(registeredTokens).forEach(([symbol, saleAddress]) => {
-      this.tokensService.save({
-        name: symbol,
-        symbol,
-        sale_address: saleAddress,
-        factory_address: address,
-      });
+    Array.from(registeredTokens).forEach(async ([symbol, saleAddress]) => {
       tokens.push({
         symbol,
         saleAddress,
         factoryAddress: address,
       });
+      const token = await this.tokensService.save({
+        name: symbol,
+        symbol,
+        sale_address: saleAddress,
+        factory_address: address,
+      });
+      // const hasHistory = await this.tokensService.checkIfTokenHasHistory(token);
+      // if (!hasHistory) {
+      //   this.tokenSaleDataSyncService.syncTokenHistory(token);
+      // }
+      this.loadTokenData(saleAddress);
+      this.tokenSaleDataSyncService.syncTokenHistory(token);
     });
     const tokenSaleFactory = {
       address,
@@ -97,13 +101,6 @@ export class TokenSaleService {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
-    console.log('TokenSaleService->loadFactories done');
-    const factories = this.tokenSaleFactories;
-    Object.values(factories).forEach((factory: ITokenSaleFactory) => {
-      factory.tokens.forEach((token) => {
-        this.loadTokenData(token.saleAddress);
-      });
-    });
   }
 
   async getTokenSaleRoomFactory(
@@ -143,8 +140,7 @@ export class TokenSaleService {
     ]);
 
     const [tokenMetaInfo, price, sell_price] = await Promise.all([
-      instance.metaInfo().catch((e) => {
-        console.error('TokenSaleService->loadTokenData', saleAddress, e);
+      instance.metaInfo().catch(() => {
         return { token: {} };
       }),
       instance
@@ -161,7 +157,7 @@ export class TokenSaleService {
 
     const market_cap = total_supply.multipliedBy(price);
 
-    console.log('loading prices for', saleAddress, tokenMetaInfo);
+    // console.log('loading prices for', saleAddress, tokenMetaInfo);
     const [price_data, sell_price_data, market_cap_data] = await Promise.all([
       this.coinGeckoService.getPriceData(price),
       this.coinGeckoService.getPriceData(sell_price),
