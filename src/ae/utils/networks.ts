@@ -1,3 +1,5 @@
+import { ACTIVE_NETWORK_ID } from 'src/configs/network';
+
 /**
  * Default `networkId` values returned by the Node after establishing the connection.
  * Nodes returns different values when connecting to the Hyperchains.
@@ -30,8 +32,7 @@ export const NETWORKS = {
   [NETWORK_ID_TESTNET]: NETWORK_TESTNET,
 };
 
-export const ACTIVE_NETWORK: INetwork =
-  NETWORKS[process.env.AE_NETWORK_ID || NETWORK_ID_MAINNET];
+export const ACTIVE_NETWORK: INetwork = NETWORKS[ACTIVE_NETWORK_ID];
 
 export interface INetwork {
   url: string;

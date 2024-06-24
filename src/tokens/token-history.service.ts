@@ -25,16 +25,17 @@ export class TokenHistoryService {
   async getHistoricalData(
     props: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
-    const { interval, startDate } = props;
+    const { startDate, endDate } = props;
+    console.log('startDate', startDate.toDate());
     const data = await this.tokenHistoryRepository
       .createQueryBuilder('token_history')
       .where('token_history.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      // .where('token_history.created_at >= :start', {
-      //   start: start.toISOString(),
-      // })
-      // .andWhere('token_history.created_at <= :end', { end: end.toISOString() })
+      .where('token_history.created_at >= :start', {
+        start: startDate.toDate(),
+      })
+      .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
