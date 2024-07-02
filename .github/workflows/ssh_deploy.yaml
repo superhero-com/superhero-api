@@ -47,7 +47,6 @@ jobs:
         uses: appleboy/ssh-action@v1.0.0
         env:
           VERSION: "${{ inputs.VERSION }}"
-          CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}"
           SHA: "${{ github.sha }}"
           AE_NETWORK_ID: "${{ secrets.AE_NETWORK_ID }}"
           HOST_DATA_DIR: "${{ secrets.HOST_DATA_DIR }}"
@@ -63,17 +62,14 @@ jobs:
             DB_USER,
             DB_PASSWORD,
             API_HOST_PORT,
-            HOST_DATA_DIR,
-            CONTAINER_NAME,
-            VERSION,
             SHA
           script: |
-            mkdir -p "${{ secrets.HOST_DATA_DIR }}" || true
-            cd "${{ secrets.HOST_DATA_DIR }}" || true
-            echo $SHA > "REVISION" || true
-            docker run -d --name "${{ secrets.CONTAINER_NAME }}" \
+            mkdir -p ${{ secrets.HOST_DATA_DIR }} || true
+            cd ${{ secrets.HOST_DATA_DIR }} || true
+            echo $SHA > REVISION || true
+            docker run -d --name ${{ inputs.CONTAINER_NAME }} \
               --restart=always \
-              -p "${{ secrets.API_HOST_PORT }}:3000" \
+              -p ${{ secrets.API_HOST_PORT }}:3000 \
               -e DB_USER \
               -e DB_PASSWORD \
               -e AE_NETWORK_ID \
@@ -83,5 +79,5 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_DATABASE=api \
               -e DB_SYNC=true \
-              --network "${{ inputs.CONTAINER_NAME }}-db" \
-              superherodotcom/tokaen-api:"${{ secrets.VERSION }}"
+              --network ${{ inputs.CONTAINER_NAME }}-db \
+              superherodotcom/tokaen-api:${{ inputs.VERSION }}
