@@ -9,7 +9,7 @@ services:
     ports:
       - 5432:5432
     volumes: 
-      - db:/var/lib/postgresql/data
+      - ./:/var/lib/postgresql/data
   api:
     container_name: "${CONTAINER_NAME:-tokaenorg-api}"
     image: superherodotcom/tokaen-api:${VERSION:-latest}
@@ -30,12 +30,3 @@ services:
       AE_NETWORK_ID: ${AE_NETWORK_ID:-ae_mainnet}
     links:
       - db
-    volumes:
-      - './:/src'
-volumes:
-  db:
-    driver: local
-    driver_opts:
-      o: bind
-      type: none
-      device: ./
