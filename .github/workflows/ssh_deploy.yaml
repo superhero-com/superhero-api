@@ -38,9 +38,6 @@ on:
       DB_PASSWORD:
         description: "Database password"
         required: false
-      NPM_GITHUB_TOKEN:
-        description: "Github token"
-        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -74,6 +71,17 @@ jobs:
             mkdir -p "${{ secrets.HOST_DATA_DIR }}" || true
             cd "${{ secrets.HOST_DATA_DIR }}" || true
             echo $SHA > "REVISION" || true
-            curl https://x-access-token:${{ secrets.NPM_GITHUB_TOKEN }}@raw.githubusercontent.com/superhero-com/tokaen-api/main/docker-compose.yaml>docker-compose.yaml
-            docker compose down || true
-            docker compose up -d || true
+            docker run -d --name "${{ secrets.CONTAINER_NAME }}" \
+              --restart=always \
+              -p "${{ secrets.API_HOST_PORT }}:3000" \
+              -e DB_USER \
+              -e DB_PASSWORD \
+              -e AE_NETWORK_ID \
+              -e NODE_ENV=production \
+              -e DB_TYPE=postgres \
+              -e DB_HOST=127.0.0.1 \
+              -e DB_PORT=5432 \
+              -e DB_DATABASE=api \
+              -e DB_SYNC=true \
+              --network "${{ inputs.CONTAINER_NAME }}-db" \
+              superherodotcom/tokaen-api:"${{ secrets.VERSION }}"

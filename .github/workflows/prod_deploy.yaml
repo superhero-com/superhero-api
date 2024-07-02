@@ -19,30 +19,28 @@ jobs:
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-ae_uat"
+      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-testnet"
     secrets:
       AE_NETWORK_ID: "ae_uat"
       API_HOST_PORT: "3030"
-      HOST_DATA_DIR: "tokaenorg-api-db-uat"
+      HOST_DATA_DIR: "tokaenorg-api-uat"
       DEPLOY_HOST: "${{ secrets.PROD_DEPLOY_HOST }}"
       DEPLOY_USERNAME: "${{ secrets.PROD_DEPLOY_USERNAME }}"
       DEPLOY_KEY: "${{ secrets.PROD_DEPLOY_KEY }}"
       DB_USER: "${{ secrets.PROD_DB_USER }}"
       DB_PASSWORD: "${{ secrets.PROD_DB_PASSWORD }}"
-      NPM_GITHUB_TOKEN: "${{ secrets.NPM_GITHUB_TOKEN }}"
   call_deploy_mainnet:
     name: Call Deploy prod via ssh (uat)
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-ae_mainnet"
+      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-mainnet"
     secrets:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3033"
-      HOST_DATA_DIR: "tokaenorg-api-db-mainnet"
+      HOST_DATA_DIR: "tokaenorg-api-mainnet"
       DEPLOY_HOST: "${{ secrets.PROD_DEPLOY_HOST }}"
       DEPLOY_USERNAME: "${{ secrets.PROD_DEPLOY_USERNAME }}"
       DEPLOY_KEY: "${{ secrets.PROD_DEPLOY_KEY }}"
       DB_USER: "${{ secrets.PROD_DB_USER }}"
       DB_PASSWORD: "${{ secrets.PROD_DB_PASSWORD }}"
-      NPM_GITHUB_TOKEN: "${{ secrets.NPM_GITHUB_TOKEN }}"
