@@ -1,0 +1,74 @@
+# This workflow is only for inclusion in other workflows.
+name: Deploy via ssh
+on:
+  workflow_call:
+    inputs:
+      VERSION:
+        description: "Version to deploy"
+        required: false
+        default: "develop"
+        type: string
+      CONTAINER_NAME:
+        description: "Container name"
+        default: "tokaenorg-api"
+        required: false
+        type: string
+    secrets:
+      DEPLOY_HOST:
+        description: "Host to deploy to"
+        required: true
+      DEPLOY_USERNAME:
+        description: "Username to use for ssh"
+        required: true
+      DEPLOY_KEY:
+        description: "SSH key to use for ssh"
+        required: true
+      AE_NETWORK_ID:
+        description: "Aeternity network id"
+        required: false
+      HOST_DATA_DIR:
+        description: "Host directory to persist /data in"
+        required: true
+      API_HOST_PORT:
+        description: "Host port to expose the API on"
+        required: true
+      DB_USER:
+        description: "Database user"
+        required: false
+      DB_PASSWORD:
+        description: "Database password"
+        required: false
+jobs:
+  deploy:
+    name: Deploy via ssh
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run deploy script
+        uses: appleboy/ssh-action@v1.0.0
+        env:
+          VERSION: "${{ inputs.VERSION }}"
+          CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}"
+          SHA: "${{ github.sha }}"
+          AE_NETWORK_ID: "${{ secrets.AE_NETWORK_ID }}"
+          HOST_DATA_DIR: "${{ secrets.HOST_DATA_DIR }}"
+          API_HOST_PORT: "${{ secrets.API_HOST_PORT }}"
+          DB_USER: "${{ secrets.DB_USER }}"
+          DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
+        with:
+          host: "${{ secrets.DEPLOY_HOST }}"
+          username: "${{ secrets.DEPLOY_USERNAME }}"
+          key: "${{ secrets.DEPLOY_KEY }}"
+          envs: >
+            AE_NETWORK_ID,
+            DB_USER,
+            DB_PASSWORD,
+            API_HOST_PORT,
+            HOST_DATA_DIR,
+            CONTAINER_NAME,
+            VERSION,
+            SHA
+          script: |
+            mkdir -p "${{ secrets.HOST_DATA_DIR }}" || true
+            echo $SHA > "${{ secrets.HOST_DATA_DIR }}/REVISION" || true
+            docker composer down || true
+            docker composer up -d || true

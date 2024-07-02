@@ -5,8 +5,6 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
     git config --global url."https://x-access-token:$(cat /run/secrets/GITHUB_TOKEN)@github.com/".insteadOf "ssh://git@github.com"
 
 WORKDIR /src
-# COPY package*.json ./
-# COPY scripts ./
 COPY . .
 RUN npm ci
 RUN npm run build

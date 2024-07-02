@@ -1,0 +1,57 @@
+name: Staging deploy (uat+mainnet)
+on:
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: "Version to deploy to staging"
+        default: "main"
+        required: false
+        type: string
+      CONTAINER_NAME:
+        description: "Container name"
+        default: "staging-tokaenorg-api"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      VERSION:
+        description: "Version to deploy to staging"
+        default: "main"
+        required: false
+        type: string
+      CONTAINER_NAME:
+        description: "Container name prefix (network suffix will be appended)"
+        default: "staging-tokaenorg-api"
+        required: false
+        type: string
+jobs:
+  call_deploy_uat:
+    name: Call Deploy stag via ssh (uat)
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION }}
+      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-ae_uat"
+    secrets:
+      AE_NETWORK_ID: "ae_uat"
+      API_HOST_PORT: "3030"
+      HOST_DATA_DIR: "~/tokaenorg-api/db-uat"
+      DEPLOY_HOST: "${{ secrets.STAG_DEPLOY_HOST }}"
+      DEPLOY_USERNAME: "${{ secrets.STAG_DEPLOY_USERNAME }}"
+      DEPLOY_KEY: "${{ secrets.STAG_DEPLOY_KEY }}"
+      DB_USER: "${{ secrets.STAG_DB_USER }}"
+      DB_PASSWORD: "${{ secrets.STAG_DB_PASSWORD }}"
+  call_deploy_mainnet:
+    name: Call Deploy stag via ssh (mainnet)
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION }}
+      CONTAINER_NAME: "${{ inputs.CONTAINER_NAME }}-ae_mainnet"
+    secrets:
+      AE_NETWORK_ID: "ae_mainnet"
+      API_HOST_PORT: "3033"
+      HOST_DATA_DIR: "~/tokaenorg-api/db-mainnet"
+      DEPLOY_HOST: "${{ secrets.STAG_DEPLOY_HOST }}"
+      DEPLOY_USERNAME: "${{ secrets.STAG_DEPLOY_USERNAME }}"
+      DEPLOY_KEY: "${{ secrets.STAG_DEPLOY_KEY }}"
+      DB_USER: "${{ secrets.STAG_DB_USER }}"
+      DB_PASSWORD: "${{ secrets.STAG_DB_PASSWORD }}"
