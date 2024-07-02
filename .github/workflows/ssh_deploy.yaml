@@ -80,7 +80,7 @@ jobs:
               -e DB_DATABASE \
               -e NODE_ENV=production \
               -e DB_TYPE=postgres \
-              -e DB_HOST=127.0.0.1 \
+              -e DB_HOST=${{ inputs.CONTAINER_NAME }}-db \
               -e DB_PORT=5432 \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
