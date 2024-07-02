@@ -6,13 +6,13 @@ services:
     environment:
       - "POSTGRES_USER=${DB_USER:-postgres}"
       - "POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}"
-    ports:
-      - 5432:5432
     volumes: 
       - ./data:/var/lib/postgresql/data
+    networks:
+      - db
   api:
     container_name: "${CONTAINER_NAME:-tokaenorg-api}"
-    image: superherodotcom/tokaen-api:${VERSION:-latest}
+    image: superherodotcom/tokaen-api:${VERSION:-main}
     restart: always
     depends_on:
       - db
@@ -28,5 +28,13 @@ services:
       DB_DATABASE: tokaenorg_api_${AE_NETWORK_ID:-ae_mainnet}
       DB_SYNC: false
       AE_NETWORK_ID: ${AE_NETWORK_ID:-ae_mainnet}
+    networks:
+      - db
+      - default
     links:
       - db
+networks:
+  db:
+    internal: true
+  default:
+    driver: bridge
