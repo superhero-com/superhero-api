@@ -38,4 +38,4 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: "${HOST_DATA_DIR:-tokaenorg-api-db}"
+      device: ./
