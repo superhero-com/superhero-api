@@ -34,10 +34,13 @@ on:
         required: true
       DB_USER:
         description: "Database user"
-        required: false
+        required: true
       DB_PASSWORD:
         description: "Database password"
-        required: false
+        required: true
+      DB_DATABASE:
+        description: "Database name"
+        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -53,6 +56,7 @@ jobs:
           API_HOST_PORT: "${{ secrets.API_HOST_PORT }}"
           DB_USER: "${{ secrets.DB_USER }}"
           DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
+          DB_DATABASE: "${{ secrets.DB_DATABASE }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
           username: "${{ secrets.DEPLOY_USERNAME }}"
@@ -64,20 +68,18 @@ jobs:
             API_HOST_PORT,
             SHA
           script: |
-            mkdir -p ${{ secrets.HOST_DATA_DIR }} || true
-            cd ${{ secrets.HOST_DATA_DIR }} || true
-            echo $SHA > REVISION || true
+            echo $SHA > ${{ secrets.HOST_DATA_DIR }}/REVISION || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
               --restart=always \
               -p ${{ secrets.API_HOST_PORT }}:3000 \
               -e DB_USER \
               -e DB_PASSWORD \
               -e AE_NETWORK_ID \
+              -e DB_DATABASE \
               -e NODE_ENV=production \
               -e DB_TYPE=postgres \
               -e DB_HOST=127.0.0.1 \
               -e DB_PORT=5432 \
-              -e DB_DATABASE=api \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
               superherodotcom/tokaen-api:${{ inputs.VERSION }}
