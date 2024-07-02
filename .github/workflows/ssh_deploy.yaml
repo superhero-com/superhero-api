@@ -38,6 +38,9 @@ on:
       DB_PASSWORD:
         description: "Database password"
         required: false
+      NPM_GITHUB_TOKEN:
+        description: "Github token"
+        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -69,6 +72,8 @@ jobs:
             SHA
           script: |
             mkdir -p "${{ secrets.HOST_DATA_DIR }}" || true
-            echo $SHA > "${{ secrets.HOST_DATA_DIR }}/REVISION" || true
-            docker composer down || true
-            docker composer up -d || true
+            cd "${{ secrets.HOST_DATA_DIR }}" || true
+            echo $SHA > "REVISION" || true
+            curl https://x-access-token:${{ secrets.NPM_GITHUB_TOKEN }}@raw.githubusercontent.com/superhero-com/tokaen-api/main/docker-compose.yaml>docker-compose.yaml
+            docker compose down || true
+            docker compose up -d || true

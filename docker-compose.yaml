@@ -17,7 +17,7 @@ services:
     depends_on:
       - db
     ports:
-      - 3003:3000
+      - ${API_HOST_PORT:-3030}:3000
     environment:
       NODE_ENV: production
       DB_TYPE: postgres
@@ -38,4 +38,4 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${HOST_DATA_DIR:-~/tokaenorg-api/db}
+      device: ${HOST_DATA_DIR:-tokaenorg-api/db}
