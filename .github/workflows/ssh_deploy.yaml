@@ -69,6 +69,8 @@ jobs:
             SHA
           script: |
             echo $SHA > ${{ secrets.HOST_DATA_DIR }}/REVISION || true
+            docker stop ${{ inputs.CONTAINER_NAME }} || true
+            docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
               --restart=always \
               -p ${{ secrets.API_HOST_PORT }}:3000 \
