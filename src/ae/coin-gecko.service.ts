@@ -3,6 +3,7 @@ import BigNumber from 'bignumber.js';
 import { fetchJson } from './utils/common';
 import { AETERNITY_COIN_ID, CURRENCIES } from './utils/constants';
 import { CurrencyRates } from './utils/types';
+import { IPriceDto } from 'src/tokens/dto/price.dto';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 
@@ -61,7 +62,7 @@ export class CoinGeckoService {
    * @param price - The amount of AE tokens.
    * @returns An object containing the price data for AE and other currencies.
    */
-  async getPriceData(price: BigNumber) {
+  async getPriceData(price: BigNumber): Promise<IPriceDto> {
     if (this.rates === null) {
       await this.pullData();
     }
@@ -74,7 +75,7 @@ export class CoinGeckoService {
       prices[code] = price.multipliedBy(this.rates![code]) as any;
     });
 
-    return prices;
+    return prices as any;
   }
 
   /**
