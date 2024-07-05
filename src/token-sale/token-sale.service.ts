@@ -6,7 +6,7 @@ import { Queue } from 'bull';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { ITransaction } from 'src/ae/utils/types';
+import { IRoomFactoryContract, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
 import { initRoomFactory } from 'token-sale-sdk';
 import { PULL_TOKEN_META_DATA_QUEUE, PULL_TOKEN_PRICE_QUEUE } from './queues';
@@ -23,11 +23,23 @@ export class TokenSaleService {
     @InjectQueue(PULL_TOKEN_META_DATA_QUEUE)
     private readonly pullTokenMetaDataQueue: Queue,
   ) {
-    console.log('TokenSaleService created v2');
-    this.loadFactories();
+    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+
+    this.loadFactories(contracts);
 
     websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
+        if (
+          contracts.some(
+            (contract) => contract.contractId === transaction.tx.contractId,
+          )
+        ) {
+          const saleAddress = transaction.tx.return.value[1].value;
+          this.pullTokenMetaDataQueue.add({
+            saleAddress,
+          });
+          this.tokens.push(saleAddress);
+        }
         if (this.tokens.includes(transaction.tx.contractId)) {
           this.pullTokenPriceQueue.add({
             saleAddress: transaction.tx.contractId,
@@ -55,8 +67,7 @@ export class TokenSaleService {
       });
   }
 
-  async loadFactories() {
-    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+  async loadFactories(contracts: IRoomFactoryContract[]) {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
