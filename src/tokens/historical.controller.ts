@@ -38,11 +38,11 @@ export class HistoricalController {
   @Get(':address')
   async findByAddress(
     @Param('address') address: string,
-    @Query('interval') interval: string = '1m',
+    @Query('interval') interval: string = '3h',
     @Query('start_date') startDate: string = undefined,
     @Query('convertTo') convertTo: string = 'ae',
   ) {
-    const date = startDate ? moment(startDate) : moment().subtract(1, 'month');
+    const date = startDate ? moment(startDate) : this.getSubtractDate(interval);
     const token = await this.tokensService.findByAddress(address);
     return this.tokenHistoryService.getHistoricalData({
       token,
@@ -51,5 +51,24 @@ export class HistoricalController {
       endDate: moment(),
       convertTo,
     });
+  }
+
+  private getSubtractDate(interval: string): moment.Moment {
+    switch (interval) {
+      case '1m':
+        return moment().subtract(4, 'hours');
+      case '1h':
+        return moment().subtract(7, 'days');
+      case '3h':
+        return moment().subtract(2, 'weeks');
+      case '1d':
+        return moment().subtract(1, 'month');
+      case '7d':
+        return moment().subtract(6, 'months');
+      case '30d':
+        return moment().subtract(12, 'months');
+      default:
+        throw new Error('Invalid interval');
+    }
   }
 }
