@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { TokenHistory } from './entities/token-history.entity';
-import { HistoricalDataDto, QuoteDto } from './dto/historical-data.dto';
-import { Moment } from 'moment';
 import BigNumber from 'bignumber.js';
+import { Moment } from 'moment';
+import { Repository } from 'typeorm';
+import { HistoricalDataDto } from './dto/historical-data.dto';
+import { TokenHistory } from './entities/token-history.entity';
 import { Token } from './entities/token.entity';
 
 export interface IGetHistoricalDataProps {
@@ -146,7 +146,10 @@ export class TokenHistoryService {
       ) {
         low = record;
       }
-      volume = 0;
+      volume = intervalData
+        .map((item) => item.volume?.toNumber())
+        .reduce((a, b) => a + b);
+      // volume = record?.volume?.toNumber() ?? 0;
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       total_supply = record.total_supply;
