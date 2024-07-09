@@ -27,6 +27,23 @@ export class TokenHistory {
   tx_hash: string;
 
   @Column({
+    nullable: true,
+  })
+  account: string;
+
+  @Column({
+    nullable: true,
+  })
+  tx_type: string;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  spent_amount: BigNumber;
+
+  @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,

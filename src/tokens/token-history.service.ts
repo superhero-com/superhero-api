@@ -9,7 +9,7 @@ import { Token } from './entities/token.entity';
 
 export interface IGetHistoricalDataProps {
   token: Token;
-  interval: string;
+  interval: number;
   startDate: Moment;
   endDate: Moment;
   convertTo?: string;
@@ -32,10 +32,10 @@ export class TokenHistoryService {
       .where('token_history.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      .where('token_history.created_at >= :start', {
-        start: startDate.toDate(),
-      })
-      .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
+      // .where('token_history.created_at >= :start', {
+      //   start: startDate.toDate(),
+      // })
+      // .where('token_history.created_at <= :end', { end: endDate.toDate() })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
@@ -46,10 +46,14 @@ export class TokenHistoryService {
     switch (interval) {
       case '1m':
         return 60 * 1000;
+      case '5m':
+        return 5 * 60 * 1000;
+      case '15m':
+        return 15 * 60 * 1000;
       case '1h':
         return 60 * 60 * 1000;
-      case '3h':
-        return 3 * 60 * 60 * 1000;
+      case '4h':
+        return 4 * 60 * 60 * 1000;
       case '1d':
         return 24 * 60 * 60 * 1000;
       case '7d':
@@ -70,7 +74,8 @@ export class TokenHistoryService {
     const result: HistoricalDataDto[] = [];
     let intervalStart = startDate.toDate().getTime();
     const endTimestamp = endDate.toDate().getTime();
-    const intervalDuration = this.getIntervalDuration(interval);
+    const intervalDuration = interval * 1000;
+    // const intervalDuration = this.getIntervalDuration(interval);
 
     let previousData: TokenHistory | null = null;
 
@@ -181,11 +186,6 @@ export class TokenHistoryService {
   private convertAggregatedDataToTokenHistory(
     aggregatedData: HistoricalDataDto,
   ): TokenHistory {
-    console.log(
-      'convertAggregatedDataToTokenHistory->aggregatedData::',
-      aggregatedData,
-    );
-
     const tokenHistory = new TokenHistory();
     tokenHistory.price = { value: aggregatedData.quote.close } as any; // Ensure type compatibility
     tokenHistory.sell_price = tokenHistory.price; // Adjust as per your entity structure
@@ -199,11 +199,6 @@ export class TokenHistoryService {
   private advancedConvertAggregatedDataToTokenHistory(
     aggregatedData: TokenHistory,
   ): TokenHistory {
-    console.log(
-      'convertAggregatedDataToTokenHistory->aggregatedData::',
-      aggregatedData,
-    );
-
     const tokenHistory = new TokenHistory();
     Object.keys(aggregatedData).forEach((key) => {
       tokenHistory[key] = aggregatedData[key];

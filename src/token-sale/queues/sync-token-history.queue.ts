@@ -52,19 +52,38 @@ export class SyncTokenHistoryQueue {
       .map((key) => key + '=' + query[key])
       .join('&');
 
-    fetchJson(`${ACTIVE_NETWORK.middlewareUrl}/v2/txs?${queryString}`).then(
-      (response) => {
-        // this.logger.log('DATA::', response);
-        response.data
-          .map((item: ITransaction) => camelcaseKeysDeep(item))
-          .forEach((item: ITransaction) =>
-            this.priceHistoryService.savePriceHistoryFromTransaction(
-              job.data.saleAddress,
-              item,
-              false,
-            ),
-          );
-      },
+    const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs?${queryString}`;
+    this.fetchAndSaveTransactions(job, url);
+  }
+
+  async fetchAndSaveTransactions(
+    job: Job<ISyncTokenHistoryQueue>,
+    url: string,
+  ) {
+    this.logger.debug(
+      `SyncTokenHistoryQueue->fetchAndSaveTransactions: ${url}`,
     );
+    const response = await fetchJson(url);
+
+    await Promise.all(
+      response.data
+        .map((item: ITransaction) => camelcaseKeysDeep(item))
+        .map((item: ITransaction) =>
+          this.priceHistoryService.savePriceHistoryFromTransaction(
+            job.data.saleAddress,
+            item,
+            false,
+          ),
+        ),
+    );
+
+    if (response.next) {
+      return this.fetchAndSaveTransactions(
+        job,
+        `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
+      );
+    }
+
+    return null;
   }
 }

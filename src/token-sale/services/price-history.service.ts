@@ -102,6 +102,9 @@ export class PriceHistoryService {
       sell_price: price,
       sell_price_data,
       volume,
+      account: transaction.tx.callerId,
+      tx_type: transaction.tx.function,
+      spent_amount: transaction.tx.amount, // TODO: check
       //   total_supply,
       //   market_cap,
       //   market_cap_data,

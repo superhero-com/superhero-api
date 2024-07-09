@@ -20,7 +20,9 @@ export class HistoricalController {
   @ApiOperation({ operationId: 'findByAddress' })
   @ApiQuery({
     name: 'interval',
-    enum: ['1m', '1h', '3h', '1d', '7d', '30d'],
+    // enum: ['1m', '1h', '3h', '1d', '7d', '30d'],
+    type: 'number',
+    description: 'Interval in seconds',
     required: false,
   })
   @ApiQuery({
@@ -30,6 +32,7 @@ export class HistoricalController {
   })
   // startDate
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiParam({
     name: 'address',
     type: 'string',
@@ -38,28 +41,50 @@ export class HistoricalController {
   @Get(':address')
   async findByAddress(
     @Param('address') address: string,
-    @Query('interval') interval: string = '3h',
+    @Query('interval') interval: number = 60 * 60,
     @Query('start_date') startDate: string = undefined,
+    @Query('end_date') endDate: string = undefined,
     @Query('convertTo') convertTo: string = 'ae',
   ) {
-    const date = startDate ? moment(startDate) : this.getSubtractDate(interval);
+    const date = startDate
+      ? this.parseDate(startDate)
+      : moment().subtract(interval * 1000, 'seconds');
+    console.log('HistoricalController->findByAddress->address', {
+      address,
+      interval,
+      date,
+      startDate,
+      endDate,
+    });
     const token = await this.tokensService.findByAddress(address);
     return this.tokenHistoryService.getHistoricalData({
       token,
       interval,
       startDate: date,
-      endDate: moment(),
+      endDate: this.parseDate(endDate),
       convertTo,
     });
+  }
+
+  private parseDate(value: string | number) {
+    // if timestamp
+    if (typeof value === 'number') {
+      return moment.unix(value);
+    }
+    return moment(value);
   }
 
   private getSubtractDate(interval: string): moment.Moment {
     switch (interval) {
       case '1m':
-        return moment().subtract(4, 'hours');
+        return moment().subtract(1, 'day');
+      case '5m':
+        return moment().subtract(2, 'days');
+      case '15m':
+        return moment().subtract(3, 'days');
       case '1h':
         return moment().subtract(7, 'days');
-      case '3h':
+      case '4h':
         return moment().subtract(2, 'weeks');
       case '1d':
         return moment().subtract(1, 'month');
