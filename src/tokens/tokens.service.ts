@@ -66,12 +66,13 @@ export class TokensService {
   }
 
   async update(sale_address, data: Partial<Token>) {
-    const tokenExists = await this.tokensRepository.findOneBy({
+    let tokenExists = await this.tokensRepository.findOneBy({
       sale_address,
     });
 
     if (!tokenExists) {
-      return;
+      console.error('Token not found', data);
+      tokenExists = await this.tokensRepository.save(data);
     }
 
     this.tokensRepository.update(tokenExists.id, data);
@@ -84,17 +85,18 @@ export class TokensService {
       total_supply: data.total_supply,
     });
 
-    if (data.price) {
-      this.tokenHistoriesRepository.save({
-        token: tokenExists,
-        sale_address,
-        price: data.price_data,
-        sell_price: data.sell_price_data,
-        market_cap: data.market_cap_data,
-        total_supply: data.total_supply,
-      });
-    }
+    // if (data.price) {
+    //   this.tokenHistoriesRepository.save({
+    //     token: tokenExists,
+    //     sale_address,
+    //     price: data.price_data,
+    //     sell_price: data.sell_price_data,
+    //     market_cap: data.market_cap_data,
+    //     total_supply: data.total_supply,
+    //   });
+    // }
 
+    // TODO: move to a hourly job
     this.updateTokensRanking();
   }
 

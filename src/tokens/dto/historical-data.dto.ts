@@ -1,4 +1,4 @@
-import BigNumber from "bignumber.js";
+import BigNumber from 'bignumber.js';
 
 export interface QuoteDto {
   convertedTo: string;
@@ -11,6 +11,7 @@ export interface QuoteDto {
   market_cap: BigNumber;
   // marketCap: number;
   timestamp: Date;
+  symbol: string;
 }
 
 export interface HistoricalDataDto {

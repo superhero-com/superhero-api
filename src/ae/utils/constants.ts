@@ -36,7 +36,8 @@ export const ROOM_FACTORY_CONTRACTS: IRoomFactoryContracts = {
   ],
   [NETWORK_ID_TESTNET]: [
     {
-      contractId: 'ct_2bp1EgvpSxndaiz5GNvoeSJgYBEF7zHGmgMu8pX2rArjB7oofL',
+      // contractId: 'ct_2bp1EgvpSxndaiz5GNvoeSJgYBEF7zHGmgMu8pX2rArjB7oofL',
+      contractId: 'ct_2uSETj5qC6QoXnKX1f6ZXjqTfS6RT2KnY6LiXZSN9Xq8wf4hKA',
       description: 'affiliation integration ',
     },
   ],

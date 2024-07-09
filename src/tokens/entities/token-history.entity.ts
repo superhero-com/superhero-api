@@ -22,29 +22,65 @@ export class TokenHistory {
   sale_address: string;
 
   @Column({
-    type: 'json',
     nullable: true,
   })
-  price!: IPriceDto;
+  tx_hash: string;
 
   @Column({
-    type: 'json',
     nullable: true,
   })
-  sell_price!: IPriceDto;
+  account: string;
 
   @Column({
-    type: 'json',
     nullable: true,
   })
-  market_cap!: IPriceDto;
+  tx_type: string;
 
   @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,
   })
-  volume: BigNumber;
+  spent_amount: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  price: BigNumber;
+
+  @Column({
+    type: 'json',
+    nullable: true,
+  })
+  price_data!: IPriceDto;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  sell_price: BigNumber;
+
+  @Column({
+    type: 'json',
+    nullable: true,
+  })
+  sell_price_data!: IPriceDto;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  market_cap: BigNumber;
+
+  @Column({
+    type: 'json',
+    nullable: true,
+  })
+  market_cap_data!: IPriceDto;
 
   @Column({
     default: 0n,
@@ -52,6 +88,13 @@ export class TokenHistory {
     transformer: BigNumberTransformer,
   })
   total_supply: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  volume: BigNumber;
 
   @CreateDateColumn({
     type: 'timestamp',
