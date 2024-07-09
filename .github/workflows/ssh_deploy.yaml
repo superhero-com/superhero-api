@@ -79,6 +79,8 @@ jobs:
               -e AE_NETWORK_ID \
               -e DB_DATABASE \
               -e NODE_ENV=production \
+              -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
+              -e REDIS_PORT=6379 \
               -e DB_TYPE=postgres \
               -e DB_HOST=${{ inputs.CONTAINER_NAME }}-db \
               -e DB_PORT=5432 \
