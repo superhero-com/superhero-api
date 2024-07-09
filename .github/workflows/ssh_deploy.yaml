@@ -6,7 +6,7 @@ on:
       VERSION:
         description: "Version to deploy"
         required: false
-        default: "develop"
+        default: "latest"
         type: string
       CONTAINER_NAME:
         description: "Container name"
@@ -69,6 +69,7 @@ jobs:
             SHA
           script: |
             echo $SHA > ${{ secrets.HOST_DATA_DIR }}/REVISION || true
+            docker pull "superherodotcom/tokaen-api:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
