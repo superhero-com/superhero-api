@@ -13,6 +13,7 @@ export interface IGetHistoricalDataProps {
   startDate: Moment;
   endDate: Moment;
   convertTo?: string;
+  aggregated?: boolean;
 }
 
 @Injectable()
@@ -94,9 +95,11 @@ export class TokenHistoryService {
           props,
         );
         result.push(aggregatedData);
-        previousData = this.advancedConvertAggregatedDataToTokenHistory(
-          intervalData[intervalData.length - 1],
-        );
+        if (props.aggregated) {
+          previousData = this.advancedConvertAggregatedDataToTokenHistory(
+            intervalData[intervalData.length - 1],
+          );
+        }
       } else if (previousData) {
         result.push(
           this.aggregateIntervalData(

@@ -30,6 +30,11 @@ export class HistoricalController {
     enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
     required: false,
   })
+  @ApiQuery({
+    name: 'aggregated',
+    type: 'boolean',
+    required: false,
+  })
   // startDate
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
@@ -45,6 +50,7 @@ export class HistoricalController {
     @Query('start_date') startDate: string = undefined,
     @Query('end_date') endDate: string = undefined,
     @Query('convertTo') convertTo: string = 'ae',
+    @Query('convertTo') aggregated: boolean = false,
   ) {
     const date = startDate
       ? this.parseDate(startDate)
@@ -63,6 +69,7 @@ export class HistoricalController {
       startDate: date,
       endDate: this.parseDate(endDate),
       convertTo,
+      aggregated,
     });
   }
 
