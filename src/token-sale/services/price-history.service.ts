@@ -85,6 +85,12 @@ export class PriceHistoryService {
       created_at: moment(transactionDate).toDate(),
       ...tokenPriceData,
     } as any);
+
+    if (transaction.tx.function === 'create_community') {
+      await this.tokensRepository.update(token.id, {
+        owner_address: transaction.tx.callerId,
+      });
+    }
   }
 
   private async getPricingDataFromTransaction(transaction: ITransaction) {
