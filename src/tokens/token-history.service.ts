@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { HistoricalDataDto } from './dto/historical-data.dto';
 import { TokenHistory } from './entities/token-history.entity';
 import { Token } from './entities/token.entity';
+import moment from 'moment';
 
 export interface IGetHistoricalDataProps {
   token: Token;
@@ -13,7 +14,7 @@ export interface IGetHistoricalDataProps {
   startDate: Moment;
   endDate: Moment;
   convertTo?: string;
-  aggregated?: boolean;
+  mode: 'normal' | 'aggregated';
 }
 
 @Injectable()
@@ -40,30 +41,87 @@ export class TokenHistoryService {
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
-    return this.processHistoricalData(data, props);
+    console.log('props.aggregated', props.mode);
+    return props.mode === 'aggregated'
+      ? this.processNonAggregatedHistoricalData(data, props)
+      : this.processHistoricalData(data, props);
   }
 
-  private getIntervalDuration(interval: string): number {
-    switch (interval) {
-      case '1m':
-        return 60 * 1000;
-      case '5m':
-        return 5 * 60 * 1000;
-      case '15m':
-        return 15 * 60 * 1000;
-      case '1h':
-        return 60 * 60 * 1000;
-      case '4h':
-        return 4 * 60 * 60 * 1000;
-      case '1d':
-        return 24 * 60 * 60 * 1000;
-      case '7d':
-        return 7 * 24 * 60 * 60 * 1000;
-      case '30d':
-        return 30 * 24 * 60 * 60 * 1000;
-      default:
-        throw new Error('Invalid interval');
-    }
+  private processNonAggregatedHistoricalData(
+    data: TokenHistory[],
+    props: IGetHistoricalDataProps,
+  ): HistoricalDataDto[] {
+    // group data by date
+    const groupedData = data.reduce((acc, item) => {
+      const date = moment(item.created_at).format('YYYY-MM-DD HH:mm');
+      if (!acc[date]) {
+        acc[date] = [];
+      }
+      acc[date].push(item);
+      return acc;
+    }, {});
+
+    // convert to HistoricalDataDto
+    const result = Object.keys(groupedData).map((date) => {
+      const items = groupedData[date].sort((a, b) => {
+        return a.created_at.getTime() - b.created_at.getTime();
+      });
+      const open = items[0];
+      const close = items[items.length - 1];
+      const high = items.reduce((acc, item) =>
+        item.price_data[props.convertTo] > acc.price_data[props.convertTo]
+          ? item
+          : acc,
+      );
+      const low = items.reduce((acc, item) =>
+        item.price_data[props.convertTo] < acc.price_data[props.convertTo]
+          ? item
+          : acc,
+      );
+      const volume = items.reduce(
+        (acc, item) => acc + item.volume?.toNumber(),
+        0,
+      );
+      const market_cap = items.reduce(
+        (acc, item) =>
+          acc +
+          (item.market_cap_data
+            ? item.market_cap_data[props.convertTo]
+            : item.market_cap?.toNumber()),
+        0,
+      );
+      const total_supply = items.reduce(
+        (acc, item) => acc + item.total_supply,
+        0,
+      );
+
+      return {
+        timeOpen: open.created_at,
+        timeClose: close.created_at,
+        timeHigh: high.created_at,
+        timeLow: low.created_at,
+        quote: {
+          convertedTo: props.convertTo,
+          open: open.price_data[props.convertTo],
+          high: high.price_data[props.convertTo],
+          low: low.price_data[props.convertTo],
+          close: close.price_data[props.convertTo],
+          volume,
+          market_cap,
+          total_supply,
+          timestamp: close.created_at,
+          symbol: props.token.symbol,
+        },
+      };
+    });
+
+    return result.map((item, index) => {
+      const previousItem = index > 0 ? result[index - 1] : null;
+      if (previousItem) {
+        item.quote.open = previousItem.quote.close;
+      }
+      return item;
+    });
   }
 
   private processHistoricalData(
@@ -95,11 +153,9 @@ export class TokenHistoryService {
           props,
         );
         result.push(aggregatedData);
-        if (props.aggregated) {
-          previousData = this.advancedConvertAggregatedDataToTokenHistory(
-            intervalData[intervalData.length - 1],
-          );
-        }
+        previousData = this.advancedConvertAggregatedDataToTokenHistory(
+          intervalData[intervalData.length - 1],
+        );
       } else if (previousData) {
         result.push(
           this.aggregateIntervalData(

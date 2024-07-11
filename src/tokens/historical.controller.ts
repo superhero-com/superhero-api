@@ -31,8 +31,8 @@ export class HistoricalController {
     required: false,
   })
   @ApiQuery({
-    name: 'aggregated',
-    type: 'boolean',
+    name: 'mode',
+    enum: ['normal', 'aggregated'],
     required: false,
   })
   // startDate
@@ -50,11 +50,17 @@ export class HistoricalController {
     @Query('start_date') startDate: string = undefined,
     @Query('end_date') endDate: string = undefined,
     @Query('convertTo') convertTo: string = 'ae',
-    @Query('convertTo') aggregated: boolean = false,
+    @Query('mode') mode: 'normal' | 'aggregated' = 'aggregated',
   ) {
+    const subtract = interval * 1000;
+    console.log(
+      'subtract',
+      subtract,
+      moment().subtract(subtract, 'seconds').fromNow(),
+    );
     const date = startDate
       ? this.parseDate(startDate)
-      : moment().subtract(interval * 1000, 'seconds');
+      : moment().subtract(subtract, 'seconds');
     console.log('HistoricalController->findByAddress->address', {
       address,
       interval,
@@ -69,7 +75,7 @@ export class HistoricalController {
       startDate: date,
       endDate: this.parseDate(endDate),
       convertTo,
-      aggregated,
+      mode,
     });
   }
 
@@ -79,28 +85,5 @@ export class HistoricalController {
       return moment.unix(value);
     }
     return moment(value);
-  }
-
-  private getSubtractDate(interval: string): moment.Moment {
-    switch (interval) {
-      case '1m':
-        return moment().subtract(1, 'day');
-      case '5m':
-        return moment().subtract(2, 'days');
-      case '15m':
-        return moment().subtract(3, 'days');
-      case '1h':
-        return moment().subtract(7, 'days');
-      case '4h':
-        return moment().subtract(2, 'weeks');
-      case '1d':
-        return moment().subtract(1, 'month');
-      case '7d':
-        return moment().subtract(6, 'months');
-      case '30d':
-        return moment().subtract(12, 'months');
-      default:
-        throw new Error('Invalid interval');
-    }
   }
 }
