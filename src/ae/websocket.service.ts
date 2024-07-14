@@ -23,6 +23,7 @@ export class WebSocketService {
   wsClient: WebSocket;
   subscribersQueue: IMiddlewareWebSocketSubscriptionMessage[] = [];
   isWsConnected = false;
+  reconnectInterval: NodeJS.Timeout;
 
   subscribers: Record<
     WebSocketChannelName,
@@ -36,6 +37,7 @@ export class WebSocketService {
 
   constructor() {
     this.connect(ACTIVE_NETWORK.websocketUrl);
+    this.setupReconnectionCheck();
   }
 
   handleWebsocketOpen() {
@@ -54,10 +56,26 @@ export class WebSocketService {
 
   private handleWebsocketClose() {
     this.isWsConnected = false;
+    this.reconnect();
   }
 
   isConnected(): boolean {
     return this.isWsConnected;
+  }
+
+  private setupReconnectionCheck() {
+    this.reconnectInterval = setInterval(() => {
+      if (!this.isWsConnected) {
+        this.reconnect();
+      }
+    }, WEB_SOCKET_RECONNECT_TIMEOUT);
+  }
+
+  private reconnect() {
+    if (!this.isWsConnected) {
+      console.log('Attempting to reconnect...');
+      this.connect(ACTIVE_NETWORK.websocketUrl);
+    }
   }
 
   subscribeForChannel(
@@ -172,6 +190,7 @@ export class WebSocketService {
       this.wsClient.removeEventListener('open', this.handleWebsocketOpen);
       this.wsClient.removeEventListener('close', this.handleWebsocketClose);
       this.wsClient.removeEventListener('message', this.handleWebsocketClose);
+      clearInterval(this.reconnectInterval);
     } catch (error) {
       //
     }
@@ -185,6 +204,7 @@ export class WebSocketService {
     this.wsClient = new WebSocket(url);
     this.wsClient.on('error', console.error);
     this.wsClient.on('open', this.handleWebsocketOpen.bind(this));
+    this.wsClient.on('close', this.handleWebsocketClose.bind(this));
     this.wsClient.on('message', this.handleWebsocketMessage.bind(this));
   }
 }
