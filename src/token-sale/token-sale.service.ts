@@ -29,7 +29,7 @@ export class TokenSaleService {
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
 
-    this.loadFactories(contracts);
+    void this.loadFactories(contracts);
 
     websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
@@ -39,7 +39,7 @@ export class TokenSaleService {
           )
         ) {
           const saleAddress = transaction.tx.return.value[1].value;
-          this.pullTokenMetaDataQueue.add({
+          void this.pullTokenMetaDataQueue.add({
             saleAddress,
           });
           this.tokens.push(saleAddress);
@@ -48,7 +48,7 @@ export class TokenSaleService {
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
-          this.saveTokenTransactionQueue.add({
+          void this.saveTokenTransactionQueue.add({
             transaction,
           });
         }
@@ -61,15 +61,13 @@ export class TokenSaleService {
     const [registeredTokens] = await Promise.all([
       factory.listRegisteredTokens(),
     ]);
-    Array.from(registeredTokens)
-      .slice(0, 5)
-      .forEach(async ([symbol, saleAddress]) => {
-        const job = await this.pullTokenMetaDataQueue.add({
-          saleAddress,
-        });
-        console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-        this.tokens.push(saleAddress);
+    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+      const job = await this.pullTokenMetaDataQueue.add({
+        saleAddress,
       });
+      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
+      this.tokens.push(saleAddress);
+    }
   }
 
   async loadFactories(contracts: IRoomFactoryContract[]) {

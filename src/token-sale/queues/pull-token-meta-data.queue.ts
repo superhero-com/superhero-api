@@ -54,7 +54,7 @@ export class PullTokenMetaDataQueue {
       this.logger.error(`PullTokenMetaDataQueue->error`, error);
     }
 
-    this.pullTokenPriceQueue.add({
+    void this.pullTokenPriceQueue.add({
       saleAddress: job.data.saleAddress,
     });
   }
@@ -71,7 +71,7 @@ export class PullTokenMetaDataQueue {
           'PullTokenMetaDataQueue->Token already exists but no history',
         );
       }
-      this.syncTokenHistoryQueue.add({
+      void this.syncTokenHistoryQueue.add({
         saleAddress,
       });
       return;
@@ -93,8 +93,8 @@ export class PullTokenMetaDataQueue {
     };
 
     await this.tokensRepository.save(tokenData);
-    this.priceHistoryService.saveLivePrice(saleAddress);
-    this.syncTokenHistoryQueue.add({
+    await this.priceHistoryService.saveLivePrice(saleAddress);
+    void this.syncTokenHistoryQueue.add({
       saleAddress,
     });
   }

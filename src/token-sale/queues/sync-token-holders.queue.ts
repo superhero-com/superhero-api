@@ -56,7 +56,7 @@ export class SyncTokenHoldersQueue {
     }
 
     // delete all previous holders
-    this.tokenHoldersRepository.delete({
+    await this.tokenHoldersRepository.delete({
       token: token,
     });
 
@@ -93,7 +93,7 @@ export class SyncTokenHoldersQueue {
         .toNumber();
     });
 
-    this.tokensRepository.update(token.id, {
+    await this.tokensRepository.update(token.id, {
       holders_count: holders.length,
     });
 
