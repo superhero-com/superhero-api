@@ -5,7 +5,6 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { IPriceDto } from '../dto/price.dto';
 import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
 import BigNumber from 'bignumber.js';
 import { Token } from './token.entity';
@@ -27,12 +26,6 @@ export class TokenHolder {
     transformer: BigNumberTransformer,
   })
   balance: BigNumber;
-
-  @Column({
-    type: 'json',
-    nullable: true,
-  })
-  balance_data: IPriceDto;
 
   @Column({
     default: 0,

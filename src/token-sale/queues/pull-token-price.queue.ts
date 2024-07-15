@@ -2,7 +2,6 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
-import { ITransaction } from 'src/ae/utils/types';
 import { PriceHistoryService } from '../services';
 import {
   PULL_TOKEN_PRICE_QUEUE,
@@ -12,8 +11,6 @@ import {
 
 export interface IPullTokenPriceQueue {
   saleAddress: Encoded.ContractAddress;
-  transaction?: ITransaction;
-  live?: boolean;
 }
 
 @Processor(PULL_TOKEN_PRICE_QUEUE)
@@ -28,19 +25,13 @@ export class PullTokenPriceQueue {
     private readonly syncTokenHoldersQueue: Queue,
 
     private priceHistoryService: PriceHistoryService,
-  ) {
-    //
-  }
+  ) {}
 
   @Process()
   async process(job: Job<IPullTokenPriceQueue>) {
     this.logger.log(`PullTokenPriceQueue->started:${job.data.saleAddress}`);
     try {
-      await this.priceHistoryService.savePriceHistoryFromTransaction(
-        job.data.saleAddress,
-        job.data.transaction,
-        job.data.live,
-      );
+      await this.priceHistoryService.saveLivePrice(job.data.saleAddress);
       this.logger.debug(
         `PullTokenPriceQueue->completed:${job.data.saleAddress}`,
       );
@@ -48,11 +39,9 @@ export class PullTokenPriceQueue {
       this.logger.error(`PullTokenPriceQueue->error`, error);
     }
 
-    if (job.data.live) {
-      void this.syncTokensRanksQueue.add({});
-      void this.syncTokenHoldersQueue.add({
-        saleAddress: job.data.saleAddress,
-      });
-    }
+    void this.syncTokensRanksQueue.add({});
+    void this.syncTokenHoldersQueue.add({
+      saleAddress: job.data.saleAddress,
+    });
   }
 }

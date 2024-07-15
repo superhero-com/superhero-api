@@ -1,3 +1,5 @@
+import BigNumber from 'bignumber.js';
+import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
 import {
   Column,
   CreateDateColumn,
@@ -6,27 +8,46 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
-import BigNumber from 'bignumber.js';
 import { Token } from './token.entity';
 
-@Entity()
-export class TokenHistory {
+@Entity({
+  name: 'token_transactions',
+})
+export class TokenTransaction {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Token, (token) => token.histories)
+  @ManyToOne(() => Token, (token) => token.transactions)
   token: Token;
 
-  @Column({
-    nullable: true,
-  })
-  tx_hash: string; // caused by
+  @Column()
+  tx_hash: string;
+
+  @Column()
+  tx_type: string;
+
+  @Column()
+  address: string;
 
   @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  volume: BigNumber;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  amount: BigNumber; // Total amount
+
+  @Column({
+    type: 'json',
     nullable: true,
   })
-  tx_type: string;
+  amount_data: IPriceDto;
 
   @Column({
     default: 0n,
@@ -40,46 +61,6 @@ export class TokenHistory {
     nullable: true,
   })
   price_data!: IPriceDto;
-
-  @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
-  })
-  sell_price: BigNumber;
-
-  @Column({
-    type: 'json',
-    nullable: true,
-  })
-  sell_price_data!: IPriceDto;
-
-  @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
-  })
-  market_cap: BigNumber;
-
-  @Column({
-    type: 'json',
-    nullable: true,
-  })
-  market_cap_data!: IPriceDto;
-
-  @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
-  })
-  total_supply: BigNumber;
-
-  @Column({
-    default: 0n,
-    type: 'numeric',
-    transformer: BigNumberTransformer,
-  })
-  volume: BigNumber;
 
   @CreateDateColumn({
     type: 'timestamp',
