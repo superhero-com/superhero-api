@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -18,6 +19,7 @@ export class TokenHistory {
   @ManyToOne(() => Token, (token) => token.histories)
   token: Token;
 
+  @Index()
   @Column({
     nullable: true,
   })
@@ -81,6 +83,7 @@ export class TokenHistory {
   })
   volume: BigNumber;
 
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
