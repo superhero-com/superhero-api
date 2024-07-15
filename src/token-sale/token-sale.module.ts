@@ -17,7 +17,7 @@ import {
   SYNC_TOKEN_HISTORY_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
-} from './queues/constants';
+} from './queues';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 import { PriceHistoryService, TransactionService } from './services';
 import { TokenSaleService } from './token-sale.service';
