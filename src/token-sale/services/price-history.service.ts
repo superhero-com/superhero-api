@@ -83,10 +83,12 @@ export class PriceHistoryService {
   private async getPricingDataFromTransaction(transaction: ITransaction) {
     const price = this.transactionService.calculateTxSpentAePrice(transaction);
     const volume = this.transactionService.calculateTxVolume(transaction);
+    const amount = this.transactionService.getTxAmount(transaction);
 
-    const [price_data, sell_price_data] = await Promise.all([
+    const [price_data, sell_price_data, amount_data] = await Promise.all([
       this.coinGeckoService.getPriceData(price),
       this.coinGeckoService.getPriceData(price),
+      this.coinGeckoService.getPriceData(amount),
     ]);
 
     return {
@@ -97,7 +99,8 @@ export class PriceHistoryService {
       volume,
       account: transaction.tx.callerId,
       tx_type: transaction.tx.function,
-      spent_amount: transaction.tx.amount, // TODO: check
+      amount,
+      amount_data,
       //   total_supply,
       //   market_cap,
       //   market_cap_data,

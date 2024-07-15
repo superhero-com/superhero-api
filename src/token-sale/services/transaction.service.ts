@@ -30,14 +30,32 @@ export class TransactionService {
     return new BigNumber(0);
   }
 
+  getTxAmount(transaction: ITransaction): BigNumber {
+    try {
+      if (transaction.tx.function === TX_FUNCTIONS.buy) {
+        return new BigNumber(toAe(transaction.tx.amount.toString()));
+      }
+
+      if (transaction.tx.function === TX_FUNCTIONS.sell) {
+        return new BigNumber(toAe(transaction.tx.return?.value.toString()));
+      }
+
+      if (transaction.tx.function === TX_FUNCTIONS.create_community) {
+        return new BigNumber(toAe(transaction.tx.amount.toString()));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    return new BigNumber(0);
+  }
+
   calculateTxSpentAePrice(transaction: ITransaction): BigNumber {
     try {
+      const spentAeAmount = this.getTxAmount(transaction);
       if (transaction.tx.function === TX_FUNCTIONS.buy) {
         const totalBoughTokens = new BigNumber(
           toAe(transaction.tx.arguments[0].value.toString()),
-        );
-        const spentAeAmount = new BigNumber(
-          toAe(transaction.tx.amount.toString()),
         );
 
         // get the price of 1 token in ae
@@ -47,9 +65,6 @@ export class TransactionService {
       if (transaction.tx.function === TX_FUNCTIONS.sell) {
         const totalBoughTokens = new BigNumber(
           toAe(transaction.tx.arguments[0].value.toString()),
-        );
-        const spentAeAmount = new BigNumber(
-          toAe(transaction.tx.return?.value.toString()),
         );
 
         // get the price of 1 token in ae
@@ -61,9 +76,6 @@ export class TransactionService {
           toAe(
             transaction.tx.arguments.find((arg) => arg.type === 'int')?.value,
           ),
-        );
-        const spentAeAmount = new BigNumber(
-          toAe(transaction.tx.amount.toString()),
         );
         return spentAeAmount.div(totalBoughTokens);
       }

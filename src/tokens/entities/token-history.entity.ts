@@ -41,13 +41,13 @@ export class TokenHistory {
     type: 'numeric',
     transformer: BigNumberTransformer,
   })
-  spent_amount: BigNumber;
+  amount: BigNumber;
 
   @Column({
     type: 'json',
     nullable: true,
   })
-  spent_amount_data: IPriceDto;
+  amount_data: IPriceDto;
 
   @Column({
     default: 0n,
