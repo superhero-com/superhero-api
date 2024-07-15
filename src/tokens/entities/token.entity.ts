@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 import { TokenHistory } from './token-history.entity';
+import { TokenHolder } from './token-holders.entity';
 
 @Entity()
 export class Token {
@@ -17,6 +18,14 @@ export class Token {
 
   @OneToMany(() => TokenHistory, (tokenHistory) => tokenHistory.token)
   histories: TokenHistory[];
+
+  @OneToMany(() => TokenHolder, (tokenHolder) => tokenHolder.token)
+  holders: TokenHolder[];
+
+  @Column({
+    default: 0,
+  })
+  holders_count: number;
 
   @Column({
     nullable: true,

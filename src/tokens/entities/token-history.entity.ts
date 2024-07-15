@@ -44,6 +44,12 @@ export class TokenHistory {
   spent_amount: BigNumber;
 
   @Column({
+    type: 'json',
+    nullable: true,
+  })
+  spent_amount_data: IPriceDto;
+
+  @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,

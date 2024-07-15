@@ -15,10 +15,13 @@ import {
   PULL_TOKEN_META_DATA_QUEUE,
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HISTORY_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './queues/constants';
+import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 import { PriceHistoryService, TransactionService } from './services';
 import { TokenSaleService } from './token-sale.service';
+import { TokenHolder } from 'src/tokens/entities/token-holders.entity';
 
 @Module({
   imports: [
@@ -37,8 +40,11 @@ import { TokenSaleService } from './token-sale.service';
       {
         name: SYNC_TOKENS_RANKS_QUEUE,
       },
+      {
+        name: SYNC_TOKEN_HOLDERS_QUEUE,
+      },
     ),
-    TypeOrmModule.forFeature([Token, TokenHistory]),
+    TypeOrmModule.forFeature([Token, TokenHistory, TokenHolder]),
   ],
   providers: [
     TokenSaleService,
@@ -50,6 +56,7 @@ import { TokenSaleService } from './token-sale.service';
     PullTokenMetaDataQueue,
     SyncTokenHistoryQueue,
     PullTokenPriceQueue,
+    SyncTokenHoldersQueue,
   ],
   exports: [TokenSaleService],
 })

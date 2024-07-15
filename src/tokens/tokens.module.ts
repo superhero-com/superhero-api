@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Token } from './entities/token.entity';
-import { TokensController } from './tokens.controller';
-import { TokensService } from './tokens.service';
 import { TokenHistory } from './entities/token-history.entity';
-import { TokensGateway } from './tokens.gateway';
+import { Token } from './entities/token.entity';
 import { HistoricalController } from './historical.controller';
 import { TokenHistoryService } from './token-history.service';
+import { TokensController } from './tokens.controller';
+import { TokensGateway } from './tokens.gateway';
+import { TokensService } from './tokens.service';
+import { TokenHolder } from './entities/token-holders.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Token, TokenHistory])],
+  imports: [TypeOrmModule.forFeature([Token, TokenHistory, TokenHolder])],
   controllers: [TokensController, HistoricalController],
   providers: [TokensService, TokenHistoryService, TokensGateway],
   exports: [TypeOrmModule, TokensService],

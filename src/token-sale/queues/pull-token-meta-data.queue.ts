@@ -12,6 +12,8 @@ import { PriceHistoryService } from '../services';
 import {
   PULL_TOKEN_META_DATA_QUEUE,
   SYNC_TOKEN_HISTORY_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
 } from './constants';
 
 export interface IPullTokenMetaDataQueue {
@@ -33,6 +35,12 @@ export class PullTokenMetaDataQueue {
     @InjectQueue(SYNC_TOKEN_HISTORY_QUEUE)
     private readonly syncTokenHistoryQueue: Queue,
 
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
+
+    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
+    private readonly syncTokensRanksQueue: Queue,
+
     private priceHistoryService: PriceHistoryService,
   ) {
     //
@@ -49,6 +57,11 @@ export class PullTokenMetaDataQueue {
     } catch (error) {
       this.logger.error(`PullTokenMetaDataQueue->error`, error);
     }
+
+    this.syncTokenHoldersQueue.add({
+      saleAddress: job.data.saleAddress,
+    });
+    this.syncTokensRanksQueue.add({});
   }
 
   async loadAndSaveTokenMetaData(saleAddress: Encoded.ContractAddress) {

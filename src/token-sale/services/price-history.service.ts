@@ -2,6 +2,7 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
+import moment from 'moment';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { ITransaction } from 'src/ae/utils/types';
@@ -10,18 +11,9 @@ import { Token } from 'src/tokens/entities/token.entity';
 import { initTokenSale } from 'token-sale-sdk';
 import { Repository } from 'typeorm';
 import { TransactionService } from './transaction.service';
-import moment from 'moment';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
-import { SYNC_TOKENS_RANKS_QUEUE } from '../queues';
 
 @Injectable()
 export class PriceHistoryService {
-  /**
-   * we have 2 type of price history
-   * 1. from transaction
-   * 2. pull from node
-   */
   constructor(
     private aeSdkService: AeSdkService,
     private coinGeckoService: CoinGeckoService,
@@ -32,9 +24,6 @@ export class PriceHistoryService {
 
     @InjectRepository(TokenHistory)
     private tokenHistoriesRepository: Repository<TokenHistory>,
-
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
   ) {
     //
   }
@@ -44,7 +33,6 @@ export class PriceHistoryService {
     const tokenPriceData = await this.getLivePricingData(sale_address);
 
     await this.tokensRepository.update(token.id, tokenPriceData as any);
-    this.syncTokensRanksQueue.add({});
   }
 
   async savePriceHistoryFromTransaction(
@@ -75,7 +63,6 @@ export class PriceHistoryService {
 
     if (shouldLiveFetchPrice) {
       await this.tokensRepository.update(token.id, tokenPriceData as any);
-      this.syncTokensRanksQueue.add({});
     }
 
     this.tokenHistoriesRepository.save({

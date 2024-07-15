@@ -36,6 +36,9 @@ export class TokenDto {
   rank: number;
 
   @ApiProperty()
+  holders_count: number;
+
+  @ApiProperty()
   price: string;
 
   @ApiProperty()
