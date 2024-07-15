@@ -11,9 +11,8 @@ import { Repository } from 'typeorm';
 import { PriceHistoryService } from '../services';
 import {
   PULL_TOKEN_META_DATA_QUEUE,
+  PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HISTORY_QUEUE,
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
 } from './constants';
 
 export interface IPullTokenMetaDataQueue {
@@ -35,11 +34,8 @@ export class PullTokenMetaDataQueue {
     @InjectQueue(SYNC_TOKEN_HISTORY_QUEUE)
     private readonly syncTokenHistoryQueue: Queue,
 
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
-
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
+    @InjectQueue(PULL_TOKEN_PRICE_QUEUE)
+    private readonly pullTokenPriceQueue: Queue,
 
     private priceHistoryService: PriceHistoryService,
   ) {
@@ -58,10 +54,9 @@ export class PullTokenMetaDataQueue {
       this.logger.error(`PullTokenMetaDataQueue->error`, error);
     }
 
-    this.syncTokenHoldersQueue.add({
+    void this.pullTokenPriceQueue.add({
       saleAddress: job.data.saleAddress,
     });
-    this.syncTokensRanksQueue.add({});
   }
 
   async loadAndSaveTokenMetaData(saleAddress: Encoded.ContractAddress) {
@@ -76,7 +71,7 @@ export class PullTokenMetaDataQueue {
           'PullTokenMetaDataQueue->Token already exists but no history',
         );
       }
-      this.syncTokenHistoryQueue.add({
+      void this.syncTokenHistoryQueue.add({
         saleAddress,
       });
       return;
@@ -98,8 +93,8 @@ export class PullTokenMetaDataQueue {
     };
 
     await this.tokensRepository.save(tokenData);
-    this.priceHistoryService.saveLivePrice(saleAddress);
-    this.syncTokenHistoryQueue.add({
+    await this.priceHistoryService.saveLivePrice(saleAddress);
+    void this.syncTokenHistoryQueue.add({
       saleAddress,
     });
   }

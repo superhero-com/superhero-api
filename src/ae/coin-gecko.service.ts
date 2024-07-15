@@ -72,7 +72,11 @@ export class CoinGeckoService {
     };
 
     CURRENCIES.forEach(({ code }) => {
-      prices[code] = price.multipliedBy(this.rates![code]) as any;
+      try {
+        prices[code] = price.multipliedBy(this.rates![code]) as any;
+      } catch (error) {
+        console.warn(`Failed to calculate price for ${code}`);
+      }
     });
 
     return prices as any;

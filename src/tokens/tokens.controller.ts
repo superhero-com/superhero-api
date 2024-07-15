@@ -24,6 +24,7 @@ import { TokenHistory } from './entities/token-history.entity';
 import { TokenTransactionDto } from './dto/token-transaction.dto';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
+import { TokenTransaction } from './entities/token-transaction.entity';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -31,6 +32,9 @@ export class TokensController {
   constructor(
     @InjectRepository(Token)
     private readonly tokensRepository: Repository<Token>,
+
+    @InjectRepository(TokenTransaction)
+    private readonly tokenTransactionsRepository: Repository<TokenTransaction>,
 
     @InjectRepository(TokenHistory)
     private readonly tokenHistoryRepository: Repository<TokenHistory>,
@@ -137,20 +141,19 @@ export class TokensController {
     @Query('account') account: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-  ): Promise<Pagination<TokenHistory>> {
+  ): Promise<Pagination<TokenTransaction>> {
+    const token = await this.tokensService.findByAddress(address);
     const queryBuilder =
-      this.tokenHistoryRepository.createQueryBuilder('token_history');
-    queryBuilder.orderBy(`token_history.created_at`, 'DESC');
-    queryBuilder.where('token_history.sale_address = :address', { address });
-
-    // where not null tx_hash
-    queryBuilder.andWhere('token_history.tx_hash IS NOT NULL');
-    queryBuilder.andWhere('token_history.account IS NOT NULL');
+      this.tokenTransactionsRepository.createQueryBuilder('token_transactions');
+    queryBuilder.orderBy(`token_transactions.created_at`, 'DESC');
+    queryBuilder.where('token_transactions.tokenId = :tokenId', {
+      tokenId: token.id,
+    });
 
     if (account) {
-      queryBuilder.andWhere('token_history.account = :account', { account });
+      queryBuilder.andWhere('token_history.address = :account', { account });
     }
 
-    return paginate<TokenHistory>(queryBuilder, { page, limit });
+    return paginate<TokenTransaction>(queryBuilder, { page, limit });
   }
 }

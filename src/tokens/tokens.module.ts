@@ -8,9 +8,17 @@ import { TokensController } from './tokens.controller';
 import { TokensGateway } from './tokens.gateway';
 import { TokensService } from './tokens.service';
 import { TokenHolder } from './entities/token-holders.entity';
+import { TokenTransaction } from './entities/token-transaction.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Token, TokenHistory, TokenHolder])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Token,
+      TokenHistory,
+      TokenHolder,
+      TokenTransaction,
+    ]),
+  ],
   controllers: [TokensController, HistoricalController],
   providers: [TokensService, TokenHistoryService, TokensGateway],
   exports: [TypeOrmModule, TokensService],

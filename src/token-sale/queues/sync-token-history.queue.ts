@@ -6,7 +6,7 @@ import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { ITransaction } from 'src/ae/utils/types';
-import { PriceHistoryService } from '../services';
+import { TransactionService } from '../services';
 import { SYNC_TOKEN_HISTORY_QUEUE } from './constants';
 
 export interface ISyncTokenHistoryQueue {
@@ -16,12 +16,9 @@ export interface ISyncTokenHistoryQueue {
 @Processor(SYNC_TOKEN_HISTORY_QUEUE)
 export class SyncTokenHistoryQueue {
   private readonly logger = new Logger(SyncTokenHistoryQueue.name);
-  constructor(private priceHistoryService: PriceHistoryService) {
-    //
-  }
+  constructor(private transactionService: TransactionService) {}
 
   /**
-   * TODO:: add pagination
    * @param job
    */
   @Process()
@@ -43,7 +40,7 @@ export class SyncTokenHistoryQueue {
     );
     const query: Record<string, string | number> = {
       direction: 'forward',
-      limit: 100, // TODO: pagination, lazy load next results
+      limit: 100,
       type: 'contract_call',
       contract: job.data.saleAddress,
     };
@@ -53,7 +50,7 @@ export class SyncTokenHistoryQueue {
       .join('&');
 
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs?${queryString}`;
-    this.fetchAndSaveTransactions(job, url);
+    await this.fetchAndSaveTransactions(job, url);
   }
 
   async fetchAndSaveTransactions(
@@ -69,11 +66,7 @@ export class SyncTokenHistoryQueue {
       response.data
         .map((item: ITransaction) => camelcaseKeysDeep(item))
         .map((item: ITransaction) =>
-          this.priceHistoryService.savePriceHistoryFromTransaction(
-            job.data.saleAddress,
-            item,
-            false,
-          ),
+          this.transactionService.saveTransaction(item),
         ),
     );
 
