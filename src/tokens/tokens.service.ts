@@ -75,7 +75,7 @@ export class TokensService {
       tokenExists = await this.tokensRepository.save(data);
     }
 
-    this.tokensRepository.update(tokenExists.id, data);
+    await this.tokensRepository.update(tokenExists.id, data);
 
     this.tokensGateway?.handleTokenUpdate({
       sale_address,
@@ -97,7 +97,7 @@ export class TokensService {
     // }
 
     // TODO: move to a hourly job
-    this.updateTokensRanking();
+    await this.updateTokensRanking();
   }
 
   async updateTokensRanking() {

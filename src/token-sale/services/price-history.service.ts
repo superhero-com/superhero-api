@@ -65,7 +65,7 @@ export class PriceHistoryService {
       await this.tokensRepository.update(token.id, tokenPriceData as any);
     }
 
-    this.tokenHistoriesRepository.save({
+    await this.tokenHistoriesRepository.save({
       tx_hash: transaction.hash,
       token,
       sale_address: token.sale_address,

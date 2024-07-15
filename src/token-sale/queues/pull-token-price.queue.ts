@@ -49,8 +49,8 @@ export class PullTokenPriceQueue {
     }
 
     if (job.data.live) {
-      this.syncTokensRanksQueue.add({});
-      this.syncTokenHoldersQueue.add({
+      void this.syncTokensRanksQueue.add({});
+      void this.syncTokenHoldersQueue.add({
         saleAddress: job.data.saleAddress,
       });
     }

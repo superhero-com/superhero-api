@@ -25,7 +25,7 @@ export class TokenSaleService {
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
 
-    this.loadFactories(contracts);
+    void this.loadFactories(contracts);
 
     websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
@@ -35,13 +35,13 @@ export class TokenSaleService {
           )
         ) {
           const saleAddress = transaction.tx.return.value[1].value;
-          this.pullTokenMetaDataQueue.add({
+          void this.pullTokenMetaDataQueue.add({
             saleAddress,
           });
           this.tokens.push(saleAddress);
         }
         if (this.tokens.includes(transaction.tx.contractId)) {
-          this.pullTokenPriceQueue.add({
+          void this.pullTokenPriceQueue.add({
             saleAddress: transaction.tx.contractId,
             transaction,
             live: true,
@@ -56,15 +56,13 @@ export class TokenSaleService {
     const [registeredTokens] = await Promise.all([
       factory.listRegisteredTokens(),
     ]);
-    Array.from(registeredTokens)
-      // .slice(0, 5)
-      .forEach(async ([symbol, saleAddress]) => {
-        const job = await this.pullTokenMetaDataQueue.add({
-          saleAddress,
-        });
-        console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-        this.tokens.push(saleAddress);
+    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+      const job = await this.pullTokenMetaDataQueue.add({
+        saleAddress,
       });
+      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
+      this.tokens.push(saleAddress);
+    }
   }
 
   async loadFactories(contracts: IRoomFactoryContract[]) {

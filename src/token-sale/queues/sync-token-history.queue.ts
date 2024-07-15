@@ -53,7 +53,7 @@ export class SyncTokenHistoryQueue {
       .join('&');
 
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs?${queryString}`;
-    this.fetchAndSaveTransactions(job, url);
+    await this.fetchAndSaveTransactions(job, url);
   }
 
   async fetchAndSaveTransactions(
