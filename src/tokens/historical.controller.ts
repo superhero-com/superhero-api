@@ -79,7 +79,7 @@ export class HistoricalController {
     });
   }
 
-  private parseDate(value: string | number) {
+  private parseDate(value: string | number | undefined) {
     // if timestamp
     if (typeof value === 'number') {
       return moment.unix(value);

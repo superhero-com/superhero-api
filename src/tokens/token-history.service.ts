@@ -29,22 +29,42 @@ export class TokenHistoryService {
   ): Promise<HistoricalDataDto[]> {
     const { startDate, endDate } = props;
     console.log('startDate', startDate.toDate());
+
     const data = await this.tokenHistoryRepository
       .createQueryBuilder('token_history')
       .where('token_history.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      // .where('token_history.created_at >= :start', {
-      //   start: startDate.toDate(),
-      // })
-      // .where('token_history.created_at <= :end', { end: endDate.toDate() })
+      .andWhere('token_history.created_at >= :start', {
+        start: startDate.toDate(),
+      })
+      .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
     console.log('props.aggregated', props.mode);
-    return props.mode === 'aggregated'
-      ? this.processNonAggregatedHistoricalData(data, props)
-      : this.processHistoricalData(data, props);
+
+    const firstBefore =
+      props.mode === 'aggregated'
+        ? await this.tokenHistoryRepository
+            .createQueryBuilder('token_history')
+            .where('token_history.tokenId = :tokenId', {
+              tokenId: props.token.id,
+            })
+            .andWhere('token_history.created_at < :start', {
+              start: startDate.toDate(),
+            })
+            .orderBy('token_history.created_at', 'DESC')
+            .limit(1)
+            .getOne()
+        : undefined;
+
+    return this.processAggregatedHistoricalData(
+      data,
+      props,
+      firstBefore,
+      props.mode === 'aggregated',
+    );
   }
 
   private processNonAggregatedHistoricalData(
@@ -124,9 +144,11 @@ export class TokenHistoryService {
     });
   }
 
-  private processHistoricalData(
+  private processAggregatedHistoricalData(
     data: TokenHistory[],
     props: IGetHistoricalDataProps,
+    initialPreviousData: TokenHistory | undefined = undefined,
+    fillGaps: boolean,
   ): HistoricalDataDto[] {
     const { startDate, endDate, interval } = props;
 
@@ -136,7 +158,7 @@ export class TokenHistoryService {
     const intervalDuration = interval * 1000;
     // const intervalDuration = this.getIntervalDuration(interval);
 
-    let previousData: TokenHistory | null = null;
+    let previousData: TokenHistory | undefined = initialPreviousData;
 
     while (intervalStart < endTimestamp) {
       const intervalEnd = intervalStart + intervalDuration;
@@ -156,7 +178,7 @@ export class TokenHistoryService {
         previousData = this.advancedConvertAggregatedDataToTokenHistory(
           intervalData[intervalData.length - 1],
         );
-      } else if (previousData) {
+      } else if (fillGaps && previousData) {
         result.push(
           this.aggregateIntervalData(
             [previousData],
