@@ -25,6 +25,7 @@ import { PriceHistoryService, TransactionService } from './services';
 import { TokenSaleService } from './token-sale.service';
 import { TokenHolder } from 'src/tokens/entities/token-holders.entity';
 import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
+import { TokensGateway } from 'src/tokens/tokens.gateway';
 
 @Module({
   imports: [
@@ -56,6 +57,8 @@ import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
       TokenHolder,
       TokenTransaction,
     ]),
+
+    TokensGateway,
   ],
   providers: [
     TokenSaleService,

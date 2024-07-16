@@ -49,7 +49,7 @@ export class TransactionService {
     });
 
     // if tx_type create_community, update token creator
-    if (transaction.tx.function === 'create_community') {
+    if (transaction.tx.function === TX_FUNCTIONS.create_community) {
       try {
         await this.tokensRepository.update(token.id, {
           owner_address: transaction.tx.callerId,

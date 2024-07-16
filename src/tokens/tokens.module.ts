@@ -21,7 +21,7 @@ import { TokenTransaction } from './entities/token-transaction.entity';
   ],
   controllers: [TokensController, HistoricalController],
   providers: [TokensService, TokenHistoryService, TokensGateway],
-  exports: [TypeOrmModule, TokensService],
+  exports: [TypeOrmModule, TokensService, TokensGateway],
 })
 export class TokensModule {
   onModuleInit() {

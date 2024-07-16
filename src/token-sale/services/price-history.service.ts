@@ -9,6 +9,7 @@ import { ITransaction } from 'src/ae/utils/types';
 import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
 import { Token } from 'src/tokens/entities/token.entity';
+import { TokensGateway } from 'src/tokens/tokens.gateway';
 import { initTokenSale } from 'token-sale-sdk';
 import { Repository } from 'typeorm';
 
@@ -23,15 +24,21 @@ export class PriceHistoryService {
 
     @InjectRepository(TokenHistory)
     private tokenHistoriesRepository: Repository<TokenHistory>,
+
+    private tokensGateway: TokensGateway,
   ) {
     //
   }
 
   async saveLivePrice(sale_address: Encoded.ContractAddress) {
     const token = await this.getToken(sale_address);
-    const tokenPriceData = await this.getLivePricingData(sale_address);
+    const data = await this.getLivePricingData(sale_address);
 
-    await this.tokensRepository.update(token.id, tokenPriceData as any);
+    await this.tokensRepository.update(token.id, data as any);
+    this.tokensGateway?.handleTokenUpdate({
+      sale_address,
+      data,
+    });
   }
 
   async saveTokenHistoryFromTransaction(transaction: TokenTransaction) {
@@ -46,11 +53,14 @@ export class PriceHistoryService {
       return;
     }
 
-    const history = await this.tokenHistoriesRepository.save({
+    await this.tokenHistoriesRepository.save({
       ...transaction,
     } as any);
 
     // TODO: broadcast
+    this.saveLivePrice(
+      transaction.token.sale_address as Encoded.ContractAddress,
+    );
   }
 
   /**

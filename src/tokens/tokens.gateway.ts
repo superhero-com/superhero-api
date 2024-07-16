@@ -8,7 +8,11 @@ import {
 
 import { Server } from 'socket.io';
 
-@WebSocketGateway()
+@WebSocketGateway({
+  cors: {
+    origin: '*',
+  },
+})
 export class TokensGateway implements OnModuleInit {
   @WebSocketServer()
   server: Server;
@@ -22,7 +26,7 @@ export class TokensGateway implements OnModuleInit {
   @SubscribeMessage('tokenUpdate')
   handleTokenUpdate(@MessageBody() payload: any): string {
     // console.log('handleTokenUpdate', payload);
-    this.server.emit('tokenUpdate', payload);
+    this.server.emit('token-update', payload);
     return 'Done!';
   }
 }
