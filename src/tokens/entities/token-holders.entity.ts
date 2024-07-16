@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -27,12 +28,14 @@ export class TokenHolder {
   })
   balance: BigNumber;
 
+  @Index()
   @Column({
     default: 0,
     type: 'float',
   })
   percentage: number;
 
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

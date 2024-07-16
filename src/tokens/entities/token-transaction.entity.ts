@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -20,6 +21,7 @@ export class TokenTransaction {
   @ManyToOne(() => Token, (token) => token.transactions)
   token: Token;
 
+  @Index()
   @Column()
   tx_hash: string;
 
@@ -62,6 +64,7 @@ export class TokenTransaction {
   })
   price_data!: IPriceDto;
 
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

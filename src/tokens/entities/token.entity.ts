@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -50,6 +51,7 @@ export class Token {
   /**
    * Basic Token Info
    */
+  @Index()
   @Column({
     default: null,
   })
@@ -98,6 +100,7 @@ export class Token {
   })
   sell_price_data!: IPriceDto;
 
+  @Index()
   @Column({
     default: 0n,
     type: 'numeric',
