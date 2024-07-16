@@ -5,7 +5,7 @@ import { Token } from './entities/token.entity';
 import { HistoricalController } from './historical.controller';
 import { TokenHistoryService } from './token-history.service';
 import { TokensController } from './tokens.controller';
-import { TokensGateway } from './tokens.gateway';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensService } from './tokens.service';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenTransaction } from './entities/token-transaction.entity';
@@ -20,8 +20,8 @@ import { TokenTransaction } from './entities/token-transaction.entity';
     ]),
   ],
   controllers: [TokensController, HistoricalController],
-  providers: [TokensService, TokenHistoryService, TokensGateway],
-  exports: [TypeOrmModule, TokensService, TokensGateway],
+  providers: [TokensService, TokenHistoryService, TokenWebsocketGateway],
+  exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })
 export class TokensModule {
   onModuleInit() {

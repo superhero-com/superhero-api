@@ -6,6 +6,7 @@ import { Job, Queue } from 'bull';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { Token } from 'src/tokens/entities/token.entity';
+import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
 import { initTokenSale } from 'token-sale-sdk';
 import { Repository } from 'typeorm';
 import { PriceHistoryService } from '../services';
@@ -38,9 +39,9 @@ export class PullTokenMetaDataQueue {
     private readonly pullTokenPriceQueue: Queue,
 
     private priceHistoryService: PriceHistoryService,
-  ) {
-    //
-  }
+
+    private tokenWebsocketGateway: TokenWebsocketGateway,
+  ) {}
 
   @Process()
   async process(job: Job<IPullTokenMetaDataQueue>) {
@@ -92,7 +93,12 @@ export class PullTokenMetaDataQueue {
       ...(tokenMetaInfo?.token || {}),
     };
 
-    await this.tokensRepository.save(tokenData);
+    const token = await this.tokensRepository.save(tokenData);
+    // Broadcast token created
+    this.tokenWebsocketGateway.handleTokenCreated({
+      sale_address: saleAddress,
+      data: token,
+    });
     await this.priceHistoryService.saveLivePrice(saleAddress);
     void this.syncTokenHistoryQueue.add({
       saleAddress,
