@@ -44,23 +44,27 @@ export class TokenHistoryService {
 
     console.log('props.aggregated', props.mode);
 
-    if (props.mode === 'aggregated') {
-      const firstBefore = await this.tokenHistoryRepository
-        .createQueryBuilder('token_history')
-        .where('token_history.tokenId = :tokenId', {
-          tokenId: props.token.id,
-        })
-        .andWhere('token_history.created_at < :start', {
-          start: startDate.toDate(),
-        })
-        .orderBy('token_history.created_at', 'DESC')
-        .limit(1)
-        .getOne();
+    const firstBefore =
+      props.mode === 'aggregated'
+        ? await this.tokenHistoryRepository
+            .createQueryBuilder('token_history')
+            .where('token_history.tokenId = :tokenId', {
+              tokenId: props.token.id,
+            })
+            .andWhere('token_history.created_at < :start', {
+              start: startDate.toDate(),
+            })
+            .orderBy('token_history.created_at', 'DESC')
+            .limit(1)
+            .getOne()
+        : undefined;
 
-      return this.processAggregatedHistoricalData(data, props, firstBefore);
-    }
-
-    return this.processNonAggregatedHistoricalData(data, props);
+    return this.processAggregatedHistoricalData(
+      data,
+      props,
+      firstBefore,
+      props.mode === 'aggregated',
+    );
   }
 
   private processNonAggregatedHistoricalData(
@@ -144,6 +148,7 @@ export class TokenHistoryService {
     data: TokenHistory[],
     props: IGetHistoricalDataProps,
     initialPreviousData: TokenHistory | undefined = undefined,
+    fillGaps: boolean,
   ): HistoricalDataDto[] {
     const { startDate, endDate, interval } = props;
 
@@ -173,7 +178,7 @@ export class TokenHistoryService {
         previousData = this.advancedConvertAggregatedDataToTokenHistory(
           intervalData[intervalData.length - 1],
         );
-      } else if (previousData) {
+      } else if (fillGaps && previousData) {
         result.push(
           this.aggregateIntervalData(
             [previousData],
