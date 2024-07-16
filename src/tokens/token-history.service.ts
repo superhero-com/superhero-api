@@ -34,17 +34,17 @@ export class TokenHistoryService {
       .where('token_history.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      // .where('token_history.created_at >= :start', {
+      // .andWhere('token_history.created_at >= :start', {
       //   start: startDate.toDate(),
       // })
-      // .where('token_history.created_at <= :end', { end: endDate.toDate() })
+      .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
     console.log('props.aggregated', props.mode);
     return props.mode === 'aggregated'
-      ? this.processNonAggregatedHistoricalData(data, props)
-      : this.processHistoricalData(data, props);
+      ? this.processAggregatedHistoricalData(data, props)
+      : this.processNonAggregatedHistoricalData(data, props);
   }
 
   private processNonAggregatedHistoricalData(
@@ -124,7 +124,7 @@ export class TokenHistoryService {
     });
   }
 
-  private processHistoricalData(
+  private processAggregatedHistoricalData(
     data: TokenHistory[],
     props: IGetHistoricalDataProps,
   ): HistoricalDataDto[] {
