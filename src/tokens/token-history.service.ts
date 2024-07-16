@@ -29,22 +29,38 @@ export class TokenHistoryService {
   ): Promise<HistoricalDataDto[]> {
     const { startDate, endDate } = props;
     console.log('startDate', startDate.toDate());
+
     const data = await this.tokenHistoryRepository
       .createQueryBuilder('token_history')
       .where('token_history.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      // .andWhere('token_history.created_at >= :start', {
-      //   start: startDate.toDate(),
-      // })
+      .andWhere('token_history.created_at >= :start', {
+        start: startDate.toDate(),
+      })
       .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 
     console.log('props.aggregated', props.mode);
-    return props.mode === 'aggregated'
-      ? this.processAggregatedHistoricalData(data, props)
-      : this.processNonAggregatedHistoricalData(data, props);
+
+    if (props.mode === 'aggregated') {
+      const firstBefore = await this.tokenHistoryRepository
+        .createQueryBuilder('token_history')
+        .where('token_history.tokenId = :tokenId', {
+          tokenId: props.token.id,
+        })
+        .andWhere('token_history.created_at < :start', {
+          start: startDate.toDate(),
+        })
+        .orderBy('token_history.created_at', 'DESC')
+        .limit(1)
+        .getOne();
+
+      return this.processAggregatedHistoricalData(data, props, firstBefore);
+    }
+
+    return this.processNonAggregatedHistoricalData(data, props);
   }
 
   private processNonAggregatedHistoricalData(
@@ -127,6 +143,7 @@ export class TokenHistoryService {
   private processAggregatedHistoricalData(
     data: TokenHistory[],
     props: IGetHistoricalDataProps,
+    initialPreviousData: TokenHistory | undefined = undefined,
   ): HistoricalDataDto[] {
     const { startDate, endDate, interval } = props;
 
@@ -136,7 +153,7 @@ export class TokenHistoryService {
     const intervalDuration = interval * 1000;
     // const intervalDuration = this.getIntervalDuration(interval);
 
-    let previousData: TokenHistory | null = null;
+    let previousData: TokenHistory | undefined = initialPreviousData;
 
     while (intervalStart < endTimestamp) {
       const intervalEnd = intervalStart + intervalDuration;
