@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Moment } from 'moment';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from './dto/historical-data.dto';
 import { TokenHistory } from './entities/token-history.entity';
 import { Token } from './entities/token.entity';
@@ -17,12 +17,45 @@ export interface IGetHistoricalDataProps {
   mode: 'normal' | 'aggregated';
 }
 
+export interface IOldestHistoryInfo {
+  id: number;
+  created_at: Date;
+}
+
+export interface ITokenHistoryPreviewPrice {
+  end_time: Date;
+  last_price: string;
+}
+
+export interface ITokenHistoryPreview {
+  result: ITokenHistoryPreviewPrice[];
+  timeframe: string;
+}
+
 @Injectable()
 export class TokenHistoryService {
   constructor(
     @InjectRepository(TokenHistory)
     private readonly tokenHistoryRepository: Repository<TokenHistory>,
+    @InjectRepository(Token)
+    private readonly tokenRepository: Repository<Token>,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
+
+  async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
+    return await this.tokenRepository
+      .createQueryBuilder('token')
+      .select(['token.id as id', 'token_history.created_at as created_at'])
+      .leftJoin(
+        'token_history',
+        'token_history',
+        'token.id = token_history."tokenId"',
+      )
+      .where('token.address = :address', { address })
+      .orderBy('token_history.created_at', 'ASC')
+      .limit(1)
+      .getRawOne<IOldestHistoryInfo>();
+  }
 
   async getHistoricalData(
     props: IGetHistoricalDataProps,
@@ -277,6 +310,7 @@ export class TokenHistoryService {
     tokenHistory.created_at = aggregatedData.timeClose;
     return tokenHistory;
   }
+
   private advancedConvertAggregatedDataToTokenHistory(
     aggregatedData: TokenHistory,
   ): TokenHistory {
@@ -292,5 +326,70 @@ export class TokenHistoryService {
     // tokenHistory.total_supply = aggregatedData.quote.volume;
     // tokenHistory.created_at = aggregatedData.timeClose;
     return tokenHistory;
+  }
+
+  async getForPreview(oldestHistoryInfo: IOldestHistoryInfo | null) {
+    if (!oldestHistoryInfo) return { result: [], timeframe: '' };
+    const getIntervalTimeframe = () => {
+      const daysDiff = moment().diff(
+        moment(oldestHistoryInfo.created_at),
+        'days',
+      );
+
+      if (daysDiff > 7) {
+        return { interval: '1 DAY', timeframe: '30 DAYS' };
+      } else if (daysDiff > 1) {
+        return { interval: '6 HOURS', timeframe: '7 DAYS' };
+      } else {
+        return { interval: '1 HOUR', timeframe: '1 DAY' };
+      }
+    };
+
+    const { interval, timeframe } = getIntervalTimeframe();
+
+    const runner = this.dataSource.createQueryRunner();
+
+    const query = `
+WITH
+  intervals AS (
+    SELECT
+      s AS start_time,
+      s + $2::INTERVAL AS end_time
+    FROM
+      generate_series(
+        NOW() - $3::INTERVAL,
+        NOW() - $2::INTERVAL,
+        $2::INTERVAL
+      ) s
+  )
+SELECT
+  i.end_time,
+  (
+    array_agg(
+      th.price
+      ORDER BY
+        th.created_at DESC
+    )
+  ) [1] AS last_price
+FROM
+  token_history th
+  RIGHT JOIN intervals i ON th.created_at >= i.start_time
+  AND th.created_at < i.end_time
+WHERE
+  "tokenId" = $1
+GROUP BY
+  i.end_time
+ORDER BY
+  i.end_time;
+    `;
+
+    const result = await runner.query(query, [
+      oldestHistoryInfo.id,
+      interval,
+      timeframe,
+    ]);
+    await runner.release();
+
+    return { result, timeframe } as ITokenHistoryPreview;
   }
 }
