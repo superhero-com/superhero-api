@@ -4,7 +4,10 @@ import { TokenHistory } from './entities/token-history.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TokensService } from './tokens.service';
-import { TokenHistoryService } from './token-history.service';
+import {
+  ITokenHistoryPreview,
+  TokenHistoryService,
+} from './token-history.service';
 import moment from 'moment';
 
 @Controller('api/historical')
@@ -77,6 +80,21 @@ export class HistoricalController {
       convertTo,
       mode,
     });
+  }
+
+  @ApiOperation({ operationId: 'getForPreview' })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @Get('/preview/:address')
+  async getForPreview(
+    @Param('address') address: string,
+  ): Promise<ITokenHistoryPreview> {
+    const oldestInfo =
+      await this.tokenHistoryService.getOldestHistoryInfo(address);
+    return this.tokenHistoryService.getForPreview(oldestInfo);
   }
 
   private parseDate(value: string | number | undefined) {
