@@ -25,7 +25,12 @@ export class TransactionService {
   ) {}
 
   async saveTransaction(transaction: ITransaction) {
-    const token = await this.getToken(transaction.tx.contractId);
+    let saleAddress = transaction.tx.contractId;
+    if (transaction.tx.function == TX_FUNCTIONS.create_community) {
+      saleAddress = transaction.tx.return.value[1].value;
+    }
+    const token = await this.getToken(saleAddress);
+
     // Prevent duplicate entries
     const exists = await this.tokenTransactionRepository
       .createQueryBuilder('token_transactions')

@@ -25,7 +25,6 @@ export class TokenWebsocketGateway implements OnModuleInit {
 
   @SubscribeMessage('tokenUpdated')
   handleTokenUpdated(@MessageBody() payload: any): string {
-    console.log('handleTokenUpdated', payload);
     this.server.emit('token-updated', payload);
     return 'Done!';
   }
