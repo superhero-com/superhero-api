@@ -15,7 +15,16 @@ export class TokenDto {
   sale_address: string;
 
   @ApiProperty()
+  creator_address: string;
+
+  @ApiProperty()
   owner_address: string;
+
+  @ApiProperty()
+  beneficiary_address: string;
+
+  @ApiProperty()
+  bonding_curve_address: string;
 
   /**
    * Basic Token Info
@@ -56,6 +65,9 @@ export class TokenDto {
 
   @ApiProperty()
   total_supply: string;
+
+  @ApiProperty()
+  dao_balance: string;
 
   @ApiProperty()
   public created_at: Date;

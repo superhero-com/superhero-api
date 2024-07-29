@@ -57,7 +57,7 @@ export class TransactionService {
     if (transaction.tx.function === TX_FUNCTIONS.create_community) {
       try {
         await this.tokensRepository.update(token.id, {
-          owner_address: transaction.tx.callerId,
+          creator_address: transaction.tx.callerId,
         });
       } catch (error) {
         console.error(error);

@@ -78,7 +78,7 @@ export class PriceHistoryService {
         .then((res) => new BigNumber(res.decodedResult))
         .catch(() => new BigNumber('0')),
     ]);
-    const [price, sell_price] = await Promise.all([
+    const [price, sell_price, metaInfo] = await Promise.all([
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
@@ -89,6 +89,9 @@ export class PriceHistoryService {
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
         .catch(() => new BigNumber('0')),
+      instance.metaInfo().catch(() => {
+        return { token: {} };
+      }),
     ]);
 
     const market_cap = total_supply.multipliedBy(price);
@@ -99,6 +102,10 @@ export class PriceHistoryService {
       this.coinGeckoService.getPriceData(market_cap),
     ]);
 
+    const dao_balance = await this.aeSdkService.sdk.getBalance(
+      metaInfo?.beneficiary,
+    );
+
     return {
       sale_address,
       price,
@@ -108,6 +115,10 @@ export class PriceHistoryService {
       price_data,
       market_cap,
       market_cap_data,
+      beneficiary_address: metaInfo?.beneficiary,
+      bonding_curve_address: metaInfo?.bondingCurve,
+      owner_address: metaInfo?.owner,
+      dao_balance: new BigNumber(dao_balance),
     };
   }
 

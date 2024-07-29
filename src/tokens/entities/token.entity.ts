@@ -46,6 +46,28 @@ export class Token {
   @Column({
     default: null,
   })
+  creator_address: string;
+
+  @Column({
+    default: null,
+  })
+  beneficiary_address: string;
+
+  @Column({
+    default: null,
+  })
+  bonding_curve_address: string;
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  dao_balance: BigNumber;
+
+  @Column({
+    default: null,
+  })
   owner_address: string;
 
   /**

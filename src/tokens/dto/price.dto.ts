@@ -14,6 +14,9 @@ export interface IPriceDto {
 
 export class PriceDto {
   @ApiProperty()
+  ae: number;
+
+  @ApiProperty()
   usd: number;
 
   @ApiProperty()
