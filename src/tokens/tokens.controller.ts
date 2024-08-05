@@ -156,4 +156,34 @@ export class TokensController {
 
     return paginate<TokenTransaction>(queryBuilder, { page, limit });
   }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiOperation({ operationId: 'listTokenRankings' })
+  @ApiOkResponsePaginated(TokenDto)
+  @Get(':address/rankings')
+  async listTokenRankings(
+    @Param('address') address: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(5), ParseIntPipe) limit = 5,
+  ): Promise<Pagination<Token>> {
+    const token = await this.tokensService.findByAddress(address);
+
+    const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    queryBuilder.orderBy(`token.rank`, 'ASC');
+
+    const minRank = token.rank - Math.floor(limit / 2);
+    const maxRank = token.rank + Math.floor(limit / 2);
+    queryBuilder.where('token.rank BETWEEN :minRank AND :maxRank', {
+      minRank,
+      maxRank,
+    });
+
+    return paginate<Token>(queryBuilder, { page, limit });
+  }
 }
