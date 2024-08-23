@@ -30,15 +30,14 @@ export const AE_SYMBOL = 'AE';
 export const ROOM_FACTORY_CONTRACTS: IRoomFactoryContracts = {
   [NETWORK_ID_MAINNET]: [
     {
-      contractId: 'ct_5FZBKFyq2DTp1d25LfHRtgXV8yN4v4eBeNmS8eYcuEGqHsu5k',
-      description: 'SH Chat',
+      contractId: 'ct_2YWMMhFzsQWSNXsBTFZD6A6FHtgtNVbfT2ZtaUpDGpmKPpRXhJ',
+      description: 'Token Gating Contract (Mainnet)',
     },
   ],
   [NETWORK_ID_TESTNET]: [
     {
-      // contractId: 'ct_2bp1EgvpSxndaiz5GNvoeSJgYBEF7zHGmgMu8pX2rArjB7oofL',
-      contractId: 'ct_2uSETj5qC6QoXnKX1f6ZXjqTfS6RT2KnY6LiXZSN9Xq8wf4hKA',
-      description: 'affiliation integration ',
+      contractId: 'ct_2iW4DCbJooqb6genCsHfiGWk2y2A8fv6Kh6d5qynatjjpPE2oX',
+      description: 'Token Gating Contract (Testnet)',
     },
   ],
 };
