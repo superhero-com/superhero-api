@@ -88,9 +88,12 @@ export class PullTokenMetaDataQueue {
       }),
     ]);
 
+    const tokensCount = await this.tokensRepository.count();
+
     const tokenData = {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
+      rank: tokensCount + 1,
     };
 
     const token = await this.tokensRepository.save(tokenData);
