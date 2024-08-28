@@ -31,7 +31,7 @@ jobs:
       DB_USER: "${{ secrets.PROD_DB_USER }}"
       DB_PASSWORD: "${{ secrets.PROD_DB_PASSWORD }}"
   call_deploy_mainnet:
-    name: Call Deploy prod via ssh (uat)
+    name: Call Deploy prod via ssh (mainnet)
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
