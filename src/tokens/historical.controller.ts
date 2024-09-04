@@ -61,13 +61,13 @@ export class HistoricalController {
       subtract,
       moment().subtract(subtract, 'seconds').fromNow(),
     );
-    const date = startDate
+    const newStartDate = startDate
       ? this.parseDate(startDate)
-      : moment().subtract(subtract, 'seconds');
+      : moment().add(2, 'days');
     console.log('HistoricalController->findByAddress->address', {
       address,
       interval,
-      date,
+      newStartDate,
       startDate,
       endDate,
     });
@@ -75,7 +75,7 @@ export class HistoricalController {
     return this.tokenHistoryService.getHistoricalData({
       token,
       interval,
-      startDate: date,
+      startDate: newStartDate,
       endDate: this.parseDate(endDate),
       convertTo,
       mode,
