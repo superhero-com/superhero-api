@@ -277,6 +277,26 @@ export class TokenHistoryService {
         : record.market_cap;
     });
 
+    let open_price_data: any = open.price_data;
+
+    if (open_price_data?.ae == 'NaN') {
+      if ((open?.sell_price_data?.ae as any) != 'NaN') {
+        open_price_data = open.sell_price_data;
+      }
+    }
+
+    function getPrice(object, convertTo) {
+      let final_price_data: any = object.price_data;
+
+      if (final_price_data?.ae == 'NaN') {
+        if ((object?.sell_price_data?.ae as any) != 'NaN') {
+          final_price_data = open.sell_price_data;
+        }
+      }
+
+      return final_price_data[convertTo];
+    }
+
     return {
       timeOpen: new Date(intervalStart),
       timeClose: new Date(intervalEnd - 1),
@@ -284,10 +304,10 @@ export class TokenHistoryService {
       timeLow: low.created_at,
       quote: {
         convertedTo: props.convertTo,
-        open: open.price_data[props.convertTo],
-        high: high.price_data[props.convertTo],
-        low: low.price_data[props.convertTo],
-        close: close.price_data[props.convertTo],
+        open: getPrice(open, props.convertTo),
+        high: getPrice(high, props.convertTo),
+        low: getPrice(low, props.convertTo),
+        close: getPrice(close, props.convertTo),
         volume: volume,
         market_cap,
         total_supply,
