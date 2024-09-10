@@ -9,6 +9,8 @@ import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensService } from './tokens.service';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenTransaction } from './entities/token-transaction.entity';
+import { BullModule } from '@nestjs/bull';
+import { PULL_TOKEN_META_DATA_QUEUE } from 'src/token-sale/queues';
 
 @Module({
   imports: [
@@ -18,6 +20,9 @@ import { TokenTransaction } from './entities/token-transaction.entity';
       TokenHolder,
       TokenTransaction,
     ]),
+    BullModule.registerQueue({
+      name: PULL_TOKEN_META_DATA_QUEUE,
+    }),
   ],
   controllers: [TokensController, HistoricalController],
   providers: [TokensService, TokenHistoryService, TokenWebsocketGateway],

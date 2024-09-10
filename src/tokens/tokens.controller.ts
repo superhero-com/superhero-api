@@ -25,6 +25,9 @@ import { TokenTransactionDto } from './dto/token-transaction.dto';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenTransaction } from './entities/token-transaction.entity';
+import { InjectQueue } from '@nestjs/bull';
+import { PULL_TOKEN_META_DATA_QUEUE } from 'src/token-sale/queues';
+import { Queue } from 'bull';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -43,6 +46,9 @@ export class TokensController {
     private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
+
+    @InjectQueue(PULL_TOKEN_META_DATA_QUEUE)
+    private readonly pullTokenMetaDataQueue: Queue,
   ) {}
 
   @ApiQuery({ name: 'search', type: 'string', required: false })
@@ -89,7 +95,16 @@ export class TokensController {
   @ApiResponse({
     type: TokenDto,
   })
-  findByAddress(@Param('address') address: string) {
+  async findByAddress(@Param('address') address: string) {
+    const token = await this.tokensService.findByAddress(address);
+
+    if (token) {
+      return token;
+    }
+
+    await this.pullTokenMetaDataQueue.add({
+      saleAddress: address,
+    });
     return this.tokensService.findByAddress(address);
   }
 

@@ -81,7 +81,14 @@ export class PullTokenMetaDataQueue {
     const { instance } = await initTokenSale(
       this.aeSdkService.sdk,
       saleAddress as Encoded.ContractAddress,
-    );
+    ).catch((error) => {
+      this.logger.error('PullTokenMetaDataQueue->initTokenSale', error);
+      return { instance: null };
+    });
+
+    if (!instance) {
+      return;
+    }
     const [tokenMetaInfo] = await Promise.all([
       instance.metaInfo().catch(() => {
         return { token: {} };
