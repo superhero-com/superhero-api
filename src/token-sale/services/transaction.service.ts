@@ -63,6 +63,14 @@ export class TransactionService {
         console.error(error);
       }
     }
+    // When it's sell transaction, we should only save the current price
+    if (
+      ![TX_FUNCTIONS.buy, TX_FUNCTIONS.create_community].includes(
+        transaction.tx.function as any,
+      )
+    ) {
+      return;
+    }
 
     return this.priceHistoryService.saveTokenHistoryFromTransaction(
       tokenTransaction,
