@@ -63,7 +63,7 @@ export class HistoricalController {
     );
     const newStartDate = startDate
       ? this.parseDate(startDate)
-      : moment().add(2, 'days');
+      : moment().subtract(2, 'days');
     console.log('HistoricalController->findByAddress->address', {
       address,
       interval,

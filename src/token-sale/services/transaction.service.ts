@@ -24,7 +24,7 @@ export class TransactionService {
     private priceHistoryService: PriceHistoryService,
   ) {}
 
-  async saveTransaction(transaction: ITransaction) {
+  async saveTransaction(transaction: ITransaction, shouldSaveHistory = false) {
     let saleAddress = transaction.tx.contractId;
     if (transaction.tx.function == TX_FUNCTIONS.create_community) {
       saleAddress = transaction.tx.return.value[1].value;
@@ -63,17 +63,14 @@ export class TransactionService {
         console.error(error);
       }
     }
-    // When it's sell transaction, we should only save the current price
-    if (
-      ![TX_FUNCTIONS.buy, TX_FUNCTIONS.create_community].includes(
-        transaction.tx.function as any,
-      )
-    ) {
+
+    if (!shouldSaveHistory) {
       return;
     }
 
     return this.priceHistoryService.saveTokenHistoryFromTransaction(
       tokenTransaction,
+      token,
     );
   }
 
