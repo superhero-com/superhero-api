@@ -26,7 +26,10 @@ export class PriceHistoryService {
     private tokenWebsocketGateway: TokenWebsocketGateway,
   ) {}
 
-  async saveLivePrice(sale_address: Encoded.ContractAddress) {
+  async saveLivePrice(
+    sale_address: Encoded.ContractAddress,
+    volume: BigNumber = new BigNumber('0'),
+  ) {
     const token = await this.getToken(sale_address);
     const data = await this.getLivePricingData(sale_address);
 
@@ -37,6 +40,8 @@ export class PriceHistoryService {
     });
 
     const history = await this.tokenHistoriesRepository.save({
+      token: token,
+      volume,
       ...data,
     } as any);
 
@@ -46,7 +51,10 @@ export class PriceHistoryService {
     });
   }
 
-  async saveTokenHistoryFromTransaction(transaction: TokenTransaction) {
+  async saveTokenHistoryFromTransaction(
+    transaction: TokenTransaction,
+    token: Token,
+  ) {
     const exists = await this.tokenHistoriesRepository
       .createQueryBuilder('token_history')
       .where('token_history.tx_hash = :tx_hash', {
@@ -58,14 +66,10 @@ export class PriceHistoryService {
       return;
     }
 
-    const history = await this.tokenHistoriesRepository.save({
+    this.tokenHistoriesRepository.save({
+      token,
       ...transaction,
     } as any);
-
-    this.tokenWebsocketGateway?.handleTokenHistory({
-      sale_address: history.token.sale_address,
-      data: history,
-    });
   }
 
   private async getLivePricingData(sale_address: Encoded.ContractAddress) {

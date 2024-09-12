@@ -24,7 +24,7 @@ export class TransactionService {
     private priceHistoryService: PriceHistoryService,
   ) {}
 
-  async saveTransaction(transaction: ITransaction) {
+  async saveTransaction(transaction: ITransaction, shouldSaveHistory = false) {
     let saleAddress = transaction.tx.contractId;
     if (transaction.tx.function == TX_FUNCTIONS.create_community) {
       saleAddress = transaction.tx.return.value[1].value;
@@ -64,8 +64,13 @@ export class TransactionService {
       }
     }
 
+    if (!shouldSaveHistory) {
+      return;
+    }
+
     return this.priceHistoryService.saveTokenHistoryFromTransaction(
       tokenTransaction,
+      token,
     );
   }
 

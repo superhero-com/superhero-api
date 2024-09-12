@@ -61,7 +61,8 @@ export class TokenHistoryService {
     props: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
     const { startDate, endDate } = props;
-    console.log('startDate', startDate.toDate());
+    console.log('startDate::', startDate.toDate());
+    console.log('endDate::', endDate.toDate());
 
     const data = await this.tokenHistoryRepository
       .createQueryBuilder('token_history')
@@ -71,7 +72,9 @@ export class TokenHistoryService {
       .andWhere('token_history.created_at >= :start', {
         start: startDate.toDate(),
       })
-      .andWhere('token_history.created_at <= :end', { end: endDate.toDate() })
+      .andWhere('token_history.created_at <= :endDate', {
+        endDate: endDate.toDate(),
+      })
       .orderBy('token_history.created_at', 'ASC')
       .getMany();
 

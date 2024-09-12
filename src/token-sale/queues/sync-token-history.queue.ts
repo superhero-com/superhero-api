@@ -66,7 +66,7 @@ export class SyncTokenHistoryQueue {
       response.data
         .map((item: ITransaction) => camelcaseKeysDeep(item))
         .map((item: ITransaction) =>
-          this.transactionService.saveTransaction(item),
+          this.transactionService.saveTransaction(item, true),
         ),
     );
 
