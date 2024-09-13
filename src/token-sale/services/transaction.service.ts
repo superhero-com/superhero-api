@@ -64,7 +64,11 @@ export class TransactionService {
       }
     }
 
-    if (!shouldSaveHistory) {
+    if (
+      !shouldSaveHistory ||
+      (transaction.tx.function !== TX_FUNCTIONS.buy &&
+        transaction.tx.function !== TX_FUNCTIONS.create_community)
+    ) {
       return;
     }
 
