@@ -2,16 +2,17 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
+import { ITransaction } from 'src/ae/utils/types';
 import { PriceHistoryService } from '../services';
 import {
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './constants';
-import BigNumber from 'bignumber.js';
 
 export interface IPullTokenPriceQueue {
   saleAddress: Encoded.ContractAddress;
+  transaction?: ITransaction;
   volume: number;
 }
 
@@ -35,7 +36,7 @@ export class PullTokenPriceQueue {
     try {
       await this.priceHistoryService.saveLivePrice(
         job.data.saleAddress,
-        job.data.volume ? new BigNumber(job.data.volume) : new BigNumber(0),
+        job.data.transaction,
       );
       this.logger.debug(
         `PullTokenPriceQueue->completed:${job.data.saleAddress}`,

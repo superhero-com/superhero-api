@@ -1,9 +1,11 @@
-import { Encoded } from '@aeternity/aepp-sdk';
+import { Encoded, toAe } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { CoinGeckoService } from 'src/ae/coin-gecko.service';
+import { TX_FUNCTIONS } from 'src/ae/utils/constants';
+import { ITransaction } from 'src/ae/utils/types';
 import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
 import { Token } from 'src/tokens/entities/token.entity';
@@ -28,7 +30,8 @@ export class PriceHistoryService {
 
   async saveLivePrice(
     sale_address: Encoded.ContractAddress,
-    volume: BigNumber = new BigNumber('0'),
+    transaction?: ITransaction,
+    // volume: BigNumber = new BigNumber('0'),
   ) {
     const token = await this.getToken(sale_address);
     const data = await this.getLivePricingData(sale_address);
@@ -39,9 +42,28 @@ export class PriceHistoryService {
       data,
     });
 
+    // if tx hash exists skip
+    if (!transaction?.hash) {
+      const txHashExists = await this.tokenHistoriesRepository
+        .createQueryBuilder('token_history')
+        .where('token_history.tx_hash = :tx_hash', {
+          tx_hash: transaction?.hash,
+        })
+        .getExists();
+
+      if (txHashExists) {
+        return;
+      }
+    }
+
     const history = await this.tokenHistoriesRepository.save({
       token: token,
-      volume,
+      token_rank: token.rank,
+      tx_hash: transaction?.hash,
+      volume: transaction?.hash
+        ? this.calculateTxVolume(transaction)
+        : new BigNumber('0'),
+      // volume,
       ...data,
     } as any);
 
@@ -143,5 +165,29 @@ export class PriceHistoryService {
       instance,
       tokenContractInstance,
     };
+  }
+
+  calculateTxVolume(transaction: ITransaction): BigNumber {
+    try {
+      if (transaction.tx.function === TX_FUNCTIONS.buy) {
+        return new BigNumber(
+          toAe(transaction.tx.arguments[0].value.toString()),
+        );
+      }
+
+      if (transaction.tx.function === TX_FUNCTIONS.sell) {
+        return new BigNumber(
+          toAe(transaction.tx.arguments[0].value.toString()),
+        );
+      }
+
+      if (transaction.tx.function === TX_FUNCTIONS.create_community) {
+        return new BigNumber(toAe(transaction.tx.amount.toString()));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    return new BigNumber(0);
   }
 }

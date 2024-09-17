@@ -63,13 +63,13 @@ export class TokenSaleService {
     const [registeredTokens] = await Promise.all([
       factory.listRegisteredTokens(),
     ]);
-    // for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-    //   const job = await this.pullTokenMetaDataQueue.add({
-    //     saleAddress,
-    //   });
-    //   console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-    //   this.tokens.push(saleAddress);
-    // }
+    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+      const job = await this.pullTokenMetaDataQueue.add({
+        saleAddress,
+      });
+      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
+      this.tokens.push(saleAddress);
+    }
   }
 
   async loadFactories(contracts: IRoomFactoryContract[]) {

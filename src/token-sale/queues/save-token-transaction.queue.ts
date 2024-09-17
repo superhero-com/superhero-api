@@ -36,7 +36,7 @@ export class SaveTokenTransactionQueue {
 
       this.pullTokenPriceQueue.add({
         saleAddress: job.data.transaction.tx.contractId,
-        volume: this.transactionService.calculateTxVolume(job.data.transaction),
+        transaction: job.data.transaction,
       });
 
       this.logger.debug(

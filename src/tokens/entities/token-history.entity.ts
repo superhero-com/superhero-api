@@ -19,6 +19,11 @@ export class TokenHistory {
   @ManyToOne(() => Token, (token) => token.histories)
   token: Token;
 
+  @Column({
+    default: 10000,
+  })
+  token_rank: number;
+
   @Index()
   @Column({
     nullable: true,
