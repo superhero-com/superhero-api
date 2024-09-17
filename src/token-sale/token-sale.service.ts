@@ -39,10 +39,12 @@ export class TokenSaleService {
           )
         ) {
           const saleAddress = transaction.tx.return.value[1].value;
-          void this.pullTokenMetaDataQueue.add({
-            saleAddress,
-          });
-          this.tokens.push(saleAddress);
+          if (!this.tokens.includes(saleAddress)) {
+            void this.pullTokenMetaDataQueue.add({
+              saleAddress,
+            });
+            this.tokens.push(saleAddress);
+          }
         }
         if (
           transaction.tx.contractId &&
@@ -61,13 +63,13 @@ export class TokenSaleService {
     const [registeredTokens] = await Promise.all([
       factory.listRegisteredTokens(),
     ]);
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      const job = await this.pullTokenMetaDataQueue.add({
-        saleAddress,
-      });
-      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-      this.tokens.push(saleAddress);
-    }
+    // for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+    //   const job = await this.pullTokenMetaDataQueue.add({
+    //     saleAddress,
+    //   });
+    //   console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
+    //   this.tokens.push(saleAddress);
+    // }
   }
 
   async loadFactories(contracts: IRoomFactoryContract[]) {
