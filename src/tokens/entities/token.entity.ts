@@ -92,7 +92,7 @@ export class Token {
   decimals: string;
 
   @Column({
-    default: 10000,
+    nullable: true,
   })
   rank: number;
 

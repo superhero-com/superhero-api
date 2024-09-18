@@ -20,7 +20,7 @@ export class TokenHistory {
   token: Token;
 
   @Column({
-    default: 10000,
+    nullable: true,
   })
   token_rank: number;
 
