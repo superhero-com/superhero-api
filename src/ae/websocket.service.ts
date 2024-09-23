@@ -18,12 +18,19 @@ import {
 } from './utils/types';
 import { ACTIVE_NETWORK } from './utils/networks';
 
+type PingI = {
+  id: string;
+  timestamp: number;
+};
+
 @Injectable()
 export class WebSocketService {
   wsClient: WebSocket;
   subscribersQueue: IMiddlewareWebSocketSubscriptionMessage[] = [];
   isWsConnected = false;
   reconnectInterval: NodeJS.Timeout;
+
+  pings = [];
 
   subscribers: Record<
     WebSocketChannelName,
@@ -65,6 +72,23 @@ export class WebSocketService {
 
   private setupReconnectionCheck() {
     this.reconnectInterval = setInterval(() => {
+      if (this.pings.length) {
+        console.log('Reconnecting...');
+        this.isWsConnected = false;
+        return;
+      }
+      const pingData: PingI = {
+        id: genUuid(),
+        timestamp: Date.now(),
+      };
+      this.pings.push(pingData);
+      console.log('PING::', pingData.id);
+      this.wsClient.ping(
+        JSON.stringify({
+          op: 'Ping',
+          payload: pingData,
+        }),
+      );
       if (!this.isWsConnected) {
         this.reconnect();
       }
@@ -157,6 +181,7 @@ export class WebSocketService {
     if (!message) {
       return;
     }
+    // console.log('handleWebsocketMessage::', JSON.parse(message));
     try {
       const data: any = camelcaseKeysDeep(JSON.parse(message));
 
@@ -169,6 +194,7 @@ export class WebSocketService {
         this.subscribers[data.subscription as WebSocketChannelName],
       ).forEach((subscriberCb) => subscriberCb(data.payload));
     } catch (error) {
+      console.log('=======::', message);
       console.log(error);
     }
   }
@@ -206,5 +232,12 @@ export class WebSocketService {
     this.wsClient.on('open', this.handleWebsocketOpen.bind(this));
     this.wsClient.on('close', this.handleWebsocketClose.bind(this));
     this.wsClient.on('message', this.handleWebsocketMessage.bind(this));
+    this.wsClient.on('pong', (data: any) => {
+      const parsedData = JSON.parse(data.toString());
+      const pingData = parsedData.payload;
+      console.log('PONG::', pingData?.id);
+      this.pings = this.pings.filter((ping) => ping.id !== pingData.id);
+    });
+    this.pings = [];
   }
 }
