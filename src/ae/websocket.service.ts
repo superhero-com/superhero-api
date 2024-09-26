@@ -75,6 +75,7 @@ export class WebSocketService {
       if (this.pings.length) {
         console.log('Reconnecting...');
         this.isWsConnected = false;
+        this.reconnect();
         return;
       }
       const pingData: PingI = {
@@ -89,9 +90,6 @@ export class WebSocketService {
           payload: pingData,
         }),
       );
-      if (!this.isWsConnected) {
-        this.reconnect();
-      }
     }, WEB_SOCKET_RECONNECT_TIMEOUT);
   }
 
