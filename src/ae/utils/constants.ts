@@ -39,6 +39,10 @@ export const ROOM_FACTORY_CONTRACTS: IRoomFactoryContracts = {
       contractId: 'ct_2iW4DCbJooqb6genCsHfiGWk2y2A8fv6Kh6d5qynatjjpPE2oX',
       description: 'Token Gating Contract (Testnet)',
     },
+    {
+      contractId: 'ct_tz9ve4cMPR6RMBmXCemvxRF6hfnqTZGGEpqn62V9KupKFzSZM',
+      description: 'Token Gating Contract (Testnet)',
+    },
   ],
 };
 
