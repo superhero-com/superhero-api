@@ -70,15 +70,13 @@ export class SyncTokenHoldersQueue {
       .balances()
       .then((res) => res.decodedResult)
       .then((res) => {
-        return Array.from(res)
-          .map(([key, value]: any) => {
-            return {
-              address: key,
-              balance: new BigNumber(value),
-              percentage: 0,
-            };
-          })
-          .filter((holder) => holder.balance.gt(0));
+        return Array.from(res).map(([key, value]: any) => {
+          return {
+            address: key,
+            balance: new BigNumber(value),
+            percentage: 0,
+          };
+        });
       });
 
     // calculate each holder percentage
