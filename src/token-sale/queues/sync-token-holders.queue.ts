@@ -91,8 +91,12 @@ export class SyncTokenHoldersQueue {
         .toNumber();
     });
 
+    const holders_count = holders.filter((holder) =>
+      holder.balance.gt(0),
+    ).length;
+
     await this.tokensRepository.update(token.id, {
-      holders_count: holders.length,
+      holders_count,
     });
 
     await this.tokenHoldersRepository.save(
