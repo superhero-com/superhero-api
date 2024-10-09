@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
 import { CoinGeckoService } from 'src/ae/coin-gecko.service';
+import { TokenGatingService } from 'src/ae/token-gating.service';
 import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
 import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
@@ -14,6 +15,8 @@ import { PriceHistoryService } from './price-history.service';
 @Injectable()
 export class TransactionService {
   constructor(
+    private tokenGatingService: TokenGatingService,
+
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
 
@@ -22,7 +25,9 @@ export class TransactionService {
     private coinGeckoService: CoinGeckoService,
 
     private priceHistoryService: PriceHistoryService,
-  ) {}
+  ) {
+    //
+  }
 
   async saveTransaction(transaction: ITransaction, shouldSaveHistory = false) {
     let saleAddress = transaction.tx.contractId;
@@ -102,9 +107,20 @@ export class TransactionService {
     return new BigNumber(0);
   }
 
-  getTxAmount(transaction: ITransaction): BigNumber {
+  async getTxAmount(transaction: ITransaction): Promise<BigNumber> {
     try {
       if (transaction.tx.function === TX_FUNCTIONS.buy) {
+        try {
+          const factory =
+            await this.tokenGatingService.getCurrentTokenGatingFactory();
+          const decodedData = factory.contract.$decodeEvents(
+            transaction.tx.log,
+          );
+          const priceData: any = decodedData.filter((d) => d.name === 'Buy')[0];
+          return new BigNumber(toAe(priceData.args[0]));
+        } catch (error) {
+          //
+        }
         return new BigNumber(toAe(transaction.tx.amount.toString()));
       }
 
@@ -122,9 +138,9 @@ export class TransactionService {
     return new BigNumber(0);
   }
 
-  calculateTxSpentAePrice(transaction: ITransaction): BigNumber {
+  async calculateTxSpentAePrice(transaction: ITransaction): Promise<BigNumber> {
     try {
-      const spentAeAmount = this.getTxAmount(transaction);
+      const spentAeAmount = await this.getTxAmount(transaction);
       if (transaction.tx.function === TX_FUNCTIONS.buy) {
         const totalBoughTokens = new BigNumber(
           toAe(transaction.tx.arguments[0].value.toString()),
@@ -159,9 +175,9 @@ export class TransactionService {
   }
 
   async getPricingDataFromTransaction(transaction: ITransaction) {
-    const price = this.calculateTxSpentAePrice(transaction);
+    const price = await this.calculateTxSpentAePrice(transaction);
     const volume = this.calculateTxVolume(transaction);
-    const amount = this.getTxAmount(transaction);
+    const amount = await this.getTxAmount(transaction);
 
     const [price_data, amount_data] = await Promise.all([
       this.coinGeckoService.getPriceData(price),
