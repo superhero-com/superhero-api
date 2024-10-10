@@ -107,25 +107,38 @@ export class TransactionService {
     return new BigNumber(0);
   }
 
+  async getTxAmountFromLog(
+    transaction: ITransaction,
+    name: 'Buy' | 'Sell',
+    fallback: BigNumber,
+  ): Promise<BigNumber> {
+    try {
+      const factory =
+        await this.tokenGatingService.getCurrentTokenGatingFactory();
+      const decodedData = factory.contract.$decodeEvents(transaction.tx.log);
+      const priceData: any = decodedData.filter((d) => d.name === name)[0];
+      return new BigNumber(toAe(priceData.args[0]));
+    } catch (error) {
+      return fallback;
+    }
+  }
+
   async getTxAmount(transaction: ITransaction): Promise<BigNumber> {
     try {
       if (transaction.tx.function === TX_FUNCTIONS.buy) {
-        try {
-          const factory =
-            await this.tokenGatingService.getCurrentTokenGatingFactory();
-          const decodedData = factory.contract.$decodeEvents(
-            transaction.tx.log,
-          );
-          const priceData: any = decodedData.filter((d) => d.name === 'Buy')[0];
-          return new BigNumber(toAe(priceData.args[0]));
-        } catch (error) {
-          //
-        }
-        return new BigNumber(toAe(transaction.tx.amount.toString()));
+        return this.getTxAmountFromLog(
+          transaction,
+          'Buy',
+          new BigNumber(toAe(transaction.tx.amount.toString())),
+        );
       }
 
       if (transaction.tx.function === TX_FUNCTIONS.sell) {
-        return new BigNumber(toAe(transaction.tx.return?.value.toString()));
+        return this.getTxAmountFromLog(
+          transaction,
+          'Sell',
+          new BigNumber(toAe(transaction.tx.return?.value.toString())),
+        );
       }
 
       if (transaction.tx.function === TX_FUNCTIONS.create_community) {
