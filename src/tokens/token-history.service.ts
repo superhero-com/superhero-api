@@ -199,6 +199,12 @@ export class TokenHistoryService {
     while (intervalStart < endTimestamp) {
       const intervalEnd = intervalStart + intervalDuration;
       const intervalData = data.filter((record) => {
+        if (
+          !record?.price_data?.ae ||
+          (record?.price_data?.ae as any) == 'NaN'
+        ) {
+          return false;
+        }
         const recordTime = record.created_at.getTime();
         return recordTime >= intervalStart && recordTime < intervalEnd;
       });
@@ -295,6 +301,11 @@ export class TokenHistoryService {
         if ((object?.sell_price_data?.ae as any) != 'NaN') {
           final_price_data = open.sell_price_data;
         }
+      }
+
+      // TODO: when no price is found the candle data should be excluded
+      if (!final_price_data) {
+        return 0;
       }
 
       return final_price_data[convertTo];
