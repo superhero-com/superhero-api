@@ -1,13 +1,13 @@
 import { Encoded } from '@aeternity/aepp-sdk';
-import { Process, Processor } from '@nestjs/bull';
+import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bull';
+import { Job, Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { ITransaction } from 'src/ae/utils/types';
-import { TransactionService } from '../services';
-import { SYNC_TOKEN_HISTORY_QUEUE } from './constants';
+import { PriceHistoryService, TransactionService } from '../services';
+import { PULL_TOKEN_PRICE_QUEUE, SYNC_TOKEN_HISTORY_QUEUE } from './constants';
 
 export interface ISyncTokenHistoryQueue {
   saleAddress: Encoded.ContractAddress;
@@ -16,7 +16,14 @@ export interface ISyncTokenHistoryQueue {
 @Processor(SYNC_TOKEN_HISTORY_QUEUE)
 export class SyncTokenHistoryQueue {
   private readonly logger = new Logger(SyncTokenHistoryQueue.name);
-  constructor(private transactionService: TransactionService) {}
+  constructor(
+    private transactionService: TransactionService,
+
+    private priceHistoryService: PriceHistoryService,
+
+    @InjectQueue(PULL_TOKEN_PRICE_QUEUE)
+    private readonly pullTokenPriceQueue: Queue,
+  ) {}
 
   /**
    * @param job
@@ -32,6 +39,13 @@ export class SyncTokenHistoryQueue {
     } catch (error) {
       this.logger.error(`SyncTokenHistoryQueue->error`, error);
     }
+
+    void this.pullTokenPriceQueue.add({
+      saleAddress: job.data.saleAddress,
+    });
+
+    // TODO: (check if needed) save live price should run after pulling all transactions
+    // await this.priceHistoryService.saveLivePrice(saleAddress);
   }
 
   async pullTokenHistoryData(job: Job<ISyncTokenHistoryQueue>) {

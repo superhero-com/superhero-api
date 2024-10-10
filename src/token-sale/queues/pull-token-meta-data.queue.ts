@@ -9,10 +9,8 @@ import { Token } from 'src/tokens/entities/token.entity';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
 import { initTokenSale } from 'token-sale-sdk';
 import { Repository } from 'typeorm';
-import { PriceHistoryService } from '../services';
 import {
   PULL_TOKEN_META_DATA_QUEUE,
-  PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HISTORY_QUEUE,
 } from './constants';
 
@@ -35,13 +33,10 @@ export class PullTokenMetaDataQueue {
     @InjectQueue(SYNC_TOKEN_HISTORY_QUEUE)
     private readonly syncTokenHistoryQueue: Queue,
 
-    @InjectQueue(PULL_TOKEN_PRICE_QUEUE)
-    private readonly pullTokenPriceQueue: Queue,
-
-    private priceHistoryService: PriceHistoryService,
-
     private tokenWebsocketGateway: TokenWebsocketGateway,
-  ) {}
+  ) {
+    //
+  }
 
   @Process()
   async process(job: Job<IPullTokenMetaDataQueue>) {
@@ -54,10 +49,6 @@ export class PullTokenMetaDataQueue {
     } catch (error) {
       this.logger.error(`PullTokenMetaDataQueue->error`, error);
     }
-
-    void this.pullTokenPriceQueue.add({
-      saleAddress: job.data.saleAddress,
-    });
   }
 
   async loadAndSaveTokenMetaData(saleAddress: Encoded.ContractAddress) {
@@ -109,7 +100,6 @@ export class PullTokenMetaDataQueue {
       sale_address: saleAddress,
       data: token,
     });
-    await this.priceHistoryService.saveLivePrice(saleAddress);
     void this.syncTokenHistoryQueue.add({
       saleAddress,
     });
