@@ -48,8 +48,11 @@ export class TransactionService {
       return;
     }
 
-    const tokenPriceData =
-      await this.getPricingDataFromTransaction(transaction);
+    const transactionWithDecodedData =
+      await this.decodeTransactionData(transaction);
+    const tokenPriceData = await this.getPricingDataFromTransaction(
+      transactionWithDecodedData,
+    );
 
     const tokenTransaction = await this.tokenTransactionRepository.save({
       ...tokenPriceData,
@@ -114,15 +117,15 @@ export class TransactionService {
     name: 'Buy' | 'Sell',
     fallback: BigNumber,
   ): Promise<BigNumber> {
-    try {
-      const factory =
-        await this.tokenGatingService.getCurrentTokenGatingFactory();
-      const decodedData = factory.contract.$decodeEvents(transaction.tx.log);
-      const priceData: any = decodedData.filter((d) => d.name === name)[0];
-      return new BigNumber(toAe(priceData.args[0]));
-    } catch (error) {
+    console.log('======== getTxAmountFromLog =========');
+    const priceData: any = transaction.tx.decodedData.filter(
+      (d) => d.name === name,
+    )[0];
+
+    if (!priceData) {
       return fallback;
     }
+    return new BigNumber(toAe(priceData.args[0]));
   }
 
   async getTxAmount(transaction: ITransaction): Promise<BigNumber> {
@@ -214,5 +217,25 @@ export class TransactionService {
     return await this.tokensRepository.findOneBy({
       sale_address: sale_address,
     });
+  }
+
+  async decodeTransactionData(
+    transaction: ITransaction,
+  ): Promise<ITransaction> {
+    try {
+      const factory =
+        await this.tokenGatingService.getCurrentTokenGatingFactory();
+      const decodedData = factory.contract.$decodeEvents(transaction.tx.log);
+      console.log('decodedData', decodedData);
+      return {
+        ...transaction,
+        tx: {
+          ...transaction.tx,
+          decodedData,
+        },
+      };
+    } catch (error) {
+      return transaction;
+    }
   }
 }

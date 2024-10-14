@@ -150,6 +150,7 @@ export interface ITx {
   gasPrice: number;
   gasUsed: number;
   log?: any[]; // TODO find source
+  decodedData?: any[]; // TODO find source
   name: any;
   nameFee: number;
   nameId: any;
