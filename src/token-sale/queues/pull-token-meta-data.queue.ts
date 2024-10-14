@@ -7,7 +7,7 @@ import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { Token } from 'src/tokens/entities/token.entity';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { initTokenSale } from 'token-sale-sdk';
+import { initTokenSale } from 'token-gating-sdk';
 import { Repository } from 'typeorm';
 import {
   PULL_TOKEN_META_DATA_QUEUE,

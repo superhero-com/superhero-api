@@ -5,7 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bull';
 import { TokenHolder } from 'src/tokens/entities/token-holders.entity';
 import { Token } from 'src/tokens/entities/token.entity';
-import { initTokenSale } from 'token-sale-sdk';
+import { initTokenSale } from 'token-gating-sdk';
 import { Repository } from 'typeorm';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 import { AeSdkService } from 'src/ae/ae-sdk.service';

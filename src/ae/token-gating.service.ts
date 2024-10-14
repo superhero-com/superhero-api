@@ -1,20 +1,20 @@
 import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
-import { initRoomFactory, RoomFactory } from 'token-sale-sdk';
+import { CommunityFactory, initCommunityFactory } from 'token-gating-sdk';
 import { AeSdkService } from './ae-sdk.service';
 import { ROOM_FACTORY_CONTRACTS } from './utils/constants';
 import { ACTIVE_NETWORK } from './utils/networks';
 
 @Injectable()
 export class TokenGatingService {
-  factories: Record<Encoded.ContractAddress, RoomFactory> = {};
+  factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
   constructor(private aeSdkService: AeSdkService) {
     this.getCurrentTokenGatingFactory().then(() =>
       console.log('TokenGatingService->factoryAddress:'),
     );
   }
 
-  async getCurrentTokenGatingFactory(): Promise<RoomFactory> {
+  async getCurrentTokenGatingFactory(): Promise<CommunityFactory> {
     return this.loadTokenGatingFactory(this.getCurrentFactoryAddress());
   }
 
@@ -28,12 +28,12 @@ export class TokenGatingService {
 
   async loadTokenGatingFactory(
     address: Encoded.ContractAddress,
-  ): Promise<RoomFactory> {
+  ): Promise<CommunityFactory> {
     if (this.factories[address]) {
       return this.factories[address];
     }
 
-    const factory = await initRoomFactory(this.aeSdkService.sdk, address);
+    const factory = await initCommunityFactory(this.aeSdkService.sdk, address);
 
     this.factories[address] = factory;
 

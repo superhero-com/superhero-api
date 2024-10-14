@@ -150,6 +150,7 @@ export interface ITx {
   gasPrice: number;
   gasUsed: number;
   log?: any[]; // TODO find source
+  decodedData?: any[]; // TODO find source
   name: any;
   nameFee: number;
   nameId: any;
@@ -236,11 +237,11 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export interface IRoomFactoryContract {
+export interface ICommunityFactoryContract {
   contractId: Encoded.ContractAddress;
   description?: string;
 }
 
-export type IRoomFactoryContracts = {
-  [K in INetworkTypes]: IRoomFactoryContract[];
+export type ICommunityFactoryContracts = {
+  [K in INetworkTypes]: ICommunityFactoryContract[];
 };

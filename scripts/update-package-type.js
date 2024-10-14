@@ -3,8 +3,8 @@ const path = require('path');
 
 // Define the path to the package.json file
 const packageJsonPath = path.join(
-    __dirname,
-  '../node_modules/token-sale-sdk',
+  __dirname,
+  '../node_modules/token-gating-sdk',
   'package.json',
 );
 
@@ -25,6 +25,7 @@ fs.readFile(packageJsonPath, 'utf8', (err, data) => {
   }
 
   // Modify the "type" field
+  // delete packageJson.type;
   packageJson.type = 'commonjs';
 
   // Convert the JSON object back to a string

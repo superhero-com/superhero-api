@@ -1,4 +1,4 @@
-import { ACTIVE_NETWORK_ID } from 'src/configs/network';
+import { ACTIVE_NETWORK_ID } from '../../configs/network';
 
 /**
  * Default `networkId` values returned by the Node after establishing the connection.
