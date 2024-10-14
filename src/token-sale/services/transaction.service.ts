@@ -98,7 +98,9 @@ export class TransactionService {
       }
 
       if (transaction.tx.function === TX_FUNCTIONS.create_community) {
-        return new BigNumber(toAe(transaction.tx.amount.toString()));
+        return new BigNumber(
+          toAe(transaction.tx.arguments[1].value.toString()),
+        );
       }
     } catch (e) {
       console.error(e);
