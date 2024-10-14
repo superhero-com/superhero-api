@@ -13,5 +13,5 @@ export async function fetchJson<T = any>(
   if (response.status === 204) {
     return null;
   }
-  return response.json();
+  return response.json() as Promise<T>;
 }

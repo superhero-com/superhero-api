@@ -236,11 +236,11 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export interface IRoomFactoryContract {
+export interface ICommunityFactoryContract {
   contractId: Encoded.ContractAddress;
   description?: string;
 }
 
-export type IRoomFactoryContracts = {
-  [K in INetworkTypes]: IRoomFactoryContract[];
+export type ICommunityFactoryContracts = {
+  [K in INetworkTypes]: ICommunityFactoryContract[];
 };

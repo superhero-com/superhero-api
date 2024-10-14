@@ -2,7 +2,7 @@ import { Encoding } from '@aeternity/aepp-sdk';
 import type {
   CurrencyCode,
   ICurrency,
-  IRoomFactoryContracts,
+  ICommunityFactoryContracts,
   IToken,
 } from './types';
 import { NETWORK_ID_MAINNET, NETWORK_ID_TESTNET } from './networks';
@@ -27,7 +27,7 @@ export const AE_SYMBOL = 'AE';
  * Token sale contracts addresses for different networks.
  * The last contract in the array is the default one.
  */
-export const ROOM_FACTORY_CONTRACTS: IRoomFactoryContracts = {
+export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
   [NETWORK_ID_MAINNET]: [
     {
       contractId: 'ct_2YWMMhFzsQWSNXsBTFZD6A6FHtgtNVbfT2ZtaUpDGpmKPpRXhJ',

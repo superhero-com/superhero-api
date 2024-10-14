@@ -10,7 +10,7 @@ import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { TokenTransaction } from 'src/tokens/entities/token-transaction.entity';
 import { Token } from 'src/tokens/entities/token.entity';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { initTokenSale } from 'token-sale-sdk';
+import { initTokenSale } from 'token-gating-sdk';
 import { Repository } from 'typeorm';
 
 @Injectable()

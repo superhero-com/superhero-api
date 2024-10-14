@@ -2,13 +2,15 @@ import { Injectable } from '@nestjs/common';
 
 import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
+import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
+import { TokenGatingService } from 'src/ae/token-gating.service';
+import { fetchJson } from 'src/ae/utils/common';
 import { ROOM_FACTORY_CONTRACTS, TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { IRoomFactoryContract, ITransaction } from 'src/ae/utils/types';
+import { ICommunityFactoryContract, ITransaction } from 'src/ae/utils/types';
 import { WebSocketService } from 'src/ae/websocket.service';
-import { initRoomFactory } from 'token-sale-sdk';
 import {
   PULL_TOKEN_META_DATA_QUEUE,
   SAVE_TOKEN_TRANSACTION_QUEUE,
@@ -20,6 +22,7 @@ export class TokenSaleService {
 
   constructor(
     private aeSdkService: AeSdkService,
+    private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
     @InjectQueue(PULL_TOKEN_META_DATA_QUEUE)
     private readonly pullTokenMetaDataQueue: Queue,
@@ -59,20 +62,45 @@ export class TokenSaleService {
   }
 
   async loadFactory(address: Encoded.ContractAddress) {
-    const factory = await initRoomFactory(this.aeSdkService.sdk, address);
+    const factory =
+      await this.tokenGatingService.loadTokenGatingFactory(address);
     const [registeredTokens] = await Promise.all([
       factory.listRegisteredTokens(),
     ]);
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      const job = await this.pullTokenMetaDataQueue.add({
-        saleAddress,
-      });
-      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-      this.tokens.push(saleAddress);
-    }
+    // for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+    //   const job = await this.pullTokenMetaDataQueue.add({
+    //     saleAddress,
+    //   });
+    //   console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
+    //   this.tokens.push(saleAddress);
+    // }
+    const job = await this.pullTokenMetaDataQueue.add({
+      saleAddress: 'th_akRPUrcVojbZiyjJGF7Tgerg7RCHgZrKaiWsozU1XSKud7Jbu',
+    });
+
+    // this.debugTransaction(
+    //   factory,
+    //   'th_akRPUrcVojbZiyjJGF7Tgerg7RCHgZrKaiWsozU1XSKud7Jbu',
+    // );
   }
 
-  async loadFactories(contracts: IRoomFactoryContract[]) {
+  async debugTransaction(factory, txHash) {
+    const url = `https://testnet.aeternity.io/mdw/v3/transactions/${txHash}`;
+    const response = await fetchJson(url);
+
+    // console.log('response', response);
+    const decodedData = await factory.contract.$decodeEvents(
+      response.tx.log as any,
+    );
+    console?.log('decodedData', decodedData);
+
+    console.log('factory.contract:::', factory.contract);
+    console.log('=======');
+    console.log('=======');
+    console.log('=======ƒ');    
+  }
+
+  async loadFactories(contracts: ICommunityFactoryContract[]) {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
