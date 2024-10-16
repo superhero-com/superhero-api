@@ -157,6 +157,9 @@ export class PullTokenMetaDataQueue {
             obj[key] = value;
           }
           return obj;
+        })
+        .catch(() => {
+          return {};
         });
 
       if (!metaInfo?.category) {
@@ -172,11 +175,15 @@ export class PullTokenMetaDataQueue {
         'PullTokenMetaDataQueue->loadAndSaveTokenCategory',
         error,
       );
-      return this.detectTokenCategoryFromName(token);
+      const category = this.detectTokenCategoryFromName(token);
+      await this.tokensRepository.update(token.id, {
+        category,
+      });
+      return category;
     }
   }
 
-  async detectTokenCategoryFromName(token: Token): Promise<string> {
+  detectTokenCategoryFromName(token: Token): string {
     const name = token.name.toLowerCase();
     // if name is only numbers return number
     if (/^\d+$/.test(name)) {
