@@ -36,16 +36,16 @@ export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
   ],
   [NETWORK_ID_TESTNET]: [
     {
-      contractId: "ct_2iW4DCbJooqb6genCsHfiGWk2y2A8fv6Kh6d5qynatjjpPE2oX",
-      description: "Token Gating Contract (Testnet:v1.0.0)",
+      contractId: 'ct_2iW4DCbJooqb6genCsHfiGWk2y2A8fv6Kh6d5qynatjjpPE2oX',
+      description: 'Token Gating Contract (Testnet:v1.0.0)',
     },
     {
-      contractId: "ct_tz9ve4cMPR6RMBmXCemvxRF6hfnqTZGGEpqn62V9KupKFzSZM",
-      description: "Token Gating Contract (Testnet:v1.0.1)",
+      contractId: 'ct_tz9ve4cMPR6RMBmXCemvxRF6hfnqTZGGEpqn62V9KupKFzSZM',
+      description: 'Token Gating Contract (Testnet:v1.0.1)',
     },
     {
-      contractId: "ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU",
-      description: "Token Gating Contract (Testnet:v1.0.2)",
+      contractId: 'ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU',
+      description: 'Token Gating Contract (Testnet:v1.0.2)',
     },
   ],
 };

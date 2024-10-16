@@ -72,7 +72,6 @@ export class TokenSaleService {
       console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
       this.tokens.push(saleAddress);
     }
-
   }
 
   async loadFactories(contracts: ICommunityFactoryContract[]) {
