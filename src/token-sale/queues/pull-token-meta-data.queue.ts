@@ -163,7 +163,11 @@ export class PullTokenMetaDataQueue {
         });
 
       if (!metaInfo?.category) {
-        return this.detectTokenCategoryFromName(token);
+        const category = this.detectTokenCategoryFromName(token);
+        await this.tokensRepository.update(token.id, {
+          category,
+        });
+        return category;
       }
 
       await this.tokensRepository.update(token.id, {
