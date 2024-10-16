@@ -44,7 +44,7 @@ export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
       description: "Token Gating Contract (Testnet:v1.0.1)",
     },
     {
-      contractId: "ct_6Lx6youq36b6RPiY3QUGrCwrh5VNtf4Ju1qQo2QQuqK2Xgkat",
+      contractId: "ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU",
       description: "Token Gating Contract (Testnet:v1.0.2)",
     },
   ],

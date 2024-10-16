@@ -24,6 +24,8 @@ export class SyncTokensRanksQueue {
     this.logger.log(`SyncTokensRanksQueue->started`);
     try {
       await this.updateTokensRanking();
+      await this.updateTokenCategoryRankings('word');
+      await this.updateTokenCategoryRankings('number');
       this.logger.debug(`SyncTokensRanksQueue->completed`);
     } catch (error) {
       this.logger.error(`SyncTokensRanksQueue->error`, error);
@@ -38,6 +40,18 @@ export class SyncTokensRanksQueue {
 
     tokens.forEach((token, index) => {
       this.tokensRepository.update(token.id, { rank: index + 1 });
+    });
+  }
+
+  async updateTokenCategoryRankings(category: string) {
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('tokens')
+      .where('tokens.category = :category', { category })
+      .orderBy('tokens.market_cap', 'DESC')
+      .getMany();
+
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { category_rank: index + 1 });
     });
   }
 }

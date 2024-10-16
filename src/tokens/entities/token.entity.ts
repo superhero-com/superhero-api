@@ -97,6 +97,16 @@ export class Token {
   rank: number;
 
   @Column({
+    nullable: true,
+  })
+  category: string;
+
+  @Column({
+    nullable: true,
+  })
+  category_rank: number;
+
+  @Column({
     default: 0n,
     type: 'numeric',
     transformer: BigNumberTransformer,

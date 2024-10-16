@@ -4,6 +4,9 @@ import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job, Queue } from 'bull';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
+import { TokenGatingService } from 'src/ae/token-gating.service';
+import { fetchJson } from 'src/ae/utils/common';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { TokenHistory } from 'src/tokens/entities/token-history.entity';
 import { Token } from 'src/tokens/entities/token.entity';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
@@ -34,6 +37,8 @@ export class PullTokenMetaDataQueue {
     private readonly syncTokenHistoryQueue: Queue,
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
+
+    private tokenGatingService: TokenGatingService,
   ) {
     //
   }
@@ -94,8 +99,10 @@ export class PullTokenMetaDataQueue {
       rank: tokensCount + 1,
     };
 
-    const token = await this.tokensRepository.save(tokenData);
+    const newToken = await this.tokensRepository.save(tokenData);
+    await this.loadAndSaveTokenCategory(newToken);
     // Broadcast token created
+    const token = await this.tokensRepository.findOne(newToken.id);
     this.tokenWebsocketGateway.handleTokenCreated({
       sale_address: saleAddress,
       data: token,
@@ -104,6 +111,91 @@ export class PullTokenMetaDataQueue {
       saleAddress,
     });
   }
+
+  async loadAndGetTokenFactoryAddress(
+    token: Token,
+  ): Promise<Encoded.ContractAddress> {
+    if (token.factory_address) {
+      return token.factory_address as Encoded.ContractAddress;
+    }
+    // 1. fetch factory create tx
+    const contractInfo = await fetchJson(
+      `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
+    );
+
+    const response = await fetchJson(
+      `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${contractInfo.source_tx_hash}`,
+    );
+
+    await this.tokensRepository.update(token.id, {
+      factory_address: response?.tx?.contract_id,
+    });
+
+    return response?.tx?.contract_id as Encoded.ContractAddress;
+  }
+
+  async loadAndSaveTokenCategory(token: Token): Promise<string> {
+    if (token.category) {
+      return token.category;
+    }
+
+    try {
+      const factoryAddress = await this.loadAndGetTokenFactoryAddress(token);
+      const communityFactory =
+        await this.tokenGatingService.loadTokenGatingFactory(factoryAddress);
+
+      const communityManagementContract =
+        await communityFactory.getCommunityManagementContract(
+          token.sale_address as Encoded.ContractAddress,
+        );
+
+      const metaInfo: Record<string, string> = await communityManagementContract
+        .meta_info()
+        .then((r) => {
+          const obj: Record<string, string> = {};
+          for (const [key, value] of r.decodedResult) {
+            obj[key] = value;
+          }
+          return obj;
+        })
+        .catch(() => {
+          return {};
+        });
+
+      if (!metaInfo?.category) {
+        const category = this.detectTokenCategoryFromName(token);
+        await this.tokensRepository.update(token.id, {
+          category,
+        });
+        return category;
+      }
+
+      await this.tokensRepository.update(token.id, {
+        category: metaInfo.category,
+      });
+      return metaInfo.category;
+    } catch (error) {
+      this.logger.error(
+        'PullTokenMetaDataQueue->loadAndSaveTokenCategory',
+        error,
+      );
+      const category = this.detectTokenCategoryFromName(token);
+      await this.tokensRepository.update(token.id, {
+        category,
+      });
+      return category;
+    }
+  }
+
+  detectTokenCategoryFromName(token: Token): string {
+    const name = token.name.toLowerCase();
+    // if name is only numbers return number
+    if (/^\d+$/.test(name)) {
+      return 'number';
+    }
+    return 'word';
+  }
+
   async checkIfTokenHasHistory(token: Token) {
     const tokenHistory = await this.tokenHistoriesRepository
       .createQueryBuilder('token_history')
