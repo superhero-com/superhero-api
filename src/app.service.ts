@@ -2,7 +2,6 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
-import { AeSdkService } from './ae/ae-sdk.service';
 import { TokenGatingService } from './ae/token-gating.service';
 import { ROOM_FACTORY_CONTRACTS, TX_FUNCTIONS } from './ae/utils/constants';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
@@ -20,10 +19,7 @@ import {
 
 @Injectable()
 export class AppService {
-  tokens: Encoded.ContractAddress[] = [];
-
   constructor(
-    private aeSdkService: AeSdkService,
     private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
     @InjectQueue(PULL_TOKEN_PRICE_QUEUE)
@@ -47,20 +43,6 @@ export class AppService {
 
     websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
-        if (
-          contracts.some(
-            (contract) => contract.contractId === transaction.tx.contractId,
-          )
-        ) {
-          const saleAddress = transaction.tx.return.value[1].value;
-          if (!this.tokens.includes(saleAddress)) {
-            void this.pullTokenPriceQueue.add({
-              saleAddress,
-              shouldBroadcast: true,
-            });
-            this.tokens.push(saleAddress);
-          }
-        }
         if (
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
