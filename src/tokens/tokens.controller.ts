@@ -16,18 +16,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
+import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
+import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
-import { TokenHistory } from './entities/token-history.entity';
-import { TokenTransactionDto } from './dto/token-transaction.dto';
-import { TokenHolderDto } from './dto/token-holder.dto';
-import { TokenHolder } from './entities/token-holders.entity';
-import { TokenTransaction } from './entities/token-transaction.entity';
-import { InjectQueue } from '@nestjs/bull';
-import { PULL_TOKEN_META_DATA_QUEUE } from 'src/token-sale/queues';
-import { Queue } from 'bull';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -36,20 +30,13 @@ export class TokensController {
     @InjectRepository(Token)
     private readonly tokensRepository: Repository<Token>,
 
-    @InjectRepository(TokenTransaction)
-    private readonly tokenTransactionsRepository: Repository<TokenTransaction>,
-
-    @InjectRepository(TokenHistory)
-    private readonly tokenHistoryRepository: Repository<TokenHistory>,
-
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
-
-    @InjectQueue(PULL_TOKEN_META_DATA_QUEUE)
-    private readonly pullTokenMetaDataQueue: Queue,
-  ) {}
+  ) {
+    //
+  }
 
   @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({ name: 'factory_address', type: 'string', required: false })
@@ -107,16 +94,9 @@ export class TokensController {
     type: TokenDto,
   })
   async findByAddress(@Param('address') address: string) {
-    const token = await this.tokensService.findByAddress(address);
+    const token = await this.tokensService.getToken(address);
 
-    if (token) {
-      return token;
-    }
-
-    await this.pullTokenMetaDataQueue.add({
-      saleAddress: address,
-    });
-    return this.tokensService.findByAddress(address);
+    return token;
   }
 
   @ApiParam({
@@ -144,43 +124,6 @@ export class TokensController {
     });
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
-  }
-
-  @ApiParam({
-    name: 'address',
-    type: 'string',
-    description: 'Token address or name',
-  })
-  @ApiQuery({ name: 'page', type: 'number', required: false })
-  @ApiQuery({ name: 'limit', type: 'number', required: false })
-  @ApiQuery({
-    name: 'account',
-    type: 'string',
-    required: false,
-    description: 'Filter Transaction Made by this account address',
-  })
-  @ApiOperation({ operationId: 'listTokenTransactions' })
-  @ApiOkResponsePaginated(TokenTransactionDto)
-  @Get(':address/transactions')
-  async listTokenTransactions(
-    @Param('address') address: string,
-    @Query('account') account: string,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-  ): Promise<Pagination<TokenTransaction>> {
-    const token = await this.tokensService.findByAddress(address);
-    const queryBuilder =
-      this.tokenTransactionsRepository.createQueryBuilder('token_transactions');
-    queryBuilder.orderBy(`token_transactions.created_at`, 'DESC');
-    queryBuilder.where('token_transactions.tokenId = :tokenId', {
-      tokenId: token.id,
-    });
-
-    if (account) {
-      queryBuilder.andWhere('token_history.address = :account', { account });
-    }
-
-    return paginate<TokenTransaction>(queryBuilder, { page, limit });
   }
 
   @ApiParam({
