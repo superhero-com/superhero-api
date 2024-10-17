@@ -25,23 +25,31 @@ export class TransactionService {
     //
   }
 
-  async saveTransaction(rawTransaction: ITransaction) {
+  async saveTransaction(
+    rawTransaction: ITransaction,
+    token?: Token,
+  ): Promise<Transaction> {
+    if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
+      return;
+    }
     // prevent transaction duplication
     let saleAddress = rawTransaction.tx.contractId;
     if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
       saleAddress = rawTransaction.tx.return.value[1].value;
     }
 
-    const token = await this.tokenService.getToken(saleAddress);
+    if (!token) {
+      token = await this.tokenService.getToken(saleAddress);
+    }
     const exists = await this.transactionRepository
       .createQueryBuilder('token_transactions')
       .where('token_transactions.tx_hash = :tx_hash', {
         tx_hash: rawTransaction.hash,
       })
-      .getExists();
+      .getOne();
 
-    if (!token || exists) {
-      return;
+    if (!token || !!exists) {
+      return exists;
     }
 
     rawTransaction = await this.decodeTransactionData(token, rawTransaction);
@@ -75,7 +83,7 @@ export class TransactionService {
         this.coinGeckoService.getPriceData(_market_cap),
       ]);
 
-    this.transactionRepository.save({
+    const transaction = this.transactionRepository.save({
       token,
       tx_type: rawTransaction.tx.function,
       tx_hash: rawTransaction.hash,
@@ -96,6 +104,7 @@ export class TransactionService {
     //   sale_address,
     //   data: history,
     // });
+    return transaction;
   }
 
   async parseTransactionData(rawTransaction: ITransaction): Promise<{
@@ -121,7 +130,6 @@ export class TransactionService {
     }
 
     if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-      console.log("INDEXING CREAE COMMUNITY", rawTransaction)
       if (!decodedData.find((data) => data.name === 'PriceChange')) {
         return {
           volume,

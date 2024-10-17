@@ -9,23 +9,16 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
-import { TokenHistory } from './token-history.entity';
 import { TokenHolder } from './token-holders.entity';
-import { TokenTransaction } from './token-transaction.entity';
+import { Transaction } from 'src/transactions/entities/transaction.entity';
 
 @Entity()
 export class Token {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @OneToMany(
-    () => TokenTransaction,
-    (tokenTransaction) => tokenTransaction.token,
-  )
-  transactions: TokenTransaction[];
-
-  @OneToMany(() => TokenHistory, (tokenHistory) => tokenHistory.token)
-  histories: TokenHistory[];
+  @OneToMany(() => Transaction, (tokenTransaction) => tokenTransaction.token)
+  transactions: Transaction[];
 
   @OneToMany(() => TokenHolder, (tokenHolder) => tokenHolder.token)
   holders: TokenHolder[];

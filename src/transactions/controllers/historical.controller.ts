@@ -8,7 +8,7 @@ import {
   TransactionHistoryService,
 } from '../services/transaction-history.service';
 
-@Controller('api/v2/historical')
+@Controller('api/historical')
 @ApiTags('Transaction Historical')
 export class HistoricalController {
   constructor(

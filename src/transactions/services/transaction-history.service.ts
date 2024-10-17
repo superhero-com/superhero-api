@@ -45,14 +45,14 @@ export class TransactionHistoryService {
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
       .createQueryBuilder('token')
-      .select(['token.id as id', 'token_history.created_at as created_at'])
+      .select(['token.id as id', 'transactions.created_at as created_at'])
       .leftJoin(
-        'token_history',
-        'token_history',
-        'token.id = token_history."tokenId"',
+        'transactions',
+        'transactions',
+        'token.id = transactions."tokenId"',
       )
       .where('token.address = :address', { address })
-      .orderBy('token_history.created_at', 'ASC')
+      .orderBy('transactions.created_at', 'ASC')
       .limit(1)
       .getRawOne<IOldestHistoryInfo>();
   }
@@ -65,17 +65,17 @@ export class TransactionHistoryService {
     console.log('endDate::', endDate.toDate());
 
     const data = await this.tokenHistoryRepository
-      .createQueryBuilder('token_history')
-      .where('token_history.tokenId = :tokenId', {
+      .createQueryBuilder('transactions')
+      .where('transactions.tokenId = :tokenId', {
         tokenId: props.token.id,
       })
-      .andWhere('token_history.created_at >= :start', {
+      .andWhere('transactions.created_at >= :start', {
         start: startDate.toDate(),
       })
-      .andWhere('token_history.created_at <= :endDate', {
+      .andWhere('transactions.created_at <= :endDate', {
         endDate: endDate.toDate(),
       })
-      .orderBy('token_history.created_at', 'ASC')
+      .orderBy('transactions.created_at', 'ASC')
       .getMany();
 
     console.log('props.aggregated', props.mode);
@@ -83,14 +83,14 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.tokenHistoryRepository
-            .createQueryBuilder('token_history')
-            .where('token_history.tokenId = :tokenId', {
+            .createQueryBuilder('transactions')
+            .where('transactions.tokenId = :tokenId', {
               tokenId: props.token.id,
             })
-            .andWhere('token_history.created_at < :start', {
+            .andWhere('transactions.created_at < :start', {
               start: startDate.toDate(),
             })
-            .orderBy('token_history.created_at', 'DESC')
+            .orderBy('transactions.created_at', 'DESC')
             .limit(1)
             .getOne()
         : undefined;
@@ -377,13 +377,13 @@ SELECT
   i.end_time,
   (
     array_agg(
-      th.price
+      th.buy_price->>'ae'
       ORDER BY
         th.created_at DESC
     )
   ) [1] AS last_price
 FROM
-  token_history th
+  transactions th
   RIGHT JOIN intervals i ON th.created_at >= i.start_time
   AND th.created_at < i.end_time
 WHERE

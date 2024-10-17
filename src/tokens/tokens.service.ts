@@ -10,6 +10,8 @@ import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokenGatingService } from 'src/ae/token-gating.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
+import { CoinGeckoService } from 'src/ae/coin-gecko.service';
+import BigNumber from 'bignumber.js';
 
 @Injectable()
 export class TokensService {
@@ -22,6 +24,8 @@ export class TokensService {
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
     private tokenGatingService: TokenGatingService,
+
+    private coinGeckoService: CoinGeckoService,
   ) {
     //
   }
@@ -51,6 +55,16 @@ export class TokensService {
     return this.tokensRepository.findOneBy({ id });
   }
 
+  async syncTokenPrice(token: Token): Promise<void> {
+    const data = await this.getTokeLivePrice(token);
+
+    await this.tokensRepository.update(token.id, data as any);
+    this.tokenWebsocketGateway?.handleTokenUpdated({
+      sale_address: token.sale_address,
+      data,
+    });
+  }
+
   async getToken(address: string): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
@@ -64,12 +78,7 @@ export class TokensService {
   async createToken(
     saleAddress: Encoded.ContractAddress,
   ): Promise<Token | null> {
-    const { instance } = await initTokenSale(
-      this.aeSdkService.sdk,
-      saleAddress as Encoded.ContractAddress,
-    ).catch((error) => {
-      return { instance: null };
-    });
+    const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
 
     if (!instance) {
       return null;
@@ -85,11 +94,16 @@ export class TokensService {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
     };
+    // prevent duplicate tokens
+    const existingToken = await this.findByAddress(saleAddress);
+    if (existingToken) {
+      return existingToken;
+    }
 
     const newToken = await this.tokensRepository.save(tokenData);
     await this.updateTokenCategory(newToken);
     await this.updateTokenInitialRank(newToken);
-
+    await this.syncTokenPrice(newToken);
     return this.findOne(newToken.id);
   }
 
@@ -180,5 +194,77 @@ export class TokensService {
       return 'number';
     }
     return 'word';
+  }
+
+  async getTokenContracts(token: Token) {
+    return this.getTokenContractsBySaleAddress(
+      token.sale_address as Encoded.ContractAddress,
+    );
+  }
+
+  async getTokenContractsBySaleAddress(saleAddress: Encoded.ContractAddress) {
+    const { instance } = await initTokenSale(
+      this.aeSdkService.sdk,
+      saleAddress,
+    );
+    const tokenContractInstance = await instance?.tokenContractInstance();
+
+    return {
+      instance,
+      tokenContractInstance,
+    };
+  }
+
+  private async getTokeLivePrice(token: Token) {
+    const { instance, tokenContractInstance } =
+      await this.getTokenContracts(token);
+
+    const [total_supply] = await Promise.all([
+      tokenContractInstance
+        .total_supply?.()
+        .then((res) => new BigNumber(res.decodedResult))
+        .catch(() => new BigNumber('0')),
+    ]);
+    const [price, sell_price, metaInfo] = await Promise.all([
+      instance
+        .price(1)
+        .then((res: string) => new BigNumber(res || '0'))
+        .catch(() => new BigNumber('0')),
+      instance
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        .sellReturn?.('1' as string)
+        .then((res: string) => new BigNumber(res || '0'))
+        .catch(() => new BigNumber('0')),
+      instance.metaInfo().catch(() => {
+        return { token: {} };
+      }),
+    ]);
+
+    const market_cap = total_supply.multipliedBy(price);
+
+    const [price_data, sell_price_data, market_cap_data] = await Promise.all([
+      this.coinGeckoService.getPriceData(price),
+      this.coinGeckoService.getPriceData(sell_price),
+      this.coinGeckoService.getPriceData(market_cap),
+    ]);
+
+    const dao_balance = await this.aeSdkService.sdk.getBalance(
+      metaInfo?.beneficiary,
+    );
+
+    return {
+      price,
+      sell_price,
+      sell_price_data,
+      total_supply,
+      price_data,
+      market_cap,
+      market_cap_data,
+      beneficiary_address: metaInfo?.beneficiary,
+      bonding_curve_address: metaInfo?.bondingCurve,
+      owner_address: metaInfo?.owner,
+      dao_balance: new BigNumber(dao_balance),
+    };
   }
 }

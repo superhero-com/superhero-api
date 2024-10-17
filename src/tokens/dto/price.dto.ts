@@ -2,14 +2,14 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export interface IPriceDto {
   ae: number;
-  usd: number;
-  eur: number;
-  aud: number;
-  brl: number;
-  cad: number;
-  chf: number;
-  gbp: number;
-  xau: number;
+  usd?: number;
+  eur?: number;
+  aud?: number;
+  brl?: number;
+  cad?: number;
+  chf?: number;
+  gbp?: number;
+  xau?: number;
 }
 
 export class PriceDto {
