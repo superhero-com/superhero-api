@@ -28,6 +28,16 @@ export class TokenTransaction {
   @Column()
   tx_type: string;
 
+  @Column({
+    nullable: true,
+  })
+  block_height: number;
+
+  @Column({
+    default: false,
+  })
+  verified: boolean;
+
   @Column()
   address: string;
 

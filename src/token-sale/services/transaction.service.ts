@@ -58,6 +58,7 @@ export class TransactionService {
       ...tokenPriceData,
       token: token,
       tx_hash: transaction.hash,
+      block_height: transaction.blockHeight,
       created_at: moment(transaction.microTime).toDate(),
     });
 
