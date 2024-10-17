@@ -2,19 +2,28 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Token } from './entities/token.entity';
 import { Encoded } from '@aeternity/aepp-sdk';
-import { initTokenSale } from 'token-gating-sdk';
+import ContractWithMethods, {
+  ContractMethodsBase,
+} from '@aeternity/aepp-sdk/es/contract/Contract';
+import BigNumber from 'bignumber.js';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
+import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { TokenGatingService } from 'src/ae/token-gating.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
-import BigNumber from 'bignumber.js';
+import { initTokenSale, TokenSale } from 'token-gating-sdk';
+import { Token } from './entities/token.entity';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
+
+type TokenContracts = {
+  instance: TokenSale;
+  tokenContractInstance: ContractWithMethods<ContractMethodsBase>;
+};
 
 @Injectable()
 export class TokensService {
+  contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -206,17 +215,25 @@ export class TokensService {
     );
   }
 
-  async getTokenContractsBySaleAddress(saleAddress: Encoded.ContractAddress) {
+  async getTokenContractsBySaleAddress(
+    saleAddress: Encoded.ContractAddress,
+  ): Promise<TokenContracts> {
+    if (this.contracts[saleAddress]) {
+      console.log('RETURNING CACHED CONTRACTS');
+      return this.contracts[saleAddress];
+    }
     const { instance } = await initTokenSale(
       this.aeSdkService.sdk,
       saleAddress,
     );
     const tokenContractInstance = await instance?.tokenContractInstance();
 
-    return {
+    this.contracts[saleAddress] = {
       instance,
       tokenContractInstance,
     };
+
+    return this.contracts[saleAddress];
   }
 
   private async getTokeLivePrice(token: Token) {
