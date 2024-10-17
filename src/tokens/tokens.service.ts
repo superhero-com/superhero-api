@@ -59,6 +59,9 @@ export class TokensService {
     const data = await this.getTokeLivePrice(token);
 
     await this.tokensRepository.update(token.id, data as any);
+    // update token ranks
+
+    // re-fetch token
     this.tokenWebsocketGateway?.handleTokenUpdated({
       sale_address: token.sale_address,
       data,
@@ -102,8 +105,9 @@ export class TokensService {
 
     const newToken = await this.tokensRepository.save(tokenData);
     await this.updateTokenCategory(newToken);
-    await this.updateTokenInitialRank(newToken);
     await this.syncTokenPrice(newToken);
+    // TODO: should refresh token info
+    await this.updateTokenInitialRank(newToken);
     return this.findOne(newToken.id);
   }
 

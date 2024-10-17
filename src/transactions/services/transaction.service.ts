@@ -11,6 +11,7 @@ import { TokensService } from 'src/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import moment from 'moment';
+import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
 
 @Injectable()
 export class TransactionService {
@@ -18,6 +19,7 @@ export class TransactionService {
     private tokenGatingService: TokenGatingService,
     private coinGeckoService: CoinGeckoService,
     private tokenService: TokensService,
+    private tokenWebsocketGateway: TokenWebsocketGateway,
 
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
@@ -28,6 +30,7 @@ export class TransactionService {
   async saveTransaction(
     rawTransaction: ITransaction,
     token?: Token,
+    shouldBroadcast?: boolean,
   ): Promise<Transaction> {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
@@ -83,8 +86,7 @@ export class TransactionService {
         this.coinGeckoService.getPriceData(_market_cap),
       ]);
 
-    const transaction = this.transactionRepository.save({
-      token,
+    const txData = {
       tx_type: rawTransaction.tx.function,
       tx_hash: rawTransaction.hash,
       block_height: rawTransaction.blockHeight,
@@ -97,13 +99,19 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
+    };
+    const transaction = this.transactionRepository.save({
+      token,
+      ...txData,
     } as any);
 
-    // TODO broadcast transaction to websocket
-    // this.tokenWebsocketGateway?.handleTokenHistory({
-    //   sale_address,
-    //   data: history,
-    // });
+    if (shouldBroadcast) {
+      await this.tokenService.syncTokenPrice(token);
+      this.tokenWebsocketGateway?.handleTokenHistory({
+        sale_address: saleAddress,
+        data: txData,
+      });
+    }
     return transaction;
   }
 
