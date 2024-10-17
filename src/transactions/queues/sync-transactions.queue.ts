@@ -50,7 +50,7 @@ export class SyncTransactionsQueue {
       direction: 'forward',
       limit: 100,
       type: 'contract_call',
-      contract: token.address,
+      contract: token.sale_address,
     };
 
     const queryString = Object.keys(query)

@@ -7,7 +7,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import {
-  PULL_TOKEN_META_DATA_QUEUE,
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
@@ -40,9 +39,6 @@ import { TransactionsModule } from './transactions/transactions.module';
       },
       {
         name: SYNC_TRANSACTIONS_QUEUE,
-      },
-      {
-        name: PULL_TOKEN_META_DATA_QUEUE,
       },
     ),
     TypeOrmModule.forRoot({

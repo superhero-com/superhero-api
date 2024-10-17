@@ -8,7 +8,7 @@ import {
   TransactionHistoryService,
 } from '../services/transaction-history.service';
 
-@Controller('api/historical')
+@Controller('api/tokens')
 @ApiTags('Transaction Historical')
 export class HistoricalController {
   constructor(
@@ -44,7 +44,7 @@ export class HistoricalController {
     type: 'string',
     description: 'Token address or name',
   })
-  @Get(':address')
+  @Get(':address/transactions')
   async findByAddress(
     @Param('address') address: string,
     @Query('interval') interval: number = 60 * 60,
