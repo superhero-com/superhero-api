@@ -8,13 +8,7 @@ import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([
-      Token,
-      TokenHolder,
-    ]),
-    AeModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Token, TokenHolder]), AeModule],
   controllers: [TokensController],
   providers: [TokensService, TokenWebsocketGateway],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],

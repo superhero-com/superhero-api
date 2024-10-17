@@ -10,7 +10,7 @@ import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   PULL_TOKEN_PRICE_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE
+  SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,
