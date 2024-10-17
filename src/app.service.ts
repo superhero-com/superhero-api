@@ -82,15 +82,7 @@ export class AppService {
     ]);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
       console.log('TokenSaleService->dispatch::', symbol, saleAddress);
-      void this.pullTokenPriceQueue.add({
-        saleAddress,
-      });
-      void this.syncTokenHoldersQueue.add({
-        saleAddress,
-      });
-      void this.syncTransactionsQueue.add({
-        saleAddress,
-      });
+      this.loadTokenData(saleAddress);
     }
   }
 
@@ -98,6 +90,18 @@ export class AppService {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
+  }
+
+  loadTokenData(saleAddress: Encoded.ContractAddress) {
+    void this.pullTokenPriceQueue.add({
+      saleAddress,
+    });
+    void this.syncTokenHoldersQueue.add({
+      saleAddress,
+    });
+    void this.syncTransactionsQueue.add({
+      saleAddress,
+    });
   }
 
   /**
