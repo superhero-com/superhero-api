@@ -8,6 +8,7 @@ import { AppService } from './app.service';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import { TokenSaleModule } from './token-sale/token-sale.module';
 import { TokensModule } from './tokens/tokens.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { TokensModule } from './tokens/tokens.module';
     AeModule,
     TokenSaleModule,
     TokensModule,
+    TransactionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

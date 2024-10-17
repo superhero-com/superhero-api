@@ -4,6 +4,8 @@ import { fetchJson } from './utils/common';
 import { AETERNITY_COIN_ID, CURRENCIES } from './utils/constants';
 import { CurrencyRates } from './utils/types';
 import { IPriceDto } from 'src/tokens/dto/price.dto';
+import { Moment } from 'moment';
+import moment from 'moment';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 
@@ -39,6 +41,7 @@ export interface CoinGeckoMarketResponse {
 @Injectable()
 export class CoinGeckoService {
   rates: CurrencyRates | null = null;
+  last_pull_time: Moment;
 
   /**
    * CoinGeckoService class responsible for pulling data at regular intervals.
@@ -54,7 +57,14 @@ export class CoinGeckoService {
   pullData() {
     this.fetchCoinCurrencyRates(AETERNITY_COIN_ID).then((rates) => {
       this.rates = rates;
+      this.last_pull_time = moment();
     });
+  }
+
+  isPullTimeExpired() {
+    return (
+      this.last_pull_time && moment().diff(this.last_pull_time, 'minutes') > 2
+    );
   }
 
   /**
@@ -63,7 +73,7 @@ export class CoinGeckoService {
    * @returns An object containing the price data for AE and other currencies.
    */
   async getPriceData(price: BigNumber): Promise<IPriceDto> {
-    if (this.rates === null) {
+    if (this.rates === null || this.isPullTimeExpired()) {
       await this.pullData();
     }
 
