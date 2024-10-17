@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import BigNumber from 'bignumber.js';
+import { TokensService } from '../tokens.service';
 
 export interface ISyncTokenHoldersQueue {
   saleAddress: Encoded.ContractAddress;
@@ -21,6 +22,7 @@ export class SyncTokenHoldersQueue {
 
   constructor(
     private aeSdkService: AeSdkService,
+    private tokenService: TokensService,
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
 
@@ -47,26 +49,11 @@ export class SyncTokenHoldersQueue {
   }
 
   async loadAndSaveTokenHolders(saleAddress: Encoded.ContractAddress) {
-    const token = await this.tokensRepository.findOneBy({
-      sale_address: saleAddress,
-    });
+    const token = await this.tokenService.getToken(saleAddress);
+    const { tokenContractInstance } =
+      await this.tokenService.getTokenContractsBySaleAddress(saleAddress);
 
-    if (!token) {
-      return;
-    }
-
-    // delete all previous holders
-    await this.tokenHoldersRepository.delete({
-      token: token,
-    });
-
-    const { instance } = await initTokenSale(
-      this.aeSdkService.sdk,
-      saleAddress as Encoded.ContractAddress,
-    );
-    const contractInstance = await instance.tokenContractInstance();
-
-    const holders = await contractInstance
+    const holders = await tokenContractInstance
       .balances()
       .then((res) => res.decodedResult)
       .then((res) => {

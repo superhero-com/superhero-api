@@ -10,6 +10,7 @@ import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   PULL_TOKEN_PRICE_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import {
@@ -36,9 +37,12 @@ export class AppService {
 
     @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
     private readonly syncTokensRanksQueue: Queue,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
-
+    void this.syncTokensRanksQueue.add({});
     void this.loadFactories(contracts);
 
     websocketService.subscribeForTransactionsUpdates(
@@ -52,6 +56,7 @@ export class AppService {
           if (!this.tokens.includes(saleAddress)) {
             void this.pullTokenPriceQueue.add({
               saleAddress,
+              shouldBroadcast: true,
             });
             this.tokens.push(saleAddress);
           }
@@ -76,19 +81,8 @@ export class AppService {
       factory.listRegisteredTokens(),
     ]);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      const job = await this.pullTokenPriceQueue.add({
-        saleAddress,
-      });
-      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-      this.tokens.push(saleAddress);
-    }
-
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      // sync token transactions
-      const job = await this.syncTransactionsQueue.add({
-        saleAddress,
-      });
-      console.log('TokenSaleService->syncTokenTransactions', symbol, job.id);
+      console.log('TokenSaleService->dispatch::', symbol, saleAddress);
+      this.loadTokenData(saleAddress);
     }
   }
 
@@ -96,7 +90,18 @@ export class AppService {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
-    void this.syncTokensRanksQueue.add({});
+  }
+
+  loadTokenData(saleAddress: Encoded.ContractAddress) {
+    void this.pullTokenPriceQueue.add({
+      saleAddress,
+    });
+    void this.syncTokenHoldersQueue.add({
+      saleAddress,
+    });
+    void this.syncTransactionsQueue.add({
+      saleAddress,
+    });
   }
 
   /**

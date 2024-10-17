@@ -6,11 +6,40 @@ import { Token } from './entities/token.entity';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
+import { PullTokenPriceQueue } from './queues/pull-token-price.queue';
+import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
+import { BullModule } from '@nestjs/bull';
+import {
+  PULL_TOKEN_PRICE_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
+} from './queues/constants';
+import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Token, TokenHolder]), AeModule],
+  imports: [
+    TypeOrmModule.forFeature([Token, TokenHolder]),
+    AeModule,
+    BullModule.registerQueue(
+      {
+        name: PULL_TOKEN_PRICE_QUEUE,
+      },
+      {
+        name: SYNC_TOKENS_RANKS_QUEUE,
+      },
+      {
+        name: SYNC_TOKEN_HOLDERS_QUEUE,
+      },
+    ),
+  ],
   controllers: [TokensController],
-  providers: [TokensService, TokenWebsocketGateway],
+  providers: [
+    TokensService,
+    TokenWebsocketGateway,
+    PullTokenPriceQueue,
+    SyncTokensRanksQueue,
+    SyncTokenHoldersQueue,
+  ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })
 export class TokensModule {

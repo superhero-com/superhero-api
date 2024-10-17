@@ -12,6 +12,9 @@ import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import moment from 'moment';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from 'src/tokens/queues/constants';
 
 @Injectable()
 export class TransactionService {
@@ -23,6 +26,9 @@ export class TransactionService {
 
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
   ) {
     //
   }
@@ -110,6 +116,9 @@ export class TransactionService {
       this.tokenWebsocketGateway?.handleTokenHistory({
         sale_address: saleAddress,
         data: txData,
+      });
+      void this.syncTokenHoldersQueue.add({
+        saleAddress,
       });
     }
     return transaction;
