@@ -38,7 +38,7 @@ export class AppService {
     private readonly syncTokensRanksQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
-
+    void this.syncTokensRanksQueue.add({});
     void this.loadFactories(contracts);
 
     websocketService.subscribeForTransactionsUpdates(
@@ -96,7 +96,6 @@ export class AppService {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
-    void this.syncTokensRanksQueue.add({});
   }
 
   /**
