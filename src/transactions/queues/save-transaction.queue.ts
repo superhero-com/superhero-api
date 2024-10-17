@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { ITransaction } from 'src/ae/utils/types';
 import { SAVE_TRANSACTION_QUEUE } from 'src/token-sale/queues';
-import { TransactionService } from '../transaction.service';
+import { TransactionService } from '../services/transaction.service';
 
 export interface ISaveTransactionQueue {
   transaction: ITransaction;

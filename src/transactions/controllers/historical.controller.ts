@@ -1,24 +1,22 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { TokenHistory } from './entities/token-history.entity';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { TokensService } from './tokens.service';
-import {
-  ITokenHistoryPreview,
-  TokenHistoryService,
-} from './token-history.service';
-import moment from 'moment';
 
-@Controller('api/historical')
-@ApiTags('Historical')
+import moment from 'moment';
+import { TokensService } from 'src/tokens/tokens.service';
+import {
+  ITransactionPreview,
+  TransactionHistoryService,
+} from '../services/transaction-history.service';
+
+@Controller('api/v2/historical')
+@ApiTags('Transaction Historical')
 export class HistoricalController {
   constructor(
-    @InjectRepository(TokenHistory)
-    private readonly tokenHistoryRepository: Repository<TokenHistory>,
-    private readonly tokensService: TokensService,
-    private readonly tokenHistoryService: TokenHistoryService,
-  ) {}
+    private tokenService: TokensService,
+    private readonly tokenHistoryService: TransactionHistoryService,
+  ) {
+    //
+  }
 
   @ApiOperation({ operationId: 'findByAddress' })
   @ApiQuery({
@@ -71,7 +69,7 @@ export class HistoricalController {
       startDate,
       endDate,
     });
-    const token = await this.tokensService.findByAddress(address);
+    const token = await this.tokenService.getToken(address);
     return this.tokenHistoryService.getHistoricalData({
       token,
       interval,
@@ -91,7 +89,7 @@ export class HistoricalController {
   @Get('/preview/:address')
   async getForPreview(
     @Param('address') address: string,
-  ): Promise<ITokenHistoryPreview> {
+  ): Promise<ITransactionPreview> {
     const oldestInfo =
       await this.tokenHistoryService.getOldestHistoryInfo(address);
     return this.tokenHistoryService.getForPreview(oldestInfo);

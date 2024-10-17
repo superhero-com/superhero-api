@@ -9,7 +9,7 @@ import { ITransaction } from 'src/ae/utils/types';
 import { Token } from 'src/tokens/entities/token.entity';
 import { TokensService } from 'src/tokens/tokens.service';
 import { Repository } from 'typeorm';
-import { Transaction } from './entities/transaction.entity';
+import { Transaction } from '../entities/transaction.entity';
 import moment from 'moment';
 
 @Injectable()
@@ -52,20 +52,16 @@ export class TransactionService {
       total_supply,
     } = await this.parseTransactionData(rawTransaction);
 
-    if (_amount === null) {
-      return;
-    }
-
     const decodedData = rawTransaction.tx.decodedData;
 
     const priceChangeData = decodedData.find(
       (data) => data.name === 'PriceChange',
     );
     const _unit_price = _amount.div(volume);
-    const _previous_buy_price = priceChangeData
+    const _previous_buy_price = !!priceChangeData
       ? new BigNumber(toAe(priceChangeData.args[0]))
       : _unit_price;
-    const _buy_price = priceChangeData
+    const _buy_price = !!priceChangeData
       ? new BigNumber(toAe(priceChangeData.args[1]))
       : _unit_price;
     const _market_cap = _buy_price.times(total_supply);
@@ -94,6 +90,12 @@ export class TransactionService {
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
     } as any);
+
+    // TODO broadcast transaction to websocket
+    // this.tokenWebsocketGateway?.handleTokenHistory({
+    //   sale_address,
+    //   data: history,
+    // });
   }
 
   async parseTransactionData(rawTransaction: ITransaction): Promise<{
@@ -119,11 +121,12 @@ export class TransactionService {
     }
 
     if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+      console.log("INDEXING CREAE COMMUNITY", rawTransaction)
       if (!decodedData.find((data) => data.name === 'PriceChange')) {
         return {
-          volume: null,
-          amount: null,
-          total_supply: null,
+          volume,
+          amount,
+          total_supply,
         };
       }
       volume = new BigNumber(

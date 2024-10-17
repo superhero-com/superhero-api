@@ -6,7 +6,7 @@ import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { ITransaction } from 'src/ae/utils/types';
-import { TransactionService } from '../transaction.service';
+import { TransactionService } from '../services/transaction.service';
 import { SYNC_TRANSACTIONS_QUEUE } from './constants';
 
 export interface ISyncTransactionsQueue {

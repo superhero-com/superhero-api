@@ -6,9 +6,12 @@ import { SAVE_TRANSACTION_QUEUE } from 'src/token-sale/queues';
 import { TokensModule } from 'src/tokens/tokens.module';
 import { SaveTransactionQueue } from './queues/save-transaction.queue';
 import { Transaction } from './entities/transaction.entity';
-import { TransactionService } from './transaction.service';
+import { TransactionService } from './services/transaction.service';
 import { SYNC_TRANSACTIONS_QUEUE } from './queues/constants';
 import { SyncTransactionsQueue } from './queues/sync-transactions.queue';
+import { TransactionsController } from './controllers/transactions.controller';
+import { HistoricalController } from './controllers/historical.controller';
+import { TransactionHistoryService } from './services/transaction-history.service';
 
 @Module({
   imports: [
@@ -24,8 +27,14 @@ import { SyncTransactionsQueue } from './queues/sync-transactions.queue';
     AeModule,
     TokensModule,
   ],
-  providers: [TransactionService, SaveTransactionQueue, SyncTransactionsQueue],
+  providers: [
+    TransactionService,
+    TransactionHistoryService,
+    SaveTransactionQueue,
+    SyncTransactionsQueue,
+  ],
   exports: [TypeOrmModule],
+  controllers: [TransactionsController, HistoricalController],
 })
 export class TransactionsModule {
   //
