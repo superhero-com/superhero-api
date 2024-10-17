@@ -14,6 +14,7 @@ import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './queues/constants';
+import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 
 @Module({
   imports: [
@@ -37,7 +38,7 @@ import {
     TokenWebsocketGateway,
     PullTokenPriceQueue,
     SyncTokensRanksQueue,
-    SyncTokensRanksQueue,
+    SyncTokenHoldersQueue,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

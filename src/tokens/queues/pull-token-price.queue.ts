@@ -11,6 +11,7 @@ import {
 
 export interface IPullTokenPriceQueue {
   saleAddress: Encoded.ContractAddress;
+  shouldBroadcast?: boolean;
 }
 
 @Processor(PULL_TOKEN_PRICE_QUEUE)
@@ -40,9 +41,11 @@ export class PullTokenPriceQueue {
       this.logger.error(`PullTokenPriceQueue->error`, error);
     }
 
-    void this.syncTokensRanksQueue.add({});
-    void this.syncTokenHoldersQueue.add({
-      saleAddress: job.data.saleAddress,
-    });
+    if (job.data.shouldBroadcast) {
+      void this.syncTokensRanksQueue.add({});
+      void this.syncTokenHoldersQueue.add({
+        saleAddress: job.data.saleAddress,
+      });
+    }
   }
 }

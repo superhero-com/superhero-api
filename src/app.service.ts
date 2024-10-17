@@ -10,6 +10,7 @@ import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   PULL_TOKEN_PRICE_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import {
@@ -36,6 +37,9 @@ export class AppService {
 
     @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
     private readonly syncTokensRanksQueue: Queue,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
     void this.syncTokensRanksQueue.add({});
@@ -52,6 +56,7 @@ export class AppService {
           if (!this.tokens.includes(saleAddress)) {
             void this.pullTokenPriceQueue.add({
               saleAddress,
+              shouldBroadcast: true,
             });
             this.tokens.push(saleAddress);
           }
@@ -76,19 +81,16 @@ export class AppService {
       factory.listRegisteredTokens(),
     ]);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      const job = await this.pullTokenPriceQueue.add({
+      console.log('TokenSaleService->dispatch::', symbol, saleAddress);
+      void this.pullTokenPriceQueue.add({
         saleAddress,
       });
-      console.log('TokenSaleService->loadFactory->add-token', symbol, job.id);
-      this.tokens.push(saleAddress);
-    }
-
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      // sync token transactions
-      const job = await this.syncTransactionsQueue.add({
+      void this.syncTokenHoldersQueue.add({
         saleAddress,
       });
-      console.log('TokenSaleService->syncTokenTransactions', symbol, job.id);
+      void this.syncTransactionsQueue.add({
+        saleAddress,
+      });
     }
   }
 
