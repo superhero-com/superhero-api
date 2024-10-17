@@ -8,7 +8,10 @@ import { ROOM_FACTORY_CONTRACTS, TX_FUNCTIONS } from './ae/utils/constants';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { PULL_TOKEN_PRICE_QUEUE } from './tokens/queues/constants';
+import {
+  PULL_TOKEN_PRICE_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
+} from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
@@ -30,6 +33,9 @@ export class AppService {
 
     @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
     private readonly syncTransactionsQueue: Queue,
+
+    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
+    private readonly syncTokensRanksQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
 
@@ -90,6 +96,7 @@ export class AppService {
     await Promise.all(
       contracts.map((contract) => this.loadFactory(contract.contractId)),
     );
+    void this.syncTokensRanksQueue.add({});
   }
 
   /**

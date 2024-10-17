@@ -6,7 +6,10 @@ import { TokensModule } from 'src/tokens/tokens.module';
 import { SaveTransactionQueue } from './queues/save-transaction.queue';
 import { Transaction } from './entities/transaction.entity';
 import { TransactionService } from './services/transaction.service';
-import { SAVE_TRANSACTION_QUEUE, SYNC_TRANSACTIONS_QUEUE } from './queues/constants';
+import {
+  SAVE_TRANSACTION_QUEUE,
+  SYNC_TRANSACTIONS_QUEUE,
+} from './queues/constants';
 import { SyncTransactionsQueue } from './queues/sync-transactions.queue';
 import { TransactionsController } from './controllers/transactions.controller';
 import { HistoricalController } from './controllers/historical.controller';

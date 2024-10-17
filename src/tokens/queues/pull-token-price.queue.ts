@@ -25,7 +25,7 @@ export class PullTokenPriceQueue {
     private readonly syncTokenHoldersQueue: Queue,
 
     private tokenService: TokensService,
-  ) { }
+  ) {}
 
   @Process()
   async process(job: Job<IPullTokenPriceQueue>) {
