@@ -14,7 +14,10 @@ import { SyncTransactionsQueue } from './queues/sync-transactions.queue';
 import { TransactionsController } from './controllers/transactions.controller';
 import { HistoricalController } from './controllers/historical.controller';
 import { TransactionHistoryService } from './services/transaction-history.service';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from 'src/tokens/queues/constants';
+import {
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
+} from 'src/tokens/queues/constants';
 
 @Module({
   imports: [
@@ -28,6 +31,9 @@ import { SYNC_TOKEN_HOLDERS_QUEUE } from 'src/tokens/queues/constants';
       },
       {
         name: SYNC_TOKEN_HOLDERS_QUEUE,
+      },
+      {
+        name: SYNC_TOKENS_RANKS_QUEUE,
       },
     ),
     AeModule,

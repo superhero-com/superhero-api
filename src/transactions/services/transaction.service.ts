@@ -14,7 +14,10 @@ import moment from 'moment';
 import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from 'src/tokens/queues/constants';
+import {
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
+} from 'src/tokens/queues/constants';
 
 @Injectable()
 export class TransactionService {
@@ -29,6 +32,9 @@ export class TransactionService {
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
+
+    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
+    private readonly syncTokensRanksQueue: Queue,
   ) {
     //
   }
@@ -120,6 +126,7 @@ export class TransactionService {
       void this.syncTokenHoldersQueue.add({
         saleAddress,
       });
+      void this.syncTokensRanksQueue.add({});
     }
     return transaction;
   }
