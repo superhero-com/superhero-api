@@ -10,6 +10,7 @@ import { Token } from 'src/tokens/entities/token.entity';
 import { TokensService } from 'src/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { Transaction } from './entities/transaction.entity';
+import moment from 'moment';
 
 @Injectable()
 export class TransactionService {
@@ -18,9 +19,6 @@ export class TransactionService {
     private coinGeckoService: CoinGeckoService,
     private tokenService: TokensService,
 
-    @InjectRepository(Token)
-    private tokensRepository: Repository<Token>,
-
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
   ) {
@@ -28,7 +26,6 @@ export class TransactionService {
   }
 
   async saveTransaction(rawTransaction: ITransaction) {
-    console.log('SAVE TRANSACTION', rawTransaction);
     // prevent transaction duplication
     let saleAddress = rawTransaction.tx.contractId;
     if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
@@ -72,9 +69,6 @@ export class TransactionService {
       ? new BigNumber(toAe(priceChangeData.args[1]))
       : _unit_price;
     const _market_cap = _buy_price.times(total_supply);
-    console.log('volume', volume);
-    console.log('amount', _amount);
-    console.log('====================================');
 
     const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
       await Promise.all([
@@ -98,7 +92,7 @@ export class TransactionService {
       buy_price,
       total_supply,
       market_cap,
-      // TODO created at
+      created_at: moment(rawTransaction.microTime).toDate(),
     } as any);
   }
 
@@ -171,7 +165,7 @@ export class TransactionService {
         token.factory_address as Encoded.ContractAddress,
       );
       const decodedData = factory.contract.$decodeEvents(rawTransaction.tx.log);
-      console.log('decodedData', decodedData);
+
       return {
         ...rawTransaction,
         tx: {
