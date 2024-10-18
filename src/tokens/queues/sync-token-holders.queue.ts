@@ -2,15 +2,13 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
 import { Job } from 'bull';
 import { TokenHolder } from 'src/tokens/entities/token-holders.entity';
 import { Token } from 'src/tokens/entities/token.entity';
-import { initTokenSale } from 'token-gating-sdk';
 import { Repository } from 'typeorm';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
-import { AeSdkService } from 'src/ae/ae-sdk.service';
-import BigNumber from 'bignumber.js';
 import { TokensService } from '../tokens.service';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 
 export interface ISyncTokenHoldersQueue {
   saleAddress: Encoded.ContractAddress;
@@ -21,7 +19,6 @@ export class SyncTokenHoldersQueue {
   private readonly logger = new Logger(SyncTokenHoldersQueue.name);
 
   constructor(
-    private aeSdkService: AeSdkService,
     private tokenService: TokensService,
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -84,6 +81,11 @@ export class SyncTokenHoldersQueue {
 
     await this.tokensRepository.update(token.id, {
       holders_count,
+    });
+
+    // remove all holders
+    await this.tokenHoldersRepository.delete({
+      token: token,
     });
 
     await this.tokenHoldersRepository.save(
