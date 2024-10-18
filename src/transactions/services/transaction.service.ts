@@ -56,6 +56,17 @@ export class TransactionService {
     if (!token) {
       token = await this.tokenService.getToken(saleAddress);
     }
+    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+      try {
+        await this.tokenService.update(token, {
+          creator_address: rawTransaction.tx.callerId,
+          created_at: moment(rawTransaction.microTime).toDate(),
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
     const exists = await this.transactionRepository
       .createQueryBuilder('token_transactions')
       .where('token_transactions.tx_hash = :tx_hash', {
@@ -63,7 +74,7 @@ export class TransactionService {
       })
       .getOne();
 
-    if (!token || !!exists) {
+    if (!!exists) {
       return exists;
     }
 
