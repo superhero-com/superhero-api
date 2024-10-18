@@ -7,6 +7,7 @@ import moment from 'moment';
 import { Transaction } from '../entities/transaction.entity';
 import { Token } from 'src/tokens/entities/token.entity';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
+import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 
 export interface IGetHistoricalDataProps {
   token: Token;
@@ -103,6 +104,9 @@ export class TransactionHistoryService {
     );
   }
 
+  /**
+   * @deprecated
+   */
   private processNonAggregatedHistoricalData(
     data: Transaction[],
     props: IGetHistoricalDataProps,
@@ -285,13 +289,15 @@ export class TransactionHistoryService {
       }
     }
 
-    function getPrice(object, convertTo) {
+    function getPrice(object: Transaction, convertTo, isOpenTrade = false) {
       let final_buy_price: any = object.buy_price;
 
-      if (final_buy_price?.ae == 'NaN') {
-        if ((object?.sell_buy_price?.ae as any) != 'NaN') {
-          final_buy_price = open.previous_buy_price;
-        }
+      if (
+        !!open?.previous_buy_price?.ae &&
+        (final_buy_price?.ae == 'NaN' ||
+          (object.tx_type === TX_FUNCTIONS.create_community && isOpenTrade))
+      ) {
+        final_buy_price = open.previous_buy_price;
       }
 
       // TODO: when no price is found the candle data should be excluded
@@ -309,7 +315,7 @@ export class TransactionHistoryService {
       timeLow: low.created_at,
       quote: {
         convertedTo: props.convertTo,
-        open: getPrice(open, props.convertTo),
+        open: getPrice(open, props.convertTo, true),
         high: getPrice(high, props.convertTo),
         low: getPrice(low, props.convertTo),
         close: getPrice(close, props.convertTo),
