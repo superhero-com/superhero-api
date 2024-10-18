@@ -37,7 +37,7 @@ export interface ITransactionPreview {
 export class TransactionHistoryService {
   constructor(
     @InjectRepository(Transaction)
-    private readonly tokenHistoryRepository: Repository<Transaction>,
+    private readonly transactionsRepository: Repository<Transaction>,
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -46,14 +46,9 @@ export class TransactionHistoryService {
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
       .createQueryBuilder('token')
-      .select(['token.id as id', 'transactions.created_at as created_at'])
-      .leftJoin(
-        'transactions',
-        'transactions',
-        'token.id = transactions."tokenId"',
-      )
+      .select(['token.id as id', 'token.created_at as created_at'])
       .where('token.address = :address', { address })
-      .orderBy('transactions.created_at', 'ASC')
+      .orWhere('token.sale_address = :address', { address })
       .limit(1)
       .getRawOne<IOldestHistoryInfo>();
   }
@@ -65,7 +60,7 @@ export class TransactionHistoryService {
     console.log('startDate::', startDate.toDate());
     console.log('endDate::', endDate.toDate());
 
-    const data = await this.tokenHistoryRepository
+    const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('transactions.tokenId = :tokenId', {
         tokenId: props.token.id,
@@ -83,7 +78,7 @@ export class TransactionHistoryService {
 
     const firstBefore =
       props.mode === 'aggregated'
-        ? await this.tokenHistoryRepository
+        ? await this.transactionsRepository
             .createQueryBuilder('transactions')
             .where('transactions.tokenId = :tokenId', {
               tokenId: props.token.id,
@@ -347,66 +342,70 @@ export class TransactionHistoryService {
 
   async getForPreview(oldestHistoryInfo: IOldestHistoryInfo | null) {
     if (!oldestHistoryInfo) return { result: [], timeframe: '' };
-    const getIntervalTimeframe = () => {
+    const getIntervalTimeFrame = () => {
       const daysDiff = moment().diff(
         moment(oldestHistoryInfo.created_at),
         'days',
       );
-
       if (daysDiff > 7) {
-        return { interval: '1 DAY', timeframe: '30 DAYS' };
+        return {
+          interval: '1 day',
+          unit: 'day',
+          size: 1,
+          timeframe: '30 days',
+        };
       } else if (daysDiff > 1) {
-        return { interval: '6 HOURS', timeframe: '7 DAYS' };
+        return {
+          interval: '6 hours',
+          unit: 'hour',
+          size: 6,
+          timeframe: '7 days',
+        };
       } else {
-        return { interval: '1 HOUR', timeframe: '1 DAY' };
+        return {
+          interval: '20 minutes',
+          unit: 'minute',
+          size: 20,
+          timeframe: '1 day',
+        };
       }
     };
 
-    const { interval, timeframe } = getIntervalTimeframe();
+    const { interval, unit, size, timeframe } = getIntervalTimeFrame();
 
-    const runner = this.dataSource.createQueryRunner();
+    // Create dynamic truncation based on the interval unit and size
+    const truncationQuery =
+      size > 1
+        ? `DATE_TRUNC('${unit}', transactions.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM transactions.created_at) / ${size})`
+        : `DATE_TRUNC('${unit}', transactions.created_at)`; // For single units like '1 day'
 
-    const query = `
-WITH
-  intervals AS (
-    SELECT
-      s AS start_time,
-      s + $2::INTERVAL AS end_time
-    FROM
-      generate_series(
-        NOW() - $3::INTERVAL,
-        NOW() - $2::INTERVAL,
-        $2::INTERVAL
-      ) s
-  )
-SELECT
-  i.end_time,
-  (
-    array_agg(
-      th.buy_price->>'ae'
-      ORDER BY
-        th.created_at DESC
-    )
-  ) [1] AS last_price
-FROM
-  transactions th
-  RIGHT JOIN intervals i ON th.created_at >= i.start_time
-  AND th.created_at < i.end_time
-WHERE
-  "tokenId" = $1
-GROUP BY
-  i.end_time
-ORDER BY
-  i.end_time;
-    `;
+    const data = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('')
+      .select([
+        `${truncationQuery} AS truncated_time`,
+        "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
+      ])
+      .where('transactions.tokenId = :tokenId', {
+        tokenId: oldestHistoryInfo.id,
+      })
+      .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
+      .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
+      .groupBy('truncated_time')
+      .orderBy('truncated_time', 'DESC')
+      .getRawMany();
 
-    const result = await runner.query(query, [
-      oldestHistoryInfo.id,
-      interval,
+    console.log('Raw data:', data);
+
+    const result = data.map((item) => ({
+      last_price: item.max_buy_price, // Ensure it's parsed correctly
+      end_time: item.truncated_time, // Grouped time
+    }));
+
+    return {
+      result,
       timeframe,
-    ]);
-    await runner.release();
-
-    return { result, timeframe } as ITransactionPreview;
+      interval,
+    } as ITransactionPreview;
   }
 }

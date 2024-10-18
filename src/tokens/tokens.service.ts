@@ -43,6 +43,11 @@ export class TokensService {
     return this.tokensRepository.find();
   }
 
+  async update(token: Token, data): Promise<Token> {
+    await this.tokensRepository.update(token.id, data);
+    return this.findOne(token.id);
+  }
+
   searchForToken(address: string): Promise<Token | null> {
     return this.tokensRepository
       .createQueryBuilder('token')
