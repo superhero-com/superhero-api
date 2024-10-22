@@ -40,6 +40,8 @@ export class TokensController {
 
   @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({ name: 'factory_address', type: 'string', required: false })
+  @ApiQuery({ name: 'creator_address', type: 'string', required: false })
+  @ApiQuery({ name: 'owner_address', type: 'string', required: false })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -59,6 +61,8 @@ export class TokensController {
   async listAll(
     @Query('search') search = undefined,
     @Query('factory_address') factory_address = undefined,
+    @Query('creator_address') creator_address = undefined,
+    @Query('owner_address') owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
@@ -66,6 +70,8 @@ export class TokensController {
     @Query('category') category: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    // Select all columns from the 'token' table
+    queryBuilder.select('token');
     queryBuilder.orderBy(`token.${orderBy}`, orderDirection);
     if (search) {
       queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
@@ -80,7 +86,29 @@ export class TokensController {
         category,
       });
     }
-    return paginate<Token>(queryBuilder, { page, limit });
+    if (creator_address) {
+      queryBuilder.andWhere('token.creator_address = :creator_address', {
+        creator_address,
+      });
+    }
+    if (owner_address) {
+      const ownedTokens = await this.tokenHolderRepository
+        .createQueryBuilder('token_holder')
+        .where('token_holder.address = :owner_address', {
+          owner_address,
+        })
+        .andWhere('token_holder.percentage > 0')
+        .select('token_holder.tokenId')
+        .distinct(true)
+        .getRawMany()
+        .then((res) => res.map((r) => r.tokenId));
+
+      queryBuilder.andWhereInIds(ownedTokens);
+    }
+    return paginate<Token>(queryBuilder, {
+      page,
+      limit,
+    });
   }
 
   @ApiOperation({ operationId: 'findByAddress' })

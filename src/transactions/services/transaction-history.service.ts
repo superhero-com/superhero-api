@@ -395,8 +395,6 @@ export class TransactionHistoryService {
       .orderBy('truncated_time', 'DESC')
       .getRawMany();
 
-    console.log('Raw data:', data);
-
     const result = data.map((item) => ({
       last_price: item.max_buy_price, // Ensure it's parsed correctly
       end_time: item.truncated_time, // Grouped time
