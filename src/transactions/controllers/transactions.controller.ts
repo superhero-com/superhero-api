@@ -28,35 +28,50 @@ export class TransactionsController {
     name: 'token_address',
     type: 'string',
     description: 'Token address sale address',
-    required: true,
+    required: false,
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
-    name: 'account',
+    name: 'account_address',
     type: 'string',
     required: false,
     description: 'Filter Transaction Made by this account address',
   })
-  @ApiOperation({ operationId: 'listTokenTransactions' })
+  @ApiOperation({ operationId: 'listTransactions' })
   @ApiOkResponsePaginated(TransactionDto)
   @Get('')
-  async listTokenTransactions(
+  async listTransactions(
     @Query('token_address') token_address: string,
-    @Query('account') account: string,
+    @Query('account_address') account_address: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<Transaction>> {
-    const token = await this.tokenService.getToken(token_address);
     const queryBuilder =
       this.transactionsRepository.createQueryBuilder('transactions');
     queryBuilder.orderBy(`transactions.created_at`, 'DESC');
-    queryBuilder.where('transactions.tokenId = :tokenId', {
-      tokenId: token.id,
-    });
 
-    if (account) {
-      queryBuilder.andWhere('transactions.address = :account', { account });
+    if (token_address) {
+      const token = await this.tokenService.getToken(token_address);
+      queryBuilder.where('transactions.tokenId = :tokenId', {
+        tokenId: token.id,
+      });
+    }
+
+    if (account_address) {
+      queryBuilder
+        .andWhere('transactions.address = :account_address', {
+          account_address,
+        })
+        .leftJoin('transactions.token', 'token')
+        .addSelect([
+          'token.name',
+          'token.symbol',
+          'token.address',
+          'token.sale_address',
+          'token.rank',
+          'token.category',
+        ]);
     }
 
     return paginate<Transaction>(queryBuilder, { page, limit });
