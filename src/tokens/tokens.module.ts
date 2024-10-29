@@ -10,11 +10,13 @@ import { PullTokenPriceQueue } from './queues/pull-token-price.queue';
 import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
 import { BullModule } from '@nestjs/bull';
 import {
+  DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './queues/constants';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
+import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
 
 @Module({
   imports: [
@@ -30,6 +32,9 @@ import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
       {
         name: SYNC_TOKEN_HOLDERS_QUEUE,
       },
+      {
+        name: DELETE_OLD_TOKENS_QUEUE,
+      },
     ),
   ],
   controllers: [TokensController],
@@ -39,6 +44,7 @@ import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
     PullTokenPriceQueue,
     SyncTokensRanksQueue,
     SyncTokenHoldersQueue,
+    RemoveOldTokensQueue,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

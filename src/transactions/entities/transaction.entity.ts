@@ -18,7 +18,9 @@ export class Transaction {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Token, (token) => token.transactions)
+  @ManyToOne(() => Token, (token) => token.transactions, {
+    onDelete: 'CASCADE',
+  })
   token: Token;
 
   @Index()

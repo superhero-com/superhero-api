@@ -15,7 +15,9 @@ export class TokenHolder {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => Token, (token) => token.holders)
+  @ManyToOne(() => Token, (token) => token.holders, {
+    onDelete: 'CASCADE',
+  })
   token: Token;
 
   @Column()

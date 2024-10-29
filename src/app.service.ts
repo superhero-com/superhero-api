@@ -8,6 +8,7 @@ import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
+  DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
@@ -36,8 +37,14 @@ export class AppService {
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
+
+    @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
+    private readonly deleteOldTokensQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+    void this.deleteOldTokensQueue.add({
+      factories: contracts.map((contract) => contract.contractId),
+    });
     void this.syncTokensRanksQueue.add({});
     void this.loadFactories(contracts);
 
