@@ -43,6 +43,7 @@ export class TransactionService {
     rawTransaction: ITransaction,
     token?: Token,
     shouldBroadcast?: boolean,
+    shouldValidate?: boolean,
   ): Promise<Transaction> {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
@@ -74,7 +75,7 @@ export class TransactionService {
       })
       .getOne();
 
-    if (!!exists) {
+    if (!!exists && (!shouldValidate || exists.verified)) {
       return exists;
     }
 
@@ -123,6 +124,13 @@ export class TransactionService {
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
     };
+    if (exists) {
+      await this.transactionRepository.update(exists.id, {
+        ...txData,
+        verified: true,
+      });
+      return exists;
+    }
     const transaction = this.transactionRepository.save({
       token,
       ...txData,

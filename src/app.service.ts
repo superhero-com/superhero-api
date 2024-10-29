@@ -16,6 +16,7 @@ import {
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
+  VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
 
 @Injectable()
@@ -40,6 +41,9 @@ export class AppService {
 
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
+
+    @InjectQueue(VALIDATE_TRANSACTIONS_QUEUE)
+    private readonly validateTransactionsQueue: Queue,
   ) {
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
     void this.deleteOldTokensQueue.add({
@@ -61,6 +65,14 @@ export class AppService {
         }
       },
     );
+
+    websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
+      const desiredBlockHeight = keyBlock.height - 5;
+      void this.validateTransactionsQueue.add({
+        from: desiredBlockHeight - 10,
+        to: desiredBlockHeight,
+      });
+    });
   }
 
   async loadFactory(address: Encoded.ContractAddress) {
