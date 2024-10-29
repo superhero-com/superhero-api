@@ -88,13 +88,21 @@ export class SyncTokenHoldersQueue {
       token: token,
     });
 
+    const factoryAddress = token.factory_address.replace('ct_', 'ak_');
     await this.tokenHoldersRepository.save(
-      holders.map((holder) => {
-        return {
-          token: token,
-          ...holder,
-        };
-      }),
+      holders
+        .filter((holder) => {
+          if (factoryAddress === holder.address && !holder.balance.gt(0)) {
+            return false;
+          }
+          return true;
+        })
+        .map((holder) => {
+          return {
+            token: token,
+            ...holder,
+          };
+        }),
     );
   }
 }
