@@ -2,10 +2,16 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { ApiOkResponsePaginated } from 'src/tokens/tmp/api-type';
@@ -22,7 +28,7 @@ export class TransactionsController {
     private readonly transactionsRepository: Repository<Transaction>,
 
     private tokenService: TokensService,
-  ) {}
+  ) { }
 
   @ApiQuery({
     name: 'token_address',
@@ -75,5 +81,28 @@ export class TransactionsController {
     }
 
     return paginate<Transaction>(queryBuilder, { page, limit });
+  }
+
+  @ApiQuery({
+    name: 'tx_hash',
+    type: 'string',
+    required: true,
+    description: 'Transaction hash to fetch the transaction details',
+  })
+  @ApiOperation({ operationId: 'getTransactionByHash' })
+  @ApiOkResponse({ type: TransactionDto })
+  @Get('by-hash')
+  async getTransactionByHash(
+    @Query('tx_hash') tx_hash: string,
+  ): Promise<TransactionDto> {
+    const transaction = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.tx_hash = :tx_hash', { tx_hash })
+      .select('transactions.*')
+      .getRawOne();
+    if (!transaction) {
+      throw new NotFoundException(`Transaction with hash ${tx_hash} not found`);
+    }
+    return transaction;
   }
 }
