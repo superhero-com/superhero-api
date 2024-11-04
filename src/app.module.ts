@@ -16,6 +16,7 @@ import { TokensModule } from './tokens/tokens.module';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
+  VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
 import { TransactionsModule } from './transactions/transactions.module';
 
@@ -43,6 +44,9 @@ import { TransactionsModule } from './transactions/transactions.module';
       },
       {
         name: DELETE_OLD_TOKENS_QUEUE,
+      },
+      {
+        name: VALIDATE_TRANSACTIONS_QUEUE,
       },
     ),
     TypeOrmModule.forRoot({

@@ -9,6 +9,8 @@ import { TransactionService } from './services/transaction.service';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
+  VALIDATE_TOKEN_TRANSACTIONS_QUEUE,
+  VALIDATE_TRANSACTIONS_QUEUE,
 } from './queues/constants';
 import { SyncTransactionsQueue } from './queues/sync-transactions.queue';
 import { TransactionsController } from './controllers/transactions.controller';
@@ -18,6 +20,8 @@ import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from 'src/tokens/queues/constants';
+import { ValidateTransactionsQueue } from './queues/validate-transactions.queue';
+import { ValidateTokenTransactionsQueue } from './queues/validate-token-transactions.queue';
 
 @Module({
   imports: [
@@ -35,6 +39,12 @@ import {
       {
         name: SYNC_TOKENS_RANKS_QUEUE,
       },
+      {
+        name: VALIDATE_TRANSACTIONS_QUEUE,
+      },
+      {
+        name: VALIDATE_TOKEN_TRANSACTIONS_QUEUE,
+      },
     ),
     AeModule,
     TokensModule,
@@ -44,6 +54,8 @@ import {
     TransactionHistoryService,
     SaveTransactionQueue,
     SyncTransactionsQueue,
+    ValidateTransactionsQueue,
+    ValidateTokenTransactionsQueue,
   ],
   exports: [TypeOrmModule],
   controllers: [TransactionsController, HistoricalController],
