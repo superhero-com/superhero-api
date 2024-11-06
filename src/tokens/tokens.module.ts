@@ -1,22 +1,22 @@
+import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AeModule } from 'src/ae/ae.module';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { TokensController } from './tokens.controller';
-import { TokensService } from './tokens.service';
-import { PullTokenPriceQueue } from './queues/pull-token-price.queue';
-import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
-import { BullModule } from '@nestjs/bull';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_PRICE_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './queues/constants';
-import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
+import { PullTokenPriceQueue } from './queues/pull-token-price.queue';
 import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
+import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
+import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
+import { TokensController } from './tokens.controller';
+import { TokensService } from './tokens.service';
 
 @Module({
   imports: [
