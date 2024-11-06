@@ -22,6 +22,7 @@ import {
 } from 'src/tokens/queues/constants';
 import { ValidateTransactionsQueue } from './queues/validate-transactions.queue';
 import { ValidateTokenTransactionsQueue } from './queues/validate-token-transactions.queue';
+import { TokenStatsController } from './controllers/token-stats.controller';
 
 @Module({
   imports: [
@@ -58,7 +59,11 @@ import { ValidateTokenTransactionsQueue } from './queues/validate-token-transact
     ValidateTokenTransactionsQueue,
   ],
   exports: [TypeOrmModule],
-  controllers: [TransactionsController, HistoricalController],
+  controllers: [
+    TransactionsController,
+    HistoricalController,
+    TokenStatsController,
+  ],
 })
 export class TransactionsModule {
   //
