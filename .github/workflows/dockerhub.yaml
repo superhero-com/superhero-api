@@ -47,7 +47,7 @@ jobs:
             "GITHUB_TOKEN=${{ secrets.NPM_GITHUB_TOKEN }}"
   deploy_develop:
     if: github.ref == 'refs/heads/develop'
-    name: Deploy via ssh (staging)
+    name: Deploy via ssh (develop)
     uses: ./.github/workflows/dev_deploy.yaml
     secrets: inherit
     needs: buildx
