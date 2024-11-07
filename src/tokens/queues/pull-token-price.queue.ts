@@ -41,11 +41,9 @@ export class PullTokenPriceQueue {
       this.logger.error(`PullTokenPriceQueue->error`, error);
     }
 
-    if (job.data.shouldBroadcast) {
-      void this.syncTokensRanksQueue.add({});
-      void this.syncTokenHoldersQueue.add({
-        saleAddress: job.data.saleAddress,
-      });
-    }
+    void this.syncTokensRanksQueue.add({});
+    void this.syncTokenHoldersQueue.add({
+      saleAddress: job.data.saleAddress,
+    });
   }
 }
