@@ -8,7 +8,7 @@ import { AppService } from './app.service';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
-  PULL_TOKEN_PRICE_QUEUE,
+  PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
@@ -28,7 +28,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     }),
     BullModule.registerQueue(
       {
-        name: PULL_TOKEN_PRICE_QUEUE,
+        name: PULL_TOKEN_INFO_QUEUE,
       },
       {
         name: SYNC_TOKENS_RANKS_QUEUE,

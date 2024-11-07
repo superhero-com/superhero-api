@@ -6,17 +6,18 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import {
   DELETE_OLD_TOKENS_QUEUE,
-  PULL_TOKEN_PRICE_QUEUE,
+  PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './queues/constants';
-import { PullTokenPriceQueue } from './queues/pull-token-price.queue';
+import { PullTokenInfoQueue } from './queues/pull-token-info.queue';
 import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { TokensService } from './tokens.service';
     AeModule,
     BullModule.registerQueue(
       {
-        name: PULL_TOKEN_PRICE_QUEUE,
+        name: PULL_TOKEN_INFO_QUEUE,
       },
       {
         name: SYNC_TOKENS_RANKS_QUEUE,
@@ -35,13 +36,16 @@ import { TokensService } from './tokens.service';
       {
         name: DELETE_OLD_TOKENS_QUEUE,
       },
+      {
+        name: SYNC_TRANSACTIONS_QUEUE,
+      },
     ),
   ],
   controllers: [TokensController],
   providers: [
     TokensService,
     TokenWebsocketGateway,
-    PullTokenPriceQueue,
+    PullTokenInfoQueue,
     SyncTokensRanksQueue,
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,

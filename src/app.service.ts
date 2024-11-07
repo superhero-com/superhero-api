@@ -9,7 +9,7 @@ import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   DELETE_OLD_TOKENS_QUEUE,
-  PULL_TOKEN_PRICE_QUEUE,
+  PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
@@ -24,7 +24,7 @@ export class AppService {
   constructor(
     private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
-    @InjectQueue(PULL_TOKEN_PRICE_QUEUE)
+    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenPriceQueue: Queue,
 
     @InjectQueue(SAVE_TRANSACTION_QUEUE)
@@ -63,7 +63,6 @@ export class AppService {
     void this.deleteOldTokensQueue.add({
       factories: contracts.map((contract) => contract.contractId),
     });
-    void this.syncTokensRanksQueue.add({});
     void this.loadFactories(contracts);
 
     this.websocketService.subscribeForTransactionsUpdates(
@@ -109,12 +108,6 @@ export class AppService {
 
   loadTokenData(saleAddress: Encoded.ContractAddress) {
     void this.pullTokenPriceQueue.add({
-      saleAddress,
-    });
-    void this.syncTokenHoldersQueue.add({
-      saleAddress,
-    });
-    void this.syncTransactionsQueue.add({
       saleAddress,
     });
   }

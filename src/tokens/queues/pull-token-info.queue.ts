@@ -4,19 +4,20 @@ import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
 import { TokensService } from 'src/tokens/tokens.service';
 import {
-  PULL_TOKEN_PRICE_QUEUE,
+  PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './constants';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 
-export interface IPullTokenPriceQueue {
+export interface IPullTokenInfoQueue {
   saleAddress: Encoded.ContractAddress;
   shouldBroadcast?: boolean;
 }
 
-@Processor(PULL_TOKEN_PRICE_QUEUE)
-export class PullTokenPriceQueue {
-  private readonly logger = new Logger(PullTokenPriceQueue.name);
+@Processor(PULL_TOKEN_INFO_QUEUE)
+export class PullTokenInfoQueue {
+  private readonly logger = new Logger(PullTokenInfoQueue.name);
 
   constructor(
     @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
@@ -25,25 +26,30 @@ export class PullTokenPriceQueue {
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
 
+    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
+    private readonly syncTransactionsQueue: Queue,
+
     private tokenService: TokensService,
   ) {}
 
   @Process()
-  async process(job: Job<IPullTokenPriceQueue>) {
-    this.logger.log(`PullTokenPriceQueue->started:${job.data.saleAddress}`);
+  async process(job: Job<IPullTokenInfoQueue>) {
+    this.logger.log(`PullTokenInfoQueue->started:${job.data.saleAddress}`);
     try {
       const token = await this.tokenService.getToken(job.data.saleAddress);
       await this.tokenService.syncTokenPrice(token);
       this.logger.debug(
-        `PullTokenPriceQueue->completed:${job.data.saleAddress}`,
+        `PullTokenInfoQueue->completed:${job.data.saleAddress}`,
       );
+      void this.syncTokensRanksQueue.add({});
+      void this.syncTokenHoldersQueue.add({
+        saleAddress: job.data.saleAddress,
+      });
+      void this.syncTransactionsQueue.add({
+        saleAddress: job.data.saleAddress,
+      });
     } catch (error) {
-      this.logger.error(`PullTokenPriceQueue->error`, error);
+      this.logger.error(`PullTokenInfoQueue->error`, error);
     }
-
-    void this.syncTokensRanksQueue.add({});
-    void this.syncTokenHoldersQueue.add({
-      saleAddress: job.data.saleAddress,
-    });
   }
 }
