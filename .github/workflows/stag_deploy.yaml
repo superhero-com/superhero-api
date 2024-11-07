@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       CONTAINER_NAME:
-        description: "Container name"
+        description: "Container name prefix (network suffix will be appended)"
         default: "staging-tokaenorg-api"
         required: false
         type: string
@@ -26,7 +26,7 @@ on:
         type: string
 jobs:
   call_deploy_uat:
-    name: Call Deploy stag via ssh (uat)
+    name: Deploy staging (uat)
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
@@ -34,7 +34,6 @@ jobs:
     secrets:
       AE_NETWORK_ID: "ae_uat"
       API_HOST_PORT: "3030"
-      HOST_DATA_DIR: "./tokaenorg-api-testnet"
       DB_DATABASE: "api"
       DEPLOY_HOST: "${{ secrets.STAG_DEPLOY_HOST }}"
       DEPLOY_USERNAME: "${{ secrets.STAG_DEPLOY_USERNAME }}"
@@ -42,7 +41,7 @@ jobs:
       DB_USER: "${{ secrets.STAG_DB_USER }}"
       DB_PASSWORD: "${{ secrets.STAG_DB_PASSWORD }}"
   call_deploy_mainnet:
-    name: Call Deploy stag via ssh (mainnet)
+    name: Deploy staging (mainnet)
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
@@ -50,7 +49,6 @@ jobs:
     secrets:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3033"
-      HOST_DATA_DIR: "./tokaenorg-api-mainnet"
       DB_DATABASE: "api"
       DEPLOY_HOST: "${{ secrets.STAG_DEPLOY_HOST }}"
       DEPLOY_USERNAME: "${{ secrets.STAG_DEPLOY_USERNAME }}"

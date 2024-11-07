@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       VERSION:
-        description: "Version to deploy"
+        description: "Version to deploy (dockerhub tag)"
         required: false
         default: "latest"
         type: string
@@ -24,13 +24,10 @@ on:
         description: "SSH key to use for ssh"
         required: true
       AE_NETWORK_ID:
-        description: "Aeternity network id"
+        description: "Aeternity network id (ae_uat, ae_mainnet)"
         required: false
-      HOST_DATA_DIR:
-        description: "Host directory to persist /data in"
-        required: true
       API_HOST_PORT:
-        description: "Host port to expose the API on"
+        description: "Host port to expose the API on (3000)"
         required: true
       DB_USER:
         description: "Database user"
@@ -52,7 +49,7 @@ jobs:
           VERSION: "${{ inputs.VERSION }}"
           SHA: "${{ github.sha }}"
           AE_NETWORK_ID: "${{ secrets.AE_NETWORK_ID }}"
-          HOST_DATA_DIR: "${{ secrets.HOST_DATA_DIR }}"
+          HOST_DATA_DIR: "./${{ inputs.CONTAINER_NAME }}"
           API_HOST_PORT: "${{ secrets.API_HOST_PORT }}"
           DB_USER: "${{ secrets.DB_USER }}"
           DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
@@ -66,15 +63,17 @@ jobs:
             DB_USER,
             DB_PASSWORD,
             API_HOST_PORT,
+            HOST_DATA_DIR,
             SHA
           script: |
-            echo $SHA > ${{ secrets.HOST_DATA_DIR }}/REVISION || true
+            echo $SHA > $HOST_DATA_DIR/REVISION || true
             docker pull "superherodotcom/tokaen-api:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
               --restart=always \
               -p ${{ secrets.API_HOST_PORT }}:3000 \
+              -e APP_PORT="3000" \
               -e DB_USER \
               -e DB_PASSWORD \
               -e AE_NETWORK_ID \

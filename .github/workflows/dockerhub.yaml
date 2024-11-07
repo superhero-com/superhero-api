@@ -3,7 +3,7 @@ on:
   workflow_dispatch: {}
   push:
     tags: [v*]
-    branches: [main]
+    branches: [main, staging, develop]
 concurrency: ${{ github.workflow }}-${{ github.ref_name }}
 jobs:
   buildx:
@@ -45,8 +45,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
             "GITHUB_TOKEN=${{ secrets.NPM_GITHUB_TOKEN }}"
-  deploy:
+  deploy_develop:
+    if: github.ref == 'refs/heads/develop'
+    name: Deploy via ssh (staging)
+    uses: ./.github/workflows/dev_deploy.yaml
+    secrets: inherit
+    needs: buildx
+  deploy_staging:
+    if: github.ref == 'refs/heads/staging'
     name: Deploy via ssh (staging)
     uses: ./.github/workflows/stag_deploy.yaml
+    secrets: inherit
+    needs: buildx
+  deploy_main:
+    if: github.ref == 'refs/heads/main'
+    name: Deploy via ssh (production)
+    uses: ./.github/workflows/prod_deploy.yaml
     secrets: inherit
     needs: buildx
