@@ -4,7 +4,7 @@ on:
     inputs:
       VERSION:
         description: "Version to deploy to staging"
-        default: "main"
+        default: "staging"
         required: false
         type: string
       CONTAINER_NAME:
@@ -16,7 +16,7 @@ on:
     inputs:
       VERSION:
         description: "Version to deploy to staging"
-        default: "main"
+        default: "staging"
         required: false
         type: string
       CONTAINER_NAME:
