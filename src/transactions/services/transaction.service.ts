@@ -93,10 +93,10 @@ export class TransactionService {
       (data) => data.name === 'PriceChange',
     );
     const _unit_price = _amount.div(volume);
-    const _previous_buy_price = !!priceChangeData
+    const _previous_buy_price = !!priceChangeData?.args
       ? new BigNumber(toAe(priceChangeData.args[0]))
       : _unit_price;
-    const _buy_price = !!priceChangeData
+    const _buy_price = !!priceChangeData?.args
       ? new BigNumber(toAe(priceChangeData.args[1]))
       : _unit_price;
     const _market_cap = _buy_price.times(total_supply);
@@ -160,47 +160,51 @@ export class TransactionService {
     let amount = new BigNumber(0);
     let total_supply = new BigNumber(0);
 
-    if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
-      volume = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Mint').args[1]),
-      );
-      amount = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-      );
-      total_supply = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-      );
-    }
-
-    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-      if (!decodedData.find((data) => data.name === 'PriceChange')) {
-        return {
-          volume,
-          amount,
-          total_supply,
-        };
+    try {
+      if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+        volume = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Mint').args[1]),
+        );
+        amount = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+        );
+        total_supply = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+        );
       }
-      volume = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Mint').args[1]),
-      );
-      amount = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-      );
-      total_supply = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-      );
-    }
 
-    if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
-      volume = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
-      );
-      amount = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
-      );
-      total_supply = new BigNumber(
-        toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
-      );
+      if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+        if (!decodedData.find((data) => data.name === 'PriceChange')) {
+          return {
+            volume,
+            amount,
+            total_supply,
+          };
+        }
+        volume = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Mint').args[1]),
+        );
+        amount = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+        );
+        total_supply = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+        );
+      }
+
+      if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+        volume = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
+        );
+        amount = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
+        );
+        total_supply = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
+        );
+      }
+    } catch (error) {
+      console.log('failed to parse transaction data: ', rawTransaction?.hash);
     }
 
     return {

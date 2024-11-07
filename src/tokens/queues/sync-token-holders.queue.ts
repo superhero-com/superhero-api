@@ -88,7 +88,7 @@ export class SyncTokenHoldersQueue {
       token: token,
     });
 
-    const factoryAddress = token.factory_address.replace('ct_', 'ak_');
+    const factoryAddress = token.factory_address?.replace('ct_', 'ak_');
     await this.tokenHoldersRepository.save(
       holders
         .filter((holder) => {
