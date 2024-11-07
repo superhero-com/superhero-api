@@ -45,6 +45,20 @@ export class AppService {
     @InjectQueue(VALIDATE_TRANSACTIONS_QUEUE)
     private readonly validateTransactionsQueue: Queue,
   ) {
+    this.init();
+  }
+
+  async init() {
+    // clean all queue jobs
+    await Promise.all([
+      this.pullTokenPriceQueue.empty(),
+      this.saveTransactionQueue.empty(),
+      this.syncTransactionsQueue.empty(),
+      this.syncTokensRanksQueue.empty(),
+      this.syncTokenHoldersQueue.empty(),
+      this.deleteOldTokensQueue.empty(),
+      this.validateTransactionsQueue.empty(),
+    ]);
     const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
     void this.deleteOldTokensQueue.add({
       factories: contracts.map((contract) => contract.contractId),
@@ -52,7 +66,7 @@ export class AppService {
     void this.syncTokensRanksQueue.add({});
     void this.loadFactories(contracts);
 
-    websocketService.subscribeForTransactionsUpdates(
+    this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
         if (
           transaction.tx.contractId &&
@@ -66,7 +80,7 @@ export class AppService {
       },
     );
 
-    websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
+    this.websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
       const desiredBlockHeight = keyBlock.height - 5;
       void this.validateTransactionsQueue.add({
         from: desiredBlockHeight - 10,
