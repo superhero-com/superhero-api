@@ -16,7 +16,7 @@ on:
     inputs:
       VERSION:
         description: "Version to deploy to develop"
-        default: "main"
+        default: "develop"
         required: false
         type: string
       CONTAINER_NAME:
