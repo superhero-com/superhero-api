@@ -85,7 +85,8 @@ export class CoinGeckoService {
       try {
         prices[code] = price.multipliedBy(this.rates![code]) as any;
       } catch (error) {
-        console.warn(`Failed to calculate price for ${code}`);
+        // console.warn(`Failed to calculate price for ${code}`);
+        prices[code] = null;
       }
     });
 

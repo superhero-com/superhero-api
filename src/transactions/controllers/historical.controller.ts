@@ -53,22 +53,9 @@ export class HistoricalController {
     @Query('convertTo') convertTo: string = 'ae',
     @Query('mode') mode: 'normal' | 'aggregated' = 'aggregated',
   ) {
-    const subtract = interval * 1000;
-    console.log(
-      'subtract',
-      subtract,
-      moment().subtract(subtract, 'seconds').fromNow(),
-    );
     const newStartDate = startDate
       ? this.parseDate(startDate)
       : moment().subtract(2, 'days');
-    console.log('HistoricalController->findByAddress->address', {
-      address,
-      interval,
-      newStartDate,
-      startDate,
-      endDate,
-    });
     const token = await this.tokenService.getToken(address);
     return this.tokenHistoryService.getHistoricalData({
       token,

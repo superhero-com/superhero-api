@@ -57,8 +57,6 @@ export class TransactionHistoryService {
     props: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
     const { startDate, endDate } = props;
-    console.log('startDate::', startDate.toDate());
-    console.log('endDate::', endDate.toDate());
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
@@ -73,8 +71,6 @@ export class TransactionHistoryService {
       })
       .orderBy('transactions.created_at', 'ASC')
       .getMany();
-
-    console.log('props.aggregated', props.mode);
 
     const firstBefore =
       props.mode === 'aggregated'
