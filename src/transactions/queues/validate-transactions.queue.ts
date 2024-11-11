@@ -58,6 +58,7 @@ export class ValidateTransactionsQueue {
         .getRawMany()
         .then((items) => items.map((item) => item.tokenId));
 
+      this.logger.debug(`ValidateTransactionsQueue->tokens:${tokens.length}`);
       tokens.forEach((tokenId) => {
         void this.validateTokenTransactionsQueue.add({
           from: job.data.from,
