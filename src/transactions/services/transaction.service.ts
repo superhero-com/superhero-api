@@ -123,13 +123,18 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
+      verified: false,
     };
+    // if transaction 2 days old
     if (exists) {
       await this.transactionRepository.update(exists.id, {
         ...txData,
         verified: true,
       });
       return exists;
+    }
+    if (moment().diff(moment(rawTransaction.microTime), 'days') >= 1) {
+      txData.verified = true;
     }
     const transaction = this.transactionRepository.save({
       token,
