@@ -22,7 +22,7 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
-import math from 'mathjs';
+import BigNumber from 'bignumber.js';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -200,65 +200,63 @@ export class TokensController {
   ): Promise<any> {
     const token = await this.tokensService.findByAddress(address);
 
-    function findXForTarget(targetValue) {
-      const integralFunction = (x) => {
+    function findXForTarget(targetValue, supply) {
+      // Define the integral function from supply to supply + x
+      function integralFunction(x) {
         return (
-          Math.exp(0.0000005 * x) / 0.0000005 -
+          Math.exp(0.0000005 * (supply + x)) / 0.0000005 -
+          Math.exp(0.0000005 * supply) / 0.0000005 -
           0.999999 * x -
-          1 / 0.0000005 -
           targetValue
         );
-      };
-
-      const derivativeFunction = (x) => {
-        return Math.exp(0.0000005 * x);
-      };
-
-      // Improved initial guess for larger target values
-      let x = targetValue < 1000 ? 2000 : Math.log(targetValue) * 100000;
-      const tolerance = 1e-5;
-      const maxIterations = 50000000; // Increased further for larger targets
-
-      for (let i = 0; i < maxIterations; i++) {
-        const fx = integralFunction(x);
-        const fPrimeX = derivativeFunction(x);
-
-        if (Math.abs(fx) < tolerance) {
-          return x;
-        }
-
-        if (fPrimeX === 0) {
-          throw new Error('Derivative is zero, cannot continue iteration.');
-        }
-
-        // Introduce dynamic damping to prevent overshooting
-        let step = fx / fPrimeX;
-        step = Math.min(step, x * 0.1); // Limit step size to a fraction of current x
-        x = x - step;
-
-        // Check if the step size is sufficiently small to declare convergence
-        if (Math.abs(step) < tolerance) {
-          return x;
-        }
       }
 
-      throw new Error(
-        'Solver did not converge within the maximum number of iterations.',
-      );
+      // Set an initial guess dynamically based on the target
+      const initialGuess = Math.max(1000000, targetValue * 1000);
+
+      // Define the tolerance and the maximum number of iterations
+      const tolerance = 1e-5;
+      const maxIterations = 50000000;
+
+      // Define the bisection method
+      let low = 0; // Set a lower bound
+      let high = initialGuess; // Set an upper bound
+      let x = (low + high) / 2; // Midpoint between low and high
+      let iteration = 0;
+      let error = Math.abs(integralFunction(x));
+
+      // Perform bisection method
+      while (error > tolerance && iteration < maxIterations) {
+        // Check if the function changes signs
+        if (integralFunction(low) * integralFunction(x) < 0) {
+          high = x; // If sign changes, move the high bound
+        } else {
+          low = x; // If no sign change, move the low bound
+        }
+        x = (low + high) / 2; // New midpoint
+        error = Math.abs(integralFunction(x)); // Update error
+        iteration++;
+      }
+
+      // Check if the solver succeeded
+      if (iteration >= maxIterations) {
+        throw new Error(
+          'Solver did not converge within the max number of iterations.',
+        );
+      }
+
+      return x;
     }
 
-    try {
-      const x = findXForTarget(price);
+    const x = findXForTarget(
+      price,
+      new BigNumber(token.total_supply).shiftedBy(-18).toNumber(),
+    );
 
-      return {
-        price,
-        x,
-        token,
-      };
-    } catch (error: any) {
-      return {
-        error: error.message,
-      };
-    }
+    return {
+      price,
+      x,
+      token,
+    };
   }
 }
