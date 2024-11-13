@@ -22,6 +22,7 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
+import math from 'mathjs';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -182,5 +183,82 @@ export class TokensController {
     });
 
     return paginate<Token>(queryBuilder, { page, limit });
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @ApiQuery({ name: 'price', type: 'string', required: true })
+  @ApiOperation({ operationId: 'estimatePrice' })
+  @ApiOkResponsePaginated(TokenDto)
+  @Get(':address/estimate-price')
+  async estimatePrice(
+    @Param('address') address: string,
+    @Query('price') price = 1,
+  ): Promise<any> {
+    const token = await this.tokensService.findByAddress(address);
+
+    function findXForTarget(targetValue) {
+      const integralFunction = (x) => {
+        return (
+          Math.exp(0.0000005 * x) / 0.0000005 -
+          0.999999 * x -
+          1 / 0.0000005 -
+          targetValue
+        );
+      };
+
+      const derivativeFunction = (x) => {
+        return Math.exp(0.0000005 * x);
+      };
+
+      // Improved initial guess for larger target values
+      let x = targetValue < 1000 ? 2000 : Math.log(targetValue) * 100000;
+      const tolerance = 1e-5;
+      const maxIterations = 50000000; // Increased further for larger targets
+
+      for (let i = 0; i < maxIterations; i++) {
+        const fx = integralFunction(x);
+        const fPrimeX = derivativeFunction(x);
+
+        if (Math.abs(fx) < tolerance) {
+          return x;
+        }
+
+        if (fPrimeX === 0) {
+          throw new Error('Derivative is zero, cannot continue iteration.');
+        }
+
+        // Introduce dynamic damping to prevent overshooting
+        let step = fx / fPrimeX;
+        step = Math.min(step, x * 0.1); // Limit step size to a fraction of current x
+        x = x - step;
+
+        // Check if the step size is sufficiently small to declare convergence
+        if (Math.abs(step) < tolerance) {
+          return x;
+        }
+      }
+
+      throw new Error(
+        'Solver did not converge within the maximum number of iterations.',
+      );
+    }
+
+    try {
+      const x = findXForTarget(price);
+
+      return {
+        price,
+        x,
+        token,
+      };
+    } catch (error: any) {
+      return {
+        error: error.message,
+      };
+    }
   }
 }
