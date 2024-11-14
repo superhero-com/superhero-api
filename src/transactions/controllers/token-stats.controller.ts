@@ -69,7 +69,7 @@ export class TokenStatsController {
   }
 
   async getTokenPriceMovement(token: Token, date: Moment) {
-    const transactionsQuery = await this.transactionsRepository
+    const highestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('transactions.tokenId = :tokenId', {
         tokenId: token.id,
@@ -78,17 +78,64 @@ export class TokenStatsController {
         date: date.toDate(),
       })
       .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy("transactions.buy_price->>'ae'", 'DESC')
       .select([
-        "MAX((transactions.buy_price->>'ae')::numeric) as high",
-        "MIN((transactions.buy_price->>'ae')::numeric) as low",
+        "transactions.buy_price->>'ae' as buy_price",
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
+    const lowestPriceQuery = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.tokenId = :tokenId', {
+        tokenId: token.id,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy("transactions.buy_price->>'ae'", 'ASC')
+      .select([
+        "transactions.buy_price->>'ae' as buy_price",
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
+    // query first transaction on the token
+    const firstTransaction = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.tokenId = :tokenId', {
+        tokenId: token.id,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy('transactions.created_at', 'ASC')
+      .select([
+        "transactions.buy_price->>'ae' as buy_price",
+        'transactions.created_at as created_at',
       ])
       .getRawOne();
 
-    console.log('transactionsQuery::', transactionsQuery);
+    const high = highestPriceQuery.buy_price ?? token?.price_data?.ae;
+    const low = lowestPriceQuery.buy_price ?? token?.price_data?.ae;
+
+    const firstTransactionPrice =
+      firstTransaction?.buy_price ?? token?.price_data?.ae;
+    const current_token_price = token?.price_data?.ae;
+
+    const change = current_token_price - firstTransactionPrice;
+    const change_percent = (change / current_token_price) * 100;
+    const change_direction = change > 0 ? 'up' : 'down';
 
     return {
-      high: transactionsQuery.high ?? token?.price_data?.ae,
-      low: transactionsQuery.low ?? token?.price_data?.ae,
+      high,
+      high_date: highestPriceQuery.created_at,
+      low,
+      low_date: lowestPriceQuery.created_at,
+      change,
+      change_percent,
+      change_direction,
+      current_token_price,
     };
   }
 }
