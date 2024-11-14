@@ -11,7 +11,7 @@ import { TokenPriceMovementDto } from '../dto/token-stats.dto';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
-export class TokenStatsController {
+export class TokenPerformanceController {
   constructor(
     @InjectRepository(Token)
     private readonly tokensRepository: Repository<Token>,
@@ -27,17 +27,17 @@ export class TokenStatsController {
     //
   }
 
-  @ApiOperation({ operationId: 'stats' })
+  @ApiOperation({ operationId: 'performance' })
   @ApiParam({
     name: 'address',
     type: 'string',
     description: 'Token address or name',
   })
-  @Get(':address/stats')
+  @Get(':address/performance')
   @ApiResponse({
     type: TokenPriceMovementDto,
   })
-  async stats(@Param('address') address: string) {
+  async performance(@Param('address') address: string) {
     const token = await this.tokensService.getToken(address);
 
     const past_24h = await this.getTokenPriceMovement(
