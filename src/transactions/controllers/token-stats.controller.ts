@@ -40,25 +40,31 @@ export class TokenStatsController {
   async stats(@Param('address') address: string) {
     const token = await this.tokensService.getToken(address);
 
-    const past24h = await this.getTokenPriceMovement(
+    const past_24h = await this.getTokenPriceMovement(
       token,
       moment().subtract(24, 'hours'),
     );
 
-    const past7d = await this.getTokenPriceMovement(
+    const past_7d = await this.getTokenPriceMovement(
       token,
       moment().subtract(7, 'days'),
     );
 
-    const past30d = await this.getTokenPriceMovement(
+    const past_30d = await this.getTokenPriceMovement(
       token,
       moment().subtract(30, 'days'),
     );
 
+    const all_time = await this.getTokenPriceMovement(
+      token,
+      moment(token.created_at).subtract(30, 'days'),
+    );
     return {
-      past_24h: past24h,
-      past_7d: past7d,
-      past_30d: past30d,
+      token_id: token.id,
+      past_24h,
+      past_7d,
+      past_30d,
+      all_time,
     };
   }
 
@@ -71,17 +77,18 @@ export class TokenStatsController {
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
       })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
       .select([
         "MAX((transactions.buy_price->>'ae')::numeric) as high",
         "MIN((transactions.buy_price->>'ae')::numeric) as low",
-        'MAX(transactions.created_at) as last_updated',
       ])
       .getRawOne();
+
+    console.log('transactionsQuery::', transactionsQuery);
 
     return {
       high: transactionsQuery.high ?? token?.price_data?.ae,
       low: transactionsQuery.low ?? token?.price_data?.ae,
-      last_updated: transactionsQuery.last_updated ?? moment().toDate(),
     };
   }
 }
