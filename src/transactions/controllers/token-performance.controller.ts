@@ -100,8 +100,8 @@ export class TokenPerformanceController {
       ])
       .getRawOne();
 
-    const high = highestPriceQuery.buy_price ?? token?.price_data;
-    const low = lowestPriceQuery.buy_price ?? token?.price_data;
+    const high = highestPriceQuery?.buy_price ?? token?.price_data;
+    const low = lowestPriceQuery?.buy_price ?? token?.price_data;
 
     const current_token_price = token?.price_data?.ae;
 
@@ -115,13 +115,13 @@ export class TokenPerformanceController {
 
     return {
       high,
-      high_date: highestPriceQuery.created_at,
+      high_date: highestPriceQuery?.created_at,
       high_change,
       high_change_percent,
       high_change_direction,
 
       low,
-      low_date: lowestPriceQuery.created_at,
+      low_date: lowestPriceQuery?.created_at,
       low_change,
       low_change_percent,
       low_change_direction,
