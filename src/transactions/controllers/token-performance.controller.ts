@@ -80,7 +80,7 @@ export class TokenPerformanceController {
       .andWhere("transactions.buy_price->>'ae' != 'NaN'")
       .orderBy("transactions.buy_price->>'ae'", 'DESC')
       .select([
-        "transactions.buy_price->>'ae' as buy_price",
+        'transactions.buy_price as buy_price',
         'transactions.created_at as created_at',
       ])
       .getRawOne();
@@ -95,46 +95,37 @@ export class TokenPerformanceController {
       .andWhere("transactions.buy_price->>'ae' != 'NaN'")
       .orderBy("transactions.buy_price->>'ae'", 'ASC')
       .select([
-        "transactions.buy_price->>'ae' as buy_price",
-        'transactions.created_at as created_at',
-      ])
-      .getRawOne();
-    // query first transaction on the token
-    const firstTransaction = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('transactions.tokenId = :tokenId', {
-        tokenId: token.id,
-      })
-      .andWhere('transactions.created_at > :date', {
-        date: date.toDate(),
-      })
-      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
-      .orderBy('transactions.created_at', 'ASC')
-      .select([
-        "transactions.buy_price->>'ae' as buy_price",
+        'transactions.buy_price as buy_price',
         'transactions.created_at as created_at',
       ])
       .getRawOne();
 
-    const high = highestPriceQuery.buy_price ?? token?.price_data?.ae;
-    const low = lowestPriceQuery.buy_price ?? token?.price_data?.ae;
+    const high = highestPriceQuery.buy_price ?? token?.price_data;
+    const low = lowestPriceQuery.buy_price ?? token?.price_data;
 
-    const firstTransactionPrice =
-      firstTransaction?.buy_price ?? token?.price_data?.ae;
     const current_token_price = token?.price_data?.ae;
 
-    const change = current_token_price - firstTransactionPrice;
-    const change_percent = (change / current_token_price) * 100;
-    const change_direction = change > 0 ? 'up' : 'down';
+    const high_change = current_token_price - high?.ae;
+    const high_change_percent = (high_change / current_token_price) * 100;
+    const high_change_direction = high_change > 0 ? 'up' : 'down';
+
+    const low_change = current_token_price - low?.ae;
+    const low_change_percent = (low_change / current_token_price) * 100;
+    const low_change_direction = low_change > 0 ? 'up' : 'down';
 
     return {
       high,
       high_date: highestPriceQuery.created_at,
+      high_change,
+      high_change_percent,
+      high_change_direction,
+
       low,
       low_date: lowestPriceQuery.created_at,
-      change,
-      change_percent,
-      change_direction,
+      low_change,
+      low_change_percent,
+      low_change_direction,
+
       current_token_price,
     };
   }
