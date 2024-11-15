@@ -21,7 +21,6 @@ export class HistoricalController {
   @ApiOperation({ operationId: 'findByAddress' })
   @ApiQuery({
     name: 'interval',
-    // enum: ['1m', '1h', '3h', '1d', '7d', '30d'],
     type: 'number',
     description: 'Interval in seconds',
     required: false,
