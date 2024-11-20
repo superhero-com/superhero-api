@@ -185,20 +185,26 @@ export class TokensController {
     return paginate<Token>(queryBuilder, { page, limit });
   }
 
-  @ApiParam({
-    name: 'address',
-    type: 'string',
-    description: 'Token address or name',
-  })
-  @ApiQuery({ name: 'price', type: 'string', required: true })
+  @ApiQuery({ name: 'price', type: 'number', required: true })
+  @ApiQuery({ name: 'token_address', type: 'string', required: false })
+  @ApiQuery({ name: 'factory_address', type: 'string', required: false })
+  @ApiQuery({ name: 'supply', type: 'string', required: false })
   @ApiOperation({ operationId: 'estimatePrice' })
   @ApiOkResponsePaginated(TokenDto)
-  @Get(':address/estimate-price')
+  @Get('contracts/estimate-price')
   async estimatePrice(
-    @Param('address') address: string,
+    @Query('token_address') token_address = undefined,
+    @Query('factory_address') factory_address = undefined,
     @Query('price') price = 1,
+    @Query('supply') supply = 0,
   ): Promise<any> {
-    const token = await this.tokensService.findByAddress(address);
+    let totalSupply = supply;
+    let factoryAddress = factory_address;
+    if (token_address) {
+      const token = await this.tokensService.findByAddress(token_address);
+      totalSupply = token.total_supply.toNumber();
+      factoryAddress = token.factory_address;
+    }
 
     const calculators = {
       default: (targetValue, supply) => {
@@ -356,20 +362,19 @@ export class TokensController {
 
     let findXForTarget = calculators.default;
 
-    if (Object.keys(calculators).includes(token.factory_address)) {
-      console.log('Using custom calculator for token', token.factory_address);
-      findXForTarget = calculators[token.factory_address];
+    if (Object.keys(calculators).includes(factoryAddress)) {
+      console.log('Using custom calculator for token', factoryAddress);
+      findXForTarget = calculators[factoryAddress];
     }
 
     const x = findXForTarget(
       price,
-      new BigNumber(token.total_supply).shiftedBy(-18).toNumber(),
+      new BigNumber(totalSupply).shiftedBy(-18).toNumber(),
     );
 
     return {
       price,
       x,
-      token,
     };
   }
 }
