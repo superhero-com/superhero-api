@@ -47,6 +47,14 @@ export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
       contractId: 'ct_HqknMBru4eGT4kQS7yt2M9fUrwBDFcWV2Dbq2Zrim1xNzHi1D',
       description: 'Token Gating Contract (Testnet:v1.0.4)',
     },
+    {
+      contractId: 'ct_pykmqDUUf8iNvVNq2vQgW7qY6zo83HAUogqXhgJuT1BPpymNf',
+      description: 'name factory 20 alphanumeric chars and hyphen',
+    },
+    {
+      contractId: 'ct_2UnNEeTTBMct4ykx9kMzeEXGqgBMAPxYLW2XGGvR3uTDJQPdVa',
+      description: 'number factory 20 numbers and hyphen:',
+    },
   ],
 };
 
