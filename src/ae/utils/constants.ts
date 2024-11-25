@@ -35,25 +35,25 @@ export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
     },
   ],
   [NETWORK_ID_TESTNET]: [
-    {
-      contractId: 'ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU',
-      description: 'Token Gating Contract (Testnet:v1.0.2)',
-    },
-    {
-      contractId: 'ct_yqXZuGX4J8qsMRoVzYF31Je9Tdwo5F7AFpPo1NRni9EXNEdFX',
-      description: 'Token Gating Contract (Testnet:v1.0.3)',
-    },
-    {
-      contractId: 'ct_HqknMBru4eGT4kQS7yt2M9fUrwBDFcWV2Dbq2Zrim1xNzHi1D',
-      description: 'Token Gating Contract (Testnet:v1.0.4)',
-    },
+    // {
+    //   contractId: 'ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU',
+    //   description: 'Token Gating Contract (Testnet:v1.0.2)',
+    // },
+    // {
+    //   contractId: 'ct_yqXZuGX4J8qsMRoVzYF31Je9Tdwo5F7AFpPo1NRni9EXNEdFX',
+    //   description: 'Token Gating Contract (Testnet:v1.0.3)',
+    // },
+    // {
+    //   contractId: 'ct_HqknMBru4eGT4kQS7yt2M9fUrwBDFcWV2Dbq2Zrim1xNzHi1D',
+    //   description: 'Token Gating Contract (Testnet:v1.0.4)',
+    // },
     {
       contractId: 'ct_pykmqDUUf8iNvVNq2vQgW7qY6zo83HAUogqXhgJuT1BPpymNf',
       description: 'name factory 20 alphanumeric chars and hyphen',
     },
     {
       contractId: 'ct_2UnNEeTTBMct4ykx9kMzeEXGqgBMAPxYLW2XGGvR3uTDJQPdVa',
-      description: 'number factory 20 numbers and hyphen:',
+      description: 'number factory 20 numbers and hyphen',
     },
   ],
 };
