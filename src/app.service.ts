@@ -21,6 +21,7 @@ import {
 
 @Injectable()
 export class AppService {
+  tokens: string[] = [];
   constructor(
     private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
@@ -68,6 +69,15 @@ export class AppService {
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
         if (
+          [TX_FUNCTIONS.buy, TX_FUNCTIONS.sell].includes(
+            transaction.tx.function as any,
+          ) &&
+          !this.tokens.includes(transaction.tx.contractId)
+        ) {
+          return;
+        }
+
+        if (
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
@@ -95,6 +105,7 @@ export class AppService {
       factory.listRegisteredTokens(),
     ]);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+      this.tokens.push(saleAddress);
       console.log('TokenSaleService->dispatch::', symbol, saleAddress);
       this.loadTokenData(saleAddress);
     }
