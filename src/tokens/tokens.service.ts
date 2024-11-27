@@ -206,19 +206,19 @@ export class TokensService {
 
     const factory_address = response?.tx?.contract_id;
     // check if factory address is supported
-    if (
-      !ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].some(
-        (f) => f.contractId === factory_address,
-      )
-    ) {
-      return null;
-    }
+    // if (
+    //   !ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].some(
+    //     (f) => f.contractId === factory_address,
+    //   )
+    // ) {
+    //   return null;
+    // }
 
     await this.tokensRepository.update(token.id, {
-      factory_address: response?.tx?.contract_id,
+      factory_address: factory_address,
     });
 
-    return response?.tx?.contract_id as Encoded.ContractAddress;
+    return factory_address as Encoded.ContractAddress;
   }
 
   detectTokenCategoryFromName(token: Token): string {
