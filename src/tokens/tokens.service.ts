@@ -207,6 +207,7 @@ export class TokensService {
     const factory_address = response?.tx?.contract_id;
     // check if factory address is supported
     if (
+      factory_address &&
       !ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].some(
         (f) => f.contractId === factory_address,
       )
