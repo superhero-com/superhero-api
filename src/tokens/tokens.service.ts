@@ -16,6 +16,10 @@ import { initTokenSale, TokenSale } from 'token-gating-sdk';
 import { Token } from './entities/token.entity';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -36,6 +40,11 @@ export class TokensService {
     private tokenGatingService: TokenGatingService,
 
     private coinGeckoService: CoinGeckoService,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
+    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
+    private readonly syncTransactionsQueue: Queue,
   ) {
     //
   }
@@ -129,6 +138,12 @@ export class TokensService {
     await this.syncTokenPrice(newToken);
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
+    void this.syncTokenHoldersQueue.add({
+      saleAddress,
+    });
+    void this.syncTransactionsQueue.add({
+      saleAddress,
+    });
     return this.findOne(newToken.id);
   }
 
