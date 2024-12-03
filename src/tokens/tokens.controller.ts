@@ -23,6 +23,8 @@ import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
 import BigNumber from 'bignumber.js';
+import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -81,6 +83,17 @@ export class TokensController {
       queryBuilder.andWhere('token.factory_address = :factory_address', {
         factory_address,
       });
+    } else {
+      const factory_addresses = ROOM_FACTORY_CONTRACTS[
+        ACTIVE_NETWORK.networkId
+      ].map((f) => f.contractId);
+
+      queryBuilder.andWhere(
+        'token.factory_address IN (:...factory_addresses)',
+        {
+          factory_addresses,
+        },
+      );
     }
     if (category !== 'all') {
       queryBuilder.andWhere('token.category = :category', {
