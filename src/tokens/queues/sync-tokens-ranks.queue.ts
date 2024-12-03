@@ -4,10 +4,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Token } from 'src/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
+import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 export interface ISyncTokensRanksQueue {
   //
 }
+
+const factory_addresses = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].map(
+  (f) => f.contractId,
+);
 
 @Processor(SYNC_TOKENS_RANKS_QUEUE)
 export class SyncTokensRanksQueue {
@@ -35,6 +41,9 @@ export class SyncTokensRanksQueue {
   async updateTokensRanking() {
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
+      .where('token.factory_address IN (:...factory_addresses)', {
+        factory_addresses,
+      })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
@@ -47,6 +56,9 @@ export class SyncTokensRanksQueue {
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
       .where('tokens.category = :category', { category })
+      .andWhere('token.factory_address IN (:...factory_addresses)', {
+        factory_addresses,
+      })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
