@@ -55,6 +55,15 @@ export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
       contractId: 'ct_2UnNEeTTBMct4ykx9kMzeEXGqgBMAPxYLW2XGGvR3uTDJQPdVa',
       description: 'number factory 20 numbers and hyphen',
     },
+
+    {
+      contractId: 'ct_psW6kCmWw6BMsfWCjZaDNkjSC87FttgkBanTg8PQ7RoHf12sC',
+      description: 'v2 name factory 20 alphanumeric chars and hyphen',
+    },
+    {
+      contractId: 'ct_27zp8V5ZYd23PeqkUSPBJE92JaZLemzcLf7U4dRx3ck8qHYCU8',
+      description: 'v2 number factory 20 numbers and hyphen',
+    },
   ],
 };
 
