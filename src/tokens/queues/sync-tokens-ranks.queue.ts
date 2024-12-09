@@ -41,29 +41,35 @@ export class SyncTokensRanksQueue {
   async updateTokensRanking() {
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
-      .where('token.factory_address IN (:...factory_addresses)', {
-        factory_addresses,
-      })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { rank: index + 1 });
-    });
+    tokens
+      .filter(
+        (token) =>
+          !token.factory_address ||
+          factory_addresses.includes(token.factory_address as any),
+      )
+      .forEach((token, index) => {
+        this.tokensRepository.update(token.id, { rank: index + 1 });
+      });
   }
 
   async updateTokenCategoryRankings(category: string) {
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
       .where('tokens.category = :category', { category })
-      .andWhere('token.factory_address IN (:...factory_addresses)', {
-        factory_addresses,
-      })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { category_rank: index + 1 });
-    });
+    tokens
+      .filter(
+        (token) =>
+          !token.factory_address ||
+          factory_addresses.includes(token.factory_address as any),
+      )
+      .forEach((token, index) => {
+        this.tokensRepository.update(token.id, { category_rank: index + 1 });
+      });
   }
 }
