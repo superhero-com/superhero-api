@@ -185,9 +185,8 @@ export class TransactionService {
             total_supply,
           };
         }
-        volume = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Mint').args[1]),
-        );
+        const mints = decodedData.filter((data) => data.name === 'Mint');
+        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
         amount = new BigNumber(
           toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
         );
