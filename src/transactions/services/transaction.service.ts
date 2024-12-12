@@ -87,6 +87,14 @@ export class TransactionService {
       total_supply,
     } = await this.parseTransactionData(rawTransaction);
 
+    // if volume is 0 & tx type is not create_community ignore it
+    if (
+      volume.isZero() &&
+      rawTransaction.tx.function !== TX_FUNCTIONS.create_community
+    ) {
+      return;
+    }
+
     const decodedData = rawTransaction.tx.decodedData;
 
     const priceChangeData = decodedData.find(
