@@ -89,8 +89,9 @@ export class TransactionService {
 
     // if volume is 0 & tx type is not create_community ignore it
     if (
-      volume.isZero() &&
-      rawTransaction.tx.function !== TX_FUNCTIONS.create_community
+      (volume.isZero() &&
+        rawTransaction.tx.function !== TX_FUNCTIONS.create_community) ||
+      rawTransaction.tx.returnType === 'revert'
     ) {
       return;
     }
