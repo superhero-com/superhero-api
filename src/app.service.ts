@@ -69,15 +69,6 @@ export class AppService {
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
         if (
-          Object.keys(TX_FUNCTIONS).includes(transaction.tx.function as any) &&
-          !this.tokens.includes(transaction.tx.contractId) &&
-          !contracts.some(
-            (contract) => contract.contractId === transaction.tx.contractId,
-          )
-        ) {
-          return;
-        }
-        if (
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
