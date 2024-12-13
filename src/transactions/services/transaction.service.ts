@@ -183,7 +183,7 @@ export class TransactionService {
         );
         total_supply = new BigNumber(
           toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-        );
+        ).plus(volume);
       }
 
       if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
@@ -201,7 +201,7 @@ export class TransactionService {
         );
         total_supply = new BigNumber(
           toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-        );
+        ).plus(volume);
       }
 
       if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
@@ -213,7 +213,7 @@ export class TransactionService {
         );
         total_supply = new BigNumber(
           toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
-        );
+        ).minus(volume);
       }
     } catch (error) {
       console.log('failed to parse transaction data: ', rawTransaction?.hash);
