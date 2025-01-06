@@ -49,6 +49,7 @@ export class TransactionHistoryService {
       .select(['token.id as id', 'token.created_at as created_at'])
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
+      .orderBy('token.created_at', 'ASC')
       .limit(1)
       .getRawOne<IOldestHistoryInfo>();
   }
@@ -339,10 +340,9 @@ export class TransactionHistoryService {
   async getForPreview(oldestHistoryInfo: IOldestHistoryInfo | null) {
     if (!oldestHistoryInfo) return { result: [], timeframe: '' };
     const getIntervalTimeFrame = () => {
-      const daysDiff = moment().diff(
-        moment(oldestHistoryInfo.created_at),
-        'days',
-      );
+      const daysDiff = moment()
+        .add(1, 'day')
+        .diff(moment(oldestHistoryInfo.created_at), 'days');
       if (daysDiff > 7) {
         return {
           interval: '1 day',

@@ -4,10 +4,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Token } from 'src/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
+import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 export interface ISyncTokensRanksQueue {
   //
 }
+
+const factory_addresses = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].map(
+  (f) => f.contractId,
+);
 
 @Processor(SYNC_TOKENS_RANKS_QUEUE)
 export class SyncTokensRanksQueue {
@@ -38,9 +44,15 @@ export class SyncTokensRanksQueue {
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { rank: index + 1 });
-    });
+    tokens
+      .filter(
+        (token) =>
+          !token.factory_address ||
+          factory_addresses.includes(token.factory_address as any),
+      )
+      .forEach((token, index) => {
+        this.tokensRepository.update(token.id, { rank: index + 1 });
+      });
   }
 
   async updateTokenCategoryRankings(category: string) {
@@ -50,8 +62,14 @@ export class SyncTokensRanksQueue {
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { category_rank: index + 1 });
-    });
+    tokens
+      .filter(
+        (token) =>
+          !token.factory_address ||
+          factory_addresses.includes(token.factory_address as any),
+      )
+      .forEach((token, index) => {
+        this.tokensRepository.update(token.id, { category_rank: index + 1 });
+      });
   }
 }

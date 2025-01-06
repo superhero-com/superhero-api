@@ -10,7 +10,7 @@ on:
         type: string
       CONTAINER_NAME:
         description: "Container name"
-        default: "tokaenorg-api"
+        default: "wordcraftfun-api"
         required: false
         type: string
     secrets:
@@ -67,7 +67,7 @@ jobs:
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
-            docker pull "superherodotcom/tokaen-api:${{ inputs.VERSION }}" || true
+            docker pull "superherodotcom/wordcraftfun-api:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
@@ -86,4 +86,4 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
-              superherodotcom/tokaen-api:${{ inputs.VERSION }}
+              superherodotcom/wordcraftfun-api:${{ inputs.VERSION }}
