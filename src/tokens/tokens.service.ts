@@ -6,20 +6,19 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
+import { InjectQueue } from '@nestjs/bull';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
 import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { TokenGatingService } from 'src/ae/token-gating.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 import { initTokenSale, TokenSale } from 'token-gating-sdk';
 import { Token } from './entities/token.entity';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
   instance: TokenSale;
