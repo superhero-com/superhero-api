@@ -29,7 +29,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            superherodotcom/tokaen-api
+            superherodotcom/wordcraftfun-api
           tags: |
             type=ref,event=branch
             type=ref,event=tag

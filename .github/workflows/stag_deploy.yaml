@@ -9,7 +9,7 @@ on:
         type: string
       CONTAINER_NAME:
         description: "Container name prefix (network suffix will be appended)"
-        default: "staging-tokaenorg-api"
+        default: "staging-wordcraftfun-api"
         required: false
         type: string
   workflow_call:
@@ -21,7 +21,7 @@ on:
         type: string
       CONTAINER_NAME:
         description: "Container name prefix (network suffix will be appended)"
-        default: "staging-tokaenorg-api"
+        default: "staging-wordcraftfun-api"
         required: false
         type: string
 jobs:
