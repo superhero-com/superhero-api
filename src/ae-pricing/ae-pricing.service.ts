@@ -52,11 +52,17 @@ export class AePricingService {
    * @returns An object containing the price data for AE and other currencies.
    */
   async getPriceData(price: BigNumber): Promise<IPriceDto> {
-    let latestRates = await this.coinPriceRepository.findOne({
-      order: {
-        created_at: 'DESC',
-      },
-    });
+    let latestRates = null;
+    try {
+      latestRates = await this.coinPriceRepository.findOne({
+        where: {},
+        order: {
+          created_at: 'DESC',
+        },
+      });
+    } catch (error) {
+      //
+    }
     if (!latestRates) {
       latestRates = await this.pullAndSaveCoinCurrencyRates();
     }
