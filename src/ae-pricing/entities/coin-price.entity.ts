@@ -17,7 +17,7 @@ export class CoinPrice {
   @Column({
     type: 'json',
   })
-  amount: IPriceDto; // Total spent/received amount
+  rates: IPriceDto; // { [currencyCode: string]: number }
 
   @Index()
   @CreateDateColumn({
