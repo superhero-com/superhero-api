@@ -16,30 +16,34 @@ export class AePricingService {
     public coinGeckoService: CoinGeckoService,
     @InjectRepository(CoinPrice)
     private coinPriceRepository: Repository<CoinPrice>,
-  ) {
-    console.log('====================');
-    console.log('====================');
-    console.log('====================');
-    console.log('AePricingService initialized');
-    this.watchCoinCurrencyRates();
-  }
+  ) {}
 
-  watchCoinCurrencyRates() {
+  async watchCoinCurrencyRates() {
+    await this.pullAndSaveCoinCurrencyRates();
+    console.log('====================');
+    console.log('====================');
+    console.log('====================');
+    console.log('AePricingService watchCoinCurrencyRates');
     if (this.fetchCoinCurrencyRatesInterval) {
       clearInterval(this.fetchCoinCurrencyRatesInterval);
     }
     this.fetchCoinCurrencyRatesInterval = setInterval(() => {
       this.pullAndSaveCoinCurrencyRates();
-    }, 5000);
+    }, 10000);
   }
 
   async pullAndSaveCoinCurrencyRates() {
     console.log('fetching coin currency rates');
-    const rates = await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    const rates =
+      await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    if (!rates) {
+      return this.latestRates;
+    }
     this.latestRates = await this.coinPriceRepository.save({
       rates,
     });
     console.log('latestRates::', this.latestRates);
+    return this.latestRates;
   }
 
   /**
@@ -48,13 +52,22 @@ export class AePricingService {
    * @returns An object containing the price data for AE and other currencies.
    */
   async getPriceData(price: BigNumber): Promise<IPriceDto> {
-    if (this.latestRates === null) {
-      await this.pullAndSaveCoinCurrencyRates();
+    let latestRates = await this.coinPriceRepository.findOne({
+      order: {
+        created_at: 'DESC',
+      },
+    });
+    if (!latestRates) {
+      latestRates = await this.pullAndSaveCoinCurrencyRates();
     }
 
     const prices = {
       ae: price,
     };
+
+    if (!this.latestRates) {
+      return prices as any;
+    }
 
     CURRENCIES.forEach(({ code }) => {
       try {

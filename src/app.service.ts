@@ -18,6 +18,7 @@ import {
   SYNC_TRANSACTIONS_QUEUE,
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
+import { AePricingService } from './ae-pricing/ae-pricing.service';
 
 @Injectable()
 export class AppService {
@@ -25,6 +26,7 @@ export class AppService {
   constructor(
     private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
+    private aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenPriceQueue: Queue,
 
@@ -50,6 +52,7 @@ export class AppService {
   }
 
   async init() {
+    this.aePricingService.watchCoinCurrencyRates();
     // clean all queue jobs
     await Promise.all([
       this.pullTokenPriceQueue.empty(),

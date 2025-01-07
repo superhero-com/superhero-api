@@ -23,6 +23,7 @@ import {
 import { ValidateTransactionsQueue } from './queues/validate-transactions.queue';
 import { ValidateTokenTransactionsQueue } from './queues/validate-token-transactions.queue';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { TokenPerformanceController } from './controllers/token-performance.cont
     ),
     AeModule,
     TokensModule,
+    AePricingModule,
   ],
   providers: [
     TransactionService,

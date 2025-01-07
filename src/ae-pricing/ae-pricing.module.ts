@@ -7,5 +7,6 @@ import { AeModule } from 'src/ae/ae.module';
 @Module({
   imports: [TypeOrmModule.forFeature([CoinPrice]), AeModule],
   providers: [AePricingService],
+  exports: [AePricingService],
 })
 export class AePricingModule {}
