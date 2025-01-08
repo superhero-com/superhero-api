@@ -1,29 +1,29 @@
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
+import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
+import { Queue } from 'bull';
+import moment from 'moment';
+import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
 import { TokenGatingService } from 'src/ae/token-gating.service';
 import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
 import { Token } from 'src/tokens/entities/token.entity';
-import { TokensService } from 'src/tokens/tokens.service';
-import { Repository } from 'typeorm';
-import { Transaction } from '../entities/transaction.entity';
-import moment from 'moment';
-import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
 import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from 'src/tokens/queues/constants';
+import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
+import { TokensService } from 'src/tokens/tokens.service';
+import { Repository } from 'typeorm';
+import { Transaction } from '../entities/transaction.entity';
 
 @Injectable()
 export class TransactionService {
   constructor(
     private tokenGatingService: TokenGatingService,
-    private coinGeckoService: CoinGeckoService,
+    private aePricingService: AePricingService,
     private tokenService: TokensService,
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
@@ -112,11 +112,11 @@ export class TransactionService {
 
     const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
       await Promise.all([
-        this.coinGeckoService.getPriceData(_amount),
-        this.coinGeckoService.getPriceData(_unit_price),
-        this.coinGeckoService.getPriceData(_previous_buy_price),
-        this.coinGeckoService.getPriceData(_buy_price),
-        this.coinGeckoService.getPriceData(_market_cap),
+        this.aePricingService.getPriceData(_amount),
+        this.aePricingService.getPriceData(_unit_price),
+        this.aePricingService.getPriceData(_previous_buy_price),
+        this.aePricingService.getPriceData(_buy_price),
+        this.aePricingService.getPriceData(_market_cap),
       ]);
 
     const txData = {

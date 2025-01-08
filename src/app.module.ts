@@ -19,6 +19,7 @@ import {
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
 import { TransactionsModule } from './transactions/transactions.module';
+import { AePricingModule } from './ae-pricing/ae-pricing.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     AeModule,
     TokensModule,
     TransactionsModule,
+    AePricingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -6,20 +6,19 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
+import { InjectQueue } from '@nestjs/bull';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
+import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
 import { TokenGatingService } from 'src/ae/token-gating.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 import { initTokenSale, TokenSale } from 'token-gating-sdk';
 import { Token } from './entities/token.entity';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -39,7 +38,7 @@ export class TokensService {
 
     private tokenGatingService: TokenGatingService,
 
-    private coinGeckoService: CoinGeckoService,
+    private aePricingService: AePricingService,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
@@ -293,9 +292,9 @@ export class TokensService {
     const market_cap = total_supply.multipliedBy(price);
 
     const [price_data, sell_price_data, market_cap_data] = await Promise.all([
-      this.coinGeckoService.getPriceData(price),
-      this.coinGeckoService.getPriceData(sell_price),
-      this.coinGeckoService.getPriceData(market_cap),
+      this.aePricingService.getPriceData(price),
+      this.aePricingService.getPriceData(sell_price),
+      this.aePricingService.getPriceData(market_cap),
     ]);
 
     const dao_balance = await this.aeSdkService.sdk.getBalance(
