@@ -21,6 +21,7 @@ import {
 
 @Injectable()
 export class AppService {
+  tokens: string[] = [];
   constructor(
     private tokenGatingService: TokenGatingService,
     private websocketService: WebSocketService,
@@ -95,6 +96,7 @@ export class AppService {
       factory.listRegisteredTokens(),
     ]);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+      this.tokens.push(saleAddress);
       console.log('TokenSaleService->dispatch::', symbol, saleAddress);
       this.loadTokenData(saleAddress);
     }

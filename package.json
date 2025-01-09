@@ -40,7 +40,7 @@
     "pg": "^8.12.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "token-gating-sdk": "git+ssh://git@github.com/superhero-com/token-gating-sdk#3ef7176d7890ed0d73093994d119f05b2468c42d",
+    "token-gating-sdk": "git+ssh://git@github.com/superhero-com/token-gating-sdk#69680ebbbeb773ae675cf854dc467e8f8bb56dd2",
     "typeorm": "^0.3.20",
     "ws": "^8.17.0"
   },

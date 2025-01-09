@@ -22,7 +22,7 @@ import {
 } from 'src/tokens/queues/constants';
 import { ValidateTransactionsQueue } from './queues/validate-transactions.queue';
 import { ValidateTokenTransactionsQueue } from './queues/validate-token-transactions.queue';
-import { TokenStatsController } from './controllers/token-stats.controller';
+import { TokenPerformanceController } from './controllers/token-performance.controller';
 
 @Module({
   imports: [
@@ -62,7 +62,7 @@ import { TokenStatsController } from './controllers/token-stats.controller';
   controllers: [
     TransactionsController,
     HistoricalController,
-    TokenStatsController,
+    TokenPerformanceController,
   ],
 })
 export class TransactionsModule {

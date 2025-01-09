@@ -53,6 +53,12 @@ export class ValidateTokenTransactionsQueue {
     );
     try {
       const token = await this.tokenService.findOne(job.data.tokenId);
+      if (!token) {
+        this.logger.error(
+          `ValidateTokenTransactionsQueue->token not found:${job.data.tokenId}`,
+        );
+        return;
+      }
       await this.validateTokenHistory(token, job);
 
       await this.transactionRepository
@@ -61,9 +67,9 @@ export class ValidateTokenTransactionsQueue {
         .andWhere('transactions.block_height <= :to', { to: job.data.to })
         .andWhere('transactions.verified = false')
         .andWhere('transactions.tokenId = :tokenId', {
-          tokenId: job.data.tokenId,
+          tokenId: token.id,
         })
-        .where({
+        .andWhere({
           tx_hash: Not(In(this.validated_hashes)),
         })
         .delete()

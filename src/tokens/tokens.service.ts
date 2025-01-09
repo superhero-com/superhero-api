@@ -15,6 +15,11 @@ import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { initTokenSale, TokenSale } from 'token-gating-sdk';
 import { Token } from './entities/token.entity';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
+import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
+import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -35,6 +40,11 @@ export class TokensService {
     private tokenGatingService: TokenGatingService,
 
     private coinGeckoService: CoinGeckoService,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
+    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
+    private readonly syncTransactionsQueue: Queue,
   ) {
     //
   }
@@ -118,10 +128,22 @@ export class TokensService {
     }
 
     const newToken = await this.tokensRepository.save(tokenData);
-    await this.updateTokenCategory(newToken);
+    const factoryAddress = await this.updateTokenFactoryAddress(newToken);
+
+    if (!factoryAddress) {
+      await this.tokensRepository.delete(newToken.id);
+      return null;
+    }
+    await this.updateTokenCategory(newToken, factoryAddress);
     await this.syncTokenPrice(newToken);
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
+    void this.syncTokenHoldersQueue.add({
+      saleAddress,
+    });
+    void this.syncTransactionsQueue.add({
+      saleAddress,
+    });
     return this.findOne(newToken.id);
   }
 
@@ -134,13 +156,12 @@ export class TokensService {
     return tokensCount + 1;
   }
 
-  async updateTokenCategory(token: Token): Promise<string> {
+  async updateTokenCategory(token: Token, factoryAddress): Promise<string> {
     if (token.category) {
       return token.category;
     }
 
     try {
-      const factoryAddress = await this.updateTokenFactoryAddress(token);
       const communityFactory =
         await this.tokenGatingService.loadTokenGatingFactory(factoryAddress);
 
@@ -198,11 +219,13 @@ export class TokensService {
       `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${contractInfo.source_tx_hash}`,
     );
 
+    const factory_address = response?.tx?.contract_id;
+
     await this.tokensRepository.update(token.id, {
-      factory_address: response?.tx?.contract_id,
+      factory_address: factory_address,
     });
 
-    return response?.tx?.contract_id as Encoded.ContractAddress;
+    return factory_address as Encoded.ContractAddress;
   }
 
   detectTokenCategoryFromName(token: Token): string {
