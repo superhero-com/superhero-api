@@ -52,7 +52,7 @@ export class AppService {
   }
 
   async init() {
-    this.aePricingService.watchCoinCurrencyRates();
+    await this.aePricingService.pullAndSaveCoinCurrencyRates();
     // clean all queue jobs
     await Promise.all([
       this.pullTokenPriceQueue.empty(),
@@ -89,6 +89,8 @@ export class AppService {
         from: desiredBlockHeight - 10,
         to: desiredBlockHeight,
       });
+
+      this.aePricingService.pullAndSaveCoinCurrencyRates();
     });
   }
 

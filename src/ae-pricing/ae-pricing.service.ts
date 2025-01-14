@@ -9,7 +9,6 @@ import { CoinPrice } from './entities/coin-price.entity';
 
 @Injectable()
 export class AePricingService {
-  fetchCoinCurrencyRatesInterval: NodeJS.Timeout | null = null;
   latestRates: CoinPrice | null = null;
 
   constructor(
@@ -18,22 +17,7 @@ export class AePricingService {
     private coinPriceRepository: Repository<CoinPrice>,
   ) {}
 
-  async watchCoinCurrencyRates() {
-    await this.pullAndSaveCoinCurrencyRates();
-    console.log('====================');
-    console.log('====================');
-    console.log('====================');
-    console.log('AePricingService watchCoinCurrencyRates');
-    if (this.fetchCoinCurrencyRatesInterval) {
-      clearInterval(this.fetchCoinCurrencyRatesInterval);
-    }
-    this.fetchCoinCurrencyRatesInterval = setInterval(() => {
-      this.pullAndSaveCoinCurrencyRates();
-    }, 10000);
-  }
-
   async pullAndSaveCoinCurrencyRates() {
-    console.log('fetching coin currency rates');
     const rates =
       await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
     if (!rates) {
