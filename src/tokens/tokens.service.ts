@@ -79,16 +79,20 @@ export class TokensService {
   }
 
   async syncTokenPrice(token: Token): Promise<void> {
-    const data = await this.getTokeLivePrice(token);
+    try {
+      const data = await this.getTokeLivePrice(token);
 
-    await this.tokensRepository.update(token.id, data as any);
-    // update token ranks
+      await this.tokensRepository.update(token.id, data as any);
+      // update token ranks
 
-    // re-fetch token
-    this.tokenWebsocketGateway?.handleTokenUpdated({
-      sale_address: token.sale_address,
-      data,
-    });
+      // re-fetch token
+      this.tokenWebsocketGateway?.handleTokenUpdated({
+        sale_address: token.sale_address,
+        data,
+      });
+    } catch (error) {
+      //
+    }
   }
 
   async getToken(address: string): Promise<Token> {
