@@ -69,16 +69,21 @@ export class AppService {
     });
     void this.loadFactories(contracts);
 
+    let syncedTransactions = [];
+
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
         if (
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
-          void this.saveTransactionQueue.add({
-            transaction,
-            shouldBroadcast: true,
-          });
+          if (!syncedTransactions.includes(transaction.hash)) {
+            syncedTransactions.push(transaction.hash);
+            void this.saveTransactionQueue.add({
+              transaction,
+              shouldBroadcast: true,
+            });
+          }
         }
       },
     );
@@ -91,6 +96,7 @@ export class AppService {
       });
 
       this.aePricingService.pullAndSaveCoinCurrencyRates();
+      syncedTransactions = [];
     });
   }
 
