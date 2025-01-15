@@ -79,10 +79,15 @@ export class AppService {
         ) {
           if (!syncedTransactions.includes(transaction.hash)) {
             syncedTransactions.push(transaction.hash);
-            void this.saveTransactionQueue.add({
-              transaction,
-              shouldBroadcast: true,
-            });
+            void this.saveTransactionQueue.add(
+              {
+                transaction,
+                shouldBroadcast: true,
+              },
+              {
+                jobId: transaction.hash,
+              },
+            );
           }
         }
       },
@@ -120,9 +125,14 @@ export class AppService {
   }
 
   loadTokenData(saleAddress: Encoded.ContractAddress) {
-    void this.pullTokenPriceQueue.add({
-      saleAddress,
-    });
+    void this.pullTokenPriceQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: saleAddress,
+      },
+    );
   }
 
   /**
