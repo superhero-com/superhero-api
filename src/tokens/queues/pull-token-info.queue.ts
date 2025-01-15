@@ -30,7 +30,7 @@ export class PullTokenInfoQueue {
     private readonly syncTransactionsQueue: Queue,
 
     private tokenService: TokensService,
-  ) { }
+  ) {}
 
   @Process()
   async process(job: Job<IPullTokenInfoQueue>) {
@@ -41,7 +41,10 @@ export class PullTokenInfoQueue {
       this.logger.debug(
         `PullTokenInfoQueue->completed:${job.data.saleAddress}`,
       );
-      void this.syncTokensRanksQueue.add({}, { jobId: 'syncTokensRanks' });
+      void this.syncTokensRanksQueue.add(
+        {},
+        { jobId: `syncTokensRanks-${job.data.saleAddress}` },
+      );
       void this.syncTokenHoldersQueue.add(
         {
           saleAddress: job.data.saleAddress,

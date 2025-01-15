@@ -169,7 +169,10 @@ export class TransactionService {
           jobId: `syncTokenHolders-${saleAddress}`,
         },
       );
-      void this.syncTokensRanksQueue.add({}, { jobId: 'syncTokensRanks' });
+      void this.syncTokensRanksQueue.add(
+        {},
+        { jobId: `syncTokensRanks-${saleAddress}` },
+      );
     }
     return transaction;
   }
