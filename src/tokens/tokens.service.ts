@@ -95,18 +95,25 @@ export class TokensService {
     }
   }
 
-  async getToken(address: string): Promise<Token> {
+  async getToken(
+    address: string,
+    shouldSyncTransactions = true,
+  ): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
     if (existingToken) {
       return existingToken;
     }
 
-    return this.createToken(address as Encoded.ContractAddress);
+    return this.createToken(
+      address as Encoded.ContractAddress,
+      shouldSyncTransactions,
+    );
   }
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
+    shouldSyncTransactions = true,
   ): Promise<Token | null> {
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
 
@@ -149,14 +156,16 @@ export class TokensService {
         jobId: `syncTokenHolders-${saleAddress}`,
       },
     );
-    void this.syncTransactionsQueue.add(
-      {
-        saleAddress,
-      },
-      {
-        jobId: `syncTokenTransactions-${saleAddress}`,
-      },
-    );
+    if (shouldSyncTransactions) {
+      void this.syncTransactionsQueue.add(
+        {
+          saleAddress,
+        },
+        {
+          jobId: `syncTokenTransactions-${saleAddress}`,
+        },
+      );
+    }
     return this.findOne(newToken.id);
   }
 

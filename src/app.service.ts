@@ -130,7 +130,8 @@ export class AppService {
         saleAddress,
       },
       {
-        jobId: saleAddress,
+        jobId: `pull-price-${saleAddress}`,
+        removeOnComplete: true,
       },
     );
   }

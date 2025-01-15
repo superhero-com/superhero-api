@@ -54,8 +54,13 @@ export class TransactionService {
       saleAddress = rawTransaction.tx.return.value[1].value;
     }
 
+    /**
+     * if the token doesn't exists get token will create it and call sync token
+     * transactions, if the token exists it will just return the token.
+     * this will cause create community transaction to be saved twice.
+     */
     if (!token) {
-      token = await this.tokenService.getToken(saleAddress);
+      token = await this.tokenService.getToken(saleAddress, !shouldBroadcast);
     }
     if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
       try {
@@ -135,7 +140,7 @@ export class TransactionService {
       verified: false,
     };
     // if transaction 2 days old
-    if (exists) {
+    if (!!exists?.id) {
       await this.transactionRepository.update(exists.id, {
         ...txData,
         verified: true,
