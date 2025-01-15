@@ -141,12 +141,22 @@ export class TokensService {
     await this.syncTokenPrice(newToken);
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
-    void this.syncTokenHoldersQueue.add({
-      saleAddress,
-    });
-    void this.syncTransactionsQueue.add({
-      saleAddress,
-    });
+    void this.syncTokenHoldersQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: `syncTokenHolders-${saleAddress}`,
+      },
+    );
+    void this.syncTransactionsQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: `syncTokenTransactions-${saleAddress}`,
+      },
+    );
     return this.findOne(newToken.id);
   }
 

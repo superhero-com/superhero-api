@@ -156,10 +156,15 @@ export class TransactionService {
         sale_address: saleAddress,
         data: txData,
       });
-      void this.syncTokenHoldersQueue.add({
-        saleAddress,
-      });
-      void this.syncTokensRanksQueue.add({});
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress,
+        },
+        {
+          jobId: `syncTokenHolders-${saleAddress}`,
+        },
+      );
+      void this.syncTokensRanksQueue.add({}, { jobId: 'syncTokensRanks' });
     }
     return transaction;
   }
