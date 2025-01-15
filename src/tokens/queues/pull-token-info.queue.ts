@@ -43,7 +43,10 @@ export class PullTokenInfoQueue {
       );
       void this.syncTokensRanksQueue.add(
         {},
-        { jobId: `syncTokensRanks-${job.data.saleAddress}` },
+        {
+          jobId: `syncTokensRanks-${job.data.saleAddress}`,
+          removeOnComplete: true,
+        },
       );
       void this.syncTokenHoldersQueue.add(
         {
@@ -51,6 +54,7 @@ export class PullTokenInfoQueue {
         },
         {
           jobId: `syncTokenHolders-${job.data.saleAddress}`,
+          removeOnComplete: true,
         },
       );
       void this.syncTransactionsQueue.add(

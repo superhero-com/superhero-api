@@ -154,6 +154,7 @@ export class TokensService {
       },
       {
         jobId: `syncTokenHolders-${saleAddress}`,
+        removeOnComplete: true,
       },
     );
     if (shouldSyncTransactions) {

@@ -167,11 +167,12 @@ export class TransactionService {
         },
         {
           jobId: `syncTokenHolders-${saleAddress}`,
+          removeOnComplete: true,
         },
       );
       void this.syncTokensRanksQueue.add(
         {},
-        { jobId: `syncTokensRanks-${saleAddress}` },
+        { jobId: `syncTokensRanks-${saleAddress}`, removeOnComplete: true },
       );
     }
     return transaction;
