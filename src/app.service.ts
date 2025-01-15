@@ -103,10 +103,6 @@ export class AppService {
       this.aePricingService.pullAndSaveCoinCurrencyRates();
       syncedTransactions = [];
 
-      void this.deleteOldTokensQueue.add({
-        factories: contracts.map((contract) => contract.contractId),
-      });
-
       void this.syncTokensRanksQueue.add({});
     });
   }
