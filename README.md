@@ -1,5 +1,11 @@
 # Bonding Curve Toeknsale launchpad API
 
+## Requirements
+```
+node >= 18
+postgres >=16
+redis
+```
 
 ## Installation
 
