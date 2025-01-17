@@ -14,7 +14,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
+import { BCL_CONTRACTS } from 'src/configs';
 import { Repository } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
@@ -22,9 +25,6 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from './tmp/api-type';
 import { TokensService } from './tokens.service';
-import BigNumber from 'bignumber.js';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -84,9 +84,9 @@ export class TokensController {
         factory_address,
       });
     } else {
-      const factory_addresses = ROOM_FACTORY_CONTRACTS[
-        ACTIVE_NETWORK.networkId
-      ].map((f) => f.contractId);
+      const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
+        (f) => f.contractId,
+      );
 
       queryBuilder.andWhere(
         'token.factory_address IN (:...factory_addresses)',

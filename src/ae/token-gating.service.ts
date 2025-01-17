@@ -1,8 +1,8 @@
 import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
+import { BCL_CONTRACTS } from 'src/configs';
 import { CommunityFactory, initCommunityFactory } from 'token-gating-sdk';
 import { AeSdkService } from './ae-sdk.service';
-import { ROOM_FACTORY_CONTRACTS } from './utils/constants';
 import { ACTIVE_NETWORK } from './utils/networks';
 
 @Injectable()
@@ -19,7 +19,7 @@ export class TokenGatingService {
   }
 
   getCurrentFactoryAddress() {
-    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+    const contracts = BCL_CONTRACTS[ACTIVE_NETWORK.networkId];
 
     const latestContract = contracts[contracts.length - 1];
 

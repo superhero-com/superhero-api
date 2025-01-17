@@ -2,11 +2,13 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
+import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { TokenGatingService } from './ae/token-gating.service';
-import { ROOM_FACTORY_CONTRACTS, TX_FUNCTIONS } from './ae/utils/constants';
+import { TX_FUNCTIONS } from './ae/utils/constants';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
+import { BCL_CONTRACTS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -18,7 +20,6 @@ import {
   SYNC_TRANSACTIONS_QUEUE,
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
-import { AePricingService } from './ae-pricing/ae-pricing.service';
 
 @Injectable()
 export class AppService {
@@ -63,7 +64,7 @@ export class AppService {
       this.deleteOldTokensQueue.empty(),
       this.validateTransactionsQueue.empty(),
     ]);
-    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+    const contracts = BCL_CONTRACTS[ACTIVE_NETWORK.networkId];
     void this.deleteOldTokensQueue.add({
       factories: contracts.map((contract) => contract.contractId),
     });

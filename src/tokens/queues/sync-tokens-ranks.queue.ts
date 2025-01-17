@@ -1,17 +1,17 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
+import { BCL_CONTRACTS } from 'src/configs';
 import { Token } from 'src/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 export interface ISyncTokensRanksQueue {
   //
 }
 
-const factory_addresses = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].map(
+const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
   (f) => f.contractId,
 );
 
