@@ -1,4 +1,4 @@
-# Bonding Curve Toeknsale launchpad API
+# Bonding Curve TokenSale launchpad API
 
 ## Requirements
 ```
