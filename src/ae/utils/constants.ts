@@ -4,6 +4,7 @@ import type {
   ICurrency,
   ICommunityFactoryContracts,
   IToken,
+  ICategories,
 } from './types';
 import { NETWORK_ID_MAINNET, NETWORK_ID_TESTNET } from './networks';
 
@@ -22,6 +23,21 @@ export const AETERNITY_TOKEN_BASE_DATA: Partial<IToken> = {
 };
 
 export const AE_SYMBOL = 'AE';
+
+export const COMMUNITY_FACTORY_CONTRACT_ADDRESS: ICommunityFactoryContracts = {
+  [NETWORK_ID_MAINNET]: 'ct_2YWMMhFzsQWSNXsBTFZD6A6FHtgtNVbfT2ZtaUpDGpmKPpRXhJ',
+  [NETWORK_ID_TESTNET]: 'ct_2h4y5gFg7dJkRnXbxmZZKYZyeDrKSbZMtshX1q1u72Zw4KVaNx',
+};
+
+export const CATEGORIES: ICategories = {
+  [NETWORK_ID_MAINNET]: {},
+  [NETWORK_ID_TESTNET]: {
+    ALPHA: {
+      name: 'ALPHA',
+      description: 'Token Gating Contract (Testnet)',
+    },
+  },
+};
 
 export const DEFAULT_CURRENCY_CODE: CurrencyCode = 'usd';
 

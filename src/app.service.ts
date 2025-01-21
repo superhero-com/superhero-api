@@ -4,9 +4,12 @@ import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { TokenGatingService } from './ae/token-gating.service';
-import { TX_FUNCTIONS } from './ae/utils/constants';
+import {
+  COMMUNITY_FACTORY_CONTRACT_ADDRESS,
+  TX_FUNCTIONS,
+} from './ae/utils/constants';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
-import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
+import { ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import { BCL_CONTRACTS } from './configs';
 import {
@@ -68,7 +71,7 @@ export class AppService {
     void this.deleteOldTokensQueue.add({
       factories: contracts.map((contract) => contract.contractId),
     });
-    void this.loadFactories(contracts);
+    void this.loadFactory('ALPHA');
 
     let syncedTransactions = [];
 
@@ -108,23 +111,16 @@ export class AppService {
     });
   }
 
-  async loadFactory(address: Encoded.ContractAddress) {
-    const factory =
-      await this.tokenGatingService.loadTokenGatingFactory(address);
-    const [registeredTokens] = await Promise.all([
-      factory.listRegisteredTokens(),
-    ]);
+  async loadFactory(category: string) {
+    const factory = await this.tokenGatingService.loadTokenGatingFactory(
+      COMMUNITY_FACTORY_CONTRACT_ADDRESS[ACTIVE_NETWORK.networkId],
+    );
+    const [registeredTokens] = await factory.listRegisteredTokens(category);
     for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
       this.tokens.push(saleAddress);
       console.log('TokenSaleService->dispatch::', symbol, saleAddress);
-      this.loadTokenData(saleAddress);
+      this.loadTokenData(saleAddress as Encoded.ContractAddress);
     }
-  }
-
-  async loadFactories(contracts: ICommunityFactoryContract[]) {
-    await Promise.all(
-      contracts.map((contract) => this.loadFactory(contract.contractId)),
-    );
   }
 
   loadTokenData(saleAddress: Encoded.ContractAddress) {
