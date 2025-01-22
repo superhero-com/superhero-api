@@ -22,7 +22,7 @@ import { Transaction } from '../entities/transaction.entity';
 @Injectable()
 export class TransactionService {
   constructor(
-    private tokenGatingService: CommunityFactoryService,
+    private communityFactoryService: CommunityFactoryService,
     private aePricingService: AePricingService,
     private tokenService: TokensService,
     private tokenWebsocketGateway: TokenWebsocketGateway,
@@ -251,7 +251,7 @@ export class TransactionService {
     rawTransaction: ITransaction,
   ): Promise<ITransaction> {
     try {
-      const factory = await this.tokenGatingService.loadTokenGatingFactory(
+      const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
       const decodedData = factory.contract.$decodeEvents(rawTransaction.tx.log);

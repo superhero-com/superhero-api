@@ -13,7 +13,7 @@ export class CommunityFactoryService {
     //
   }
 
-  async loadTokenGatingFactory(
+  async loadFactory(
     address: Encoded.ContractAddress,
   ): Promise<CommunityFactory> {
     if (this.factories[address]) {
@@ -38,7 +38,7 @@ export class CommunityFactoryService {
     const factory = BCL_FACTORY[ACTIVE_NETWORK.networkId];
 
     if (!Object.keys(factory.categories).length) {
-      const factoryInstance = await this.loadTokenGatingFactory(
+      const factoryInstance = await this.loadFactory(
         factory.address,
       );
       const collection_registry: any = await factoryInstance.contract

@@ -36,7 +36,7 @@ export class TokensService {
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
-    private tokenGatingService: CommunityFactoryService,
+    private communityFactoryService: CommunityFactoryService,
 
     private aePricingService: AePricingService,
 
@@ -186,7 +186,7 @@ export class TokensService {
 
     try {
       const communityFactory =
-        await this.tokenGatingService.loadTokenGatingFactory(factoryAddress);
+        await this.communityFactoryService.loadFactory(factoryAddress);
 
       const communityManagementContract =
         await communityFactory.getCommunityManagementContract(

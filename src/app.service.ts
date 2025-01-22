@@ -25,7 +25,7 @@ import {
 export class AppService {
   tokens: string[] = [];
   constructor(
-    private tokenGatingService: CommunityFactoryService,
+    private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
     private aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
@@ -68,7 +68,7 @@ export class AppService {
     void this.deleteOldTokensQueue.add({
       factories: contracts.map((contract) => contract.contractId),
     });
-    const factory = await this.tokenGatingService.getCurrentFactory();
+    const factory = await this.communityFactoryService.getCurrentFactory();
     void this.loadFactory(factory);
 
     let syncedTransactions = [];
@@ -110,8 +110,9 @@ export class AppService {
   }
 
   async loadFactory(factory: IFactorySchema) {
-    const factoryInstance =
-      await this.tokenGatingService.loadTokenGatingFactory(factory.address);
+    const factoryInstance = await this.communityFactoryService.loadFactory(
+      factory.address,
+    );
 
     for (const category of Object.keys(factory.categories)) {
       const registeredTokens =

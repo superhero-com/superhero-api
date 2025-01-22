@@ -9,7 +9,7 @@ import { BCL_CONTRACTS } from './configs';
 export class AppController {
   constructor(
     private readonly appService: AppService,
-    private tokenGatingService: CommunityFactoryService,
+    private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
   ) {}
 
@@ -29,6 +29,6 @@ export class AppController {
 
   @Get('/api/factory')
   async getFactory() {
-    return this.tokenGatingService.getCurrentFactory();
+    return this.communityFactoryService.getCurrentFactory();
   }
 }
