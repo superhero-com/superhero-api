@@ -251,3 +251,13 @@ interface Category {
 export type ICategories = {
   [K in INetworkTypes]: Record<string, Category>;
 };
+
+export type IFactorySchema = {
+  address: Encoded.ContractAddress;
+  categories: {
+    [key: `${string}-${Encoded.AccountAddress}`]: {
+      name: string;
+      allowed_name_length: string;
+    };
+  };
+};
