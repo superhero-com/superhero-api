@@ -79,22 +79,22 @@ export class TokensController {
     if (search) {
       queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
     }
-    if (factory_address) {
-      queryBuilder.andWhere('token.factory_address = :factory_address', {
-        factory_address,
-      });
-    } else {
-      const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
-        (f) => f.contractId,
-      );
+    // if (factory_address) {
+    //   queryBuilder.andWhere('token.factory_address = :factory_address', {
+    //     factory_address,
+    //   });
+    // } else {
+    //   const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
+    //     (f) => f.contractId,
+    //   );
 
-      queryBuilder.andWhere(
-        'token.factory_address IN (:...factory_addresses)',
-        {
-          factory_addresses,
-        },
-      );
-    }
+    //   queryBuilder.andWhere(
+    //     'token.factory_address IN (:...factory_addresses)',
+    //     {
+    //       factory_addresses,
+    //     },
+    //   );
+    // }
     if (category !== 'all') {
       queryBuilder.andWhere('token.category = :category', {
         category,

@@ -244,14 +244,6 @@ export interface ICommunityFactoryContract {
 
 export type ICommunityFactoryContracts = {};
 
-interface Category {
-  name: string;
-  description: string;
-}
-export type ICategories = {
-  [K in INetworkTypes]: Record<string, Category>;
-};
-
 export type IFactorySchema = {
   address: Encoded.ContractAddress;
   categories: {
