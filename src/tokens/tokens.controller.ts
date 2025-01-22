@@ -22,7 +22,7 @@ import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
-import { ApiOkResponsePaginated } from './tmp/api-type';
+import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
 
 @Controller('api/tokens')
