@@ -28,6 +28,10 @@ export const BCL_CONTRACTS: ICommunityFactoryContracts = {
   ],
 };
 
+/**
+ * Define the categories you want the api to support for each network.
+ * If no categories are defined, the api will support all categories.
+ */
 export const BCL_FACTORY: Record<INetworkTypes, IFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
     address: 'ct_2i4e5bXZbAsdjZZRikZEvBA1M8B5xn9shpVPQJiqUoNWDCPuUm',
@@ -38,7 +42,7 @@ export const BCL_FACTORY: Record<INetworkTypes, IFactorySchema> = {
     categories: {
       // 'ALPHA-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
       //   name: 'ALPHA',
-      //   description: 'Token Gating Contract (Testnet)',
+      //   allowed_name_length: '20',
       // },
     },
   },
