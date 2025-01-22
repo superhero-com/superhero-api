@@ -1,19 +1,10 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { BCL_CONTRACTS } from 'src/configs';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { Token } from 'src/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
-
-export interface ISyncTokensRanksQueue {
-  //
-}
-
-const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
-  (f) => f.contractId,
-);
 
 @Processor(SYNC_TOKENS_RANKS_QUEUE)
 export class SyncTokensRanksQueue {
@@ -21,6 +12,7 @@ export class SyncTokensRanksQueue {
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
+    private communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -30,8 +22,10 @@ export class SyncTokensRanksQueue {
     this.logger.log(`SyncTokensRanksQueue->started`);
     try {
       await this.updateTokensRanking();
-      await this.updateTokenCategoryRankings('word');
-      await this.updateTokenCategoryRankings('number');
+      const factory = await this.communityFactoryService.getCurrentFactory();
+      for (const category of Object.keys(factory.categories)) {
+        await this.updateTokenCategoryRankings(category);
+      }
       this.logger.debug(`SyncTokensRanksQueue->completed`);
     } catch (error) {
       this.logger.error(`SyncTokensRanksQueue->error`, error);
@@ -44,15 +38,9 @@ export class SyncTokensRanksQueue {
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens
-      .filter(
-        (token) =>
-          !token.factory_address ||
-          factory_addresses.includes(token.factory_address as any),
-      )
-      .forEach((token, index) => {
-        this.tokensRepository.update(token.id, { rank: index + 1 });
-      });
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { rank: index + 1 });
+    });
   }
 
   async updateTokenCategoryRankings(category: string) {
@@ -62,14 +50,8 @@ export class SyncTokensRanksQueue {
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens
-      .filter(
-        (token) =>
-          !token.factory_address ||
-          factory_addresses.includes(token.factory_address as any),
-      )
-      .forEach((token, index) => {
-        this.tokensRepository.update(token.id, { category_rank: index + 1 });
-      });
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { category_rank: index + 1 });
+    });
   }
 }

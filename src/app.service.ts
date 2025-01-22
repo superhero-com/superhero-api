@@ -5,10 +5,8 @@ import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { TX_FUNCTIONS } from './ae/utils/constants';
-import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { IFactorySchema, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { BCL_CONTRACTS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -64,11 +62,11 @@ export class AppService {
       this.deleteOldTokensQueue.empty(),
       this.validateTransactionsQueue.empty(),
     ]);
-    const contracts = BCL_CONTRACTS[ACTIVE_NETWORK.networkId];
-    void this.deleteOldTokensQueue.add({
-      factories: contracts.map((contract) => contract.contractId),
-    });
+
     const factory = await this.communityFactoryService.getCurrentFactory();
+    void this.deleteOldTokensQueue.add({
+      factories: [factory.address],
+    });
     void this.loadFactory(factory);
 
     let syncedTransactions = [];

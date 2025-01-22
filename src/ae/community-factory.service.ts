@@ -38,9 +38,7 @@ export class CommunityFactoryService {
     const factory = BCL_FACTORY[ACTIVE_NETWORK.networkId];
 
     if (!Object.keys(factory.categories).length) {
-      const factoryInstance = await this.loadFactory(
-        factory.address,
-      );
+      const factoryInstance = await this.loadFactory(factory.address);
       const collection_registry: any = await factoryInstance.contract
         .get_state()
         .then((res) => res.decodedResult?.collection_registry);
