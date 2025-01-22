@@ -16,8 +16,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { BCL_CONTRACTS } from 'src/configs';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { Repository } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
@@ -37,6 +36,7 @@ export class TokensController {
     private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -79,22 +79,17 @@ export class TokensController {
     if (search) {
       queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
     }
-    // if (factory_address) {
-    //   queryBuilder.andWhere('token.factory_address = :factory_address', {
-    //     factory_address,
-    //   });
-    // } else {
-    //   const factory_addresses = BCL_CONTRACTS[ACTIVE_NETWORK.networkId].map(
-    //     (f) => f.contractId,
-    //   );
+    if (factory_address) {
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address,
+      });
+    } else {
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-    //   queryBuilder.andWhere(
-    //     'token.factory_address IN (:...factory_addresses)',
-    //     {
-    //       factory_addresses,
-    //     },
-    //   );
-    // }
+      queryBuilder.andWhere('token.factory_address = :address', {
+        address: factory.address,
+      });
+    }
     if (category !== 'all') {
       queryBuilder.andWhere('token.category = :category', {
         category,

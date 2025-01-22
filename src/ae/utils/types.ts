@@ -237,13 +237,6 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export interface ICommunityFactoryContract {
-  contractId: Encoded.ContractAddress;
-  description?: string;
-}
-
-export type ICommunityFactoryContracts = {};
-
 export type IFactorySchema = {
   address: Encoded.ContractAddress;
   categories: {
