@@ -7,7 +7,7 @@ import { ACTIVE_NETWORK } from './utils/networks';
 import { IFactorySchema } from './utils/types';
 
 @Injectable()
-export class TokenGatingService {
+export class CommunityFactoryService {
   factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
   constructor(private aeSdkService: AeSdkService) {
     //

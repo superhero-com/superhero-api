@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { TokenGatingService } from './ae/token-gating.service';
+import { CommunityFactoryService } from './ae/community-factory.service';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
@@ -9,7 +9,7 @@ import { BCL_CONTRACTS } from './configs';
 export class AppController {
   constructor(
     private readonly appService: AppService,
-    private tokenGatingService: TokenGatingService,
+    private tokenGatingService: CommunityFactoryService,
     private websocketService: WebSocketService,
   ) {}
 

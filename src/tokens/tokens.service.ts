@@ -11,7 +11,7 @@ import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
@@ -36,7 +36,7 @@ export class TokensService {
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
-    private tokenGatingService: TokenGatingService,
+    private tokenGatingService: CommunityFactoryService,
 
     private aePricingService: AePricingService,
 

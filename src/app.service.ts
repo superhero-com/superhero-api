@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
-import { TokenGatingService } from './ae/token-gating.service';
+import { CommunityFactoryService } from './ae/community-factory.service';
 import { TX_FUNCTIONS } from './ae/utils/constants';
 import { ACTIVE_NETWORK } from './ae/utils/networks';
 import { IFactorySchema, ITransaction } from './ae/utils/types';
@@ -25,7 +25,7 @@ import {
 export class AppService {
   tokens: string[] = [];
   constructor(
-    private tokenGatingService: TokenGatingService,
+    private tokenGatingService: CommunityFactoryService,
     private websocketService: WebSocketService,
     private aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
@@ -118,7 +118,7 @@ export class AppService {
         await factoryInstance.listRegisteredTokens(category);
       for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
         this.tokens.push(saleAddress);
-        console.log('TokenSaleService->dispatch::', symbol, saleAddress);
+        console.log('BCLService->dispatch::', symbol, saleAddress);
         this.loadTokenData(saleAddress as Encoded.ContractAddress);
       }
     }

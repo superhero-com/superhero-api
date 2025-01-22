@@ -6,7 +6,7 @@ import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
 import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
 import { Token } from 'src/tokens/entities/token.entity';
@@ -22,7 +22,7 @@ import { Transaction } from '../entities/transaction.entity';
 @Injectable()
 export class TransactionService {
   constructor(
-    private tokenGatingService: TokenGatingService,
+    private tokenGatingService: CommunityFactoryService,
     private aePricingService: AePricingService,
     private tokenService: TokensService,
     private tokenWebsocketGateway: TokenWebsocketGateway,
