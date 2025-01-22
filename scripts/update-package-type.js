@@ -4,7 +4,7 @@ const path = require('path');
 // Define the path to the package.json file
 const packageJsonPath = path.join(
   __dirname,
-  '../node_modules/token-gating-sdk',
+  '../node_modules/bctsl-sdk',
   'package.json',
 );
 

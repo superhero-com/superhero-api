@@ -1,7 +1,7 @@
 import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { BCL_FACTORY } from 'src/configs';
-import { CommunityFactory, initCommunityFactory } from 'token-gating-sdk';
+import { CommunityFactory, initCommunityFactory } from 'bctsl-sdk';
 import { AeSdkService } from './ae-sdk.service';
 import { ACTIVE_NETWORK } from './utils/networks';
 import { IFactorySchema } from './utils/types';

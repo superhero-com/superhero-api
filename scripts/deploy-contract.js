@@ -1,7 +1,7 @@
 import { AeSdk, CompilerHttp, MemoryAccount } from '@aeternity/aepp-sdk';
 import { nodes } from '../src/ae/config';
 import { NETWORK_TESTNET } from '../src/ae/utils/networks';
-import { deployCommunityFactory } from "token-gating-sdk";
+import { deployCommunityFactory } from "bctsl-sdk";
 
 async function deployContract() {
   const botAccount = {

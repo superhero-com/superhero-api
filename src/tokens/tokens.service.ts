@@ -15,7 +15,7 @@ import { TokenGatingService } from 'src/ae/token-gating.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { initTokenSale, TokenSale } from 'token-gating-sdk';
+import { initTokenSale, TokenSale } from 'bctsl-sdk';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
