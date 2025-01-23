@@ -47,6 +47,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactory> = {
       // 'CATEGORY-ak_..': {
       //   name: 'CATEGORY',
       //   allowed_name_length: '20',
+      //   description: 'Tokenize a unique name with up to 20.',  
       // },
     },
   },
