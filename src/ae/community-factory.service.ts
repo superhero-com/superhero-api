@@ -53,6 +53,14 @@ export class CommunityFactoryService {
           id: collectionName,
           name,
           allowed_name_length,
+          allowed_name_chars: collection.allowed_name_chars.map((rule) =>
+            Object.fromEntries(
+              Object.entries(rule).map(([key, chars]) => [
+                key,
+                (chars as string[]).map((char) => char.toString()),
+              ]),
+            ),
+          ),
           description: `Tokenize a unique name with up to ${allowed_name_length}.`,
         };
       }
