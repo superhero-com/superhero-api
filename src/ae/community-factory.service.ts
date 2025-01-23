@@ -57,7 +57,7 @@ export class CommunityFactoryService {
             Object.fromEntries(
               Object.entries(rule).map(([key, chars]) => [
                 key,
-                (chars as string[]).map((char) => char.toString()),
+                (chars as string[]).map((char) => Number(char.toString())),
               ]),
             ),
           ),
