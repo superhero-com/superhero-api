@@ -33,8 +33,10 @@ export class SyncTokensRanksQueue {
   }
 
   async updateTokensRanking() {
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
+      .where('tokens.factory_address = :factory', { factory: factory.address })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
@@ -44,8 +46,10 @@ export class SyncTokensRanksQueue {
   }
 
   async updateTokenCollectionRankings(collection: string) {
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
+      .where('tokens.factory_address = :factory', { factory: factory.address })
       .where('tokens.collection = :collection', { collection })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
