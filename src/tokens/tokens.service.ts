@@ -173,7 +173,7 @@ export class TokensService {
 
   async updateTokenInitialRank(token: Token): Promise<number> {
     const tokensCount = await this.tokensRepository.count();
-    // TODO: add initial category_rank
+    // TODO: add initial collection_rank
     await this.tokensRepository.update(token.id, {
       rank: tokensCount + 1,
     });
@@ -196,11 +196,11 @@ export class TokensService {
     );
 
     const factory_address = response?.tx?.contract_id;
-    const category = response?.tx.arguments[0].value;
+    const collection = response?.tx.arguments[0].value;
 
     await this.tokensRepository.update(token.id, {
       factory_address: factory_address,
-      category,
+      collection,
       creator_address: response?.tx?.caller_id,
       created_at: moment(response?.tx?.micro_time).toDate(),
     });

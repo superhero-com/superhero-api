@@ -237,11 +237,12 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export type IFactorySchema = {
+export type ICommunityFactory = {
   address: Encoded.ContractAddress;
-  categories: {
+  collections: {
     [key: `${string}-${Encoded.AccountAddress}`]: {
       name: string;
+      description?: string;
       allowed_name_length: string;
     };
   };

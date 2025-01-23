@@ -4,7 +4,7 @@ import { BCL_FACTORY } from 'src/configs';
 import { CommunityFactory, initCommunityFactory } from 'bctsl-sdk';
 import { AeSdkService } from './ae-sdk.service';
 import { ACTIVE_NETWORK } from './utils/networks';
-import { IFactorySchema } from './utils/types';
+import { ICommunityFactory } from './utils/types';
 
 @Injectable()
 export class CommunityFactoryService {
@@ -29,28 +29,28 @@ export class CommunityFactoryService {
 
   /**
    * Retrieves the current factory configuration for the active network.
-   * If the factory's categories are not already populated, it loads the token gating factory
-   * and populates the categories from the collection registry.
+   * If the factory's collections are not already populated, it loads the token gating factory
+   * and populates the collections from the collection registry.
    *
-   * @returns {Promise<IFactorySchema>} A promise that resolves to the factory schema.
+   * @returns {Promise<ICommunityFactory>} A promise that resolves to the factory schema.
    */
-  async getCurrentFactory(): Promise<IFactorySchema> {
+  async getCurrentFactory(): Promise<ICommunityFactory> {
     const factory = BCL_FACTORY[ACTIVE_NETWORK.networkId];
 
-    if (!Object.keys(factory.categories).length) {
+    if (!Object.keys(factory.collections).length) {
       const factoryInstance = await this.loadFactory(factory.address);
       const collection_registry: any = await factoryInstance.contract
         .get_state()
         .then((res) => res.decodedResult?.collection_registry);
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
-      for (const [categoryName, category] of Array.from(
+      for (const [collectionName, collection] of Array.from(
         collection_registry as any,
       )) {
-        const name = categoryName?.split('-ak_')[0];
-        factory.categories[categoryName] = {
+        const name = collectionName?.split('-ak_')[0];
+        factory.collections[collectionName] = {
           name,
-          allowed_name_length: category.allowed_name_length?.toString(),
+          allowed_name_length: collection.allowed_name_length?.toString(),
         };
       }
     }

@@ -96,7 +96,7 @@ export class Transaction {
   @Column({
     nullable: true,
   })
-  token_category_rank: number; // Token category rank at the time of this transaction
+  token_collection_rank: number; // Token collection rank at the time of this transaction
 
   @Index()
   @CreateDateColumn({

@@ -23,8 +23,8 @@ export class SyncTokensRanksQueue {
     try {
       await this.updateTokensRanking();
       const factory = await this.communityFactoryService.getCurrentFactory();
-      for (const category of Object.keys(factory.categories)) {
-        await this.updateTokenCategoryRankings(category);
+      for (const collection of Object.keys(factory.collections)) {
+        await this.updateTokenCollectionRankings(collection);
       }
       this.logger.debug(`SyncTokensRanksQueue->completed`);
     } catch (error) {
@@ -43,15 +43,15 @@ export class SyncTokensRanksQueue {
     });
   }
 
-  async updateTokenCategoryRankings(category: string) {
+  async updateTokenCollectionRankings(collection: string) {
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
-      .where('tokens.category = :category', { category })
+      .where('tokens.collection = :collection', { collection })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
     tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { category_rank: index + 1 });
+      this.tokensRepository.update(token.id, { collection_rank: index + 1 });
     });
   }
 }

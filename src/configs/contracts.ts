@@ -3,20 +3,20 @@ import {
   NETWORK_ID_MAINNET,
   NETWORK_ID_TESTNET,
 } from 'src/ae/utils/networks';
-import { IFactorySchema } from 'src/ae/utils/types';
+import { ICommunityFactory } from 'src/ae/utils/types';
 
 /**
- * Define the categories you want the api to support for each network.
- * If no categories are defined, the api will support all categories.
+ * Define the collections you want the api to support for each network.
+ * If no collections are defined, the api will support all collections.
  */
-export const BCL_FACTORY: Record<INetworkTypes, IFactorySchema> = {
+export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactory> = {
   [NETWORK_ID_MAINNET]: {
     address: 'ct_2i4e5bXZbAsdjZZRikZEvBA1M8B5xn9shpVPQJiqUoNWDCPuUm',
-    categories: {},
+    collections: {},
   },
   [NETWORK_ID_TESTNET]: {
     address: 'ct_2i4e5bXZbAsdjZZRikZEvBA1M8B5xn9shpVPQJiqUoNWDCPuUm',
-    categories: {
+    collections: {
       // 'ALPHA-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
       //   name: 'ALPHA',
       //   allowed_name_length: '20',

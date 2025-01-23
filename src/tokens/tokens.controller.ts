@@ -49,12 +49,12 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'rank', 'category_rank', 'price', 'market_cap'],
+    enum: ['name', 'rank', 'collection_rank', 'price', 'market_cap'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiQuery({
-    name: 'category',
+    name: 'collection',
     enum: ['all', 'word', 'number'],
     required: false,
   })
@@ -70,7 +70,7 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
-    @Query('category') category: 'all' | 'word' | 'number' = 'all',
+    @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
     // Select all columns from the 'token' table
@@ -90,9 +90,9 @@ export class TokensController {
         address: factory.address,
       });
     }
-    if (category !== 'all') {
-      queryBuilder.andWhere('token.category = :category', {
-        category,
+    if (collection !== 'all') {
+      queryBuilder.andWhere('token.collection = :collection', {
+        collection,
       });
     }
     if (creator_address) {

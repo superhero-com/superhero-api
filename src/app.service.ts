@@ -5,7 +5,7 @@ import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { TX_FUNCTIONS } from './ae/utils/constants';
-import { IFactorySchema, ITransaction } from './ae/utils/types';
+import { ICommunityFactory, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   DELETE_OLD_TOKENS_QUEUE,
@@ -107,14 +107,14 @@ export class AppService {
     });
   }
 
-  async loadFactory(factory: IFactorySchema) {
+  async loadFactory(factory: ICommunityFactory) {
     const factoryInstance = await this.communityFactoryService.loadFactory(
       factory.address,
     );
 
-    for (const category of Object.keys(factory.categories)) {
+    for (const collection of Object.keys(factory.collections)) {
       const registeredTokens =
-        await factoryInstance.listRegisteredTokens(category);
+        await factoryInstance.listRegisteredTokens(collection);
       for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
         this.tokens.push(saleAddress);
         console.log('BCLService->dispatch::', symbol, saleAddress);

@@ -76,7 +76,7 @@ export class TransactionsController {
           'token.address',
           'token.sale_address',
           'token.rank',
-          'token.category',
+          'token.collection',
         ]);
     }
 
