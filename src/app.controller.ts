@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller()
 export class AppController {
@@ -13,6 +14,7 @@ export class AppController {
     //
   }
 
+  @ApiOperation({ operationId: 'getApiStats' })
   @Get('/api/stats')
   getApiStats() {
     return {
@@ -22,9 +24,7 @@ export class AppController {
     };
   }
 
-  /**
-   * @deprecated
-   */
+  @ApiOperation({ operationId: 'getContracts', deprecated: true })
   @Get('/api/contracts')
   async getContracts() {
     const factory = await this.communityFactoryService.getCurrentFactory();
@@ -36,6 +36,7 @@ export class AppController {
     ];
   }
 
+  @ApiOperation({ operationId: 'getFactory' })
   @Get('/api/factory')
   async getFactory() {
     return this.communityFactoryService.getCurrentFactory();
