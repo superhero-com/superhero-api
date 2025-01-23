@@ -19,6 +19,7 @@ import { initTokenSale, TokenSale } from 'bctsl-sdk';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
+import moment from 'moment';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -144,8 +145,8 @@ export class TokensService {
       await this.tokensRepository.delete(newToken.id);
       return null;
     }
-    await this.updateTokenCategory(newToken, factoryAddress);
     await this.syncTokenPrice(newToken);
+    // refresh token token info
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
     void this.syncTokenHoldersQueue.add(
@@ -179,54 +180,6 @@ export class TokensService {
     return tokensCount + 1;
   }
 
-  async updateTokenCategory(token: Token, factoryAddress): Promise<string> {
-    if (token.category) {
-      return token.category;
-    }
-
-    try {
-      const communityFactory =
-        await this.communityFactoryService.loadFactory(factoryAddress);
-
-      const communityManagementContract =
-        await communityFactory.getCommunityManagementContract(
-          token.sale_address as Encoded.ContractAddress,
-        );
-
-      const metaInfo: Record<string, string> = await communityManagementContract
-        .meta_info()
-        .then((r) => {
-          const obj: Record<string, string> = {};
-          for (const [key, value] of r.decodedResult) {
-            obj[key] = value;
-          }
-          return obj;
-        })
-        .catch(() => {
-          return {};
-        });
-
-      if (!metaInfo?.category) {
-        const category = this.detectTokenCategoryFromName(token);
-        await this.tokensRepository.update(token.id, {
-          category,
-        });
-        return category;
-      }
-
-      await this.tokensRepository.update(token.id, {
-        category: metaInfo.category,
-      });
-      return metaInfo.category;
-    } catch (error) {
-      const category = this.detectTokenCategoryFromName(token);
-      await this.tokensRepository.update(token.id, {
-        category,
-      });
-      return category;
-    }
-  }
-
   async updateTokenFactoryAddress(
     token: Token,
   ): Promise<Encoded.ContractAddress> {
@@ -243,21 +196,16 @@ export class TokensService {
     );
 
     const factory_address = response?.tx?.contract_id;
+    const category = response?.tx.arguments[0].value;
 
     await this.tokensRepository.update(token.id, {
       factory_address: factory_address,
+      category,
+      creator_address: response?.tx?.caller_id,
+      created_at: moment(response?.tx?.micro_time).toDate(),
     });
 
     return factory_address as Encoded.ContractAddress;
-  }
-
-  detectTokenCategoryFromName(token: Token): string {
-    const name = token.name.toLowerCase();
-    // if name is only numbers return number
-    if (/^\d+$/.test(name)) {
-      return 'number';
-    }
-    return 'word';
   }
 
   async getTokenContracts(token: Token) {
