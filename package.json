@@ -18,7 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/token-gating-sdk/.build && tsc -b ./node_modules/token-gating-sdk/tsconfig.cjs.json ./node_modules/token-gating-sdk/tsconfig.esm.json ./node_modules/token-gating-sdk/tsconfig.types.json"
+    "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/bctsl-sdk/.build && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json"
   },
   "dependencies": {
     "@aeternity/aepp-sdk": "^13.3.2",
@@ -40,7 +40,7 @@
     "pg": "^8.12.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "token-gating-sdk": "git+ssh://git@github.com/superhero-com/token-gating-sdk#69680ebbbeb773ae675cf854dc467e8f8bb56dd2",
+    "bctsl-sdk": "git+ssh://git@github.com/superhero-com/bcl-sdk#d9991fe35dd5ec9e0dec58d9b09257090bb2d273",
     "typeorm": "^0.3.20",
     "ws": "^8.17.0"
   },

@@ -3,12 +3,10 @@ import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
-import { TokenGatingService } from './ae/token-gating.service';
+import { CommunityFactoryService } from './ae/community-factory.service';
 import { TX_FUNCTIONS } from './ae/utils/constants';
-import { ACTIVE_NETWORK } from './ae/utils/networks';
-import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
+import { ICommunityFactorySchema, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { BCL_CONTRACTS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -25,7 +23,7 @@ import {
 export class AppService {
   tokens: string[] = [];
   constructor(
-    private tokenGatingService: TokenGatingService,
+    private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
     private aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
@@ -64,11 +62,12 @@ export class AppService {
       this.deleteOldTokensQueue.empty(),
       this.validateTransactionsQueue.empty(),
     ]);
-    const contracts = BCL_CONTRACTS[ACTIVE_NETWORK.networkId];
+
+    const factory = await this.communityFactoryService.getCurrentFactory();
     void this.deleteOldTokensQueue.add({
-      factories: contracts.map((contract) => contract.contractId),
+      factories: [factory.address],
     });
-    void this.loadFactories(contracts);
+    void this.loadFactory(factory);
 
     let syncedTransactions = [];
 
@@ -108,23 +107,20 @@ export class AppService {
     });
   }
 
-  async loadFactory(address: Encoded.ContractAddress) {
-    const factory =
-      await this.tokenGatingService.loadTokenGatingFactory(address);
-    const [registeredTokens] = await Promise.all([
-      factory.listRegisteredTokens(),
-    ]);
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      this.tokens.push(saleAddress);
-      console.log('TokenSaleService->dispatch::', symbol, saleAddress);
-      this.loadTokenData(saleAddress);
-    }
-  }
-
-  async loadFactories(contracts: ICommunityFactoryContract[]) {
-    await Promise.all(
-      contracts.map((contract) => this.loadFactory(contract.contractId)),
+  async loadFactory(factory: ICommunityFactorySchema) {
+    const factoryInstance = await this.communityFactoryService.loadFactory(
+      factory.address,
     );
+
+    for (const collection of Object.keys(factory.collections)) {
+      const registeredTokens =
+        await factoryInstance.listRegisteredTokens(collection);
+      for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+        this.tokens.push(saleAddress);
+        console.log('BCLService->dispatch::', symbol, saleAddress);
+        this.loadTokenData(saleAddress as Encoded.ContractAddress);
+      }
+    }
   }
 
   loadTokenData(saleAddress: Encoded.ContractAddress) {

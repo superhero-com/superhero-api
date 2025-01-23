@@ -30,3 +30,26 @@ $ npm run start:dev
 # production mode
 $ npm run start:prod
 ```
+
+
+## Token Categories Support
+Define the collections you want the api to support, if not cat defined here, the API will serve all collections.
+```js
+// src/configs/contracts.ts
+export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
+  [NETWORK_ID_MAINNET]: {
+    address: 'ct_..',
+    collections: {},
+  },
+  [NETWORK_ID_TESTNET]: {
+    address: 'ct_..',
+    collections: { 
+      // 'CATEGORY-ak_..': {
+      //   name: 'CATEGORY',
+      //   allowed_name_length: '20',
+      //   description: 'Tokenize a unique name with up to 20.',  
+      // },
+    },
+  },
+};
+```

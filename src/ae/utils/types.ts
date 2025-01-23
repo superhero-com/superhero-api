@@ -237,11 +237,14 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export interface ICommunityFactoryContract {
-  contractId: Encoded.ContractAddress;
-  description?: string;
-}
-
-export type ICommunityFactoryContracts = {
-  [K in INetworkTypes]: ICommunityFactoryContract[];
+export type ICommunityFactorySchema = {
+  address: Encoded.ContractAddress;
+  collections: {
+    [key: `${string}-${Encoded.AccountAddress}`]: {
+      id: `${string}-${Encoded.AccountAddress}`;
+      name: string;
+      description?: string;
+      allowed_name_length: string;
+    };
+  };
 };

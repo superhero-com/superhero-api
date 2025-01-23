@@ -1,11 +1,5 @@
 import { Encoding } from '@aeternity/aepp-sdk';
-import type {
-  CurrencyCode,
-  ICurrency,
-  ICommunityFactoryContracts,
-  IToken,
-} from './types';
-import { NETWORK_ID_MAINNET, NETWORK_ID_TESTNET } from './networks';
+import type { CurrencyCode, ICurrency, IToken } from './types';
 
 export const AETERNITY_CONTRACT_ID = 'aeternity';
 export const AETERNITY_SYMBOL = 'AE';

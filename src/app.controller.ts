@@ -1,16 +1,20 @@
 import { Controller, Get } from '@nestjs/common';
-import { ACTIVE_NETWORK } from './ae/utils/networks';
+import { CommunityFactoryService } from './ae/community-factory.service';
 import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
-import { BCL_CONTRACTS } from './configs';
+import { ApiOperation } from '@nestjs/swagger';
 
 @Controller()
 export class AppController {
   constructor(
     private readonly appService: AppService,
+    private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
-  ) {}
+  ) {
+    //
+  }
 
+  @ApiOperation({ operationId: 'getApiStats' })
   @Get('/api/stats')
   getApiStats() {
     return {
@@ -20,8 +24,21 @@ export class AppController {
     };
   }
 
+  @ApiOperation({ operationId: 'getContracts', deprecated: true })
   @Get('/api/contracts')
-  getContracts() {
-    return BCL_CONTRACTS[ACTIVE_NETWORK.networkId];
+  async getContracts() {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    return [
+      {
+        contractId: factory.address,
+        description: 'Community Factory',
+      },
+    ];
+  }
+
+  @ApiOperation({ operationId: 'getFactory' })
+  @Get('/api/factory')
+  async getFactory() {
+    return this.communityFactoryService.getCurrentFactory();
   }
 }

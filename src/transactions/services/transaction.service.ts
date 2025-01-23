@@ -6,7 +6,7 @@ import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
 import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
 import { Token } from 'src/tokens/entities/token.entity';
@@ -22,7 +22,7 @@ import { Transaction } from '../entities/transaction.entity';
 @Injectable()
 export class TransactionService {
   constructor(
-    private tokenGatingService: TokenGatingService,
+    private communityFactoryService: CommunityFactoryService,
     private aePricingService: AePricingService,
     private tokenService: TokensService,
     private tokenWebsocketGateway: TokenWebsocketGateway,
@@ -61,16 +61,6 @@ export class TransactionService {
      */
     if (!token) {
       token = await this.tokenService.getToken(saleAddress, !shouldBroadcast);
-    }
-    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-      try {
-        await this.tokenService.update(token, {
-          creator_address: rawTransaction.tx.callerId,
-          created_at: moment(rawTransaction.microTime).toDate(),
-        });
-      } catch (error) {
-        console.error(error);
-      }
     }
 
     const exists = await this.transactionRepository
@@ -251,7 +241,7 @@ export class TransactionService {
     rawTransaction: ITransaction,
   ): Promise<ITransaction> {
     try {
-      const factory = await this.tokenGatingService.loadTokenGatingFactory(
+      const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
       const decodedData = factory.contract.$decodeEvents(rawTransaction.tx.log);

@@ -57,14 +57,9 @@ export class PullTokenInfoQueue {
           removeOnComplete: true,
         },
       );
-      void this.syncTransactionsQueue.add(
-        {
-          saleAddress: job.data.saleAddress,
-        },
-        {
-          jobId: `syncTokenTransactions-${job.data.saleAddress}`,
-        },
-      );
+      void this.syncTransactionsQueue.add({
+        saleAddress: job.data.saleAddress,
+      });
     } catch (error) {
       this.logger.error(`PullTokenInfoQueue->error`, error);
     }
