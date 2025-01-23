@@ -241,6 +241,7 @@ export type ICommunityFactorySchema = {
   address: Encoded.ContractAddress;
   collections: {
     [key: `${string}-${Encoded.AccountAddress}`]: {
+      id: `${string}-${Encoded.AccountAddress}`;
       name: string;
       description?: string;
       allowed_name_length: string;

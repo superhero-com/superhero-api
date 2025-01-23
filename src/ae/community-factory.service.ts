@@ -50,6 +50,7 @@ export class CommunityFactoryService {
         const name = collectionName?.split('-ak_')[0];
         const allowed_name_length = collection.allowed_name_length?.toString();
         factory.collections[collectionName] = {
+          id: collectionName,
           name,
           allowed_name_length,
           description: `Tokenize a unique name with up to ${allowed_name_length}.`,
