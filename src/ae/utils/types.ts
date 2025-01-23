@@ -245,6 +245,9 @@ export type ICommunityFactorySchema = {
       name: string;
       description?: string;
       allowed_name_length: string;
+      allowed_name_chars: {
+        [key: string]: number[];
+      }[];
     };
   };
 };

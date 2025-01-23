@@ -32,6 +32,9 @@ export class TokenDto {
   @ApiProperty()
   collection_rank: number;
 
+  @ApiProperty()
+  metaInfo: Record<string, string>;
+
   /**
    * Basic Token Info
    */
