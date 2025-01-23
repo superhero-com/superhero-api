@@ -26,6 +26,12 @@ export class TokenDto {
   @ApiProperty()
   bonding_curve_address: string;
 
+  @ApiProperty()
+  collection: string;
+
+  @ApiProperty()
+  collection_rank: number;
+
   /**
    * Basic Token Info
    */
