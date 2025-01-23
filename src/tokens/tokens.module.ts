@@ -18,11 +18,13 @@ import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
+import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Token, TokenHolder]),
     AeModule,
+    AePricingModule,
     BullModule.registerQueue(
       {
         name: PULL_TOKEN_INFO_QUEUE,

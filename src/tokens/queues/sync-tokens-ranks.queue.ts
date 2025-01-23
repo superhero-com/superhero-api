@@ -1,19 +1,10 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { Token } from 'src/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-
-export interface ISyncTokensRanksQueue {
-  //
-}
-
-const factory_addresses = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId].map(
-  (f) => f.contractId,
-);
 
 @Processor(SYNC_TOKENS_RANKS_QUEUE)
 export class SyncTokensRanksQueue {
@@ -21,6 +12,7 @@ export class SyncTokensRanksQueue {
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
+    private communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -30,8 +22,10 @@ export class SyncTokensRanksQueue {
     this.logger.log(`SyncTokensRanksQueue->started`);
     try {
       await this.updateTokensRanking();
-      await this.updateTokenCategoryRankings('word');
-      await this.updateTokenCategoryRankings('number');
+      const factory = await this.communityFactoryService.getCurrentFactory();
+      for (const collection of Object.keys(factory.collections)) {
+        await this.updateTokenCollectionRankings(collection);
+      }
       this.logger.debug(`SyncTokensRanksQueue->completed`);
     } catch (error) {
       this.logger.error(`SyncTokensRanksQueue->error`, error);
@@ -39,37 +33,29 @@ export class SyncTokensRanksQueue {
   }
 
   async updateTokensRanking() {
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
+      .where('tokens.factory_address = :factory', { factory: factory.address })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens
-      .filter(
-        (token) =>
-          !token.factory_address ||
-          factory_addresses.includes(token.factory_address as any),
-      )
-      .forEach((token, index) => {
-        this.tokensRepository.update(token.id, { rank: index + 1 });
-      });
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { rank: index + 1 });
+    });
   }
 
-  async updateTokenCategoryRankings(category: string) {
+  async updateTokenCollectionRankings(collection: string) {
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const tokens = await this.tokensRepository
       .createQueryBuilder('tokens')
-      .where('tokens.category = :category', { category })
+      .where('tokens.factory_address = :factory', { factory: factory.address })
+      .where('tokens.collection = :collection', { collection })
       .orderBy('tokens.market_cap', 'DESC')
       .getMany();
 
-    tokens
-      .filter(
-        (token) =>
-          !token.factory_address ||
-          factory_addresses.includes(token.factory_address as any),
-      )
-      .forEach((token, index) => {
-        this.tokensRepository.update(token.id, { category_rank: index + 1 });
-      });
+    tokens.forEach((token, index) => {
+      this.tokensRepository.update(token.id, { collection_rank: index + 1 });
+    });
   }
 }

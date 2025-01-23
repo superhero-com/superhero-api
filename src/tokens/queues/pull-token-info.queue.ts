@@ -41,10 +41,22 @@ export class PullTokenInfoQueue {
       this.logger.debug(
         `PullTokenInfoQueue->completed:${job.data.saleAddress}`,
       );
-      void this.syncTokensRanksQueue.add({});
-      void this.syncTokenHoldersQueue.add({
-        saleAddress: job.data.saleAddress,
-      });
+      void this.syncTokensRanksQueue.add(
+        {},
+        {
+          jobId: `syncTokensRanks-${job.data.saleAddress}`,
+          removeOnComplete: true,
+        },
+      );
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress: job.data.saleAddress,
+        },
+        {
+          jobId: `syncTokenHolders-${job.data.saleAddress}`,
+          removeOnComplete: true,
+        },
+      );
       void this.syncTransactionsQueue.add({
         saleAddress: job.data.saleAddress,
       });

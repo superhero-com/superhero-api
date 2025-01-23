@@ -14,17 +14,16 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { Repository } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
-import { ApiOkResponsePaginated } from './tmp/api-type';
+import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
-import BigNumber from 'bignumber.js';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
 
 @Controller('api/tokens')
 @ApiTags('Tokens')
@@ -37,6 +36,7 @@ export class TokensController {
     private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -49,12 +49,12 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'rank', 'category_rank', 'price', 'market_cap'],
+    enum: ['name', 'rank', 'collection_rank', 'price', 'market_cap'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiQuery({
-    name: 'category',
+    name: 'collection',
     enum: ['all', 'word', 'number'],
     required: false,
   })
@@ -70,7 +70,7 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
-    @Query('category') category: 'all' | 'word' | 'number' = 'all',
+    @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
     // Select all columns from the 'token' table
@@ -84,20 +84,15 @@ export class TokensController {
         factory_address,
       });
     } else {
-      const factory_addresses = ROOM_FACTORY_CONTRACTS[
-        ACTIVE_NETWORK.networkId
-      ].map((f) => f.contractId);
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-      queryBuilder.andWhere(
-        'token.factory_address IN (:...factory_addresses)',
-        {
-          factory_addresses,
-        },
-      );
+      queryBuilder.andWhere('token.factory_address = :address', {
+        address: factory.address,
+      });
     }
-    if (category !== 'all') {
-      queryBuilder.andWhere('token.category = :category', {
-        category,
+    if (collection !== 'all') {
+      queryBuilder.andWhere('token.collection = :collection', {
+        collection,
       });
     }
     if (creator_address) {

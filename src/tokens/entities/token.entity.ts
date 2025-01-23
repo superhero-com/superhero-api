@@ -92,12 +92,12 @@ export class Token {
   @Column({
     nullable: true,
   })
-  category: string;
+  collection: string;
 
   @Column({
     nullable: true,
   })
-  category_rank: number;
+  collection_rank: number;
 
   @Column({
     default: 0n,

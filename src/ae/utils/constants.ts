@@ -1,11 +1,5 @@
 import { Encoding } from '@aeternity/aepp-sdk';
-import type {
-  CurrencyCode,
-  ICurrency,
-  ICommunityFactoryContracts,
-  IToken,
-} from './types';
-import { NETWORK_ID_MAINNET, NETWORK_ID_TESTNET } from './networks';
+import type { CurrencyCode, ICurrency, IToken } from './types';
 
 export const AETERNITY_CONTRACT_ID = 'aeternity';
 export const AETERNITY_SYMBOL = 'AE';
@@ -22,59 +16,6 @@ export const AETERNITY_TOKEN_BASE_DATA: Partial<IToken> = {
 };
 
 export const AE_SYMBOL = 'AE';
-
-/**
- * Token sale contracts addresses for different networks.
- * The last contract in the array is the default one.
- */
-export const ROOM_FACTORY_CONTRACTS: ICommunityFactoryContracts = {
-  [NETWORK_ID_MAINNET]: [
-    {
-      contractId: 'ct_2YWMMhFzsQWSNXsBTFZD6A6FHtgtNVbfT2ZtaUpDGpmKPpRXhJ',
-      description: 'Token Gating Contract (Mainnet)',
-    },
-  ],
-  [NETWORK_ID_TESTNET]: [
-    // {
-    //   contractId: 'ct_2P3DfJo3Bi4iMCmvQRoHfTdiQyiu35ax7FCm8nrdSQ2uMfn2HU',
-    //   description: 'Token Gating Contract (Testnet:v1.0.2)',
-    // },
-    // {
-    //   contractId: 'ct_yqXZuGX4J8qsMRoVzYF31Je9Tdwo5F7AFpPo1NRni9EXNEdFX',
-    //   description: 'Token Gating Contract (Testnet:v1.0.3)',
-    // },
-    // {
-    //   contractId: 'ct_HqknMBru4eGT4kQS7yt2M9fUrwBDFcWV2Dbq2Zrim1xNzHi1D',
-    //   description: 'Token Gating Contract (Testnet:v1.0.4)',
-    // },
-    // {
-    //   contractId: 'ct_pykmqDUUf8iNvVNq2vQgW7qY6zo83HAUogqXhgJuT1BPpymNf',
-    //   description: 'name factory 20 alphanumeric chars and hyphen',
-    // },
-    // {
-    //   contractId: 'ct_2UnNEeTTBMct4ykx9kMzeEXGqgBMAPxYLW2XGGvR3uTDJQPdVa',
-    //   description: 'number factory 20 numbers and hyphen',
-    // },
-
-    // {
-    //   contractId: 'ct_psW6kCmWw6BMsfWCjZaDNkjSC87FttgkBanTg8PQ7RoHf12sC',
-    //   description: 'v2 name factory 20 alphanumeric chars and hyphen',
-    // },
-    // {
-    //   contractId: 'ct_27zp8V5ZYd23PeqkUSPBJE92JaZLemzcLf7U4dRx3ck8qHYCU8',
-    //   description: 'v2 number factory 20 numbers and hyphen',
-    // },
-
-    {
-      contractId: 'ct_22ymZBECdNqBWFZ12iZqSxs6DwQHT4XinJaL7gbcXM4yD4iU7p',
-      description: 'v1.1.0 name factory 20 alphanumeric chars and hyphen',
-    },
-    {
-      contractId: 'ct_2rBqfMLTn6UuhAJmeyEBnxxTqCnoA5ahpxBM35CRSDkQsvfVpk',
-      description: 'v1.1.0 number factory 20 numbers and hyphen',
-    },
-  ],
-};
 
 export const DEFAULT_CURRENCY_CODE: CurrencyCode = 'usd';
 

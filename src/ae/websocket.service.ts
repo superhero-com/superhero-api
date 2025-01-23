@@ -105,18 +105,28 @@ export class WebSocketService {
     callback: (payload: any) => void,
   ) {
     if (this.isWsConnected) {
-      Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
-        try {
-          this.wsClient.send(
-            JSON.stringify({
-              ...message,
-              source,
-            }),
-          );
-        } catch (error) {
-          console.log('ERROR subscribeForChannel:', error);
-        }
-      });
+      try {
+        this.wsClient.send(
+          JSON.stringify({
+            ...message,
+            source: WEB_SOCKET_SOURCE.mdw,
+          }),
+        );
+      } catch (error) {
+        console.log('ERROR subscribeForChannel:', error);
+      }
+      // Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
+      //   try {
+      //     this.wsClient.send(
+      //       JSON.stringify({
+      //         ...message,
+      //         source: 'mdw',
+      //       }),
+      //     );
+      //   } catch (error) {
+      //     console.log('ERROR subscribeForChannel:', error);
+      //   }
+      // });
     }
 
     this.subscribersQueue.push(message);

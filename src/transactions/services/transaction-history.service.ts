@@ -263,12 +263,7 @@ export class TransactionHistoryService {
       if (record.buy_price[props.convertTo] < low.buy_price[props.convertTo]) {
         low = record;
       }
-      volume = intervalData
-        .map((item) => item.volume?.toNumber())
-        .reduce((a, b) => a + b);
-      // volume = record?.volume?.toNumber() ?? 0;
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
+      volume += record.volume?.toNumber() ?? 0;
       total_supply = record.total_supply;
       market_cap = record.market_cap[props.convertTo];
     });

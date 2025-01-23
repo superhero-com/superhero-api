@@ -2,10 +2,10 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
-import { TokenGatingService } from './ae/token-gating.service';
-import { ROOM_FACTORY_CONTRACTS, TX_FUNCTIONS } from './ae/utils/constants';
-import { ACTIVE_NETWORK } from './ae/utils/networks';
-import { ICommunityFactoryContract, ITransaction } from './ae/utils/types';
+import { AePricingService } from './ae-pricing/ae-pricing.service';
+import { CommunityFactoryService } from './ae/community-factory.service';
+import { TX_FUNCTIONS } from './ae/utils/constants';
+import { ICommunityFactorySchema, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   DELETE_OLD_TOKENS_QUEUE,
@@ -23,8 +23,9 @@ import {
 export class AppService {
   tokens: string[] = [];
   constructor(
-    private tokenGatingService: TokenGatingService,
+    private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
+    private aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenPriceQueue: Queue,
 
@@ -50,6 +51,7 @@ export class AppService {
   }
 
   async init() {
+    await this.aePricingService.pullAndSaveCoinCurrencyRates();
     // clean all queue jobs
     await Promise.all([
       this.pullTokenPriceQueue.empty(),
@@ -60,11 +62,14 @@ export class AppService {
       this.deleteOldTokensQueue.empty(),
       this.validateTransactionsQueue.empty(),
     ]);
-    const contracts = ROOM_FACTORY_CONTRACTS[ACTIVE_NETWORK.networkId];
+
+    const factory = await this.communityFactoryService.getCurrentFactory();
     void this.deleteOldTokensQueue.add({
-      factories: contracts.map((contract) => contract.contractId),
+      factories: [factory.address],
     });
-    void this.loadFactories(contracts);
+    void this.loadFactory(factory);
+
+    let syncedTransactions = [];
 
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
@@ -72,10 +77,18 @@ export class AppService {
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
-          void this.saveTransactionQueue.add({
-            transaction,
-            shouldBroadcast: true,
-          });
+          if (!syncedTransactions.includes(transaction.hash)) {
+            syncedTransactions.push(transaction.hash);
+            void this.saveTransactionQueue.add(
+              {
+                transaction,
+                shouldBroadcast: true,
+              },
+              {
+                jobId: transaction.hash,
+              },
+            );
+          }
         }
       },
     );
@@ -86,32 +99,40 @@ export class AppService {
         from: desiredBlockHeight - 10,
         to: desiredBlockHeight,
       });
+
+      this.aePricingService.pullAndSaveCoinCurrencyRates();
+      syncedTransactions = [];
+
+      void this.syncTokensRanksQueue.add({});
     });
   }
 
-  async loadFactory(address: Encoded.ContractAddress) {
-    const factory =
-      await this.tokenGatingService.loadTokenGatingFactory(address);
-    const [registeredTokens] = await Promise.all([
-      factory.listRegisteredTokens(),
-    ]);
-    for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-      this.tokens.push(saleAddress);
-      console.log('TokenSaleService->dispatch::', symbol, saleAddress);
-      this.loadTokenData(saleAddress);
+  async loadFactory(factory: ICommunityFactorySchema) {
+    const factoryInstance = await this.communityFactoryService.loadFactory(
+      factory.address,
+    );
+
+    for (const collection of Object.keys(factory.collections)) {
+      const registeredTokens =
+        await factoryInstance.listRegisteredTokens(collection);
+      for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
+        this.tokens.push(saleAddress);
+        console.log('BCLService->dispatch::', symbol, saleAddress);
+        this.loadTokenData(saleAddress as Encoded.ContractAddress);
+      }
     }
   }
 
-  async loadFactories(contracts: ICommunityFactoryContract[]) {
-    await Promise.all(
-      contracts.map((contract) => this.loadFactory(contract.contractId)),
-    );
-  }
-
   loadTokenData(saleAddress: Encoded.ContractAddress) {
-    void this.pullTokenPriceQueue.add({
-      saleAddress,
-    });
+    void this.pullTokenPriceQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: `pull-price-${saleAddress}`,
+        removeOnComplete: true,
+      },
+    );
   }
 
   /**

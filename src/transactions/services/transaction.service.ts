@@ -1,29 +1,29 @@
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
+import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
+import { Queue } from 'bull';
+import moment from 'moment';
+import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
 import { Token } from 'src/tokens/entities/token.entity';
-import { TokensService } from 'src/tokens/tokens.service';
-import { Repository } from 'typeorm';
-import { Transaction } from '../entities/transaction.entity';
-import moment from 'moment';
-import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
 import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from 'src/tokens/queues/constants';
+import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
+import { TokensService } from 'src/tokens/tokens.service';
+import { Repository } from 'typeorm';
+import { Transaction } from '../entities/transaction.entity';
 
 @Injectable()
 export class TransactionService {
   constructor(
-    private tokenGatingService: TokenGatingService,
-    private coinGeckoService: CoinGeckoService,
+    private communityFactoryService: CommunityFactoryService,
+    private aePricingService: AePricingService,
     private tokenService: TokensService,
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
@@ -54,18 +54,13 @@ export class TransactionService {
       saleAddress = rawTransaction.tx.return.value[1].value;
     }
 
+    /**
+     * if the token doesn't exists get token will create it and call sync token
+     * transactions, if the token exists it will just return the token.
+     * this will cause create community transaction to be saved twice.
+     */
     if (!token) {
-      token = await this.tokenService.getToken(saleAddress);
-    }
-    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-      try {
-        await this.tokenService.update(token, {
-          creator_address: rawTransaction.tx.callerId,
-          created_at: moment(rawTransaction.microTime).toDate(),
-        });
-      } catch (error) {
-        console.error(error);
-      }
+      token = await this.tokenService.getToken(saleAddress, !shouldBroadcast);
     }
 
     const exists = await this.transactionRepository
@@ -112,11 +107,11 @@ export class TransactionService {
 
     const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
       await Promise.all([
-        this.coinGeckoService.getPriceData(_amount),
-        this.coinGeckoService.getPriceData(_unit_price),
-        this.coinGeckoService.getPriceData(_previous_buy_price),
-        this.coinGeckoService.getPriceData(_buy_price),
-        this.coinGeckoService.getPriceData(_market_cap),
+        this.aePricingService.getPriceData(_amount),
+        this.aePricingService.getPriceData(_unit_price),
+        this.aePricingService.getPriceData(_previous_buy_price),
+        this.aePricingService.getPriceData(_buy_price),
+        this.aePricingService.getPriceData(_market_cap),
       ]);
 
     const txData = {
@@ -135,7 +130,7 @@ export class TransactionService {
       verified: false,
     };
     // if transaction 2 days old
-    if (exists) {
+    if (!!exists?.id) {
       await this.transactionRepository.update(exists.id, {
         ...txData,
         verified: true,
@@ -156,10 +151,19 @@ export class TransactionService {
         sale_address: saleAddress,
         data: txData,
       });
-      void this.syncTokenHoldersQueue.add({
-        saleAddress,
-      });
-      void this.syncTokensRanksQueue.add({});
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress,
+        },
+        {
+          jobId: `syncTokenHolders-${saleAddress}`,
+          removeOnComplete: true,
+        },
+      );
+      void this.syncTokensRanksQueue.add(
+        {},
+        { jobId: `syncTokensRanks-${saleAddress}`, removeOnComplete: true },
+      );
     }
     return transaction;
   }
@@ -174,49 +178,55 @@ export class TransactionService {
     let amount = new BigNumber(0);
     let total_supply = new BigNumber(0);
 
-    try {
-      if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
-        const mints = decodedData.filter((data) => data.name === 'Mint');
-        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-        amount = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-        );
-        total_supply = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-        ).plus(volume);
-      }
-
-      if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-        if (!decodedData.find((data) => data.name === 'PriceChange')) {
-          return {
-            volume,
-            amount,
-            total_supply,
-          };
+    if (decodedData.length) {
+      try {
+        if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+          const mints = decodedData.filter((data) => data.name === 'Mint');
+          volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+          amount = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+          );
+          total_supply = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+          ).plus(volume);
         }
-        const mints = decodedData.filter((data) => data.name === 'Mint');
-        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-        amount = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-        );
-        total_supply = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-        ).plus(volume);
-      }
 
-      if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
-        volume = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
-        );
-        amount = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
-        );
-        total_supply = new BigNumber(
-          toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
-        ).minus(volume);
+        if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+          if (!decodedData.find((data) => data.name === 'PriceChange')) {
+            return {
+              volume,
+              amount,
+              total_supply,
+            };
+          }
+          const mints = decodedData.filter((data) => data.name === 'Mint');
+          volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+          amount = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+          );
+          total_supply = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+          ).plus(volume);
+        }
+
+        if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+          volume = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
+          );
+          amount = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
+          );
+          total_supply = new BigNumber(
+            toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
+          ).minus(volume);
+        }
+      } catch (error) {
+        console.log('================================');
+        console.log('failed to parse transaction data: ', rawTransaction?.hash);
+        console.log('decodedData: ', decodedData);
+        console.log('TransactionService->parseTransactionData -> error', error);
+        console.log('================================');
       }
-    } catch (error) {
-      console.log('failed to parse transaction data: ', rawTransaction?.hash);
     }
 
     return {
@@ -231,7 +241,7 @@ export class TransactionService {
     rawTransaction: ITransaction,
   ): Promise<ITransaction> {
     try {
-      const factory = await this.tokenGatingService.loadTokenGatingFactory(
+      const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
       const decodedData = factory.contract.$decodeEvents(rawTransaction.tx.log);

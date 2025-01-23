@@ -6,20 +6,20 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
+import { InjectQueue } from '@nestjs/bull';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
+import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
 import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 import { fetchJson } from 'src/ae/utils/common';
 import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { initTokenSale, TokenSale } from 'token-gating-sdk';
-import { Token } from './entities/token.entity';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
 import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+import { initTokenSale, TokenSale } from 'bctsl-sdk';
+import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
+import moment from 'moment';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -37,9 +37,9 @@ export class TokensService {
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
-    private tokenGatingService: TokenGatingService,
+    private communityFactoryService: CommunityFactoryService,
 
-    private coinGeckoService: CoinGeckoService,
+    private aePricingService: AePricingService,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
@@ -80,30 +80,41 @@ export class TokensService {
   }
 
   async syncTokenPrice(token: Token): Promise<void> {
-    const data = await this.getTokeLivePrice(token);
+    try {
+      const data = await this.getTokeLivePrice(token);
 
-    await this.tokensRepository.update(token.id, data as any);
-    // update token ranks
+      await this.tokensRepository.update(token.id, data as any);
+      // update token ranks
 
-    // re-fetch token
-    this.tokenWebsocketGateway?.handleTokenUpdated({
-      sale_address: token.sale_address,
-      data,
-    });
+      // re-fetch token
+      this.tokenWebsocketGateway?.handleTokenUpdated({
+        sale_address: token.sale_address,
+        data,
+      });
+    } catch (error) {
+      //
+    }
   }
 
-  async getToken(address: string): Promise<Token> {
+  async getToken(
+    address: string,
+    shouldSyncTransactions = true,
+  ): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
     if (existingToken) {
       return existingToken;
     }
 
-    return this.createToken(address as Encoded.ContractAddress);
+    return this.createToken(
+      address as Encoded.ContractAddress,
+      shouldSyncTransactions,
+    );
   }
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
+    shouldSyncTransactions = true,
   ): Promise<Token | null> {
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
 
@@ -134,74 +145,39 @@ export class TokensService {
       await this.tokensRepository.delete(newToken.id);
       return null;
     }
-    await this.updateTokenCategory(newToken, factoryAddress);
     await this.syncTokenPrice(newToken);
+    // refresh token token info
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
-    void this.syncTokenHoldersQueue.add({
-      saleAddress,
-    });
-    void this.syncTransactionsQueue.add({
-      saleAddress,
-    });
+    void this.syncTokenHoldersQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: `syncTokenHolders-${saleAddress}`,
+        removeOnComplete: true,
+      },
+    );
+    if (shouldSyncTransactions) {
+      void this.syncTransactionsQueue.add(
+        {
+          saleAddress,
+        },
+        {
+          jobId: `syncTokenTransactions-${saleAddress}`,
+        },
+      );
+    }
     return this.findOne(newToken.id);
   }
 
   async updateTokenInitialRank(token: Token): Promise<number> {
     const tokensCount = await this.tokensRepository.count();
-    // TODO: add initial category_rank
+    // TODO: add initial collection_rank
     await this.tokensRepository.update(token.id, {
       rank: tokensCount + 1,
     });
     return tokensCount + 1;
-  }
-
-  async updateTokenCategory(token: Token, factoryAddress): Promise<string> {
-    if (token.category) {
-      return token.category;
-    }
-
-    try {
-      const communityFactory =
-        await this.tokenGatingService.loadTokenGatingFactory(factoryAddress);
-
-      const communityManagementContract =
-        await communityFactory.getCommunityManagementContract(
-          token.sale_address as Encoded.ContractAddress,
-        );
-
-      const metaInfo: Record<string, string> = await communityManagementContract
-        .meta_info()
-        .then((r) => {
-          const obj: Record<string, string> = {};
-          for (const [key, value] of r.decodedResult) {
-            obj[key] = value;
-          }
-          return obj;
-        })
-        .catch(() => {
-          return {};
-        });
-
-      if (!metaInfo?.category) {
-        const category = this.detectTokenCategoryFromName(token);
-        await this.tokensRepository.update(token.id, {
-          category,
-        });
-        return category;
-      }
-
-      await this.tokensRepository.update(token.id, {
-        category: metaInfo.category,
-      });
-      return metaInfo.category;
-    } catch (error) {
-      const category = this.detectTokenCategoryFromName(token);
-      await this.tokensRepository.update(token.id, {
-        category,
-      });
-      return category;
-    }
   }
 
   async updateTokenFactoryAddress(
@@ -220,21 +196,16 @@ export class TokensService {
     );
 
     const factory_address = response?.tx?.contract_id;
+    const collection = response?.tx.arguments[0].value;
 
     await this.tokensRepository.update(token.id, {
       factory_address: factory_address,
+      collection,
+      creator_address: response?.tx?.caller_id,
+      created_at: moment(response?.tx?.micro_time).toDate(),
     });
 
     return factory_address as Encoded.ContractAddress;
-  }
-
-  detectTokenCategoryFromName(token: Token): string {
-    const name = token.name.toLowerCase();
-    // if name is only numbers return number
-    if (/^\d+$/.test(name)) {
-      return 'number';
-    }
-    return 'word';
   }
 
   async getTokenContracts(token: Token) {
@@ -293,9 +264,9 @@ export class TokensService {
     const market_cap = total_supply.multipliedBy(price);
 
     const [price_data, sell_price_data, market_cap_data] = await Promise.all([
-      this.coinGeckoService.getPriceData(price),
-      this.coinGeckoService.getPriceData(sell_price),
-      this.coinGeckoService.getPriceData(market_cap),
+      this.aePricingService.getPriceData(price),
+      this.aePricingService.getPriceData(sell_price),
+      this.aePricingService.getPriceData(market_cap),
     ]);
 
     const dao_balance = await this.aeSdkService.sdk.getBalance(
