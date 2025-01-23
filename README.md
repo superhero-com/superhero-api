@@ -36,7 +36,7 @@ $ npm run start:prod
 Define the collections you want the api to support, if not cat defined here, the API will serve all collections.
 ```js
 // src/configs/contracts.ts
-export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactory> = {
+export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
     address: 'ct_..',
     collections: {},

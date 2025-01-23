@@ -237,7 +237,7 @@ export interface Wallets {
   [key: string]: Wallet;
 }
 
-export type ICommunityFactory = {
+export type ICommunityFactorySchema = {
   address: Encoded.ContractAddress;
   collections: {
     [key: `${string}-${Encoded.AccountAddress}`]: {

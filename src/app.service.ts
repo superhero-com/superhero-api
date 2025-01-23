@@ -5,7 +5,7 @@ import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { TX_FUNCTIONS } from './ae/utils/constants';
-import { ICommunityFactory, ITransaction } from './ae/utils/types';
+import { ICommunityFactorySchema, ITransaction } from './ae/utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import {
   DELETE_OLD_TOKENS_QUEUE,
@@ -107,7 +107,7 @@ export class AppService {
     });
   }
 
-  async loadFactory(factory: ICommunityFactory) {
+  async loadFactory(factory: ICommunityFactorySchema) {
     const factoryInstance = await this.communityFactoryService.loadFactory(
       factory.address,
     );

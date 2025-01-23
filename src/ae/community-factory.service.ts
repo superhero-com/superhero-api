@@ -4,7 +4,7 @@ import { BCL_FACTORY } from 'src/configs';
 import { CommunityFactory, initCommunityFactory } from 'bctsl-sdk';
 import { AeSdkService } from './ae-sdk.service';
 import { ACTIVE_NETWORK } from './utils/networks';
-import { ICommunityFactory } from './utils/types';
+import { ICommunityFactorySchema } from './utils/types';
 
 @Injectable()
 export class CommunityFactoryService {
@@ -32,9 +32,9 @@ export class CommunityFactoryService {
    * If the factory's collections are not already populated, it loads the token gating factory
    * and populates the collections from the collection registry.
    *
-   * @returns {Promise<ICommunityFactory>} A promise that resolves to the factory schema.
+   * @returns {Promise<ICommunityFactorySchema>} A promise that resolves to the factory schema.
    */
-  async getCurrentFactory(): Promise<ICommunityFactory> {
+  async getCurrentFactory(): Promise<ICommunityFactorySchema> {
     const factory = BCL_FACTORY[ACTIVE_NETWORK.networkId];
 
     if (!Object.keys(factory.collections).length) {
