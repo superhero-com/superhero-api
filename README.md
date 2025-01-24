@@ -3,6 +3,7 @@
 ## 📑 Table of Contents
 
 - [Project Overview](#-project-overview)
+- [Related Components](#-related-components)
 - [Project Architecture](#-project-architecture)
   - [Directory Structure](#-directory-structure)
   - [Core Components](#-core-components)
@@ -24,6 +25,12 @@
 ## 🎯 Project Overview
 
 This API serves as a caching and synchronization layer for the Bonding Curve Community platform on the Aeternity blockchain. It provides real-time token data, pricing information, and transaction history while maintaining collection-specific validation rules.
+
+### 🔗 Related Components
+
+- [bctsl/bctsl-sdk](https://github.com/bctsl/bctsl-sdk) - SDK for interacting with the bonding curve contracts
+- [bctsl/bctsl-contracts](https://github.com/bctsl/bctsl-contracts) - Smart contracts for the bonding curve token sale platform
+- [bctsl/bcl](https://github.com/bctsl/bcl) - Frontend application for the Bonding Curve Community platform
 
 ### ✨ Key Features
 
