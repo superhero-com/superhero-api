@@ -1,5 +1,128 @@
 # Bonding Curve TokenSale Launchpad API
 
+## Project Overview
+
+This API serves as a caching and synchronization layer for the Bonding Curve Community platform on the Aeternity blockchain. It provides real-time token data, pricing information, and transaction history while maintaining collection-specific validation rules.
+
+### Key Features
+
+- **Multi-Collection Support**: Handle multiple token collections with unique naming conventions and validation rules
+- **Real-time Pricing**: Synchronize and cache token pricing from the bonding curve contracts
+- **Transaction Tracking**: Monitor and validate buy/sell transactions
+- **Data Rankings**: Provide token rankings globally and per collection
+- **WebSocket Events**: Broadcast real-time updates for token prices, creation, and transactions
+- **Data Reorganization**: Automatically handle and remove invalid transactions
+- **MDW Integration**: Seamless integration with Aeternity Middleware (MDW)
+
+## Project Architecture
+
+### Directory Structure
+
+```
+src/
+├── ae/                    # Aeternity blockchain integration
+├── ae-pricing/           # Pricing calculation and synchronization
+├── configs/              # Application configuration
+├── tokens/              # Token management and WebSocket events
+├── transactions/        # Transaction processing and validation
+└── utils/               # Utility functions and helpers
+```
+
+### Core Components
+
+1. **Token Management** (`src/tokens/`)
+   - Token data caching and retrieval
+   - WebSocket gateway for real-time updates
+   - Collection-specific validation rules
+   - Token ranking calculations
+   - Price history tracking
+
+2. **Transaction Processing** (`src/transactions/`)
+   - Transaction monitoring and validation
+   - Buy/Sell operation tracking
+   - Invalid transaction handling
+   - Transaction history management
+
+3. **Aeternity Integration** (`src/ae/`)
+   - MDW client implementation
+   - Blockchain event monitoring
+   - Contract interaction
+   - Network synchronization
+
+4. **Pricing Engine** (`src/ae-pricing/`)
+   - Price synchronization
+
+### Data Flow
+
+1. **Initialization**
+   - Load collection configurations
+   - Establish MDW connection
+   - Initialize WebSocket server
+   - Start price synchronization
+
+2. **Token Operations**
+   - Validate token names against collection rules
+   - Calculate and cache token prices
+   - Track token ownership
+   - Update token rankings
+   - Broadcast token events
+
+3. **Transaction Handling**
+   - Monitor blockchain for new transactions
+   - Validate transaction legitimacy
+   - Update token prices and ownership
+   - Broadcast transaction events
+   - Handle transaction reorganization
+
+4. **Data Synchronization**
+   - Periodic price updates
+   - Transaction history synchronization
+   - Data cleanup and validation
+   - Cache management
+
+### API Features
+
+1. **Token Endpoints**
+   - Token validation
+   - Price history retrieval
+   - Token rankings (global/collection)
+
+2. **Transaction Endpoints**
+   - Transaction history
+   - Transaction validation status
+
+3. **WebSocket Events**
+   - Token price updates
+   - New token creation
+   - Transaction notifications
+   - Collection updates
+
+4. **Collection Management**
+   - Collection configuration
+   - Validation rules
+   - Naming conventions
+   - Character code restrictions
+
+### Caching Strategy
+
+The API implements a multi-layer caching strategy:
+
+1. **In-Memory Cache**
+   - Active token prices
+   - Recent transactions
+   - Validation rules
+
+2. **Redis Cache**
+   - Token rankings
+   - Price history
+   - Collection statistics
+
+3. **PostgreSQL Database**
+   - Historical data
+   - Transaction records
+   - Token metadata
+   - Collection configurations
+
 ## System Requirements
 
 - Node.js >= 18
