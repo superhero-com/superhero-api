@@ -1,5 +1,8 @@
 # 🚀 Bonding Curve TokenSale Launchpad API
 
+> Create, trade, and manage tokens on the æternity blockchain with advanced features and multi-level affiliation system.
+
+
 ## 📑 Table of Contents
 
 - [Project Overview](#-project-overview)
