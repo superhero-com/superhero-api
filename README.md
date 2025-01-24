@@ -1,22 +1,42 @@
-# Bonding Curve TokenSale Launchpad API
+# 🚀 Bonding Curve TokenSale Launchpad API
 
-## Project Overview
+## 📑 Table of Contents
+
+- [Project Overview](#project-overview)
+- [Project Architecture](#project-architecture)
+  - [Directory Structure](#directory-structure)
+  - [Core Components](#core-components)
+  - [Data Flow](#data-flow)
+  - [API Features](#api-features)
+  - [Caching Strategy](#caching-strategy)
+- [System Requirements](#system-requirements)
+- [Quick Start with Docker](#quick-start-with-docker)
+- [Manual Installation](#manual-installation)
+- [Environment Configuration](#environment-configuration)
+- [Available Scripts](#available-scripts)
+- [Docker Services](#docker-services)
+- [Token Categories Configuration](#token-categories-configuration)
+- [Development](#development)
+- [Production Deployment](#production-deployment)
+- [Contributing](#contributing)
+
+## 🎯 Project Overview
 
 This API serves as a caching and synchronization layer for the Bonding Curve Community platform on the Aeternity blockchain. It provides real-time token data, pricing information, and transaction history while maintaining collection-specific validation rules.
 
-### Key Features
+### ✨ Key Features
 
-- **Multi-Collection Support**: Handle multiple token collections with unique naming conventions and validation rules
-- **Real-time Pricing**: Synchronize and cache token pricing from the bonding curve contracts
-- **Transaction Tracking**: Monitor and validate buy/sell transactions
-- **Data Rankings**: Provide token rankings globally and per collection
-- **WebSocket Events**: Broadcast real-time updates for token prices, creation, and transactions
-- **Data Reorganization**: Automatically handle and remove invalid transactions
-- **MDW Integration**: Seamless integration with Aeternity Middleware (MDW)
+- 🔄 **Multi-Collection Support**: Handle multiple token collections with unique naming conventions and validation rules
+- ⚡ **Real-time Pricing**: Synchronize and cache token pricing from the bonding curve contracts
+- 📊 **Transaction Tracking**: Monitor and validate buy/sell transactions
+- 🏆 **Data Rankings**: Provide token rankings globally and per collection
+- 🔔 **WebSocket Events**: Broadcast real-time updates for token prices, creation, and transactions
+- 🧹 **Data Reorganization**: Automatically handle and remove invalid transactions
+- 🔗 **MDW Integration**: Seamless integration with Aeternity Middleware (MDW)
 
-## Project Architecture
+## 🏗 Project Architecture
 
-### Directory Structure
+### 📁 Directory Structure
 
 ```
 src/
@@ -28,109 +48,109 @@ src/
 └── utils/               # Utility functions and helpers
 ```
 
-### Core Components
+### 🧩 Core Components
 
-1. **Token Management** (`src/tokens/`)
+1. 🎫 **Token Management** (`src/tokens/`)
    - Token data caching and retrieval
    - WebSocket gateway for real-time updates
    - Collection-specific validation rules
    - Token ranking calculations
    - Price history tracking
 
-2. **Transaction Processing** (`src/transactions/`)
+2. 💱 **Transaction Processing** (`src/transactions/`)
    - Transaction monitoring and validation
    - Buy/Sell operation tracking
    - Invalid transaction handling
    - Transaction history management
 
-3. **Aeternity Integration** (`src/ae/`)
+3. ⛓ **Aeternity Integration** (`src/ae/`)
    - MDW client implementation
    - Blockchain event monitoring
    - Contract interaction
    - Network synchronization
 
-4. **Pricing Engine** (`src/ae-pricing/`)
+4. 💰 **Pricing Engine** (`src/ae-pricing/`)
    - Price synchronization
 
-### Data Flow
+### 🔄 Data Flow
 
-1. **Initialization**
+1. 🚦 **Initialization**
    - Load collection configurations
    - Establish MDW connection
    - Initialize WebSocket server
    - Start price synchronization
 
-2. **Token Operations**
+2. 🎫 **Token Operations**
    - Validate token names against collection rules
    - Calculate and cache token prices
    - Track token ownership
    - Update token rankings
    - Broadcast token events
 
-3. **Transaction Handling**
+3. 💸 **Transaction Handling**
    - Monitor blockchain for new transactions
    - Validate transaction legitimacy
    - Update token prices and ownership
    - Broadcast transaction events
    - Handle transaction reorganization
 
-4. **Data Synchronization**
+4. 🔄 **Data Synchronization**
    - Periodic price updates
    - Transaction history synchronization
    - Data cleanup and validation
    - Cache management
 
-### API Features
+### 🛠 API Features
 
-1. **Token Endpoints**
+1. 🎫 **Token Endpoints**
    - Token validation
    - Price history retrieval
    - Token rankings (global/collection)
 
-2. **Transaction Endpoints**
+2. 💱 **Transaction Endpoints**
    - Transaction history
    - Transaction validation status
 
-3. **WebSocket Events**
+3. 🔔 **WebSocket Events**
    - Token price updates
    - New token creation
    - Transaction notifications
    - Collection updates
 
-4. **Collection Management**
+4. 📚 **Collection Management**
    - Collection configuration
    - Validation rules
    - Naming conventions
    - Character code restrictions
 
-### Caching Strategy
+### 💾 Caching Strategy
 
 The API implements a multi-layer caching strategy:
 
-1. **In-Memory Cache**
+1. 💡 **In-Memory Cache**
    - Active token prices
    - Recent transactions
    - Validation rules
 
-2. **Redis Cache**
+2. ⚡ **Redis Cache**
    - Token rankings
    - Price history
    - Collection statistics
 
-3. **PostgreSQL Database**
+3. 💽 **PostgreSQL Database**
    - Historical data
    - Transaction records
    - Token metadata
    - Collection configurations
 
-## System Requirements
+## 🛠 System Requirements
 
-- Node.js >= 18
-- PostgreSQL >= 16
-- Redis (latest)
-- Docker and Docker Compose (for containerized setup)
+- 📦 Node.js >= 18
+- 🗄️ PostgreSQL >= 16
+- 📝 Redis (latest)
+- 🐳 Docker and Docker Compose (for containerized setup)
 
-## Quick Start with Docker
+## 🚀 Quick Start with Docker
 
 The easiest way to run the application is using Docker Compose:
 
@@ -148,7 +168,7 @@ docker compose up --build
 
 The application will be available at `http://localhost:3000`.
 
-## Manual Installation
+## 📦 Manual Installation
 
 If you prefer to run the services locally:
 
@@ -163,7 +183,7 @@ cp .env.example .env
 npm run start:dev
 ```
 
-## Environment Configuration
+## 📝 Environment Configuration
 
 Configure the following environment variables in your `.env` file:
 
@@ -188,7 +208,7 @@ AE_NETWORK_ID=ae_mainnet  # or ae_uat for testnet
 APP_PORT=3000
 ```
 
-## Available Scripts
+## 📊 Available Scripts
 
 ```bash
 # Development
@@ -197,7 +217,7 @@ npm run start:dev      # Start with hot-reload
 npm run start:prod     # Start in production mode
 ```
 
-## Docker Services
+## 🐳 Docker Services
 
 The project includes three main services:
 
@@ -216,7 +236,7 @@ The project includes three main services:
    - Persists data in a Docker volume
    - Accessible on port 6379
 
-## Token Categories Configuration
+## 📚 Token Categories Configuration
 
 Define the collections you want the API to support in `src/configs/contracts.ts`:
 
@@ -240,9 +260,9 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
 };
 ```
 
-## Development
+## 💻 Development
 
-### Docker Commands
+### 🐳 Docker Commands
 
 ```bash
 # Start all services
@@ -261,11 +281,11 @@ docker compose logs -f
 docker compose up --build
 ```
 
-### Database Management
+### 🗄️ Database Management
 
 The database automatically syncs schema changes in development (`DB_SYNC=true`). For production, you should manage database migrations manually.
 
-## Production Deployment
+## 🚀 Production Deployment
 
 For production deployment:
 
@@ -275,6 +295,6 @@ For production deployment:
 4. Configure proper network settings
 5. Enable SSL/TLS
 
-## Contributing
+## 🤝 Contributing
 
 Please refer to our contribution guidelines for details on our code of conduct and the process for submitting pull requests.
