@@ -19,6 +19,7 @@
 - [Development](#-development)
 - [Production Deployment](#-production-deployment)
 - [Contributing](#-contributing)
+- [License](#-license)
 
 ## 🎯 Project Overview
 
@@ -298,3 +299,9 @@ For production deployment:
 ## 🤝 Contributing
 
 Please refer to our contribution guidelines for details on our code of conduct and the process for submitting pull requests.
+
+## 📄 License
+
+This project is licensed under the ISC License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2025, BCTSL
