@@ -18,6 +18,7 @@
 - [Docker Services](#-docker-services)
 - [Token Categories Configuration](#-token-categories-configuration)
 - [Development](#-development)
+- [Contributing Guide](#-contributing-guide)
 - [Production Deployment](#-production-deployment)
 - [Contributing](#-contributing)
 - [License](#-license)
@@ -270,6 +271,8 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
 
 ## 💻 Development
 
+For detailed information about our development standards, testing practices, and contribution guidelines, please see our [Contributing Guide](CONTRIBUTING.md).
+
 ### 🐳 Docker Commands
 
 ```bash
@@ -305,7 +308,13 @@ For production deployment:
 
 ## 🤝 Contributing
 
-Please refer to our contribution guidelines for details on our code of conduct and the process for submitting pull requests.
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
+
+- Development standards
+- Code style and linting
+- Testing requirements
+- Commit message conventions
+- Pull request process
 
 ## 📄 License
 
