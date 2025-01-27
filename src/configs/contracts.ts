@@ -15,7 +15,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     collections: {},
   },
   [NETWORK_ID_TESTNET]: {
-    address: 'ct_2i4e5bXZbAsdjZZRikZEvBA1M8B5xn9shpVPQJiqUoNWDCPuUm',
+    address: 'ct_2UGLvS4zBMG6W7KEM46qgcaom7FXSNNx99pjeyU7AykXQcwzV2',
     collections: {
       // 'ALPHA-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
       //   name: 'ALPHA',
