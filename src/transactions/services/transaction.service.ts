@@ -150,6 +150,7 @@ export class TransactionService {
       this.tokenWebsocketGateway?.handleTokenHistory({
         sale_address: saleAddress,
         data: txData,
+        token: token,
       });
       void this.syncTokenHoldersQueue.add(
         {
