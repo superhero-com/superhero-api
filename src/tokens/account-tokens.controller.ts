@@ -43,7 +43,7 @@ export class AccountTokensController {
   @ApiOkResponsePaginated(TokenHolderDto)
   @CacheTTL(1000)
   @Get(':address/tokens')
-  async listTokenHolders(
+  async listAccountTokens(
     @Param('address') address: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
