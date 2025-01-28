@@ -48,7 +48,7 @@ export class AccountTokensController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'balance',
-    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
+    @Query('order_direction') orderDirection: 'DESC' | 'DESC' = 'DESC',
   ): Promise<Pagination<TokenHolder>> {
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
