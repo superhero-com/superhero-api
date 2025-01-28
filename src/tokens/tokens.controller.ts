@@ -188,6 +188,11 @@ export class TokensController {
     const token = await this.tokensService.findByAddress(address);
 
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    queryBuilder.andWhere('token.factory_address = :address', {
+      address: factory.address,
+    });
     queryBuilder.orderBy(`token.rank`, 'ASC');
 
     const minRank = token.rank - Math.floor(limit / 2);
