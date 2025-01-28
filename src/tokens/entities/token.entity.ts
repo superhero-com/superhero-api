@@ -33,7 +33,9 @@ export class Token {
   })
   factory_address: string;
 
-  @Column()
+  @Column({
+    unique: true,
+  })
   sale_address: string;
 
   @Column({
