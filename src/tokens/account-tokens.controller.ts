@@ -33,6 +33,12 @@ export class AccountTokensController {
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiQuery({
+    name: 'order_by',
+    enum: ['balance', 'percentage'],
+    required: false,
+  })
+  @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiOperation({ operationId: 'listTokenHolders' })
   @ApiOkResponsePaginated(TokenHolderDto)
   @CacheTTL(1000)
@@ -41,6 +47,8 @@ export class AccountTokensController {
     @Param('address') address: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+    @Query('order_by') orderBy: string = 'balance',
+    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<TokenHolder>> {
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
@@ -49,6 +57,7 @@ export class AccountTokensController {
     queryBuilder.where('token_holder.address = :address', {
       address: address,
     });
+    queryBuilder.orderBy(`token_holder.${orderBy}`, orderDirection);
     queryBuilder.leftJoinAndSelect('token_holder.token', 'token');
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
