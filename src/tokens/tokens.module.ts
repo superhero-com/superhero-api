@@ -19,6 +19,7 @@ import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
+import { AccountTokensController } from './account-tokens.controller';
 
 @Module({
   imports: [
@@ -43,7 +44,7 @@ import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
       },
     ),
   ],
-  controllers: [TokensController],
+  controllers: [TokensController, AccountTokensController],
   providers: [
     TokensService,
     TokenWebsocketGateway,
