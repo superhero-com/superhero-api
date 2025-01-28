@@ -20,10 +20,14 @@ import {
 } from './transactions/queues/constants';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
+import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
   imports: [
     ConfigModule.forRoot(),
+    CacheModule.register({
+      isGlobal: true,
+    }),
     BullModule.forRoot({
       redis: REDIS_CONFIG,
     }),

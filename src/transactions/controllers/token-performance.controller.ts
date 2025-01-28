@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
@@ -8,8 +8,10 @@ import { TokenHolder } from '../../tokens/entities/token-holders.entity';
 import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';
 import { TokenPriceMovementDto } from '../dto/token-stats.dto';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 
 @Controller('api/tokens')
+@UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
@@ -34,6 +36,7 @@ export class TokenPerformanceController {
     description: 'Token address or name',
   })
   @Get(':address/performance')
+  @CacheTTL(60 * 1000)
   @ApiResponse({
     type: TokenPriceMovementDto,
   })
