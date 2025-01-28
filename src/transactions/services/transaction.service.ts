@@ -128,6 +128,8 @@ export class TransactionService {
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
       verified: false,
+      token_rank: token.rank,
+      token_collection_rank: token.collection_rank,
     };
     // if transaction 2 days old
     if (!!exists?.id) {
