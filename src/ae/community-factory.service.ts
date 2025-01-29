@@ -8,7 +8,10 @@ import { ICommunityFactorySchema } from './utils/types';
 
 @Injectable()
 export class CommunityFactoryService {
-  cachedFactorySchema: Record<Encoded.ContractAddress, ICommunityFactorySchema>;
+  cachedFactorySchema: Record<
+    Encoded.ContractAddress,
+    ICommunityFactorySchema
+  > = {};
   factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
   constructor(private aeSdkService: AeSdkService) {
     //
