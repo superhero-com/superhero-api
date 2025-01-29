@@ -63,12 +63,12 @@ export class ValidateTokenTransactionsQueue {
 
       await this.transactionRepository
         .createQueryBuilder('transactions')
-        .where('transactions.block_height >= :from', { from: job.data.from })
-        .andWhere('transactions.block_height <= :to', { to: job.data.to })
-        .andWhere('transactions.verified = false')
-        .andWhere('transactions.tokenId = :tokenId', {
+        .where('transactions.tokenId = :tokenId', {
           tokenId: token.id,
         })
+        .andWhere('transactions.block_height >= :from', { from: job.data.from })
+        .andWhere('transactions.block_height <= :to', { to: job.data.to })
+        .andWhere('transactions.verified = false')
         .andWhere({
           tx_hash: Not(In(this.validated_hashes)),
         })

@@ -7,6 +7,7 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -21,6 +22,7 @@ export class Transaction {
   @ManyToOne(() => Token, (token) => token.transactions, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'tokenId' })
   token: Token;
 
   @Index()
