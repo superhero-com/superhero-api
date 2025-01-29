@@ -22,7 +22,9 @@ export class SaveTransactionQueue {
   /**
    * @param job
    */
-  @Process()
+  @Process({
+    concurrency: 100,
+  })
   async process(job: Job<ISaveTransactionQueue>) {
     this.logger.log(
       `SaveTransactionQueue->started:${job.data.transaction.tx.contractId}:${job.data.transaction.hash}`,

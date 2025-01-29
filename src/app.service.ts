@@ -86,6 +86,7 @@ export class AppService {
               },
               {
                 jobId: transaction.hash,
+                lifo: true,
               },
             );
           }
