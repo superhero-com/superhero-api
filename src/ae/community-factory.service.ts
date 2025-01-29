@@ -8,6 +8,7 @@ import { ICommunityFactorySchema } from './utils/types';
 
 @Injectable()
 export class CommunityFactoryService {
+  cachedFactorySchema: Record<Encoded.ContractAddress, ICommunityFactorySchema>;
   factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
   constructor(private aeSdkService: AeSdkService) {
     //
@@ -37,6 +38,10 @@ export class CommunityFactoryService {
   async getCurrentFactory(): Promise<ICommunityFactorySchema> {
     const factory = BCL_FACTORY[ACTIVE_NETWORK.networkId];
 
+    if (this.cachedFactorySchema[factory.address]) {
+      return this.cachedFactorySchema[factory.address];
+    }
+
     if (!Object.keys(factory.collections).length) {
       const factoryInstance = await this.loadFactory(factory.address);
       const collection_registry: any = await factoryInstance.contract
@@ -65,6 +70,8 @@ export class CommunityFactoryService {
         };
       }
     }
+
+    this.cachedFactorySchema[factory.address] = factory;
 
     return factory;
   }
