@@ -15,6 +15,7 @@ import { Repository } from 'typeorm';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
+import { CommunityFactoryService } from 'src/ae/community-factory.service';
 
 @Controller('api/accounts')
 @UseInterceptors(CacheInterceptor)
@@ -23,6 +24,7 @@ export class AccountTokensController {
   constructor(
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -31,6 +33,10 @@ export class AccountTokensController {
     type: 'string',
     description: 'Account Address',
   })
+  @ApiQuery({ name: 'search', type: 'string', required: false })
+  @ApiQuery({ name: 'factory_address', type: 'string', required: false })
+  @ApiQuery({ name: 'creator_address', type: 'string', required: false })
+  @ApiQuery({ name: 'owner_address', type: 'string', required: false })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -45,6 +51,10 @@ export class AccountTokensController {
   @Get(':address/tokens')
   async listAccountTokens(
     @Param('address') address: string,
+    @Query('search') search = undefined,
+    @Query('factory_address') factory_address = undefined,
+    @Query('creator_address') creator_address = undefined,
+    @Query('owner_address') owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'balance',
@@ -59,6 +69,35 @@ export class AccountTokensController {
     });
     queryBuilder.orderBy(`token_holder.${orderBy}`, orderDirection);
     queryBuilder.leftJoinAndSelect('token_holder.token', 'token');
+
+    if (factory_address) {
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address,
+      });
+    } else {
+      const factory = await this.communityFactoryService.getCurrentFactory();
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address: factory.address,
+      });
+    }
+
+    if (creator_address) {
+      queryBuilder.andWhere('token.creator_address = :creator_address', {
+        creator_address,
+      });
+    }
+
+    if (owner_address) {
+      queryBuilder.andWhere('token.owner_address = :owner_address', {
+        owner_address,
+      });
+    }
+
+    if (search) {
+      queryBuilder.andWhere('token.name ILIKE :search', {
+        search: `%${search}%`,
+      });
+    }
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
   }
