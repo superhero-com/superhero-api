@@ -90,6 +90,8 @@ export class AppService {
               },
             );
           }
+        } else if (syncedTransactions.length > 100) {
+          syncedTransactions = [];
         }
       },
     );
