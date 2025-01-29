@@ -17,10 +17,23 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_TESTNET]: {
     address: 'ct_2UGLvS4zBMG6W7KEM46qgcaom7FXSNNx99pjeyU7AykXQcwzV2',
     collections: {
-      // 'ALPHA-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
-      //   name: 'ALPHA',
-      //   allowed_name_length: '20',
-      // },
+      'WORDS-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
+        id: 'WORDS-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE',
+        name: 'WORDS',
+        allowed_name_length: '20',
+        allowed_name_chars: [
+          {
+            SingleChar: [45],
+          },
+          {
+            CharRangeFromTo: [48, 57],
+          },
+          {
+            CharRangeFromTo: [65, 90],
+          },
+        ],
+        description: 'Tokenize a unique name with up to 20.',
+      },
     },
   },
 };
