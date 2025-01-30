@@ -136,6 +136,7 @@ export interface ITx {
   abiVersion: number;
   accountId?: Encoded.AccountAddress;
   amount: number;
+  microTime: number;
   arguments: ITxArguments[];
   callData?: string; // TODO find source
   call_data?: string; // TODO incoming data is parsed with the use of camelcaseDeep, but not always

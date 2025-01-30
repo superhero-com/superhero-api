@@ -91,6 +91,17 @@ export class TransactionService {
       return;
     }
 
+    if (
+      rawTransaction.tx.function == TX_FUNCTIONS.create_community &&
+      !token.factory_address
+    ) {
+      await this.tokenService.updateTokenMetaDataFromCreateTx(
+        token,
+        rawTransaction,
+      );
+      token = await this.tokenService.findOne(token.id);
+    }
+
     const decodedData = rawTransaction.tx.decodedData;
 
     const priceChangeData = decodedData.find(
