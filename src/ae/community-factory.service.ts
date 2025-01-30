@@ -56,7 +56,8 @@ export class CommunityFactoryService {
           collection_registry as any,
         )) {
           const name = collectionName?.split('-ak_')[0];
-          const allowed_name_length = collection.allowed_name_length?.toString();
+          const allowed_name_length =
+            collection.allowed_name_length?.toString();
           factory.collections[collectionName] = {
             id: collectionName,
             name,
