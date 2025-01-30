@@ -212,16 +212,21 @@ export class TokensService {
   async getTokenContractsBySaleAddress(
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts> {
+    if (this.contracts[saleAddress]) {
+      return this.contracts[saleAddress];
+    }
     const { instance } = await initTokenSale(
       this.aeSdkService.sdk,
       saleAddress,
     );
     const tokenContractInstance = await instance?.tokenContractInstance();
 
-    return {
+    this.contracts[saleAddress] = {
       instance,
       tokenContractInstance,
     };
+
+    return this.contracts[saleAddress];
   }
 
   private async getTokeLivePrice(token: Token) {
