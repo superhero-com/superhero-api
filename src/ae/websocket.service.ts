@@ -2,6 +2,7 @@ import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { v4 as genUuid } from 'uuid';
 
 import { Injectable } from '@nestjs/common';
+import { ACTIVE_NETWORK } from 'src/configs';
 import { WebSocket } from 'ws';
 import {
   WEB_SOCKET_CHANNELS,
@@ -16,7 +17,6 @@ import {
   ITransaction,
   WebSocketChannelName,
 } from './utils/types';
-import { ACTIVE_NETWORK } from './utils/networks';
 
 type PingI = {
   id: string;

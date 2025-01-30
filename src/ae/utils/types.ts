@@ -1,8 +1,4 @@
-import type {
-  BrowserWindowMessageConnection,
-  Encoded,
-  Tag,
-} from '@aeternity/aepp-sdk';
+import type { Encoded, Tag } from '@aeternity/aepp-sdk';
 import {
   TX_FUNCTIONS,
   WEB_SOCKET_CHANNELS,
@@ -198,43 +194,6 @@ export interface IMiddlewareWebSocketSubscriptionMessage {
   payload: WebSocketChannelName;
   target?: string;
   source?: WebSocketSourceName;
-}
-
-export enum BONDING_CURVE {
-  LINEAR,
-  STEPPED,
-}
-
-export type BondingCurveLinearState = {
-  alpha: number;
-  init_buy_price: number;
-  init_sell_price: number;
-};
-
-export type SteppedBounds = {
-  lower: number;
-  upper: number;
-  price: number;
-}[];
-
-export type BondingCurveSteppedState = {
-  stepped_bounds: SteppedBounds;
-  supported_decimals: number;
-  sell_return_percentage: number;
-  price_denominator: number;
-};
-
-export interface Wallet {
-  info: {
-    id: string;
-    type: string;
-    origin: string;
-  };
-  getConnection: () => BrowserWindowMessageConnection;
-}
-
-export interface Wallets {
-  [key: string]: Wallet;
 }
 
 export type ICommunityFactorySchema = {

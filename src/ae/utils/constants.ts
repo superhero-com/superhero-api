@@ -1,4 +1,3 @@
-import { Encoding } from '@aeternity/aepp-sdk';
 import type { CurrencyCode, ICurrency, IToken } from './types';
 
 export const AETERNITY_CONTRACT_ID = 'aeternity';
@@ -78,29 +77,8 @@ export const WEB_SOCKET_SUBSCRIBE = 'Subscribe';
 export const WEB_SOCKET_UNSUBSCRIBE = 'Unsubscribe';
 export const WEB_SOCKET_RECONNECT_TIMEOUT = 20000;
 
-export const PUSH_NOTIFICATION_AUTO_CLOSE_TIMEOUT = 10000;
-
 export const TX_FUNCTIONS = {
   buy: 'buy',
   sell: 'sell',
   create_community: 'create_community',
 } as const;
-
-export enum CreateOptionsType {
-  FIXED_PRICE = 'FIXED_PRICE',
-  BONDING_CURVE = 'BONDING_CURVE',
-  CUSTOM_OPTIONS = 'CUSTOM_OPTIONS',
-}
-
-export const HASH_REGEX = /^[1-9A-HJ-NP-Za-km-z]{48,50}$/;
-
-export const AE_HASH_PREFIXES_ALLOWED = [
-  Encoding.AccountAddress,
-  Encoding.Channel,
-  Encoding.ContractAddress,
-  Encoding.Name,
-  Encoding.OracleAddress,
-  Encoding.TxHash,
-] as const;
-
-export const AE_AENS_DOMAIN = '.chain';

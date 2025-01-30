@@ -1,9 +1,9 @@
+import { ICommunityFactorySchema } from 'src/ae/utils/types';
 import {
   INetworkTypes,
   NETWORK_ID_MAINNET,
   NETWORK_ID_TESTNET,
-} from 'src/ae/utils/networks';
-import { ICommunityFactorySchema } from 'src/ae/utils/types';
+} from './network';
 
 /**
  * Define the collections you want the api to support for each network.
