@@ -73,7 +73,6 @@ export class WebSocketService {
   private setupReconnectionCheck() {
     this.reconnectInterval = setInterval(() => {
       if (this.pings.length) {
-        console.log('Reconnecting...');
         this.isWsConnected = false;
         this.reconnect();
         return;
@@ -83,7 +82,6 @@ export class WebSocketService {
         timestamp: Date.now(),
       };
       this.pings.push(pingData);
-      console.log('PING::', pingData.id);
       this.wsClient.ping(
         JSON.stringify({
           op: 'Ping',
@@ -95,7 +93,6 @@ export class WebSocketService {
 
   private reconnect() {
     if (!this.isWsConnected) {
-      console.log('Attempting to reconnect...');
       this.connect(ACTIVE_NETWORK.websocketUrl);
     }
   }

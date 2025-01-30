@@ -1,13 +1,5 @@
-import { Encoded, toAe } from '@aeternity/aepp-sdk';
-import { InjectQueue } from '@nestjs/bull';
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
-import moment from 'moment';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { ITransaction } from '@/utils/types';
 import { TX_FUNCTIONS } from '@/configs';
 import { Token } from '@/tokens/entities/token.entity';
 import {
@@ -16,6 +8,14 @@ import {
 } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
+import { ITransaction } from '@/utils/types';
+import { Encoded, toAe } from '@aeternity/aepp-sdk';
+import { InjectQueue } from '@nestjs/bull';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
+import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 
@@ -235,11 +235,7 @@ export class TransactionService {
           ).minus(volume);
         }
       } catch (error) {
-        console.log('================================');
-        console.log('failed to parse transaction data: ', rawTransaction?.hash);
-        console.log('decodedData: ', decodedData);
-        console.log('TransactionService->parseTransactionData -> error', error);
-        console.log('================================');
+        //
       }
     }
 

@@ -8,7 +8,7 @@ import {
   IMiddlewareWebSocketSubscriptionMessage,
   ITransaction,
 } from '@/utils/types';
-import { Test, TestingModule } from '@nestjs/testing';
+import { Test } from '@nestjs/testing';
 import { v4 as genUuid } from 'uuid';
 import { WebSocket } from 'ws';
 import { WebSocketService } from './websocket.service';
