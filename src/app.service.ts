@@ -21,7 +21,6 @@ import {
 
 @Injectable()
 export class AppService {
-  tokens: string[] = [];
   constructor(
     private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
@@ -119,7 +118,6 @@ export class AppService {
       const registeredTokens =
         await factoryInstance.listRegisteredTokens(collection);
       for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-        this.tokens.push(saleAddress);
         console.log('BCLService->dispatch::', symbol, saleAddress);
         this.loadTokenData(saleAddress as Encoded.ContractAddress);
       }
