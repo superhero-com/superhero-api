@@ -1,7 +1,7 @@
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AeModule } from 'src/ae/ae.module';
+import { AeModule } from '@/ae/ae.module';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import {
@@ -17,8 +17,8 @@ import { SyncTokensRanksQueue } from './queues/sync-tokens-ranks.queue';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
+import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AccountTokensController } from './account-tokens.controller';
 
 @Module({

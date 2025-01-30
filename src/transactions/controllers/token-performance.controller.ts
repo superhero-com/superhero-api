@@ -3,7 +3,7 @@ import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
-import { Transaction } from 'src/transactions/entities/transaction.entity';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Repository } from 'typeorm';
 import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';

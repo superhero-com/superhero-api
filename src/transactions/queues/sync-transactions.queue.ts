@@ -3,11 +3,11 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { fetchJson } from 'src/utils/common';
-import { ITransaction } from 'src/utils/types';
-import { ACTIVE_NETWORK } from 'src/configs';
-import { Token } from 'src/tokens/entities/token.entity';
-import { TokensService } from 'src/tokens/tokens.service';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { ACTIVE_NETWORK } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '../services/transaction.service';
 import { SYNC_TRANSACTIONS_QUEUE } from './constants';
 

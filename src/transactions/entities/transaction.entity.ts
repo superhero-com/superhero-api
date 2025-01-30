@@ -1,7 +1,7 @@
 import BigNumber from 'bignumber.js';
-import { IPriceDto } from 'src/tokens/dto/price.dto';
-import { Token } from 'src/tokens/entities/token.entity';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
+import { IPriceDto } from '@/tokens/dto/price.dto';
+import { Token } from '@/tokens/entities/token.entity';
+import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
 import {
   Column,
   CreateDateColumn,

@@ -3,7 +3,7 @@ import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import moment from 'moment';
-import { TokensService } from 'src/tokens/tokens.service';
+import { TokensService } from '@/tokens/tokens.service';
 import {
   ITransactionPreview,
   TransactionHistoryService,

@@ -1,7 +1,7 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-import { ITransaction } from 'src/utils/types';
+import { ITransaction } from '@/utils/types';
 
 import { TransactionService } from '../services/transaction.service';
 import { SAVE_TRANSACTION_QUEUE } from './constants';

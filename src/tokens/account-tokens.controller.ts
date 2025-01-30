@@ -15,7 +15,7 @@ import { Repository } from 'typeorm';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 
 @Controller('api/accounts')
 @UseInterceptors(CacheInterceptor)

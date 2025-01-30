@@ -7,7 +7,7 @@ import {
   WEB_SOCKET_SOURCE,
   WEB_SOCKET_SUBSCRIBE,
   WEB_SOCKET_UNSUBSCRIBE,
-} from 'src/configs';
+} from '@/configs';
 import { v4 as genUuid } from 'uuid';
 import { WebSocket } from 'ws';
 
@@ -16,7 +16,7 @@ import {
   ITopHeader,
   ITransaction,
   WebSocketChannelName,
-} from 'src/utils/types';
+} from '@/utils/types';
 
 type PingI = {
   id: string;

@@ -5,17 +5,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
-import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
-import { ITransaction } from 'src/utils/types';
-import { TX_FUNCTIONS } from 'src/configs';
-import { Token } from 'src/tokens/entities/token.entity';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { ITransaction } from '@/utils/types';
+import { TX_FUNCTIONS } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
 import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
-} from 'src/tokens/queues/constants';
-import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { TokensService } from 'src/tokens/tokens.service';
+} from '@/tokens/queues/constants';
+import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
+import { TokensService } from '@/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PriceDto } from 'src/tokens/dto/price.dto';
+import { PriceDto } from '@/tokens/dto/price.dto';
 
 export class PriceMovementDto {
   @ApiProperty()

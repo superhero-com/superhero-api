@@ -6,7 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
+import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
 import BigNumber from 'bignumber.js';
 import { Token } from './token.entity';
 

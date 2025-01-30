@@ -14,8 +14,8 @@ import {
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { ApiOkResponsePaginated } from 'src/utils/api-type';
-import { TokensService } from 'src/tokens/tokens.service';
+import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { TokensService } from '@/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';

@@ -1,4 +1,4 @@
-import type { CurrencyCode, ICurrency, IToken } from 'src/utils/types';
+import type { CurrencyCode, ICurrency, IToken } from '@/utils/types';
 
 export const AETERNITY_CONTRACT_ID = 'aeternity';
 export const AETERNITY_SYMBOL = 'AE';

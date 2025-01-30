@@ -1,13 +1,13 @@
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AePricingModule } from 'src/ae-pricing/ae-pricing.module';
-import { AeModule } from 'src/ae/ae.module';
+import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
+import { AeModule } from '@/ae/ae.module';
 import {
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
-} from 'src/tokens/queues/constants';
-import { TokensModule } from 'src/tokens/tokens.module';
+} from '@/tokens/queues/constants';
+import { TokensModule } from '@/tokens/tokens.module';
 import { HistoricalController } from './controllers/historical.controller';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TransactionsController } from './controllers/transactions.controller';
