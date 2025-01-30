@@ -49,27 +49,29 @@ export class CommunityFactoryService {
       const collection_registry: any = await factoryInstance.contract
         .get_state()
         .then((res) => res.decodedResult?.collection_registry);
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      for (const [collectionName, collection] of Array.from(
-        collection_registry as any,
-      )) {
-        const name = collectionName?.split('-ak_')[0];
-        const allowed_name_length = collection.allowed_name_length?.toString();
-        factory.collections[collectionName] = {
-          id: collectionName,
-          name,
-          allowed_name_length,
-          allowed_name_chars: collection.allowed_name_chars.map((rule) =>
-            Object.fromEntries(
-              Object.entries(rule).map(([key, chars]) => [
-                key,
-                (chars as string[]).map((char) => Number(char.toString())),
-              ]),
+      if (collection_registry) {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        for (const [collectionName, collection] of Array.from(
+          collection_registry as any,
+        )) {
+          const name = collectionName?.split('-ak_')[0];
+          const allowed_name_length = collection.allowed_name_length?.toString();
+          factory.collections[collectionName] = {
+            id: collectionName,
+            name,
+            allowed_name_length,
+            allowed_name_chars: collection.allowed_name_chars.map((rule) =>
+              Object.fromEntries(
+                Object.entries(rule).map(([key, chars]) => [
+                  key,
+                  (chars as string[]).map((char) => Number(char.toString())),
+                ]),
+              ),
             ),
-          ),
-          description: `Tokenize a unique name with up to ${allowed_name_length}.`,
-        };
+            description: `Tokenize a unique name with up to ${allowed_name_length}.`,
+          };
+        }
       }
     }
 
