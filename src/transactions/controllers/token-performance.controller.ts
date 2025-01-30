@@ -1,28 +1,21 @@
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
 import { Transaction } from 'src/transactions/entities/transaction.entity';
 import { Repository } from 'typeorm';
-import { TokenHolder } from '../../tokens/entities/token-holders.entity';
 import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';
 import { TokenPriceMovementDto } from '../dto/token-stats.dto';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 
 @Controller('api/tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
-    @InjectRepository(Token)
-    private readonly tokensRepository: Repository<Token>,
-
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
-
-    @InjectRepository(TokenHolder)
-    private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
   ) {

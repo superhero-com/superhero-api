@@ -8,7 +8,6 @@ import {
   WEB_SOCKET_CHANNELS,
   WEB_SOCKET_SOURCE,
 } from './constants';
-import { INetworkTypes } from './networks';
 
 /**
  * Convert `key: val` objects into union of values.

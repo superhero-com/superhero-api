@@ -28,7 +28,7 @@ export class TransactionsController {
     private readonly transactionsRepository: Repository<Transaction>,
 
     private tokenService: TokensService,
-  ) { }
+  ) {}
 
   @ApiQuery({
     name: 'token_address',
