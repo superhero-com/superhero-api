@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Moment } from 'moment';
-import { DataSource, Repository } from 'typeorm';
-import moment from 'moment';
-import { Transaction } from '../entities/transaction.entity';
+import moment, { Moment } from 'moment';
+import { TX_FUNCTIONS } from 'src/configs';
 import { Token } from 'src/tokens/entities/token.entity';
+import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
-import { TX_FUNCTIONS } from 'src/ae/utils/constants';
+import { Transaction } from '../entities/transaction.entity';
 
 export interface IGetHistoricalDataProps {
   token: Token;

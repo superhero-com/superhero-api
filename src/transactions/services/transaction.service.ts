@@ -7,8 +7,8 @@ import { Queue } from 'bull';
 import moment from 'moment';
 import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from 'src/ae/community-factory.service';
-import { TX_FUNCTIONS } from 'src/ae/utils/constants';
 import { ITransaction } from 'src/ae/utils/types';
+import { TX_FUNCTIONS } from 'src/configs';
 import { Token } from 'src/tokens/entities/token.entity';
 import {
   SYNC_TOKEN_HOLDERS_QUEUE,

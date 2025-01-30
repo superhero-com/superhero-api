@@ -1,16 +1,16 @@
-import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { v4 as genUuid } from 'uuid';
-
 import { Injectable } from '@nestjs/common';
-import { ACTIVE_NETWORK } from 'src/configs';
-import { WebSocket } from 'ws';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import {
+  ACTIVE_NETWORK,
   WEB_SOCKET_CHANNELS,
   WEB_SOCKET_RECONNECT_TIMEOUT,
   WEB_SOCKET_SOURCE,
   WEB_SOCKET_SUBSCRIBE,
   WEB_SOCKET_UNSUBSCRIBE,
-} from './utils/constants';
+} from 'src/configs';
+import { v4 as genUuid } from 'uuid';
+import { WebSocket } from 'ws';
+
 import {
   IMiddlewareWebSocketSubscriptionMessage,
   ITopHeader,
