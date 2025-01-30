@@ -3,7 +3,7 @@ import {
   TX_FUNCTIONS,
   WEB_SOCKET_CHANNELS,
   WEB_SOCKET_SOURCE,
-} from '../../configs/constants';
+} from '../configs/constants';
 
 /**
  * Convert `key: val` objects into union of values.

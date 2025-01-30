@@ -4,7 +4,7 @@ import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
-import { ICommunityFactorySchema, ITransaction } from './ae/utils/types';
+import { ICommunityFactorySchema, ITransaction } from './utils/types';
 import { WebSocketService } from './ae/websocket.service';
 import { TX_FUNCTIONS } from './configs';
 import {

@@ -2,8 +2,8 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { CommunityFactory, initCommunityFactory } from 'bctsl-sdk';
 import { ACTIVE_NETWORK, BCL_FACTORY } from 'src/configs';
+import { ICommunityFactorySchema } from 'src/utils/types';
 import { AeSdkService } from './ae-sdk.service';
-import { ICommunityFactorySchema } from './utils/types';
 
 @Injectable()
 export class CommunityFactoryService {

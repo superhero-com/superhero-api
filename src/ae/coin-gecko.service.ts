@@ -3,8 +3,8 @@ import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { AETERNITY_COIN_ID, CURRENCIES } from 'src/configs';
 import { IPriceDto } from 'src/tokens/dto/price.dto';
-import { fetchJson } from './utils/common';
-import { CurrencyRates } from './utils/types';
+import { fetchJson } from 'src/utils/common';
+import { CurrencyRates } from 'src/utils/types';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 

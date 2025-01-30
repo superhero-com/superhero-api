@@ -16,7 +16,7 @@ import {
   ITopHeader,
   ITransaction,
   WebSocketChannelName,
-} from './utils/types';
+} from 'src/utils/types';
 
 type PingI = {
   id: string;

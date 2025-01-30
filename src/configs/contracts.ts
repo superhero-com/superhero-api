@@ -1,4 +1,4 @@
-import { ICommunityFactorySchema } from 'src/ae/utils/types';
+import { ICommunityFactorySchema } from 'src/utils/types';
 import {
   INetworkTypes,
   NETWORK_ID_MAINNET,
