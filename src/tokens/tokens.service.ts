@@ -289,7 +289,7 @@ export class TokensService {
     const tokenData = {
       factory_address: transaction.tx.contractId,
       creator_address: transaction?.tx?.callerId,
-      created_at: moment(transaction?.tx?.microTime).toDate(),
+      created_at: moment(transaction?.microTime).toDate(),
     };
     if (transaction?.tx.arguments?.[0]?.value) {
       tokenData['collection'] = transaction?.tx.arguments[0].value;
