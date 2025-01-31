@@ -313,6 +313,7 @@ export class TransactionHistoryService {
 
     return {
       result,
+      count: result.length,
       timeframe,
       interval,
       token,
