@@ -38,6 +38,15 @@ on:
       DB_DATABASE:
         description: "Database name"
         required: true
+      DOCKERHUB_USERNAME:
+        description: "Dockerhub username"
+        required: true
+      DOCKERHUB_PASSWORD:
+        description: "Dockerhub password"
+        required: true
+      DOCKERHUB_REPO:
+        description: "Dockerhub repository"
+        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -67,7 +76,7 @@ jobs:
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
-            docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_PASSWORD }}"
+            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
             docker pull "${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
