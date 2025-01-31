@@ -251,12 +251,13 @@ export class TransactionHistoryService {
     return tokenHistory;
   }
 
-  async getForPreview(oldestHistoryInfo: IOldestHistoryInfo | null) {
-    if (!oldestHistoryInfo) return { result: [], timeframe: '' };
+  async getForPreview(token: Token | null) {
+    if (!token) return { result: [], timeframe: '' };
     const getIntervalTimeFrame = () => {
       const daysDiff = moment()
         .add(1, 'day')
-        .diff(moment(oldestHistoryInfo.created_at), 'days');
+        .diff(moment(token.created_at), 'days');
+
       if (daysDiff > 7) {
         return {
           interval: '1 day',
@@ -297,7 +298,7 @@ export class TransactionHistoryService {
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
       .where('transactions.tokenId = :tokenId', {
-        tokenId: oldestHistoryInfo.id,
+        tokenId: token.id,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
       .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
@@ -314,6 +315,7 @@ export class TransactionHistoryService {
       result,
       timeframe,
       interval,
+      token,
     } as ITransactionPreview;
   }
 }

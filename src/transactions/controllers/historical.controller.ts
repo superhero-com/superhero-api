@@ -2,8 +2,8 @@ import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
-import moment from 'moment';
 import { TokensService } from '@/tokens/tokens.service';
+import moment from 'moment';
 import {
   ITransactionPreview,
   TransactionHistoryService,
@@ -80,9 +80,8 @@ export class HistoricalController {
   async getForPreview(
     @Param('address') address: string,
   ): Promise<ITransactionPreview> {
-    const oldestInfo =
-      await this.tokenHistoryService.getOldestHistoryInfo(address);
-    return this.tokenHistoryService.getForPreview(oldestInfo);
+    const token = await this.tokenService.getToken(address);
+    return this.tokenHistoryService.getForPreview(token);
   }
 
   private parseDate(value: string | number | undefined) {
