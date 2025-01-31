@@ -67,7 +67,8 @@ jobs:
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
-            docker pull "superherodotcom/ccga5tw-api:${{ inputs.VERSION }}" || true
+            docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_PASSWORD }}"
+            docker pull "${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
@@ -86,4 +87,4 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
-              superherodotcom/ccga5tw-api:${{ inputs.VERSION }}
+              ${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}
