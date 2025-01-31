@@ -56,5 +56,5 @@ jobs:
       DB_USER: "${{ secrets.PROD_DB_USER }}"
       DB_PASSWORD: "${{ secrets.PROD_DB_PASSWORD }}"
       DOCKERHUB_USERNAME: "${{ secrets.DOCKERHUB_USERNAME }}"
-      DOCKERHUB_PASSWORD: "${{ secrets.DOCKERHUB_PASSWORD }}"
+      DOCKERHUB_TOKEN: "${{ secrets.DOCKERHUB_TOKEN }}"
       DOCKERHUB_REPO: "${{ secrets.DOCKERHUB_REPO }}"

@@ -41,7 +41,7 @@ on:
       DOCKERHUB_USERNAME:
         description: "Dockerhub username"
         required: true
-      DOCKERHUB_PASSWORD:
+      DOCKERHUB_TOKEN:
         description: "Dockerhub password"
         required: true
       DOCKERHUB_REPO:
@@ -76,7 +76,7 @@ jobs:
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
-            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
             docker pull "${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
