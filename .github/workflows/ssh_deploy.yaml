@@ -86,4 +86,4 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
-              superherodotcom/ccga5tw-api-api:${{ inputs.VERSION }}
+              superherodotcom/ccga5tw-api:${{ inputs.VERSION }}
