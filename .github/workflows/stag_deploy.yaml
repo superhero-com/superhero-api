@@ -40,6 +40,9 @@ jobs:
       DEPLOY_KEY: "${{ secrets.STAG_DEPLOY_KEY }}"
       DB_USER: "${{ secrets.STAG_DB_USER }}"
       DB_PASSWORD: "${{ secrets.STAG_DB_PASSWORD }}"
+      DOCKERHUB_USERNAME: "${{ secrets.DOCKERHUB_USERNAME }}"
+      DOCKERHUB_TOKEN: "${{ secrets.DOCKERHUB_TOKEN }}"
+      DOCKERHUB_REPO: "${{ secrets.DOCKERHUB_REPO }}"
   call_deploy_mainnet:
     name: Deploy staging (mainnet)
     uses: ./.github/workflows/ssh_deploy.yaml
