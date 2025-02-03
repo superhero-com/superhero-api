@@ -6,16 +6,14 @@ import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 
 import { TokensService } from '@/tokens/tokens.service';
-import { fetchJson } from '@/utils/common';
-import { Job } from 'bull';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
 } from '../queues/constants';
 import { SaveTransactionQueue } from '../queues/save-transaction.queue';
-import { TransactionService } from '../services/transaction.service';
+import { SyncTransactionsQueue } from '../queues/sync-transactions.queue';
 import { TransactionHistoryService } from '../services/transaction-history.service';
-import { ISyncTransactionsQueue, SyncTransactionsQueue } from '../queues/sync-transactions.queue';
+import { TransactionService } from '../services/transaction.service';
 
 describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueue', () => {
   let service: TransactionHistoryService;
