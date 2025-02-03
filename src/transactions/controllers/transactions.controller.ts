@@ -39,6 +39,11 @@ export class TransactionsController {
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
+    name: 'includes',
+    enum: ['token'],
+    required: false,
+  })
+  @ApiQuery({
     name: 'account_address',
     type: 'string',
     required: false,
@@ -50,6 +55,7 @@ export class TransactionsController {
   async listTransactions(
     @Query('token_address') token_address: string,
     @Query('account_address') account_address: string,
+    @Query('includes') includes: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<Transaction>> {
@@ -78,6 +84,10 @@ export class TransactionsController {
           'token.rank',
           'token.collection',
         ]);
+    }
+
+    if (includes === 'token') {
+      queryBuilder.leftJoinAndSelect('transactions.token', 'token');
     }
 
     return paginate<Transaction>(queryBuilder, { page, limit });
