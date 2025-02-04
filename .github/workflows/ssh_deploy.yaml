@@ -38,6 +38,15 @@ on:
       DB_DATABASE:
         description: "Database name"
         required: true
+      DOCKERHUB_USERNAME:
+        description: "Dockerhub username"
+        required: true
+      DOCKERHUB_TOKEN:
+        description: "Dockerhub password"
+        required: true
+      DOCKERHUB_REPO:
+        description: "Dockerhub repository"
+        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -67,7 +76,8 @@ jobs:
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
-            docker pull "superherodotcom/wordcraftfun-api:${{ inputs.VERSION }}" || true
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            docker pull "${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}" || true
             docker stop ${{ inputs.CONTAINER_NAME }} || true
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
@@ -86,4 +96,4 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
-              superherodotcom/wordcraftfun-api:${{ inputs.VERSION }}
+              ${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}

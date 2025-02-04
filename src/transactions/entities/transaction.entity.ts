@@ -1,12 +1,13 @@
 import BigNumber from 'bignumber.js';
-import { IPriceDto } from 'src/tokens/dto/price.dto';
-import { Token } from 'src/tokens/entities/token.entity';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
+import { IPriceDto } from '@/tokens/dto/price.dto';
+import { Token } from '@/tokens/entities/token.entity';
+import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
 import {
   Column,
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -21,6 +22,7 @@ export class Transaction {
   @ManyToOne(() => Token, (token) => token.transactions, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'tokenId' })
   token: Token;
 
   @Index()
@@ -96,7 +98,7 @@ export class Transaction {
   @Column({
     nullable: true,
   })
-  token_category_rank: number; // Token category rank at the time of this transaction
+  token_collection_rank: number; // Token collection rank at the time of this transaction
 
   @Index()
   @CreateDateColumn({

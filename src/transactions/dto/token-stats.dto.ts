@@ -1,7 +1,18 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PriceDto } from 'src/tokens/dto/price.dto';
+import { PriceDto } from '@/tokens/dto/price.dto';
 
 export class PriceMovementDto {
+  @ApiProperty()
+  current: PriceDto;
+  @ApiProperty()
+  current_date: Date;
+  @ApiProperty()
+  current_change: number;
+  @ApiProperty()
+  current_change_percent: number;
+  @ApiProperty()
+  current_change_direction: string;
+
   @ApiProperty()
   high: PriceDto;
   @ApiProperty()

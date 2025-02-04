@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Moment } from 'moment';
+import moment, { Moment } from 'moment';
+import { TX_FUNCTIONS } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
 import { DataSource, Repository } from 'typeorm';
-import moment from 'moment';
-import { Transaction } from '../entities/transaction.entity';
-import { Token } from 'src/tokens/entities/token.entity';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
-import { TX_FUNCTIONS } from 'src/ae/utils/constants';
+import { Transaction } from '../entities/transaction.entity';
 
 export interface IGetHistoricalDataProps {
   token: Token;
@@ -94,86 +93,6 @@ export class TransactionHistoryService {
       firstBefore,
       props.mode === 'aggregated',
     );
-  }
-
-  /**
-   * @deprecated
-   */
-  private processNonAggregatedHistoricalData(
-    data: Transaction[],
-    props: IGetHistoricalDataProps,
-  ): HistoricalDataDto[] {
-    // group data by date
-    const groupedData = data.reduce((acc, item) => {
-      const date = moment(item.created_at).format('YYYY-MM-DD HH:mm');
-      if (!acc[date]) {
-        acc[date] = [];
-      }
-      acc[date].push(item);
-      return acc;
-    }, {});
-
-    // convert to HistoricalDataDto
-    const result = Object.keys(groupedData).map((date) => {
-      const items = groupedData[date].sort((a, b) => {
-        return a.created_at.getTime() - b.created_at.getTime();
-      });
-      const open = items[0];
-      const close = items[items.length - 1];
-      const high = items.reduce((acc, item) =>
-        item.buy_price[props.convertTo] > acc.buy_price[props.convertTo]
-          ? item
-          : acc,
-      );
-      const low = items.reduce((acc, item) =>
-        item.buy_price[props.convertTo] < acc.buy_price[props.convertTo]
-          ? item
-          : acc,
-      );
-      const volume = items.reduce(
-        (acc, item) => acc + item.volume?.toNumber(),
-        0,
-      );
-      const market_cap = items.reduce(
-        (acc, item) =>
-          acc +
-          (item.market_cap_data
-            ? item.market_cap_data[props.convertTo]
-            : item.market_cap?.toNumber()),
-        0,
-      );
-      const total_supply = items.reduce(
-        (acc, item) => acc + item.total_supply,
-        0,
-      );
-
-      return {
-        timeOpen: open.created_at,
-        timeClose: close.created_at,
-        timeHigh: high.created_at,
-        timeLow: low.created_at,
-        quote: {
-          convertedTo: props.convertTo,
-          open: open.buy_price[props.convertTo],
-          high: high.buy_price[props.convertTo],
-          low: low.buy_price[props.convertTo],
-          close: close.buy_price[props.convertTo],
-          volume,
-          market_cap,
-          total_supply,
-          timestamp: close.created_at,
-          symbol: props.token.symbol,
-        },
-      };
-    });
-
-    return result.map((item, index) => {
-      const previousItem = index > 0 ? result[index - 1] : null;
-      if (previousItem) {
-        item.quote.open = previousItem.quote.close;
-      }
-      return item;
-    });
   }
 
   private processAggregatedHistoricalData(
@@ -263,12 +182,7 @@ export class TransactionHistoryService {
       if (record.buy_price[props.convertTo] < low.buy_price[props.convertTo]) {
         low = record;
       }
-      volume = intervalData
-        .map((item) => item.volume?.toNumber())
-        .reduce((a, b) => a + b);
-      // volume = record?.volume?.toNumber() ?? 0;
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
+      volume += record.volume?.toNumber() ?? 0;
       total_supply = record.total_supply;
       market_cap = record.market_cap[props.convertTo];
     });
@@ -337,12 +251,13 @@ export class TransactionHistoryService {
     return tokenHistory;
   }
 
-  async getForPreview(oldestHistoryInfo: IOldestHistoryInfo | null) {
-    if (!oldestHistoryInfo) return { result: [], timeframe: '' };
+  async getForPreview(token: Token | null) {
+    if (!token) return { result: [], timeframe: '' };
     const getIntervalTimeFrame = () => {
       const daysDiff = moment()
         .add(1, 'day')
-        .diff(moment(oldestHistoryInfo.created_at), 'days');
+        .diff(moment(token.created_at), 'days');
+
       if (daysDiff > 7) {
         return {
           interval: '1 day',
@@ -383,7 +298,7 @@ export class TransactionHistoryService {
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
       .where('transactions.tokenId = :tokenId', {
-        tokenId: oldestHistoryInfo.id,
+        tokenId: token.id,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
       .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
@@ -398,8 +313,10 @@ export class TransactionHistoryService {
 
     return {
       result,
+      count: result.length,
       timeframe,
       interval,
+      token,
     } as ITransactionPreview;
   }
 }

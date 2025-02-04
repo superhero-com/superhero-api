@@ -2,19 +2,19 @@ import { Module } from '@nestjs/common';
 import { WebSocketService } from './websocket.service';
 import { AeSdkService } from './ae-sdk.service';
 import { CoinGeckoService } from './coin-gecko.service';
-import { TokenGatingService } from './token-gating.service';
+import { CommunityFactoryService } from './community-factory.service';
 
 @Module({
   providers: [
     WebSocketService,
     AeSdkService,
-    TokenGatingService,
+    CommunityFactoryService,
     CoinGeckoService,
   ],
   exports: [
     WebSocketService,
     AeSdkService,
-    TokenGatingService,
+    CommunityFactoryService,
     CoinGeckoService,
   ],
 })

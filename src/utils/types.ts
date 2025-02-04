@@ -1,14 +1,9 @@
-import type {
-  BrowserWindowMessageConnection,
-  Encoded,
-  Tag,
-} from '@aeternity/aepp-sdk';
+import type { Encoded, Tag } from '@aeternity/aepp-sdk';
 import {
   TX_FUNCTIONS,
   WEB_SOCKET_CHANNELS,
   WEB_SOCKET_SOURCE,
-} from './constants';
-import { INetworkTypes } from './networks';
+} from '../configs/constants';
 
 /**
  * Convert `key: val` objects into union of values.
@@ -136,6 +131,7 @@ export interface ITx {
   abiVersion: number;
   accountId?: Encoded.AccountAddress;
   amount: number;
+  microTime: number;
   arguments: ITxArguments[];
   callData?: string; // TODO find source
   call_data?: string; // TODO incoming data is parsed with the use of camelcaseDeep, but not always
@@ -200,48 +196,17 @@ export interface IMiddlewareWebSocketSubscriptionMessage {
   source?: WebSocketSourceName;
 }
 
-export enum BONDING_CURVE {
-  LINEAR,
-  STEPPED,
-}
-
-export type BondingCurveLinearState = {
-  alpha: number;
-  init_buy_price: number;
-  init_sell_price: number;
-};
-
-export type SteppedBounds = {
-  lower: number;
-  upper: number;
-  price: number;
-}[];
-
-export type BondingCurveSteppedState = {
-  stepped_bounds: SteppedBounds;
-  supported_decimals: number;
-  sell_return_percentage: number;
-  price_denominator: number;
-};
-
-export interface Wallet {
-  info: {
-    id: string;
-    type: string;
-    origin: string;
+export type ICommunityFactorySchema = {
+  address: Encoded.ContractAddress;
+  collections: {
+    [key: `${string}-${Encoded.AccountAddress}`]: {
+      id: `${string}-${Encoded.AccountAddress}`;
+      name: string;
+      description?: string;
+      allowed_name_length: string;
+      allowed_name_chars: {
+        [key: string]: number[];
+      }[];
+    };
   };
-  getConnection: () => BrowserWindowMessageConnection;
-}
-
-export interface Wallets {
-  [key: string]: Wallet;
-}
-
-export interface ICommunityFactoryContract {
-  contractId: Encoded.ContractAddress;
-  description?: string;
-}
-
-export type ICommunityFactoryContracts = {
-  [K in INetworkTypes]: ICommunityFactoryContract[];
 };

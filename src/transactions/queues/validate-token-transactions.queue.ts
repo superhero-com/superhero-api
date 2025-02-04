@@ -3,11 +3,11 @@ import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { fetchJson } from 'src/ae/utils/common';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { ITransaction } from 'src/ae/utils/types';
-import { Token } from 'src/tokens/entities/token.entity';
-import { TokensService } from 'src/tokens/tokens.service';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { ACTIVE_NETWORK } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokensService } from '@/tokens/tokens.service';
 import { In, Not, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
@@ -63,12 +63,12 @@ export class ValidateTokenTransactionsQueue {
 
       await this.transactionRepository
         .createQueryBuilder('transactions')
-        .where('transactions.block_height >= :from', { from: job.data.from })
-        .andWhere('transactions.block_height <= :to', { to: job.data.to })
-        .andWhere('transactions.verified = false')
-        .andWhere('transactions.tokenId = :tokenId', {
+        .where('transactions.tokenId = :tokenId', {
           tokenId: token.id,
         })
+        .andWhere('transactions.block_height >= :from', { from: job.data.from })
+        .andWhere('transactions.block_height <= :to', { to: job.data.to })
+        .andWhere('transactions.verified = false')
         .andWhere({
           tx_hash: Not(In(this.validated_hashes)),
         })

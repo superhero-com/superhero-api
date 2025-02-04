@@ -1,5 +1,5 @@
 import { Node } from '@aeternity/aepp-sdk';
-import { NETWORK_MAINNET, NETWORK_TESTNET } from './utils/networks';
+import { NETWORK_MAINNET, NETWORK_TESTNET } from './network';
 
 export const nodes: { instance: Node; name: string }[] = [
   {

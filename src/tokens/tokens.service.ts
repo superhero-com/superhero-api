@@ -1,25 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
-import BigNumber from 'bignumber.js';
-import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
-import { TokenGatingService } from 'src/ae/token-gating.service';
-import { fetchJson } from 'src/ae/utils/common';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { initTokenSale, TokenSale } from 'token-gating-sdk';
-import { Token } from './entities/token.entity';
-import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { ROOM_FACTORY_CONTRACTS } from 'src/ae/utils/constants';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
 import { InjectQueue } from '@nestjs/bull';
+import { initTokenSale, TokenSale } from 'bctsl-sdk';
+import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
+import moment from 'moment';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { AeSdkService } from '@/ae/ae-sdk.service';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { ACTIVE_NETWORK } from '@/configs';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
+import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -37,9 +38,7 @@ export class TokensService {
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
-    private tokenGatingService: TokenGatingService,
-
-    private coinGeckoService: CoinGeckoService,
+    private aePricingService: AePricingService,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
@@ -80,30 +79,41 @@ export class TokensService {
   }
 
   async syncTokenPrice(token: Token): Promise<void> {
-    const data = await this.getTokeLivePrice(token);
+    try {
+      const data = await this.getTokeLivePrice(token);
 
-    await this.tokensRepository.update(token.id, data as any);
-    // update token ranks
+      await this.tokensRepository.update(token.id, data as any);
+      // update token ranks
 
-    // re-fetch token
-    this.tokenWebsocketGateway?.handleTokenUpdated({
-      sale_address: token.sale_address,
-      data,
-    });
+      // re-fetch token
+      this.tokenWebsocketGateway?.handleTokenUpdated({
+        sale_address: token.sale_address,
+        data,
+      });
+    } catch (error) {
+      //
+    }
   }
 
-  async getToken(address: string): Promise<Token> {
+  async getToken(
+    address: string,
+    shouldSyncTransactions = true,
+  ): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
     if (existingToken) {
       return existingToken;
     }
 
-    return this.createToken(address as Encoded.ContractAddress);
+    return this.createToken(
+      address as Encoded.ContractAddress,
+      shouldSyncTransactions,
+    );
   }
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
+    shouldSyncTransactions = true,
   ): Promise<Token | null> {
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
 
@@ -134,74 +144,39 @@ export class TokensService {
       await this.tokensRepository.delete(newToken.id);
       return null;
     }
-    await this.updateTokenCategory(newToken, factoryAddress);
     await this.syncTokenPrice(newToken);
+    // refresh token token info
     // TODO: should refresh token info
     await this.updateTokenInitialRank(newToken);
-    void this.syncTokenHoldersQueue.add({
-      saleAddress,
-    });
-    void this.syncTransactionsQueue.add({
-      saleAddress,
-    });
+    void this.syncTokenHoldersQueue.add(
+      {
+        saleAddress,
+      },
+      {
+        jobId: `syncTokenHolders-${saleAddress}`,
+        removeOnComplete: true,
+      },
+    );
+    if (shouldSyncTransactions) {
+      void this.syncTransactionsQueue.add(
+        {
+          saleAddress,
+        },
+        {
+          jobId: `syncTokenTransactions-${saleAddress}`,
+        },
+      );
+    }
     return this.findOne(newToken.id);
   }
 
   async updateTokenInitialRank(token: Token): Promise<number> {
     const tokensCount = await this.tokensRepository.count();
-    // TODO: add initial category_rank
+    // TODO: add initial collection_rank
     await this.tokensRepository.update(token.id, {
       rank: tokensCount + 1,
     });
     return tokensCount + 1;
-  }
-
-  async updateTokenCategory(token: Token, factoryAddress): Promise<string> {
-    if (token.category) {
-      return token.category;
-    }
-
-    try {
-      const communityFactory =
-        await this.tokenGatingService.loadTokenGatingFactory(factoryAddress);
-
-      const communityManagementContract =
-        await communityFactory.getCommunityManagementContract(
-          token.sale_address as Encoded.ContractAddress,
-        );
-
-      const metaInfo: Record<string, string> = await communityManagementContract
-        .meta_info()
-        .then((r) => {
-          const obj: Record<string, string> = {};
-          for (const [key, value] of r.decodedResult) {
-            obj[key] = value;
-          }
-          return obj;
-        })
-        .catch(() => {
-          return {};
-        });
-
-      if (!metaInfo?.category) {
-        const category = this.detectTokenCategoryFromName(token);
-        await this.tokensRepository.update(token.id, {
-          category,
-        });
-        return category;
-      }
-
-      await this.tokensRepository.update(token.id, {
-        category: metaInfo.category,
-      });
-      return metaInfo.category;
-    } catch (error) {
-      const category = this.detectTokenCategoryFromName(token);
-      await this.tokensRepository.update(token.id, {
-        category,
-      });
-      return category;
-    }
   }
 
   async updateTokenFactoryAddress(
@@ -220,21 +195,12 @@ export class TokensService {
     );
 
     const factory_address = response?.tx?.contract_id;
-
-    await this.tokensRepository.update(token.id, {
-      factory_address: factory_address,
-    });
+    await this.updateTokenMetaDataFromCreateTx(
+      token,
+      camelcaseKeysDeep(response),
+    );
 
     return factory_address as Encoded.ContractAddress;
-  }
-
-  detectTokenCategoryFromName(token: Token): string {
-    const name = token.name.toLowerCase();
-    // if name is only numbers return number
-    if (/^\d+$/.test(name)) {
-      return 'number';
-    }
-    return 'word';
   }
 
   async getTokenContracts(token: Token) {
@@ -247,7 +213,6 @@ export class TokensService {
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts> {
     if (this.contracts[saleAddress]) {
-      console.log('RETURNING CACHED CONTRACTS');
       return this.contracts[saleAddress];
     }
     const { instance } = await initTokenSale(
@@ -293,9 +258,9 @@ export class TokensService {
     const market_cap = total_supply.multipliedBy(price);
 
     const [price_data, sell_price_data, market_cap_data] = await Promise.all([
-      this.coinGeckoService.getPriceData(price),
-      this.coinGeckoService.getPriceData(sell_price),
-      this.coinGeckoService.getPriceData(market_cap),
+      this.aePricingService.getPriceData(price),
+      this.aePricingService.getPriceData(sell_price),
+      this.aePricingService.getPriceData(market_cap),
     ]);
 
     const dao_balance = await this.aeSdkService.sdk.getBalance(
@@ -315,5 +280,22 @@ export class TokensService {
       owner_address: metaInfo?.owner,
       dao_balance: new BigNumber(dao_balance),
     };
+  }
+
+  async updateTokenMetaDataFromCreateTx(
+    token: Token,
+    transaction: ITransaction,
+  ): Promise<Encoded.ContractAddress> {
+    const tokenData = {
+      factory_address: transaction.tx.contractId,
+      creator_address: transaction?.tx?.callerId,
+      created_at: moment(transaction?.microTime).toDate(),
+    };
+    if (transaction?.tx.arguments?.[0]?.value) {
+      tokenData['collection'] = transaction?.tx.arguments[0].value;
+    }
+    await this.tokensRepository.update(token.id, tokenData);
+
+    return transaction.tx.contractId;
   }
 }

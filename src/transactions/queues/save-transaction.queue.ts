@@ -1,7 +1,7 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-import { ITransaction } from 'src/ae/utils/types';
+import { ITransaction } from '@/utils/types';
 
 import { TransactionService } from '../services/transaction.service';
 import { SAVE_TRANSACTION_QUEUE } from './constants';
@@ -22,7 +22,9 @@ export class SaveTransactionQueue {
   /**
    * @param job
    */
-  @Process()
+  @Process({
+    concurrency: 100,
+  })
   async process(job: Job<ISaveTransactionQueue>) {
     this.logger.log(
       `SaveTransactionQueue->started:${job.data.transaction.tx.contractId}:${job.data.transaction.hash}`,

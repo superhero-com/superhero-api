@@ -1,11 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import BigNumber from 'bignumber.js';
-import { fetchJson } from './utils/common';
-import { AETERNITY_COIN_ID, CURRENCIES } from './utils/constants';
-import { CurrencyRates } from './utils/types';
-import { IPriceDto } from 'src/tokens/dto/price.dto';
-import { Moment } from 'moment';
-import moment from 'moment';
+import moment, { Moment } from 'moment';
+import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
+import { IPriceDto } from '@/tokens/dto/price.dto';
+import { fetchJson } from '@/utils/common';
+import { CurrencyRates } from '@/utils/types';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 
@@ -83,7 +82,9 @@ export class CoinGeckoService {
 
     CURRENCIES.forEach(({ code }) => {
       try {
-        prices[code] = price.multipliedBy(this.rates![code]) as any;
+        prices[code] = this.rates![code]
+          ? price.multipliedBy(this.rates![code])
+          : null;
       } catch (error) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;

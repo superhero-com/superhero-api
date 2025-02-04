@@ -1,22 +1,22 @@
-import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { v4 as genUuid } from 'uuid';
-
 import { Injectable } from '@nestjs/common';
-import { WebSocket } from 'ws';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import {
+  ACTIVE_NETWORK,
   WEB_SOCKET_CHANNELS,
   WEB_SOCKET_RECONNECT_TIMEOUT,
   WEB_SOCKET_SOURCE,
   WEB_SOCKET_SUBSCRIBE,
   WEB_SOCKET_UNSUBSCRIBE,
-} from './utils/constants';
+} from '@/configs';
+import { v4 as genUuid } from 'uuid';
+import { WebSocket } from 'ws';
+
 import {
   IMiddlewareWebSocketSubscriptionMessage,
   ITopHeader,
   ITransaction,
   WebSocketChannelName,
-} from './utils/types';
-import { ACTIVE_NETWORK } from './utils/networks';
+} from '@/utils/types';
 
 type PingI = {
   id: string;
@@ -73,7 +73,6 @@ export class WebSocketService {
   private setupReconnectionCheck() {
     this.reconnectInterval = setInterval(() => {
       if (this.pings.length) {
-        console.log('Reconnecting...');
         this.isWsConnected = false;
         this.reconnect();
         return;
@@ -83,7 +82,6 @@ export class WebSocketService {
         timestamp: Date.now(),
       };
       this.pings.push(pingData);
-      console.log('PING::', pingData.id);
       this.wsClient.ping(
         JSON.stringify({
           op: 'Ping',
@@ -95,7 +93,6 @@ export class WebSocketService {
 
   private reconnect() {
     if (!this.isWsConnected) {
-      console.log('Attempting to reconnect...');
       this.connect(ACTIVE_NETWORK.websocketUrl);
     }
   }
@@ -105,18 +102,28 @@ export class WebSocketService {
     callback: (payload: any) => void,
   ) {
     if (this.isWsConnected) {
-      Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
-        try {
-          this.wsClient.send(
-            JSON.stringify({
-              ...message,
-              source,
-            }),
-          );
-        } catch (error) {
-          console.log('ERROR subscribeForChannel:', error);
-        }
-      });
+      try {
+        this.wsClient.send(
+          JSON.stringify({
+            ...message,
+            source: WEB_SOCKET_SOURCE.mdw,
+          }),
+        );
+      } catch (error) {
+        console.log('ERROR subscribeForChannel:', error);
+      }
+      // Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
+      //   try {
+      //     this.wsClient.send(
+      //       JSON.stringify({
+      //         ...message,
+      //         source: 'mdw',
+      //       }),
+      //     );
+      //   } catch (error) {
+      //     console.log('ERROR subscribeForChannel:', error);
+      //   }
+      // });
     }
 
     this.subscribersQueue.push(message);

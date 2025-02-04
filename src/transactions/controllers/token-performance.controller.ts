@@ -1,26 +1,21 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
-import { Transaction } from 'src/transactions/entities/transaction.entity';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Repository } from 'typeorm';
-import { TokenHolder } from '../../tokens/entities/token-holders.entity';
 import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';
 import { TokenPriceMovementDto } from '../dto/token-stats.dto';
 
 @Controller('api/tokens')
+@UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
-    @InjectRepository(Token)
-    private readonly tokensRepository: Repository<Token>,
-
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
-
-    @InjectRepository(TokenHolder)
-    private readonly tokenHolderRepository: Repository<TokenHolder>,
 
     private readonly tokensService: TokensService,
   ) {
@@ -34,6 +29,7 @@ export class TokenPerformanceController {
     description: 'Token address or name',
   })
   @Get(':address/performance')
+  @CacheTTL(60 * 1000)
   @ApiResponse({
     type: TokenPriceMovementDto,
   })
@@ -69,6 +65,21 @@ export class TokenPerformanceController {
   }
 
   async getTokenPriceMovement(token: Token, date: Moment) {
+    const startingTransaction = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.tokenId = :tokenId', {
+        tokenId: token.id,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy('transactions.created_at', 'ASC')
+      .select([
+        'transactions.buy_price as buy_price',
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
     const highestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('transactions.tokenId = :tokenId', {
@@ -100,6 +111,7 @@ export class TokenPerformanceController {
       ])
       .getRawOne();
 
+    const current = startingTransaction?.buy_price ?? token?.price_data;
     const high = highestPriceQuery?.buy_price ?? token?.price_data;
     const low = lowestPriceQuery?.buy_price ?? token?.price_data;
 
@@ -113,7 +125,17 @@ export class TokenPerformanceController {
     const low_change_percent = (low_change / current_token_price) * 100;
     const low_change_direction = low_change > 0 ? 'up' : 'down';
 
+    const current_change = current_token_price - current?.ae;
+    const current_change_percent = (current_change / current_token_price) * 100;
+    const current_change_direction = current_change > 0 ? 'up' : 'down';
+
     return {
+      current,
+      current_date: startingTransaction?.created_at,
+      current_change,
+      current_change_percent,
+      current_change_direction,
+
       high,
       high_date: highestPriceQuery?.created_at,
       high_change,

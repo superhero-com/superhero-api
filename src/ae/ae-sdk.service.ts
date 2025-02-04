@@ -1,7 +1,6 @@
 import { AeSdk, CompilerHttp } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
-import { nodes } from './config';
-import { ACTIVE_NETWORK } from './utils/networks';
+import { ACTIVE_NETWORK, nodes } from '../configs';
 
 @Injectable()
 export class AeSdkService {

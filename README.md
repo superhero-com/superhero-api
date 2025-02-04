@@ -1,73 +1,327 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# 🚀 Bonding Curve TokenSale Launchpad API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+> Create, trade, and manage tokens on the æternity blockchain with advanced features and multi-level affiliation system.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
-## Description
+## 📑 Table of Contents
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+- [Project Overview](#-project-overview)
+- [Related Components](#-related-components)
+- [Project Architecture](#-project-architecture)
+  - [Directory Structure](#-directory-structure)
+  - [Core Components](#-core-components)
+  - [Data Flow](#-data-flow)
+  - [API Features](#-api-features)
+  - [Caching Strategy](#-caching-strategy)
+- [System Requirements](#-system-requirements)
+- [Quick Start with Docker](#-quick-start-with-docker)
+- [Manual Installation](#-manual-installation)
+- [Environment Configuration](#-environment-configuration)
+- [Available Scripts](#-available-scripts)
+- [Docker Services](#-docker-services)
+- [Token Categories Configuration](#-token-categories-configuration)
+- [Development](#-development)
+- [Contributing Guide](#-contributing-guide)
+- [Production Deployment](#-production-deployment)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-## Installation
+## 🎯 Project Overview
 
-```bash
-$ npm install
+This API serves as a caching and synchronization layer for the Bonding Curve Community platform on the Aeternity blockchain. It provides real-time token data, pricing information, and transaction history while maintaining collection-specific validation rules.
+
+### 🔗 Related Components
+
+- [bctsl/bctsl-sdk](https://github.com/bctsl/bctsl-sdk) - SDK for interacting with the bonding curve contracts
+- [bctsl/bctsl-contracts](https://github.com/bctsl/bctsl-contracts) - Smart contracts for the bonding curve token sale platform
+- [bctsl/bcl](https://github.com/bctsl/bcl) - Frontend application for the Bonding Curve Community platform
+
+### ✨ Key Features
+
+- 🔄 **Multi-Collection Support**: Handle multiple token collections with unique naming conventions and validation rules
+- ⚡ **Real-time Pricing**: Synchronize and cache token pricing from the bonding curve contracts
+- 📊 **Transaction Tracking**: Monitor and validate buy/sell transactions
+- 🏆 **Data Rankings**: Provide token rankings globally and per collection
+- 🔔 **WebSocket Events**: Broadcast real-time updates for token prices, creation, and transactions
+- 🧹 **Data Reorganization**: Automatically handle and remove invalid transactions
+- 🔗 **MDW Integration**: Seamless integration with Aeternity Middleware (MDW)
+
+## 🏗 Project Architecture
+
+### 📁 Directory Structure
+
+```
+src/
+├── ae/                    # Aeternity blockchain integration
+├── ae-pricing/           # Pricing calculation and synchronization
+├── configs/              # Application configuration
+├── tokens/              # Token management and WebSocket events
+├── transactions/        # Transaction processing and validation
+└── utils/               # Utility functions and helpers
 ```
 
-## Running the app
+### 🧩 Core Components
+
+1. 🎫 **Token Management** (`src/tokens/`)
+   - Token data caching and retrieval
+   - WebSocket gateway for real-time updates
+   - Collection-specific validation rules
+   - Token ranking calculations
+   - Price history tracking
+
+2. 💱 **Transaction Processing** (`src/transactions/`)
+   - Transaction monitoring and validation
+   - Buy/Sell operation tracking
+   - Invalid transaction handling
+   - Transaction history management
+
+3. ⛓ **Aeternity Integration** (`src/ae/`)
+   - MDW client implementation
+   - Blockchain event monitoring
+   - Contract interaction
+   - Network synchronization
+
+4. 💰 **Pricing Engine** (`src/ae-pricing/`)
+   - Price synchronization
+
+### 🔄 Data Flow
+
+1. 🚦 **Initialization**
+   - Load collection configurations
+   - Establish MDW connection
+   - Initialize WebSocket server
+   - Start price synchronization
+
+2. 🎫 **Token Operations**
+   - Validate token names against collection rules
+   - Calculate and cache token prices
+   - Track token ownership
+   - Update token rankings
+   - Broadcast token events
+
+3. 💸 **Transaction Handling**
+   - Monitor blockchain for new transactions
+   - Validate transaction legitimacy
+   - Update token prices and ownership
+   - Broadcast transaction events
+   - Handle transaction reorganization
+
+4. 🔄 **Data Synchronization**
+   - Periodic price updates
+   - Transaction history synchronization
+   - Data cleanup and validation
+   - Cache management
+
+### 🛠 API Features
+
+1. 🎫 **Token Endpoints**
+   - Token validation
+   - Price history retrieval
+   - Token rankings (global/collection)
+
+2. 💱 **Transaction Endpoints**
+   - Transaction history
+   - Transaction validation status
+
+3. 🔔 **WebSocket Events**
+   - Token price updates
+   - New token creation
+   - Transaction notifications
+   - Collection updates
+
+4. 📚 **Collection Management**
+   - Collection configuration
+   - Validation rules
+   - Naming conventions
+   - Character code restrictions
+
+### 💾 Caching Strategy
+
+The API implements a multi-layer caching strategy:
+
+1. 💡 **In-Memory Cache**
+   - Active token prices
+   - Recent transactions
+   - Validation rules
+
+2. ⚡ **Redis Cache**
+   - Token rankings
+   - Price history
+   - Collection statistics
+
+3. 💽 **PostgreSQL Database**
+   - Historical data
+   - Transaction records
+   - Token metadata
+   - Collection configurations
+
+## 🛠 System Requirements
+
+- 📦 Node.js >= 18
+- 🗄️ PostgreSQL >= 16
+- 📝 Redis (latest)
+- 🐳 Docker and Docker Compose (for containerized setup)
+
+## 🚀 Quick Start with Docker
+
+The easiest way to run the application is using Docker Compose:
 
 ```bash
-# development
-$ npm run start
+# Clone the repository
+git clone https://github.com/bctsl/bctsl-api.git
+cd bctsl-api
 
-# watch mode
-$ npm run start:dev
 
-# production mode
-$ npm run start:prod
+# Setup environment variables
+cp .env.example .env
+
+# Start all services
+docker compose up --build
 ```
 
-## Test
+The application will be available at `http://localhost:3000`.
+
+## 📦 Manual Installation
+
+If you prefer to run the services locally:
 
 ```bash
-# unit tests
-$ npm run test
+# Install dependencies
+npm install
 
-# e2e tests
-$ npm run test:e2e
+# Setup environment variables
+cp .env.example .env
 
-# test coverage
-$ npm run test:cov
+# Start the development server
+npm run start:dev
 ```
 
-## Support
+## 📝 Environment Configuration
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+Configure the following environment variables in your `.env` file:
 
-## Stay in touch
+```bash
+# Database Configuration
+DB_TYPE=postgres
+DB_HOST=127.0.0.1        # Use 'postgres' if running with Docker
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres     # Change in production
+DB_DATABASE=bcl_api
+DB_SYNC=true            # Set to false in production
 
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+# Redis Configuration
+REDIS_HOST=localhost    # Use 'redis' if running with Docker
+REDIS_PORT=6379
 
-## License
+# Network Configuration
+AE_NETWORK_ID=ae_mainnet  # or ae_uat for testnet
 
-Nest is [MIT licensed](LICENSE).
+# Application Configuration
+APP_PORT=3000
+```
+
+## 📊 Available Scripts
+
+```bash
+# Development
+npm run start          # Start the application
+npm run start:dev      # Start with hot-reload
+npm run start:prod     # Start in production mode
+```
+
+## 🐳 Docker Services
+
+The project includes three main services:
+
+1. **API Service** (`api`):
+   - NestJS application
+   - Runs on port 3000
+   - Auto-reloads in development
+
+2. **PostgreSQL** (`postgres`):
+   - Version 16
+   - Persists data in a Docker volume
+   - Accessible on port 5432
+
+3. **Redis** (`redis`):
+   - Latest Alpine version
+   - Persists data in a Docker volume
+   - Accessible on port 6379
+
+## 📚 Token Categories Configuration
+
+Define the collections you want the API to support in `src/configs/contracts.ts`:
+
+```typescript
+export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
+  [NETWORK_ID_MAINNET]: {
+    address: 'ct_..',
+    collections: {
+      // Example configuration:
+      // 'CATEGORY-ak_..': {
+      //   name: 'CATEGORY',
+      //   allowed_name_length: '20',
+      //   description: 'Tokenize a unique name with up to 20 characters',  
+      // },
+    },
+  },
+  [NETWORK_ID_TESTNET]: {
+    address: 'ct_..',
+    collections: {}
+  }
+};
+```
+
+## 💻 Development
+
+For detailed information about our development standards, testing practices, and contribution guidelines, please see our [Contributing Guide](CONTRIBUTING.md).
+
+### 🐳 Docker Commands
+
+```bash
+# Start all services
+docker compose up
+
+# Start services in background
+docker compose up -d
+
+# Stop all services
+docker compose down
+
+# View logs
+docker compose logs -f
+
+# Rebuild services
+docker compose up --build
+```
+
+### 🗄️ Database Management
+
+The database automatically syncs schema changes in development (`DB_SYNC=true`). For production, you should manage database migrations manually.
+
+## 🚀 Production Deployment
+
+For production deployment:
+
+1. Set appropriate environment variables
+2. Disable `DB_SYNC`
+3. Use proper secrets management
+4. Configure proper network settings
+5. Enable SSL/TLS
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
+
+- Development standards
+- Code style and linting
+- Testing requirements
+- Commit message conventions
+- Pull request process
+
+## 📄 License
+
+This project is licensed under the ISC License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2025, BCTSL
