@@ -1,8 +1,8 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
-import { Token } from 'src/tokens/entities/token.entity';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { Token } from '@/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { SYNC_TOKENS_RANKS_QUEUE } from './constants';
 

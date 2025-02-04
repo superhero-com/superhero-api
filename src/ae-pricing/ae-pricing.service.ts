@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { CoinGeckoService } from 'src/ae/coin-gecko.service';
-import { AETERNITY_COIN_ID, CURRENCIES } from 'src/ae/utils/constants';
-import { IPriceDto } from 'src/tokens/dto/price.dto';
+import { CoinGeckoService } from '@/ae/coin-gecko.service';
+import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
+import { IPriceDto } from '@/tokens/dto/price.dto';
 import { Repository } from 'typeorm';
 import { CoinPrice } from './entities/coin-price.entity';
 

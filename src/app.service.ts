@@ -4,9 +4,9 @@ import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
-import { TX_FUNCTIONS } from './ae/utils/constants';
-import { ICommunityFactorySchema, ITransaction } from './ae/utils/types';
+import { ICommunityFactorySchema, ITransaction } from './utils/types';
 import { WebSocketService } from './ae/websocket.service';
+import { TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -21,7 +21,6 @@ import {
 
 @Injectable()
 export class AppService {
-  tokens: string[] = [];
   constructor(
     private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
@@ -86,9 +85,12 @@ export class AppService {
               },
               {
                 jobId: transaction.hash,
+                lifo: true,
               },
             );
           }
+        } else if (syncedTransactions.length > 100) {
+          syncedTransactions = [];
         }
       },
     );
@@ -116,7 +118,6 @@ export class AppService {
       const registeredTokens =
         await factoryInstance.listRegisteredTokens(collection);
       for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-        this.tokens.push(saleAddress);
         console.log('BCLService->dispatch::', symbol, saleAddress);
         this.loadTokenData(saleAddress as Encoded.ContractAddress);
       }

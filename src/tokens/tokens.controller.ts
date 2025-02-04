@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -16,7 +17,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { Repository } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
@@ -24,8 +25,10 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 
 @Controller('api/tokens')
+@UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokensController {
   constructor(
@@ -60,6 +63,7 @@ export class TokensController {
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
+  @CacheTTL(1000)
   @Get()
   async listAll(
     @Query('search') search = undefined,
@@ -127,6 +131,7 @@ export class TokensController {
     description: 'Token address or name',
   })
   @Get(':address')
+  @CacheTTL(1000)
   @ApiResponse({
     type: TokenDto,
   })
@@ -145,6 +150,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenHolders' })
   @ApiOkResponsePaginated(TokenHolderDto)
+  @CacheTTL(1000)
   @Get(':address/holders')
   async listTokenHolders(
     @Param('address') address: string,
@@ -172,6 +178,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenRankings' })
   @ApiOkResponsePaginated(TokenDto)
+  @CacheTTL(1000)
   @Get(':address/rankings')
   async listTokenRankings(
     @Param('address') address: string,
@@ -181,6 +188,11 @@ export class TokensController {
     const token = await this.tokensService.findByAddress(address);
 
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    queryBuilder.andWhere('token.factory_address = :address', {
+      address: factory.address,
+    });
     queryBuilder.orderBy(`token.rank`, 'ASC');
 
     const minRank = token.rank - Math.floor(limit / 2);
@@ -197,7 +209,7 @@ export class TokensController {
   @ApiQuery({ name: 'token_address', type: 'string', required: false })
   @ApiQuery({ name: 'factory_address', type: 'string', required: false })
   @ApiQuery({ name: 'supply', type: 'string', required: false })
-  @ApiOperation({ operationId: 'estimatePrice' })
+  @ApiOperation({ operationId: 'estimatePrice', deprecated: true })
   @ApiOkResponsePaginated(TokenDto)
   @Get('contracts/estimate-price')
   async estimatePrice(

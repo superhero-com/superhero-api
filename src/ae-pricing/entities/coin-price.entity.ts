@@ -1,4 +1,4 @@
-import { IPriceDto } from 'src/tokens/dto/price.dto';
+import { IPriceDto } from '@/tokens/dto/price.dto';
 import {
   Column,
   CreateDateColumn,

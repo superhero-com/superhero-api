@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 
 import { Encoded } from '@aeternity/aepp-sdk';
@@ -7,19 +8,19 @@ import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { InjectQueue } from '@nestjs/bull';
+import { initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
-import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
-import { AeSdkService } from 'src/ae/ae-sdk.service';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
-import { fetchJson } from 'src/ae/utils/common';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
-import { initTokenSale, TokenSale } from 'bctsl-sdk';
+import moment from 'moment';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { AeSdkService } from '@/ae/ae-sdk.service';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { ACTIVE_NETWORK } from '@/configs';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
-import moment from 'moment';
 
 type TokenContracts = {
   instance: TokenSale;
@@ -36,8 +37,6 @@ export class TokensService {
     private aeSdkService: AeSdkService,
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
-
-    private communityFactoryService: CommunityFactoryService,
 
     private aePricingService: AePricingService,
 
@@ -196,14 +195,10 @@ export class TokensService {
     );
 
     const factory_address = response?.tx?.contract_id;
-    const collection = response?.tx.arguments[0].value;
-
-    await this.tokensRepository.update(token.id, {
-      factory_address: factory_address,
-      collection,
-      creator_address: response?.tx?.caller_id,
-      created_at: moment(response?.tx?.micro_time).toDate(),
-    });
+    await this.updateTokenMetaDataFromCreateTx(
+      token,
+      camelcaseKeysDeep(response),
+    );
 
     return factory_address as Encoded.ContractAddress;
   }
@@ -218,7 +213,6 @@ export class TokensService {
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts> {
     if (this.contracts[saleAddress]) {
-      console.log('RETURNING CACHED CONTRACTS');
       return this.contracts[saleAddress];
     }
     const { instance } = await initTokenSale(
@@ -286,5 +280,22 @@ export class TokensService {
       owner_address: metaInfo?.owner,
       dao_balance: new BigNumber(dao_balance),
     };
+  }
+
+  async updateTokenMetaDataFromCreateTx(
+    token: Token,
+    transaction: ITransaction,
+  ): Promise<Encoded.ContractAddress> {
+    const tokenData = {
+      factory_address: transaction.tx.contractId,
+      creator_address: transaction?.tx?.callerId,
+      created_at: moment(transaction?.microTime).toDate(),
+    };
+    if (transaction?.tx.arguments?.[0]?.value) {
+      tokenData['collection'] = transaction?.tx.arguments[0].value;
+    }
+    await this.tokensRepository.update(token.id, tokenData);
+
+    return transaction.tx.contractId;
   }
 }

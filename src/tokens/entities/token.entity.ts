@@ -1,5 +1,5 @@
 import { BigNumber } from 'bignumber.js';
-import { BigNumberTransformer } from 'src/utils/BigNumberTransformer';
+import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
 import {
   Column,
   CreateDateColumn,
@@ -10,7 +10,7 @@ import {
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 import { TokenHolder } from './token-holders.entity';
-import { Transaction } from 'src/transactions/entities/transaction.entity';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 
 @Entity()
 export class Token {
@@ -33,7 +33,9 @@ export class Token {
   })
   factory_address: string;
 
-  @Column()
+  @Column({
+    unique: true,
+  })
   sale_address: string;
 
   @Column({

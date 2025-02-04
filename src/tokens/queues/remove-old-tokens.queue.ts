@@ -3,7 +3,7 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bull';
-import { Token } from 'src/tokens/entities/token.entity';
+import { Token } from '@/tokens/entities/token.entity';
 import { In, Not, Repository } from 'typeorm';
 import { DELETE_OLD_TOKENS_QUEUE } from './constants';
 

@@ -2,13 +2,13 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
-import { TokensService } from 'src/tokens/tokens.service';
+import { TokensService } from '@/tokens/tokens.service';
 import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
   SYNC_TOKENS_RANKS_QUEUE,
 } from './constants';
-import { SYNC_TRANSACTIONS_QUEUE } from 'src/transactions/queues/constants';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 
 export interface IPullTokenInfoQueue {
   saleAddress: Encoded.ContractAddress;

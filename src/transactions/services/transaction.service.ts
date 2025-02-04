@@ -1,3 +1,14 @@
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { TX_FUNCTIONS } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
+import {
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKENS_RANKS_QUEUE,
+} from '@/tokens/queues/constants';
+import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
+import { TokensService } from '@/tokens/tokens.service';
+import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
@@ -5,17 +16,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
-import { AePricingService } from 'src/ae-pricing/ae-pricing.service';
-import { CommunityFactoryService } from 'src/ae/community-factory.service';
-import { TX_FUNCTIONS } from 'src/ae/utils/constants';
-import { ITransaction } from 'src/ae/utils/types';
-import { Token } from 'src/tokens/entities/token.entity';
-import {
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
-} from 'src/tokens/queues/constants';
-import { TokenWebsocketGateway } from 'src/tokens/token-websocket.gateway';
-import { TokensService } from 'src/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 
@@ -91,6 +91,17 @@ export class TransactionService {
       return;
     }
 
+    if (
+      rawTransaction.tx.function == TX_FUNCTIONS.create_community &&
+      !token.factory_address
+    ) {
+      await this.tokenService.updateTokenMetaDataFromCreateTx(
+        token,
+        rawTransaction,
+      );
+      token = await this.tokenService.findOne(token.id);
+    }
+
     const decodedData = rawTransaction.tx.decodedData;
 
     const priceChangeData = decodedData.find(
@@ -128,6 +139,8 @@ export class TransactionService {
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
       verified: false,
+      token_rank: token.rank,
+      token_collection_rank: token.collection_rank,
     };
     // if transaction 2 days old
     if (!!exists?.id) {
@@ -145,11 +158,16 @@ export class TransactionService {
       ...txData,
     } as any);
 
+    if (!this.isTokenSupportedCollection(token)) {
+      return transaction;
+    }
     if (shouldBroadcast) {
+      // it should only broadcast if token is within supported collections
       await this.tokenService.syncTokenPrice(token);
       this.tokenWebsocketGateway?.handleTokenHistory({
         sale_address: saleAddress,
         data: txData,
+        token: token,
       });
       void this.syncTokenHoldersQueue.add(
         {
@@ -221,11 +239,7 @@ export class TransactionService {
           ).minus(volume);
         }
       } catch (error) {
-        console.log('================================');
-        console.log('failed to parse transaction data: ', rawTransaction?.hash);
-        console.log('decodedData: ', decodedData);
-        console.log('TransactionService->parseTransactionData -> error', error);
-        console.log('================================');
+        //
       }
     }
 
@@ -256,5 +270,25 @@ export class TransactionService {
     } catch (error) {
       return rawTransaction;
     }
+  }
+
+  /**
+   * Checks if the given token is part of a supported collection.
+   *
+   * @param token - The token to check.
+   * @returns A promise that resolves to a boolean indicating whether the token is part of a supported collection.
+   */
+  async isTokenSupportedCollection(token: Token): Promise<boolean> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    if (token.factory_address !== factory.address) {
+      return false;
+    }
+
+    if (!Object.keys(factory.collections).includes(token.collection)) {
+      return false;
+    }
+
+    return true;
   }
 }

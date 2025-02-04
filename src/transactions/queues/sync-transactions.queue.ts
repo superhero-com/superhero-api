@@ -3,13 +3,13 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { fetchJson } from 'src/ae/utils/common';
-import { ACTIVE_NETWORK } from 'src/ae/utils/networks';
-import { ITransaction } from 'src/ae/utils/types';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { ACTIVE_NETWORK } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '../services/transaction.service';
 import { SYNC_TRANSACTIONS_QUEUE } from './constants';
-import { TokensService } from 'src/tokens/tokens.service';
-import { Token } from 'src/tokens/entities/token.entity';
 
 export interface ISyncTransactionsQueue {
   saleAddress: Encoded.ContractAddress;
