@@ -19,6 +19,7 @@ import { TokensService } from '@/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 
 @Controller('api/transactions')
 @ApiTags('Transactions')
@@ -26,7 +27,7 @@ export class TransactionsController {
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
-
+    private readonly communityFactoryService: CommunityFactoryService,
     private tokenService: TokensService,
   ) {}
 
@@ -61,12 +62,22 @@ export class TransactionsController {
   ): Promise<Pagination<Transaction>> {
     const queryBuilder =
       this.transactionsRepository.createQueryBuilder('transactions');
+    if (includes === 'token') {
+      queryBuilder.leftJoinAndSelect('transactions.token', 'token');
+    } else {
+      queryBuilder.leftJoin('transactions.token', 'token');
+    }
     queryBuilder.orderBy(`transactions.created_at`, 'DESC');
 
     if (token_address) {
       const token = await this.tokenService.getToken(token_address);
       queryBuilder.where('transactions.tokenId = :tokenId', {
         tokenId: token.id,
+      });
+    } else {
+      const factory = await this.communityFactoryService.getCurrentFactory();
+      queryBuilder.where('token.factory_address = :factoryAddress', {
+        factoryAddress: factory.address,
       });
     }
 
@@ -84,10 +95,6 @@ export class TransactionsController {
           'token.rank',
           'token.collection',
         ]);
-    }
-
-    if (includes === 'token') {
-      queryBuilder.leftJoinAndSelect('transactions.token', 'token');
     }
 
     return paginate<Transaction>(queryBuilder, { page, limit });
