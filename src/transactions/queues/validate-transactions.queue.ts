@@ -53,7 +53,7 @@ export class ValidateTransactionsQueue {
         .where('transactions.block_height >= :from', { from: job.data.from })
         .andWhere('transactions.block_height <= :to', { to: job.data.to })
         .andWhere('transactions.verified = false')
-        .select('transactions.tokenId')
+        .select('transactions."tokenId"')
         .distinct(true)
         .getRawMany()
         .then((items) => items.map((item) => item.tokenId));

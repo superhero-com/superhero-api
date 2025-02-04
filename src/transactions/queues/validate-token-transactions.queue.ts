@@ -63,7 +63,7 @@ export class ValidateTokenTransactionsQueue {
 
       await this.transactionRepository
         .createQueryBuilder('transactions')
-        .where('transactions.tokenId = :tokenId', {
+        .where('transactions."tokenId" = :tokenId', {
           tokenId: token.id,
         })
         .andWhere('transactions.block_height >= :from', { from: job.data.from })

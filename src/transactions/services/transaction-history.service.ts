@@ -60,7 +60,7 @@ export class TransactionHistoryService {
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions.tokenId = :tokenId', {
+      .where('transactions."tokenId" = :tokenId', {
         tokenId: props.token.id,
       })
       .andWhere('transactions.created_at >= :start', {
@@ -76,7 +76,7 @@ export class TransactionHistoryService {
       props.mode === 'aggregated'
         ? await this.transactionsRepository
             .createQueryBuilder('transactions')
-            .where('transactions.tokenId = :tokenId', {
+            .where('transactions."tokenId" = :tokenId', {
               tokenId: props.token.id,
             })
             .andWhere('transactions.created_at < :start', {
@@ -297,7 +297,7 @@ export class TransactionHistoryService {
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
-      .where('transactions.tokenId = :tokenId', {
+      .where('transactions."tokenId" = :tokenId', {
         tokenId: token.id,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)

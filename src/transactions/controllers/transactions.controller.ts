@@ -71,7 +71,7 @@ export class TransactionsController {
 
     if (token_address) {
       const token = await this.tokenService.getToken(token_address);
-      queryBuilder.where('transactions.tokenId = :tokenId', {
+      queryBuilder.where('transactions."tokenId" = :tokenId', {
         tokenId: token.id,
       });
     } else {

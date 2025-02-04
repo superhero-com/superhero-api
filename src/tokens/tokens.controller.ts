@@ -111,7 +111,7 @@ export class TokensController {
           owner_address,
         })
         .andWhere('token_holder.percentage > 0')
-        .select('token_holder.tokenId')
+        .select('token_holder."tokenId"')
         .distinct(true)
         .getRawMany()
         .then((res) => res.map((r) => r.tokenId));
