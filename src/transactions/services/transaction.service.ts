@@ -158,7 +158,11 @@ export class TransactionService {
       ...txData,
     } as any);
 
+    if (!this.isTokenSupportedCollection(token)) {
+      return transaction;
+    }
     if (shouldBroadcast) {
+      // it should only broadcast if token is within supported collections
       await this.tokenService.syncTokenPrice(token);
       this.tokenWebsocketGateway?.handleTokenHistory({
         sale_address: saleAddress,
@@ -266,5 +270,25 @@ export class TransactionService {
     } catch (error) {
       return rawTransaction;
     }
+  }
+
+  /**
+   * Checks if the given token is part of a supported collection.
+   *
+   * @param token - The token to check.
+   * @returns A promise that resolves to a boolean indicating whether the token is part of a supported collection.
+   */
+  async isTokenSupportedCollection(token: Token): Promise<boolean> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    if (token.factory_address !== factory.address) {
+      return false;
+    }
+
+    if (!Object.keys(factory.collections).includes(token.collection)) {
+      return false;
+    }
+
+    return true;
   }
 }
