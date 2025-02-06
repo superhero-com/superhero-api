@@ -22,10 +22,10 @@ import { Transaction } from '../entities/transaction.entity';
 @Injectable()
 export class TransactionService {
   constructor(
-    private communityFactoryService: CommunityFactoryService,
-    private aePricingService: AePricingService,
-    private tokenService: TokensService,
-    private tokenWebsocketGateway: TokenWebsocketGateway,
+    private readonly communityFactoryService: CommunityFactoryService,
+    private readonly aePricingService: AePricingService,
+    private readonly tokenService: TokensService,
+    private readonly tokenWebsocketGateway: TokenWebsocketGateway,
 
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,

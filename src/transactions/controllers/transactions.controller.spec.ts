@@ -1,21 +1,24 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { Test, TestingModule } from '@nestjs/testing';
-import { TransactionsController } from './transactions.controller';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TokensService } from '@/tokens/tokens.service';
-import { Repository } from 'typeorm';
-import { Transaction } from '../entities/transaction.entity';
+import { NotFoundException } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { paginate, Pagination } from 'nestjs-typeorm-paginate';
-import { NotFoundException } from '@nestjs/common';
+import { Repository } from 'typeorm';
+import { Transaction } from '../entities/transaction.entity';
+import { TransactionsController } from './transactions.controller';
 
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn(),
 }));
+jest.mock('@/ae/community-factory.service');
 
 describe('TransactionsController', () => {
   let controller: TransactionsController;
   let transactionsRepository: Repository<Transaction>;
   let tokenService: TokensService;
+  let communityFactoryService: CommunityFactoryService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -33,6 +36,14 @@ describe('TransactionsController', () => {
               .mockResolvedValue({ id: 1, address: 'test_token' }),
           },
         },
+        {
+          provide: CommunityFactoryService,
+          useValue: {
+            getCurrentFactory: jest
+              .fn()
+              .mockResolvedValue({ address: 'test_factory' }),
+          },
+        },
       ],
     }).compile();
 
@@ -41,6 +52,9 @@ describe('TransactionsController', () => {
       getRepositoryToken(Transaction),
     );
     tokenService = module.get<TokensService>(TokensService);
+    communityFactoryService = module.get<CommunityFactoryService>(
+      CommunityFactoryService,
+    );
   });
 
   it('should be defined', () => {
@@ -66,6 +80,7 @@ describe('TransactionsController', () => {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         leftJoin: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         getManyAndCount: jest.fn().mockResolvedValue([mockPagination.items, 1]),
       } as any);
