@@ -211,27 +211,35 @@ export class TokensService {
 
   async getTokenContractsBySaleAddress(
     saleAddress: Encoded.ContractAddress,
-  ): Promise<TokenContracts> {
+  ): Promise<TokenContracts | undefined> {
     if (this.contracts[saleAddress]) {
       return this.contracts[saleAddress];
     }
-    const { instance } = await initTokenSale(
-      this.aeSdkService.sdk,
-      saleAddress,
-    );
-    const tokenContractInstance = await instance?.tokenContractInstance();
 
-    this.contracts[saleAddress] = {
-      instance,
-      tokenContractInstance,
-    };
+    try {
+      const { instance } = await initTokenSale(
+        this.aeSdkService.sdk,
+        saleAddress,
+      );
+      const tokenContractInstance = await instance?.tokenContractInstance();
 
-    return this.contracts[saleAddress];
+      this.contracts[saleAddress] = {
+        instance,
+        tokenContractInstance,
+      };
+
+      return this.contracts[saleAddress];
+    } catch (error) {
+      return undefined;
+    }
   }
 
   private async getTokeLivePrice(token: Token) {
-    const { instance, tokenContractInstance } =
-      await this.getTokenContracts(token);
+    const contract = await this.getTokenContracts(token);
+    if (!contract) {
+      return {};
+    }
+    const { instance, tokenContractInstance } = contract;
 
     const [total_supply] = await Promise.all([
       tokenContractInstance
