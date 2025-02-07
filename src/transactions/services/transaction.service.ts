@@ -210,21 +210,16 @@ export class TransactionService {
         }
 
         if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-          if (!decodedData.find((data) => data.name === 'PriceChange')) {
-            return {
-              volume,
-              amount,
-              total_supply,
-            };
+          if (decodedData.find((data) => data.name === 'PriceChange')) {
+            const mints = decodedData.filter((data) => data.name === 'Mint');
+            volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+            amount = new BigNumber(
+              toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+            );
+            total_supply = new BigNumber(
+              toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+            ).plus(volume);
           }
-          const mints = decodedData.filter((data) => data.name === 'Mint');
-          volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-          amount = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-          );
-          total_supply = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-          ).plus(volume);
         }
 
         if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
