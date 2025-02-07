@@ -51,6 +51,13 @@ export class Transaction {
   volume: BigNumber; // Total Units was bought/sold
 
   @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  protocol_reward: BigNumber; // Protocol reward for this transaction
+
+  @Column({
     type: 'json',
   })
   amount: IPriceDto; // Total spent/received amount

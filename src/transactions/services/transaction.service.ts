@@ -36,7 +36,9 @@ export class TransactionService {
     @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
     private readonly syncTokensRanksQueue: Queue,
   ) {
-    //
+    // this._testTransaction(
+    //   'th_8B9qcMtArB59kBAHKKzPo4JXyECgBUBDH415gy8a3K69yr837',
+    // );
   }
 
   async saveTransaction(
@@ -80,6 +82,7 @@ export class TransactionService {
       amount: _amount,
       volume,
       total_supply,
+      protocol_reward,
     } = await this.parseTransactionData(rawTransaction);
 
     // if volume is 0 & tx type is not create_community ignore it
@@ -131,6 +134,7 @@ export class TransactionService {
       block_height: rawTransaction.blockHeight,
       address: rawTransaction.tx.callerId,
       volume,
+      protocol_reward,
       amount,
       unit_price,
       previous_buy_price,
@@ -190,16 +194,19 @@ export class TransactionService {
     volume: BigNumber;
     amount: BigNumber;
     total_supply: BigNumber;
+    protocol_reward: BigNumber;
   }> {
     const decodedData = rawTransaction.tx.decodedData;
     let volume = new BigNumber(0);
     let amount = new BigNumber(0);
     let total_supply = new BigNumber(0);
+    let protocol_reward = new BigNumber(0);
 
     if (decodedData.length) {
       try {
         if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
           const mints = decodedData.filter((data) => data.name === 'Mint');
+          protocol_reward = new BigNumber(toAe(mints[0].args[1]));
           volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
           amount = new BigNumber(
             toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
@@ -212,6 +219,7 @@ export class TransactionService {
         if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
           if (decodedData.find((data) => data.name === 'PriceChange')) {
             const mints = decodedData.filter((data) => data.name === 'Mint');
+            protocol_reward = new BigNumber(toAe(mints[0].args[1]));
             volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
             amount = new BigNumber(
               toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
@@ -242,6 +250,7 @@ export class TransactionService {
       volume,
       amount,
       total_supply,
+      protocol_reward,
     };
   }
 
@@ -286,4 +295,24 @@ export class TransactionService {
 
     return true;
   }
+
+  // FOT TESTING TX
+  // async _testTransaction(hash: Encoded.TxHash) {
+  //   const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${hash}`;
+  //   let rawTransaction = await fetchJson(url).then((res) =>
+  //     camelcaseKeysDeep(res),
+  //   );
+  //   const token = await this.tokenService.getToken(
+  //     rawTransaction.tx.contractId,
+  //   );
+  //   console.log('==============   response   ==============');
+  //   console.log(rawTransaction);
+  //   rawTransaction = await this.decodeTransactionData(token, rawTransaction);
+
+  //   const {
+  //     amount: _amount,
+  //     volume,
+  //     total_supply,
+  //   } = await this.parseTransactionData(rawTransaction);
+  // }
 }
