@@ -71,6 +71,7 @@ export class TokensService {
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
+      .orWhere('token.name = :address', { address })
       .getOne();
   }
 
