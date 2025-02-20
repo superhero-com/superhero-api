@@ -86,7 +86,6 @@ export class TransactionsController {
         .andWhere('transactions.address = :account_address', {
           account_address,
         })
-        .leftJoin('transactions.token', 'token')
         .addSelect([
           'token.name',
           'token.symbol',
