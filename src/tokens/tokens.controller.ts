@@ -118,6 +118,8 @@ export class TokensController {
 
       queryBuilder.andWhereInIds(ownedTokens);
     }
+    // listed only
+    queryBuilder.andWhere('token.unlisted = false');
     return paginate<Token>(queryBuilder, {
       page,
       limit,

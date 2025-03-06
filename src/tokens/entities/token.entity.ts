@@ -17,6 +17,11 @@ export class Token {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({
+    default: false,
+  })
+  unlisted: boolean;
+
   @OneToMany(() => Transaction, (tokenTransaction) => tokenTransaction.token)
   transactions: Transaction[];
 
