@@ -47,7 +47,7 @@ export class TransactionHistoryService {
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
@@ -81,7 +81,8 @@ export class TransactionHistoryService {
           WHERE "tokenId" = $1
             AND buy_price->>'${convertTo}' != 'NaN'
           ORDER BY created_at DESC
-          LIMIT ${limit}
+          OFFSET ${offset}
+          LIMIT ${limit * 2}  -- Fetch extra record for previous close price
         ),
         time_groups AS (
           SELECT 
@@ -103,42 +104,52 @@ export class TransactionHistoryService {
             MAX(market_cap) AS market_cap,
             MAX(total_supply) AS total_supply,
             MIN(created_at) AS "timeMin",
-            MAX(created_at) AS "timeMax"
+            MAX(created_at) AS "timeMax",
+            LAST_VALUE(price) OVER (
+              PARTITION BY interval_start 
+              ORDER BY created_at
+              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) as close
           FROM time_groups
-          GROUP BY interval_start
+          GROUP BY interval_start, created_at, price
         ),
-        prices AS (
-          SELECT DISTINCT ON (interval_start)
+        final_aggregated AS (
+          SELECT 
+            a.*,
+            LAG(close) OVER (ORDER BY interval_start DESC) as open
+          FROM (
+            SELECT DISTINCT ON (interval_start)
             interval_start,
-            FIRST_VALUE(price) OVER w AS open,
-            LAST_VALUE(price) OVER w AS close
-          FROM time_groups
-          WINDOW w AS (
-            PARTITION BY interval_start 
-            ORDER BY created_at
-            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-          )
+            low,
+            high,
+            volume,
+            market_cap,
+            total_supply,
+            "timeMin",
+            "timeMax",
+            close
+            FROM aggregated
+          ) a
         )
         SELECT 
-          a.interval_start AS "timeOpen",
-          a.interval_start + INTERVAL '${pgInterval}' AS "timeClose",
-          a.low,
-          a.high,
-          COALESCE(p.open, 0) as open,
-          COALESCE(p.close, 0) as close,
-          a.volume,
-          a.market_cap,
-          a.total_supply,
-          a."timeMin",
-          a."timeMax"
-        FROM aggregated a
-        LEFT JOIN prices p ON p.interval_start = a.interval_start
-        ORDER BY a.interval_start DESC
-        OFFSET ${offset}
+          interval_start AS "timeOpen",
+          interval_start + INTERVAL '${pgInterval}' AS "timeClose",
+          low,
+          high,
+          COALESCE(open, close) as open,
+          close,
+          volume,
+          market_cap,
+          total_supply,
+          "timeMin",
+          "timeMax"
+        FROM final_aggregated
+        ORDER BY interval_start DESC
         LIMIT ${limit}
       `, [token.id, interval]);
 
     await queryRunner.release();
+    
     return rawResults.map((row) => ({
       timeOpen: row.timeOpen,
       timeClose: row.timeClose,
@@ -181,16 +192,16 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.transactionsRepository
-            .createQueryBuilder('transactions')
-            .where('transactions."tokenId" = :tokenId', {
-              tokenId: props.token.id,
-            })
-            .andWhere('transactions.created_at < :start', {
-              start: startDate.toDate(),
-            })
-            .orderBy('transactions.created_at', 'DESC')
-            .limit(1)
-            .getOne()
+          .createQueryBuilder('transactions')
+          .where('transactions."tokenId" = :tokenId', {
+            tokenId: props.token.id,
+          })
+          .andWhere('transactions.created_at < :start', {
+            start: startDate.toDate(),
+          })
+          .orderBy('transactions.created_at', 'DESC')
+          .limit(1)
+          .getOne()
         : undefined;
 
     return this.processAggregatedHistoricalData(
