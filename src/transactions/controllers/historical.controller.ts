@@ -1,5 +1,5 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
+import { Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Query, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { TokensService } from '@/tokens/tokens.service';
@@ -66,6 +66,47 @@ export class HistoricalController {
       endDate: this.parseDate(endDate),
       convertTo,
       mode,
+    });
+  }
+
+
+  @ApiOperation({ operationId: 'getPaginatedHistory' })
+  @ApiQuery({
+    name: 'interval',
+    type: 'number',
+    description: 'Interval type in seconds, default is 3600 (1 hour)',
+    required: false,
+  })
+  @ApiQuery({
+    name: 'convertTo',
+    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    required: false,
+  })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @CacheTTL(10)
+  // @CacheTTL(1000)
+  @Get(':address/history')
+  async getPaginatedHistory(
+    @Param('address') address: string,
+    @Query('interval') interval: number = 3600,
+    @Query('convertTo') convertTo: string = 'ae',
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+  ) {
+    console.log('getPaginatedHistory:', { address, interval, convertTo, page, limit });
+    const token = await this.tokenService.getToken(address);
+    return this.tokenHistoryService.getPaginatedHistoricalData({
+      token,
+      interval,
+      convertTo,
+      page,
+      limit,
     });
   }
 

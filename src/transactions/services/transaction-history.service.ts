@@ -8,6 +8,13 @@ import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
 import { Transaction } from '../entities/transaction.entity';
 
+export interface IGetPaginatedHistoricalDataProps {
+  token: Token;
+  interval: number; // number of seconds
+  page: number;
+  limit: number;
+  convertTo?: string;
+}
 export interface IGetHistoricalDataProps {
   token: Token;
   interval: number;
@@ -51,6 +58,105 @@ export class TransactionHistoryService {
       .orderBy('token.created_at', 'ASC')
       .limit(1)
       .getRawOne<IOldestHistoryInfo>();
+  }
+
+  async getPaginatedHistoricalData(
+    props: IGetPaginatedHistoricalDataProps,
+  ): Promise<HistoricalDataDto[]> {
+    const { token, interval, page, limit, convertTo = 'ae' } = props;
+    const pgInterval = `${interval} seconds`;
+    const offset = (page - 1) * limit;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    const rawResults = await queryRunner
+      .query(`
+        WITH bounded_transactions AS (
+          SELECT 
+            created_at,
+            buy_price->>'${convertTo}' as price,
+            volume,
+            market_cap->>'${convertTo}' as market_cap,
+            total_supply
+          FROM transactions
+          WHERE "tokenId" = $1
+            AND buy_price->>'${convertTo}' != 'NaN'
+          ORDER BY created_at DESC
+          LIMIT ${limit}
+        ),
+        time_groups AS (
+          SELECT 
+            date_trunc('second', created_at) - 
+              (EXTRACT(EPOCH FROM created_at)::integer % $2) * INTERVAL '1 second' as interval_start,
+            price::float,
+            created_at,
+            volume,
+            market_cap,
+            total_supply
+          FROM bounded_transactions
+        ),
+        aggregated AS (
+          SELECT 
+            interval_start,
+            MIN(price) AS low,
+            MAX(price) AS high,
+            SUM(COALESCE(volume, 0)) AS volume,
+            MAX(market_cap) AS market_cap,
+            MAX(total_supply) AS total_supply,
+            MIN(created_at) AS "timeMin",
+            MAX(created_at) AS "timeMax"
+          FROM time_groups
+          GROUP BY interval_start
+        ),
+        prices AS (
+          SELECT DISTINCT ON (interval_start)
+            interval_start,
+            FIRST_VALUE(price) OVER w AS open,
+            LAST_VALUE(price) OVER w AS close
+          FROM time_groups
+          WINDOW w AS (
+            PARTITION BY interval_start 
+            ORDER BY created_at
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+          )
+        )
+        SELECT 
+          a.interval_start AS "timeOpen",
+          a.interval_start + INTERVAL '${pgInterval}' AS "timeClose",
+          a.low,
+          a.high,
+          COALESCE(p.open, 0) as open,
+          COALESCE(p.close, 0) as close,
+          a.volume,
+          a.market_cap,
+          a.total_supply,
+          a."timeMin",
+          a."timeMax"
+        FROM aggregated a
+        LEFT JOIN prices p ON p.interval_start = a.interval_start
+        ORDER BY a.interval_start DESC
+        OFFSET ${offset}
+        LIMIT ${limit}
+      `, [token.id, interval]);
+
+    await queryRunner.release();
+    return rawResults.map((row) => ({
+      timeOpen: row.timeOpen,
+      timeClose: row.timeClose,
+      timeHigh: row.timeMax,
+      timeLow: row.timeMin,
+      quote: {
+        convertedTo: convertTo,
+        open: parseFloat(row.open || '0'),
+        high: parseFloat(row.high || '0'),
+        low: parseFloat(row.low || '0'),
+        close: parseFloat(row.close || '0'),
+        volume: parseFloat(row.volume || '0'),
+        market_cap: new BigNumber(row.market_cap || '0'),
+        total_supply: new BigNumber(row.total_supply || '0'),
+        timestamp: row.timeClose,
+        symbol: token.symbol,
+      },
+    }));
   }
 
   async getHistoricalData(
