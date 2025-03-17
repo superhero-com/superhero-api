@@ -70,104 +70,98 @@ export class TransactionHistoryService {
     const queryRunner = this.dataSource.createQueryRunner();
     const rawResults = await queryRunner
       .query(`
-        WITH bounded_transactions AS (
+        WITH transactions_in_intervals AS (
           SELECT 
-            created_at,
-            buy_price->>'${convertTo}' as price,
-            volume,
-            market_cap->>'${convertTo}' as market_cap,
-            total_supply
-          FROM transactions
-          WHERE "tokenId" = $1
-            AND buy_price->>'${convertTo}' != 'NaN'
-          ORDER BY created_at DESC
+            t.created_at,
+            (t.buy_price->>'${convertTo}')::float as price,
+            t.volume,
+            (t.market_cap->>'${convertTo}') as market_cap,
+            t.total_supply,
+            date_trunc('second', t.created_at) - 
+              (EXTRACT(EPOCH FROM t.created_at)::integer % $2) * INTERVAL '1 second' as interval_start
+          FROM transactions t
+          WHERE t."tokenId" = $1
+            AND t.buy_price->>'${convertTo}' != 'NaN'
+        ),
+        grouped_intervals AS (
+          SELECT DISTINCT interval_start
+          FROM transactions_in_intervals
+          ORDER BY interval_start DESC
           OFFSET ${offset}
-          LIMIT ${limit * 2}  -- Fetch extra record for previous close price
+          LIMIT ${limit}
         ),
-        time_groups AS (
+        interval_stats AS (
           SELECT 
-            date_trunc('second', created_at) - 
-              (EXTRACT(EPOCH FROM created_at)::integer % $2) * INTERVAL '1 second' as interval_start,
-            price::float,
-            created_at,
-            volume,
-            market_cap,
-            total_supply
-          FROM bounded_transactions
+            t.interval_start,
+            MIN(t.price) as low,
+            MAX(t.price) as high,
+            SUM(COALESCE(t.volume, 0)) as volume,
+            MAX(t.market_cap) as market_cap,
+            MAX(t.total_supply) as total_supply,
+            MIN(t.created_at) as "timeMin",
+            MAX(t.created_at) as "timeMax"
+          FROM transactions_in_intervals t
+          INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
+          GROUP BY t.interval_start
         ),
-        aggregated AS (
-          SELECT 
-            interval_start,
-            MIN(price) AS low,
-            MAX(price) AS high,
-            SUM(COALESCE(volume, 0)) AS volume,
-            MAX(market_cap) AS market_cap,
-            MAX(total_supply) AS total_supply,
-            MIN(created_at) AS "timeMin",
-            MAX(created_at) AS "timeMax",
-            LAST_VALUE(price) OVER (
-              PARTITION BY interval_start 
-              ORDER BY created_at
-              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+        prices AS (
+          SELECT DISTINCT ON (t.interval_start)
+            t.interval_start,
+            FIRST_VALUE(t.price) OVER (
+              PARTITION BY t.interval_start 
+              ORDER BY t.created_at ASC
+            ) as open,
+            FIRST_VALUE(t.price) OVER (
+              PARTITION BY t.interval_start 
+              ORDER BY t.created_at DESC
             ) as close
-          FROM time_groups
-          GROUP BY interval_start, created_at, price
-        ),
-        final_aggregated AS (
-          SELECT 
-            a.*,
-            LAG(close) OVER (ORDER BY interval_start DESC) as open
-          FROM (
-            SELECT DISTINCT ON (interval_start)
-            interval_start,
-            low,
-            high,
-            volume,
-            market_cap,
-            total_supply,
-            "timeMin",
-            "timeMax",
-            close
-            FROM aggregated
-          ) a
+          FROM transactions_in_intervals t
+          INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
         )
         SELECT 
-          interval_start AS "timeOpen",
-          interval_start + INTERVAL '${pgInterval}' AS "timeClose",
-          low,
-          high,
-          COALESCE(open, close) as open,
-          close,
-          volume,
-          market_cap,
-          total_supply,
-          "timeMin",
-          "timeMax"
-        FROM final_aggregated
-        ORDER BY interval_start DESC
-        LIMIT ${limit}
+          s.interval_start as "timeOpen",
+          s.interval_start + INTERVAL '${pgInterval}' as "timeClose",
+          s.low,
+          s.high,
+          p.open,
+          p.close,
+          s.volume,
+          s.market_cap,
+          s.total_supply,
+          s."timeMin",
+          s."timeMax",
+          LAG(p.close) OVER (ORDER BY s.interval_start DESC) as previous_close
+        FROM interval_stats s
+        INNER JOIN prices p ON p.interval_start = s.interval_start
+        ORDER BY s.interval_start DESC
       `, [token.id, interval]);
 
     await queryRunner.release();
-    
-    return rawResults.map((row) => ({
-      timeOpen: row.timeOpen,
-      timeClose: row.timeClose,
-      timeHigh: row.timeMax,
-      timeLow: row.timeMin,
-      quote: {
-        convertedTo: convertTo,
-        open: parseFloat(row.open || '0'),
-        high: parseFloat(row.high || '0'),
-        low: parseFloat(row.low || '0'),
-        close: parseFloat(row.close || '0'),
-        volume: parseFloat(row.volume || '0'),
-        market_cap: new BigNumber(row.market_cap || '0'),
-        total_supply: new BigNumber(row.total_supply || '0'),
-        timestamp: row.timeClose,
-        symbol: token.symbol,
-      },
-    }));
+
+    // Modify the mapping to handle the previous close price correctly
+    let lastClose = null;
+    return rawResults.map((row) => {
+      const result = {
+        timeOpen: row.timeOpen,
+        timeClose: row.timeClose,
+        timeHigh: row.timeMax,
+        timeLow: row.timeMin,
+        quote: {
+          convertedTo: convertTo,
+          open: lastClose !== null ? lastClose : parseFloat(row.open || '0'),
+          high: parseFloat(row.high || '0'),
+          low: parseFloat(row.low || '0'),
+          close: parseFloat(row.close || '0'),
+          volume: parseFloat(row.volume || '0'),
+          market_cap: new BigNumber(row.market_cap || '0'),
+          total_supply: new BigNumber(row.total_supply || '0'),
+          timestamp: row.timeClose,
+          symbol: token.symbol,
+        },
+      };
+      lastClose = parseFloat(row.close || '0');
+      return result;
+    });
   }
 
   async getHistoricalData(
