@@ -64,7 +64,6 @@ export class TransactionHistoryService {
     props: IGetPaginatedHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
     const { token, interval, page, limit, convertTo = 'ae' } = props;
-    const pgInterval = `${interval} seconds`;
     const offset = (page - 1) * limit;
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -78,8 +77,9 @@ export class TransactionHistoryService {
             t.volume,
             (t.market_cap->>'${convertTo}') as market_cap,
             t.total_supply,
-            date_trunc('second', t.created_at) - 
-              (EXTRACT(EPOCH FROM t.created_at)::integer % $2) * INTERVAL '1 second' as interval_start
+            to_timestamp(
+              floor(extract(epoch from t.created_at) / $2) * $2
+            ) as interval_start
           FROM transactions t
           WHERE t."tokenId" = $1
             AND t.buy_price->>'${convertTo}' != 'NaN'
@@ -99,36 +99,40 @@ export class TransactionHistoryService {
             SUM(COALESCE(t.volume, 0)) as volume,
             MAX(t.market_cap) as market_cap,
             MAX(t.total_supply) as total_supply,
-            MIN(t.price) OVER (PARTITION BY t.interval_start) as low,
-            MAX(t.price) OVER (PARTITION BY t.interval_start) as high,
+            MIN(t.price) as low,
+            MAX(t.price) as high,
             FIRST_VALUE(t.price) OVER (
               PARTITION BY t.interval_start 
               ORDER BY t.created_at ASC
+              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ) as open,
             FIRST_VALUE(t.price) OVER (
               PARTITION BY t.interval_start 
               ORDER BY t.created_at DESC
-              RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
-            ) as close
+              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) as close,
+            t.created_at,
+            t.price
           FROM transactions_in_intervals t
           INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
           GROUP BY t.interval_start, t.created_at, t.price
         )
-        SELECT DISTINCT ON (interval_start)
+        SELECT 
           interval_start as "timeOpen",
-          interval_start + INTERVAL '${pgInterval}' as "timeClose",
-          low,
-          high,
-          open,
-          close,
-          volume,
-          market_cap,
-          total_supply,
-          "timeMin",
-          "timeMax",
-          LAG(close) OVER (ORDER BY interval_start DESC) as previous_close
+          interval_start + (interval '$2 seconds') as "timeClose",
+          MIN(low) as low,
+          MAX(high) as high,
+          MIN(open) as open,
+          MAX(close) as close,
+          SUM(volume) as volume,
+          MAX(market_cap) as market_cap,
+          MAX(total_supply) as total_supply,
+          MIN("timeMin") as "timeMin",
+          MAX("timeMax") as "timeMax",
+          LAG(MAX(close)) OVER (ORDER BY interval_start) as previous_close
         FROM interval_stats
-        ORDER BY interval_start ASC, "timeMax" DESC
+        GROUP BY interval_start
+        ORDER BY interval_start ASC
       `, [token.id, interval]);
 
     await queryRunner.release();
