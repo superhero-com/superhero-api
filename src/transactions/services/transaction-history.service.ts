@@ -68,12 +68,13 @@ export class TransactionHistoryService {
     const offset = (page - 1) * limit;
 
     const queryRunner = this.dataSource.createQueryRunner();
+    //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
     const rawResults = await queryRunner
       .query(`
         WITH transactions_in_intervals AS (
           SELECT 
             t.created_at,
-            (t.buy_price->>'${convertTo}')::float as price,
+            CAST(NULLIF(t.buy_price->>'${convertTo}', 'NaN') AS decimal) as price,
             t.volume,
             (t.market_cap->>'${convertTo}') as market_cap,
             t.total_supply,
@@ -93,20 +94,13 @@ export class TransactionHistoryService {
         interval_stats AS (
           SELECT 
             t.interval_start,
-            MIN(t.price) as low,
-            MAX(t.price) as high,
+            MIN(t.created_at) as "timeMin",
+            MAX(t.created_at) as "timeMax",
             SUM(COALESCE(t.volume, 0)) as volume,
             MAX(t.market_cap) as market_cap,
             MAX(t.total_supply) as total_supply,
-            MIN(t.created_at) as "timeMin",
-            MAX(t.created_at) as "timeMax"
-          FROM transactions_in_intervals t
-          INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
-          GROUP BY t.interval_start
-        ),
-        prices AS (
-          SELECT DISTINCT ON (t.interval_start)
-            t.interval_start,
+            MIN(t.price) OVER (PARTITION BY t.interval_start) as low,
+            MAX(t.price) OVER (PARTITION BY t.interval_start) as high,
             FIRST_VALUE(t.price) OVER (
               PARTITION BY t.interval_start 
               ORDER BY t.created_at ASC
@@ -114,26 +108,27 @@ export class TransactionHistoryService {
             FIRST_VALUE(t.price) OVER (
               PARTITION BY t.interval_start 
               ORDER BY t.created_at DESC
+              RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
             ) as close
           FROM transactions_in_intervals t
           INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
+          GROUP BY t.interval_start, t.created_at, t.price
         )
-        SELECT 
-          s.interval_start as "timeOpen",
-          s.interval_start + INTERVAL '${pgInterval}' as "timeClose",
-          s.low,
-          s.high,
-          p.open,
-          p.close,
-          s.volume,
-          s.market_cap,
-          s.total_supply,
-          s."timeMin",
-          s."timeMax",
-          LAG(p.close) OVER (ORDER BY s.interval_start DESC) as previous_close
-        FROM interval_stats s
-        INNER JOIN prices p ON p.interval_start = s.interval_start
-        ORDER BY s.interval_start DESC
+        SELECT DISTINCT ON (interval_start)
+          interval_start as "timeOpen",
+          interval_start + INTERVAL '${pgInterval}' as "timeClose",
+          low,
+          high,
+          open,
+          close,
+          volume,
+          market_cap,
+          total_supply,
+          "timeMin",
+          "timeMax",
+          LAG(close) OVER (ORDER BY interval_start DESC) as previous_close
+        FROM interval_stats
+        ORDER BY interval_start ASC, "timeMax" DESC
       `, [token.id, interval]);
 
     await queryRunner.release();
@@ -148,10 +143,10 @@ export class TransactionHistoryService {
         timeLow: row.timeMin,
         quote: {
           convertedTo: convertTo,
-          open: lastClose !== null ? lastClose : parseFloat(row.open || '0'),
-          high: parseFloat(row.high || '0'),
-          low: parseFloat(row.low || '0'),
-          close: parseFloat(row.close || '0'),
+          open: lastClose !== null ? lastClose : String(row.open || '0'),
+          high: String(row.high || '0'),
+          low: String(row.low || '0'),
+          close: String(row.close || '0'),
           volume: parseFloat(row.volume || '0'),
           market_cap: new BigNumber(row.market_cap || '0'),
           total_supply: new BigNumber(row.total_supply || '0'),
@@ -159,7 +154,7 @@ export class TransactionHistoryService {
           symbol: token.symbol,
         },
       };
-      lastClose = parseFloat(row.close || '0');
+      lastClose = String(row.close || '0');
       return result;
     });
   }
@@ -404,7 +399,7 @@ export class TransactionHistoryService {
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('')
-      .select([
+      .select([//
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
