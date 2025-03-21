@@ -33,10 +33,10 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     },
   },
   [NETWORK_ID_TESTNET]: {
-    address: 'ct_2HQJwyKAWpuSHN3pyfAyVqALjMk1eBePNRQP2VBe1Rq25SNnUb',
+    address: 'ct_Q6nXuqr7Ba14noX6xkpTvMsejgErGn7om34wcWBeZ6ivPxEnJ',
     collections: {
-      'WORDS-ak_vyEThWC5XJR6p2t3hQARPNKz1djWnS4P6Rga2iTPfVWFj3sRi': {
-        id: 'WORDS-ak_vyEThWC5XJR6p2t3hQARPNKz1djWnS4P6Rga2iTPfVWFj3sRi',
+      'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
+        id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
         name: 'WORDS',
         allowed_name_length: '20',
         allowed_name_chars: [
