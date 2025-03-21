@@ -99,7 +99,6 @@ export class HistoricalController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
-    console.log('getPaginatedHistory:', { address, interval, convertTo, page, limit });
     const token = await this.tokenService.getToken(address);
     return this.tokenHistoryService.getPaginatedHistoricalData({
       token,
