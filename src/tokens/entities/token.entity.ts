@@ -17,6 +17,7 @@ export class Token {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @Column({
     default: false,
   })
