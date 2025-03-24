@@ -33,16 +33,19 @@ export class Token {
   })
   holders_count: number;
 
+  @Index()
   @Column({
     nullable: true,
   })
   factory_address: string;
 
+  @Index()
   @Column({
     unique: true,
   })
   sale_address: string;
 
+  @Index()
   @Column({
     default: null,
   })
@@ -65,6 +68,7 @@ export class Token {
   })
   dao_balance: BigNumber;
 
+  @Index()
   @Column({
     default: null,
   })
@@ -79,9 +83,11 @@ export class Token {
   })
   address: string;
 
+  @Index()
   @Column()
   name: string;
 
+  @Index()
   @Column()
   symbol: string;
 
