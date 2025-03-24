@@ -19,6 +19,7 @@ export class Transaction {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @ManyToOne(() => Token, (token) => token.transactions, {
     onDelete: 'CASCADE',
   })
@@ -40,6 +41,7 @@ export class Transaction {
   })
   verified: boolean; // If this transaction is verified
 
+  @Index()
   @Column()
   address: string; // Address of the user who made this transaction
 
