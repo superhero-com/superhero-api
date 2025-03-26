@@ -11,7 +11,7 @@ import {
  */
 export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
-    address: 'ct_Q6nXuqr7Ba14noX6xkpTvMsejgErGn7om34wcWBeZ6ivPxEnJ',
+    address: 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
@@ -33,7 +33,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     },
   },
   [NETWORK_ID_TESTNET]: {
-    address: 'ct_Q6nXuqr7Ba14noX6xkpTvMsejgErGn7om34wcWBeZ6ivPxEnJ',
+    address: 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
