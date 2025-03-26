@@ -85,6 +85,8 @@ export class AccountTokensController {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
         creator_address,
       });
+    } else {
+      queryBuilder.andWhere('token_holder.balance > 0');
     }
 
     if (owner_address) {

@@ -54,9 +54,9 @@ export class TransactionsController {
   @ApiOkResponsePaginated(TransactionDto)
   @Get('')
   async listTransactions(
-    @Query('token_address') token_address: string,
-    @Query('account_address') account_address: string,
-    @Query('includes') includes: string,
+    @Query('token_address') token_address: string = undefined,
+    @Query('account_address') account_address: string = undefined,
+    @Query('includes') includes: string = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<Transaction>> {
@@ -71,7 +71,7 @@ export class TransactionsController {
 
     if (token_address) {
       const token = await this.tokenService.getToken(token_address);
-      queryBuilder.where('transactions.tokenId = :tokenId', {
+      queryBuilder.where('transactions."tokenId" = :tokenId', {
         tokenId: token.id,
       });
     } else {
@@ -86,7 +86,6 @@ export class TransactionsController {
         .andWhere('transactions.address = :account_address', {
           account_address,
         })
-        .leftJoin('transactions.token', 'token')
         .addSelect([
           'token.name',
           'token.symbol',

@@ -19,6 +19,7 @@ export class Transaction {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @ManyToOne(() => Token, (token) => token.transactions, {
     onDelete: 'CASCADE',
   })
@@ -40,6 +41,7 @@ export class Transaction {
   })
   verified: boolean; // If this transaction is verified
 
+  @Index()
   @Column()
   address: string; // Address of the user who made this transaction
 
@@ -49,6 +51,13 @@ export class Transaction {
     transformer: BigNumberTransformer,
   })
   volume: BigNumber; // Total Units was bought/sold
+
+  @Column({
+    default: 0n,
+    type: 'numeric',
+    transformer: BigNumberTransformer,
+  })
+  protocol_reward: BigNumber; // Protocol reward for this transaction
 
   @Column({
     type: 'json',

@@ -41,7 +41,10 @@ export class SyncTokensRanksQueue {
       .getMany();
 
     tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { rank: index + 1 });
+      const nextIndex = index + 1;
+      if (nextIndex !== token.rank) {
+        this.tokensRepository.update(token.id, { rank: nextIndex });
+      }
     });
   }
 
@@ -55,7 +58,12 @@ export class SyncTokensRanksQueue {
       .getMany();
 
     tokens.forEach((token, index) => {
-      this.tokensRepository.update(token.id, { collection_rank: index + 1 });
+      const nextIndex = index + 1;
+      if (nextIndex !== token.collection_rank) {
+        this.tokensRepository.update(token.id, {
+          collection_rank: nextIndex,
+        });
+      }
     });
   }
 }

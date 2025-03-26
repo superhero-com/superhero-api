@@ -11,10 +11,10 @@ import {
  */
 export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
-    address: 'ct_NV8W3LnriBtdsbivPAo4jGQs68gA7HBPXVjnMMysuXqNSeMXG',
+    address: 'ct_Q6nXuqr7Ba14noX6xkpTvMsejgErGn7om34wcWBeZ6ivPxEnJ',
     collections: {
-      'WORDS-ak_b8N3csfrdb1PWLWeA5xbxSeeaKLFnBfkdVayLt7ZqDdFnSCaZ': {
-        id: 'WORDS-ak_b8N3csfrdb1PWLWeA5xbxSeeaKLFnBfkdVayLt7ZqDdFnSCaZ',
+      'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
+        id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
         name: 'WORDS',
         allowed_name_length: '20',
         allowed_name_chars: [
@@ -33,10 +33,10 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     },
   },
   [NETWORK_ID_TESTNET]: {
-    address: 'ct_2UGLvS4zBMG6W7KEM46qgcaom7FXSNNx99pjeyU7AykXQcwzV2',
+    address: 'ct_Q6nXuqr7Ba14noX6xkpTvMsejgErGn7om34wcWBeZ6ivPxEnJ',
     collections: {
-      'WORDS-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE': {
-        id: 'WORDS-ak_LMYXQ6mRKUwyMwrCuCZ2TmzUUySNmmjL2ehabSSXCx2W65uyE',
+      'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
+        id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
         name: 'WORDS',
         allowed_name_length: '20',
         allowed_name_chars: [

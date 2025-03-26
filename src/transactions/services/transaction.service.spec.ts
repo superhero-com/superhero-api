@@ -58,6 +58,9 @@ describe('TransactionService', () => {
       loadFactory: jest
         .fn()
         .mockResolvedValue({ contract: { $decodeEvents: jest.fn() } }),
+      getCurrentFactory: jest
+        .fn()
+        .mockResolvedValue({ address: 'test_factory' }),
     } as any;
 
     tokenWebsocketGateway = {

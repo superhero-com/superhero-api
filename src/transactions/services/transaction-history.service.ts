@@ -8,6 +8,13 @@ import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
 import { Transaction } from '../entities/transaction.entity';
 
+export interface IGetPaginatedHistoricalDataProps {
+  token: Token;
+  interval: number; // number of seconds
+  page: number;
+  limit: number;
+  convertTo?: string;
+}
 export interface IGetHistoricalDataProps {
   token: Token;
   interval: number;
@@ -40,7 +47,7 @@ export class TransactionHistoryService {
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
@@ -53,6 +60,109 @@ export class TransactionHistoryService {
       .getRawOne<IOldestHistoryInfo>();
   }
 
+  async getPaginatedHistoricalData(
+    props: IGetPaginatedHistoricalDataProps,
+  ): Promise<HistoricalDataDto[]> {
+    const { token, interval, page, limit, convertTo = 'ae' } = props;
+    const offset = (page - 1) * limit;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
+    const rawResults = await queryRunner
+      .query(`
+        WITH transactions_in_intervals AS (
+          SELECT 
+            t.created_at,
+            CAST(NULLIF(t.buy_price->>'${convertTo}', 'NaN') AS decimal) as price,
+            t.volume,
+            (t.market_cap->>'${convertTo}') as market_cap,
+            t.total_supply,
+            to_timestamp(
+              floor(extract(epoch from t.created_at) / $2) * $2
+            ) as interval_start
+          FROM transactions t
+          WHERE t."tokenId" = $1
+            AND t.buy_price->>'${convertTo}' != 'NaN'
+        ),
+        grouped_intervals AS (
+          SELECT DISTINCT interval_start
+          FROM transactions_in_intervals
+          ORDER BY interval_start DESC
+          OFFSET ${offset}
+          LIMIT ${limit}
+        ),
+        interval_stats AS (
+          SELECT 
+            t.interval_start,
+            MIN(t.created_at) as "timeMin",
+            MAX(t.created_at) as "timeMax",
+            SUM(COALESCE(t.volume, 0)) as volume,
+            MAX(t.market_cap) as market_cap,
+            MAX(t.total_supply) as total_supply,
+            MIN(t.price) as low,
+            MAX(t.price) as high,
+            FIRST_VALUE(t.price) OVER (
+              PARTITION BY t.interval_start 
+              ORDER BY t.created_at ASC
+              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) as open,
+            FIRST_VALUE(t.price) OVER (
+              PARTITION BY t.interval_start 
+              ORDER BY t.created_at DESC
+              ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+            ) as close,
+            t.created_at,
+            t.price
+          FROM transactions_in_intervals t
+          INNER JOIN grouped_intervals g ON g.interval_start = t.interval_start
+          GROUP BY t.interval_start, t.created_at, t.price
+        )
+        SELECT 
+          interval_start as "timeOpen",
+          interval_start + (interval '$2 seconds') as "timeClose",
+          MIN(low) as low,
+          MAX(high) as high,
+          MIN(open) as open,
+          MAX(close) as close,
+          SUM(volume) as volume,
+          MAX(market_cap) as market_cap,
+          MAX(total_supply) as total_supply,
+          MIN("timeMin") as "timeMin",
+          MAX("timeMax") as "timeMax",
+          LAG(MAX(close)) OVER (ORDER BY interval_start) as previous_close
+        FROM interval_stats
+        GROUP BY interval_start
+        ORDER BY interval_start ASC
+      `, [token.id, interval]);
+
+    await queryRunner.release();
+
+    // Modify the mapping to handle the previous close price correctly
+    let lastClose = null;
+    return rawResults.map((row) => {
+      const result = {
+        timeOpen: row.timeOpen,
+        timeClose: row.timeClose,
+        timeHigh: row.timeMax,
+        timeLow: row.timeMin,
+        quote: {
+          convertedTo: convertTo,
+          open: lastClose !== null ? lastClose : String(row.open || '0'),
+          high: String(row.high || '0'),
+          low: String(row.low || '0'),
+          close: String(row.close || '0'),
+          volume: parseFloat(row.volume || '0'),
+          market_cap: new BigNumber(row.market_cap || '0'),
+          total_supply: new BigNumber(row.total_supply || '0'),
+          timestamp: row.timeClose,
+          symbol: token.symbol,
+        },
+      };
+      lastClose = String(row.close || '0');
+      return result;
+    });
+  }
+
   async getHistoricalData(
     props: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
@@ -60,7 +170,7 @@ export class TransactionHistoryService {
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions.tokenId = :tokenId', {
+      .where('transactions."tokenId" = :tokenId', {
         tokenId: props.token.id,
       })
       .andWhere('transactions.created_at >= :start', {
@@ -75,16 +185,16 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.transactionsRepository
-            .createQueryBuilder('transactions')
-            .where('transactions.tokenId = :tokenId', {
-              tokenId: props.token.id,
-            })
-            .andWhere('transactions.created_at < :start', {
-              start: startDate.toDate(),
-            })
-            .orderBy('transactions.created_at', 'DESC')
-            .limit(1)
-            .getOne()
+          .createQueryBuilder('transactions')
+          .where('transactions."tokenId" = :tokenId', {
+            tokenId: props.token.id,
+          })
+          .andWhere('transactions.created_at < :start', {
+            start: startDate.toDate(),
+          })
+          .orderBy('transactions.created_at', 'DESC')
+          .limit(1)
+          .getOne()
         : undefined;
 
     return this.processAggregatedHistoricalData(
@@ -293,11 +403,11 @@ export class TransactionHistoryService {
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('')
-      .select([
+      .select([//
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
-      .where('transactions.tokenId = :tokenId', {
+      .where('transactions."tokenId" = :tokenId', {
         tokenId: token.id,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)

@@ -15,11 +15,13 @@ export class TokenHolder {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @ManyToOne(() => Token, (token) => token.holders, {
     onDelete: 'CASCADE',
   })
   token: Token;
 
+  @Index()
   @Column()
   address: string;
 
