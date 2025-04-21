@@ -9,6 +9,8 @@ import { Token } from '@/tokens/entities/token.entity';
 import { Repository } from 'typeorm';
 import { TokensService } from '../tokens.service';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
+import { ACTIVE_NETWORK } from '@/configs';
+import { fetchJson } from '@/utils/common';
 
 export interface ISyncTokenHoldersQueue {
   saleAddress: Encoded.ContractAddress;
@@ -36,7 +38,7 @@ export class SyncTokenHoldersQueue {
   async process(job: Job<ISyncTokenHoldersQueue>) {
     this.logger.log(`SyncTokenHoldersQueue->started:${job.data.saleAddress}`);
     try {
-      await this.loadAndSaveTokenHolders(job.data.saleAddress);
+      await this.loadAndSaveTokenHoldersFromMdw(job.data.saleAddress);
       this.logger.debug(
         `SyncTokenHoldersQueue->completed:${job.data.saleAddress}`,
       );
@@ -45,6 +47,54 @@ export class SyncTokenHoldersQueue {
     }
   }
 
+  async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
+    const token = await this.tokenService.getToken(saleAddress);
+    await this.tokenHoldersRepository.delete({
+      token: token,
+    });
+    const totalHolders = await this.loadData(
+      token,
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances?by=amount&limit=100`,
+    );
+    await this.tokensRepository.update(token.id, {
+      holders_count: totalHolders,
+    });
+  }
+
+  async loadData(token: Token, url: string, totalHolders = 0) {
+    const response = await fetchJson(url);
+    const holders = response.data.filter((item) => item.amount > 0);
+    this.logger.debug(`SyncTokenHoldersQueue->holders:${holders.length}`, url);
+
+    await this.tokenHoldersRepository.save(
+      holders.map((holder) => {
+        const balance = new BigNumber(holder.amount);
+        return {
+          token: token,
+          address: holder.account_id,
+          balance,
+          percentage: balance
+            .div(token.total_supply)
+            .multipliedBy(100)
+            .toNumber(),
+        };
+      }),
+    );
+
+    if (response.next) {
+      return this.loadData(
+        token,
+        `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
+        totalHolders + holders.length,
+      );
+    }
+
+    return totalHolders + holders.length;
+  }
+
+  /**
+   * @deprecated
+   */
   async loadAndSaveTokenHolders(saleAddress: Encoded.ContractAddress) {
     const token = await this.tokenService.getToken(saleAddress);
     const { tokenContractInstance } =
