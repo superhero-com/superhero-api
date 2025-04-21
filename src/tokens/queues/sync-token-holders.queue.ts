@@ -67,18 +67,11 @@ export class SyncTokenHoldersQueue {
     this.logger.debug(`SyncTokenHoldersQueue->holders:${holders.length}`, url);
 
     await this.tokenHoldersRepository.save(
-      holders.map((holder) => {
-        const balance = new BigNumber(holder.amount);
-        return {
-          token: token,
-          address: holder.account_id,
-          balance,
-          percentage: balance
-            .div(token.total_supply)
-            .multipliedBy(100)
-            .toNumber(),
-        };
-      }),
+      holders.map((holder) => ({
+        token: token,
+        address: holder.account_id,
+        balance: new BigNumber(holder.amount),
+      })),
     );
 
     if (response.next) {
@@ -90,69 +83,5 @@ export class SyncTokenHoldersQueue {
     }
 
     return totalHolders + holders.length;
-  }
-
-  /**
-   * @deprecated
-   */
-  async loadAndSaveTokenHolders(saleAddress: Encoded.ContractAddress) {
-    const token = await this.tokenService.getToken(saleAddress);
-    const { tokenContractInstance } =
-      await this.tokenService.getTokenContractsBySaleAddress(saleAddress);
-
-    const holders = await tokenContractInstance
-      .balances()
-      .then((res) => res.decodedResult)
-      .then((res) => {
-        return Array.from(res).map(([key, value]: any) => {
-          return {
-            address: key,
-            balance: new BigNumber(value),
-            percentage: 0,
-          };
-        });
-      });
-
-    // calculate each holder percentage
-    const totalSupply = holders.reduce((acc, holder) => {
-      return acc.plus(holder.balance);
-    }, new BigNumber(0));
-
-    holders.forEach((holder) => {
-      holder.percentage = holder.balance
-        .div(totalSupply)
-        .multipliedBy(100)
-        .toNumber();
-    });
-
-    const holders_count = holders.filter((holder) =>
-      holder.balance.gt(0),
-    ).length;
-
-    await this.tokensRepository.update(token.id, {
-      holders_count,
-    });
-
-    // remove all holders
-    await this.tokenHoldersRepository.delete({
-      token: token,
-    });
-
-    const factoryAddress = token.factory_address?.replace('ct_', 'ak_');
-    await this.tokenHoldersRepository.save(
-      holders
-        .filter((holder) => {
-          if (factoryAddress === holder.address && !holder.balance.gt(0)) {
-            return false;
-          }
-          return true;
-        })
-        .map((holder) => {
-          return {
-            token: token,
-            ...holder,
-          };
-        }),
-    );
   }
 }
