@@ -1,11 +1,10 @@
+import { TokensService } from '@/tokens/tokens.service';
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
-import moment from 'moment';
-import { TokensService } from '@/tokens/tokens.service';
 
 interface DailyVolumeResult {
   date: Date;
@@ -13,13 +12,17 @@ interface DailyVolumeResult {
   transaction_count: number;
 }
 
-@Controller('api/analytics/transactions')
+interface DailyActiveUsersResult {
+  date: Date;
+  active_users: number;
+}
+
+@Controller('api/analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
-    private readonly communityFactoryService: CommunityFactoryService,
     private tokenService: TokensService,
   ) {}
 
@@ -111,6 +114,61 @@ export class AnalyticsTransactionsController {
       queryBuilder.andWhere('transactions.address = :account_address', {
         account_address,
       });
+    }
+
+    return queryBuilder.getRawMany();
+  }
+
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiQuery({ name: 'token_address', type: 'string', required: false })
+  @ApiOperation({ operationId: 'listDailyActiveUsers' })
+  @Get('daily-active-users')
+  async dailyActiveUsers(
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+    @Query('token_address') token_address?: string,
+  ): Promise<DailyActiveUsersResult[]> {
+    // If no dates provided, default to last 7 days
+    const defaultStartDate = moment().subtract(7, 'days').startOf('day');
+    const defaultEndDate = moment().endOf('day');
+
+    const startDate = start_date
+      ? moment(start_date).startOf('day')
+      : defaultStartDate;
+    const endDate = end_date ? moment(end_date).endOf('day') : defaultEndDate;
+
+    console.log('Query parameters:', {
+      start_date: startDate.format('YYYY-MM-DD'),
+      end_date: endDate.format('YYYY-MM-DD'),
+      token_address,
+    });
+
+    // Build the query to count unique users per day
+    const queryBuilder = this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .select([
+        "DATE_TRUNC('day', transactions.created_at) as date",
+        'COUNT(DISTINCT transactions.address) as active_users',
+      ])
+      .where('transactions.created_at >= :start_date', {
+        start_date: startDate.toDate(),
+      })
+      .andWhere('transactions.created_at <= :end_date', {
+        end_date: endDate.toDate(),
+      })
+      .groupBy("DATE_TRUNC('day', transactions.created_at)")
+      .orderBy('date', 'DESC');
+
+    // Add token filter if provided
+    if (token_address) {
+      const token = await this.tokenService.getToken(token_address);
+      console.log('Token filter:', token);
+      if (token) {
+        queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
+          tokenId: token.id,
+        });
+      }
     }
 
     return queryBuilder.getRawMany();
