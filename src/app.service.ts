@@ -122,7 +122,13 @@ export class AppService {
     factory: ICommunityFactorySchema,
   ) {
     console.log('loading created community from mdw::', url);
-    const result = await fetchJson(url);
+    let result;
+    try {
+      result = await fetchJson(url);
+    } catch (error) {
+      console.log('error::', error);
+      return;
+    }
 
     for (const transaction of result.data) {
       if (transaction.tx.function !== 'create_community') {
@@ -135,11 +141,14 @@ export class AppService {
       ) {
         continue;
       }
-      if (!transaction?.tx?.return?.value?.length) {
+      // handled reverted transactions
+      if (
+        !transaction?.tx?.return?.value?.length ||
+        transaction.tx.return.value.length < 2
+      ) {
         continue;
       }
       const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      console.log('saleAddress::', saleAddress);
       this.loadTokenData(saleAddress as Encoded.ContractAddress);
     }
 
