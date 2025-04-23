@@ -361,38 +361,29 @@ export class TransactionHistoryService {
     return tokenHistory;
   }
 
-  async getForPreview(token: Token | null) {
+  async getForPreview(token: Token, intervalType: '1d' | '7d' | '30d') {
     if (!token) return { result: [], timeframe: '' };
-    const getIntervalTimeFrame = () => {
-      const daysDiff = moment()
-        .add(1, 'day')
-        .diff(moment(token.created_at), 'days');
-
-      if (daysDiff > 7) {
-        return {
-          interval: '1 day',
-          unit: 'day',
-          size: 1,
-          timeframe: '30 days',
-        };
-      } else if (daysDiff > 1) {
-        return {
-          interval: '6 hours',
-          unit: 'hour',
-          size: 6,
-          timeframe: '7 days',
-        };
-      } else {
-        return {
-          interval: '20 minutes',
-          unit: 'minute',
-          size: 20,
-          timeframe: '1 day',
-        };
-      }
+    const types = {
+      '1d': {
+        interval: '20 minutes',
+        unit: 'minute',
+        size: 20,
+        timeframe: '1 day',
+      },
+      '7d': {
+        interval: '6 hours',
+        unit: 'hour',
+        size: 6,
+        timeframe: '7 days',
+      },
+      '30d': {
+        interval: '1 day',
+        unit: 'day',
+        size: 1,
+        timeframe: '30 days',
+      },
     };
-
-    const { interval, unit, size, timeframe } = getIntervalTimeFrame();
+    const { interval, unit, size, timeframe } = types[intervalType];
 
     // Create dynamic truncation based on the interval unit and size
     const truncationQuery =

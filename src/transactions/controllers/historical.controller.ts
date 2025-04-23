@@ -115,13 +115,20 @@ export class HistoricalController {
     type: 'string',
     description: 'Token address or name',
   })
+  @ApiQuery({
+    name: 'interval',
+    enum: ['1d', '7d', '30d'],
+    required: false,
+    example: '7d',
+  })
   @CacheTTL(5 * 60 * 1000)
   @Get('/preview/:address')
   async getForPreview(
     @Param('address') address: string,
+    @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
   ): Promise<ITransactionPreview> {
     const token = await this.tokenService.getToken(address);
-    return this.tokenHistoryService.getForPreview(token);
+    return this.tokenHistoryService.getForPreview(token, interval);
   }
 
   private parseDate(value: string | number | undefined) {
