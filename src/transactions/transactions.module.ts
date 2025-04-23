@@ -24,6 +24,7 @@ import { ValidateTokenTransactionsQueue } from './queues/validate-token-transact
 import { ValidateTransactionsQueue } from './queues/validate-transactions.queue';
 import { TransactionHistoryService } from './services/transaction-history.service';
 import { TransactionService } from './services/transaction.service';
+import { AnalyticsTransactionsController } from './controllers/analytics-transactions.controller';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { TransactionService } from './services/transaction.service';
     TransactionsController,
     HistoricalController,
     TokenPerformanceController,
+    AnalyticsTransactionsController,
   ],
 })
 export class TransactionsModule {
