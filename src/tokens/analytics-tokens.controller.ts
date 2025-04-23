@@ -19,15 +19,18 @@ export class AnalyticTokensController {
 
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
-  @ApiOperation({ operationId: 'listDailyTokenCount' })
+  @ApiOperation({
+    operationId: 'listDailyCreatedTokensCount',
+    description: 'Returns the count of tokens created per day',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns the count of tokens created per day',
     type: [DailyTokenCountDto],
   })
   @CacheTTL(1000)
-  @Get('daily-token-count')
-  async listDailyTokenCount(
+  @Get('daily-created-tokens-count')
+  async listDailyCreatedTokensCount(
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ): Promise<DailyTokenCountDto[]> {

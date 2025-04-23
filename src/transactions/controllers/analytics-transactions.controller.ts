@@ -34,9 +34,12 @@ export class AnalyticsTransactionsController {
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiQuery({ name: 'token_address', type: 'string', required: false })
   @ApiQuery({ name: 'account_address', type: 'string', required: false })
-  @ApiOperation({ operationId: 'listDailyVolume' })
-  @Get('daily-volume')
-  async dailyVolume(
+  @ApiOperation({
+    operationId: 'dailyTradeVolume',
+    description: 'Returns the daily trade volume for a given token or account',
+  })
+  @Get('daily-trade-volume')
+  async dailyTradeVolume(
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
     @Query('token_address') token_address?: string,
@@ -126,9 +129,13 @@ export class AnalyticsTransactionsController {
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiQuery({ name: 'token_address', type: 'string', required: false })
-  @ApiOperation({ operationId: 'listDailyActiveUsers' })
-  @Get('daily-active-users')
-  async dailyActiveUsers(
+  @ApiOperation({
+    operationId: 'listDailyUniqueActiveUsers',
+    description:
+      'Returns the daily unique active users for a given token or account',
+  })
+  @Get('daily-unique-active-users')
+  async dailyUniqueActiveUsers(
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
     @Query('token_address') token_address?: string,
@@ -178,9 +185,13 @@ export class AnalyticsTransactionsController {
     return queryBuilder.getRawMany();
   }
 
-  @ApiOperation({ operationId: 'getTotalUsers' })
-  @Get('total-users')
-  async totalUsers(): Promise<TotalUsersResult> {
+  @ApiOperation({
+    operationId: 'totalUniqueUsers',
+    description:
+      'Returns the total number of unique users across the entire system',
+  })
+  @Get('total-unique-users')
+  async totalUniqueUsers(): Promise<TotalUsersResult> {
     // Count all unique users across the entire system
     const queryBuilder = this.transactionsRepository
       .createQueryBuilder('transactions')
