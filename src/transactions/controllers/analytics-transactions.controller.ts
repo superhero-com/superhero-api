@@ -17,6 +17,10 @@ interface DailyActiveUsersResult {
   active_users: number;
 }
 
+interface TotalUsersResult {
+  total_users: number;
+}
+
 @Controller('api/analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
@@ -172,5 +176,17 @@ export class AnalyticsTransactionsController {
     }
 
     return queryBuilder.getRawMany();
+  }
+
+  @ApiOperation({ operationId: 'getTotalUsers' })
+  @Get('total-users')
+  async totalUsers(): Promise<TotalUsersResult> {
+    // Count all unique users across the entire system
+    const queryBuilder = this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .select('COUNT(DISTINCT transactions.address) as total_users');
+
+    const result = await queryBuilder.getRawOne();
+    return { total_users: parseInt(result.total_users) || 0 };
   }
 }
