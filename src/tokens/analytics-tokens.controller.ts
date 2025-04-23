@@ -6,7 +6,7 @@ import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { Token } from './entities/token.entity';
 
-@Controller('api/analytics/tokens')
+@Controller('api/analytics')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Analytics')
 export class AnalyticTokensController {
