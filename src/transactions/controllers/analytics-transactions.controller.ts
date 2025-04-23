@@ -1,25 +1,17 @@
 import { TokensService } from '@/tokens/tokens.service';
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
-
-interface DailyVolumeResult {
-  date: Date;
-  volume_ae: number;
-  transaction_count: number;
-}
-
-interface DailyActiveUsersResult {
-  date: Date;
-  active_users: number;
-}
-
-interface TotalUsersResult {
-  total_users: number;
-}
+import {
+  DailyTradeVolumeQueryDto,
+  DailyTradeVolumeResultDto,
+  DailyUniqueActiveUsersQueryDto,
+  DailyUniqueActiveUsersResultDto,
+  TotalUniqueUsersResultDto,
+} from '../dto/analytics-transactions.dto';
 
 @Controller('api/analytics')
 @ApiTags('Analytics')
@@ -30,35 +22,35 @@ export class AnalyticsTransactionsController {
     private tokenService: TokensService,
   ) {}
 
-  @ApiQuery({ name: 'start_date', type: 'string', required: false })
-  @ApiQuery({ name: 'end_date', type: 'string', required: false })
-  @ApiQuery({ name: 'token_address', type: 'string', required: false })
-  @ApiQuery({ name: 'account_address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'dailyTradeVolume',
     description: 'Returns the daily trade volume for a given token or account',
   })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns daily trade volume data',
+    type: [DailyTradeVolumeResultDto],
+  })
   @Get('daily-trade-volume')
   async dailyTradeVolume(
-    @Query('start_date') start_date?: string,
-    @Query('end_date') end_date?: string,
-    @Query('token_address') token_address?: string,
-    @Query('account_address') account_address?: string,
-  ): Promise<DailyVolumeResult[]> {
+    @Query() query: DailyTradeVolumeQueryDto,
+  ): Promise<DailyTradeVolumeResultDto[]> {
     // If no dates provided, default to last 7 days
     const defaultStartDate = moment().subtract(7, 'days').startOf('day');
     const defaultEndDate = moment().endOf('day');
 
-    const startDate = start_date
-      ? moment(start_date).startOf('day')
+    const startDate = query.start_date
+      ? moment(query.start_date).startOf('day')
       : defaultStartDate;
-    const endDate = end_date ? moment(end_date).endOf('day') : defaultEndDate;
+    const endDate = query.end_date
+      ? moment(query.end_date).endOf('day')
+      : defaultEndDate;
 
     console.log('Query parameters:', {
       start_date: startDate.format('YYYY-MM-DD'),
       end_date: endDate.format('YYYY-MM-DD'),
-      token_address,
-      account_address,
+      token_address: query.token_address,
+      account_address: query.account_address,
     });
 
     // First, let's check if we have any transactions in the date range
@@ -105,8 +97,8 @@ export class AnalyticsTransactionsController {
       .orderBy('date', 'DESC');
 
     // Add token filter if provided
-    if (token_address) {
-      const token = await this.tokenService.getToken(token_address);
+    if (query.token_address) {
+      const token = await this.tokenService.getToken(query.token_address);
       console.log('Token filter:', token);
       if (token) {
         queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
@@ -116,43 +108,44 @@ export class AnalyticsTransactionsController {
     }
 
     // Add account filter if provided
-    if (account_address) {
-      console.log('Account filter:', account_address);
+    if (query.account_address) {
+      console.log('Account filter:', query.account_address);
       queryBuilder.andWhere('transactions.address = :account_address', {
-        account_address,
+        account_address: query.account_address,
       });
     }
 
     return queryBuilder.getRawMany();
   }
 
-  @ApiQuery({ name: 'start_date', type: 'string', required: false })
-  @ApiQuery({ name: 'end_date', type: 'string', required: false })
-  @ApiQuery({ name: 'token_address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'listDailyUniqueActiveUsers',
-    description:
-      'Returns the daily unique active users for a given token or account',
+    description: 'Returns the daily unique active users for a given token',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns daily unique active users data',
+    type: [DailyUniqueActiveUsersResultDto],
   })
   @Get('daily-unique-active-users')
   async dailyUniqueActiveUsers(
-    @Query('start_date') start_date?: string,
-    @Query('end_date') end_date?: string,
-    @Query('token_address') token_address?: string,
-  ): Promise<DailyActiveUsersResult[]> {
+    @Query() query: DailyUniqueActiveUsersQueryDto,
+  ): Promise<DailyUniqueActiveUsersResultDto[]> {
     // If no dates provided, default to last 7 days
     const defaultStartDate = moment().subtract(7, 'days').startOf('day');
     const defaultEndDate = moment().endOf('day');
 
-    const startDate = start_date
-      ? moment(start_date).startOf('day')
+    const startDate = query.start_date
+      ? moment(query.start_date).startOf('day')
       : defaultStartDate;
-    const endDate = end_date ? moment(end_date).endOf('day') : defaultEndDate;
+    const endDate = query.end_date
+      ? moment(query.end_date).endOf('day')
+      : defaultEndDate;
 
     console.log('Query parameters:', {
       start_date: startDate.format('YYYY-MM-DD'),
       end_date: endDate.format('YYYY-MM-DD'),
-      token_address,
+      token_address: query.token_address,
     });
 
     // Build the query to count unique users per day
@@ -172,8 +165,9 @@ export class AnalyticsTransactionsController {
       .orderBy('date', 'DESC');
 
     // Add token filter if provided
-    if (token_address) {
-      const token = await this.tokenService.getToken(token_address);
+    if (query.token_address) {
+      console.log('Token filter:', query.token_address);
+      const token = await this.tokenService.getToken(query.token_address);
       console.log('Token filter:', token);
       if (token) {
         queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
@@ -187,11 +181,15 @@ export class AnalyticsTransactionsController {
 
   @ApiOperation({
     operationId: 'totalUniqueUsers',
-    description:
-      'Returns the total number of unique users across the entire system',
+    description: 'Returns the total number of unique users across the entire system',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns total unique users count',
+    type: TotalUniqueUsersResultDto,
   })
   @Get('total-unique-users')
-  async totalUniqueUsers(): Promise<TotalUsersResult> {
+  async totalUniqueUsers(): Promise<TotalUniqueUsersResultDto> {
     // Count all unique users across the entire system
     const queryBuilder = this.transactionsRepository
       .createQueryBuilder('transactions')
