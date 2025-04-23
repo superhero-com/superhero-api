@@ -6,7 +6,7 @@ import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { ICommunityFactorySchema, ITransaction } from './utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { TX_FUNCTIONS } from './configs';
+import { ACTIVE_NETWORK, TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -18,6 +18,7 @@ import {
   SYNC_TRANSACTIONS_QUEUE,
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
+import { fetchJson } from './utils/common';
 
 @Injectable()
 export class AppService {
@@ -110,17 +111,52 @@ export class AppService {
   }
 
   async loadFactory(factory: ICommunityFactorySchema) {
-    const factoryInstance = await this.communityFactoryService.loadFactory(
-      factory.address,
+    await this.loadCreatedCommunityFromMdw(
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
+      factory,
     );
+  }
 
-    for (const collection of Object.keys(factory.collections)) {
-      const registeredTokens =
-        await factoryInstance.listRegisteredTokens(collection);
-      for (const [symbol, saleAddress] of Array.from(registeredTokens)) {
-        console.log('BCLService->dispatch::', symbol, saleAddress);
-        this.loadTokenData(saleAddress as Encoded.ContractAddress);
+  async loadCreatedCommunityFromMdw(
+    url: string,
+    factory: ICommunityFactorySchema,
+  ) {
+    console.log('loading created community from mdw::', url);
+    let result;
+    try {
+      result = await fetchJson(url);
+    } catch (error) {
+      console.log('error::', error);
+      return;
+    }
+
+    for (const transaction of result.data) {
+      if (transaction.tx.function !== 'create_community') {
+        continue;
       }
+      if (
+        !Object.keys(factory.collections).includes(
+          transaction.tx.arguments[0].value,
+        )
+      ) {
+        continue;
+      }
+      // handled reverted transactions
+      if (
+        !transaction?.tx?.return?.value?.length ||
+        transaction.tx.return.value.length < 2
+      ) {
+        continue;
+      }
+      const saleAddress = transaction?.tx?.return?.value[1]?.value;
+      this.loadTokenData(saleAddress as Encoded.ContractAddress);
+    }
+
+    if (result.next) {
+      await this.loadCreatedCommunityFromMdw(
+        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
+        factory,
+      );
     }
   }
 
