@@ -54,20 +54,11 @@ export class TokensService {
 
   async update(token: Token, data): Promise<Token> {
     await this.tokensRepository.update(token.id, data);
-    return this.findOne(token.id);
+    return this.findByAddress(token.sale_address);
   }
 
-  searchForToken(address: string): Promise<Token | null> {
-    return this.tokensRepository
-      .createQueryBuilder('token')
-      .where('token.address = :address', { address })
-      .orWhere('token.sale_address = :address', { address })
-      .orWhere('token.name = :address', { address })
-      .getOne();
-  }
-
-  findByAddress(address: string): Promise<Token | null> {
-    return this.tokensRepository
+  async findByAddress(address: string): Promise<Token | null> {
+    return await this.tokensRepository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
@@ -168,7 +159,7 @@ export class TokensService {
         },
       );
     }
-    return this.findOne(newToken.id);
+    return this.findByAddress(newToken.sale_address);
   }
 
   async updateTokenInitialRank(token: Token): Promise<number> {
