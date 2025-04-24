@@ -4,7 +4,9 @@ import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
+import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 
 @Controller('api/analytics')
 @UseInterceptors(CacheInterceptor)
@@ -13,6 +15,7 @@ export class AnalyticTokensController {
   constructor(
     @InjectRepository(Token)
     private readonly tokensRepository: Repository<Token>,
+    private readonly aePricingService: AePricingService,
   ) {
     //
   }
@@ -56,5 +59,34 @@ export class AnalyticTokensController {
       date: result.date,
       count: parseInt(result.count, 10),
     }));
+  }
+
+  @ApiOperation({
+    operationId: 'getTotalMarketCap',
+    description: 'Returns the sum of market caps for all tokens',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns the sum of market caps for all tokens',
+    type: MarketCapSumDto,
+  })
+  @CacheTTL(1000)
+  @Get('total-market-cap')
+  async getTotalMarketCap(): Promise<MarketCapSumDto> {
+    const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+
+    // Select sum of market_cap for all tokens
+    const result = await queryBuilder
+      .select('SUM(token.market_cap)', 'sum')
+      .where('token.unlisted = false')
+      .getRawOne();
+
+    const sum = result.sum || '0';
+    const sum_data = await this.aePricingService.getPriceData(sum);
+
+    return {
+      sum,
+      sum_data,
+    };
   }
 }
