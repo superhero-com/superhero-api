@@ -1,6 +1,6 @@
 import { TokensService } from '@/tokens/tokens.service';
 import { Controller, Get, Query } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { Repository } from 'typeorm';
@@ -12,6 +12,9 @@ import {
   DailyUniqueActiveUsersResultDto,
   TotalUniqueUsersResultDto,
 } from '../dto/analytics-transactions.dto';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { DailyMarketCapSumDto } from '@/tokens/dto/daily-market-cap-sum.dto';
+import { CacheTTL } from '@nestjs/cache-manager';
 
 @Controller('api/analytics')
 @ApiTags('Analytics')
@@ -20,6 +23,8 @@ export class AnalyticsTransactionsController {
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
     private tokenService: TokensService,
+
+    private readonly aePricingService: AePricingService,
   ) {}
 
   @ApiOperation({
@@ -197,5 +202,55 @@ export class AnalyticsTransactionsController {
 
     const result = await queryBuilder.getRawOne();
     return { total_users: parseInt(result.total_users) || 0 };
+  }
+
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiOperation({
+    operationId: 'listDailyMarketCapSum',
+    description: 'Returns the sum of market caps for all tokens per day',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns the sum of market caps for all tokens per day',
+    type: [DailyMarketCapSumDto],
+  })
+  @CacheTTL(1000)
+  @Get('daily-market-cap-sum')
+  async listDailyMarketCapSum(
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+  ): Promise<DailyMarketCapSumDto[]> {
+    const queryBuilder = this.transactionsRepository.createQueryBuilder('transaction');
+
+    // Select date and sum of market_cap for each day
+    queryBuilder
+      .select('DATE(transaction.created_at) as date')
+      .addSelect('MAX(transaction.market_cap->>\'ae\') as sum')
+      .where('transaction.market_cap->>\'ae\' IS NOT NULL')
+      .groupBy('DATE(transaction.created_at)')
+      .orderBy('DATE(transaction.created_at)', 'ASC');
+
+    if (start_date) {
+      queryBuilder.andWhere('transaction.created_at >= :start_date', { start_date });
+    }
+    if (end_date) {
+      queryBuilder.andWhere('transaction.created_at <= :end_date', { end_date });
+    }
+
+    const results = await queryBuilder.getRawMany();
+
+    // Convert each result to include price data
+    const dailySums = await Promise.all(
+      results.map(async (result) => {
+        const sum = result.sum || '0';
+        return {
+          date: result.date,
+          sum,
+        };
+      }),
+    );
+
+    return dailySums;
   }
 }

@@ -102,7 +102,7 @@ export class TransactionService {
         token,
         rawTransaction,
       );
-      token = await this.tokenService.findOne(token.id);
+      token = await this.tokenService.findByAddress(token.sale_address);
     }
 
     const decodedData = rawTransaction.tx.decodedData;

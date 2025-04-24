@@ -163,7 +163,7 @@ export class TokensController {
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
-    queryBuilder.orderBy(`token_holder.percentage`, 'DESC');
+    queryBuilder.orderBy(`token_holder.balance`, 'DESC');
     queryBuilder.where('token_holder.tokenId = :tokenId', {
       tokenId: token.id,
     });
