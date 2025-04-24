@@ -1,13 +1,14 @@
+import { ACTIVE_NETWORK } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokensService } from '@/tokens/tokens.service';
+import { fetchJson } from '@/utils/common';
+import { ITransaction } from '@/utils/types';
+import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { fetchJson } from '@/utils/common';
-import { ITransaction } from '@/utils/types';
-import { ACTIVE_NETWORK } from '@/configs';
-import { Token } from '@/tokens/entities/token.entity';
-import { TokensService } from '@/tokens/tokens.service';
 import { In, Not, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
@@ -16,7 +17,7 @@ import { VALIDATE_TOKEN_TRANSACTIONS_QUEUE } from './constants';
 export interface IValidateTokenTransactionsQueue {
   from: number; // Block height
   to: number;
-  tokenId: number;
+  saleAddress: Encoded.ContractAddress; // should be sale address
 }
 
 @Processor(VALIDATE_TOKEN_TRANSACTIONS_QUEUE)
@@ -39,7 +40,7 @@ export class ValidateTokenTransactionsQueue {
    * @param job - The job containing data for validating token transactions.
    * @param job.data.from - The starting block height for validation.
    * @param job.data.to - The ending block height for validation.
-   * @param job.data.tokenId - The ID of the token to validate.
+   * @param job.data.saleAddress - The ID of the token to validate.
    *
    * Logs the start of the validation process, retrieves the token, validates its history,
    * and deletes unverified transactions within the specified block height range that are not in the list of validated hashes.
@@ -52,10 +53,10 @@ export class ValidateTokenTransactionsQueue {
       `ValidateTokenTransactionsQueue->started:from:${job.data.from} - to:${job.data.to}`,
     );
     try {
-      const token = await this.tokenService.findOne(job.data.tokenId);
+      const token = await this.tokenService.findByAddress(job.data.saleAddress);
       if (!token) {
         this.logger.error(
-          `ValidateTokenTransactionsQueue->token not found:${job.data.tokenId}`,
+          `ValidateTokenTransactionsQueue->token not found:${job.data.saleAddress}`,
         );
         return;
       }

@@ -53,17 +53,17 @@ export class ValidateTransactionsQueue {
         .where('transactions.block_height >= :from', { from: job.data.from })
         .andWhere('transactions.block_height <= :to', { to: job.data.to })
         .andWhere('transactions.verified = false')
-        .select('transactions."tokenId"')
+        .select('transactions."sale_address"')
         .distinct(true)
         .getRawMany()
-        .then((items) => items.map((item) => item.tokenId));
+        .then((items) => items.map((item) => item.sale_address));
 
       this.logger.debug(`ValidateTransactionsQueue->tokens:${tokens.length}`);
-      tokens.forEach((tokenId) => {
+      tokens.forEach((saleAddress) => {
         void this.validateTokenTransactionsQueue.add({
           from: job.data.from,
           to: job.data.to,
-          tokenId,
+          saleAddress,
         });
       });
     } catch (error) {
