@@ -110,7 +110,7 @@ export class TokensController {
         .where('token_holder.address = :owner_address', {
           owner_address,
         })
-        .andWhere('token_holder.percentage > 0')
+        .andWhere('token_holder.amount > 0')
         .select('token_holder."tokenId"')
         .distinct(true)
         .getRawMany()

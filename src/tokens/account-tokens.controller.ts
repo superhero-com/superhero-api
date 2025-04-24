@@ -41,7 +41,7 @@ export class AccountTokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['balance', 'percentage'],
+    enum: ['balance'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -63,7 +63,7 @@ export class AccountTokensController {
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
-    queryBuilder.orderBy(`token_holder.percentage`, 'DESC');
+    queryBuilder.orderBy(`token_holder.amount`, 'DESC');
     queryBuilder.where('token_holder.address = :address', {
       address: address,
     });
