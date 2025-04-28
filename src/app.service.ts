@@ -53,6 +53,12 @@ export class AppService {
   async init() {
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
     // clean all queue jobs
+    /**
+     * we should avoid clearing the queue here.
+     * need to avoid starting over the sync process.
+     * when the server restarts, we should continue from the last processed block.
+     * there might be some lost transactions, but this should be covered by the reorg process.
+     */
     await Promise.all([
       this.pullTokenPriceQueue.empty(),
       this.saveTransactionQueue.empty(),
@@ -67,7 +73,6 @@ export class AppService {
     void this.deleteOldTokensQueue.add({
       factories: [factory.address],
     });
-    void this.loadFactory(factory);
 
     let syncedTransactions = [];
 
@@ -108,68 +113,6 @@ export class AppService {
 
       void this.syncTokensRanksQueue.add({});
     });
-  }
-
-  async loadFactory(factory: ICommunityFactorySchema) {
-    await this.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
-      factory,
-    );
-  }
-
-  async loadCreatedCommunityFromMdw(
-    url: string,
-    factory: ICommunityFactorySchema,
-  ) {
-    console.log('loading created community from mdw::', url);
-    let result;
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      console.log('error::', error);
-      return;
-    }
-
-    for (const transaction of result.data) {
-      if (transaction.tx.function !== 'create_community') {
-        continue;
-      }
-      if (
-        !Object.keys(factory.collections).includes(
-          transaction.tx.arguments[0].value,
-        )
-      ) {
-        continue;
-      }
-      // handled reverted transactions
-      if (
-        !transaction?.tx?.return?.value?.length ||
-        transaction.tx.return.value.length < 2
-      ) {
-        continue;
-      }
-      const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      this.loadTokenData(saleAddress as Encoded.ContractAddress);
-    }
-
-    if (result.next) {
-      await this.loadCreatedCommunityFromMdw(
-        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-        factory,
-      );
-    }
-  }
-
-  loadTokenData(saleAddress: Encoded.ContractAddress) {
-    void this.pullTokenPriceQueue.add(
-      {
-        saleAddress,
-      },
-      {
-        jobId: `pull-price-${saleAddress}`,
-        removeOnComplete: true,
-      },
-    );
   }
 
   /**

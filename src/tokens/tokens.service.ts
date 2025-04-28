@@ -8,28 +8,31 @@ import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { InjectQueue } from '@nestjs/bull';
-import { initTokenSale, TokenSale } from 'bctsl-sdk';
+import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { fetchJson } from '@/utils/common';
-import { ITransaction } from '@/utils/types';
+import { ICommunityFactorySchema, ITransaction } from '@/utils/types';
 import { ACTIVE_NETWORK } from '@/configs';
 import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 
 type TokenContracts = {
-  instance: TokenSale;
-  tokenContractInstance: ContractWithMethods<ContractMethodsBase>;
+  instance?: TokenSale;
+  tokenContractInstance?: ContractWithMethods<ContractMethodsBase>;
+  token?: Token;
 };
 
 @Injectable()
 export class TokensService {
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
+  totalTokens = 0;
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -44,8 +47,159 @@ export class TokensService {
     private readonly syncTokenHoldersQueue: Queue,
     @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
     private readonly syncTransactionsQueue: Queue,
+
+    private communityFactoryService: CommunityFactoryService,
   ) {
-    //
+    this.init();
+  }
+
+  factoryContract: CommunityFactory;
+  async init() {
+    console.log('--------------------------------');
+    console.log('init tokens service');
+    console.log('--------------------------------');
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    this.factoryContract = await this.communityFactoryService.loadFactory(
+      factory.address,
+    );
+    void this.loadFactoryTokens(factory);
+  }
+
+  async loadFactoryTokens(factory: ICommunityFactorySchema) {
+    await this.loadCreatedCommunityFromMdw(
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
+      factory,
+    );
+    // next part should only run for the new tokens been recently pulled from the mdw
+    // TODO: create a command that can run a full-resync
+    // since the total supply is gonna be wrong on currrent mdw issue, we need to refetch the data
+    const tokensQuery =
+      await this.tokensRepository.createQueryBuilder('tokens');
+    tokensQuery.orderBy('total_supply', 'DESC');
+    const tokens = await tokensQuery.getMany();
+    for (const token of tokens) {
+      console.log('LIVE UPDATE STARTED FOR::', token.name);
+      const liveTokenData = await this.getTokeLivePrice(token);
+      await this.tokensRepository.update(token.id, liveTokenData);
+      this.contracts[token.sale_address].token = token;
+      console.log('LIVE UPDATE FINISHED FOR::', token.name);
+      console.log('--------------------------------');
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `syncTokenHolders-${token.sale_address}`,
+          removeOnComplete: true,
+        },
+      );
+      void this.syncTransactionsQueue.add({
+        saleAddress: token.sale_address,
+      });
+    }
+  }
+
+  async loadCreatedCommunityFromMdw(
+    url: string,
+    factory: ICommunityFactorySchema,
+  ) {
+    console.log('loading created community from mdw::', url);
+    let result;
+    try {
+      result = await fetchJson(url);
+    } catch (error) {
+      console.log('error::', error);
+      return;
+    }
+
+    for (const transaction of result.data) {
+      if (transaction.tx.function !== 'create_community') {
+        continue;
+      }
+      if (
+        !Object.keys(factory.collections).includes(
+          transaction.tx.arguments[0].value,
+        )
+      ) {
+        continue;
+      }
+      // handled reverted transactions
+      if (
+        !transaction?.tx?.return?.value?.length ||
+        transaction.tx.return.value.length < 2
+      ) {
+        continue;
+      }
+      const daoAddress = transaction?.tx?.return?.value[0]?.value;
+      const saleAddress = transaction?.tx?.return?.value[1]?.value;
+      // const saleAddress = transaction?.tx?.return?.value[1]?.value;
+      console.log('saleAddress::', saleAddress);
+      // this.loadTokenData(saleAddress as Encoded.ContractAddress);
+      /**
+       * should call (based on: PullTokenInfoQueue)
+       * getToken
+       */
+      const tokenExists = await this.findByAddress(saleAddress);
+      if (tokenExists) {
+        continue;
+      }
+      const tokenName = transaction?.tx?.arguments?.[1]?.value;
+
+      const decodedData = this.factoryContract.contract.$decodeEvents(
+        transaction?.tx?.log,
+      );
+      const tokenData = {
+        total_supply: new BigNumber(0),
+        holders_count: 0,
+        address: null,
+        dao_address: daoAddress,
+        sale_address: saleAddress,
+        factory_address: factory.address,
+        creator_address: transaction?.tx?.caller_id,
+        created_at: moment(transaction?.microTime).toDate(),
+        name: tokenName,
+        symbol: tokenName,
+      };
+
+      const fungibleToken = decodedData?.find(
+        (event) =>
+          event.contract.name === 'FungibleTokenFull' &&
+          event.contract.address !==
+          'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+      );
+      if (fungibleToken) {
+        tokenData.address = fungibleToken.contract.address;
+        const tokenDataResponse = await fetchJson(
+          `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+        );
+        tokenData.total_supply = new BigNumber(tokenDataResponse?.event_supply);
+        tokenData.holders_count = tokenDataResponse?.holders;
+      }
+
+      const token = await this.tokensRepository.save(tokenData);
+      this.contracts[saleAddress] = {
+        token,
+      };
+    }
+
+    if (result.next) {
+      await this.loadCreatedCommunityFromMdw(
+        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
+        factory,
+      );
+    }
+  }
+
+  async loadTokenContractAndUpdateMintAddress(token: Token) {
+    const contract = await this.getTokenContractsBySaleAddress(
+      token.sale_address as Encoded.ContractAddress,
+    );
+    const priceData = await this.getTokeLivePrice(token);
+
+    this.tokensRepository.update(token.id, {
+      address: contract?.tokenContractInstance?.$options.address,
+      ...priceData,
+    });
   }
 
   findAll(): Promise<Token[]> {
@@ -204,7 +358,7 @@ export class TokensService {
   async getTokenContractsBySaleAddress(
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts | undefined> {
-    if (this.contracts[saleAddress]) {
+    if (this.contracts[saleAddress] && this.contracts[saleAddress].instance) {
       return this.contracts[saleAddress];
     }
 
@@ -216,6 +370,7 @@ export class TokensService {
       const tokenContractInstance = await instance?.tokenContractInstance();
 
       this.contracts[saleAddress] = {
+        ...(this.contracts[saleAddress] || {}),
         instance,
         tokenContractInstance,
       };
@@ -233,13 +388,11 @@ export class TokensService {
     }
     const { instance, tokenContractInstance } = contract;
 
-    const [total_supply] = await Promise.all([
+    const [total_supply, price, sell_price, metaInfo] = await Promise.all([
       tokenContractInstance
         .total_supply?.()
         .then((res) => new BigNumber(res.decodedResult))
         .catch(() => new BigNumber('0')),
-    ]);
-    const [price, sell_price, metaInfo] = await Promise.all([
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
@@ -257,15 +410,13 @@ export class TokensService {
 
     const market_cap = total_supply.multipliedBy(price);
 
-    const [price_data, sell_price_data, market_cap_data] = await Promise.all([
-      this.aePricingService.getPriceData(price),
-      this.aePricingService.getPriceData(sell_price),
-      this.aePricingService.getPriceData(market_cap),
-    ]);
-
-    const dao_balance = await this.aeSdkService.sdk.getBalance(
-      metaInfo?.beneficiary,
-    );
+    const [price_data, sell_price_data, market_cap_data, dao_balance] =
+      await Promise.all([
+        this.aePricingService.getPriceData(price),
+        this.aePricingService.getPriceData(sell_price),
+        this.aePricingService.getPriceData(market_cap),
+        this.aeSdkService.sdk.getBalance(metaInfo?.beneficiary),
+      ]);
 
     return {
       price,
