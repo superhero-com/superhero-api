@@ -63,7 +63,7 @@ export class TokensController {
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
-  @CacheTTL(1000)
+  // @CacheTTL(1000)
   @Get()
   async listAll(
     @Query('search') search = undefined,
@@ -76,12 +76,71 @@ export class TokensController {
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
-    const queryBuilder = this.tokensRepository.createQueryBuilder('token');
-    // Select all columns from the 'token' table
-    queryBuilder.select('token');
-    queryBuilder.orderBy(`token.${orderBy}`, orderDirection);
+    // const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    // // Select all columns from the 'token' table
+    // queryBuilder.select('token');
+    // queryBuilder.orderBy(`token.${orderBy}`, orderDirection);
+    // if (search) {
+    //   queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
+    // }
+    // if (factory_address) {
+    //   queryBuilder.andWhere('token.factory_address = :factory_address', {
+    //     factory_address,
+    //   });
+    // } else {
+    //   const factory = await this.communityFactoryService.getCurrentFactory();
+
+    //   queryBuilder.andWhere('token.factory_address = :address', {
+    //     address: factory.address,
+    //   });
+    // }
+    // if (collection !== 'all') {
+    //   queryBuilder.andWhere('token.collection = :collection', {
+    //     collection,
+    //   });
+    // }
+    // if (creator_address) {
+    //   queryBuilder.andWhere('token.creator_address = :creator_address', {
+    //     creator_address,
+    //   });
+    // }
+    // if (owner_address) {
+    //   const ownedTokens = await this.tokenHolderRepository
+    //     .createQueryBuilder('token_holder')
+    //     .where('token_holder.address = :owner_address', {
+    //       owner_address,
+    //     })
+    //     .andWhere('token_holder.amount > 0')
+    //     .select('token_holder."tokenId"')
+    //     .distinct(true)
+    //     .getRawMany()
+    //     .then((res) => res.map((r) => r.tokenId));
+
+    //   queryBuilder.andWhereInIds(ownedTokens);
+    // }
+    // // listed only
+    // queryBuilder.andWhere('token.unlisted = false');
+    // return paginate<Token>(queryBuilder, {
+    //   page,
+    //   limit,
+    // });
+
+    // Now, wrap with RANK()
+    // allowed sort fields to avoid SQL Injection
+    const allowedSortFields = ['market_cap', 'rank', 'name', 'price'];
+    if (!allowedSortFields.includes(orderBy)) {
+      orderBy = 'market_cap';
+    }
+
+    const queryBuilder = this.tokensRepository
+      .createQueryBuilder('token')
+      .select('token.*')
+      .where('token.unlisted = false');
+
     if (search) {
-      queryBuilder.where('token.name ILIKE :search', { search: `%${search}%` });
+      queryBuilder.andWhere('token.name ILIKE :search', {
+        search: `%${search}%`,
+      });
     }
     if (factory_address) {
       queryBuilder.andWhere('token.factory_address = :factory_address', {
@@ -89,15 +148,12 @@ export class TokensController {
       });
     } else {
       const factory = await this.communityFactoryService.getCurrentFactory();
-
       queryBuilder.andWhere('token.factory_address = :address', {
         address: factory.address,
       });
     }
     if (collection !== 'all') {
-      queryBuilder.andWhere('token.collection = :collection', {
-        collection,
-      });
+      queryBuilder.andWhere('token.collection = :collection', { collection });
     }
     if (creator_address) {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
@@ -107,9 +163,7 @@ export class TokensController {
     if (owner_address) {
       const ownedTokens = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
-        .where('token_holder.address = :owner_address', {
-          owner_address,
-        })
+        .where('token_holder.address = :owner_address', { owner_address })
         .andWhere('token_holder.amount > 0')
         .select('token_holder."tokenId"')
         .distinct(true)
@@ -118,12 +172,8 @@ export class TokensController {
 
       queryBuilder.andWhereInIds(ownedTokens);
     }
-    // listed only
-    queryBuilder.andWhere('token.unlisted = false');
-    return paginate<Token>(queryBuilder, {
-      page,
-      limit,
-    });
+
+    return this.tokensService.queryTokensWithRanks(queryBuilder, limit, page);
   }
 
   @ApiOperation({ operationId: 'findByAddress' })
@@ -197,12 +247,12 @@ export class TokensController {
     });
     queryBuilder.orderBy(`token.rank`, 'ASC');
 
-    const minRank = token.rank - Math.floor(limit / 2);
-    const maxRank = token.rank + Math.floor(limit / 2);
-    queryBuilder.where('token.rank BETWEEN :minRank AND :maxRank', {
-      minRank,
-      maxRank,
-    });
+    // const minRank = token.rank - Math.floor(limit / 2);
+    // const maxRank = token.rank + Math.floor(limit / 2);
+    // queryBuilder.where('token.rank BETWEEN :minRank AND :maxRank', {
+    //   minRank,
+    //   maxRank,
+    // });
 
     return paginate<Token>(queryBuilder, { page, limit });
   }
