@@ -30,9 +30,6 @@ export class TokenDto {
   collection: string;
 
   @ApiProperty()
-  collection_rank: number;
-
-  @ApiProperty()
   metaInfo: Record<string, string>;
 
   /**

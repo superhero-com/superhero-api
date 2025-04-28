@@ -1,24 +1,21 @@
-import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
-import { ICommunityFactorySchema, ITransaction } from './utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { ACTIVE_NETWORK, TX_FUNCTIONS } from './configs';
+import { TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
-import { fetchJson } from './utils/common';
+import { ITransaction } from './utils/types';
 
 @Injectable()
 export class AppService {
@@ -35,9 +32,6 @@ export class AppService {
     @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
     private readonly syncTransactionsQueue: Queue,
 
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
-
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
 
@@ -52,22 +46,11 @@ export class AppService {
 
   async init() {
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
-    // clean all queue jobs
-    await Promise.all([
-      this.pullTokenPriceQueue.empty(),
-      this.saveTransactionQueue.empty(),
-      this.syncTransactionsQueue.empty(),
-      this.syncTokensRanksQueue.empty(),
-      this.syncTokenHoldersQueue.empty(),
-      this.deleteOldTokensQueue.empty(),
-      this.validateTransactionsQueue.empty(),
-    ]);
 
     const factory = await this.communityFactoryService.getCurrentFactory();
     void this.deleteOldTokensQueue.add({
       factories: [factory.address],
     });
-    void this.loadFactory(factory);
 
     let syncedTransactions = [];
 
@@ -99,77 +82,13 @@ export class AppService {
     this.websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
       const desiredBlockHeight = keyBlock.height - 5;
       void this.validateTransactionsQueue.add({
-        from: desiredBlockHeight - 10,
+        from: desiredBlockHeight - 50,
         to: desiredBlockHeight,
       });
 
       this.aePricingService.pullAndSaveCoinCurrencyRates();
       syncedTransactions = [];
-
-      void this.syncTokensRanksQueue.add({});
     });
-  }
-
-  async loadFactory(factory: ICommunityFactorySchema) {
-    await this.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
-      factory,
-    );
-  }
-
-  async loadCreatedCommunityFromMdw(
-    url: string,
-    factory: ICommunityFactorySchema,
-  ) {
-    console.log('loading created community from mdw::', url);
-    let result;
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      console.log('error::', error);
-      return;
-    }
-
-    for (const transaction of result.data) {
-      if (transaction.tx.function !== 'create_community') {
-        continue;
-      }
-      if (
-        !Object.keys(factory.collections).includes(
-          transaction.tx.arguments[0].value,
-        )
-      ) {
-        continue;
-      }
-      // handled reverted transactions
-      if (
-        !transaction?.tx?.return?.value?.length ||
-        transaction.tx.return.value.length < 2
-      ) {
-        continue;
-      }
-      const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      this.loadTokenData(saleAddress as Encoded.ContractAddress);
-    }
-
-    if (result.next) {
-      await this.loadCreatedCommunityFromMdw(
-        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-        factory,
-      );
-    }
-  }
-
-  loadTokenData(saleAddress: Encoded.ContractAddress) {
-    void this.pullTokenPriceQueue.add(
-      {
-        saleAddress,
-      },
-      {
-        jobId: `pull-price-${saleAddress}`,
-        removeOnComplete: true,
-      },
-    );
   }
 
   /**

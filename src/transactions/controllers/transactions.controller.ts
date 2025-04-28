@@ -91,7 +91,7 @@ export class TransactionsController {
           'token.symbol',
           'token.address',
           'token.sale_address',
-          'token.rank',
+          // 'token.rank',
           'token.collection',
         ]);
     }

@@ -16,6 +16,7 @@ import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { TokensService } from './tokens.service';
 
 @Controller('api/accounts')
 @UseInterceptors(CacheInterceptor)
@@ -25,6 +26,7 @@ export class AccountTokensController {
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
     private readonly communityFactoryService: CommunityFactoryService,
+    private readonly tokensService: TokensService,
   ) {
     //
   }
@@ -101,6 +103,26 @@ export class AccountTokensController {
       });
     }
 
-    return paginate<TokenHolder>(queryBuilder, { page, limit });
+    // Get the token holders with their tokens
+    const tokenHolders = await paginate<TokenHolder>(queryBuilder, {
+      page,
+      limit,
+    });
+
+    // Get the token ranks for all tokens in the result
+    const tokenIds = tokenHolders.items
+      .map((holder) => holder.token?.id)
+      .filter((id): id is number => id !== undefined);
+
+    const tokenRanks = await this.tokensService.getTokenRanks(tokenIds);
+
+    // Merge the rank information into the token holders
+    tokenHolders.items.forEach((holder) => {
+      if (holder.token) {
+        (holder.token as any).rank = tokenRanks.get(holder.token.id);
+      }
+    });
+
+    return tokenHolders;
   }
 }

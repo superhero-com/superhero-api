@@ -101,17 +101,7 @@ export class Token {
   @Column({
     nullable: true,
   })
-  rank: number;
-
-  @Column({
-    nullable: true,
-  })
   collection: string;
-
-  @Column({
-    nullable: true,
-  })
-  collection_rank: number;
 
   @Column({
     default: 0n,

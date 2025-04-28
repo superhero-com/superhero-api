@@ -2,10 +2,7 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TX_FUNCTIONS } from '@/configs';
 import { Token } from '@/tokens/entities/token.entity';
-import {
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
-} from '@/tokens/queues/constants';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
@@ -32,9 +29,6 @@ export class TransactionService {
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
-
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
   ) {
     // this._testTransaction(
     //   'th_8B9qcMtArB59kBAHKKzPo4JXyECgBUBDH415gy8a3K69yr837',
@@ -143,8 +137,6 @@ export class TransactionService {
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
       verified: false,
-      token_rank: token.rank,
-      token_collection_rank: token.collection_rank,
     };
     // if transaction 2 days old
     if (!!exists?.id) {
@@ -181,10 +173,6 @@ export class TransactionService {
           jobId: `syncTokenHolders-${saleAddress}`,
           removeOnComplete: true,
         },
-      );
-      void this.syncTokensRanksQueue.add(
-        {},
-        { jobId: `syncTokensRanks-${saleAddress}`, removeOnComplete: true },
       );
     }
     return transaction;
