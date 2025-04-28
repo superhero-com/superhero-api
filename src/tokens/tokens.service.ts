@@ -66,24 +66,19 @@ export class TokensService {
   }
 
   async loadFactoryTokens(factory: ICommunityFactorySchema) {
-    await this.loadCreatedCommunityFromMdw(
+    const communities = await this.loadCreatedCommunityFromMdw(
       `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
       factory,
     );
-    // next part should only run for the new tokens been recently pulled from the mdw
-    // TODO: create a command that can run a full-resync
-    // since the total supply is gonna be wrong on currrent mdw issue, we need to refetch the data
-    const tokensQuery =
-      await this.tokensRepository.createQueryBuilder('tokens');
-    tokensQuery.orderBy('total_supply', 'DESC');
-    const tokens = await tokensQuery.getMany();
+
+    const tokens = communities.sort((a, b) => {
+      if (!a.total_supply || !b.total_supply) return 0;
+      return b.total_supply.minus(a.total_supply).toNumber();
+    });
     for (const token of tokens) {
-      console.log('LIVE UPDATE STARTED FOR::', token.name);
       const liveTokenData = await this.getTokeLivePrice(token);
       await this.tokensRepository.update(token.id, liveTokenData);
       this.contracts[token.sale_address].token = token;
-      console.log('LIVE UPDATE FINISHED FOR::', token.name);
-      console.log('--------------------------------');
       void this.syncTokenHoldersQueue.add(
         {
           saleAddress: token.sale_address,
@@ -102,8 +97,8 @@ export class TokensService {
   async loadCreatedCommunityFromMdw(
     url: string,
     factory: ICommunityFactorySchema,
-  ) {
-    console.log('loading created community from mdw::', url);
+    tokens: Token[] = [],
+  ): Promise<Token[]> {
     let result;
     try {
       result = await fetchJson(url);
@@ -132,13 +127,7 @@ export class TokensService {
       }
       const daoAddress = transaction?.tx?.return?.value[0]?.value;
       const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      // const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      console.log('saleAddress::', saleAddress);
-      // this.loadTokenData(saleAddress as Encoded.ContractAddress);
-      /**
-       * should call (based on: PullTokenInfoQueue)
-       * getToken
-       */
+
       const tokenExists = await this.findByAddress(saleAddress);
       if (tokenExists) {
         continue;
@@ -165,7 +154,7 @@ export class TokensService {
         (event) =>
           event.contract.name === 'FungibleTokenFull' &&
           event.contract.address !==
-          'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+            'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
       );
       if (fungibleToken) {
         tokenData.address = fungibleToken.contract.address;
@@ -177,17 +166,20 @@ export class TokensService {
       }
 
       const token = await this.tokensRepository.save(tokenData);
+      tokens.push(token);
       this.contracts[saleAddress] = {
         token,
       };
     }
 
     if (result.next) {
-      await this.loadCreatedCommunityFromMdw(
+      return await this.loadCreatedCommunityFromMdw(
         `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
         factory,
+        tokens,
       );
     }
+    return tokens;
   }
 
   async loadTokenContractAndUpdateMintAddress(token: Token) {
