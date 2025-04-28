@@ -104,7 +104,7 @@ export class TokensService {
       result = await fetchJson(url);
     } catch (error) {
       console.log('error::', error);
-      return;
+      return tokens;
     }
 
     for (const transaction of result.data) {
