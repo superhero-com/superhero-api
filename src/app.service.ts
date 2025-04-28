@@ -1,24 +1,21 @@
-import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
-import { ICommunityFactorySchema, ITransaction } from './utils/types';
 import { WebSocketService } from './ae/websocket.service';
-import { ACTIVE_NETWORK, TX_FUNCTIONS } from './configs';
+import { TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,
   SYNC_TRANSACTIONS_QUEUE,
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
-import { fetchJson } from './utils/common';
+import { ITransaction } from './utils/types';
 
 @Injectable()
 export class AppService {
@@ -34,9 +31,6 @@ export class AppService {
 
     @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
     private readonly syncTransactionsQueue: Queue,
-
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
@@ -63,7 +57,6 @@ export class AppService {
       this.pullTokenPriceQueue.empty(),
       this.saveTransactionQueue.empty(),
       this.syncTransactionsQueue.empty(),
-      this.syncTokensRanksQueue.empty(),
       this.syncTokenHoldersQueue.empty(),
       this.deleteOldTokensQueue.empty(),
       this.validateTransactionsQueue.empty(),
@@ -110,8 +103,6 @@ export class AppService {
 
       this.aePricingService.pullAndSaveCoinCurrencyRates();
       syncedTransactions = [];
-
-      void this.syncTokensRanksQueue.add({});
     });
   }
 

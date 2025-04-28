@@ -99,16 +99,6 @@ export class Transaction {
   })
   market_cap!: IPriceDto; // Market cap data at the time of this transaction
 
-  @Column({
-    nullable: true,
-  })
-  token_rank: number; // Token rank at the time of this transaction
-
-  @Column({
-    nullable: true,
-  })
-  token_collection_rank: number; // Token collection rank at the time of this transaction
-
   @Index()
   @CreateDateColumn({
     type: 'timestamp',

@@ -52,7 +52,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'rank', 'collection_rank', 'price', 'market_cap'],
+    enum: ['name', 'price', 'market_cap'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -230,7 +230,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenRankings' })
   @ApiOkResponsePaginated(TokenDto)
-  @CacheTTL(1000)
+  // @CacheTTL(1000)
   @Get(':address/rankings')
   async listTokenRankings(
     @Param('address') address: string,
@@ -238,23 +238,67 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(5), ParseIntPipe) limit = 5,
   ): Promise<Pagination<Token>> {
     const token = await this.tokensService.findByAddress(address);
+    if (!token) {
+      return {
+        items: [],
+        meta: {
+          currentPage: page,
+          itemCount: 0,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0,
+        },
+      };
+    }
 
-    const queryBuilder = this.tokensRepository.createQueryBuilder('token');
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    queryBuilder.andWhere('token.factory_address = :address', {
-      address: factory.address,
-    });
-    queryBuilder.orderBy(`token.rank`, 'ASC');
+    // Get tokens with market cap around the target token
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          t.*,
+          CAST(RANK() OVER (ORDER BY t.market_cap DESC) AS INTEGER) as rank
+        FROM token t
+        WHERE t.factory_address = '${factory.address}'
+      ),
+      target_rank AS (
+        SELECT rank
+        FROM ranked_tokens
+        WHERE id = ${token.id}
+      ),
+      adjusted_limits AS (
+        SELECT 
+          CASE 
+            WHEN (SELECT rank FROM target_rank) <= 2
+            THEN ${Math.floor(limit)} - (SELECT rank FROM target_rank)
+            ELSE ${Math.floor(limit / 2)} 
+          END as upper_limit,
+          ${Math.floor(limit / 2)} as lower_limit
+      )
+      SELECT *
+      FROM ranked_tokens
+      WHERE rank >= (
+        SELECT rank FROM target_rank
+      ) - (SELECT lower_limit FROM adjusted_limits)
+      AND rank <= (
+        SELECT rank FROM target_rank
+      ) + (SELECT upper_limit FROM adjusted_limits)
+      ORDER BY market_cap DESC
+    `;
 
-    // const minRank = token.rank - Math.floor(limit / 2);
-    // const maxRank = token.rank + Math.floor(limit / 2);
-    // queryBuilder.where('token.rank BETWEEN :minRank AND :maxRank', {
-    //   minRank,
-    //   maxRank,
-    // });
+    const rankedTokens = await this.tokensRepository.query(rankedQuery);
 
-    return paginate<Token>(queryBuilder, { page, limit });
+    return {
+      items: rankedTokens,
+      meta: {
+        currentPage: page,
+        itemCount: rankedTokens.length,
+        itemsPerPage: limit,
+        totalItems: rankedTokens.length,
+        totalPages: 1,
+      },
+    };
   }
 
   @ApiQuery({ name: 'price', type: 'number', required: true })

@@ -285,7 +285,6 @@ export class TokensService {
     await this.syncTokenPrice(newToken);
     // refresh token token info
     // TODO: should refresh token info
-    await this.updateTokenInitialRank(newToken);
     void this.syncTokenHoldersQueue.add(
       {
         saleAddress,
@@ -306,15 +305,6 @@ export class TokensService {
       );
     }
     return this.findByAddress(newToken.sale_address);
-  }
-
-  async updateTokenInitialRank(token: Token): Promise<number> {
-    const tokensCount = await this.tokensRepository.count();
-    // TODO: add initial collection_rank
-    await this.tokensRepository.update(token.id, {
-      rank: tokensCount + 1,
-    });
-    return tokensCount + 1;
   }
 
   async updateTokenFactoryAddress(
@@ -440,5 +430,71 @@ export class TokensService {
     await this.tokensRepository.update(token.id, tokenData);
 
     return transaction.tx.contractId;
+  }
+
+  async queryTokensWithRanks(
+    queryBuilder: any,
+    limit: number = 20,
+    page: number = 1,
+  ) {
+    // Get the base query and parameters
+    const subQuery = queryBuilder.getQuery();
+    const parameters = queryBuilder.getParameters();
+
+    // Replace all parameter placeholders with actual values
+    let finalSubQuery = subQuery;
+    Object.entries(parameters).forEach(([key, value]) => {
+      finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
+    });
+
+    // Create a new query that includes the rank
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          *,
+          CAST(RANK() OVER (ORDER BY market_cap DESC) AS INTEGER) as rank
+        FROM (${finalSubQuery}) AS token
+      )
+      SELECT *
+      FROM ranked_tokens
+      ORDER BY market_cap DESC
+      LIMIT ${limit}
+      OFFSET ${(page - 1) * limit}
+    `;
+
+    console.log('rankedQuery::', rankedQuery);
+
+    const result = await this.tokensRepository.query(rankedQuery);
+
+    return {
+      items: result,
+      meta: {
+        currentPage: page,
+        itemCount: result.length,
+        itemsPerPage: limit,
+        totalItems: null,
+        totalPages: null,
+      },
+    };
+  }
+
+  async getTokenRanks(tokenIds: number[]): Promise<Map<number, number>> {
+    if (!tokenIds.length) {
+      return new Map();
+    }
+
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          id,
+          CAST(RANK() OVER (ORDER BY market_cap DESC) AS INTEGER) as rank
+        FROM token
+        WHERE id IN (${tokenIds.join(',')})
+      )
+      SELECT * FROM ranked_tokens
+    `;
+
+    const result = await this.tokensRepository.query(rankedQuery);
+    return new Map(result.map((token) => [token.id, token.rank]));
   }
 }

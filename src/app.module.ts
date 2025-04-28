@@ -10,7 +10,6 @@ import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
 } from './tokens/queues/constants';
 import { TokensModule } from './tokens/tokens.module';
 import {
@@ -34,9 +33,6 @@ import { CacheModule } from '@nestjs/cache-manager';
     BullModule.registerQueue(
       {
         name: PULL_TOKEN_INFO_QUEUE,
-      },
-      {
-        name: SYNC_TOKENS_RANKS_QUEUE,
       },
       {
         name: SYNC_TOKEN_HOLDERS_QUEUE,

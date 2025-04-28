@@ -9,10 +9,7 @@ import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Queue } from 'bull';
 import { Token } from '@/tokens/entities/token.entity';
-import {
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
-} from '@/tokens/queues/constants';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TX_FUNCTIONS } from '@/configs';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
@@ -31,7 +28,6 @@ describe('TransactionService', () => {
   let communityFactoryService: jest.Mocked<CommunityFactoryService>;
   let tokenWebsocketGateway: jest.Mocked<TokenWebsocketGateway>;
   let syncTokenHoldersQueue: jest.Mocked<Queue>;
-  let syncTokensRanksQueue: jest.Mocked<Queue>;
 
   beforeEach(async () => {
     transactionRepository = {
@@ -68,7 +64,6 @@ describe('TransactionService', () => {
     } as any;
 
     syncTokenHoldersQueue = { add: jest.fn() } as any;
-    syncTokensRanksQueue = { add: jest.fn() } as any;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -84,10 +79,6 @@ describe('TransactionService', () => {
         {
           provide: getQueueToken(SYNC_TOKEN_HOLDERS_QUEUE),
           useValue: syncTokenHoldersQueue,
-        },
-        {
-          provide: getQueueToken(SYNC_TOKENS_RANKS_QUEUE),
-          useValue: syncTokensRanksQueue,
         },
       ],
     }).compile();

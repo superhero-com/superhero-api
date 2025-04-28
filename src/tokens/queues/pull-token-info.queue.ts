@@ -1,14 +1,10 @@
+import { TokensService } from '@/tokens/tokens.service';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bull';
-import { TokensService } from '@/tokens/tokens.service';
-import {
-  PULL_TOKEN_INFO_QUEUE,
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
-} from './constants';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
+import { PULL_TOKEN_INFO_QUEUE, SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 
 export interface IPullTokenInfoQueue {
   saleAddress: Encoded.ContractAddress;
@@ -20,9 +16,6 @@ export class PullTokenInfoQueue {
   private readonly logger = new Logger(PullTokenInfoQueue.name);
 
   constructor(
-    @InjectQueue(SYNC_TOKENS_RANKS_QUEUE)
-    private readonly syncTokensRanksQueue: Queue,
-
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
 
@@ -40,13 +33,6 @@ export class PullTokenInfoQueue {
       await this.tokenService.syncTokenPrice(token);
       this.logger.debug(
         `PullTokenInfoQueue->completed:${job.data.saleAddress}`,
-      );
-      void this.syncTokensRanksQueue.add(
-        {},
-        {
-          jobId: `syncTokensRanks-${job.data.saleAddress}`,
-          removeOnComplete: true,
-        },
       );
       void this.syncTokenHoldersQueue.add(
         {
