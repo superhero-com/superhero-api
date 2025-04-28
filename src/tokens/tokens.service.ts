@@ -204,12 +204,40 @@ export class TokensService {
   }
 
   async findByAddress(address: string): Promise<Token | null> {
-    return await this.tokensRepository
+    const token = await this.tokensRepository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
       .orWhere('token.name = :address', { address })
       .getOne();
+
+    if (!token) {
+      return null;
+    }
+
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          id,
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
+              market_cap DESC,
+              created_at ASC
+          ) AS INTEGER) as rank
+        FROM token
+        WHERE factory_address = '${token.factory_address}'
+      )
+      SELECT rank
+      FROM ranked_tokens
+      WHERE id = ${token.id}
+    `;
+
+    const [rankResult] = await this.tokensRepository.query(rankedQuery);
+    return {
+      ...token,
+      rank: rankResult?.rank,
+    } as Token & { rank: number };
   }
 
   findOne(id: number): Promise<Token | null> {
@@ -449,20 +477,27 @@ export class TokensService {
 
     // Create a new query that includes the rank
     const rankedQuery = `
-      WITH ranked_tokens AS (
+      WITH all_ranked_tokens AS (
         SELECT 
           *,
-          CAST(RANK() OVER (ORDER BY market_cap DESC) AS INTEGER) as rank
-        FROM (${finalSubQuery}) AS token
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
+              market_cap DESC,
+              created_at ASC
+          ) AS INTEGER) as rank
+        FROM token
+      ),
+      filtered_tokens AS (
+        ${finalSubQuery}
       )
-      SELECT *
-      FROM ranked_tokens
-      ORDER BY market_cap DESC
+      SELECT all_ranked_tokens.*
+      FROM all_ranked_tokens
+      INNER JOIN filtered_tokens ON all_ranked_tokens.id = filtered_tokens.id
+      ORDER BY all_ranked_tokens.rank ASC
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}
     `;
-
-    console.log('rankedQuery::', rankedQuery);
 
     const result = await this.tokensRepository.query(rankedQuery);
 

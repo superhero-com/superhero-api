@@ -164,7 +164,7 @@ export class TokensController {
       const ownedTokens = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
         .where('token_holder.address = :owner_address', { owner_address })
-        .andWhere('token_holder.amount > 0')
+        .andWhere('token_holder.balance > 0')
         .select('token_holder."tokenId"')
         .distinct(true)
         .getRawMany()
@@ -258,7 +258,12 @@ export class TokensController {
       WITH ranked_tokens AS (
         SELECT 
           t.*,
-          CAST(RANK() OVER (ORDER BY t.market_cap DESC) AS INTEGER) as rank
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
+              t.market_cap DESC,
+              t.created_at ASC
+          ) AS INTEGER) as rank
         FROM token t
         WHERE t.factory_address = '${factory.address}'
       ),
