@@ -203,6 +203,10 @@ export class TokensService {
     return this.findByAddress(token.sale_address);
   }
 
+  async findById(id: number): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ id });
+  }
+
   async findByAddress(address: string): Promise<Token | null> {
     const token = await this.tokensRepository
       .createQueryBuilder('token')
