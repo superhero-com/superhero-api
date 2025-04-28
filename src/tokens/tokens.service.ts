@@ -145,7 +145,7 @@ export class TokensService {
         sale_address: saleAddress,
         factory_address: factory.address,
         creator_address: transaction?.tx?.caller_id,
-        created_at: moment(transaction?.microTime).toDate(),
+        created_at: moment(transaction?.micro_time).toDate(),
         name: tokenName,
         symbol: tokenName,
       };

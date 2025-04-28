@@ -46,21 +46,6 @@ export class AppService {
 
   async init() {
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
-    // clean all queue jobs
-    /**
-     * we should avoid clearing the queue here.
-     * need to avoid starting over the sync process.
-     * when the server restarts, we should continue from the last processed block.
-     * there might be some lost transactions, but this should be covered by the reorg process.
-     */
-    await Promise.all([
-      this.pullTokenPriceQueue.empty(),
-      this.saveTransactionQueue.empty(),
-      this.syncTransactionsQueue.empty(),
-      this.syncTokenHoldersQueue.empty(),
-      this.deleteOldTokensQueue.empty(),
-      this.validateTransactionsQueue.empty(),
-    ]);
 
     const factory = await this.communityFactoryService.getCurrentFactory();
     void this.deleteOldTokensQueue.add({
@@ -97,7 +82,7 @@ export class AppService {
     this.websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
       const desiredBlockHeight = keyBlock.height - 5;
       void this.validateTransactionsQueue.add({
-        from: desiredBlockHeight - 10,
+        from: desiredBlockHeight - 50,
         to: desiredBlockHeight,
       });
 
