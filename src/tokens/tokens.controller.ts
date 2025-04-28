@@ -276,7 +276,7 @@ export class TokensController {
         SELECT 
           CASE 
             WHEN (SELECT rank FROM target_rank) <= 2
-            THEN ${Math.floor(limit)} - (SELECT rank FROM target_rank)
+            THEN ${Math.floor(limit / 2)} - (SELECT rank FROM target_rank) + 1
             ELSE ${Math.floor(limit / 2)} 
           END as upper_limit,
           ${Math.floor(limit / 2)} as lower_limit
