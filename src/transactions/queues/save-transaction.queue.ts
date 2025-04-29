@@ -39,8 +39,9 @@ export class SaveTransactionQueue {
       this.logger.debug(
         `SaveTransactionQueue->completed:${job.data.transaction.tx.contractId}:${job.data.transaction.hash}`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`SaveTransactionQueue->error`, error);
+      this.logger.error('Error stack::', error.stack);
     }
   }
 }
