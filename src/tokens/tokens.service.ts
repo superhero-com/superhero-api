@@ -468,6 +468,8 @@ export class TokensService {
     queryBuilder: any,
     limit: number = 20,
     page: number = 1,
+    orderBy: string = 'rank',
+    orderDirection: 'ASC' | 'DESC' = 'ASC',
   ) {
     // Get the base query and parameters
     const subQuery = queryBuilder.getQuery();
@@ -498,7 +500,7 @@ export class TokensService {
       SELECT all_ranked_tokens.*
       FROM all_ranked_tokens
       INNER JOIN filtered_tokens ON all_ranked_tokens.id = filtered_tokens.id
-      ORDER BY all_ranked_tokens.rank ASC
+      ORDER BY all_ranked_tokens.${orderBy} ${orderDirection}
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}
     `;
