@@ -1,23 +1,26 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TX_FUNCTIONS } from '@/configs';
+import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
-import { InjectQueue } from '@nestjs/bull';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
+import { InjectQueue } from '@nestjs/bull';
 
 @Injectable()
 export class TransactionService {
+  private readonly logger = new Logger(TransactionService.name);
+
   constructor(
     private readonly communityFactoryService: CommunityFactoryService,
     private readonly aePricingService: AePricingService,
@@ -26,6 +29,9 @@ export class TransactionService {
 
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
+
+    @InjectRepository(TokenHolder)
+    private tokenHolderRepository: Repository<TokenHolder>,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
@@ -165,15 +171,8 @@ export class TransactionService {
         data: txData,
         token: token,
       });
-      void this.syncTokenHoldersQueue.add(
-        {
-          saleAddress,
-        },
-        {
-          jobId: `syncTokenHolders-${saleAddress}`,
-          removeOnComplete: true,
-        },
-      );
+      // update token holder
+      await this.updateTokenHolder(token, rawTransaction, volume);
     }
     return transaction;
   }
@@ -284,6 +283,15 @@ export class TransactionService {
     return true;
   }
 
+  async getTokenTransactionsCount(token: Token): Promise<number> {
+    const queryBuilder = this.transactionRepository
+      .createQueryBuilder('token_transactions')
+      .where('token_transactions."tokenId" = :token_id', {
+        token_id: token.id,
+      });
+    return queryBuilder.getCount();
+  }
+
   // FOT TESTING TX
   // async _testTransaction(hash: Encoded.TxHash) {
   //   const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${hash}`;
@@ -303,4 +311,68 @@ export class TransactionService {
   //     total_supply,
   //   } = await this.parseTransactionData(rawTransaction);
   // }
+
+  private async updateTokenHolder(
+    token: Token,
+    rawTransaction: ITransaction,
+    volume: BigNumber,
+  ): Promise<void> {
+    try {
+      const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
+      const tokenHolder = await this.tokenHolderRepository
+        .createQueryBuilder('token_holders')
+        .where('token_holders."tokenId" = :token_id', {
+          token_id: token.id,
+        })
+        .andWhere('token_holders."address" = :address', {
+          address: rawTransaction.tx.callerId,
+        })
+        .getOne();
+      if (tokenHolder) {
+        let tokenHolderBalance = tokenHolder.balance;
+        // if balance is negative, set it to 0
+        if (tokenHolderBalance.isNegative()) {
+          tokenHolderBalance = new BigNumber(0);
+        }
+        // if is buy
+        if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+          await this.tokenHolderRepository.update(tokenHolder.id, {
+            balance: tokenHolderBalance.plus(bigNumberVolume),
+          });
+        }
+        // if is sell
+        if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+          await this.tokenHolderRepository.update(tokenHolder.id, {
+            balance: tokenHolderBalance.minus(bigNumberVolume),
+          });
+        }
+        if (token.holders_count == 0) {
+          await this.tokenService.update(token, {
+            holders_count: 1,
+          });
+        }
+      } else {
+        // create token holder
+        await this.tokenHolderRepository.save({
+          token: token,
+          address: rawTransaction.tx.callerId,
+          balance: bigNumberVolume,
+        });
+        // increment token holders count
+        await this.tokenService.update(token, {
+          holders_count: token.holders_count + 1,
+        });
+      }
+    } catch (error) {
+      this.logger.error('Error updating token holder', error);
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `syncTokenHolders-${token.sale_address}`,
+        },
+      );
+    }
+  }
 }
