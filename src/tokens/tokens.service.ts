@@ -521,16 +521,21 @@ export class TokensService {
     if (!tokenIds.length) {
       return new Map();
     }
-
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const rankedQuery = `
       WITH ranked_tokens AS (
         SELECT 
-          id,
-          CAST(RANK() OVER (ORDER BY market_cap DESC) AS INTEGER) as rank
-        FROM token
-        WHERE id IN (${tokenIds.join(',')})
+          t.*,
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
+              t.market_cap DESC,
+              t.created_at ASC
+          ) AS INTEGER) as rank
+        FROM token t
+        WHERE t.factory_address = '${factory.address}'
       )
-      SELECT * FROM ranked_tokens
+      SELECT * FROM ranked_tokens WHERE id IN (${tokenIds.join(',')})
     `;
 
     const result = await this.tokensRepository.query(rankedQuery);
