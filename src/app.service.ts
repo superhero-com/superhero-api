@@ -7,8 +7,7 @@ import { WebSocketService } from './ae/websocket.service';
 import { TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
-  PULL_TOKEN_INFO_QUEUE,
-  SYNC_TOKEN_HOLDERS_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE
 } from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,
@@ -23,8 +22,6 @@ export class AppService {
     private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
     private aePricingService: AePricingService,
-    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
-    private readonly pullTokenPriceQueue: Queue,
 
     @InjectQueue(SAVE_TRANSACTION_QUEUE)
     private readonly saveTransactionQueue: Queue,
@@ -51,6 +48,7 @@ export class AppService {
     await Promise.all([
       this.deleteOldTokensQueue.empty(),
       this.syncTransactionsQueue.empty(),
+      this.syncTokenHoldersQueue.empty(),
     ]);
     void this.deleteOldTokensQueue.add({
       factories: [factory.address],

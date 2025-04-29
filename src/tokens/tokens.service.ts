@@ -79,18 +79,27 @@ export class TokensService {
       const liveTokenData = await this.getTokeLivePrice(token);
       await this.tokensRepository.update(token.id, liveTokenData);
       this.contracts[token.sale_address].token = token;
-      void this.syncTokenHoldersQueue.add(
-        {
-          saleAddress: token.sale_address,
-        },
-        {
-          jobId: `syncTokenHolders-${token.sale_address}`,
-          removeOnComplete: true,
-        },
-      );
-      void this.syncTransactionsQueue.add({
-        saleAddress: token.sale_address,
-      });
+      try {
+        const txCount = await fetchJson(
+          `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
+        );
+        if (txCount !== token.last_sync_tx_count) {
+          void this.syncTokenHoldersQueue.add(
+            {
+              saleAddress: token.sale_address,
+            },
+            {
+              jobId: `syncTokenHolders-${token.sale_address}`,
+              removeOnComplete: true,
+            },
+          );
+          void this.syncTransactionsQueue.add({
+            saleAddress: token.sale_address,
+          });
+        }
+      } catch (error) {
+        //
+      }
     }
   }
 
