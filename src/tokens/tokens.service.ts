@@ -3,6 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { AeSdkService } from '@/ae/ae-sdk.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { ACTIVE_NETWORK } from '@/configs';
+import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
+import { fetchJson } from '@/utils/common';
+import { ICommunityFactorySchema, ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
@@ -12,16 +19,9 @@ import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
-import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { AeSdkService } from '@/ae/ae-sdk.service';
-import { fetchJson } from '@/utils/common';
-import { ICommunityFactorySchema, ITransaction } from '@/utils/types';
-import { ACTIVE_NETWORK } from '@/configs';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -130,6 +130,7 @@ export class TokensService {
 
       const tokenExists = await this.findByAddress(saleAddress);
       if (tokenExists) {
+        tokens.push(tokenExists);
         continue;
       }
       const tokenName = transaction?.tx?.arguments?.[1]?.value;

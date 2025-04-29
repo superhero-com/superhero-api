@@ -284,6 +284,15 @@ export class TransactionService {
     return true;
   }
 
+  async getTokenTransactionsCount(token: Token): Promise<number> {
+    const queryBuilder = this.transactionRepository
+      .createQueryBuilder('token_transactions')
+      .where('token_transactions."tokenId" = :token_id', {
+        token_id: token.id,
+      });
+    return queryBuilder.getCount();
+  }
+
   // FOT TESTING TX
   // async _testTransaction(hash: Encoded.TxHash) {
   //   const url = `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${hash}`;

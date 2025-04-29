@@ -48,6 +48,10 @@ export class AppService {
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
 
     const factory = await this.communityFactoryService.getCurrentFactory();
+    await Promise.all([
+      this.deleteOldTokensQueue.empty(),
+      this.syncTransactionsQueue.empty(),
+    ]);
     void this.deleteOldTokensQueue.add({
       factories: [factory.address],
     });

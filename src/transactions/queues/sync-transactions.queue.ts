@@ -33,7 +33,14 @@ export class SyncTransactionsQueue {
     this.logger.log(`SyncTransactionsQueue->started:${job.data.saleAddress}`);
     try {
       const token = await this.tokenService.getToken(job.data.saleAddress);
-      await this.pullTokenHistoryData(token);
+      const txCount = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
+      );
+      const localTxCount =
+        await this.transactionService.getTokenTransactionsCount(token);
+      if (localTxCount !== txCount) {
+        await this.pullTokenHistoryData(token);
+      }
       this.logger.debug(
         `SyncTransactionsQueue->completed:${job.data.saleAddress}`,
       );
