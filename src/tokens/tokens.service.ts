@@ -497,6 +497,18 @@ export class TokensService {
       orderDirection = orderDirection === 'ASC' ? 'DESC' : 'ASC';
     }
 
+    // Get total count of filtered items
+    const countQuery = `
+      WITH filtered_tokens AS (
+        ${finalSubQuery}
+      )
+      SELECT COUNT(*) as total
+      FROM filtered_tokens
+    `;
+    const [{ total }] = await this.tokensRepository.query(countQuery);
+    const totalItems = parseInt(total, 10);
+    const totalPages = Math.ceil(totalItems / limit);
+
     // Create a new query that includes the rank
     const rankedQuery = `
       WITH all_ranked_tokens AS (
@@ -529,8 +541,8 @@ export class TokensService {
         currentPage: page,
         itemCount: result.length,
         itemsPerPage: limit,
-        totalItems: null,
-        totalPages: null,
+        totalItems,
+        totalPages,
       },
     };
   }
