@@ -491,6 +491,12 @@ export class TokensService {
       finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
     });
 
+    if (orderBy === 'market_cap') {
+      orderBy = 'rank';
+      // reverse the order direction
+      orderDirection = orderDirection === 'ASC' ? 'DESC' : 'ASC';
+    }
+
     // Create a new query that includes the rank
     const rankedQuery = `
       WITH all_ranked_tokens AS (
