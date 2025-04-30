@@ -26,6 +26,16 @@ export class Token {
   @OneToMany(() => Transaction, (tokenTransaction) => tokenTransaction.token)
   transactions: Transaction[];
 
+  @Column({
+    default: 0,
+  })
+  last_sync_tx_count: number;
+
+  @Column({
+    default: 0,
+  })
+  tx_count: number;
+
   @OneToMany(() => TokenHolder, (tokenHolder) => tokenHolder.token)
   holders: TokenHolder[];
 
@@ -101,17 +111,7 @@ export class Token {
   @Column({
     nullable: true,
   })
-  rank: number;
-
-  @Column({
-    nullable: true,
-  })
   collection: string;
-
-  @Column({
-    nullable: true,
-  })
-  collection_rank: number;
 
   @Column({
     default: 0n,

@@ -42,8 +42,9 @@ export class SyncTokenHoldersQueue {
       this.logger.debug(
         `SyncTokenHoldersQueue->completed:${job.data.saleAddress}`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`SyncTokenHoldersQueue->error`, error);
+      this.logger.error(`SyncTokenHoldersQueue->error:stack::`, error.stack);
     }
   }
 

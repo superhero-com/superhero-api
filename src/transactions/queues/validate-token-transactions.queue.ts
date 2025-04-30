@@ -17,7 +17,7 @@ import { VALIDATE_TOKEN_TRANSACTIONS_QUEUE } from './constants';
 export interface IValidateTokenTransactionsQueue {
   from: number; // Block height
   to: number;
-  saleAddress: Encoded.ContractAddress; // should be sale address
+  tokenId: number; // should be sale address
 }
 
 @Processor(VALIDATE_TOKEN_TRANSACTIONS_QUEUE)
@@ -53,10 +53,10 @@ export class ValidateTokenTransactionsQueue {
       `ValidateTokenTransactionsQueue->started:from:${job.data.from} - to:${job.data.to}`,
     );
     try {
-      const token = await this.tokenService.findByAddress(job.data.saleAddress);
+      const token = await this.tokenService.findById(job.data.tokenId);
       if (!token) {
         this.logger.error(
-          `ValidateTokenTransactionsQueue->token not found:${job.data.saleAddress}`,
+          `ValidateTokenTransactionsQueue->token not found:${job.data.tokenId}`,
         );
         return;
       }

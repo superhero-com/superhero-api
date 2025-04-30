@@ -15,8 +15,5 @@ export class TokenHolderDto {
   balance_data: PriceDto;
 
   @ApiProperty()
-  percentage: number;
-
-  @ApiProperty()
   public created_at: Date;
 }

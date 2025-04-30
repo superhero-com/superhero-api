@@ -1,5 +1,5 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Query, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Query, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { TokensService } from '@/tokens/tokens.service';
@@ -127,6 +127,9 @@ export class HistoricalController {
     @Param('address') address: string,
     @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
   ): Promise<ITransactionPreview> {
+    if (!address || address == 'null') {
+      throw new BadRequestException('Address is required');
+    }
     const token = await this.tokenService.getToken(address);
     return this.tokenHistoryService.getForPreview(token, interval);
   }

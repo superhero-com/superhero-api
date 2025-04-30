@@ -82,6 +82,9 @@ jobs:
             docker rm ${{ inputs.CONTAINER_NAME }} || true
             docker run -d --name ${{ inputs.CONTAINER_NAME }} \
               --restart=always \
+              --log-driver json-file \
+              --log-opt max-size=100m \
+              --log-opt max-file=30 \
               -p ${{ secrets.API_HOST_PORT }}:3000 \
               -e APP_PORT="3000" \
               -e DB_USER \

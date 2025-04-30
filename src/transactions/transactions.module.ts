@@ -3,10 +3,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
-import {
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  SYNC_TOKENS_RANKS_QUEUE,
-} from '@/tokens/queues/constants';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokensModule } from '@/tokens/tokens.module';
 import { HistoricalController } from './controllers/historical.controller';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
@@ -38,9 +35,6 @@ import { AnalyticsTransactionsController } from './controllers/analytics-transac
       },
       {
         name: SYNC_TOKEN_HOLDERS_QUEUE,
-      },
-      {
-        name: SYNC_TOKENS_RANKS_QUEUE,
       },
       {
         name: VALIDATE_TRANSACTIONS_QUEUE,

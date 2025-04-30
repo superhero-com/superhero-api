@@ -33,7 +33,18 @@ export class SyncTransactionsQueue {
     this.logger.log(`SyncTransactionsQueue->started:${job.data.saleAddress}`);
     try {
       const token = await this.tokenService.getToken(job.data.saleAddress);
-      await this.pullTokenHistoryData(token);
+      const txCount = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
+      );
+      if (txCount !== token.last_sync_tx_count) {
+        await this.pullTokenHistoryData(token);
+      }
+      const localTxCount =
+        await this.transactionService.getTokenTransactionsCount(token);
+      await this.tokenService.update(token, {
+        last_sync_tx_count: txCount,
+        tx_count: localTxCount,
+      });
       this.logger.debug(
         `SyncTransactionsQueue->completed:${job.data.saleAddress}`,
       );
