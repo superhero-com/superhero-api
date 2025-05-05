@@ -33,7 +33,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     },
   },
   [NETWORK_ID_TESTNET]: {
-    address: 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
+    address: 'ct_vLKrYRCthfViqUuWFKGYgz7kxhvrsdAoKhZPXqzxcaEFRkZy1',
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
@@ -41,13 +41,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
         allowed_name_length: '20',
         allowed_name_chars: [
           {
-            SingleChar: [45],
-          },
-          {
-            CharRangeFromTo: [48, 57],
-          },
-          {
-            CharRangeFromTo: [65, 90],
+            CharRangeFromTo: [19968, 40959],
           },
         ],
         description: 'Tokenize a unique name with up to 20.',
