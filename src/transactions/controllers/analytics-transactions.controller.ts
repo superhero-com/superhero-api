@@ -186,6 +186,7 @@ export class AnalyticsTransactionsController {
     return queryBuilder.getRawMany();
   }
 
+  @ApiQuery({ name: 'token_sale_addresses', type: 'array', required: false })
   @ApiOperation({
     operationId: 'totalUniqueUsers',
     description:
@@ -197,18 +198,37 @@ export class AnalyticsTransactionsController {
     type: TotalUniqueUsersResultDto,
   })
   @Get('total-unique-users')
-  async totalUniqueUsers(): Promise<TotalUniqueUsersResultDto> {
+  async totalUniqueUsers(
+    @Query('token_sale_addresses') token_sale_addresses?: string[],
+  ): Promise<TotalUniqueUsersResultDto> {
+    if (token_sale_addresses && !Array.isArray(token_sale_addresses)) {
+      token_sale_addresses = [token_sale_addresses];
+    }
     // Count all unique users across the entire system
-    const queryBuilder = this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .select('COUNT(DISTINCT transactions.address) as total_users');
+    const queryBuilder =
+      this.transactionsRepository.createQueryBuilder('transactions');
 
-    const result = await queryBuilder.getRawOne();
+    if (token_sale_addresses?.length) {
+      const tokens = await this.tokensRepository.find({
+        where: {
+          sale_address: In(token_sale_addresses),
+        },
+      });
+      const uniqueTokenIds = tokens.map((t) => t.id);
+      queryBuilder.andWhere('transactions."tokenId" IN (:...tokenIds)', {
+        tokenIds: uniqueTokenIds,
+      });
+    }
+
+    const result = await queryBuilder
+      .select('COUNT(DISTINCT transactions.address) as total_users')
+      .getRawOne();
     return { total_users: parseInt(result.total_users) || 0 };
   }
 
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiQuery({ name: 'token_sale_addresses', type: 'array', required: false })
   @ApiOperation({
     operationId: 'listDailyMarketCapSum',
     description: 'Returns the sum of market caps for all tokens per day',
@@ -218,7 +238,6 @@ export class AnalyticsTransactionsController {
     description: 'Returns the sum of market caps for all tokens per day',
     type: [DailyMarketCapSumDto],
   })
-  @ApiQuery({ name: 'token_sale_addresses', type: 'array', required: false })
   @CacheTTL(1000)
   @Get('daily-market-cap-sum')
   async listDailyMarketCapSum(
