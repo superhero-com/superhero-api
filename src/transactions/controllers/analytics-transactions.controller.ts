@@ -3,7 +3,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import {
   DailyTradeVolumeQueryDto,
@@ -15,12 +15,15 @@ import {
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DailyMarketCapSumDto } from '@/tokens/dto/daily-market-cap-sum.dto';
 import { CacheTTL } from '@nestjs/cache-manager';
+import { Token } from '@/tokens/entities/token.entity';
 @Controller('api/analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
+    @InjectRepository(Token)
+    private tokensRepository: Repository<Token>,
     private tokenService: TokensService,
 
     private readonly aePricingService: AePricingService,
@@ -215,22 +218,34 @@ export class AnalyticsTransactionsController {
     description: 'Returns the sum of market caps for all tokens per day',
     type: [DailyMarketCapSumDto],
   })
+  @ApiQuery({ name: 'token_sale_addresses', type: 'array', required: false })
   @CacheTTL(1000)
   @Get('daily-market-cap-sum')
   async listDailyMarketCapSum(
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
+    @Query('token_sale_addresses') token_sale_addresses?: string[],
   ): Promise<DailyMarketCapSumDto[]> {
-    /**
-     * we need to create a series data for each between start_date and end_date
-     * the data for each day should contain the sum of market_cap for all tokens
-     * if there no data for a day for a token and we had it's market cap in the previous day, we should use the market cap from the previous day
-     */
-    // First get all unique tokens with market cap data
+    if (token_sale_addresses && !Array.isArray(token_sale_addresses)) {
+      token_sale_addresses = [token_sale_addresses];
+    }
+
     const tokensQuery = this.transactionsRepository
       .createQueryBuilder('transaction')
       .select('DISTINCT transaction."tokenId"')
       .where("transaction.market_cap->>'ae' IS NOT NULL");
+
+    if (token_sale_addresses?.length) {
+      const tokens = await this.tokensRepository.find({
+        where: {
+          sale_address: In(token_sale_addresses),
+        },
+      });
+      const uniqueTokenIds = tokens.map((t) => t.id);
+      tokensQuery.andWhere('transaction."tokenId" IN (:...tokenIds)', {
+        tokenIds: uniqueTokenIds,
+      });
+    }
 
     if (start_date) {
       tokensQuery.andWhere('transaction.created_at >= :start_date', {
