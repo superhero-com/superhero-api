@@ -52,7 +52,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'price', 'market_cap'],
+    enum: ['name', 'price', 'market_cap', 'created_at'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -63,7 +63,6 @@ export class TokensController {
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
-  // @CacheTTL(1000)
   @Get()
   async listAll(
     @Query('search') search = undefined,
@@ -78,7 +77,13 @@ export class TokensController {
   ): Promise<Pagination<Token>> {
     // Now, wrap with RANK()
     // allowed sort fields to avoid SQL Injection
-    const allowedSortFields = ['market_cap', 'rank', 'name', 'price'];
+    const allowedSortFields = [
+      'market_cap',
+      'rank',
+      'name',
+      'price',
+      'created_at',
+    ];
     if (!allowedSortFields.includes(orderBy)) {
       orderBy = 'market_cap';
     }
