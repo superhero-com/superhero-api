@@ -365,14 +365,16 @@ export class TransactionService {
       }
     } catch (error) {
       this.logger.error('Error updating token holder', error);
-      void this.syncTokenHoldersQueue.add(
-        {
-          saleAddress: token.sale_address,
-        },
-        {
-          jobId: `syncTokenHolders-${token.sale_address}`,
-        },
-      );
     }
+
+    void this.syncTokenHoldersQueue.add(
+      {
+        saleAddress: token.sale_address,
+      },
+      {
+        jobId: `syncTokenHolders-${token.sale_address}`,
+        delay: 1000 * 60 * 3, // 3 minutes
+      },
+    );
   }
 }

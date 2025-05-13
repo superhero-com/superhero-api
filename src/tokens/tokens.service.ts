@@ -84,19 +84,20 @@ export class TokensService {
           `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
         );
         if (txCount !== token.last_sync_tx_count) {
-          void this.syncTokenHoldersQueue.add(
-            {
-              saleAddress: token.sale_address,
-            },
-            {
-              jobId: `syncTokenHolders-${token.sale_address}`,
-              removeOnComplete: true,
-            },
-          );
           void this.syncTransactionsQueue.add({
             saleAddress: token.sale_address,
           });
         }
+        // always sync token holders
+        void this.syncTokenHoldersQueue.add(
+          {
+            saleAddress: token.sale_address,
+          },
+          {
+            jobId: `syncTokenHolders-${token.sale_address}`,
+            removeOnComplete: true,
+          },
+        );
       } catch (error) {
         //
       }
