@@ -7,7 +7,7 @@ import { WebSocketService } from './ae/websocket.service';
 import { TX_FUNCTIONS } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
-  SYNC_TOKEN_HOLDERS_QUEUE
+  SYNC_TOKEN_HOLDERS_QUEUE,
 } from './tokens/queues/constants';
 import {
   SAVE_TRANSACTION_QUEUE,

@@ -64,6 +64,13 @@ export class SyncTokenHoldersQueue {
 
   async loadData(token: Token, url: string, totalHolders = 0) {
     const response = await fetchJson(url);
+    if (!response.data) {
+      this.logger.error(
+        `SyncTokenHoldersQueue:failed to load data from url::${url}`,
+      );
+      this.logger.error(`SyncTokenHoldersQueue:response::`, response);
+      return totalHolders;
+    }
     const holders = response.data.filter((item) => item.amount > 0);
     this.logger.debug(`SyncTokenHoldersQueue->holders:${holders.length}`, url);
 
