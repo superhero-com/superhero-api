@@ -394,7 +394,7 @@ export class TransactionHistoryService {
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .where('')
-      .select([//
+      .select([
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
@@ -407,10 +407,33 @@ export class TransactionHistoryService {
       .orderBy('truncated_time', 'DESC')
       .getRawMany();
 
-    const result = data.map((item) => ({
-      last_price: item.max_buy_price, // Ensure it's parsed correctly
-      end_time: item.truncated_time, // Grouped time
-    }));
+    let result;
+    if (data.length === 0) {
+      // If no transactions found for interval, get latest 4 transactions
+      const latestTransactions = await this.transactionsRepository
+        .createQueryBuilder('transactions')
+        .select([
+          'transactions.created_at as truncated_time',
+          "CAST(transactions.buy_price->>'ae' AS FLOAT) as max_buy_price",
+        ])
+        .where('transactions."tokenId" = :tokenId', {
+          tokenId: token.id,
+        })
+        .andWhere(`transactions.buy_price->>'ae' != 'NaN'`)
+        .orderBy('transactions.created_at', 'DESC')
+        .limit(4)
+        .getRawMany();
+
+      result = latestTransactions.map((item) => ({
+        last_price: item.max_buy_price,
+        end_time: item.truncated_time,
+      }));
+    } else {
+      result = data.map((item) => ({
+        last_price: item.max_buy_price,
+        end_time: item.truncated_time,
+      }));
+    }
 
     return {
       result,

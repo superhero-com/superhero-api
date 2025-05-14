@@ -55,6 +55,10 @@ export class TokensService {
 
   factoryContract: CommunityFactory;
   async init() {
+    await Promise.all([
+      this.syncTransactionsQueue.empty(),
+      this.syncTokenHoldersQueue.empty(),
+    ]);
     console.log('--------------------------------');
     console.log('init tokens service');
     console.log('--------------------------------');
@@ -67,7 +71,7 @@ export class TokensService {
 
   async loadFactoryTokens(factory: ICommunityFactorySchema) {
     const communities = await this.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=50`,
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`,
       factory,
     );
 
@@ -84,19 +88,20 @@ export class TokensService {
           `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
         );
         if (txCount !== token.last_sync_tx_count) {
-          void this.syncTokenHoldersQueue.add(
-            {
-              saleAddress: token.sale_address,
-            },
-            {
-              jobId: `syncTokenHolders-${token.sale_address}`,
-              removeOnComplete: true,
-            },
-          );
           void this.syncTransactionsQueue.add({
             saleAddress: token.sale_address,
           });
         }
+        // always sync token holders
+        void this.syncTokenHoldersQueue.add(
+          {
+            saleAddress: token.sale_address,
+          },
+          {
+            jobId: `syncTokenHolders-${token.sale_address}`,
+            removeOnComplete: true,
+          },
+        );
       } catch (error) {
         //
       }
@@ -217,7 +222,10 @@ export class TokensService {
     return this.tokensRepository.findOneBy({ id });
   }
 
-  async findByAddress(address: string): Promise<Token | null> {
+  async findByAddress(
+    address: string,
+    withoutRank = false,
+  ): Promise<Token | null> {
     const token = await this.tokensRepository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
@@ -227,6 +235,10 @@ export class TokensService {
 
     if (!token) {
       return null;
+    }
+
+    if (withoutRank) {
+      return token;
     }
 
     const rankedQuery = `

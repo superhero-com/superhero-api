@@ -49,7 +49,7 @@ export class SyncTokenHoldersQueue {
   }
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
-    const token = await this.tokenService.getToken(saleAddress);
+    const token = await this.tokenService.getToken(saleAddress, true);
     await this.tokenHoldersRepository.delete({
       token: token,
     });
@@ -64,6 +64,36 @@ export class SyncTokenHoldersQueue {
 
   async loadData(token: Token, url: string, totalHolders = 0) {
     const response = await fetchJson(url);
+    if (!response.data) {
+      if (response.error?.includes('invalid')) {
+        const { tokenContractInstance } =
+          await this.tokenService.getTokenContractsBySaleAddress(
+            token.sale_address as Encoded.ContractAddress,
+          );
+
+        const holders = await tokenContractInstance
+          .balances()
+          .then((res) => res.decodedResult)
+          .then((res) => {
+            return Array.from(res)
+              .map(([key, value]: any) => ({
+                token,
+                address: key,
+                balance: new BigNumber(value),
+              }))
+              .filter((item) => item.balance.gt(0))
+              .sort((a, b) => b.balance.minus(a.balance).toNumber());
+          });
+
+        await this.tokenHoldersRepository.save(holders);
+        return holders.length;
+      }
+      this.logger.error(
+        `SyncTokenHoldersQueue:failed to load data from url::${url}`,
+      );
+      this.logger.error(`SyncTokenHoldersQueue:response::`, response);
+      return totalHolders;
+    }
     const holders = response.data.filter((item) => item.amount > 0);
     this.logger.debug(`SyncTokenHoldersQueue->holders:${holders.length}`, url);
 
