@@ -44,7 +44,7 @@ export class AnalyticsTransactionsController {
   ): Promise<DailyTradeVolumeResultDto[]> {
     // If no dates provided, default to last 7 days
     const defaultStartDate = moment().subtract(7, 'days').startOf('day');
-    const defaultEndDate = moment().endOf('day');
+    const defaultEndDate = moment().add(1, 'days').endOf('day');
 
     const startDate = query.start_date
       ? moment(query.start_date).startOf('day')
@@ -140,7 +140,7 @@ export class AnalyticsTransactionsController {
   ): Promise<DailyUniqueActiveUsersResultDto[]> {
     // If no dates provided, default to last 7 days
     const defaultStartDate = moment().subtract(7, 'days').startOf('day');
-    const defaultEndDate = moment().endOf('day');
+    const defaultEndDate = moment().add(1, 'days').endOf('day');
 
     const startDate = query.start_date
       ? moment(query.start_date).startOf('day')

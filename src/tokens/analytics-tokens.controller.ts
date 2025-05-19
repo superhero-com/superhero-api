@@ -7,7 +7,7 @@ import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
-
+import moment from 'moment';
 @Controller('api/analytics')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Analytics')
@@ -38,6 +38,13 @@ export class AnalyticTokensController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ): Promise<DailyTokenCountDto[]> {
+    const defaultStartDate = moment().subtract(7, 'days').startOf('day');
+    const defaultEndDate = moment().add(1, 'days').endOf('day');
+
+    const startDate = start_date
+      ? moment(start_date).startOf('day')
+      : defaultStartDate;
+    const endDate = end_date ? moment(end_date).endOf('day') : defaultEndDate;
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
 
     // Select date and count of tokens for each day
@@ -47,11 +54,15 @@ export class AnalyticTokensController {
       .groupBy('DATE(token.created_at)')
       .orderBy('DATE(token.created_at)', 'ASC');
 
-    if (start_date) {
-      queryBuilder.where('token.created_at >= :start_date', { start_date });
+    if (startDate) {
+      queryBuilder.where('token.created_at >= :start_date', {
+        start_date: startDate.toDate(),
+      });
     }
-    if (end_date) {
-      queryBuilder.andWhere('token.created_at <= :end_date', { end_date });
+    if (endDate) {
+      queryBuilder.andWhere('token.created_at <= :end_date', {
+        end_date: endDate.toDate(),
+      });
     }
 
     const results = await queryBuilder.getRawMany();
