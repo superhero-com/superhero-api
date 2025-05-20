@@ -1,13 +1,13 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import moment from 'moment';
 import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
-import moment from 'moment';
 @Controller('api/analytics')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Analytics')
@@ -32,7 +32,6 @@ export class AnalyticTokensController {
     description: 'Returns the count of tokens created per day',
     type: [DailyTokenCountDto],
   })
-  @CacheTTL(1000)
   @Get('daily-created-tokens-count')
   async listDailyCreatedTokensCount(
     @Query('start_date') start_date?: string,
@@ -82,7 +81,6 @@ export class AnalyticTokensController {
     description: 'Returns the sum of market caps for all tokens',
     type: MarketCapSumDto,
   })
-  @CacheTTL(1000)
   @Get('total-market-cap')
   async getTotalMarketCap(): Promise<MarketCapSumDto> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
@@ -100,5 +98,12 @@ export class AnalyticTokensController {
       sum,
       sum_data,
     };
+  }
+
+  @Get('total-created-tokens')
+  async getTotalCreatedTokens(): Promise<number> {
+    const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+
+    return await queryBuilder.getCount();
   }
 }
