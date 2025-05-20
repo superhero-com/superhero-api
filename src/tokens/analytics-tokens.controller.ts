@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 @Controller('api/analytics')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Analytics')
@@ -17,6 +18,8 @@ export class AnalyticTokensController {
     private readonly tokensRepository: Repository<Token>,
 
     private readonly aePricingService: AePricingService,
+
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -112,6 +115,10 @@ export class AnalyticTokensController {
   @Get('total-created-tokens')
   async getTotalCreatedTokens(): Promise<number> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    queryBuilder.where('token.factory_address = :address', {
+      address: factory.address,
+    });
 
     return await queryBuilder.getCount();
   }
