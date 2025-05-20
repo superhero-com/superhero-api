@@ -3,19 +3,19 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TX_FUNCTIONS } from '@/configs';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
+import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
-import { Queue } from 'bull';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
-import { InjectQueue } from '@nestjs/bull';
 
 @Injectable()
 export class TransactionService {

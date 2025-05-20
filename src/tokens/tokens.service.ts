@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
@@ -19,6 +19,7 @@ import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
+import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
@@ -31,11 +32,15 @@ type TokenContracts = {
 
 @Injectable()
 export class TokensService {
+  private readonly logger = new Logger(TokensService.name);
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
+
+    @InjectRepository(TokenHolder)
+    private tokenHoldersRepository: Repository<TokenHolder>,
 
     private aeSdkService: AeSdkService,
 
@@ -84,24 +89,43 @@ export class TokensService {
       await this.tokensRepository.update(token.id, liveTokenData);
       this.contracts[token.sale_address].token = token;
       try {
-        const txCount = await fetchJson(
-          `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
-        );
+        const [txCount, tokenHoldersCount, tokenDataResponse] =
+          await Promise.all([
+            fetchJson(
+              `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
+            ),
+            this.tokenHoldersRepository.count({
+              where: {
+                token: {
+                  sale_address: token.sale_address,
+                },
+              },
+            }),
+            fetchJson(
+              `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}`,
+            ),
+          ]);
         if (txCount !== token.last_sync_tx_count) {
           void this.syncTransactionsQueue.add({
             saleAddress: token.sale_address,
           });
         }
-        // always sync token holders
-        void this.syncTokenHoldersQueue.add(
-          {
-            saleAddress: token.sale_address,
-          },
-          {
-            jobId: `syncTokenHolders-${token.sale_address}`,
-            removeOnComplete: true,
-          },
-        );
+
+        if (tokenHoldersCount !== tokenDataResponse?.holders) {
+          this.logger.log(
+            `tokenHoldersCount: ${tokenHoldersCount} tokenDataResponse?.holders: ${tokenDataResponse?.holders}`,
+          );
+          // if (tokenHoldersCount !== token.holders_count) {
+          void this.syncTokenHoldersQueue.add(
+            {
+              saleAddress: token.sale_address,
+            },
+            {
+              jobId: `syncTokenHolders-${token.sale_address}`,
+              removeOnComplete: true,
+            },
+          );
+        }
       } catch (error) {
         //
       }
@@ -113,6 +137,7 @@ export class TokensService {
     factory: ICommunityFactorySchema,
     tokens: Token[] = [],
   ): Promise<Token[]> {
+    this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result;
     try {
       result = await fetchJson(url);
@@ -143,8 +168,25 @@ export class TokensService {
       const saleAddress = transaction?.tx?.return?.value[1]?.value;
 
       const tokenExists = await this.findByAddress(saleAddress);
-      if (tokenExists) {
+      if (tokenExists?.id) {
+        // update token holders count
+        // if (tokenExists?.address) {
+        //   const tokenDataResponse = await fetchJson(
+        //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenExists.address}`,
+        //   );
+        //   if (tokenDataResponse?.holders !== tokenExists.holders_count) {
+        //     await this.tokensRepository.update(tokenExists.id, {
+        //       holders_count: tokenDataResponse?.holders,
+        //     });
+        //     tokens.push({
+        //       ...tokenExists,
+        //       holders_count: tokenDataResponse?.holders,
+        //     });
+        //     continue;
+        //   }
+        // }
         tokens.push(tokenExists);
+
         continue;
       }
       const tokenName = transaction?.tx?.arguments?.[1]?.value;
@@ -169,7 +211,7 @@ export class TokensService {
         (event) =>
           event.contract.name === 'FungibleTokenFull' &&
           event.contract.address !==
-            'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+          'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
       );
       if (fungibleToken) {
         tokenData.address = fungibleToken.contract.address;

@@ -48,8 +48,8 @@ export class SyncTransactionsQueue {
       this.logger.debug(
         `SyncTransactionsQueue->completed:${job.data.saleAddress}`,
       );
-    } catch (error) {
-      this.logger.error(`SyncTransactionsQueue->error`, error);
+    } catch (error: any) {
+      this.logger.error(`SyncTransactionsQueue->error`, error, error.stack);
     }
   }
 
