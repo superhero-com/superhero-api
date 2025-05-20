@@ -63,6 +63,7 @@ export class TokensController {
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
+  @CacheTTL(10)
   @Get()
   async listAll(
     @Query('search') search = undefined,
@@ -150,7 +151,7 @@ export class TokensController {
     description: 'Token address or name',
   })
   @Get(':address')
-  @CacheTTL(1000)
+  @CacheTTL(3)
   @ApiResponse({
     type: TokenDto,
   })
@@ -169,7 +170,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenHolders' })
   @ApiOkResponsePaginated(TokenHolderDto)
-  @CacheTTL(1000)
+  @CacheTTL(10)
   @Get(':address/holders')
   async listTokenHolders(
     @Param('address') address: string,
@@ -197,7 +198,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenRankings' })
   @ApiOkResponsePaginated(TokenDto)
-  // @CacheTTL(1000)
+  @CacheTTL(10)
   @Get(':address/rankings')
   async listTokenRankings(
     @Param('address') address: string,

@@ -19,7 +19,6 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TokensService } from './tokens.service';
 
 @Controller('api/accounts')
-@UseInterceptors(CacheInterceptor)
 @ApiTags('Account Tokens')
 export class AccountTokensController {
   constructor(
@@ -49,7 +48,6 @@ export class AccountTokensController {
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiOperation({ operationId: 'listTokenHolders' })
   @ApiOkResponsePaginated(TokenHolderDto)
-  @CacheTTL(1000)
   @Get(':address/tokens')
   async listAccountTokens(
     @Param('address') address: string,

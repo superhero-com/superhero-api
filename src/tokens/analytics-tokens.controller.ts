@@ -8,6 +8,8 @@ import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
+
+
 @Controller('api/analytics')
 @ApiTags('Analytics')
 export class AnalyticTokensController {
