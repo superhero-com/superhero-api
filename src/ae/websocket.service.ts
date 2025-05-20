@@ -17,6 +17,8 @@ import {
   ITransaction,
   WebSocketChannelName,
 } from '@/utils/types';
+import { Cron } from '@nestjs/schedule';
+import { CronExpression } from '@nestjs/schedule';
 
 type PingI = {
   id: string;
@@ -44,10 +46,18 @@ export class WebSocketService {
 
   constructor() {
     this.connect(ACTIVE_NETWORK.websocketUrl);
-    this.setupReconnectionCheck();
   }
 
-  handleWebsocketOpen() {
+  async handleWebsocketOpen() {
+    await new Promise((resolve) => {
+      const interval = setInterval(() => {
+        if (this.wsClient.readyState === WebSocket.OPEN) {
+          clearInterval(interval);
+          resolve(true);
+        }
+      }, 100);
+    });
+
     this.isWsConnected = true;
     try {
       this.subscribersQueue.forEach((message) => {
@@ -112,18 +122,6 @@ export class WebSocketService {
       } catch (error) {
         console.log('ERROR subscribeForChannel:', error);
       }
-      // Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
-      //   try {
-      //     this.wsClient.send(
-      //       JSON.stringify({
-      //         ...message,
-      //         source: 'mdw',
-      //       }),
-      //     );
-      //   } catch (error) {
-      //     console.log('ERROR subscribeForChannel:', error);
-      //   }
-      // });
     }
 
     this.subscribersQueue.push(message);
@@ -218,6 +216,9 @@ export class WebSocketService {
         });
       });
       this.wsClient.close();
+      // this.wsClient.removeEventListener('open', () => {});
+      // this.wsClient.removeEventListener('close', () => {});
+      // this.wsClient.removeEventListener('message', () => {});
       this.wsClient.removeEventListener('open', this.handleWebsocketOpen);
       this.wsClient.removeEventListener('close', this.handleWebsocketClose);
       this.wsClient.removeEventListener('message', this.handleWebsocketClose);
@@ -244,5 +245,24 @@ export class WebSocketService {
       this.pings = this.pings.filter((ping) => ping.id !== pingData.id);
     });
     this.pings = [];
+  }
+
+  /**
+   * Forces a reconnection to the WebSocket server.
+   * This method disconnects the current WebSocket connection,
+   * waits for 1 second to ensure complete disconnection,
+   * and then reconnects to the server.
+   *
+   * @returns {Promise<void>}
+   */
+  @Cron(CronExpression.EVERY_30_SECONDS)
+  async forceReconnect() {
+    console.log('WEBSOCKET:: forceReconnect');
+    if (this.isWsConnected) {
+      this.disconnect();
+      // Wait for 1 second to ensure complete disconnection
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    this.connect(ACTIVE_NETWORK.websocketUrl);
   }
 }

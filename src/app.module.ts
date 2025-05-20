@@ -1,3 +1,5 @@
+import { ScheduleModule } from '@nestjs/schedule';
+
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -23,6 +25,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot(),
     CacheModule.register({
       isGlobal: true,

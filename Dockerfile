@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:20-alpine
 RUN apk add --no-cache git
 # support for private repositories
 RUN --mount=type=secret,id=GITHUB_TOKEN \
