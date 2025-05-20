@@ -1,6 +1,6 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { CacheInterceptor } from '@nestjs/cache-manager';
-import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
@@ -8,9 +8,7 @@ import { Repository } from 'typeorm';
 import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
 @Controller('api/analytics')
-@UseInterceptors(CacheInterceptor)
 @ApiTags('Analytics')
 export class AnalyticTokensController {
   constructor(
