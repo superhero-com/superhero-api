@@ -349,6 +349,10 @@ export class TokensService {
     saleAddress: Encoded.ContractAddress,
     shouldSyncTransactions = true,
   ): Promise<Token | null> {
+    if (!saleAddress?.startsWith('ct_')) {
+      this.logger.error('saleAddress is not a valid token address', saleAddress);
+      return null;
+    }
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
 
     if (!instance) {

@@ -1,3 +1,8 @@
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { ACTIVE_NETWORK } from '@/configs/network';
+import { TokensService } from '@/tokens/tokens.service';
+import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { fetchJson } from '@/utils/common';
 import {
   Controller,
   DefaultValuePipe,
@@ -13,14 +18,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { TokensService } from '@/tokens/tokens.service';
 import { Repository } from 'typeorm';
 import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
-
+import { TransactionService } from '../services/transaction.service';
 @Controller('api/transactions')
 @ApiTags('Transactions')
 export class TransactionsController {
@@ -29,7 +32,9 @@ export class TransactionsController {
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly communityFactoryService: CommunityFactoryService,
     private tokenService: TokensService,
-  ) {}
+
+    private transactionService: TransactionService,
+  ) { }
 
   @ApiQuery({
     name: 'token_address',
@@ -117,7 +122,19 @@ export class TransactionsController {
       .select('transactions.*')
       .getRawOne();
     if (!transaction) {
-      throw new NotFoundException(`Transaction with hash ${tx_hash} not found`);
+      try {
+        const mdwTransaction = await fetchJson(
+          `${ACTIVE_NETWORK.middlewareUrl}/v3/txs/${tx_hash}`,
+        ).then((res) => camelcaseKeysDeep(res));
+        // fetch from mdw
+        const tx =
+          await this.transactionService.saveTransaction(mdwTransaction);
+        return tx as unknown as TransactionDto;
+      } catch (error) {
+        throw new NotFoundException(
+          `Transaction with hash ${tx_hash} not found`,
+        );
+      }
     }
     return transaction;
   }
