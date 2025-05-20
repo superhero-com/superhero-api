@@ -100,6 +100,15 @@ export class AnalyticTokensController {
     };
   }
 
+  @ApiOperation({
+    operationId: 'getTotalCreatedTokens',
+    description: 'Returns the total number of tokens created',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns the total number of tokens created',
+    type: Number,
+  })
   @Get('total-created-tokens')
   async getTotalCreatedTokens(): Promise<number> {
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
