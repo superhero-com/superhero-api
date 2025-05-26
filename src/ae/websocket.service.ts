@@ -46,6 +46,7 @@ export class WebSocketService {
 
   constructor() {
     this.connect(ACTIVE_NETWORK.websocketUrl);
+    this.setupReconnectionCheck();
   }
 
   async handleWebsocketOpen() {
@@ -216,9 +217,6 @@ export class WebSocketService {
         });
       });
       this.wsClient.close();
-      // this.wsClient.removeEventListener('open', () => {});
-      // this.wsClient.removeEventListener('close', () => {});
-      // this.wsClient.removeEventListener('message', () => {});
       this.wsClient.removeEventListener('open', this.handleWebsocketOpen);
       this.wsClient.removeEventListener('close', this.handleWebsocketClose);
       this.wsClient.removeEventListener('message', this.handleWebsocketClose);
@@ -255,7 +253,7 @@ export class WebSocketService {
    *
    * @returns {Promise<void>}
    */
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async forceReconnect() {
     console.log('WEBSOCKET:: forceReconnect');
     if (this.isWsConnected) {

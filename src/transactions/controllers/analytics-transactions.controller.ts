@@ -47,11 +47,9 @@ export class AnalyticsTransactionsController {
     const defaultEndDate = moment().add(1, 'days').endOf('day');
 
     const startDate = query.start_date
-      ? moment(query.start_date).startOf('day')
+      ? moment(query.start_date)
       : defaultStartDate;
-    const endDate = query.end_date
-      ? moment(query.end_date).endOf('day')
-      : defaultEndDate;
+    const endDate = query.end_date ? moment(query.end_date) : defaultEndDate;
 
     console.log('Query parameters:', {
       start_date: startDate.format('YYYY-MM-DD'),
@@ -143,11 +141,9 @@ export class AnalyticsTransactionsController {
     const defaultEndDate = moment().add(1, 'days').endOf('day');
 
     const startDate = query.start_date
-      ? moment(query.start_date).startOf('day')
+      ? moment(query.start_date)
       : defaultStartDate;
-    const endDate = query.end_date
-      ? moment(query.end_date).endOf('day')
-      : defaultEndDate;
+    const endDate = query.end_date ? moment(query.end_date) : defaultEndDate;
 
     console.log('Query parameters:', {
       start_date: startDate.format('YYYY-MM-DD'),

@@ -42,10 +42,8 @@ export class AnalyticTokensController {
     const defaultStartDate = moment().subtract(7, 'days').startOf('day');
     const defaultEndDate = moment().add(1, 'days').endOf('day');
 
-    const startDate = start_date
-      ? moment(start_date).startOf('day')
-      : defaultStartDate;
-    const endDate = end_date ? moment(end_date).endOf('day') : defaultEndDate;
+    const startDate = start_date ? moment(start_date) : defaultStartDate;
+    const endDate = end_date ? moment(end_date) : defaultEndDate;
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
 
     // Select date and count of tokens for each day
