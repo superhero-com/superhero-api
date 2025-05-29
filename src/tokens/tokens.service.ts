@@ -134,6 +134,11 @@ export class TokensService {
   }
 
   async findAndRemoveDuplicatedTokensBaseSaleAddress() {
+    // remove all the tokens where sale_address is null
+    await this.tokensRepository.delete({
+      sale_address: IsNull(),
+    });
+
     const duplicatedTokensQuery = `
       SELECT sale_address, COUNT(*) as count
       FROM token
