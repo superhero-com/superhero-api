@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -60,6 +60,7 @@ export class TokensService {
 
   factoryContract: CommunityFactory;
   async init() {
+    await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
     await Promise.all([
       this.syncTransactionsQueue.empty(),
       this.syncTokenHoldersQueue.empty(),
@@ -129,6 +130,24 @@ export class TokensService {
       } catch (error) {
         //
       }
+    }
+  }
+
+  async findAndRemoveDuplicatedTokensBaseSaleAddress() {
+    const duplicatedTokensQuery = `
+      SELECT sale_address, COUNT(*) as count
+      FROM token
+      WHERE sale_address IS NOT NULL
+      GROUP BY sale_address
+      HAVING COUNT(*) > 1
+    `;
+
+    const duplicatedTokens = await this.tokensRepository.query(
+      duplicatedTokensQuery,
+    );
+    // delete duplicated tokens
+    for (const token of duplicatedTokens) {
+      await this.tokensRepository.delete(token.id);
     }
   }
 
