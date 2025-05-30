@@ -36,9 +36,7 @@ export class SyncTransactionsQueue {
       const txCount = await fetchJson(
         `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
       );
-      if (txCount !== token.last_sync_tx_count) {
-        await this.pullTokenHistoryData(token);
-      }
+      await this.pullTokenHistoryData(token);
       const localTxCount =
         await this.transactionService.getTokenTransactionsCount(token);
       await this.tokenService.update(token, {

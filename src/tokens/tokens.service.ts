@@ -106,13 +106,16 @@ export class TokensService {
               `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}`,
             ),
           ]);
-        if (txCount !== token.last_sync_tx_count) {
+        if (txCount !== token.last_sync_tx_count || tokenHoldersCount < 1) {
           void this.syncTransactionsQueue.add({
             saleAddress: token.sale_address,
           });
         }
 
-        if (tokenHoldersCount !== tokenDataResponse?.holders) {
+        if (
+          tokenHoldersCount !== tokenDataResponse?.holders ||
+          tokenHoldersCount < 1
+        ) {
           this.logger.log(
             `tokenHoldersCount: ${tokenHoldersCount} tokenDataResponse?.holders: ${tokenDataResponse?.holders}`,
           );
