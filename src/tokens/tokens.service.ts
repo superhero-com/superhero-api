@@ -90,46 +90,18 @@ export class TokensService {
       await this.tokensRepository.update(token.id, liveTokenData);
       this.contracts[token.sale_address].token = token;
       try {
-        const [txCount, tokenHoldersCount, tokenDataResponse] =
-          await Promise.all([
-            fetchJson(
-              `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/count?id=${token.sale_address}`,
-            ),
-            this.tokenHoldersRepository.count({
-              where: {
-                token: {
-                  sale_address: token.sale_address,
-                },
-              },
-            }),
-            fetchJson(
-              `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}`,
-            ),
-          ]);
-        if (txCount !== token.last_sync_tx_count || tokenHoldersCount < 1) {
-          void this.syncTransactionsQueue.add({
+        void this.syncTokenHoldersQueue.add(
+          {
             saleAddress: token.sale_address,
-          });
-        }
-
-        if (
-          tokenHoldersCount !== tokenDataResponse?.holders ||
-          tokenHoldersCount < 1
-        ) {
-          this.logger.log(
-            `tokenHoldersCount: ${tokenHoldersCount} tokenDataResponse?.holders: ${tokenDataResponse?.holders}`,
-          );
-          // if (tokenHoldersCount !== token.holders_count) {
-          void this.syncTokenHoldersQueue.add(
-            {
-              saleAddress: token.sale_address,
-            },
-            {
-              jobId: `syncTokenHolders-${token.sale_address}`,
-              removeOnComplete: true,
-            },
-          );
-        }
+          },
+          {
+            jobId: `syncTokenHolders-${token.sale_address}`,
+            removeOnComplete: true,
+          },
+        );
+        void this.syncTransactionsQueue.add({
+          saleAddress: token.sale_address,
+        });
       } catch (error) {
         //
       }
