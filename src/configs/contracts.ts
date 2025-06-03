@@ -41,11 +41,28 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
         allowed_name_length: '20',
         allowed_name_chars: [
           {
-            CharRangeFromTo: [19968, 40959],
+            SingleChar: [45],
+          },
+          {
+            CharRangeFromTo: [48, 57],
+          },
+          {
+            CharRangeFromTo: [65, 90],
           },
         ],
         description: 'Tokenize a unique name with up to 20.',
       },
+      // 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
+      //   id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
+      //   name: 'WORDS',
+      //   allowed_name_length: '20',
+      //   allowed_name_chars: [
+      //     {
+      //       CharRangeFromTo: [19968, 40959],
+      //     },
+      //   ],
+      //   description: 'Tokenize a unique name with up to 20.',
+      // },
     },
   },
 };
