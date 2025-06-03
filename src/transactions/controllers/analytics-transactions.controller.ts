@@ -51,39 +51,6 @@ export class AnalyticsTransactionsController {
       : defaultStartDate;
     const endDate = query.end_date ? moment(query.end_date) : defaultEndDate;
 
-    console.log('Query parameters:', {
-      start_date: startDate.format('YYYY-MM-DD'),
-      end_date: endDate.format('YYYY-MM-DD'),
-      token_address: query.token_address,
-      account_address: query.account_address,
-    });
-
-    // First, let's check if we have any transactions in the date range
-    const countQuery = this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('transactions.created_at >= :start_date', {
-        start_date: startDate.toDate(),
-      })
-      .andWhere('transactions.created_at <= :end_date', {
-        end_date: endDate.toDate(),
-      });
-
-    const totalCount = await countQuery.getCount();
-    console.log('Total transactions in date range:', totalCount);
-
-    // Let's check the actual data structure
-    const sampleTransactions = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .select([
-        'transactions.amount',
-        'transactions.created_at',
-        'transactions.volume',
-      ])
-      .limit(5)
-      .getRawMany();
-
-    console.log('Sample transactions:', sampleTransactions);
-
     // Build the main query
     const queryBuilder = this.transactionsRepository
       .createQueryBuilder('transactions')
@@ -104,7 +71,6 @@ export class AnalyticsTransactionsController {
     // Add token filter if provided
     if (query.token_address) {
       const token = await this.tokenService.getToken(query.token_address);
-      console.log('Token filter:', token);
       if (token) {
         queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
           tokenId: token.id,
@@ -114,7 +80,6 @@ export class AnalyticsTransactionsController {
 
     // Add account filter if provided
     if (query.account_address) {
-      console.log('Account filter:', query.account_address);
       queryBuilder.andWhere('transactions.address = :account_address', {
         account_address: query.account_address,
       });
@@ -145,12 +110,6 @@ export class AnalyticsTransactionsController {
       : defaultStartDate;
     const endDate = query.end_date ? moment(query.end_date) : defaultEndDate;
 
-    console.log('Query parameters:', {
-      start_date: startDate.format('YYYY-MM-DD'),
-      end_date: endDate.format('YYYY-MM-DD'),
-      token_address: query.token_address,
-    });
-
     // Build the query to count unique users per day
     const queryBuilder = this.transactionsRepository
       .createQueryBuilder('transactions')
@@ -169,9 +128,7 @@ export class AnalyticsTransactionsController {
 
     // Add token filter if provided
     if (query.token_address) {
-      console.log('Token filter:', query.token_address);
       const token = await this.tokenService.getToken(query.token_address);
-      console.log('Token filter:', token);
       if (token) {
         queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
           tokenId: token.id,

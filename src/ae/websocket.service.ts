@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import {
   ACTIVE_NETWORK,
@@ -27,6 +27,7 @@ type PingI = {
 
 @Injectable()
 export class WebSocketService {
+  private readonly logger = new Logger(WebSocketService.name);
   wsClient: WebSocket;
   subscribersQueue: IMiddlewareWebSocketSubscriptionMessage[] = [];
   isWsConnected = false;
@@ -65,7 +66,6 @@ export class WebSocketService {
         this.wsClient.send(JSON.stringify(message));
       });
     } catch (error) {
-      console.log(error);
       setTimeout(() => {
         this.handleWebsocketOpen();
       }, WEB_SOCKET_RECONNECT_TIMEOUT);
@@ -121,7 +121,7 @@ export class WebSocketService {
           }),
         );
       } catch (error) {
-        console.log('ERROR subscribeForChannel:', error);
+        this.logger.error('subscribeForChannel->error::', error);
       }
     }
 
@@ -198,8 +198,7 @@ export class WebSocketService {
         this.subscribers[data.subscription as WebSocketChannelName],
       ).forEach((subscriberCb) => subscriberCb(data.payload));
     } catch (error) {
-      console.log('=======::', message);
-      console.log(error);
+      this.logger.error('handleWebsocketMessage->error::', error);
     }
   }
 
@@ -239,7 +238,6 @@ export class WebSocketService {
     this.wsClient.on('pong', (data: any) => {
       const parsedData = JSON.parse(data.toString());
       const pingData = parsedData.payload;
-      console.log('PONG::', pingData?.id);
       this.pings = this.pings.filter((ping) => ping.id !== pingData.id);
     });
     this.pings = [];
@@ -255,7 +253,7 @@ export class WebSocketService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async forceReconnect() {
-    console.log('WEBSOCKET:: forceReconnect');
+    this.logger.log('forceReconnect');
     if (this.isWsConnected) {
       this.disconnect();
       // Wait for 1 second to ensure complete disconnection

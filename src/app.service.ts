@@ -47,7 +47,6 @@ export class AppService {
           transaction.tx.contractId &&
           Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)
         ) {
-          console.log('got next transaction', transaction);
           if (!syncedTransactions.includes(transaction.hash)) {
             syncedTransactions.push(transaction.hash);
             void this.saveTransactionQueue.add(

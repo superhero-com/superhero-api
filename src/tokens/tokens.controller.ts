@@ -328,7 +328,6 @@ export class TokensController {
             high = x; // If sign changes, move the high bound
             x = (low + high) / 2; // New midpoint
           } else {
-            console.log('low', low, low + high / 2);
             low = x; // If no sign change, move the low bound
             x = low + high / 4; // New midpoint
           }
@@ -350,7 +349,6 @@ export class TokensController {
     let findXForTarget = calculators.default;
 
     if (Object.keys(calculators).includes(factoryAddress)) {
-      console.log('Using custom calculator for token', factoryAddress);
       findXForTarget = calculators[factoryAddress];
     }
 

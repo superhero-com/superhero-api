@@ -141,7 +141,7 @@ export class TokensService {
     try {
       result = await fetchJson(url);
     } catch (error) {
-      console.log('error::', error);
+      this.logger.error('loadCreatedCommunityFromMdw->error::', error);
       return tokens;
     }
 

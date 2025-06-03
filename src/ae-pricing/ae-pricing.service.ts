@@ -26,7 +26,6 @@ export class AePricingService {
     this.latestRates = await this.coinPriceRepository.save({
       rates,
     });
-    console.log('latestRates::', this.latestRates);
     return this.latestRates;
   }
 
