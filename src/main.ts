@@ -1,9 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { DEBUG_ENABLED } from './configs';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: DEBUG_ENABLED
+      ? ['error', 'warn', 'log', 'debug', 'verbose']
+      : ['error'],
+  });
 
   const config = new DocumentBuilder()
     .setTitle('WORD CRAFT Scan')

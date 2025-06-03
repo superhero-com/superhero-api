@@ -50,13 +50,15 @@ export class SyncTokenHoldersQueue {
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
     const token = await this.tokenService.getToken(saleAddress, true);
-    await this.tokenHoldersRepository.delete({
-      token: token,
-    });
     const totalHolders = await this.loadData(
       token,
       `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances?by=amount&limit=100`,
     );
+    if (totalHolders > 0) {
+      await this.tokenHoldersRepository.delete({
+        token: token,
+      });
+    }
     await this.tokensRepository.update(token.id, {
       holders_count: totalHolders,
     });
