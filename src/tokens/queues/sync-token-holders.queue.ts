@@ -99,15 +99,20 @@ export class SyncTokenHoldersQueue {
 
     for (const holder of holders) {
       try {
-        const holderData = await fetchJson(
-          `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`,
-        );
+        const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`;
+        const holderData = await fetchJson(holderUrl);
+        if (!holderData?.amount) {
+          this.logger.error(
+            `SyncTokenHoldersQueue->holderData:${holderUrl}`,
+            holderData,
+          );
+        }
         await this.tokenHoldersRepository.save({
           token: {
             id: token.id,
           },
-          address: holderData.account,
-          balance: new BigNumber(holderData.amount),
+          address: holderData?.account || holder.account_id,
+          balance: new BigNumber(holderData?.amount || 0),
         });
       } catch (error: any) {
         this.logger.error(
