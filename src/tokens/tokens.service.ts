@@ -578,6 +578,7 @@ export class TokensService {
               created_at ASC
           ) AS INTEGER) as rank
         FROM token
+        WHERE unlisted = false
       ),
       filtered_tokens AS (
         ${finalSubQuery}
@@ -621,6 +622,7 @@ export class TokensService {
           ) AS INTEGER) as rank
         FROM token t
         WHERE t.factory_address = '${factory.address}'
+        AND t.unlisted = false
       )
       SELECT * FROM ranked_tokens WHERE id IN (${tokenIds.join(',')})
     `;
