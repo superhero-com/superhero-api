@@ -3,7 +3,6 @@ import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
-import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';

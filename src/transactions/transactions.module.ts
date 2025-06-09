@@ -55,7 +55,7 @@ import { AnalyticsTransactionsController } from './controllers/analytics-transac
     ValidateTransactionsQueue,
     ValidateTokenTransactionsQueue,
   ],
-  exports: [TypeOrmModule],
+  exports: [TypeOrmModule, TransactionService],
   controllers: [
     TransactionsController,
     HistoricalController,

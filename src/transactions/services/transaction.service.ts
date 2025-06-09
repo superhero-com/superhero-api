@@ -377,4 +377,18 @@ export class TransactionService {
       },
     );
   }
+
+  async deleteNonValidTransactionsInBlock(
+    blockNumber: number,
+    hashes: string[],
+  ) {
+    await this.transactionRepository
+      .createQueryBuilder('transactions')
+      .delete()
+      .where('transactions.block_height = :block_height', {
+        block_height: blockNumber,
+      })
+      .andWhere('transactions.tx_hash NOT IN (:...hashes)', { hashes })
+      .execute();
+  }
 }

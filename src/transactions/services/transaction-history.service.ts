@@ -47,7 +47,7 @@ export class TransactionHistoryService {
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
@@ -68,8 +68,8 @@ export class TransactionHistoryService {
 
     const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-    const rawResults = await queryRunner
-      .query(`
+    const rawResults = await queryRunner.query(
+      `
         WITH transactions_in_intervals AS (
           SELECT 
             t.created_at,
@@ -133,7 +133,9 @@ export class TransactionHistoryService {
         FROM interval_stats
         GROUP BY interval_start
         ORDER BY interval_start ASC
-      `, [token.id, interval]);
+      `,
+      [token.id, interval],
+    );
 
     await queryRunner.release();
 
@@ -185,16 +187,16 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.transactionsRepository
-          .createQueryBuilder('transactions')
-          .where('transactions."tokenId" = :tokenId', {
-            tokenId: props.token.id,
-          })
-          .andWhere('transactions.created_at < :start', {
-            start: startDate.toDate(),
-          })
-          .orderBy('transactions.created_at', 'DESC')
-          .limit(1)
-          .getOne()
+            .createQueryBuilder('transactions')
+            .where('transactions."tokenId" = :tokenId', {
+              tokenId: props.token.id,
+            })
+            .andWhere('transactions.created_at < :start', {
+              start: startDate.toDate(),
+            })
+            .orderBy('transactions.created_at', 'DESC')
+            .limit(1)
+            .getOne()
         : undefined;
 
     return this.processAggregatedHistoricalData(

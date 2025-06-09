@@ -1,5 +1,14 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { BadRequestException, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Query, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  DefaultValuePipe,
+  Get,
+  Param,
+  ParseIntPipe,
+  Query,
+  UseInterceptors,
+} from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { TokensService } from '@/tokens/tokens.service';
@@ -68,7 +77,6 @@ export class HistoricalController {
       mode,
     });
   }
-
 
   @ApiOperation({ operationId: 'getPaginatedHistory' })
   @ApiQuery({

@@ -34,7 +34,7 @@ export class TransactionsController {
     private tokenService: TokensService,
 
     private transactionService: TransactionService,
-  ) { }
+  ) {}
 
   @ApiQuery({
     name: 'token_address',

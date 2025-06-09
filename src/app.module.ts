@@ -22,6 +22,7 @@ import {
 import { TransactionsModule } from './transactions/transactions.module';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { CacheModule } from '@nestjs/cache-manager';
+import { BclModule } from './bcl/bcl.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { CacheModule } from '@nestjs/cache-manager';
     TokensModule,
     TransactionsModule,
     AePricingModule,
+    BclModule,
   ],
   controllers: [AppController],
   providers: [AppService],

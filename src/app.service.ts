@@ -11,6 +11,7 @@ import {
   VALIDATE_TRANSACTIONS_QUEUE,
 } from './transactions/queues/constants';
 import { ITransaction } from './utils/types';
+import { Cron, CronExpression } from '@nestjs/schedule';
 @Injectable()
 export class AppService {
   constructor(
@@ -66,16 +67,21 @@ export class AppService {
       },
     );
 
-    this.websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
-      const desiredBlockHeight = keyBlock.height - 5;
-      void this.validateTransactionsQueue.add({
-        from: desiredBlockHeight - 50,
-        to: desiredBlockHeight,
-      });
+    // this.websocketService.subscribeForKeyBlocksUpdates((keyBlock) => {
+    //   const desiredBlockHeight = keyBlock.height - 5;
+    //   void this.validateTransactionsQueue.add({
+    //     from: desiredBlockHeight - 50,
+    //     to: desiredBlockHeight,
+    //   });
 
-      this.aePricingService.pullAndSaveCoinCurrencyRates();
-      syncedTransactions = [];
-    });
+    //   this.aePricingService.pullAndSaveCoinCurrencyRates();
+    //   syncedTransactions = [];
+    // });
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  syncAeCoinPricing() {
+    this.aePricingService.pullAndSaveCoinCurrencyRates();
   }
 
   /**
