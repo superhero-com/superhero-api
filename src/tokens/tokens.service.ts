@@ -418,8 +418,17 @@ export class TokensService {
     );
 
     const response = await fetchJson(
-      `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${contractInfo.source_tx_hash}`,
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
     );
+
+    if (!response?.tx?.contract_id) {
+      this.logger.error(
+        'updateTokenFactoryAddress->error::',
+        response,
+        contractInfo,
+      );
+      return null;
+    }
 
     const factory_address = response?.tx?.contract_id;
     await this.updateTokenMetaDataFromCreateTx(
@@ -519,7 +528,7 @@ export class TokensService {
     transaction: ITransaction,
   ): Promise<Encoded.ContractAddress> {
     const tokenData = {
-      factory_address: transaction.tx.contractId,
+      factory_address: transaction.tx?.contractId,
       creator_address: transaction?.tx?.callerId,
       created_at: moment(transaction?.microTime).toDate(),
     };

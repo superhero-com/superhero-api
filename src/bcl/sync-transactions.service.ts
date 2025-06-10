@@ -1,4 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { WebSocketService } from '@/ae/websocket.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
@@ -12,9 +13,32 @@ export class SyncTransactionsService {
   private readonly logger = new Logger(SyncTransactionsService.name);
 
   constructor(
+    private websocketService: WebSocketService,
     private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
-  ) {}
+  ) {
+    this.setupLiveSync();
+  }
+
+  setupLiveSync() {
+    let syncedTransactions = [];
+
+    this.websocketService.subscribeForTransactionsUpdates(
+      (transaction: ITransaction) => {
+        if (Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)) {
+          // Prevent duplicate transactions
+          if (!syncedTransactions.includes(transaction.hash)) {
+            syncedTransactions.push(transaction.hash);
+            this.transactionService.saveTransaction(transaction, null, true);
+          }
+        }
+        // Reset synced transactions after 100 transactions
+        if (syncedTransactions.length > 100) {
+          syncedTransactions = [];
+        }
+      },
+    );
+  }
 
   latestBlockNumber;
   totalTicks = 0;

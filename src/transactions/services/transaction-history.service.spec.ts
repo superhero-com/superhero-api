@@ -6,21 +6,16 @@ import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 
 import { TokensService } from '@/tokens/tokens.service';
-import {
-  SAVE_TRANSACTION_QUEUE,
-  SYNC_TRANSACTIONS_QUEUE,
-} from '../queues/constants';
-import { SaveTransactionQueue } from '../queues/save-transaction.queue';
+import { SYNC_TRANSACTIONS_QUEUE } from '../queues/constants';
 import { SyncTransactionsQueue } from '../queues/sync-transactions.queue';
 import { TransactionHistoryService } from '../services/transaction-history.service';
 import { TransactionService } from '../services/transaction.service';
 
-describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueue', () => {
+describe('TransactionHistoryService & SyncTransactionsQueue', () => {
   let service: TransactionHistoryService;
   let transactionsRepository: jest.Mocked<Repository<Transaction>>;
   let tokenRepository: jest.Mocked<Repository<Token>>;
   let dataSource: jest.Mocked<DataSource>;
-  let saveTransactionQueue: SaveTransactionQueue;
   let syncTransactionsQueue: SyncTransactionsQueue;
   let transactionService: jest.Mocked<TransactionService>;
   let tokenService: jest.Mocked<TokensService>;
@@ -74,13 +69,9 @@ describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueu
     queueMock = { add: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
-      imports: [
-        BullModule.registerQueue({ name: SAVE_TRANSACTION_QUEUE }),
-        BullModule.registerQueue({ name: SYNC_TRANSACTIONS_QUEUE }),
-      ],
+      imports: [BullModule.registerQueue({ name: SYNC_TRANSACTIONS_QUEUE })],
       providers: [
         TransactionHistoryService,
-        SaveTransactionQueue,
         SyncTransactionsQueue,
         {
           provide: getRepositoryToken(Transaction),
@@ -90,7 +81,6 @@ describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueu
         { provide: DataSource, useValue: dataSource },
         { provide: TransactionService, useValue: transactionService },
         { provide: TokensService, useValue: tokenService },
-        { provide: getQueueToken(SAVE_TRANSACTION_QUEUE), useValue: queueMock },
         {
           provide: getQueueToken(SYNC_TRANSACTIONS_QUEUE),
           useValue: queueMock,
@@ -99,8 +89,6 @@ describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueu
     }).compile();
 
     service = module.get<TransactionHistoryService>(TransactionHistoryService);
-    saveTransactionQueue =
-      module.get<SaveTransactionQueue>(SaveTransactionQueue);
     syncTransactionsQueue = module.get<SyncTransactionsQueue>(
       SyncTransactionsQueue,
     );
@@ -108,7 +96,6 @@ describe('TransactionHistoryService, SaveTransactionQueue & SyncTransactionsQueu
 
   it('should be defined', () => {
     expect(service).toBeDefined();
-    expect(saveTransactionQueue).toBeDefined();
     expect(syncTransactionsQueue).toBeDefined();
   });
 
