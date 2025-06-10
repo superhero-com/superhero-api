@@ -62,7 +62,7 @@ export class TransactionService {
      * this will cause create community transaction to be saved twice.
      */
     if (!token) {
-      token = await this.tokenService.getToken(saleAddress, !shouldBroadcast);
+      token = await this.tokenService.getToken(saleAddress);
     }
 
     const exists = await this.transactionRepository

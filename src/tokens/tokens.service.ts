@@ -57,12 +57,13 @@ export class TokensService {
   factoryContract: CommunityFactory;
   async init() {
     await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
-    return;
-    // TODO: remove this, as it will be replaced by sync blocks service
     await Promise.all([
       this.syncTransactionsQueue.empty(),
       this.syncTokenHoldersQueue.empty(),
     ]);
+    return;
+    // TODO: remove this, as it will be replaced by sync blocks service
+
     console.log('--------------------------------');
     console.log('init tokens service');
     console.log('--------------------------------');
@@ -326,28 +327,24 @@ export class TokensService {
     }
   }
 
-  async getToken(
-    address: string,
-    shouldSyncTransactions = true,
-  ): Promise<Token> {
+  async getToken(address: string): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
     if (existingToken) {
       return existingToken;
     }
 
-    return this.createToken(
-      address as Encoded.ContractAddress,
-      shouldSyncTransactions,
-    );
+    return this.createToken(address as Encoded.ContractAddress);
   }
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
-    shouldSyncTransactions = true,
   ): Promise<Token | null> {
     if (!saleAddress?.startsWith('ct_')) {
-      this.logger.error('saleAddress is not a valid token address', saleAddress);
+      this.logger.error(
+        'saleAddress is not a valid token address',
+        saleAddress,
+      );
       return null;
     }
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
@@ -382,27 +379,7 @@ export class TokensService {
       );
     }
     await this.syncTokenPrice(newToken);
-    // refresh token token info
-    // TODO: should refresh token info
-    void this.syncTokenHoldersQueue.add(
-      {
-        saleAddress,
-      },
-      {
-        jobId: `syncTokenHolders-${saleAddress}`,
-        removeOnComplete: true,
-      },
-    );
-    if (shouldSyncTransactions) {
-      void this.syncTransactionsQueue.add(
-        {
-          saleAddress,
-        },
-        {
-          jobId: `syncTokenTransactions-${saleAddress}`,
-        },
-      );
-    }
+
     return this.findByAddress(newToken.sale_address);
   }
 

@@ -49,7 +49,7 @@ export class SyncTokenHoldersQueue {
   }
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
-    const token = await this.tokenService.getToken(saleAddress, true);
+    const token = await this.tokenService.getToken(saleAddress);
     await this.tokenHoldersRepository.delete({
       token: token,
     });

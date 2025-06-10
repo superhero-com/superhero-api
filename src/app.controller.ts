@@ -4,6 +4,7 @@ import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
 import { ApiOperation } from '@nestjs/swagger';
 import { SyncBlocksService } from './bcl/sync-blocks.service';
+import moment from 'moment';
 
 @Controller()
 export class AppController {
@@ -26,6 +27,7 @@ export class AppController {
       apiVersion: this.appService.getApiVersion(),
 
       mdwConnected: this.websocketService.isConnected(),
+      uptime: moment(this.appService.startedAt).fromNow(),
     };
   }
 

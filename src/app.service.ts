@@ -5,8 +5,10 @@ import { Queue } from 'bull';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
+import moment, { Moment } from 'moment';
 @Injectable()
 export class AppService {
+  startedAt: Moment;
   constructor(
     private communityFactoryService: CommunityFactoryService,
     private aePricingService: AePricingService,
@@ -15,6 +17,7 @@ export class AppService {
     private readonly deleteOldTokensQueue: Queue,
   ) {
     this.init();
+    this.startedAt = moment();
   }
 
   async init() {
