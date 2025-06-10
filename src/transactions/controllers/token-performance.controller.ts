@@ -36,6 +36,16 @@ export class TokenPerformanceController {
   async performance(@Param('address') address: string) {
     const token = await this.tokensService.getToken(address);
 
+    if (!token) {
+      return {
+        message: 'Token not found',
+        past_24h: null,
+        past_7d: null,
+        past_30d: null,
+        all_time: null,
+      };
+    }
+
     const past_24h = await this.getTokenPriceMovement(
       token,
       moment().subtract(24, 'hours'),
