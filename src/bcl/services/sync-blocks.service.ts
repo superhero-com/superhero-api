@@ -5,7 +5,7 @@ import { TransactionService } from '@/transactions/services/transaction.service'
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SyncedBlock } from './entities/synced-block.entity';
+import { SyncedBlock } from '../entities/synced-block.entity';
 import { SyncTransactionsService } from './sync-transactions.service';
 
 @Injectable()

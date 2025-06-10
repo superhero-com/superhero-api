@@ -8,6 +8,11 @@ export class FailedTransaction {
   hash: string; // transaction hash
 
   @Column({
+    default: 0,
+  })
+  public retries: number;
+
+  @Column({
     default: '',
   })
   error: string;

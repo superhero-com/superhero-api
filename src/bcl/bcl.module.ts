@@ -5,8 +5,9 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FailedTransaction } from './entities/failed-transaction.entity';
 import { SyncedBlock } from './entities/synced-block.entity';
-import { SyncBlocksService } from './sync-blocks.service';
-import { SyncTransactionsService } from './sync-transactions.service';
+import { FixFailedTransactionsService } from './services/fix-failed-transactions.service';
+import { SyncBlocksService } from './services/sync-blocks.service';
+import { SyncTransactionsService } from './services/sync-transactions.service';
 
 @Module({
   imports: [
@@ -15,7 +16,11 @@ import { SyncTransactionsService } from './sync-transactions.service';
     TransactionsModule,
     TypeOrmModule.forFeature([SyncedBlock, FailedTransaction]),
   ],
-  providers: [SyncTransactionsService, SyncBlocksService],
+  providers: [
+    SyncTransactionsService,
+    SyncBlocksService,
+    FixFailedTransactionsService,
+  ],
   exports: [SyncBlocksService],
 })
 export class BclModule {

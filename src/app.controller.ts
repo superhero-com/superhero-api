@@ -3,7 +3,7 @@ import { CommunityFactoryService } from './ae/community-factory.service';
 import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
 import { ApiOperation } from '@nestjs/swagger';
-import { SyncBlocksService } from './bcl/sync-blocks.service';
+import { SyncBlocksService } from './bcl/services/sync-blocks.service';
 import moment from 'moment';
 
 @Controller()

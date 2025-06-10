@@ -6,10 +6,10 @@ import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
-import { FailedTransaction } from './entities/failed-transaction.entity';
-import { InjectRepository } from '@nestjs/typeorm';
+import { FailedTransaction } from '../entities/failed-transaction.entity';
 
 @Injectable()
 export class SyncTransactionsService {
