@@ -189,7 +189,7 @@ export class TransactionService {
     let total_supply = new BigNumber(0);
     let protocol_reward = new BigNumber(0);
 
-    if (decodedData.length) {
+    if (decodedData?.length) {
       try {
         if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
           const mints = decodedData.filter((data) => data.name === 'Mint');

@@ -102,7 +102,7 @@ export class SyncTokenHoldersQueue {
         const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`;
         const holderData = await fetchJson(holderUrl);
         if (!holderData?.amount) {
-          this.logger.error(
+          this.logger.log(
             `SyncTokenHoldersQueue->holderData:${holderUrl}`,
             holderData,
           );
