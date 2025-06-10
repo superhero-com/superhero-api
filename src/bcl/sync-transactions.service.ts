@@ -7,6 +7,9 @@ import { ITransaction } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
+import { Repository } from 'typeorm';
+import { FailedTransaction } from './entities/failed-transaction.entity';
+import { InjectRepository } from '@nestjs/typeorm';
 
 @Injectable()
 export class SyncTransactionsService {
@@ -16,6 +19,9 @@ export class SyncTransactionsService {
     private websocketService: WebSocketService,
     private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
+
+    @InjectRepository(FailedTransaction)
+    private failedTransactionsRepository: Repository<FailedTransaction>,
   ) {
     this.setupLiveSync();
   }
@@ -65,12 +71,17 @@ export class SyncTransactionsService {
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
       const fromBlockNumber = this.latestBlockNumber - 5;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
-        this.syncBlockTransactions(i);
+        await this.syncBlockTransactions(i);
       }
-    } catch (error) {}
+    } catch (error: any) {
+      this.logger.error(
+        `SyncTransactionsService->Failed to sync transactions`,
+        error.stack,
+      );
+    }
   }
 
-  async syncBlockTransactions(blockNumber: number) {
+  async syncBlockTransactions(blockNumber: number): Promise<string[]> {
     this.logger.log('syncBlockTransactions', blockNumber);
     const query: Record<string, string | number> = {
       direction: 'forward',
@@ -93,6 +104,7 @@ export class SyncTransactionsService {
         transactionsHashes,
       );
     }
+    return transactionsHashes;
   }
 
   async fetchAndSyncTransactions(url: string, validated_hashes = []) {
@@ -101,19 +113,38 @@ export class SyncTransactionsService {
     );
     const response = await fetchJson(url);
 
-    await Promise.all(
-      response.data
-        ?.filter(
-          (item: ITransaction) =>
-            !validated_hashes.includes(item.hash) &&
-            Object.values(TX_FUNCTIONS).includes(item.tx.function),
-        )
-        .map((item: ITransaction) => camelcaseKeysDeep(item))
-        .map((item: ITransaction) => {
-          validated_hashes.push(item.hash);
-          return this.transactionService.saveTransaction(item);
-        }),
-    );
+    const transactions = response.data
+      ?.filter(
+        (item: ITransaction) =>
+          !validated_hashes.includes(item.hash) &&
+          Object.values(TX_FUNCTIONS).includes(item.tx.function),
+      )
+      .map((item: ITransaction) => camelcaseKeysDeep(item));
+
+    try {
+      for (const transaction of transactions) {
+        validated_hashes.push(transaction.hash);
+        try {
+          await this.transactionService.saveTransaction(transaction);
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to save transaction ${transaction.hash}`,
+            error.stack,
+          );
+          await this.failedTransactionsRepository.save({
+            hash: transaction.hash,
+            error: error.message,
+            error_trace: error.stack,
+          });
+        }
+      }
+    } catch (error: any) {
+      this.logger.debug('transactions', transactions);
+      this.logger.error(
+        `Failed to fetch and sync transactions ${url}`,
+        error.stack,
+      );
+    }
 
     if (response.next) {
       return this.fetchAndSyncTransactions(

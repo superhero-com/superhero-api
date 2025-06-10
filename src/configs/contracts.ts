@@ -12,6 +12,7 @@ import {
 export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
     address: 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
+    block_number: 1089546,
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
@@ -34,6 +35,7 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   },
   [NETWORK_ID_TESTNET]: {
     address: 'ct_vLKrYRCthfViqUuWFKGYgz7kxhvrsdAoKhZPXqzxcaEFRkZy1',
+    block_number: 1097291,
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',

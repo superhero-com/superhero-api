@@ -3,6 +3,7 @@ import { CommunityFactoryService } from './ae/community-factory.service';
 import { WebSocketService } from './ae/websocket.service';
 import { AppService } from './app.service';
 import { ApiOperation } from '@nestjs/swagger';
+import { SyncBlocksService } from './bcl/sync-blocks.service';
 
 @Controller()
 export class AppController {
@@ -10,6 +11,7 @@ export class AppController {
     private readonly appService: AppService,
     private communityFactoryService: CommunityFactoryService,
     private websocketService: WebSocketService,
+    private syncBlocksService: SyncBlocksService,
   ) {
     //
   }
@@ -18,6 +20,9 @@ export class AppController {
   @Get('/api/stats')
   getApiStats() {
     return {
+      syncing: this.syncBlocksService.syncing,
+      lastSyncedBlockNumber: this.syncBlocksService.lastSyncedBlockNumber,
+      remainingBlocksToSync: this.syncBlocksService.remainingBlocksToSync,
       apiVersion: this.appService.getApiVersion(),
 
       mdwConnected: this.websocketService.isConnected(),

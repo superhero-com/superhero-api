@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { IsNull, Not, Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -19,7 +19,6 @@ import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
-import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
@@ -38,9 +37,6 @@ export class TokensService {
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
-
-    @InjectRepository(TokenHolder)
-    private tokenHoldersRepository: Repository<TokenHolder>,
 
     private aeSdkService: AeSdkService,
 
@@ -61,6 +57,8 @@ export class TokensService {
   factoryContract: CommunityFactory;
   async init() {
     await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
+    return;
+    // TODO: remove this, as it will be replaced by sync blocks service
     await Promise.all([
       this.syncTransactionsQueue.empty(),
       this.syncTokenHoldersQueue.empty(),
@@ -379,7 +377,9 @@ export class TokensService {
 
     if (!factoryAddress) {
       await this.tokensRepository.delete(newToken.id);
-      return null;
+      throw new Error(
+        `for sale address:${saleAddress}, failed to update factory address`,
+      );
     }
     await this.syncTokenPrice(newToken);
     // refresh token token info
@@ -451,24 +451,19 @@ export class TokensService {
     if (this.contracts[saleAddress] && this.contracts[saleAddress].instance) {
       return this.contracts[saleAddress];
     }
+    const { instance } = await initTokenSale(
+      this.aeSdkService.sdk,
+      saleAddress,
+    );
+    const tokenContractInstance = await instance?.tokenContractInstance();
 
-    try {
-      const { instance } = await initTokenSale(
-        this.aeSdkService.sdk,
-        saleAddress,
-      );
-      const tokenContractInstance = await instance?.tokenContractInstance();
+    this.contracts[saleAddress] = {
+      ...(this.contracts[saleAddress] || {}),
+      instance,
+      tokenContractInstance,
+    };
 
-      this.contracts[saleAddress] = {
-        ...(this.contracts[saleAddress] || {}),
-        instance,
-        tokenContractInstance,
-      };
-
-      return this.contracts[saleAddress];
-    } catch (error) {
-      return undefined;
-    }
+    return this.contracts[saleAddress];
   }
 
   private async getTokeLivePrice(token: Token) {

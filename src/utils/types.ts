@@ -198,6 +198,7 @@ export interface IMiddlewareWebSocketSubscriptionMessage {
 
 export type ICommunityFactorySchema = {
   address: Encoded.ContractAddress;
+  block_number: number;
   collections: {
     [key: `${string}-${Encoded.AccountAddress}`]: {
       id: `${string}-${Encoded.AccountAddress}`;
