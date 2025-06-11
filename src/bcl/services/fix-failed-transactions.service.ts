@@ -21,12 +21,10 @@ export class FixFailedTransactionsService {
     this.fixFailedTransactions();
   }
 
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Cron(CronExpression.EVERY_30_MINUTES)
   async fixFailedTransactions() {
     const failedTransactions = await this.failedTransactionsRepository.find({
-      where: {
-        retries: LessThan(10),
-      },
+      where: {},
     });
     for (const failedTransaction of failedTransactions) {
       await this.fixFailedTransaction(failedTransaction);
