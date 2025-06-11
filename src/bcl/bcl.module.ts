@@ -8,6 +8,7 @@ import { SyncedBlock } from './entities/synced-block.entity';
 import { FixFailedTransactionsService } from './services/fix-failed-transactions.service';
 import { SyncBlocksService } from './services/sync-blocks.service';
 import { SyncTransactionsService } from './services/sync-transactions.service';
+import { DebugFailedTransactionsController } from './controllers/debug-failed-transactions.controller';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SyncTransactionsService } from './services/sync-transactions.service';
     FixFailedTransactionsService,
   ],
   exports: [SyncBlocksService],
+  controllers: [DebugFailedTransactionsController],
 })
 export class BclModule {
   //
