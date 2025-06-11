@@ -40,6 +40,11 @@ export class FixFailedTransactionsService {
       const transaction = await fetchJson(url).then((res) =>
         camelcaseKeysDeep(res),
       );
+      // TODO: enable this
+      // if (transaction?.tx?.returnType === 'revert') {
+      //   await this.failedTransactionsRepository.delete(failedTransaction.hash);
+      //   return;
+      // }
       await this.transactionService.saveTransaction(transaction);
       await this.failedTransactionsRepository.delete(failedTransaction.hash);
       this.logger.log(`FixFailedTransactionsService: ${hash} - success`);

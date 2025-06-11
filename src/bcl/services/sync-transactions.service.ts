@@ -79,9 +79,10 @@ export class SyncTransactionsService {
 
     const transactions = response.data
       ?.filter(
-        (item: ITransaction) =>
+        (item) =>
           !validated_hashes.includes(item.hash) &&
-          Object.values(TX_FUNCTIONS).includes(item.tx.function),
+          Object.values(TX_FUNCTIONS).includes(item.tx.function) &&
+          item?.tx?.return_type !== 'revert',
       )
       .map((item: ITransaction) => camelcaseKeysDeep(item));
 
