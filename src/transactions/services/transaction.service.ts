@@ -46,7 +46,7 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
     shouldValidate?: boolean,
-  ): Promise<Transaction> {
+  ): Promise<Transaction | undefined> {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
     }
@@ -84,15 +84,6 @@ export class TransactionService {
       total_supply,
       protocol_reward,
     } = await this.parseTransactionData(rawTransaction);
-
-    // if volume is 0 & tx type is not create_community ignore it
-    if (
-      (volume.isZero() &&
-        rawTransaction.tx.function !== TX_FUNCTIONS.create_community) ||
-      rawTransaction.tx.returnType === 'revert'
-    ) {
-      return;
-    }
 
     if (
       rawTransaction.tx.function == TX_FUNCTIONS.create_community &&

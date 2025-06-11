@@ -88,9 +88,12 @@ export class SyncTransactionsService {
 
     try {
       for (const transaction of transactions) {
-        validated_hashes.push(transaction.hash);
         try {
-          await this.transactionService.saveTransaction(transaction);
+          const result =
+            await this.transactionService.saveTransaction(transaction);
+          if (result?.id) {
+            validated_hashes.push(transaction.hash);
+          }
         } catch (error: any) {
           this.logger.error(
             `Failed to save transaction ${transaction.hash}`,
