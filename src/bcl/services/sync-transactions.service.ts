@@ -5,7 +5,6 @@ import { TransactionService } from '@/transactions/services/transaction.service'
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
@@ -44,41 +43,6 @@ export class SyncTransactionsService {
         }
       },
     );
-  }
-
-  latestBlockNumber;
-  totalTicks = 0;
-  @Cron(CronExpression.EVERY_30_SECONDS)
-  async syncTransactions() {
-    this.logger.log(`syncTransactions::: ${this.latestBlockNumber}`);
-
-    try {
-      const currentGeneration = (
-        await this.aeSdkService.sdk.getCurrentGeneration()
-      ).keyBlock.height;
-
-      this.logger.log('currentGeneration', currentGeneration);
-      if (currentGeneration <= this.latestBlockNumber) {
-        this.totalTicks++;
-        if (this.totalTicks > 3) {
-          this.syncTransactions();
-          this.totalTicks = 0;
-        }
-        this.logger.log('latestBlockNumber is not updated');
-        return;
-      }
-      this.latestBlockNumber = currentGeneration;
-      this.logger.log('latestBlockNumber', this.latestBlockNumber);
-      const fromBlockNumber = this.latestBlockNumber - 5;
-      for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
-        await this.syncBlockTransactions(i);
-      }
-    } catch (error: any) {
-      this.logger.error(
-        `SyncTransactionsService->Failed to sync transactions`,
-        error.stack,
-      );
-    }
   }
 
   async syncBlockTransactions(blockNumber: number): Promise<string[]> {

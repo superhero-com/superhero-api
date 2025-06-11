@@ -20,14 +20,19 @@ export class AppController {
   @ApiOperation({ operationId: 'getApiStats' })
   @Get('/api/stats')
   getApiStats() {
+    const duration = moment.duration(moment().diff(this.appService.startedAt));
     return {
-      syncing: this.syncBlocksService.syncing,
+      fullSyncing: this.syncBlocksService.fullSyncing,
+      currentBlockNumber: this.syncBlocksService.currentBlockNumber,
+      bclBlockNumber: this.syncBlocksService.bclBlockNumber,
+      syncingLatestBlocks: this.syncBlocksService.syncingLatestBlocks,
       lastSyncedBlockNumber: this.syncBlocksService.lastSyncedBlockNumber,
       remainingBlocksToSync: this.syncBlocksService.remainingBlocksToSync,
       apiVersion: this.appService.getApiVersion(),
 
       mdwConnected: this.websocketService.isConnected(),
-      uptime: moment(this.appService.startedAt).fromNow(),
+      uptime: `${duration.days()}d ${duration.hours()}h ${duration.minutes()}m ${duration.seconds()}s`,
+      uptimeDurationSeconds: duration.asSeconds(),
     };
   }
 
