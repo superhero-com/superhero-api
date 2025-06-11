@@ -9,6 +9,7 @@ import { FixFailedTransactionsService } from './services/fix-failed-transactions
 import { SyncBlocksService } from './services/sync-blocks.service';
 import { SyncTransactionsService } from './services/sync-transactions.service';
 import { DebugFailedTransactionsController } from './controllers/debug-failed-transactions.controller';
+import { FixTokensService } from './services/fix-tokens.service';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { DebugFailedTransactionsController } from './controllers/debug-failed-tr
     SyncTransactionsService,
     SyncBlocksService,
     FixFailedTransactionsService,
+    FixTokensService,
   ],
   exports: [SyncBlocksService],
   controllers: [DebugFailedTransactionsController],
