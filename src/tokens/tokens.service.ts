@@ -56,55 +56,7 @@ export class TokensService {
 
   factoryContract: CommunityFactory;
   async init() {
-    await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
-    await Promise.all([
-      this.syncTransactionsQueue.empty(),
-      this.syncTokenHoldersQueue.empty(),
-    ]);
-    return;
-    // TODO: remove this, as it will be replaced by sync blocks service
-
-    console.log('--------------------------------');
-    console.log('init tokens service');
-    console.log('--------------------------------');
-    const factory = await this.communityFactoryService.getCurrentFactory();
-    this.factoryContract = await this.communityFactoryService.loadFactory(
-      factory.address,
-    );
-    void this.loadFactoryTokens(factory);
-  }
-
-  async loadFactoryTokens(factory: ICommunityFactorySchema) {
-    const communities = await this.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`,
-      factory,
-    );
-
-    const tokens = communities.sort((a, b) => {
-      if (!a.total_supply || !b.total_supply) return 0;
-      return b.total_supply.minus(a.total_supply).toNumber();
-    });
-    for (const token of tokens) {
-      const liveTokenData = await this.getTokeLivePrice(token);
-      await this.tokensRepository.update(token.id, liveTokenData);
-      this.contracts[token.sale_address].token = token;
-      try {
-        void this.syncTokenHoldersQueue.add(
-          {
-            saleAddress: token.sale_address,
-          },
-          {
-            jobId: `syncTokenHolders-${token.sale_address}`,
-            removeOnComplete: true,
-          },
-        );
-        void this.syncTransactionsQueue.add({
-          saleAddress: token.sale_address,
-        });
-      } catch (error) {
-        //
-      }
-    }
+    // await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
   }
 
   async findAndRemoveDuplicatedTokensBaseSaleAddress() {
@@ -443,7 +395,7 @@ export class TokensService {
     return this.contracts[saleAddress];
   }
 
-  private async getTokeLivePrice(token: Token) {
+  async getTokeLivePrice(token: Token) {
     const contract = await this.getTokenContracts(token);
     if (!contract) {
       return {};
