@@ -1,8 +1,7 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { WebSocketService } from '@/ae/websocket.service';
-import { TransactionService } from '@/transactions/services/transaction.service';
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
@@ -10,9 +9,12 @@ import { SyncTransactionsService } from './sync-transactions.service';
 
 @Injectable()
 export class SyncBlocksService {
-  syncing = false;
+  fullSyncing = false;
+  syncingLatestBlocks = false;
+  currentBlockNumber = 0;
   lastSyncedBlockNumber = 0;
   remainingBlocksToSync = 0;
+  bclBlockNumber = 0;
   private readonly logger = new Logger(SyncBlocksService.name);
 
   constructor(
@@ -22,17 +24,59 @@ export class SyncBlocksService {
     @InjectRepository(SyncedBlock)
     private syncedBlocksRepository: Repository<SyncedBlock>,
 
-    private websocketService: WebSocketService,
     private readonly aeSdkService: AeSdkService,
-    private readonly transactionService: TransactionService,
   ) {
-    this.syncBlocks();
+    this.doFullBlockSync();
   }
 
-  async syncBlocks() {
-    this.syncing = true;
+  latestBlockNumber = 0;
+  totalTicks = 0;
+  @Cron(CronExpression.EVERY_30_SECONDS)
+  async syncLatestBlocks() {
+    if (this.syncingLatestBlocks) {
+      return;
+    }
+    this.syncingLatestBlocks = true;
+    this.logger.log(`syncTransactions::: ${this.latestBlockNumber}`);
+
+    try {
+      this.currentBlockNumber = (
+        await this.aeSdkService.sdk.getCurrentGeneration()
+      ).keyBlock.height;
+
+      this.logger.log('currentGeneration', this.currentBlockNumber);
+      if (this.currentBlockNumber <= this.latestBlockNumber) {
+        this.totalTicks++;
+        if (this.totalTicks > 3) {
+          await this.syncTransactionsService.syncBlockTransactions(
+            this.currentBlockNumber,
+          );
+          this.totalTicks = 0;
+        }
+        this.logger.log('latestBlockNumber is not updated');
+        return;
+      }
+      this.latestBlockNumber = this.currentBlockNumber;
+      this.logger.log('latestBlockNumber', this.latestBlockNumber);
+      const fromBlockNumber = this.latestBlockNumber - 5;
+      for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
+        await this.syncTransactionsService.syncBlockTransactions(i);
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `SyncTransactionsService->Failed to sync transactions`,
+        error.stack,
+      );
+    } finally {
+      this.syncingLatestBlocks = false;
+    }
+  }
+
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async doFullBlockSync() {
+    this.fullSyncing = true;
     const factory = await this.communityFactoryService.getCurrentFactory();
-    const firstBlockNumber = factory.block_number;
+    this.bclBlockNumber = factory.block_number;
 
     const currentBlockNumber = (
       await this.aeSdkService.sdk.getCurrentGeneration()
@@ -46,7 +90,7 @@ export class SyncBlocksService {
     });
 
     const latestSyncedBlockNumber =
-      latestSyncedBlock?.block_number || firstBlockNumber;
+      latestSyncedBlock?.block_number || this.bclBlockNumber;
 
     this.logger.log(
       `Syncing blocks from ${latestSyncedBlockNumber} to ${currentBlockNumber}`,
@@ -68,6 +112,6 @@ export class SyncBlocksService {
         synced_tx_hashes: transactionsHashes,
       });
     }
-    this.syncing = false;
+    this.fullSyncing = false;
   }
 }

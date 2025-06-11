@@ -18,9 +18,9 @@ export class TokenWebsocketGateway implements OnModuleInit {
   server: Server;
 
   onModuleInit() {
-    this.server.on('connection', (socket) => {
-      console.log('connection', socket.id);
-    });
+    // this.server.on('connection', (socket) => {
+    //   console.log('connection', socket.id);
+    // });
   }
 
   @SubscribeMessage('tokenUpdated')
