@@ -21,12 +21,10 @@ export class FixFailedTransactionsService {
     this.fixFailedTransactions();
   }
 
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Cron(CronExpression.EVERY_30_MINUTES)
   async fixFailedTransactions() {
     const failedTransactions = await this.failedTransactionsRepository.find({
-      where: {
-        retries: LessThan(10),
-      },
+      where: {},
     });
     for (const failedTransaction of failedTransactions) {
       await this.fixFailedTransaction(failedTransaction);
@@ -41,10 +39,10 @@ export class FixFailedTransactionsService {
         camelcaseKeysDeep(res),
       );
       // TODO: enable this
-      // if (transaction?.tx?.returnType === 'revert') {
-      //   await this.failedTransactionsRepository.delete(failedTransaction.hash);
-      //   return;
-      // }
+      if (transaction?.tx?.returnType === 'revert') {
+        await this.failedTransactionsRepository.delete(failedTransaction.hash);
+        return;
+      }
       await this.transactionService.saveTransaction(transaction);
       await this.failedTransactionsRepository.delete(failedTransaction.hash);
       this.logger.log(`FixFailedTransactionsService: ${hash} - success`);
