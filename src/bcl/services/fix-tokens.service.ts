@@ -40,6 +40,7 @@ export class FixTokensService {
           `FixTokensService: ${token.id} - ${error.message}`,
           error.stack,
         );
+        await this.tokensRepository.delete(token.id);
       }
     }
     this.fixingTokens = false;

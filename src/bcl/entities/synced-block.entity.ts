@@ -12,8 +12,11 @@ export class SyncedBlock {
   })
   total_bcl_transactions: number;
 
-  @Column('text', { array: true })
+  @Column('text', { array: true, default: [] })
   synced_tx_hashes: string[];
+
+  @Column('text', { array: true, default: [] })
+  callers: string[];
 
   @Column({
     type: 'timestamp',

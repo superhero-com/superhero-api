@@ -7,20 +7,16 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { ACTIVE_NETWORK } from '@/configs';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema, ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
-import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
 import moment from 'moment';
 import { Token } from './entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
@@ -43,11 +39,6 @@ export class TokensService {
     private tokenWebsocketGateway: TokenWebsocketGateway,
 
     private aePricingService: AePricingService,
-
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
-    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
-    private readonly syncTransactionsQueue: Queue,
 
     private communityFactoryService: CommunityFactoryService,
   ) {
@@ -85,15 +76,15 @@ export class TokensService {
   async loadCreatedCommunityFromMdw(
     url: string,
     factory: ICommunityFactorySchema,
-    tokens: Token[] = [],
-  ): Promise<Token[]> {
+    saleAddresses: string[] = [],
+  ): Promise<string[]> {
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result;
     try {
       result = await fetchJson(url);
     } catch (error) {
       this.logger.error('loadCreatedCommunityFromMdw->error::', error);
-      return tokens;
+      return saleAddresses;
     }
 
     for (const transaction of result.data) {
@@ -116,27 +107,10 @@ export class TokensService {
       }
       const daoAddress = transaction?.tx?.return?.value[0]?.value;
       const saleAddress = transaction?.tx?.return?.value[1]?.value;
+      saleAddresses.push(saleAddress);
 
       const tokenExists = await this.findByAddress(saleAddress);
       if (tokenExists?.id) {
-        // update token holders count
-        // if (tokenExists?.address) {
-        //   const tokenDataResponse = await fetchJson(
-        //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenExists.address}`,
-        //   );
-        //   if (tokenDataResponse?.holders !== tokenExists.holders_count) {
-        //     await this.tokensRepository.update(tokenExists.id, {
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     tokens.push({
-        //       ...tokenExists,
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     continue;
-        //   }
-        // }
-        tokens.push(tokenExists);
-
         continue;
       }
       const tokenName = transaction?.tx?.arguments?.[1]?.value;
@@ -161,7 +135,7 @@ export class TokensService {
         (event) =>
           event.contract.name === 'FungibleTokenFull' &&
           event.contract.address !==
-          'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+            'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
       );
       if (fungibleToken) {
         tokenData.address = fungibleToken.contract.address;
@@ -173,7 +147,6 @@ export class TokensService {
       }
 
       const token = await this.tokensRepository.save(tokenData);
-      tokens.push(token);
       this.contracts[saleAddress] = {
         token,
       };
@@ -183,10 +156,10 @@ export class TokensService {
       return await this.loadCreatedCommunityFromMdw(
         `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
         factory,
-        tokens,
+        saleAddresses,
       );
     }
-    return tokens;
+    return saleAddresses;
   }
 
   async loadTokenContractAndUpdateMintAddress(token: Token) {
@@ -311,7 +284,7 @@ export class TokensService {
       }),
     ]);
 
-    const tokenData = {
+    const tokenData: any = {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
     };
@@ -319,6 +292,13 @@ export class TokensService {
     const existingToken = await this.findByAddress(saleAddress);
     if (existingToken) {
       return existingToken;
+    }
+
+    // prevent duplicate tokens by symbol
+    if (tokenData?.symbol) {
+      await this.tokensRepository.delete({
+        symbol: tokenData.symbol,
+      });
     }
 
     const newToken = await this.tokensRepository.save(tokenData);

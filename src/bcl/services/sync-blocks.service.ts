@@ -58,7 +58,7 @@ export class SyncBlocksService {
       }
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
-      const fromBlockNumber = this.latestBlockNumber - 5;
+      const fromBlockNumber = this.latestBlockNumber - 10;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
         await this.syncTransactionsService.syncBlockTransactions(i);
       }
@@ -102,14 +102,15 @@ export class SyncBlocksService {
       blockNumber++
     ) {
       this.logger.log(`Syncing block ${blockNumber}`);
-      const transactionsHashes =
+      const result =
         await this.syncTransactionsService.syncBlockTransactions(blockNumber);
       this.lastSyncedBlockNumber = blockNumber;
       this.remainingBlocksToSync = currentBlockNumber - blockNumber;
       await this.syncedBlocksRepository.save({
         block_number: blockNumber,
-        total_bcl_transactions: transactionsHashes.length,
-        synced_tx_hashes: transactionsHashes,
+        total_bcl_transactions: result.validated_hashes.length,
+        synced_tx_hashes: result.validated_hashes,
+        callers: result.callers,
       });
     }
     this.fullSyncing = false;

@@ -6,7 +6,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CommunityFactory } from 'bctsl-sdk';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
 
 @Injectable()
 export class FastPullTokensService {
@@ -36,10 +36,15 @@ export class FastPullTokensService {
       factory.address,
     );
 
-    await this.tokensService.loadCreatedCommunityFromMdw(
+    const saleAddresses = await this.tokensService.loadCreatedCommunityFromMdw(
       `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`,
       factory,
     );
+
+    // delete all tokens where sale_address is not in saleAddresses
+    await this.tokensRepository.delete({
+      sale_address: Not(In(saleAddresses)),
+    });
 
     // pull all tokens where price is 0, order by total_supply desc
     const tokens = await this.tokensRepository.find({

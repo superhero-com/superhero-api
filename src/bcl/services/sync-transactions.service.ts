@@ -1,4 +1,3 @@
-import { AeSdkService } from '@/ae/ae-sdk.service';
 import { WebSocketService } from '@/ae/websocket.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { TransactionService } from '@/transactions/services/transaction.service';
@@ -16,7 +15,6 @@ export class SyncTransactionsService {
 
   constructor(
     private websocketService: WebSocketService,
-    private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
 
     @InjectRepository(FailedTransaction)
@@ -30,7 +28,7 @@ export class SyncTransactionsService {
 
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
-        if (Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)) {
+        if (Object.values(TX_FUNCTIONS).includes(transaction.tx.function)) {
           // Prevent duplicate transactions
           if (!syncedTransactions.includes(transaction.hash)) {
             syncedTransactions.push(transaction.hash);
@@ -45,7 +43,10 @@ export class SyncTransactionsService {
     );
   }
 
-  async syncBlockTransactions(blockNumber: number): Promise<string[]> {
+  async syncBlockTransactions(blockNumber: number): Promise<{
+    validated_hashes: string[];
+    callers: string[];
+  }> {
     this.logger.log('syncBlockTransactions', blockNumber);
     const query: Record<string, string | number> = {
       direction: 'forward',
@@ -57,27 +58,47 @@ export class SyncTransactionsService {
       .map((key) => key + '=' + query[key])
       .join('&');
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    const transactionsHashes = await this.fetchAndSyncTransactions(url);
+    const result = await this.fetchAndSyncTransactions(url);
     this.logger.log(
       `syncBlockTransactions->transactionsHashes:`,
-      transactionsHashes,
+      result.validated_hashes,
     );
-    if (transactionsHashes.length > 0) {
+    if (result.validated_hashes.length > 0) {
       await this.transactionService.deleteNonValidTransactionsInBlock(
         blockNumber,
-        transactionsHashes,
+        result.validated_hashes,
       );
     }
-    return transactionsHashes;
+    return result;
   }
 
-  async fetchAndSyncTransactions(url: string, validated_hashes = []) {
+  async fetchAndSyncTransactions(
+    url: string,
+    validated_hashes = [],
+    callers = [],
+  ) {
     this.logger.debug(
-      `ValidateTokenTransactionsQueue->fetchAndValidateTransactions: ${url}`,
+      `SyncTransactionsService->fetchAndSyncTransactions: ${url}`,
     );
     const response = await fetchJson(url);
 
-    const transactions = response.data
+    const items = response.data.filter(
+      (item) =>
+        !validated_hashes.includes(item.hash) &&
+        item?.tx?.return_type !== 'revert',
+    );
+
+    for (const item of items) {
+      if (
+        item?.tx?.caller_id &&
+        !callers.includes(item?.tx?.caller_id) &&
+        item?.tx?.type !== 'SpendTx'
+      ) {
+        callers.push(item?.tx?.caller_id);
+      }
+    }
+
+    const transactions = items
       ?.filter(
         (item) =>
           !validated_hashes.includes(item.hash) &&
@@ -118,9 +139,13 @@ export class SyncTransactionsService {
       return this.fetchAndSyncTransactions(
         `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
         validated_hashes,
+        callers,
       );
     }
 
-    return validated_hashes;
+    return {
+      validated_hashes,
+      callers,
+    };
   }
 }

@@ -17,10 +17,6 @@ import {
   SYNC_TOKEN_HOLDERS_QUEUE,
 } from './tokens/queues/constants';
 import { TokensModule } from './tokens/tokens.module';
-import {
-  SYNC_TRANSACTIONS_QUEUE,
-  VALIDATE_TRANSACTIONS_QUEUE
-} from './transactions/queues/constants';
 import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
@@ -41,13 +37,7 @@ import { TransactionsModule } from './transactions/transactions.module';
         name: SYNC_TOKEN_HOLDERS_QUEUE,
       },
       {
-        name: SYNC_TRANSACTIONS_QUEUE,
-      },
-      {
         name: DELETE_OLD_TOKENS_QUEUE,
-      },
-      {
-        name: VALIDATE_TRANSACTIONS_QUEUE,
       },
     ),
     TypeOrmModule.forRoot({

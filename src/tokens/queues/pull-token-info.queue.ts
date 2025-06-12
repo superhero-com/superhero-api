@@ -1,5 +1,4 @@
 import { TokensService } from '@/tokens/tokens.service';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue, Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
@@ -19,11 +18,10 @@ export class PullTokenInfoQueue {
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
 
-    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
-    private readonly syncTransactionsQueue: Queue,
-
     private tokenService: TokensService,
-  ) {}
+  ) {
+    //
+  }
 
   @Process()
   async process(job: Job<IPullTokenInfoQueue>) {
@@ -43,9 +41,6 @@ export class PullTokenInfoQueue {
           removeOnComplete: true,
         },
       );
-      void this.syncTransactionsQueue.add({
-        saleAddress: job.data.saleAddress,
-      });
     } catch (error) {
       this.logger.error(`PullTokenInfoQueue->error`, error);
     }

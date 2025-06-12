@@ -97,6 +97,9 @@ export class TransactionService {
     }
 
     const decodedData = rawTransaction.tx.decodedData;
+    if (!decodedData || decodedData.length == 0) {
+      throw new Error(`No decoded data for transaction ${rawTransaction.hash}`);
+    }
 
     const priceChangeData = decodedData.find(
       (data) => data.name === 'PriceChange',
