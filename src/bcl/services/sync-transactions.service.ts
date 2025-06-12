@@ -1,4 +1,3 @@
-import { AeSdkService } from '@/ae/ae-sdk.service';
 import { WebSocketService } from '@/ae/websocket.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { TransactionService } from '@/transactions/services/transaction.service';
@@ -16,7 +15,6 @@ export class SyncTransactionsService {
 
   constructor(
     private websocketService: WebSocketService,
-    private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
 
     @InjectRepository(FailedTransaction)
@@ -91,8 +89,12 @@ export class SyncTransactionsService {
     );
 
     for (const item of items) {
-      if (!callers.includes(item?.tx?.caller)) {
-        callers.push(item?.tx?.caller);
+      if (
+        item?.tx?.caller_id &&
+        !callers.includes(item?.tx?.caller_id) &&
+        item?.tx?.type !== 'SpendTx'
+      ) {
+        callers.push(item?.tx?.caller_id);
       }
     }
 

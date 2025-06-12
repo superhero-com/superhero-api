@@ -7,6 +7,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Equal, Not, Repository } from 'typeorm';
+import { SyncedBlock } from '../entities/synced-block.entity';
+import { SyncBlocksService } from './sync-blocks.service';
 
 @Injectable()
 export class FixHoldersService {
@@ -20,9 +22,38 @@ export class FixHoldersService {
     @InjectRepository(TokenHolder)
     private tokenHolderRepository: Repository<TokenHolder>,
 
-    private readonly tokensService: TokensService,
+    @InjectRepository(SyncedBlock)
+    private syncedBlocksRepository: Repository<SyncedBlock>,
+
+    private readonly syncBlocksService: SyncBlocksService,
   ) {
+    this.syncLatestBlockCallers();
     this.fixBrokenHolders();
+  }
+
+  async syncLatestBlockCallers() {
+    // get latest 5 blocks
+    const blocks = await this.syncedBlocksRepository.find({
+      order: {
+        block_number: 'DESC',
+      },
+      take: 5,
+    });
+
+    // unique callers
+    const callers = blocks.map((block) => block.callers).flat();
+    this.logger.log('===============================================');
+    this.logger.log('===============================================');
+    this.logger.log('===============================================');
+    this.logger.log(`Syncing ${callers.length} callers...`);
+    this.logger.log(callers);
+
+    // for (const block of blocks) {
+    //   const holders = block.callers;
+    //   for (const holder of holders) {
+    //     await this.fullResyncHolders(holder);
+    //   }
+    // }
   }
 
   fixingTokensHolders = false;
@@ -109,7 +140,7 @@ export class FixHoldersService {
       const data = await fetchJson(holderUrl);
       holdersData.push({
         ...holder,
-        amount: 
+        amount:
           data?.account == 'ak_2Eu8n8MWvZ2dQmsKu1zeabZjEG6F1vc1S5syHZkvAZHTj9yaKM'
             ? 0
             : data?.amount,

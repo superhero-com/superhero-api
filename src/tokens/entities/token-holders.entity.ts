@@ -32,6 +32,16 @@ export class TokenHolder {
   })
   balance: BigNumber;
 
+  @Column({
+    default: 0,
+  })
+  block_number: number;
+
+  @Column({
+    default: '',
+  })
+  last_tx_hash: string;
+
   @Index()
   @CreateDateColumn({
     type: 'timestamp',
