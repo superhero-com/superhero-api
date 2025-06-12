@@ -78,7 +78,7 @@ export class SyncTransactionsService {
     callers = [],
   ) {
     this.logger.debug(
-      `ValidateTokenTransactionsQueue->fetchAndValidateTransactions: ${url}`,
+      `SyncTransactionsService->fetchAndSyncTransactions: ${url}`,
     );
     const response = await fetchJson(url);
 
