@@ -70,9 +70,9 @@ export class FastPullTokensService {
     );
 
     // delete all tokens where sale_address is not in saleAddresses
-    await this.tokensRepository.delete({
-      sale_address: Not(In(saleAddresses)),
-    });
+    // await this.tokensRepository.delete({
+    //  sale_address: Not(In(saleAddresses)),
+    // });
 
     // pull all tokens where price is 0, order by total_supply desc
     const tokens = await this.tokensRepository.find({
