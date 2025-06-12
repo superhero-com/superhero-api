@@ -1,17 +1,16 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { CommunityFactory } from 'bctsl-sdk';
 import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
 
 @Injectable()
 export class FastPullTokensService {
   pullingTokens = false;
-  factoryContract: CommunityFactory;
   private readonly logger = new Logger(FastPullTokensService.name);
 
   constructor(
@@ -20,8 +19,39 @@ export class FastPullTokensService {
 
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
+
+    private syncBlocksService: SyncBlocksService,
   ) {
-    this.fastPullTokens();
+    this.pullLatestCreatedTokens();
+  }
+
+  isPullingLatestCreatedTokens = false;
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async pullLatestCreatedTokens() {
+    if (this.isPullingLatestCreatedTokens) {
+      return;
+    }
+    this.isPullingLatestCreatedTokens = true;
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    if (this.syncBlocksService.latestBlockNumber < 100) {
+      this.isPullingLatestCreatedTokens = false;
+      return;
+    }
+
+    const query: Record<string, string | number> = {
+      direction: 'backward',
+      limit: 100,
+      scope: `gen:${this.syncBlocksService.latestBlockNumber - 100}-${this.syncBlocksService.latestBlockNumber}`,
+      type: 'contract_call',
+      contract: factory.address,
+    };
+    const queryString = Object.keys(query)
+      .map((key) => key + '=' + query[key])
+      .join('&');
+
+    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+    await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
+    this.isPullingLatestCreatedTokens = false;
   }
 
   @Cron(CronExpression.EVERY_6_HOURS)
@@ -32,12 +62,10 @@ export class FastPullTokensService {
     this.pullingTokens = true;
 
     const factory = await this.communityFactoryService.getCurrentFactory();
-    this.factoryContract = await this.communityFactoryService.loadFactory(
-      factory.address,
-    );
 
+    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`;
     const saleAddresses = await this.tokensService.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`,
+      url,
       factory,
     );
 
