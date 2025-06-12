@@ -1,7 +1,6 @@
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokensService } from '@/tokens/tokens.service';
 import { fetchJson } from '@/utils/common';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';

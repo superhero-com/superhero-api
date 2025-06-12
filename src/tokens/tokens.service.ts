@@ -76,15 +76,15 @@ export class TokensService {
   async loadCreatedCommunityFromMdw(
     url: string,
     factory: ICommunityFactorySchema,
-    tokens: Token[] = [],
-  ): Promise<Token[]> {
+    saleAddresses: string[] = [],
+  ): Promise<string[]> {
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result;
     try {
       result = await fetchJson(url);
     } catch (error) {
       this.logger.error('loadCreatedCommunityFromMdw->error::', error);
-      return tokens;
+      return saleAddresses;
     }
 
     for (const transaction of result.data) {
@@ -107,27 +107,10 @@ export class TokensService {
       }
       const daoAddress = transaction?.tx?.return?.value[0]?.value;
       const saleAddress = transaction?.tx?.return?.value[1]?.value;
+      saleAddresses.push(saleAddress);
 
       const tokenExists = await this.findByAddress(saleAddress);
       if (tokenExists?.id) {
-        // update token holders count
-        // if (tokenExists?.address) {
-        //   const tokenDataResponse = await fetchJson(
-        //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenExists.address}`,
-        //   );
-        //   if (tokenDataResponse?.holders !== tokenExists.holders_count) {
-        //     await this.tokensRepository.update(tokenExists.id, {
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     tokens.push({
-        //       ...tokenExists,
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     continue;
-        //   }
-        // }
-        tokens.push(tokenExists);
-
         continue;
       }
       const tokenName = transaction?.tx?.arguments?.[1]?.value;
@@ -164,7 +147,6 @@ export class TokensService {
       }
 
       const token = await this.tokensRepository.save(tokenData);
-      tokens.push(token);
       this.contracts[saleAddress] = {
         token,
       };
@@ -174,10 +156,10 @@ export class TokensService {
       return await this.loadCreatedCommunityFromMdw(
         `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
         factory,
-        tokens,
+        saleAddresses,
       );
     }
-    return tokens;
+    return saleAddresses;
   }
 
   async loadTokenContractAndUpdateMintAddress(token: Token) {

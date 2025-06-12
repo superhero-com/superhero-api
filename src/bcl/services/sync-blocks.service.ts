@@ -58,7 +58,7 @@ export class SyncBlocksService {
       }
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
-      const fromBlockNumber = this.latestBlockNumber - 5;
+      const fromBlockNumber = this.latestBlockNumber - 10;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
         await this.syncTransactionsService.syncBlockTransactions(i);
       }

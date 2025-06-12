@@ -28,7 +28,7 @@ export class SyncTransactionsService {
 
     this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
-        if (Object.keys(TX_FUNCTIONS).includes(transaction.tx.function)) {
+        if (Object.values(TX_FUNCTIONS).includes(transaction.tx.function)) {
           // Prevent duplicate transactions
           if (!syncedTransactions.includes(transaction.hash)) {
             syncedTransactions.push(transaction.hash);
