@@ -79,7 +79,7 @@ export class TokensService {
     saleAddresses: string[] = [],
   ): Promise<string[]> {
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
-    let result;
+    let result: any;
     try {
       result = await fetchJson(url);
     } catch (error) {
@@ -87,69 +87,77 @@ export class TokensService {
       return saleAddresses;
     }
 
-    for (const transaction of result.data) {
-      if (transaction.tx.function !== 'create_community') {
-        continue;
-      }
-      if (
-        !Object.keys(factory.collections).includes(
-          transaction.tx.arguments[0].value,
-        )
-      ) {
-        continue;
-      }
-      // handled reverted transactions
-      if (
-        !transaction?.tx?.return?.value?.length ||
-        transaction.tx.return.value.length < 2
-      ) {
-        continue;
-      }
-      const daoAddress = transaction?.tx?.return?.value[0]?.value;
-      const saleAddress = transaction?.tx?.return?.value[1]?.value;
-      saleAddresses.push(saleAddress);
+    if (!result?.data?.length) {
+      this.logger.log('loadCreatedCommunityFromMdw->no data::', url);
+      for (const transaction of result.data) {
+        if (
+          transaction.tx.function !== 'create_community' ||
+          transaction?.tx?.return_type === 'revert'
+        ) {
+          continue;
+        }
+        if (
+          !Object.keys(factory.collections).includes(
+            transaction.tx.arguments[0].value,
+          )
+        ) {
+          continue;
+        }
+        // handled reverted transactions
+        if (
+          !transaction?.tx?.return?.value?.length ||
+          transaction.tx.return.value.length < 2
+        ) {
+          continue;
+        }
+        const daoAddress = transaction?.tx?.return?.value[0]?.value;
+        const saleAddress = transaction?.tx?.return?.value[1]?.value;
+        saleAddresses.push(saleAddress);
 
-      const tokenExists = await this.findByAddress(saleAddress);
-      if (tokenExists?.id) {
-        continue;
-      }
-      const tokenName = transaction?.tx?.arguments?.[1]?.value;
+        const tokenExists = await this.findByAddress(saleAddress);
+        if (tokenExists?.id) {
+          continue;
+        }
+        const tokenName = transaction?.tx?.arguments?.[1]?.value;
 
-      const decodedData = this.factoryContract?.contract?.$decodeEvents(
-        transaction?.tx?.log,
-      );
-      const tokenData = {
-        total_supply: new BigNumber(0),
-        holders_count: 0,
-        address: null,
-        dao_address: daoAddress,
-        sale_address: saleAddress,
-        factory_address: factory.address,
-        creator_address: transaction?.tx?.caller_id,
-        created_at: moment(transaction?.micro_time).toDate(),
-        name: tokenName,
-        symbol: tokenName,
-      };
-
-      const fungibleToken = decodedData?.find(
-        (event) =>
-          event.contract.name === 'FungibleTokenFull' &&
-          event.contract.address !==
-            'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
-      );
-      if (fungibleToken) {
-        tokenData.address = fungibleToken.contract.address;
-        const tokenDataResponse = await fetchJson(
-          `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+        const decodedData = this.factoryContract?.contract?.$decodeEvents(
+          transaction?.tx?.log,
         );
-        tokenData.total_supply = new BigNumber(tokenDataResponse?.event_supply);
-        tokenData.holders_count = tokenDataResponse?.holders;
-      }
+        const tokenData = {
+          total_supply: new BigNumber(0),
+          holders_count: 0,
+          address: null,
+          dao_address: daoAddress,
+          sale_address: saleAddress,
+          factory_address: factory.address,
+          creator_address: transaction?.tx?.caller_id,
+          created_at: moment(transaction?.micro_time).toDate(),
+          name: tokenName,
+          symbol: tokenName,
+        };
 
-      const token = await this.tokensRepository.save(tokenData);
-      this.contracts[saleAddress] = {
-        token,
-      };
+        const fungibleToken = decodedData?.find(
+          (event) =>
+            event.contract.name === 'FungibleTokenFull' &&
+            event.contract.address !==
+              'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+        );
+        if (fungibleToken) {
+          tokenData.address = fungibleToken.contract.address;
+          const tokenDataResponse = await fetchJson(
+            `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+          );
+          tokenData.total_supply = new BigNumber(
+            tokenDataResponse?.event_supply,
+          );
+          tokenData.holders_count = tokenDataResponse?.holders;
+        }
+
+        const token = await this.tokensRepository.save(tokenData);
+        this.contracts[saleAddress] = {
+          token,
+        };
+      }
     }
 
     if (result.next) {
