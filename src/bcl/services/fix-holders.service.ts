@@ -30,29 +30,75 @@ export class FixHoldersService {
     this.fixBrokenHolders();
   }
 
+  isSyncingBlockCallers = false;
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async syncLatestBlockCallers() {
+    if (this.isSyncingBlockCallers) {
+      return;
+    }
+    this.isSyncingBlockCallers = true;
     // get latest 5 blocks
     const blocks = await this.syncedBlocksRepository.find({
       order: {
         block_number: 'DESC',
       },
-      take: 5,
+      take: 10,
     });
 
     // unique callers
     const callers = blocks.map((block) => block.callers).flat();
-    this.logger.log('===============================================');
-    this.logger.log('===============================================');
-    this.logger.log('===============================================');
-    this.logger.log(`Syncing ${callers.length} callers...`);
-    this.logger.log(callers);
+    // unique callers
+    const uniqueCallers = [...new Set(callers)];
+    this.logger.log(`Syncing ${uniqueCallers.length} callers...`);
 
-    // for (const block of blocks) {
-    //   const holders = block.callers;
-    //   for (const holder of holders) {
-    //     await this.fullResyncHolders(holder);
-    //   }
-    // }
+    for (const caller of uniqueCallers) {
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
+      await this.pullAndUpdateAccountAex9Balances(url, caller);
+    }
+    this.isSyncingBlockCallers = false;
+  }
+
+  async pullAndUpdateAccountAex9Balances(url: string, caller: string) {
+    const mdwResponse = await fetchJson(url);
+
+    for (const item of mdwResponse.data) {
+      try {
+        const token = await this.tokensRepository.findOne({
+          where: {
+            address: item.contract_id,
+          },
+        });
+        if (!token) {
+          continue;
+        }
+        await this.tokenHolderRepository.update(
+          {
+            token: { id: token.id },
+            address: caller,
+          },
+          {
+            balance: item.amount,
+            block_number: item.height,
+            last_tx_hash: item.tx_hash,
+          },
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Error pulling and updating account aex9 balances for ${caller}`,
+          error,
+          error.stack,
+        );
+      }
+    }
+
+    if (mdwResponse?.next) {
+      await this.pullAndUpdateAccountAex9Balances(
+        `${ACTIVE_NETWORK.middlewareUrl}${mdwResponse.next}`,
+        caller,
+      );
+    }
+
+    this.logger.log(`Pulled ${mdwResponse.data.length} tokens for ${caller}`);
   }
 
   fixingTokensHolders = false;
