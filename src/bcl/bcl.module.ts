@@ -11,6 +11,7 @@ import { FixFailedTransactionsService } from './services/fix-failed-transactions
 import { FixTokensService } from './services/fix-tokens.service';
 import { SyncBlocksService } from './services/sync-blocks.service';
 import { SyncTransactionsService } from './services/sync-transactions.service';
+import { FixHoldersService } from './services/fix-holders.service';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SyncTransactionsService } from './services/sync-transactions.service';
     FixFailedTransactionsService,
     FixTokensService,
     FastPullTokensService,
+    FixHoldersService,
   ],
   exports: [SyncBlocksService],
   controllers: [DebugFailedTransactionsController],
