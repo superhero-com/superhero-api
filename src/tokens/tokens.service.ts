@@ -141,7 +141,7 @@ export class TokensService {
       }
       const tokenName = transaction?.tx?.arguments?.[1]?.value;
 
-      const decodedData = this.factoryContract.contract.$decodeEvents(
+      const decodedData = this.factoryContract?.contract?.$decodeEvents(
         transaction?.tx?.log,
       );
       const tokenData = {
