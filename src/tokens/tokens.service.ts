@@ -302,7 +302,7 @@ export class TokensService {
       }),
     ]);
 
-    const tokenData = {
+    const tokenData: any = {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
     };
@@ -310,6 +310,13 @@ export class TokensService {
     const existingToken = await this.findByAddress(saleAddress);
     if (existingToken) {
       return existingToken;
+    }
+
+    // prevent duplicate tokens by symbol
+    if (tokenData?.symbol) {
+      await this.tokensRepository.delete({
+        symbol: tokenData.symbol,
+      });
     }
 
     const newToken = await this.tokensRepository.save(tokenData);
