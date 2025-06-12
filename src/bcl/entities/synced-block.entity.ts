@@ -15,6 +15,9 @@ export class SyncedBlock {
   @Column('text', { array: true })
   synced_tx_hashes: string[];
 
+  @Column('text', { array: true })
+  callers: string[];
+
   @Column({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
