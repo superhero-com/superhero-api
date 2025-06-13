@@ -73,16 +73,14 @@ export class FixFailedTransactionsService {
 
   private async syncCommunityTransactions(contractAddress: string) {
     this.logger.log('syncCommunityTransactions', contractAddress);
-    const query: Record<string, string | number> = {
+    const queryString = new URLSearchParams({
       direction: 'forward',
-      limit: 100,
+      limit: '100',
       contract: contractAddress,
       type: 'contract_call',
-    };
-    const queryString = Object.keys(query)
-      .map((key) => key + '=' + query[key])
-      .join('&');
+    }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+
     await this.syncTransactionsService.fetchAndSyncTransactions(url);
   }
 }

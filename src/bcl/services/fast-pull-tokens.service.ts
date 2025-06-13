@@ -26,26 +26,22 @@ export class FastPullTokensService {
   isPullingLatestCreatedTokens = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async pullLatestCreatedTokens() {
-    if (this.isPullingLatestCreatedTokens) {
+    if (
+      this.isPullingLatestCreatedTokens ||
+      !this.syncBlocksService.latestBlockNumber
+    ) {
       return;
     }
     this.isPullingLatestCreatedTokens = true;
     const factory = await this.communityFactoryService.getCurrentFactory();
-    if (this.syncBlocksService.latestBlockNumber < 100) {
-      this.isPullingLatestCreatedTokens = false;
-      return;
-    }
 
-    const query: Record<string, string | number> = {
+    const queryString = new URLSearchParams({
       direction: 'backward',
-      limit: 100,
+      limit: '100',
       scope: `gen:${this.syncBlocksService.latestBlockNumber - 100}-${this.syncBlocksService.latestBlockNumber}`,
       type: 'contract_call',
       contract: factory.address,
-    };
-    const queryString = Object.keys(query)
-      .map((key) => key + '=' + query[key])
-      .join('&');
+    }).toString();
 
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
     await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
@@ -61,22 +57,14 @@ export class FastPullTokensService {
 
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    const query: Record<string, string | number> = {
+    const queryString = new URLSearchParams({
       direction: 'forward',
-      limit: 100,
+      limit: '100',
       type: 'contract_call',
       contract: factory.address,
-    };
-    const queryString = Object.keys(query)
-      .map((key) => key + '=' + query[key])
-      .join('&');
+    }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    this.logger.log('////////////////////////////////////////////////////');
-    this.logger.log('////////////////////////////////////////////////////');
-    this.logger.log(`FastPullTokensService->fetchAndSyncTransactions: ${url}`);
-    this.logger.log('////////////////////////////////////////////////////');
-    this.logger.log('////////////////////////////////////////////////////');
-    // await this.syncTransactionsService.fetchAndSyncTransactions(url);
+
     await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
 
     this.pullingTokens = false;

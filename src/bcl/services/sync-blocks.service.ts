@@ -128,15 +128,12 @@ export class SyncBlocksService {
     callers: string[];
   }> {
     this.logger.log('syncBlockTransactions', blockNumber);
-    const query: Record<string, string | number> = {
+    const queryString = new URLSearchParams({
       direction: 'forward',
-      limit: 100,
+      limit: '100',
       scope: `gen:${blockNumber}`,
       type: 'contract_call',
-    };
-    const queryString = Object.keys(query)
-      .map((key) => key + '=' + query[key])
-      .join('&');
+    }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
     const result =
       await this.syncTransactionsService.fetchAndSyncTransactions(url);
