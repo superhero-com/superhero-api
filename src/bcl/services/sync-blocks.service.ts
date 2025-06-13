@@ -38,7 +38,7 @@ export class SyncBlocksService {
 
   latestBlockNumber = 0;
   totalTicks = 0;
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron(CronExpression.EVERY_MINUTE)
   async syncLatestBlocks() {
     if (this.syncingLatestBlocks) {
       return;
@@ -63,7 +63,7 @@ export class SyncBlocksService {
       }
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
-      const fromBlockNumber = this.latestBlockNumber - 10;
+      const fromBlockNumber = this.latestBlockNumber - 20;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
         await this.syncBlockTransactions(i);
       }
