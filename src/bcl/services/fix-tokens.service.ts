@@ -19,7 +19,7 @@ export class FixTokensService {
     //
   }
 
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async fixTokensAddresses() {
     if (this.fixingTokens) {
       return;
@@ -30,6 +30,9 @@ export class FixTokensService {
     const tokens = await this.tokensRepository.find({
       where: {
         address: IsNull(),
+      },
+      order: {
+        total_supply: 'DESC',
       },
     });
     for (const token of tokens) {

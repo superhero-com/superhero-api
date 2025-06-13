@@ -1,13 +1,9 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
-import { SyncTransactionsService } from '@/bcl/services/sync-transactions.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
-import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
 
 @Injectable()
 export class FastPullTokensService {
@@ -17,10 +13,6 @@ export class FastPullTokensService {
   constructor(
     private readonly tokensService: TokensService,
     private communityFactoryService: CommunityFactoryService,
-    private syncTransactionsService: SyncTransactionsService,
-
-    @InjectRepository(Token)
-    private tokensRepository: Repository<Token>,
 
     private syncBlocksService: SyncBlocksService,
   ) {
@@ -56,7 +48,7 @@ export class FastPullTokensService {
     this.isPullingLatestCreatedTokens = false;
   }
 
-  @Cron(CronExpression.EVERY_6_HOURS)
+  @Cron(CronExpression.EVERY_DAY_AT_10AM)
   async fastPullTokens() {
     if (this.pullingTokens) {
       return;
@@ -82,28 +74,6 @@ export class FastPullTokensService {
     this.logger.log('////////////////////////////////////////////////////');
     // await this.syncTransactionsService.fetchAndSyncTransactions(url);
     await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
-
-    // pull all tokens where price is 0, order by total_supply desc
-    const tokens = await this.tokensRepository.find({
-      where: {
-        price: LessThanOrEqual(1),
-      },
-      order: {
-        total_supply: 'DESC',
-      },
-    });
-
-    for (const token of tokens) {
-      try {
-        const liveTokenData = await this.tokensService.getTokeLivePrice(token);
-        await this.tokensRepository.update(token.id, liveTokenData);
-      } catch (error: any) {
-        this.logger.error(
-          `FastPullTokensService: ${token.id} - ${error.message}`,
-          error.stack,
-        );
-      }
-    }
 
     this.pullingTokens = false;
   }
