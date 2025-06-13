@@ -1,5 +1,11 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  UseInterceptors,
+  NotFoundException,
+} from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
@@ -37,13 +43,7 @@ export class TokenPerformanceController {
     const token = await this.tokensService.getToken(address);
 
     if (!token) {
-      return {
-        message: 'Token not found',
-        past_24h: null,
-        past_7d: null,
-        past_30d: null,
-        all_time: null,
-      };
+      throw new NotFoundException('Token not found');
     }
 
     const past_24h = await this.getTokenPriceMovement(
