@@ -23,6 +23,7 @@ type TokenContracts = {
   instance?: TokenSale;
   tokenContractInstance?: ContractWithMethods<ContractMethodsBase>;
   token?: Token;
+  lastUsedAt?: number;
 };
 
 @Injectable()
@@ -343,31 +344,41 @@ export class TokensService {
     if (token.factory_address) {
       return token.factory_address as Encoded.ContractAddress;
     }
-    // 1. fetch factory create tx
-    const contractInfo = await fetchJson(
-      `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
-    );
 
-    const response = await fetchJson(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
-    );
+    let totalRetries = 0;
+    const maxRetries = 3;
+    const retryDelay = 5000; // 5 seconds
 
-    if (!response?.tx?.contract_id) {
+    while (totalRetries < maxRetries) {
+      const contractInfo = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
+      );
+      const response = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
+      );
+
+      if (response?.tx?.contract_id) {
+        const factory_address = response?.tx?.contract_id;
+        await this.updateTokenMetaDataFromCreateTx(
+          token,
+          camelcaseKeysDeep(response),
+        );
+        return factory_address as Encoded.ContractAddress;
+      }
+
       this.logger.error(
-        'updateTokenFactoryAddress->error::',
+        `updateTokenFactoryAddress->error:: retry ${totalRetries + 1}/${maxRetries}`,
         response,
         contractInfo,
       );
-      return null;
+
+      totalRetries++;
+      if (totalRetries < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
     }
 
-    const factory_address = response?.tx?.contract_id;
-    await this.updateTokenMetaDataFromCreateTx(
-      token,
-      camelcaseKeysDeep(response),
-    );
-
-    return factory_address as Encoded.ContractAddress;
+    return null;
   }
 
   async getTokenContracts(token: Token) {
@@ -380,6 +391,7 @@ export class TokensService {
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts | undefined> {
     if (this.contracts[saleAddress] && this.contracts[saleAddress].instance) {
+      this.contracts[saleAddress].lastUsedAt = Date.now();
       return this.contracts[saleAddress];
     }
     const { instance } = await initTokenSale(
@@ -392,6 +404,7 @@ export class TokensService {
       ...(this.contracts[saleAddress] || {}),
       instance,
       tokenContractInstance,
+      lastUsedAt: Date.now(),
     };
 
     return this.contracts[saleAddress];

@@ -57,11 +57,12 @@ export class SyncTransactionsService {
     );
     const response = await fetchJson(url);
 
-    const items = response.data.filter(
-      (item) =>
-        !validated_hashes.includes(item.hash) &&
-        item?.tx?.return_type !== 'revert',
-    );
+    const items =
+      response?.data?.filter(
+        (item) =>
+          !validated_hashes.includes(item.hash) &&
+          item?.tx?.return_type !== 'revert',
+      ) || [];
 
     for (const item of items) {
       if (
