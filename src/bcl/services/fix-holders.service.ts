@@ -123,6 +123,7 @@ export class FixHoldersService {
     this.fixingTokensHolders = true;
     this.logger.log('Fixing broken holders...');
 
+    await this.checkTokensWithMismatchingHolderCount();
     await this.checkTokensWithNoHolders();
     await this.checkTokensWithMismatchingSupply();
     this.logger.log('Fixing broken holders... done');
@@ -130,7 +131,6 @@ export class FixHoldersService {
   }
 
   async checkTokensWithNoHolders() {
-    //
     const tokens = await this.tokensRepository.find({
       where: {
         holders_count: 0,
@@ -138,6 +138,27 @@ export class FixHoldersService {
     });
     for (const token of tokens) {
       await this.fullResyncHolders(token);
+    }
+  }
+
+  async checkTokensWithMismatchingHolderCount() {
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('token')
+      .leftJoin('token.holders', 'holder')
+      .select('token.id')
+      .addSelect('token.holders_count')
+      .addSelect('COUNT(holder.id)', 'actual_holders_count')
+      .groupBy('token.id')
+      .having('token.holders_count != COUNT(holder.id)')
+      .getRawMany();
+
+    for (const token of tokens) {
+      const tokenEntity = await this.tokensRepository.findOne({
+        where: { id: token.token_id },
+      });
+      if (tokenEntity) {
+        await this.fullResyncHolders(tokenEntity);
+      }
     }
   }
 
