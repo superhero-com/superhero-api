@@ -1,12 +1,13 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
+import { SyncTransactionsService } from '@/bcl/services/sync-transactions.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
+import { LessThanOrEqual, Repository } from 'typeorm';
 
 @Injectable()
 export class FastPullTokensService {
@@ -16,6 +17,7 @@ export class FastPullTokensService {
   constructor(
     private readonly tokensService: TokensService,
     private communityFactoryService: CommunityFactoryService,
+    private syncTransactionsService: SyncTransactionsService,
 
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -63,7 +65,22 @@ export class FastPullTokensService {
 
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`;
+    const query: Record<string, string | number> = {
+      direction: 'forward',
+      limit: 100,
+      type: 'contract_call',
+      contract: factory.address,
+    };
+    const queryString = Object.keys(query)
+      .map((key) => key + '=' + query[key])
+      .join('&');
+    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+    this.logger.log('////////////////////////////////////////////////////');
+    this.logger.log('////////////////////////////////////////////////////');
+    this.logger.log(`FastPullTokensService->fetchAndSyncTransactions: ${url}`);
+    this.logger.log('////////////////////////////////////////////////////');
+    this.logger.log('////////////////////////////////////////////////////');
+    // await this.syncTransactionsService.fetchAndSyncTransactions(url);
     await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
 
     // pull all tokens where price is 0, order by total_supply desc

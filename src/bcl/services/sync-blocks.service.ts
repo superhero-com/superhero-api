@@ -6,6 +6,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
 import { SyncTransactionsService } from './sync-transactions.service';
+import { ACTIVE_NETWORK } from '@/configs/network';
+import { TransactionService } from '@/transactions/services/transaction.service';
 
 @Injectable()
 export class SyncBlocksService {
@@ -25,8 +27,9 @@ export class SyncBlocksService {
     private syncedBlocksRepository: Repository<SyncedBlock>,
 
     private readonly aeSdkService: AeSdkService,
+    private readonly transactionService: TransactionService,
   ) {
-    this.doFullBlockSync();
+    // this.doFullBlockSync();
   }
 
   latestBlockNumber = 0;
@@ -48,9 +51,7 @@ export class SyncBlocksService {
       if (this.currentBlockNumber <= this.latestBlockNumber) {
         this.totalTicks++;
         if (this.totalTicks > 3) {
-          await this.syncTransactionsService.syncBlockTransactions(
-            this.currentBlockNumber,
-          );
+          await this.syncBlockTransactions(this.currentBlockNumber);
           this.totalTicks = 0;
         }
         this.logger.log('latestBlockNumber is not updated');
@@ -60,7 +61,7 @@ export class SyncBlocksService {
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
       const fromBlockNumber = this.latestBlockNumber - 10;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
-        await this.syncTransactionsService.syncBlockTransactions(i);
+        await this.syncBlockTransactions(i);
       }
     } catch (error: any) {
       this.logger.error(
@@ -74,6 +75,9 @@ export class SyncBlocksService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async doFullBlockSync() {
+    if (this.fullSyncing) {
+      return;
+    }
     this.fullSyncing = true;
     const factory = await this.communityFactoryService.getCurrentFactory();
     this.bclBlockNumber = factory.block_number;
@@ -102,8 +106,7 @@ export class SyncBlocksService {
       blockNumber++
     ) {
       this.logger.log(`Syncing block ${blockNumber}`);
-      const result =
-        await this.syncTransactionsService.syncBlockTransactions(blockNumber);
+      const result = await this.syncBlockTransactions(blockNumber);
       this.lastSyncedBlockNumber = blockNumber;
       this.remainingBlocksToSync = currentBlockNumber - blockNumber;
       await this.syncedBlocksRepository.save({
@@ -114,5 +117,35 @@ export class SyncBlocksService {
       });
     }
     this.fullSyncing = false;
+  }
+
+  async syncBlockTransactions(blockNumber: number): Promise<{
+    validated_hashes: string[];
+    callers: string[];
+  }> {
+    this.logger.log('syncBlockTransactions', blockNumber);
+    const query: Record<string, string | number> = {
+      direction: 'forward',
+      limit: 100,
+      scope: `gen:${blockNumber}`,
+      type: 'contract_call',
+    };
+    const queryString = Object.keys(query)
+      .map((key) => key + '=' + query[key])
+      .join('&');
+    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+    const result =
+      await this.syncTransactionsService.fetchAndSyncTransactions(url);
+    this.logger.log(
+      `syncBlockTransactions->transactionsHashes:`,
+      result.validated_hashes,
+    );
+    if (result.validated_hashes.length > 0) {
+      await this.transactionService.deleteNonValidTransactionsInBlock(
+        blockNumber,
+        result.validated_hashes,
+      );
+    }
+    return result;
   }
 }

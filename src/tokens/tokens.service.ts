@@ -73,22 +73,33 @@ export class TokensService {
     }
   }
 
+  /**
+   * @param url
+   * @param factory
+   * @param saleAddresses
+   * @returns
+   */
   async loadCreatedCommunityFromMdw(
     url: string,
     factory: ICommunityFactorySchema,
     saleAddresses: string[] = [],
   ): Promise<string[]> {
+    let totalRetries = 0;
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result: any;
     try {
       result = await fetchJson(url);
     } catch (error) {
+      if (totalRetries < 3) {
+        totalRetries++;
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        return this.loadCreatedCommunityFromMdw(url, factory, saleAddresses);
+      }
       this.logger.error('loadCreatedCommunityFromMdw->error::', error);
       return saleAddresses;
     }
 
-    if (!result?.data?.length) {
-      this.logger.log('loadCreatedCommunityFromMdw->no data::', url);
+    if (result?.data?.length) {
       for (const transaction of result.data) {
         if (
           transaction.tx.function !== 'create_community' ||
@@ -158,11 +169,10 @@ export class TokensService {
           tokenData.holders_count = tokenDataResponse?.holders;
         }
 
-        const token = await this.tokensRepository.save(tokenData);
-        this.contracts[saleAddress] = {
-          token,
-        };
+        await this.tokensRepository.save(tokenData);
       }
+    } else {
+      this.logger.log('loadCreatedCommunityFromMdw->no data::', url);
     }
 
     if (result.next) {

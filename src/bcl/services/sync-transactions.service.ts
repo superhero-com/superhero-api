@@ -43,35 +43,6 @@ export class SyncTransactionsService {
     );
   }
 
-  async syncBlockTransactions(blockNumber: number): Promise<{
-    validated_hashes: string[];
-    callers: string[];
-  }> {
-    this.logger.log('syncBlockTransactions', blockNumber);
-    const query: Record<string, string | number> = {
-      direction: 'forward',
-      limit: 100,
-      scope: `gen:${blockNumber}`,
-      type: 'contract_call',
-    };
-    const queryString = Object.keys(query)
-      .map((key) => key + '=' + query[key])
-      .join('&');
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    const result = await this.fetchAndSyncTransactions(url);
-    this.logger.log(
-      `syncBlockTransactions->transactionsHashes:`,
-      result.validated_hashes,
-    );
-    if (result.validated_hashes.length > 0) {
-      await this.transactionService.deleteNonValidTransactionsInBlock(
-        blockNumber,
-        result.validated_hashes,
-      );
-    }
-    return result;
-  }
-
   async fetchAndSyncTransactions(
     url: string,
     validated_hashes = [],
