@@ -45,7 +45,6 @@ export class TransactionService {
     rawTransaction: ITransaction,
     token?: Token,
     shouldBroadcast?: boolean,
-    shouldValidate?: boolean,
   ): Promise<Transaction> {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
@@ -72,7 +71,7 @@ export class TransactionService {
       })
       .getOne();
 
-    if (!!exists && (!shouldValidate || exists.verified)) {
+    if (!!exists) {
       return exists;
     }
 
@@ -136,19 +135,8 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
-      verified: false,
+      verified: moment().diff(moment(rawTransaction.microTime), 'days') >= 1,
     };
-    // if transaction 2 days old
-    if (!!exists?.id) {
-      await this.transactionRepository.update(exists.id, {
-        ...txData,
-        verified: true,
-      });
-      return exists;
-    }
-    if (moment().diff(moment(rawTransaction.microTime), 'days') >= 1) {
-      txData.verified = true;
-    }
     const transaction = this.transactionRepository.save({
       token,
       ...txData,
