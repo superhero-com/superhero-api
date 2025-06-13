@@ -80,7 +80,7 @@ export class SyncBlocksService {
     }
     this.fullSyncing = true;
     const factory = await this.communityFactoryService.getCurrentFactory();
-    this.bclBlockNumber = factory.block_number;
+    this.bclBlockNumber = factory.deployed_at_block_height;
 
     const currentBlockNumber = (
       await this.aeSdkService.sdk.getCurrentGeneration()
