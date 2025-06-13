@@ -41,7 +41,7 @@ export class FixHoldersService {
       return;
     }
     this.isSyncingBlockCallers = true;
-    // get latest 5 blocks
+    // get latest 10 blocks
     const blocks = await this.syncedBlocksRepository.find({
       order: {
         block_number: 'DESC',
@@ -56,13 +56,21 @@ export class FixHoldersService {
     this.logger.log(`Syncing ${uniqueCallers.length} callers...`);
 
     for (const caller of uniqueCallers) {
-      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
-      await this.pullAndUpdateAccountAex9Balances(url, caller);
+      try {
+        const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
+        await this.pullAndUpdateAccountAex9Balances(url, caller);
+      } catch (error: any) {
+        this.logger.error(
+          `Error syncing block callers for ${caller}`,
+          error,
+          error.stack,
+        );
+      }
     }
     this.isSyncingBlockCallers = false;
   }
 
-  async pullAndUpdateAccountAex9Balances(url: string, caller: string) {
+  private async pullAndUpdateAccountAex9Balances(url: string, caller: string) {
     const mdwResponse = await fetchJson(url);
 
     for (const item of mdwResponse.data) {

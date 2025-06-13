@@ -40,7 +40,7 @@ export class FixFailedTransactionsService {
     this.fixingFailedTransactions = false;
   }
 
-  async fixFailedTransaction(failedTransaction: FailedTransaction) {
+  private async fixFailedTransaction(failedTransaction: FailedTransaction) {
     const { hash, retries } = failedTransaction;
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${hash}`;
     try {
@@ -56,7 +56,6 @@ export class FixFailedTransactionsService {
       }
       await this.transactionService.saveTransaction(transaction);
       await this.failedTransactionsRepository.delete(failedTransaction.hash);
-      this.logger.log(`FixFailedTransactionsService: ${hash} - success`);
       // at this point we can re-sync the community transactions
       if (transaction?.tx?.function === TX_FUNCTIONS.create_community) {
         await this.syncCommunityTransactions(transaction.tx.contractId);
@@ -72,12 +71,12 @@ export class FixFailedTransactionsService {
     }
   }
 
-  async syncCommunityTransactions(contractId: string) {
-    this.logger.log('syncCommunityTransactions', contractId);
+  private async syncCommunityTransactions(contractAddress: string) {
+    this.logger.log('syncCommunityTransactions', contractAddress);
     const query: Record<string, string | number> = {
       direction: 'forward',
       limit: 100,
-      contract: contractId,
+      contract: contractAddress,
       type: 'contract_call',
     };
     const queryString = Object.keys(query)
