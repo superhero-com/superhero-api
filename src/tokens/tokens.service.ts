@@ -115,10 +115,15 @@ export class TokensService {
         saleAddresses.push(saleAddress);
 
         const tokenExists = await this.findByAddress(saleAddress);
-        if (tokenExists?.id) {
-          continue;
-        }
         const tokenName = transaction?.tx?.arguments?.[1]?.value;
+
+        if (tokenExists?.id) {
+          if (tokenExists.name !== tokenName) {
+            await this.tokensRepository.delete(tokenExists.id);
+          } else {
+            continue;
+          }
+        }
 
         const decodedData = this.factoryContract?.contract?.$decodeEvents(
           transaction?.tx?.log,

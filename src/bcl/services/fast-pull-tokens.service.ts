@@ -22,7 +22,7 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
   ) {
-    this.pullLatestCreatedTokens();
+    this.fastPullTokens();
   }
 
   isPullingLatestCreatedTokens = false;
@@ -64,15 +64,7 @@ export class FastPullTokensService {
     const factory = await this.communityFactoryService.getCurrentFactory();
 
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`;
-    const saleAddresses = await this.tokensService.loadCreatedCommunityFromMdw(
-      url,
-      factory,
-    );
-
-    // delete all tokens where sale_address is not in saleAddresses
-    // await this.tokensRepository.delete({
-    //  sale_address: Not(In(saleAddresses)),
-    // });
+    await this.tokensService.loadCreatedCommunityFromMdw(url, factory);
 
     // pull all tokens where price is 0, order by total_supply desc
     const tokens = await this.tokensRepository.find({
