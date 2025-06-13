@@ -128,14 +128,6 @@ export class TokensService {
         const tokenExists = await this.findByAddress(saleAddress);
         const tokenName = transaction?.tx?.arguments?.[1]?.value;
 
-        if (tokenExists?.id) {
-          if (tokenExists.name !== tokenName) {
-            await this.tokensRepository.delete(tokenExists.id);
-          } else {
-            continue;
-          }
-        }
-
         const decodedData = this.factoryContract?.contract?.$decodeEvents(
           transaction?.tx?.log,
         );
@@ -150,6 +142,7 @@ export class TokensService {
           created_at: moment(transaction?.micro_time).toDate(),
           name: tokenName,
           symbol: tokenName,
+          create_tx_hash: transaction?.tx?.hash,
         };
 
         const fungibleToken = decodedData?.find(
@@ -169,7 +162,11 @@ export class TokensService {
           tokenData.holders_count = tokenDataResponse?.holders;
         }
 
-        await this.tokensRepository.save(tokenData);
+        if (tokenExists?.id) {
+          await this.tokensRepository.update(tokenExists.id, tokenData);
+        } else {
+          await this.tokensRepository.save(tokenData);
+        }
       }
     } else {
       this.logger.log('loadCreatedCommunityFromMdw->no data::', url);

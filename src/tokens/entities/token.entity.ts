@@ -50,6 +50,16 @@ export class Token {
   })
   factory_address: string;
 
+  @Column({
+    nullable: true,
+  })
+  create_tx_hash: string;
+
+  @Column({
+    nullable: true,
+  })
+  dao_address: string;
+
   @Index()
   @Column({
     unique: true,

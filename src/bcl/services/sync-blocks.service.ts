@@ -29,7 +29,7 @@ export class SyncBlocksService {
     private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
   ) {
-    // this.doFullBlockSync();
+    this.doFullBlockSync();
   }
 
   latestBlockNumber = 0;
