@@ -26,6 +26,10 @@ export class FixHoldersService {
 
     private readonly syncBlocksService: SyncBlocksService,
   ) {
+    //
+  }
+
+  onModuleInit() {
     this.syncLatestBlockCallers();
     this.fixBrokenHolders();
   }
@@ -185,11 +189,7 @@ export class FixHoldersService {
       const data = await fetchJson(holderUrl);
       holdersData.push({
         ...holder,
-        amount:
-          data?.account ==
-          'ak_2Eu8n8MWvZ2dQmsKu1zeabZjEG6F1vc1S5syHZkvAZHTj9yaKM'
-            ? 0
-            : data?.amount,
+        amount: data?.amount,
       });
     }
 

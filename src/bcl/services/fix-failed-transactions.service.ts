@@ -22,7 +22,7 @@ export class FixFailedTransactionsService {
     private readonly transactionService: TransactionService,
     private readonly syncTransactionsService: SyncTransactionsService,
   ) {
-    this.fixFailedTransactions();
+    //
   }
 
   @Cron(CronExpression.EVERY_30_MINUTES)

@@ -29,6 +29,10 @@ export class SyncBlocksService {
     private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
   ) {
+    //
+  }
+
+  onModuleInit() {
     this.doFullBlockSync();
   }
 

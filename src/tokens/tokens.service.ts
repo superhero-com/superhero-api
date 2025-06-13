@@ -101,71 +101,73 @@ export class TokensService {
 
     if (result?.data?.length) {
       for (const transaction of result.data) {
-        if (
-          transaction.tx.function !== 'create_community' ||
-          transaction?.tx?.return_type === 'revert'
-        ) {
-          continue;
-        }
-        if (
-          // If it's not supported collection, skip
-          !Object.keys(factory.collections).includes(
-            transaction.tx.arguments[0].value,
-          )
-        ) {
-          continue;
-        }
-        // handled reverted transactions
-        if (
-          !transaction?.tx?.return?.value?.length ||
-          transaction.tx.return.value.length < 2
-        ) {
-          continue;
-        }
-        const daoAddress = transaction?.tx?.return?.value[0]?.value;
-        const saleAddress = transaction?.tx?.return?.value[1]?.value;
-        saleAddresses.push(saleAddress);
+        try {
+          const tx = transaction.tx;
+          if (
+            tx.function !== 'create_community' ||
+            tx?.return_type === 'revert' ||
+            !tx?.return?.value?.length ||
+            tx.return.value.length < 2
+          ) {
+            continue;
+          }
+          if (
+            // If it's not supported collection, skip
+            !Object.keys(factory.collections).includes(tx.arguments[0].value)
+          ) {
+            continue;
+          }
+          const daoAddress = tx?.return?.value[0]?.value;
+          const saleAddress = tx?.return?.value[1]?.value;
+          saleAddresses.push(saleAddress);
 
-        const tokenExists = await this.findByAddress(saleAddress);
-        const tokenName = transaction?.tx?.arguments?.[1]?.value;
+          const tokenExists = await this.findByAddress(saleAddress);
+          const tokenName = transaction?.tx?.arguments?.[1]?.value;
 
-        const decodedData = this.factoryContract?.contract?.$decodeEvents(
-          transaction?.tx?.log,
-        );
-        const tokenData = {
-          total_supply: new BigNumber(0),
-          holders_count: 0,
-          address: null,
-          dao_address: daoAddress,
-          sale_address: saleAddress,
-          factory_address: factory.address,
-          creator_address: transaction?.tx?.caller_id,
-          created_at: moment(transaction?.micro_time).toDate(),
-          name: tokenName,
-          symbol: tokenName,
-          create_tx_hash: transaction?.tx?.hash,
-        };
-
-        const fungibleToken = decodedData?.find(
-          (event) =>
-            event.contract.name === 'FungibleTokenFull' &&
-            event.contract.address !== factory.bctsl_aex9_address,
-        );
-        if (fungibleToken) {
-          tokenData.address = fungibleToken.contract.address;
-          const tokenDataResponse = await fetchJson(
-            `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+          const decodedData = this.factoryContract?.contract?.$decodeEvents(
+            tx?.log,
           );
-          tokenData.total_supply = new BigNumber(
-            tokenDataResponse?.event_supply,
-          );
-          tokenData.holders_count = tokenDataResponse?.holders;
-        }
+          const tokenData = {
+            total_supply: new BigNumber(0),
+            holders_count: 0,
+            address: null,
+            dao_address: daoAddress,
+            sale_address: saleAddress,
+            factory_address: factory.address,
+            creator_address: tx?.caller_id,
+            created_at: moment(tx?.micro_time).toDate(),
+            name: tokenName,
+            symbol: tokenName,
+            create_tx_hash: tx?.hash,
+          };
 
-        if (tokenExists?.id) {
-          await this.tokensRepository.update(tokenExists.id, tokenData);
-        } else {
-          await this.tokensRepository.save(tokenData);
+          const fungibleToken = decodedData?.find(
+            (event) =>
+              event.contract.name === 'FungibleTokenFull' &&
+              event.contract.address !== factory.bctsl_aex9_address,
+          );
+          if (fungibleToken) {
+            tokenData.address = fungibleToken.contract.address;
+            const tokenDataResponse = await fetchJson(
+              `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+            );
+            tokenData.total_supply = new BigNumber(
+              tokenDataResponse?.event_supply,
+            );
+            tokenData.holders_count = tokenDataResponse?.holders;
+          }
+
+          if (tokenExists?.id) {
+            await this.tokensRepository.update(tokenExists.id, tokenData);
+          } else {
+            await this.tokensRepository.save(tokenData);
+          }
+        } catch (error: any) {
+          this.logger.error(
+            `loadCreatedCommunityFromMdw->error:: for tx: ${transaction?.tx?.hash}`,
+            error?.message,
+            error?.stack,
+          );
         }
       }
     } else {

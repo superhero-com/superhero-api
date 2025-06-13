@@ -20,6 +20,10 @@ export class SyncTransactionsService {
     @InjectRepository(FailedTransaction)
     private failedTransactionsRepository: Repository<FailedTransaction>,
   ) {
+    //
+  }
+
+  onModuleInit() {
     this.setupLiveSync();
   }
 

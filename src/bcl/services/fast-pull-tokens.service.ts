@@ -16,6 +16,10 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
   ) {
+    //
+  }
+
+  onModuleInit() {
     this.fastPullTokens();
   }
 
