@@ -199,6 +199,7 @@ export interface IMiddlewareWebSocketSubscriptionMessage {
 export type ICommunityFactorySchema = {
   address: Encoded.ContractAddress;
   deployed_at_block_height: number;
+  bctsl_aex9_address: Encoded.ContractAddress;
   collections: {
     [key: `${string}-${Encoded.AccountAddress}`]: {
       id: `${string}-${Encoded.AccountAddress}`;

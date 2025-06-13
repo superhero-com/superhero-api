@@ -108,6 +108,7 @@ export class TokensService {
           continue;
         }
         if (
+          // If it's not supported collection, skip
           !Object.keys(factory.collections).includes(
             transaction.tx.arguments[0].value,
           )
@@ -148,8 +149,7 @@ export class TokensService {
         const fungibleToken = decodedData?.find(
           (event) =>
             event.contract.name === 'FungibleTokenFull' &&
-            event.contract.address !==
-              'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
+            event.contract.address !== factory.bctsl_aex9_address,
         );
         if (fungibleToken) {
           tokenData.address = fungibleToken.contract.address;

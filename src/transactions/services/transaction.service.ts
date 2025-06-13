@@ -46,7 +46,7 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
     shouldValidate?: boolean,
-  ): Promise<Transaction | undefined> {
+  ): Promise<Transaction> {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
     }
@@ -183,48 +183,42 @@ export class TransactionService {
     let total_supply = new BigNumber(0);
     let protocol_reward = new BigNumber(0);
 
-    if (decodedData?.length) {
-      try {
-        if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
-          const mints = decodedData.filter((data) => data.name === 'Mint');
-          protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-          volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-          amount = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-          );
-          total_supply = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-          ).plus(volume);
-        }
+    if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+      const mints = decodedData.filter((data) => data.name === 'Mint');
+      protocol_reward = new BigNumber(toAe(mints[0].args[1]));
+      volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+      amount = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+      );
+      total_supply = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+      ).plus(volume);
+    }
 
-        if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-          if (decodedData.find((data) => data.name === 'PriceChange')) {
-            const mints = decodedData.filter((data) => data.name === 'Mint');
-            protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-            volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-            amount = new BigNumber(
-              toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-            );
-            total_supply = new BigNumber(
-              toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-            ).plus(volume);
-          }
-        }
-
-        if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
-          volume = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
-          );
-          amount = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
-          );
-          total_supply = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
-          ).minus(volume);
-        }
-      } catch (error) {
-        //
+    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+      if (decodedData.find((data) => data.name === 'PriceChange')) {
+        const mints = decodedData.filter((data) => data.name === 'Mint');
+        protocol_reward = new BigNumber(toAe(mints[0].args[1]));
+        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+        amount = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+        );
+        total_supply = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+        ).plus(volume);
       }
+    }
+
+    if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+      volume = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
+      );
+      amount = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
+      );
+      total_supply = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
+      ).minus(volume);
     }
 
     return {
