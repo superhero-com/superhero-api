@@ -1,13 +1,15 @@
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { fetchJson } from '@/utils/common';
+import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Equal, Not, Repository } from 'typeorm';
+import { Queue } from 'bull';
+import { Equal, In, Not, Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
-import { SyncBlocksService } from './sync-blocks.service';
 
 @Injectable()
 export class FixHoldersService {
@@ -24,7 +26,8 @@ export class FixHoldersService {
     @InjectRepository(SyncedBlock)
     private syncedBlocksRepository: Repository<SyncedBlock>,
 
-    private readonly syncBlocksService: SyncBlocksService,
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
   ) {
     //
   }
@@ -34,6 +37,18 @@ export class FixHoldersService {
     this.fixBrokenHolders();
   }
 
+  async syncTokenHolders(token: Token) {
+    await this.syncTokenHoldersQueue.add(
+      {
+        saleAddress: token.sale_address,
+      },
+      {
+        jobId: `syncTokenHolders-${token.sale_address}`,
+        removeOnComplete: true,
+      },
+    );
+  }
+
   isSyncingBlockCallers = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async syncLatestBlockCallers() {
@@ -41,21 +56,29 @@ export class FixHoldersService {
       return;
     }
     this.isSyncingBlockCallers = true;
-    // get latest 10 blocks
+    // get latest 20 blocks
     const blocks = await this.syncedBlocksRepository.find({
       order: {
         block_number: 'DESC',
       },
-      take: 10,
+      take: 20,
     });
 
     // unique callers
     const callers = blocks.map((block) => block.callers).flat();
     // unique callers
-    const uniqueCallers = [...new Set(callers)];
+    const uniqueCallers = callers;
     this.logger.log(`Syncing ${uniqueCallers.length} callers...`);
-
+    this.logger.log('///////////////////////////////////////////////');
+    this.logger.log('///////////////////////////////////////////////');
+    this.logger.log('///////////////////////////////////////////////');
+    this.logger.log('UNIQUE CALLERS', uniqueCallers);
+    this.logger.log('///////////////////////////////////////////////');
+    this.logger.log('///////////////////////////////////////////////');
     for (const caller of uniqueCallers) {
+      this.logger.log('///////////////////////////////////////////////');
+      this.logger.log('CALLER::', caller);
+      this.logger.log('///////////////////////////////////////////////');
       try {
         const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
         await this.pullAndUpdateAccountAex9Balances(url, caller);
@@ -123,43 +146,9 @@ export class FixHoldersService {
     this.fixingTokensHolders = true;
     this.logger.log('Fixing broken holders...');
 
-    await this.checkTokensWithMismatchingHolderCount();
-    await this.checkTokensWithNoHolders();
     await this.checkTokensWithMismatchingSupply();
     this.logger.log('Fixing broken holders... done');
     this.fixingTokensHolders = false;
-  }
-
-  async checkTokensWithNoHolders() {
-    const tokens = await this.tokensRepository.find({
-      where: {
-        holders_count: 0,
-      },
-    });
-    for (const token of tokens) {
-      await this.fullResyncHolders(token);
-    }
-  }
-
-  async checkTokensWithMismatchingHolderCount() {
-    const tokens = await this.tokensRepository
-      .createQueryBuilder('token')
-      .leftJoin('token.holders', 'holder')
-      .select('token.id')
-      .addSelect('token.holders_count')
-      .addSelect('COUNT(holder.id)', 'actual_holders_count')
-      .groupBy('token.id')
-      .having('token.holders_count != COUNT(holder.id)')
-      .getRawMany();
-
-    for (const token of tokens) {
-      const tokenEntity = await this.tokensRepository.findOne({
-        where: { id: token.token_id },
-      });
-      if (tokenEntity) {
-        await this.fullResyncHolders(tokenEntity);
-      }
-    }
   }
 
   // check if current_supply is different from the total holders sum, if not do a holders re-sync
@@ -191,16 +180,23 @@ export class FixHoldersService {
       return;
     }
 
+    const addresses = data.map((item) => item.account_id);
     // delete all holders for this token
-    await this.tokenHolderRepository.delete({ token: { id: token.id } });
+    await this.tokenHolderRepository.delete({
+      address: Not(In(addresses)),
+      token: { id: token.id },
+    });
 
     const holders = data.map((item) => ({
       address: item.account_id,
       balance: item.amount,
     }));
 
-    // insert new holders
-    await this.tokenHolderRepository.insert(holders);
+    // update or insert holders
+    await this.tokenHolderRepository.upsert(holders, {
+      conflictPaths: ['address'],
+      skipUpdateIfNoValuesChanged: true,
+    });
 
     // update token holders count
     await this.tokensRepository.update(token.id, {

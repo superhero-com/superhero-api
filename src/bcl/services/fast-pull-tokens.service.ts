@@ -14,6 +14,7 @@ import BigNumber from 'bignumber.js';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import moment from 'moment';
 import { Repository } from 'typeorm';
+import { FixHoldersService } from './fix-holders.service';
 
 @Injectable()
 export class FastPullTokensService {
@@ -27,6 +28,8 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
     private readonly transactionService: TransactionService,
+
+    private readonly fixHoldersService: FixHoldersService,
 
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -80,7 +83,20 @@ export class FastPullTokensService {
     }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-    await this.loadCreatedCommunityFromMdw(url, factory);
+    const communities = await this.loadCreatedCommunityFromMdw(url, factory);
+
+    const tokens = communities.sort((a, b) => {
+      if (!a.total_supply || !b.total_supply) {
+        return 0;
+      }
+      return b.total_supply.minus(a.total_supply).toNumber();
+    });
+
+    for (const token of tokens) {
+      const liveTokenData = await this.tokensService.getTokeLivePrice(token);
+      await this.tokensRepository.update(token.id, liveTokenData);
+      await this.fixHoldersService.syncTokenHolders(token);
+    }
 
     this.pullingTokens = false;
   }
@@ -94,8 +110,8 @@ export class FastPullTokensService {
   private async loadCreatedCommunityFromMdw(
     url: string,
     factory: ICommunityFactorySchema,
-    saleAddresses: string[] = [],
-  ): Promise<string[]> {
+    tokens: Token[] = [],
+  ): Promise<Token[]> {
     let totalRetries = 0;
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result: any;
@@ -105,10 +121,10 @@ export class FastPullTokensService {
       if (totalRetries < 3) {
         totalRetries++;
         await new Promise((resolve) => setTimeout(resolve, 3000));
-        return this.loadCreatedCommunityFromMdw(url, factory, saleAddresses);
+        return this.loadCreatedCommunityFromMdw(url, factory, tokens);
       }
       this.logger.error('loadCreatedCommunityFromMdw->error::', error);
-      return saleAddresses;
+      return tokens;
     }
 
     if (result?.data?.length) {
@@ -131,9 +147,9 @@ export class FastPullTokensService {
           }
           const daoAddress = tx?.return?.value[0]?.value;
           const saleAddress = tx?.return?.value[1]?.value;
-          saleAddresses.push(saleAddress);
 
-          const tokenExists = await this.tokensService.findByAddress(saleAddress);
+          const tokenExists =
+            await this.tokensService.findByAddress(saleAddress);
           const tokenName = transaction?.tx?.arguments?.[1]?.value;
 
           const decodedData = this.factoryContract?.contract?.$decodeEvents(
@@ -158,14 +174,18 @@ export class FastPullTokensService {
               event.contract.name === 'FungibleTokenFull' &&
               event.contract.address !== factory.bctsl_aex9_address,
           );
-          if (fungibleToken) {
-            tokenData.address = fungibleToken.contract.address;
+          tokenData.address =
+            fungibleToken?.contract?.address || tokenExists?.address;
+          if (tokenData.address) {
             const tokenDataResponse = await fetchJson(
               `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
             );
-            tokenData.total_supply = new BigNumber(
-              tokenDataResponse?.event_supply,
-            );
+            if (!tokenExists?.total_supply?.gt(0)) {
+              tokenData.total_supply = new BigNumber(
+                tokenDataResponse?.event_supply,
+              );
+            }
+
             tokenData.holders_count = tokenDataResponse?.holders;
           }
 
@@ -180,6 +200,7 @@ export class FastPullTokensService {
             camelcaseKeysDeep(transaction),
             token,
           );
+          tokens.push(token);
         } catch (error: any) {
           this.logger.error(
             `loadCreatedCommunityFromMdw->error:: for tx: ${transaction?.tx?.hash}`,
@@ -196,9 +217,9 @@ export class FastPullTokensService {
       return await this.loadCreatedCommunityFromMdw(
         `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
         factory,
-        saleAddresses,
+        tokens,
       );
     }
-    return saleAddresses;
+    return tokens;
   }
 }

@@ -108,6 +108,7 @@ export class TokensService {
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
       .orWhere('token.name = :address', { address })
+      .orWhere('token.symbol = :address', { address })
       .getOne();
 
     if (!token) {

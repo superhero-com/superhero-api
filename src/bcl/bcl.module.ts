@@ -1,6 +1,8 @@
 import { AeModule } from '@/ae/ae.module';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokensModule } from '@/tokens/tokens.module';
 import { TransactionsModule } from '@/transactions/transactions.module';
+import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DebugFailedTransactionsController } from './controllers/debug-failed-transactions.controller';
@@ -20,6 +22,9 @@ import { VerifyTransactionsService } from './services/verify-transactions.servic
     TokensModule,
     TransactionsModule,
     TypeOrmModule.forFeature([SyncedBlock, FailedTransaction]),
+    BullModule.registerQueue({
+      name: SYNC_TOKEN_HOLDERS_QUEUE,
+    }),
   ],
   providers: [
     SyncTransactionsService,
