@@ -180,10 +180,10 @@ export class FixHoldersService {
       return;
     }
 
-    const addresses = data.map((item) => item.account_id);
+    // const addresses = data.map((item) => item.account_id);
     // delete all holders for this token
     await this.tokenHolderRepository.delete({
-      address: Not(In(addresses)),
+      // address: Not(In(addresses)),
       token: { id: token.id },
     });
 
@@ -193,10 +193,7 @@ export class FixHoldersService {
     }));
 
     // update or insert holders
-    await this.tokenHolderRepository.upsert(holders, {
-      conflictPaths: ['address'],
-      skipUpdateIfNoValuesChanged: true,
-    });
+    await this.tokenHolderRepository.insert(holders);
 
     // update token holders count
     await this.tokensRepository.update(token.id, {
