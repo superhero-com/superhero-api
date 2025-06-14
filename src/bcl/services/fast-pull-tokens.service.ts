@@ -150,7 +150,7 @@ export class FastPullTokensService {
 
           const tokenExists =
             await this.tokensService.findByAddress(saleAddress);
-          const tokenName = transaction?.tx?.arguments?.[1]?.value;
+          const tokenName = tx?.arguments?.[1]?.value;
 
           const decodedData = this.factoryContract?.contract?.$decodeEvents(
             tx?.log,
@@ -163,10 +163,10 @@ export class FastPullTokensService {
             sale_address: saleAddress,
             factory_address: factory.address,
             creator_address: tx?.caller_id,
-            created_at: moment(tx?.micro_time).toDate(),
+            created_at: moment(transaction?.micro_time).toDate(),
             name: tokenName,
             symbol: tokenName,
-            create_tx_hash: tx?.hash,
+            create_tx_hash: transaction?.hash,
           };
 
           const fungibleToken = decodedData?.find(
