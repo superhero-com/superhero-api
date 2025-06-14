@@ -468,4 +468,32 @@ export class TokensService {
     const result = await this.tokensRepository.query(rankedQuery);
     return new Map(result.map((token) => [token.id, token.rank]));
   }
+
+  async getTokenRanksByAex9Address(
+    aex9Addresses: string[],
+  ): Promise<Map<string, number>> {
+    if (!aex9Addresses.length) {
+      return new Map();
+    }
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          t.*,
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
+              t.market_cap DESC,
+              t.created_at ASC
+          ) AS INTEGER) as rank
+        FROM token t
+        WHERE t.factory_address = '${factory.address}'
+        AND t.unlisted = false
+      )
+      SELECT * FROM ranked_tokens WHERE address IN (${aex9Addresses.join(',')})
+    `;
+
+    const result = await this.tokensRepository.query(rankedQuery);
+    return new Map(result.map((token) => [token.address, token.rank]));
+  }
 }

@@ -108,7 +108,7 @@ export class FixHoldersService {
         }
         await this.tokenHolderRepository.update(
           {
-            token: { id: token.id },
+            aex9_address: token.address,
             address: caller,
           },
           {
@@ -161,7 +161,9 @@ export class FixHoldersService {
     for (const token of tokens) {
       const holdersSum = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
-        .where('token_holder.tokenId = :tokenId', { tokenId: token.id })
+        .where('token_holder.aex9_address = :aex9_address', {
+          aex9_address: token.address,
+        })
         .select('SUM(token_holder.balance)')
         .getRawOne()
         .then((res) => res.sum);
@@ -183,13 +185,13 @@ export class FixHoldersService {
     // const addresses = data.map((item) => item.account_id);
     // delete all holders for this token
     await this.tokenHolderRepository.delete({
-      // address: Not(In(addresses)),
-      token: { id: token.id },
+      aex9_address: token.address,
     });
 
     const holders = data.map((item) => ({
       address: item.account_id,
       balance: item.amount,
+      aex9_address: token.address,
     }));
 
     // update or insert holders

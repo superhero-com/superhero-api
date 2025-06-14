@@ -1,5 +1,6 @@
-import { BigNumber } from 'bignumber.js';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import { BigNumber } from 'bignumber.js';
 import {
   Column,
   CreateDateColumn,
@@ -9,8 +10,6 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
-import { TokenHolder } from './token-holders.entity';
-import { Transaction } from '@/transactions/entities/transaction.entity';
 
 @Entity()
 export class Token {
@@ -35,9 +34,6 @@ export class Token {
     default: 0,
   })
   tx_count: number;
-
-  @OneToMany(() => TokenHolder, (tokenHolder) => tokenHolder.token)
-  holders: TokenHolder[];
 
   @Column({
     default: 0,

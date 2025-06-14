@@ -51,7 +51,7 @@ export class SyncTokenHoldersQueue {
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
     const token = await this.tokenService.getToken(saleAddress);
     await this.tokenHoldersRepository.delete({
-      token: token,
+      aex9_address: token.address,
     });
     const totalHolders = await this.loadData(
       token,
@@ -66,10 +66,17 @@ export class SyncTokenHoldersQueue {
     const response = await fetchJson(url);
     if (!response.data) {
       if (response.error?.includes('invalid')) {
-        const { tokenContractInstance } =
+        const { tokenContractInstance, instance } =
           await this.tokenService.getTokenContractsBySaleAddress(
             token.sale_address as Encoded.ContractAddress,
           );
+        if (token.address) {
+          const tokenMetaInfo = await instance.metaInfo();
+          await this.tokensRepository.update(token.id, {
+            address: tokenMetaInfo.token.address,
+          });
+          token.address = tokenMetaInfo.token.address;
+        }
 
         const holders = await tokenContractInstance
           .balances()
@@ -77,7 +84,7 @@ export class SyncTokenHoldersQueue {
           .then((res) => {
             return Array.from(res)
               .map(([key, value]: any) => ({
-                token,
+                aex9_address: token.address,
                 address: key,
                 balance: new BigNumber(value),
               }))
@@ -85,6 +92,10 @@ export class SyncTokenHoldersQueue {
               .sort((a, b) => b.balance.minus(a.balance).toNumber());
           });
 
+        this.logger.debug(
+          `SyncTokenHoldersQueue->holders:${holders.length}`,
+          holders,
+        );
         await this.tokenHoldersRepository.save(holders);
         return holders.length;
       }
@@ -108,9 +119,8 @@ export class SyncTokenHoldersQueue {
           );
         }
         await this.tokenHoldersRepository.save({
-          token: {
-            id: token.id,
-          },
+          aex9_address:
+            holderData?.contract || holderData?.contract_id || token.address,
           address: holderData?.account || holder.account_id,
           balance: new BigNumber(holderData?.amount || 0),
         });

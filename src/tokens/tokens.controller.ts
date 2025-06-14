@@ -182,8 +182,8 @@ export class TokensController {
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
     queryBuilder.orderBy(`token_holder.balance`, 'DESC');
-    queryBuilder.where('token_holder.tokenId = :tokenId', {
-      tokenId: token.id,
+    queryBuilder.where('token_holder.aex9_address = :aex9_address', {
+      aex9_address: token.address,
     });
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
