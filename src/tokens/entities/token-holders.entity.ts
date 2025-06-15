@@ -1,14 +1,12 @@
+import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import BigNumber from 'bignumber.js';
 import {
   Column,
   CreateDateColumn,
   Entity,
   Index,
-  ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
-import BigNumber from 'bignumber.js';
-import { Token } from './token.entity';
 
 @Entity()
 export class TokenHolder {
@@ -16,10 +14,8 @@ export class TokenHolder {
   id: number;
 
   @Index()
-  @ManyToOne(() => Token, (token) => token.holders, {
-    onDelete: 'CASCADE',
-  })
-  token: Token;
+  @Column()
+  aex9_address: string;
 
   @Index()
   @Column()

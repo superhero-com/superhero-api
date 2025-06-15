@@ -80,7 +80,7 @@ export class TokensService {
     );
     const priceData = await this.getTokeLivePrice(token);
 
-    this.tokensRepository.update(token.id, {
+    this.tokensRepository.update(token.sale_address, {
       address: contract?.tokenContractInstance?.$options.address,
       ...priceData,
     });
@@ -91,12 +91,20 @@ export class TokensService {
   }
 
   async update(token: Token, data): Promise<Token> {
-    await this.tokensRepository.update(token.id, data);
+    await this.tokensRepository.update(token.sale_address, data);
     return this.findByAddress(token.sale_address);
   }
 
-  async findById(id: number): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ id });
+  async findById(sale_address: string): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ sale_address });
+  }
+
+  async findByNameOrSymbol(name: string) {
+    return this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.name = :name', { name })
+      .orWhere('token.symbol = :name', { name })
+      .getOne();
   }
 
   async findByAddress(
@@ -122,7 +130,7 @@ export class TokensService {
     const rankedQuery = `
       WITH ranked_tokens AS (
         SELECT 
-          id,
+          sale_address,
           CAST(RANK() OVER (
             ORDER BY 
               CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
@@ -134,7 +142,7 @@ export class TokensService {
       )
       SELECT rank
       FROM ranked_tokens
-      WHERE id = ${token.id}
+      WHERE sale_address = '${token.sale_address}'
     `;
 
     const [rankResult] = await this.tokensRepository.query(rankedQuery);
@@ -144,15 +152,15 @@ export class TokensService {
     } as Token & { rank: number };
   }
 
-  findOne(id: number): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ id });
+  findOne(sale_address: string): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ sale_address });
   }
 
   async syncTokenPrice(token: Token): Promise<void> {
     try {
       const data = await this.getTokeLivePrice(token);
 
-      await this.tokensRepository.update(token.id, data as any);
+      await this.tokensRepository.update(token.sale_address, data as any);
       // update token ranks
 
       // re-fetch token
@@ -173,6 +181,22 @@ export class TokensService {
     }
 
     return this.createToken(address as Encoded.ContractAddress);
+  }
+
+  async getTokenAex9Address(token: Token): Promise<string> {
+    if (token.address) {
+      return token.address;
+    }
+    const { instance } = await this.getTokenContractsBySaleAddress(
+      token.sale_address as Encoded.ContractAddress,
+    );
+    const metaInfo = await instance.metaInfo();
+    if (metaInfo.token.address) {
+      await this.tokensRepository.update(token.sale_address, {
+        address: metaInfo.token.address,
+      });
+    }
+    return metaInfo.token.address;
   }
 
   async createToken(
@@ -218,7 +242,7 @@ export class TokensService {
     const factoryAddress = await this.updateTokenFactoryAddress(newToken);
 
     if (!factoryAddress) {
-      await this.tokensRepository.delete(newToken.id);
+      await this.tokensRepository.delete(newToken.sale_address);
       throw new Error(
         `for sale address:${saleAddress}, failed to update factory address`,
       );
@@ -364,7 +388,7 @@ export class TokensService {
     if (transaction?.tx.arguments?.[0]?.value) {
       tokenData['collection'] = transaction?.tx.arguments[0].value;
     }
-    await this.tokensRepository.update(token.id, tokenData);
+    await this.tokensRepository.update(token.sale_address, tokenData);
 
     return transaction.tx.contractId;
   }
@@ -423,7 +447,7 @@ export class TokensService {
       )
       SELECT all_ranked_tokens.*
       FROM all_ranked_tokens
-      INNER JOIN filtered_tokens ON all_ranked_tokens.id = filtered_tokens.id
+      INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
       ORDER BY all_ranked_tokens.${orderBy} ${orderDirection}
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}
@@ -443,7 +467,7 @@ export class TokensService {
     };
   }
 
-  async getTokenRanks(tokenIds: number[]): Promise<Map<number, number>> {
+  async getTokenRanks(tokenIds: string[]): Promise<Map<string, number>> {
     if (!tokenIds.length) {
       return new Map();
     }
@@ -462,10 +486,38 @@ export class TokensService {
         WHERE t.factory_address = '${factory.address}'
         AND t.unlisted = false
       )
-      SELECT * FROM ranked_tokens WHERE id IN (${tokenIds.join(',')})
+      SELECT * FROM ranked_tokens WHERE sale_address IN (${tokenIds.join(',')})
     `;
 
     const result = await this.tokensRepository.query(rankedQuery);
-    return new Map(result.map((token) => [token.id, token.rank]));
+    return new Map(result.map((token) => [token.sale_address, token.rank]));
+  }
+
+  async getTokenRanksByAex9Address(
+    aex9Addresses: string[],
+  ): Promise<Map<string, number>> {
+    if (!aex9Addresses.length) {
+      return new Map();
+    }
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          t.*,
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
+              t.market_cap DESC,
+              t.created_at ASC
+          ) AS INTEGER) as rank
+        FROM token t
+        WHERE t.factory_address = '${factory.address}'
+        AND t.unlisted = false
+      )
+      SELECT * FROM ranked_tokens WHERE address IN (${aex9Addresses.join(',')})
+    `;
+
+    const result = await this.tokensRepository.query(rankedQuery);
+    return new Map(result.map((token) => [token.address, token.rank]));
   }
 }

@@ -49,18 +49,18 @@ export class TransactionService {
     if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
       return;
     }
-    // prevent transaction duplication
-    let saleAddress = rawTransaction.tx.contractId;
-    if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
-      saleAddress = rawTransaction.tx.return.value[1].value;
-    }
+    let saleAddress;
+    if (token?.sale_address) {
+      saleAddress = token.sale_address;
+    } else {
+      saleAddress = rawTransaction.tx.contractId;
+      if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
+        saleAddress = rawTransaction.tx.return.value[1].value;
+      }
 
-    /**
-     * if the token doesn't exists get token will create it and call sync token
-     * transactions, if the token exists it will just return the token.
-     * this will cause create community transaction to be saved twice.
-     */
-    if (!token) {
+      /**
+       * if the token doesn't exists get token will create it.
+       */
       token = await this.tokenService.getToken(saleAddress);
     }
 
@@ -122,6 +122,9 @@ export class TransactionService {
       ]);
 
     const txData = {
+      token: {
+        sale_address: saleAddress,
+      },
       tx_type: rawTransaction.tx.function,
       tx_hash: rawTransaction.hash,
       block_height: rawTransaction.blockHeight,
@@ -137,10 +140,7 @@ export class TransactionService {
       created_at: moment(rawTransaction.microTime).toDate(),
       verified: moment().diff(moment(rawTransaction.microTime), 'days') >= 1,
     };
-    const transaction = this.transactionRepository.save({
-      token,
-      ...txData,
-    } as any);
+    const transaction = await this.transactionRepository.save(txData);
 
     if (!this.isTokenSupportedCollection(token)) {
       return transaction;
@@ -262,8 +262,8 @@ export class TransactionService {
   async getTokenTransactionsCount(token: Token): Promise<number> {
     const queryBuilder = this.transactionRepository
       .createQueryBuilder('token_transactions')
-      .where('token_transactions."tokenId" = :token_id', {
-        token_id: token.id,
+      .where('token_transactions."sale_address" = :sale_address', {
+        sale_address: token.sale_address,
       });
     return queryBuilder.getCount();
   }
@@ -297,8 +297,8 @@ export class TransactionService {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
-        .where('token_holders."tokenId" = :token_id', {
-          token_id: token.id,
+        .where('token_holders."sale_address" = :sale_address', {
+          sale_address: token.sale_address,
         })
         .andWhere('token_holders."address" = :address', {
           address: rawTransaction.tx.callerId,

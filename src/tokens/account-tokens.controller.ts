@@ -68,7 +68,7 @@ export class AccountTokensController {
       address: address,
     });
     queryBuilder.orderBy(`token_holder.${orderBy}`, orderDirection);
-    queryBuilder.leftJoinAndSelect('token_holder.token', 'token');
+    queryBuilder.leftJoinAndSelect('token_holder.aex9_address', 'token');
 
     if (factory_address) {
       queryBuilder.andWhere('token.factory_address = :factory_address', {
@@ -109,15 +109,21 @@ export class AccountTokensController {
 
     // Get the token ranks for all tokens in the result
     const tokenIds = tokenHolders.items
-      .map((holder) => holder.token?.id)
-      .filter((id): id is number => id !== undefined);
+      .map((holder) => holder.aex9_address)
+      .filter(
+        (aex9_address): aex9_address is string => aex9_address !== undefined,
+      );
 
-    const tokenRanks = await this.tokensService.getTokenRanks(tokenIds);
+    const tokenRanks = await this.tokensService.getTokenRanksByAex9Address(
+      tokenIds as any,
+    );
 
     // Merge the rank information into the token holders
     tokenHolders.items.forEach((holder) => {
-      if (holder.token) {
-        (holder.token as any).rank = tokenRanks.get(holder.token.id);
+      if (holder.aex9_address) {
+        (holder.aex9_address as any).rank = tokenRanks.get(
+          holder.aex9_address as any,
+        );
       }
     });
 

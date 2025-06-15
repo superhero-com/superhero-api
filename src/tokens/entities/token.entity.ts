@@ -1,30 +1,24 @@
-import { BigNumber } from 'bignumber.js';
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import { BigNumber } from 'bignumber.js';
 import {
   Column,
   CreateDateColumn,
   Entity,
   Index,
-  OneToMany,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
-import { TokenHolder } from './token-holders.entity';
-import { Transaction } from '@/transactions/entities/transaction.entity';
 
 @Entity()
 export class Token {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryColumn()
+  sale_address: string;
 
   @Index()
   @Column({
     default: false,
   })
   unlisted: boolean;
-
-  @OneToMany(() => Transaction, (tokenTransaction) => tokenTransaction.token)
-  transactions: Transaction[];
 
   @Column({
     default: 0,
@@ -35,9 +29,6 @@ export class Token {
     default: 0,
   })
   tx_count: number;
-
-  @OneToMany(() => TokenHolder, (tokenHolder) => tokenHolder.token)
-  holders: TokenHolder[];
 
   @Column({
     default: 0,
@@ -59,12 +50,6 @@ export class Token {
     nullable: true,
   })
   dao_address: string;
-
-  @Index()
-  @Column({
-    unique: true,
-  })
-  sale_address: string;
 
   @Index()
   @Column({

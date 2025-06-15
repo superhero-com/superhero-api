@@ -9,6 +9,7 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  PrimaryColumn,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
@@ -16,19 +17,16 @@ import {
   name: 'transactions',
 })
 export class Transaction {
-  @PrimaryGeneratedColumn()
-  id: number;
-
   @Index()
-  @ManyToOne(() => Token, (token) => token.transactions, {
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'tokenId' })
-  token: Token;
-
-  @Index()
-  @Column()
+  @PrimaryColumn()
   tx_hash: string;
+
+  @ManyToOne(() => Token, (token) => token.sale_address)
+  @JoinColumn({
+    name: 'sale_address',
+    referencedColumnName: 'sale_address',
+  })
+  token: Token;
 
   @Column()
   tx_type: string; // buy/sell/create_community

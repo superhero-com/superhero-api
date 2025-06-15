@@ -72,8 +72,8 @@ export class AnalyticsTransactionsController {
     if (query.token_address) {
       const token = await this.tokenService.getToken(query.token_address);
       if (token) {
-        queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
-          tokenId: token.id,
+        queryBuilder.andWhere('transactions."sale_address" = :sale_address', {
+          sale_address: token.sale_address,
         });
       }
     }
@@ -130,8 +130,8 @@ export class AnalyticsTransactionsController {
     if (query.token_address) {
       const token = await this.tokenService.getToken(query.token_address);
       if (token) {
-        queryBuilder.andWhere('transactions."tokenId" = :tokenId', {
-          tokenId: token.id,
+        queryBuilder.andWhere('transactions."sale_address" = :sale_address', {
+          sale_address: token.sale_address,
         });
       }
     }
@@ -167,10 +167,13 @@ export class AnalyticsTransactionsController {
           sale_address: In(token_sale_addresses),
         },
       });
-      const uniqueTokenIds = tokens.map((t) => t.id);
-      queryBuilder.andWhere('transactions."tokenId" IN (:...tokenIds)', {
-        tokenIds: uniqueTokenIds,
-      });
+      const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
+      queryBuilder.andWhere(
+        'transactions."sale_address" IN (:...uniqueTokenSaleAddresses)',
+        {
+          uniqueTokenSaleAddresses,
+        },
+      );
     }
 
     const result = await queryBuilder
@@ -204,7 +207,7 @@ export class AnalyticsTransactionsController {
 
     const tokensQuery = this.transactionsRepository
       .createQueryBuilder('transaction')
-      .select('DISTINCT transaction."tokenId"')
+      .select('DISTINCT transaction."sale_address"')
       .where("transaction.market_cap->>'ae' IS NOT NULL");
 
     if (token_sale_addresses?.length) {
@@ -213,10 +216,13 @@ export class AnalyticsTransactionsController {
           sale_address: In(token_sale_addresses),
         },
       });
-      const uniqueTokenIds = tokens.map((t) => t.id);
-      tokensQuery.andWhere('transaction."tokenId" IN (:...tokenIds)', {
-        tokenIds: uniqueTokenIds,
-      });
+      const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
+      tokensQuery.andWhere(
+        'transaction."sale_address" IN (:...uniqueTokenSaleAddresses)',
+        {
+          uniqueTokenSaleAddresses,
+        },
+      );
     }
 
     if (start_date) {
@@ -231,7 +237,7 @@ export class AnalyticsTransactionsController {
     }
 
     const tokens = await tokensQuery.getRawMany();
-    const tokenIds = tokens.map((t) => t.tokenId);
+    const tokenSaleAddresses = tokens.map((t) => t.sale_address);
 
     // Generate a complete date range
     const startDate = start_date ? new Date(start_date) : new Date();
@@ -245,13 +251,15 @@ export class AnalyticsTransactionsController {
 
     // Get market cap data for each token
     const tokenMarketCaps = new Map();
-    for (const tokenId of tokenIds) {
+    for (const tokenSaleAddress of tokenSaleAddresses) {
       const tokenQuery = this.transactionsRepository
         .createQueryBuilder('transaction')
         .select('DATE(transaction.created_at) as date')
         .addSelect("MAX(transaction.market_cap->>'ae') as sum")
         .where("transaction.market_cap->>'ae' IS NOT NULL")
-        .andWhere('transaction."tokenId" = :tokenId', { tokenId })
+        .andWhere('transaction."sale_address" = :sale_address', {
+          sale_address: tokenSaleAddress,
+        })
         .groupBy('DATE(transaction.created_at)')
         .orderBy('DATE(transaction.created_at)', 'ASC');
 
@@ -296,7 +304,7 @@ export class AnalyticsTransactionsController {
         };
       });
 
-      tokenMarketCaps.set(tokenId, filledData);
+      tokenMarketCaps.set(tokenSaleAddress, filledData);
     }
 
     // Sum up market caps across all tokens for each day

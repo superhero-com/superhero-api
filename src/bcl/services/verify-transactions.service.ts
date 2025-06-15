@@ -53,18 +53,13 @@ export class VerifyTransactionsService {
   }
 
   private async verifyTransaction(transaction: Transaction) {
-    if (!transaction.tx_hash) {
-      await this.transactionRepository.delete(transaction.id);
-      return;
-    }
-
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${transaction.tx_hash}`;
     try {
       const txData: ITransaction = await fetchJson(url).then((res) =>
         camelcaseKeysDeep(res),
       );
       if (txData?.tx?.returnType === 'revert') {
-        await this.transactionRepository.delete(transaction.id);
+        await this.transactionRepository.delete(transaction.tx_hash);
         return;
       }
       if (
@@ -72,12 +67,12 @@ export class VerifyTransactionsService {
         transaction.tx_type !== txData.tx.function ||
         transaction.address !== txData.tx.callerId
       ) {
-        await this.transactionRepository.delete(transaction.id);
+        await this.transactionRepository.delete(transaction.tx_hash);
         await this.transactionService.saveTransaction(txData);
         return;
       }
 
-      await this.transactionRepository.update(transaction.id, {
+      await this.transactionRepository.update(transaction.tx_hash, {
         verified: true,
       });
     } catch (error: any) {
@@ -85,7 +80,7 @@ export class VerifyTransactionsService {
         `VerifyTransactionsService: ${transaction.tx_hash} - ${error.message}`,
         error.stack,
       );
-      await this.transactionRepository.delete(transaction.id);
+      await this.transactionRepository.delete(transaction.tx_hash);
     }
   }
 }

@@ -8,7 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
-import { Equal, In, Not, Repository } from 'typeorm';
+import { Equal, Not, Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
 
 @Injectable()
@@ -108,7 +108,7 @@ export class FixHoldersService {
         }
         await this.tokenHolderRepository.update(
           {
-            token: { id: token.id },
+            aex9_address: token.address,
             address: caller,
           },
           {
@@ -161,7 +161,9 @@ export class FixHoldersService {
     for (const token of tokens) {
       const holdersSum = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
-        .where('token_holder.tokenId = :tokenId', { tokenId: token.id })
+        .where('token_holder.aex9_address = :aex9_address', {
+          aex9_address: token.address,
+        })
         .select('SUM(token_holder.balance)')
         .getRawOne()
         .then((res) => res.sum);
@@ -183,20 +185,20 @@ export class FixHoldersService {
     // const addresses = data.map((item) => item.account_id);
     // delete all holders for this token
     await this.tokenHolderRepository.delete({
-      // address: Not(In(addresses)),
-      token: { id: token.id },
+      aex9_address: token.address,
     });
 
     const holders = data.map((item) => ({
       address: item.account_id,
       balance: item.amount,
+      aex9_address: token.address,
     }));
 
     // update or insert holders
     await this.tokenHolderRepository.insert(holders);
 
     // update token holders count
-    await this.tokensRepository.update(token.id, {
+    await this.tokensRepository.update(token.sale_address, {
       holders_count: holders.length,
     });
   }

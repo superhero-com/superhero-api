@@ -88,7 +88,7 @@ export class SyncTransactionsService {
         try {
           const result =
             await this.transactionService.saveTransaction(transaction);
-          if (result?.id) {
+          if (result?.tx_hash) {
             validated_hashes.push(transaction.hash);
           }
         } catch (error: any) {

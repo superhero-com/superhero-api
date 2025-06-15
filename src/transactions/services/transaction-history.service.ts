@@ -1,9 +1,9 @@
+import { TX_FUNCTIONS } from '@/configs';
+import { Token } from '@/tokens/entities/token.entity';
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import moment, { Moment } from 'moment';
-import { TX_FUNCTIONS } from '@/configs';
-import { Token } from '@/tokens/entities/token.entity';
+import { Moment } from 'moment';
 import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
 import { Transaction } from '../entities/transaction.entity';
@@ -81,7 +81,7 @@ export class TransactionHistoryService {
               floor(extract(epoch from t.created_at) / $2) * $2
             ) as interval_start
           FROM transactions t
-          WHERE t."tokenId" = $1
+          WHERE t."sale_address" = $1
             AND t.buy_price->>'${convertTo}' != 'NaN'
         ),
         grouped_intervals AS (
@@ -134,7 +134,7 @@ export class TransactionHistoryService {
         GROUP BY interval_start
         ORDER BY interval_start ASC
       `,
-      [token.id, interval],
+      [token.sale_address, interval],
     );
 
     await queryRunner.release();
@@ -172,8 +172,8 @@ export class TransactionHistoryService {
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: props.token.id,
+      .where('transactions."sale_address" = :sale_address', {
+        sale_address: props.token.sale_address,
       })
       .andWhere('transactions.created_at >= :start', {
         start: startDate.toDate(),
@@ -188,8 +188,8 @@ export class TransactionHistoryService {
       props.mode === 'aggregated'
         ? await this.transactionsRepository
             .createQueryBuilder('transactions')
-            .where('transactions."tokenId" = :tokenId', {
-              tokenId: props.token.id,
+            .where('transactions."sale_address" = :sale_address', {
+              sale_address: props.token.sale_address,
             })
             .andWhere('transactions.created_at < :start', {
               start: startDate.toDate(),
@@ -400,8 +400,8 @@ export class TransactionHistoryService {
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions."sale_address" = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
       .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
@@ -418,8 +418,8 @@ export class TransactionHistoryService {
           'transactions.created_at as truncated_time',
           "CAST(transactions.buy_price->>'ae' AS FLOAT) as max_buy_price",
         ])
-        .where('transactions."tokenId" = :tokenId', {
-          tokenId: token.id,
+        .where('transactions."sale_address" = :sale_address', {
+          sale_address: token.sale_address,
         })
         .andWhere(`transactions.buy_price->>'ae' != 'NaN'`)
         .orderBy('transactions.created_at', 'DESC')

@@ -66,7 +66,7 @@ export class TokenPerformanceController {
       moment(token.created_at).subtract(30, 'days'),
     );
     return {
-      token_id: token.id,
+      token_id: token.sale_address,
       past_24h,
       past_7d,
       past_30d,
@@ -77,8 +77,8 @@ export class TokenPerformanceController {
   async getTokenPriceMovement(token: Token, date: Moment) {
     const startingTransaction = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions."sale_address" = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
@@ -92,8 +92,8 @@ export class TokenPerformanceController {
       .getRawOne();
     const highestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions."sale_address" = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
@@ -107,8 +107,8 @@ export class TokenPerformanceController {
       .getRawOne();
     const lowestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions."sale_address" = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
