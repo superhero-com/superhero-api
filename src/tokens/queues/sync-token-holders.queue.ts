@@ -50,33 +50,33 @@ export class SyncTokenHoldersQueue {
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
     const token = await this.tokenService.getToken(saleAddress);
+    const aex9Address = await this.tokenService.getTokenAex9Address(token);
     await this.tokenHoldersRepository.delete({
-      aex9_address: token.address,
+      aex9_address: aex9Address,
     });
     const totalHolders = await this.loadData(
       token,
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances?by=amount&limit=100`,
+      aex9Address,
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances?by=amount&limit=100`,
     );
     await this.tokensRepository.update(token.sale_address, {
       holders_count: totalHolders,
     });
   }
 
-  async loadData(token: Token, url: string, totalHolders = 0) {
+  async loadData(
+    token: Token,
+    aex9Address: string,
+    url: string,
+    totalHolders = 0,
+  ) {
     const response = await fetchJson(url);
     if (!response.data) {
       if (response.error?.includes('invalid')) {
-        const { tokenContractInstance, instance } =
+        const { tokenContractInstance } =
           await this.tokenService.getTokenContractsBySaleAddress(
             token.sale_address as Encoded.ContractAddress,
           );
-        if (!token.address) {
-          const tokenMetaInfo = await instance.metaInfo();
-          await this.tokensRepository.update(token.sale_address, {
-            address: tokenMetaInfo.token.address,
-          });
-          token.address = tokenMetaInfo.token.address;
-        }
 
         const holders = await tokenContractInstance
           .balances()
@@ -84,7 +84,7 @@ export class SyncTokenHoldersQueue {
           .then((res) => {
             return Array.from(res)
               .map(([key, value]: any) => ({
-                aex9_address: token.address,
+                aex9_address: aex9Address,
                 address: key,
                 balance: new BigNumber(value),
               }))
@@ -105,7 +105,7 @@ export class SyncTokenHoldersQueue {
 
     for (const holder of holders) {
       try {
-        const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`;
+        const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances/${holder.account_id}`;
         const holderData = await fetchJson(holderUrl);
         if (!holderData?.amount) {
           this.logger.warn(
@@ -114,8 +114,7 @@ export class SyncTokenHoldersQueue {
           );
         }
         await this.tokenHoldersRepository.save({
-          aex9_address:
-            holderData?.contract || holderData?.contract_id || token.address,
+          aex9_address: aex9Address,
           address: holderData?.account || holder.account_id,
           balance: new BigNumber(holderData?.amount || 0),
         });
@@ -131,6 +130,7 @@ export class SyncTokenHoldersQueue {
     if (response.next) {
       return this.loadData(
         token,
+        aex9Address,
         `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
         totalHolders + holders.length,
       );

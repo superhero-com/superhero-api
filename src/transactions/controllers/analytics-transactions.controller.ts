@@ -27,7 +27,7 @@ export class AnalyticsTransactionsController {
     private tokenService: TokensService,
 
     private readonly aePricingService: AePricingService,
-  ) { }
+  ) {}
 
   @ApiOperation({
     operationId: 'dailyTradeVolume',

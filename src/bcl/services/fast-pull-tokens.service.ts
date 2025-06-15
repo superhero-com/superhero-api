@@ -2,15 +2,18 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
+import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
+import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CommunityFactory } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import moment from 'moment';
 import { Repository } from 'typeorm';
@@ -30,6 +33,9 @@ export class FastPullTokensService {
     private readonly transactionService: TransactionService,
 
     private readonly fixHoldersService: FixHoldersService,
+
+    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
+    private readonly pullTokenInfoQueue: Queue,
 
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -83,20 +89,21 @@ export class FastPullTokensService {
     }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-    const communities = await this.loadCreatedCommunityFromMdw(url, factory);
+    await this.loadCreatedCommunityFromMdw(url, factory);
 
-    const tokens = communities.sort((a, b) => {
-      if (!a.total_supply || !b.total_supply) {
-        return 0;
-      }
-      return b.total_supply.minus(a.total_supply).toNumber();
-    });
+    // const tokens = communities.sort((a, b) => {
+    //   if (!a.total_supply || !b.total_supply) {
+    //     return 0;
+    //   }
+    //   return b.total_supply.minus(a.total_supply).toNumber();
+    // });
 
-    for (const token of tokens) {
-      const liveTokenData = await this.tokensService.getTokeLivePrice(token);
-      await this.tokensRepository.update(token.sale_address, liveTokenData);
-      await this.fixHoldersService.syncTokenHolders(token);
-    }
+    // for (const token of tokens) {
+    //   // const liveTokenData = await this.tokensService.getTokeLivePrice(token);
+    //   // await this.tokensRepository.update(token.sale_address, liveTokenData);
+    //   // TODO: token holders needs the aex9 address
+    //   await this.fixHoldersService.syncTokenHolders(token);
+    // }
 
     this.pullingTokens = false;
   }
@@ -148,12 +155,22 @@ export class FastPullTokensService {
           const daoAddress = tx?.return?.value[0]?.value;
           const saleAddress = tx?.return?.value[1]?.value;
 
-          const tokenExists = await this.tokensService.findById(saleAddress);
           const tokenName = tx?.arguments?.[1]?.value;
+          let tokenExists =
+            await this.tokensService.findByNameOrSymbol(tokenName);
 
-          const decodedData = this.factoryContract?.contract?.$decodeEvents(
-            tx?.log,
-          );
+          if (
+            !!tokenExists?.sale_address &&
+            tokenExists.sale_address !== saleAddress
+          ) {
+            // delete token
+            await this.tokensRepository.delete(tokenExists.sale_address);
+            tokenExists = undefined;
+          }
+
+          // const decodedData = this.factoryContract?.contract?.$decodeEvents(
+          //   tx?.log,
+          // );
           const tokenData = {
             total_supply: new BigNumber(0),
             holders_count: 0,
@@ -168,27 +185,29 @@ export class FastPullTokensService {
             create_tx_hash: transaction?.hash,
           };
 
-          const fungibleToken = decodedData?.find(
-            (event) =>
-              event.contract.name === 'FungibleTokenFull' &&
-              event.contract.address !== factory.bctsl_aex9_address,
-          );
-          tokenData.address =
-            fungibleToken?.contract?.address || tokenExists?.address;
-          if (tokenData.address) {
-            const tokenDataResponse = await fetchJson(
-              `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
-            );
-            if (!tokenExists?.total_supply?.gt(0)) {
-              tokenData.total_supply = new BigNumber(
-                tokenDataResponse?.event_supply,
-              );
-            }
+          // can be removed and replaced with queue
+          // const fungibleToken = decodedData?.find(
+          //   (event) =>
+          //     event.contract.name === 'FungibleTokenFull' &&
+          //     event.contract.address !== factory.bctsl_aex9_address,
+          // );
+          // tokenData.address =
+          //   fungibleToken?.contract?.address || tokenExists?.address;
+          // if (tokenData.address) {
+          //   const tokenDataResponse = await fetchJson(
+          //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
+          //   );
+          //   if (!tokenExists?.total_supply?.gt(0)) {
+          //     tokenData.total_supply = new BigNumber(
+          //       tokenDataResponse?.event_supply,
+          //     );
+          //   }
 
-            tokenData.holders_count = tokenDataResponse?.holders;
-          }
+          //   tokenData.holders_count = tokenDataResponse?.holders;
+          // }
 
           let token;
+          // TODO: should only update if the data is different
           if (tokenExists?.sale_address) {
             await this.tokensRepository.update(
               tokenExists.sale_address,
@@ -202,6 +221,17 @@ export class FastPullTokensService {
             camelcaseKeysDeep(transaction),
             token,
           );
+          if (!token?.address) {
+            await this.pullTokenInfoQueue.add(
+              {
+                saleAddress: token.sale_address,
+              },
+              {
+                jobId: `pullTokenInfo-${token.sale_address}`,
+                removeOnComplete: true,
+              },
+            );
+          }
           tokens.push(token);
         } catch (error: any) {
           this.logger.error(

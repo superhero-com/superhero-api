@@ -99,6 +99,14 @@ export class TokensService {
     return this.tokensRepository.findOneBy({ sale_address });
   }
 
+  async findByNameOrSymbol(name: string) {
+    return this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.name = :name', { name })
+      .orWhere('token.symbol = :name', { name })
+      .getOne();
+  }
+
   async findByAddress(
     address: string,
     withoutRank = false,
@@ -173,6 +181,22 @@ export class TokensService {
     }
 
     return this.createToken(address as Encoded.ContractAddress);
+  }
+
+  async getTokenAex9Address(token: Token): Promise<string> {
+    if (token.address) {
+      return token.address;
+    }
+    const { instance } = await this.getTokenContractsBySaleAddress(
+      token.sale_address as Encoded.ContractAddress,
+    );
+    const metaInfo = await instance.metaInfo();
+    if (metaInfo.token.address) {
+      await this.tokensRepository.update(token.sale_address, {
+        address: metaInfo.token.address,
+      });
+    }
+    return metaInfo.token.address;
   }
 
   async createToken(
