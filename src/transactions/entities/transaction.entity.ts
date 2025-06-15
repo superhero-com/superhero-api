@@ -1,7 +1,7 @@
-import BigNumber from 'bignumber.js';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { Token } from '@/tokens/entities/token.entity';
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import BigNumber from 'bignumber.js';
 import {
   Column,
   CreateDateColumn,
@@ -10,7 +10,6 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryColumn,
-  PrimaryGeneratedColumn,
 } from 'typeorm';
 
 @Entity({

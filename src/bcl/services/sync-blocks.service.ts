@@ -46,6 +46,22 @@ export class SyncBlocksService {
     this.syncingLatestBlocks = true;
     this.logger.log(`syncTransactions::: ${this.latestBlockNumber}`);
 
+    await this.validateBlocksRange(10);
+    this.syncingLatestBlocks = false;
+  }
+
+  syncingPastBlocks = false;
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async syncPast100Blocks() {
+    if (this.syncingPastBlocks) {
+      return;
+    }
+    this.syncingPastBlocks = true;
+    await this.validateBlocksRange(100);
+    this.syncingPastBlocks = false;
+  }
+
+  private async validateBlocksRange(range = 10) {
     try {
       this.currentBlockNumber = (
         await this.aeSdkService.sdk.getCurrentGeneration()
@@ -63,7 +79,7 @@ export class SyncBlocksService {
       }
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
-      const fromBlockNumber = this.latestBlockNumber - 20;
+      const fromBlockNumber = this.latestBlockNumber - range;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
         await this.syncBlockTransactions(i);
       }
@@ -72,8 +88,6 @@ export class SyncBlocksService {
         `SyncTransactionsService->Failed to sync transactions`,
         error.stack,
       );
-    } finally {
-      this.syncingLatestBlocks = false;
     }
   }
 
