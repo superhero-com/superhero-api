@@ -127,12 +127,15 @@ export class TokensController {
         .createQueryBuilder('token_holder')
         .where('token_holder.address = :owner_address', { owner_address })
         .andWhere('token_holder.balance > 0')
-        .select('token_holder."tokenId"')
+        .select('token_holder."aex9_address"')
         .distinct(true)
         .getRawMany()
-        .then((res) => res.map((r) => r.tokenId));
+        .then((res) => res.map((r) => r.aex9_address));
 
-      queryBuilder.andWhereInIds(ownedTokens);
+      // queryBuilder.andWhereInIds(ownedTokens);
+      queryBuilder.andWhere('token.address IN (:...aex9_addresses)', {
+        aex9_addresses: ownedTokens,
+      });
     }
 
     return this.tokensService.queryTokensWithRanks(
@@ -238,7 +241,7 @@ export class TokensController {
       target_rank AS (
         SELECT rank
         FROM ranked_tokens
-        WHERE id = ${token.id}
+        WHERE sale_address = '${token.sale_address}'
       ),
       adjusted_limits AS (
         SELECT 

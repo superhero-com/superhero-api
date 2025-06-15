@@ -8,7 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
-import { Equal, In, Not, Repository } from 'typeorm';
+import { Equal, Not, Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
 
 @Injectable()
@@ -198,7 +198,7 @@ export class FixHoldersService {
     await this.tokenHolderRepository.insert(holders);
 
     // update token holders count
-    await this.tokensRepository.update(token.id, {
+    await this.tokensRepository.update(token.sale_address, {
       holders_count: holders.length,
     });
   }

@@ -40,10 +40,10 @@ export class FixTokensService {
         await this.tokensService.loadTokenContractAndUpdateMintAddress(token);
       } catch (error: any) {
         this.logger.error(
-          `FixTokensService: ${token.id} - ${error.message}`,
+          `FixTokensService: ${token.sale_address} - ${error.message}`,
           error.stack,
         );
-        await this.tokensRepository.delete(token.id);
+        await this.tokensRepository.delete(token.sale_address);
       }
     }
     this.fixingTokens = false;

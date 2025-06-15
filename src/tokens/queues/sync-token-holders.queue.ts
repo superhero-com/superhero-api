@@ -57,7 +57,7 @@ export class SyncTokenHoldersQueue {
       token,
       `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances?by=amount&limit=100`,
     );
-    await this.tokensRepository.update(token.id, {
+    await this.tokensRepository.update(token.sale_address, {
       holders_count: totalHolders,
     });
   }
@@ -70,9 +70,9 @@ export class SyncTokenHoldersQueue {
           await this.tokenService.getTokenContractsBySaleAddress(
             token.sale_address as Encoded.ContractAddress,
           );
-        if (token.address) {
+        if (!token.address) {
           const tokenMetaInfo = await instance.metaInfo();
-          await this.tokensRepository.update(token.id, {
+          await this.tokensRepository.update(token.sale_address, {
             address: tokenMetaInfo.token.address,
           });
           token.address = tokenMetaInfo.token.address;
@@ -91,11 +91,6 @@ export class SyncTokenHoldersQueue {
               .filter((item) => item.balance.gt(0))
               .sort((a, b) => b.balance.minus(a.balance).toNumber());
           });
-
-        this.logger.debug(
-          `SyncTokenHoldersQueue->holders:${holders.length}`,
-          holders,
-        );
         await this.tokenHoldersRepository.save(holders);
         return holders.length;
       }

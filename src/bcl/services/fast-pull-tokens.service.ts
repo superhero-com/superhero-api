@@ -94,7 +94,7 @@ export class FastPullTokensService {
 
     for (const token of tokens) {
       const liveTokenData = await this.tokensService.getTokeLivePrice(token);
-      await this.tokensRepository.update(token.id, liveTokenData);
+      await this.tokensRepository.update(token.sale_address, liveTokenData);
       await this.fixHoldersService.syncTokenHolders(token);
     }
 
@@ -148,8 +148,7 @@ export class FastPullTokensService {
           const daoAddress = tx?.return?.value[0]?.value;
           const saleAddress = tx?.return?.value[1]?.value;
 
-          const tokenExists =
-            await this.tokensService.findByAddress(saleAddress);
+          const tokenExists = await this.tokensService.findById(saleAddress);
           const tokenName = tx?.arguments?.[1]?.value;
 
           const decodedData = this.factoryContract?.contract?.$decodeEvents(
@@ -190,9 +189,12 @@ export class FastPullTokensService {
           }
 
           let token;
-          if (tokenExists?.id) {
-            await this.tokensRepository.update(tokenExists.id, tokenData);
-            token = await this.tokensService.findById(tokenExists.id);
+          if (tokenExists?.sale_address) {
+            await this.tokensRepository.update(
+              tokenExists.sale_address,
+              tokenData,
+            );
+            token = await this.tokensService.findById(tokenExists.sale_address);
           } else {
             token = await this.tokensRepository.save(tokenData);
           }
