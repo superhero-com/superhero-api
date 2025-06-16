@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { LessThan, Repository } from 'typeorm';
 import { SyncBlocksService } from './sync-blocks.service';
+import { TX_FUNCTIONS } from '@/configs/constants';
 
 @Injectable()
 export class VerifyTransactionsService {
@@ -34,7 +35,7 @@ export class VerifyTransactionsService {
     const transactions = await this.transactionRepository.find({
       where: {
         verified: false,
-        block_height: LessThan(this.syncBlocksService.currentBlockNumber - 100),
+        block_height: LessThan(this.syncBlocksService.currentBlockNumber - 10),
       },
       order: {
         created_at: 'ASC',
@@ -74,6 +75,16 @@ export class VerifyTransactionsService {
         await this.transactionRepository.delete(transaction.tx_hash);
         await this.transactionService.saveTransaction(txData);
         return;
+      }
+
+      // if it's create_community, we need to verify the token
+      if (txData.tx.function === TX_FUNCTIONS.create_community) {
+        const saleAddress = txData.tx.return.value[1].value;
+        if (saleAddress !== transaction.sale_address) {
+          await this.transactionRepository.delete(transaction.tx_hash);
+          await this.transactionService.saveTransaction(txData);
+          return;
+        }
       }
 
       await this.transactionRepository.update(transaction.tx_hash, {
