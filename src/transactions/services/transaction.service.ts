@@ -136,7 +136,7 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
-      verified: moment().diff(moment(rawTransaction.microTime), 'days') >= 1,
+      verified: moment().diff(moment(rawTransaction.microTime), 'hours') >= 5,
     };
     const transaction = await this.transactionRepository.save(txData);
 
@@ -260,7 +260,7 @@ export class TransactionService {
   async getTokenTransactionsCount(token: Token): Promise<number> {
     const queryBuilder = this.transactionRepository
       .createQueryBuilder('token_transactions')
-      .where('token_transactions."sale_address" = :sale_address', {
+      .where('token_transactions.sale_address = :sale_address', {
         sale_address: token.sale_address,
       });
     return queryBuilder.getCount();

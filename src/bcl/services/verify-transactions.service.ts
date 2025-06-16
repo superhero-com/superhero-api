@@ -41,15 +41,19 @@ export class VerifyTransactionsService {
       },
       take: 100,
     });
-    if (transactions.length) {
-      for (const transaction of transactions) {
-        await this.verifyTransaction(transaction);
-      }
-      // wait 3 seconds before the next call
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      this.fixFailedTransactions(); // recursive call, until all transactions are verified
+    if (!transactions.length) {
+      this.verifyingTransactions = false;
+      return;
     }
+    for (const transaction of transactions) {
+      await this.verifyTransaction(transaction);
+    }
+
     this.verifyingTransactions = false;
+    // wait 3 seconds before the next call
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    this.fixFailedTransactions(); // recursive call, until all transactions are verified
   }
 
   private async verifyTransaction(transaction: Transaction) {

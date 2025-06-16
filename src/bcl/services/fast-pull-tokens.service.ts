@@ -123,9 +123,8 @@ export class FastPullTokensService {
           const tx = transaction.tx;
           if (
             tx.function !== 'create_community' ||
-            tx?.return_type === 'revert' ||
-            !tx?.return?.value?.length ||
-            tx.return.value.length < 2
+            tx.return_type === 'revert' ||
+            tx.return?.value?.length < 2
           ) {
             continue;
           }
