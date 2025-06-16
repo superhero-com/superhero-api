@@ -106,11 +106,8 @@ export class TransactionService {
     }
 
     const decodedData = rawTransaction.tx.decodedData;
-    if (!decodedData || decodedData.length == 0) {
-      throw new Error(`No decoded data for transaction ${rawTransaction.hash}`);
-    }
 
-    const priceChangeData = decodedData.find(
+    const priceChangeData = decodedData?.find(
       (data) => data.name === 'PriceChange',
     );
     const _unit_price = _amount.div(volume);
@@ -328,8 +325,8 @@ export class TransactionService {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
-        .where('token_holders.sale_address = :sale_address', {
-          sale_address: token.sale_address,
+        .where('token_holders.aex9_address = :aex9_address', {
+          aex9_address: token.address,
         })
         .andWhere('token_holders.address = :address', {
           address: rawTransaction.tx.callerId,
@@ -345,12 +342,16 @@ export class TransactionService {
         if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.plus(bigNumberVolume),
+            last_tx_hash: rawTransaction.hash,
+            block_number: rawTransaction.blockHeight,
           });
         }
         // if is sell
         if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.minus(bigNumberVolume),
+            last_tx_hash: rawTransaction.hash,
+            block_number: rawTransaction.blockHeight,
           });
         }
         if (token.holders_count == 0) {
@@ -361,9 +362,12 @@ export class TransactionService {
       } else {
         // create token holder
         await this.tokenHolderRepository.save({
-          token: token,
+          id: `${rawTransaction.tx.callerId}_${token.address}`,
+          aex9_address: token.address,
           address: rawTransaction.tx.callerId,
           balance: bigNumberVolume,
+          last_tx_hash: rawTransaction.hash,
+          block_number: rawTransaction.blockHeight,
         });
         // increment token holders count
         await this.tokenService.update(token, {
