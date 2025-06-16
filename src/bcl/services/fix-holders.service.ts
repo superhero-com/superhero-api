@@ -50,7 +50,7 @@ export class FixHoldersService {
   }
 
   isSyncingBlockCallers = false;
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Cron(CronExpression.EVERY_MINUTE)
   async syncLatestBlockCallers() {
     if (this.isSyncingBlockCallers) {
       return;
@@ -69,16 +69,7 @@ export class FixHoldersService {
     // unique callers
     const uniqueCallers = callers;
     this.logger.log(`Syncing ${uniqueCallers.length} callers...`);
-    this.logger.log('///////////////////////////////////////////////');
-    this.logger.log('///////////////////////////////////////////////');
-    this.logger.log('///////////////////////////////////////////////');
-    this.logger.log('UNIQUE CALLERS', uniqueCallers);
-    this.logger.log('///////////////////////////////////////////////');
-    this.logger.log('///////////////////////////////////////////////');
     for (const caller of uniqueCallers) {
-      this.logger.log('///////////////////////////////////////////////');
-      this.logger.log('CALLER::', caller);
-      this.logger.log('///////////////////////////////////////////////');
       try {
         const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
         await this.pullAndUpdateAccountAex9Balances(url, caller);
