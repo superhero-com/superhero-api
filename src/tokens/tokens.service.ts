@@ -407,7 +407,13 @@ export class TokensService {
     // Replace all parameter placeholders with actual values
     let finalSubQuery = subQuery;
     Object.entries(parameters).forEach(([key, value]) => {
-      finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
+      if (Array.isArray(value)) {
+        // Handle array parameters by joining them with commas and wrapping in quotes
+        const arrayValues = value.map((v) => `'${v}'`).join(',');
+        finalSubQuery = finalSubQuery.replace(`:...${key}`, arrayValues);
+      } else {
+        finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
+      }
     });
 
     if (orderBy === 'market_cap') {
