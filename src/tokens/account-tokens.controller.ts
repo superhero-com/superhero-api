@@ -17,6 +17,7 @@ import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TokensService } from './tokens.service';
+import { Token } from './entities/token.entity';
 
 @Controller('api/accounts')
 @ApiTags('Account Tokens')
@@ -68,7 +69,11 @@ export class AccountTokensController {
       address: address,
     });
     queryBuilder.orderBy(`token_holder.${orderBy}`, orderDirection);
-    queryBuilder.leftJoinAndSelect('token_holder.aex9_address', 'token');
+    queryBuilder.leftJoinAndSelect(
+      Token,
+      'token',
+      'token.address = token_holder.aex9_address',
+    );
 
     if (factory_address) {
       queryBuilder.andWhere('token.factory_address = :factory_address', {
@@ -118,12 +123,20 @@ export class AccountTokensController {
       tokenIds as any,
     );
 
+    const tokens = await this.tokensService.getTokensByAex9Address(
+      tokenIds as any,
+    );
+
     // Merge the rank information into the token holders
     tokenHolders.items.forEach((holder) => {
       if (holder.aex9_address) {
-        (holder.aex9_address as any).rank = tokenRanks.get(
-          holder.aex9_address as any,
+        const token = tokens.find(
+          (token) => token.address === holder.aex9_address,
         );
+        (holder as any).token = {
+          ...token,
+          rank: tokenRanks.get(holder.aex9_address as any),
+        };
       }
     });
 

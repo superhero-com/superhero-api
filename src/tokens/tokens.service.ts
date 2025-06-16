@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -520,10 +520,19 @@ export class TokensService {
         WHERE t.factory_address = '${factory.address}'
         AND t.unlisted = false
       )
-      SELECT * FROM ranked_tokens WHERE address IN (${aex9Addresses.join(',')})
+      SELECT * FROM ranked_tokens WHERE address IN ('${aex9Addresses.join("','")}')
     `;
 
     const result = await this.tokensRepository.query(rankedQuery);
     return new Map(result.map((token) => [token.address, token.rank]));
+  }
+
+  async getTokensByAex9Address(aex9Addresses: string[]): Promise<Token[]> {
+    if (!aex9Addresses.length) {
+      return [];
+    }
+    return this.tokensRepository.find({
+      where: { address: In(aex9Addresses) },
+    });
   }
 }
