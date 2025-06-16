@@ -144,16 +144,7 @@ export class FixHoldersService {
       .take(20)
       .getMany();
     for (const token of tokens) {
-      const holdersCount = await this.tokenHolderRepository
-        .createQueryBuilder('token_holder')
-        .where('token_holder.aex9_address = :aex9_address', {
-          aex9_address: token.address,
-        })
-        .getCount();
-
-      if (holdersCount < 1) {
-        await this.syncTokenHolders(token);
-      }
+      await this.syncTokenHolders(token);
     }
   }
 }
