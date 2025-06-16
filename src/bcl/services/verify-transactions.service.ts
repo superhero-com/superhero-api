@@ -26,7 +26,7 @@ export class VerifyTransactionsService {
     //
   }
 
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async fixFailedTransactions() {
     if (this.verifyingTransactions) {
       return;
