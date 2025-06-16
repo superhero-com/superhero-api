@@ -8,7 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
-import { Equal, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class FixHoldersService {
@@ -137,15 +137,12 @@ export class FixHoldersService {
   }
 
   async checkTokensWithoutHolders() {
-    const tokens = await this.tokensRepository.find({
-      where: {
-        holders_count: Equal(0),
-      },
-      order: {
-        total_supply: 'DESC',
-      },
-      take: 20,
-    });
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.holders_count = :holdersCount', { holdersCount: 0 })
+      .orderBy('token.total_supply', 'DESC')
+      .take(20)
+      .getMany();
     for (const token of tokens) {
       const holdersCount = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
