@@ -188,7 +188,7 @@ export class TokensService {
 
     if (!address.startsWith('ct_')) {
       // find by name or symbol TODO:
-      return null;
+      return this.pullLatestCreatedTokensByNameOrSymbol(address);
     }
 
     return this.createToken(address as Encoded.ContractAddress);
@@ -620,5 +620,39 @@ export class TokensService {
     }
 
     return token;
+  }
+
+  async pullLatestCreatedTokensByNameOrSymbol(name: string): Promise<Token> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    try {
+      const queryString = new URLSearchParams({
+        direction: 'backward',
+        limit: '100',
+        type: 'contract_call',
+        contract: factory.address,
+      }).toString();
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      const result = await fetchJson(url);
+      const transactions = result.data;
+
+      // TODO: mybe we need to loop through all the transactions
+
+      for (const transaction of transactions) {
+        const tokenName = transaction?.tx?.arguments?.[1]?.value;
+        if (tokenName === name) {
+          // TODO: need to save the transaction too
+          return this.createTokenFromRawTransaction(transaction);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `pullLatestCreatedTokensByNameOrSymbol->error::`,
+        error,
+        error.stack,
+      );
+    }
+
+    return null;
   }
 }
