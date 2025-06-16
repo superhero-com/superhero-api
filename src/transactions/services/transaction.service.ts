@@ -323,6 +323,13 @@ export class TransactionService {
   ): Promise<void> {
     try {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
+      const tokenHolderCount = await this.tokenHolderRepository
+        .createQueryBuilder('token_holders')
+        .where('token_holders.aex9_address = :aex9_address', {
+          aex9_address: token.address,
+        })
+        .getCount();
+
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
         .where('token_holders.aex9_address = :aex9_address', {
@@ -371,7 +378,7 @@ export class TransactionService {
         });
         // increment token holders count
         await this.tokenService.update(token, {
-          holders_count: token.holders_count + 1,
+          holders_count: tokenHolderCount + 1,
         });
       }
     } catch (error) {
