@@ -61,7 +61,7 @@ export class SyncTokenHoldersQueue {
       await this.tokenHoldersRepository.delete({
         aex9_address: aex9Address,
       });
-      await this.tokenHoldersRepository.upsert(totalHolders, ['id']);
+      await this.tokenHoldersRepository.insert(totalHolders);
     }
     await this.tokensRepository.update(token.sale_address, {
       holders_count: totalHolders.length,

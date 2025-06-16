@@ -199,9 +199,16 @@ export class TokensController {
     // check if count is 0
     const count = await queryBuilder.getCount();
     if (count === 0) {
-      void this.syncTokenHoldersQueue.add(SYNC_TOKEN_HOLDERS_QUEUE, {
-        saleAddress: token.sale_address,
-      });
+      void this.syncTokenHoldersQueue.add(
+        SYNC_TOKEN_HOLDERS_QUEUE,
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `syncTokenHolders-${token.sale_address}`,
+          removeOnComplete: true,
+        },
+      );
     }
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
