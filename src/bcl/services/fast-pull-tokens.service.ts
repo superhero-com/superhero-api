@@ -2,21 +2,14 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
-import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
-import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectRepository } from '@nestjs/typeorm';
 import { CommunityFactory } from 'bctsl-sdk';
-import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import moment from 'moment';
-import { Repository } from 'typeorm';
 
 @Injectable()
 export class FastPullTokensService {
@@ -30,12 +23,6 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
     private readonly transactionService: TransactionService,
-
-    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
-    private readonly pullTokenInfoQueue: Queue,
-
-    @InjectRepository(Token)
-    private tokensRepository: Repository<Token>,
   ) {
     //
   }
@@ -132,81 +119,15 @@ export class FastPullTokensService {
     if (result?.data?.length) {
       for (const transaction of result.data) {
         try {
-          const tx = transaction.tx;
-          if (
-            tx.function !== 'create_community' ||
-            tx.return_type === 'revert' ||
-            tx.return?.value?.length < 2
-          ) {
+          const token =
+            await this.tokensService.createTokenFromRawTransaction(transaction);
+          if (!token) {
             continue;
-          }
-          if (
-            // If it's not supported collection, skip
-            !Object.keys(factory.collections).includes(tx.arguments[0].value)
-          ) {
-            continue;
-          }
-          const daoAddress = tx?.return?.value[0]?.value;
-          const saleAddress = tx?.return?.value[1]?.value;
-
-          const tokenName = tx?.arguments?.[1]?.value;
-          let tokenExists =
-            await this.tokensService.findByNameOrSymbol(tokenName);
-
-          if (
-            !!tokenExists?.sale_address &&
-            tokenExists.sale_address !== saleAddress
-          ) {
-            // delete token
-            await this.tokensRepository.delete(tokenExists.sale_address);
-            tokenExists = undefined;
-          }
-
-          if (!!tokenExists?.address) {
-            continue;
-          }
-
-          const tokenData = {
-            total_supply: new BigNumber(0),
-            holders_count: 0,
-            address: null,
-            dao_address: daoAddress,
-            sale_address: saleAddress,
-            factory_address: factory.address,
-            creator_address: tx?.caller_id,
-            created_at: moment(transaction?.micro_time).toDate(),
-            name: tokenName,
-            symbol: tokenName,
-            create_tx_hash: transaction?.hash,
-            ...(tokenExists || {}),
-          };
-
-          let token;
-          // TODO: should only update if the data is different
-          if (tokenExists?.sale_address) {
-            await this.tokensRepository.update(
-              tokenExists.sale_address,
-              tokenData,
-            );
-            token = await this.tokensService.findById(tokenExists.sale_address);
-          } else {
-            token = await this.tokensRepository.save(tokenData);
           }
           await this.transactionService.saveTransaction(
             camelcaseKeysDeep(transaction),
             token,
           );
-          if (!token?.address) {
-            await this.pullTokenInfoQueue.add(
-              {
-                saleAddress: token.sale_address,
-              },
-              {
-                jobId: `pullTokenInfo-${token.sale_address}`,
-                removeOnComplete: true,
-              },
-            );
-          }
           tokens.push(token);
         } catch (error: any) {
           this.logger.error(

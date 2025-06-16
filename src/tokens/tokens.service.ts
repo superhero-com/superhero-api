@@ -13,10 +13,13 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
+import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
+import { Queue } from 'bull';
 import moment from 'moment';
 import { Token } from './entities/token.entity';
+import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
@@ -42,6 +45,9 @@ export class TokensService {
     private aePricingService: AePricingService,
 
     private communityFactoryService: CommunityFactoryService,
+
+    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
+    private readonly pullTokenInfoQueue: Queue,
   ) {
     this.init();
   }
@@ -178,6 +184,11 @@ export class TokensService {
 
     if (existingToken) {
       return existingToken;
+    }
+
+    if (!address.startsWith('ct_')) {
+      // find by name or symbol TODO:
+      return null;
     }
 
     return this.createToken(address as Encoded.ContractAddress);
@@ -535,5 +546,79 @@ export class TokensService {
     return this.tokensRepository.find({
       where: { address: In(aex9Addresses) },
     });
+  }
+
+  async createTokenFromRawTransaction(rawTransaction: any): Promise<Token> {
+    const tx = rawTransaction.tx;
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    if (
+      tx.function !== 'create_community' ||
+      tx.return_type === 'revert' ||
+      tx.return?.value?.length < 2
+    ) {
+      return null;
+    }
+    if (
+      // If it's not supported collection, skip
+      !Object.keys(factory.collections).includes(tx.arguments[0].value)
+    ) {
+      return null;
+    }
+    const daoAddress = tx?.return?.value[0]?.value;
+    const saleAddress = tx?.return?.value[1]?.value;
+
+    const tokenName = tx?.arguments?.[1]?.value;
+    let tokenExists = await this.findByNameOrSymbol(tokenName);
+
+    if (
+      !!tokenExists?.sale_address &&
+      tokenExists.sale_address !== saleAddress
+    ) {
+      // delete token
+      await this.tokensRepository.delete(tokenExists.sale_address);
+      tokenExists = undefined;
+    }
+
+    if (!!tokenExists?.address) {
+      return tokenExists;
+    }
+
+    const tokenData = {
+      total_supply: new BigNumber(0),
+      holders_count: 0,
+      address: null,
+      dao_address: daoAddress,
+      sale_address: saleAddress,
+      factory_address: factory.address,
+      creator_address: tx?.caller_id,
+      created_at: moment(rawTransaction?.microTime).toDate(),
+      name: tokenName,
+      symbol: tokenName,
+      create_tx_hash: rawTransaction?.hash,
+      ...(tokenExists || {}),
+    };
+
+    let token;
+    // TODO: should only update if the data is different
+    if (tokenExists?.sale_address) {
+      await this.tokensRepository.update(tokenExists.sale_address, tokenData);
+      token = await this.findById(tokenExists.sale_address);
+    } else {
+      token = await this.tokensRepository.save(tokenData);
+    }
+
+    if (!token?.address) {
+      await this.pullTokenInfoQueue.add(
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `pullTokenInfo-${token.sale_address}`,
+          removeOnComplete: true,
+        },
+      );
+    }
+
+    return token;
   }
 }

@@ -64,6 +64,15 @@ export class TransactionService {
       token = await this.tokenService.getToken(saleAddress);
     }
 
+    if (!token) {
+      token =
+        await this.tokenService.createTokenFromRawTransaction(rawTransaction);
+      // creat token from tx
+      if (!token) {
+        return;
+      }
+    }
+
     const exists = await this.transactionRepository
       .createQueryBuilder('token_transactions')
       .where('token_transactions.tx_hash = :tx_hash', {

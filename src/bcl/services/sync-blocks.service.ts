@@ -71,7 +71,7 @@ export class SyncBlocksService {
     callers: string[];
     validated_hashes: string[];
   }> {
-    let result = {
+    const result = {
       callers: [],
       validated_hashes: [],
     };
@@ -81,26 +81,18 @@ export class SyncBlocksService {
       ).keyBlock.height;
 
       this.logger.log('currentGeneration', this.currentBlockNumber);
-      if (this.currentBlockNumber <= this.latestBlockNumber) {
-        this.totalTicks++;
-        if (this.totalTicks > 3) {
-          result = await this.syncBlockTransactions(this.currentBlockNumber);
-          this.totalTicks = 0;
-        }
-        this.logger.log('latestBlockNumber is not updated');
-        return result;
-      }
+
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
       const fromBlockNumber = this.latestBlockNumber - range;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
-        const result = await this.syncBlockTransactions(i);
-        result.callers.forEach((caller) => {
+        const syncResult = await this.syncBlockTransactions(i);
+        syncResult.callers.forEach((caller) => {
           if (!result.callers.includes(caller)) {
             result.callers.push(caller);
           }
         });
-        result.validated_hashes.forEach((hash) => {
+        syncResult.validated_hashes.forEach((hash) => {
           if (!result.validated_hashes.includes(hash)) {
             result.validated_hashes.push(hash);
           }
