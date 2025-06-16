@@ -9,8 +9,8 @@ export async function fetchJson<T = any>(
   url: string,
   options?: RequestInit,
   shouldNotRetry = false,
+  totalRetries = 1,
 ): Promise<T | null> {
-  let totalRetries = 0;
   try {
     const response = await fetch(url, options);
     if (response.status === 204) {
@@ -21,7 +21,7 @@ export async function fetchJson<T = any>(
     if (totalRetries < 3 && !shouldNotRetry) {
       totalRetries++;
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      return fetchJson(url, options, shouldNotRetry);
+      return fetchJson(url, options, shouldNotRetry, totalRetries);
     }
     throw error;
   }
