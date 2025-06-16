@@ -80,17 +80,28 @@ export class FixHoldersService {
         if (!token) {
           continue;
         }
-        await this.tokenHolderRepository.update(
-          {
+        const holder = await this.tokenHolderRepository.findOne({
+          where: {
             aex9_address: token.address,
             address: caller,
           },
-          {
+        });
+        if (!holder) {
+          await this.tokenHolderRepository.save({
+            id: `${caller}_${token.address}`,
+            aex9_address: token.address,
+            address: caller,
             balance: item.amount,
             block_number: item.height,
             last_tx_hash: item.tx_hash,
-          },
-        );
+          });
+        } else {
+          await this.tokenHolderRepository.update(holder.id, {
+            balance: item.amount,
+            block_number: item.height,
+            last_tx_hash: item.tx_hash,
+          });
+        }
       } catch (error: any) {
         this.logger.error(
           `Error pulling and updating account aex9 balances for ${caller}`,
