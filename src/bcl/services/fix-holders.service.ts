@@ -141,6 +141,10 @@ export class FixHoldersService {
       where: {
         holders_count: Equal(0),
       },
+      order: {
+        total_supply: 'DESC',
+      },
+      take: 20,
     });
     for (const token of tokens) {
       const holdersCount = await this.tokenHolderRepository
