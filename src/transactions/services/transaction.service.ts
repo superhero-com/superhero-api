@@ -91,6 +91,7 @@ export class TransactionService {
       volume,
       total_supply,
       protocol_reward,
+      _should_revalidate,
     } = await this.parseTransactionData(rawTransaction);
 
     if (
@@ -145,7 +146,9 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
-      verified: moment().diff(moment(rawTransaction.microTime), 'hours') >= 5,
+      verified:
+        !_should_revalidate &&
+        moment().diff(moment(rawTransaction.microTime), 'hours') >= 5,
     };
     const transaction = await this.transactionRepository.save(txData);
 
@@ -171,12 +174,23 @@ export class TransactionService {
     amount: BigNumber;
     total_supply: BigNumber;
     protocol_reward: BigNumber;
+    _should_revalidate: boolean;
   }> {
     const decodedData = rawTransaction.tx.decodedData;
     let volume = new BigNumber(0);
     let amount = new BigNumber(0);
     let total_supply = new BigNumber(0);
     let protocol_reward = new BigNumber(0);
+
+    if (!decodedData || decodedData.length == 0) {
+      return {
+        volume,
+        amount,
+        total_supply,
+        protocol_reward,
+        _should_revalidate: true,
+      };
+    }
 
     if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
       const mints = decodedData.filter((data) => data.name === 'Mint');
@@ -221,12 +235,14 @@ export class TransactionService {
       amount,
       total_supply,
       protocol_reward,
+      _should_revalidate: false,
     };
   }
 
   async decodeTransactionData(
     token: Token,
     rawTransaction: ITransaction,
+    retries = 0,
   ): Promise<ITransaction> {
     try {
       const factory = await this.communityFactoryService.loadFactory(
@@ -241,7 +257,15 @@ export class TransactionService {
           decodedData,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
+      if (retries < 3) {
+        return this.decodeTransactionData(token, rawTransaction, retries + 1);
+      }
+      this.logger.error(
+        `decodeTransactionData->error:: retry ${retries + 1}/3`,
+        error,
+        error.stack,
+      );
       return rawTransaction;
     }
   }
