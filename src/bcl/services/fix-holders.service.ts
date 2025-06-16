@@ -123,7 +123,7 @@ export class FixHoldersService {
 
   fixingTokensHolders = false;
   // auto fix job, that will search for all tokens that have 0 holders and double-check them
-  @Cron(CronExpression.EVERY_30_MINUTES)
+  @Cron(CronExpression.EVERY_5_MINUTES)
   async fixBrokenHolders() {
     if (this.fixingTokensHolders) {
       return;
