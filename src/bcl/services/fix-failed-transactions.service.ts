@@ -31,11 +31,18 @@ export class FixFailedTransactionsService {
       return;
     }
     this.fixingFailedTransactions = true;
-    const failedTransactions = await this.failedTransactionsRepository.find({
-      where: {},
-    });
-    for (const failedTransaction of failedTransactions) {
-      await this.fixFailedTransaction(failedTransaction);
+    try {
+      const failedTransactions = await this.failedTransactionsRepository.find({
+        where: {},
+      });
+      for (const failedTransaction of failedTransactions) {
+        await this.fixFailedTransaction(failedTransaction);
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `FixFailedTransactionsService: ${error.message}`,
+        error.stack,
+      );
     }
     this.fixingFailedTransactions = false;
   }

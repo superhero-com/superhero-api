@@ -76,17 +76,24 @@ export class FastPullTokensService {
     }
     this.pullingTokens = true;
 
-    const factory = await this.communityFactoryService.getCurrentFactory();
+    try {
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-    const queryString = new URLSearchParams({
-      direction: 'forward',
-      limit: '100',
-      type: 'contract_call',
-      contract: factory.address,
-    }).toString();
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      const queryString = new URLSearchParams({
+        direction: 'forward',
+        limit: '100',
+        type: 'contract_call',
+        contract: factory.address,
+      }).toString();
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-    await this.loadCreatedCommunityFromMdw(url, factory);
+      await this.loadCreatedCommunityFromMdw(url, factory);
+    } catch (error: any) {
+      this.logger.error(
+        `FastPullTokensService->fastPullTokens: ${error.message}`,
+        error.stack,
+      );
+    }
 
     this.pullingTokens = false;
   }
@@ -101,8 +108,8 @@ export class FastPullTokensService {
     url: string,
     factory: ICommunityFactorySchema,
     tokens: Token[] = [],
+    totalRetries = 0,
   ): Promise<Token[]> {
-    let totalRetries = 0;
     this.logger.log('loadCreatedCommunityFromMdw->url::', url);
     let result: any;
     try {
@@ -111,7 +118,12 @@ export class FastPullTokensService {
       if (totalRetries < 3) {
         totalRetries++;
         await new Promise((resolve) => setTimeout(resolve, 3000));
-        return this.loadCreatedCommunityFromMdw(url, factory, tokens);
+        return this.loadCreatedCommunityFromMdw(
+          url,
+          factory,
+          tokens,
+          totalRetries,
+        );
       }
       this.logger.error('loadCreatedCommunityFromMdw->error::', error);
       return tokens;
@@ -213,6 +225,7 @@ export class FastPullTokensService {
         `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
         factory,
         tokens,
+        0,
       );
     }
     return tokens;
