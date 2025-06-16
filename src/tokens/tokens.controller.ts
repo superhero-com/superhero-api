@@ -14,6 +14,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
@@ -26,6 +27,8 @@ import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
 @Controller('api/tokens')
 @UseInterceptors(CacheInterceptor)
@@ -37,6 +40,9 @@ export class TokensController {
 
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
 
     private readonly tokensService: TokensService,
     private readonly communityFactoryService: CommunityFactoryService,
@@ -189,6 +195,14 @@ export class TokensController {
     queryBuilder.where('token_holder.aex9_address = :aex9_address', {
       aex9_address: token.address,
     });
+
+    // check if count is 0
+    const count = await queryBuilder.getCount();
+    if (count === 0) {
+      void this.syncTokenHoldersQueue.add(SYNC_TOKEN_HOLDERS_QUEUE, {
+        saleAddress: token.sale_address,
+      });
+    }
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
   }
