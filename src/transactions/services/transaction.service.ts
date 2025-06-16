@@ -259,7 +259,7 @@ export class TransactionService {
         return this.decodeTransactionData(token, rawTransaction, retries + 1);
       }
       this.logger.error(
-        `decodeTransactionData->error:: retry ${retries + 1}/3`,
+        `decodeTransactionData->error:: retry ${retries}/3`,
         error,
         error.stack,
       );

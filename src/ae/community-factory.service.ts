@@ -19,6 +19,9 @@ export class CommunityFactoryService {
   async loadFactory(
     address: Encoded.ContractAddress,
   ): Promise<CommunityFactory> {
+    if (!address) {
+      address = BCL_FACTORY[ACTIVE_NETWORK.networkId].address;
+    }
     if (this.factories[address]) {
       return this.factories[address];
     }
