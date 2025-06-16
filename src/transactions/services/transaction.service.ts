@@ -295,10 +295,10 @@ export class TransactionService {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
-        .where('token_holders."sale_address" = :sale_address', {
+        .where('token_holders.sale_address = :sale_address', {
           sale_address: token.sale_address,
         })
-        .andWhere('token_holders."address" = :address', {
+        .andWhere('token_holders.address = :address', {
           address: rawTransaction.tx.callerId,
         })
         .getOne();

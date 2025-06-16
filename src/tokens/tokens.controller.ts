@@ -140,7 +140,7 @@ export class TokensController {
 
       // queryBuilder.andWhereInIds(ownedTokens);
 
-      queryBuilder.andWhere('token."address" IN (:...aex9_addresses)', {
+      queryBuilder.andWhere('token.address IN (:...aex9_addresses)', {
         aex9_addresses: ownedTokens,
       });
     }

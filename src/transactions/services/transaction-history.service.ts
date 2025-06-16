@@ -81,7 +81,7 @@ export class TransactionHistoryService {
               floor(extract(epoch from t.created_at) / $2) * $2
             ) as interval_start
           FROM transactions t
-          WHERE t."sale_address" = $1
+          WHERE t.sale_address = $1
             AND t.buy_price->>'${convertTo}' != 'NaN'
         ),
         grouped_intervals AS (
@@ -172,7 +172,7 @@ export class TransactionHistoryService {
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."sale_address" = :sale_address', {
+      .where('transactions.sale_address = :sale_address', {
         sale_address: props.token.sale_address,
       })
       .andWhere('transactions.created_at >= :start', {
@@ -188,7 +188,7 @@ export class TransactionHistoryService {
       props.mode === 'aggregated'
         ? await this.transactionsRepository
             .createQueryBuilder('transactions')
-            .where('transactions."sale_address" = :sale_address', {
+            .where('transactions.sale_address = :sale_address', {
               sale_address: props.token.sale_address,
             })
             .andWhere('transactions.created_at < :start', {
@@ -400,7 +400,7 @@ export class TransactionHistoryService {
         `${truncationQuery} AS truncated_time`,
         "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
       ])
-      .where('transactions."sale_address" = :sale_address', {
+      .where('transactions.sale_address = :sale_address', {
         sale_address: token.sale_address,
       })
       .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
@@ -418,7 +418,7 @@ export class TransactionHistoryService {
           'transactions.created_at as truncated_time',
           "CAST(transactions.buy_price->>'ae' AS FLOAT) as max_buy_price",
         ])
-        .where('transactions."sale_address" = :sale_address', {
+        .where('transactions.sale_address = :sale_address', {
           sale_address: token.sale_address,
         })
         .andWhere(`transactions.buy_price->>'ae' != 'NaN'`)

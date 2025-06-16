@@ -72,7 +72,7 @@ export class AnalyticsTransactionsController {
     if (query.token_address) {
       const token = await this.tokenService.getToken(query.token_address);
       if (token) {
-        queryBuilder.andWhere('transactions."sale_address" = :sale_address', {
+        queryBuilder.andWhere('transactions.sale_address = :sale_address', {
           sale_address: token.sale_address,
         });
       }
@@ -130,7 +130,7 @@ export class AnalyticsTransactionsController {
     if (query.token_address) {
       const token = await this.tokenService.getToken(query.token_address);
       if (token) {
-        queryBuilder.andWhere('transactions."sale_address" = :sale_address', {
+        queryBuilder.andWhere('transactions.sale_address = :sale_address', {
           sale_address: token.sale_address,
         });
       }
@@ -169,7 +169,7 @@ export class AnalyticsTransactionsController {
       });
       const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
       queryBuilder.andWhere(
-        'transactions."sale_address" IN (:...uniqueTokenSaleAddresses)',
+        'transactions.sale_address IN (:...uniqueTokenSaleAddresses)',
         {
           uniqueTokenSaleAddresses,
         },
@@ -207,7 +207,7 @@ export class AnalyticsTransactionsController {
 
     const tokensQuery = this.transactionsRepository
       .createQueryBuilder('transaction')
-      .select('DISTINCT transaction."sale_address"')
+      .select('DISTINCT transaction.sale_address')
       .where("transaction.market_cap->>'ae' IS NOT NULL");
 
     if (token_sale_addresses?.length) {
@@ -218,7 +218,7 @@ export class AnalyticsTransactionsController {
       });
       const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
       tokensQuery.andWhere(
-        'transaction."sale_address" IN (:...uniqueTokenSaleAddresses)',
+        'transaction.sale_address IN (:...uniqueTokenSaleAddresses)',
         {
           uniqueTokenSaleAddresses,
         },
@@ -257,7 +257,7 @@ export class AnalyticsTransactionsController {
         .select('DATE(transaction.created_at) as date')
         .addSelect("MAX(transaction.market_cap->>'ae') as sum")
         .where("transaction.market_cap->>'ae' IS NOT NULL")
-        .andWhere('transaction."sale_address" = :sale_address', {
+        .andWhere('transaction.sale_address = :sale_address', {
           sale_address: tokenSaleAddress,
         })
         .groupBy('DATE(transaction.created_at)')
