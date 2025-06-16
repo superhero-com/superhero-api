@@ -189,6 +189,7 @@ export class FixHoldersService {
     });
 
     const holders = data.map((item) => ({
+      id: `${item.account_id}_${token.address}`,
       address: item.account_id,
       balance: item.amount,
       aex9_address: token.address,
@@ -209,12 +210,20 @@ export class FixHoldersService {
     const holdersData = [];
     const holders = await this.getAllHoldersList(url);
     for (const holder of holders) {
-      const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`;
-      const data = await fetchJson(holderUrl);
-      holdersData.push({
-        ...holder,
-        amount: data?.amount,
-      });
+      try {
+        const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${token.address}/balances/${holder.account_id}`;
+        const data = await fetchJson(holderUrl);
+        holdersData.push({
+          ...holder,
+          amount: data?.amount,
+        });
+      } catch (error: any) {
+        this.logger.error(
+          `Error pulling and updating account aex9 balances for ${holder.account_id}`,
+          error,
+          error.stack,
+        );
+      }
     }
 
     return holdersData;

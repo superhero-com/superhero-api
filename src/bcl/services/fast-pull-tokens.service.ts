@@ -91,20 +91,6 @@ export class FastPullTokensService {
 
     await this.loadCreatedCommunityFromMdw(url, factory);
 
-    // const tokens = communities.sort((a, b) => {
-    //   if (!a.total_supply || !b.total_supply) {
-    //     return 0;
-    //   }
-    //   return b.total_supply.minus(a.total_supply).toNumber();
-    // });
-
-    // for (const token of tokens) {
-    //   // const liveTokenData = await this.tokensService.getTokeLivePrice(token);
-    //   // await this.tokensRepository.update(token.sale_address, liveTokenData);
-    //   // TODO: token holders needs the aex9 address
-    //   await this.fixHoldersService.syncTokenHolders(token);
-    // }
-
     this.pullingTokens = false;
   }
 
@@ -168,9 +154,10 @@ export class FastPullTokensService {
             tokenExists = undefined;
           }
 
-          // const decodedData = this.factoryContract?.contract?.$decodeEvents(
-          //   tx?.log,
-          // );
+          if (!!tokenExists?.address) {
+            continue;
+          }
+
           const tokenData = {
             total_supply: new BigNumber(0),
             holders_count: 0,
@@ -183,28 +170,8 @@ export class FastPullTokensService {
             name: tokenName,
             symbol: tokenName,
             create_tx_hash: transaction?.hash,
+            ...(tokenExists || {}),
           };
-
-          // can be removed and replaced with queue
-          // const fungibleToken = decodedData?.find(
-          //   (event) =>
-          //     event.contract.name === 'FungibleTokenFull' &&
-          //     event.contract.address !== factory.bctsl_aex9_address,
-          // );
-          // tokenData.address =
-          //   fungibleToken?.contract?.address || tokenExists?.address;
-          // if (tokenData.address) {
-          //   const tokenDataResponse = await fetchJson(
-          //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
-          //   );
-          //   if (!tokenExists?.total_supply?.gt(0)) {
-          //     tokenData.total_supply = new BigNumber(
-          //       tokenDataResponse?.event_supply,
-          //     );
-          //   }
-
-          //   tokenData.holders_count = tokenDataResponse?.holders;
-          // }
 
           let token;
           // TODO: should only update if the data is different
