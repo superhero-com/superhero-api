@@ -235,6 +235,7 @@ export class TokensService {
     if (tokenData?.symbol) {
       await this.tokensRepository.delete({
         symbol: tokenData.symbol,
+        name: tokenData.name,
       });
     }
 
