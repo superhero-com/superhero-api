@@ -122,9 +122,7 @@ export class TransactionService {
       ]);
 
     const txData = {
-      token: {
-        sale_address: saleAddress,
-      },
+      sale_address: saleAddress,
       tx_type: rawTransaction.tx.function,
       tx_hash: rawTransaction.hash,
       block_height: rawTransaction.blockHeight,

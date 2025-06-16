@@ -20,12 +20,9 @@ export class Transaction {
   @PrimaryColumn()
   tx_hash: string;
 
-  @ManyToOne(() => Token, (token) => token.sale_address)
-  @JoinColumn({
-    name: 'sale_address',
-    referencedColumnName: 'sale_address',
-  })
-  token: Token;
+  @Index()
+  @Column()
+  sale_address: string;
 
   @Column()
   tx_type: string; // buy/sell/create_community
