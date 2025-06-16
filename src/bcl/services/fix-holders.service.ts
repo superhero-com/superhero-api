@@ -137,30 +137,26 @@ export class FixHoldersService {
     this.fixingTokensHolders = true;
     this.logger.log('Fixing broken holders...');
 
-    await this.checkTokensWithMismatchingSupply();
+    await this.checkTokensWithoutHolders();
     this.logger.log('Fixing broken holders... done');
     this.fixingTokensHolders = false;
   }
 
-  // check if current_supply is different from the total holders sum, if not do a holders re-sync
-  async checkTokensWithMismatchingSupply() {
+  async checkTokensWithoutHolders() {
     const tokens = await this.tokensRepository.find({
       where: {
-        total_supply: Not(Equal(0)),
+        holders_count: Equal(0),
       },
     });
     for (const token of tokens) {
-      const holdersSum = await this.tokenHolderRepository
+      const holdersCount = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
         .where('token_holder.aex9_address = :aex9_address', {
           aex9_address: token.address,
         })
-        .select('SUM(token_holder.balance)')
-        .getRawOne()
-        .then((res) => res.sum);
+        .getCount();
 
-      const balance = token.total_supply.toNumber();
-      if (holdersSum !== balance && holdersSum > 0) {
+      if (holdersCount < 1) {
         await this.fullResyncHolders(token);
       }
     }

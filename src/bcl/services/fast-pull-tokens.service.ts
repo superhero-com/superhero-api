@@ -17,7 +17,6 @@ import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import moment from 'moment';
 import { Repository } from 'typeorm';
-import { FixHoldersService } from './fix-holders.service';
 
 @Injectable()
 export class FastPullTokensService {
@@ -31,8 +30,6 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
     private readonly transactionService: TransactionService,
-
-    private readonly fixHoldersService: FixHoldersService,
 
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenInfoQueue: Queue,
