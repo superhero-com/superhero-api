@@ -8,8 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
-import { Equal, Not, Repository } from 'typeorm';
-import { SyncedBlock } from '../entities/synced-block.entity';
+import { Equal, Repository } from 'typeorm';
 
 @Injectable()
 export class FixHoldersService {
@@ -23,9 +22,6 @@ export class FixHoldersService {
     @InjectRepository(TokenHolder)
     private tokenHolderRepository: Repository<TokenHolder>,
 
-    @InjectRepository(SyncedBlock)
-    private syncedBlocksRepository: Repository<SyncedBlock>,
-
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly syncTokenHoldersQueue: Queue,
   ) {
@@ -33,7 +29,6 @@ export class FixHoldersService {
   }
 
   onModuleInit() {
-    this.syncLatestBlockCallers();
     this.fixBrokenHolders();
   }
 
@@ -50,26 +45,14 @@ export class FixHoldersService {
   }
 
   isSyncingBlockCallers = false;
-  @Cron(CronExpression.EVERY_MINUTE)
-  async syncLatestBlockCallers() {
+  async syncLatestBlockCallers(callers: string[] = []) {
     if (this.isSyncingBlockCallers) {
       return;
     }
     this.isSyncingBlockCallers = true;
-    // get latest 20 blocks
-    const blocks = await this.syncedBlocksRepository.find({
-      order: {
-        block_number: 'DESC',
-      },
-      take: 20,
-    });
 
-    // unique callers
-    const callers = blocks.map((block) => block.callers).flat();
-    // unique callers
-    const uniqueCallers = callers;
-    this.logger.log(`Syncing ${uniqueCallers.length} callers...`);
-    for (const caller of uniqueCallers) {
+    this.logger.log(`Syncing ${callers.length} callers...`);
+    for (const caller of callers) {
       try {
         const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/accounts/${caller}/aex9/balances?limit=100`;
         await this.pullAndUpdateAccountAex9Balances(url, caller);

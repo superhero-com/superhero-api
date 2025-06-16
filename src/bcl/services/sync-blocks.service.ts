@@ -8,6 +8,7 @@ import { SyncedBlock } from '../entities/synced-block.entity';
 import { SyncTransactionsService } from './sync-transactions.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TransactionService } from '@/transactions/services/transaction.service';
+import { FixHoldersService } from './fix-holders.service';
 
 @Injectable()
 export class SyncBlocksService {
@@ -28,6 +29,8 @@ export class SyncBlocksService {
 
     private readonly aeSdkService: AeSdkService,
     private readonly transactionService: TransactionService,
+
+    private fixHoldersService: FixHoldersService,
   ) {
     //
   }
@@ -46,7 +49,10 @@ export class SyncBlocksService {
     this.syncingLatestBlocks = true;
     this.logger.log(`syncTransactions::: ${this.latestBlockNumber}`);
 
-    await this.validateBlocksRange(10);
+    const result = await this.validateBlocksRange(10);
+    if (result.callers.length > 0) {
+      await this.fixHoldersService.syncLatestBlockCallers(result.callers);
+    }
     this.syncingLatestBlocks = false;
   }
 
@@ -61,7 +67,14 @@ export class SyncBlocksService {
     this.syncingPastBlocks = false;
   }
 
-  private async validateBlocksRange(range = 10) {
+  private async validateBlocksRange(range = 10): Promise<{
+    callers: string[];
+    validated_hashes: string[];
+  }> {
+    let result = {
+      callers: [],
+      validated_hashes: [],
+    };
     try {
       this.currentBlockNumber = (
         await this.aeSdkService.sdk.getCurrentGeneration()
@@ -71,17 +84,27 @@ export class SyncBlocksService {
       if (this.currentBlockNumber <= this.latestBlockNumber) {
         this.totalTicks++;
         if (this.totalTicks > 3) {
-          await this.syncBlockTransactions(this.currentBlockNumber);
+          result = await this.syncBlockTransactions(this.currentBlockNumber);
           this.totalTicks = 0;
         }
         this.logger.log('latestBlockNumber is not updated');
-        return;
+        return result;
       }
       this.latestBlockNumber = this.currentBlockNumber;
       this.logger.log('latestBlockNumber', this.latestBlockNumber);
       const fromBlockNumber = this.latestBlockNumber - range;
       for (let i = fromBlockNumber; i <= this.latestBlockNumber; i++) {
-        await this.syncBlockTransactions(i);
+        const result = await this.syncBlockTransactions(i);
+        result.callers.forEach((caller) => {
+          if (!result.callers.includes(caller)) {
+            result.callers.push(caller);
+          }
+        });
+        result.validated_hashes.forEach((hash) => {
+          if (!result.validated_hashes.includes(hash)) {
+            result.validated_hashes.push(hash);
+          }
+        });
       }
     } catch (error: any) {
       this.logger.error(
@@ -89,6 +112,7 @@ export class SyncBlocksService {
         error.stack,
       );
     }
+    return result;
   }
 
   @Cron(CronExpression.EVERY_30_MINUTES)
