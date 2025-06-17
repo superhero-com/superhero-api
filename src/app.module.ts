@@ -30,7 +30,6 @@ import { TransactionsModule } from './transactions/transactions.module';
     BullModule.forRoot({
       redis: REDIS_CONFIG,
     }),
-    BullBoardModule.register(),
     BullModule.registerQueue(
       {
         name: PULL_TOKEN_INFO_QUEUE,
@@ -51,6 +50,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     TransactionsModule,
     AePricingModule,
     BclModule,
+    BullBoardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
