@@ -592,6 +592,7 @@ export class TokensService {
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
       await this.tokensRepository.update(tokenExists.sale_address, tokenData);
+      token = await this.findByAddress(tokenExists.sale_address);
     } else {
       token = await this.tokensRepository.save(tokenData);
     }
