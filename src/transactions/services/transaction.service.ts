@@ -46,7 +46,7 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
   ): Promise<Transaction> {
-    if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
+    if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction?.tx?.function)) {
       return;
     }
     let saleAddress;
