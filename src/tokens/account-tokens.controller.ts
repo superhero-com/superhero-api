@@ -1,4 +1,4 @@
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 import {
   Controller,
   DefaultValuePipe,
@@ -6,7 +6,6 @@ import {
   Param,
   ParseIntPipe,
   Query,
-  UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,11 +14,10 @@ import { Repository } from 'typeorm';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { TokensService } from './tokens.service';
 import { Token } from './entities/token.entity';
+import { TokensService } from './tokens.service';
 
-@Controller('api/accounts')
+@Controller('accounts')
 @ApiTags('Account Tokens')
 export class AccountTokensController {
   constructor(

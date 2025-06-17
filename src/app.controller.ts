@@ -18,7 +18,7 @@ export class AppController {
   }
 
   @ApiOperation({ operationId: 'getApiStats' })
-  @Get('/api/stats')
+  @Get('/stats')
   async getApiStats() {
     const duration = moment.duration(moment().diff(this.appService.startedAt));
     return {
@@ -37,7 +37,7 @@ export class AppController {
   }
 
   @ApiOperation({ operationId: 'getContracts', deprecated: true })
-  @Get('/api/contracts')
+  @Get('/contracts')
   async getContracts() {
     const factory = await this.communityFactoryService.getCurrentFactory();
     return [
@@ -49,7 +49,7 @@ export class AppController {
   }
 
   @ApiOperation({ operationId: 'getFactory' })
-  @Get('/api/factory')
+  @Get('/factory')
   async getFactory() {
     return this.communityFactoryService.getCurrentFactory();
   }

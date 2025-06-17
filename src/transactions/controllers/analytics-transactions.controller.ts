@@ -16,7 +16,7 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DailyMarketCapSumDto } from '@/tokens/dto/daily-market-cap-sum.dto';
 import { CacheTTL } from '@nestjs/cache-manager';
 import { Token } from '@/tokens/entities/token.entity';
-@Controller('api/analytics')
+@Controller('analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
   constructor(

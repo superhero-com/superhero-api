@@ -18,7 +18,7 @@ import {
   TransactionHistoryService,
 } from '../services/transaction-history.service';
 
-@Controller('api/tokens')
+@Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Transaction Historical')
 export class HistoricalController {

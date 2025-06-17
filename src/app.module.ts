@@ -1,4 +1,5 @@
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullBoardModule } from '@nestql/bull-board';
 
 import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
@@ -29,6 +30,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     BullModule.forRoot({
       redis: REDIS_CONFIG,
     }),
+    BullBoardModule.register(),
     BullModule.registerQueue(
       {
         name: PULL_TOKEN_INFO_QUEUE,

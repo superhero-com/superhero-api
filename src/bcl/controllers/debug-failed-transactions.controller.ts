@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FailedTransaction } from '../entities/failed-transaction.entity';
 
-@Controller('api/debug')
+@Controller('debug')
 export class DebugFailedTransactionsController {
   constructor(
     @InjectRepository(FailedTransaction)

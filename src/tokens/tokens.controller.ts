@@ -30,7 +30,7 @@ import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { Queue } from 'bull';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
-@Controller('api/tokens')
+@Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokensController {

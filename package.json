@@ -33,6 +33,7 @@
     "@nestjs/swagger": "^7.3.1",
     "@nestjs/typeorm": "^10.0.2",
     "@nestjs/websockets": "^10.3.9",
+    "@nestql/bull-board": "^1.0.3",
     "bctsl-sdk": "git+ssh://git@github.com/bctsl/bctsl-sdk#v1.0.0",
     "bignumber.js": "^9.1.2",
     "bull": "^4.15.0",

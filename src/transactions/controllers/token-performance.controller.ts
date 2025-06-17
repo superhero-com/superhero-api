@@ -15,7 +15,7 @@ import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';
 import { TokenPriceMovementDto } from '../dto/token-stats.dto';
 
-@Controller('api/tokens')
+@Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {

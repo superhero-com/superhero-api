@@ -9,7 +9,7 @@ import { DailyTokenCountDto } from './dto/daily-token-count.dto';
 import { MarketCapSumDto } from './dto/market-cap-sum.dto';
 import { Token } from './entities/token.entity';
 
-@Controller('api/analytics')
+@Controller('analytics')
 @ApiTags('Analytics')
 export class AnalyticTokensController {
   constructor(

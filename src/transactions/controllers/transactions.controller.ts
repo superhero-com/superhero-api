@@ -25,7 +25,7 @@ import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
 
-@Controller('api/transactions')
+@Controller('transactions')
 @ApiTags('Transactions')
 export class TransactionsController {
   constructor(
