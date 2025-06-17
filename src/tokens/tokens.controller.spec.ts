@@ -80,7 +80,8 @@ describe('TokensController', () => {
             }),
             findByAddress: jest.fn().mockResolvedValue({
               id: 1,
-              : 5,
+              address: 'ct_123',
+              rank: 5,
               total_supply: { toNumber: () => 1000000 },
               factory_address: 'ct_123',
             }),

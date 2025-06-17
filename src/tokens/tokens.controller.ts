@@ -109,19 +109,20 @@ export class TokensController {
         search: `%${search}%`,
       });
     }
-    // if (factory_address) {
-    //   queryBuilder.andWhere('token.factory_address = :factory_address', {
-    //     factory_address,
-    //   });
-    // } else {
+    if (factory_address) {
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address,
+      });
+    }
+    // else {
     //   const factory = await this.communityFactoryService.getCurrentFactory();
     //   queryBuilder.andWhere('token.factory_address = :address', {
     //     address: factory.address,
     //   });
     // }
-    // if (collection !== 'all') {
-    //   queryBuilder.andWhere('token.collection = :collection', { collection });
-    // }
+    if (collection !== 'all') {
+      queryBuilder.andWhere('token.collection = :collection', { collection });
+    }
     if (creator_address) {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
         creator_address,

@@ -15,7 +15,6 @@ describe('TransactionHistoryService', () => {
   let dataSource: jest.Mocked<DataSource>;
   let transactionService: jest.Mocked<TransactionService>;
   let tokenService: jest.Mocked<TokensService>;
-  let queueMock: { add: jest.Mock };
 
   beforeEach(async () => {
     transactionsRepository = {
@@ -61,8 +60,6 @@ describe('TransactionHistoryService', () => {
     tokenService = {
       getToken: jest.fn().mockResolvedValue(new Token()),
     } as any;
-
-    queueMock = { add: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [

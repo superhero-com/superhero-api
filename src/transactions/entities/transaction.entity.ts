@@ -1,5 +1,4 @@
 import { IPriceDto } from '@/tokens/dto/price.dto';
-import { Token } from '@/tokens/entities/token.entity';
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
 import BigNumber from 'bignumber.js';
 import {
@@ -7,8 +6,6 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
 
