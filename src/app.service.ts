@@ -43,12 +43,4 @@ export class AppService {
   getApiVersion() {
     return process.env.npm_package_version;
   }
-
-  failedQueueMetrics() {
-    return this.deleteOldTokensQueue.getMetrics('failed');
-  }
-
-  completedQueueMetrics() {
-    return this.deleteOldTokensQueue.getMetrics('completed');
-  }
 }
