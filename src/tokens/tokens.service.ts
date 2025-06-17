@@ -579,10 +579,6 @@ export class TokensService {
       tokenExists = undefined;
     }
 
-    if (!!tokenExists?.address) {
-      return tokenExists;
-    }
-
     const tokenData = {
       total_supply: new BigNumber(0),
       holders_count: 0,
@@ -602,22 +598,19 @@ export class TokensService {
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
       await this.tokensRepository.update(tokenExists.sale_address, tokenData);
-      token = await this.findById(tokenExists.sale_address);
     } else {
       token = await this.tokensRepository.save(tokenData);
     }
 
-    if (!token?.address) {
-      await this.pullTokenInfoQueue.add(
-        {
-          saleAddress: token.sale_address,
-        },
-        {
-          jobId: `pullTokenInfo-${token.sale_address}`,
-          removeOnComplete: true,
-        },
-      );
-    }
+    await this.pullTokenInfoQueue.add(
+      {
+        saleAddress: token.sale_address,
+      },
+      {
+        jobId: `pullTokenInfo-${token.sale_address}`,
+        removeOnComplete: true,
+      },
+    );
 
     return token;
   }

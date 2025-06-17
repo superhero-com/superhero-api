@@ -391,7 +391,7 @@ export class TransactionService {
       },
       {
         jobId: `syncTokenHolders-${token.sale_address}`,
-        delay: 1000 * 60 * 3, // 3 minutes
+        removeOnComplete: true,
       },
     );
   }
