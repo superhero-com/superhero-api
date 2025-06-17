@@ -64,7 +64,7 @@ export class BullBoardService implements OnModuleInit {
       const queuesToRemove: BullAdapter[] = this._queueConfigsToAdapters(
         this.moduleConfig.config.queues.remove,
       );
-      queuesToRemove.forEach(queue =>
+      queuesToRemove.forEach((queue) =>
         this.moduleConfig.board.removeQueue(queue),
       );
     }

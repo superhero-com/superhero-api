@@ -12,9 +12,15 @@ import { TransactionService } from '@/transactions/services/transaction.service'
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { CommunityFactory } from 'bctsl-sdk';
+import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
+import { CommunityFactory } from 'bctsl-sdk';
+import {
+  SYNC_TOKEN_HOLDERS_QUEUE,
+  PULL_TOKEN_INFO_QUEUE,
+} from '@/tokens/queues/constants';
 
 @Injectable()
 export class FastPullTokensService {
@@ -28,6 +34,12 @@ export class FastPullTokensService {
 
     private syncBlocksService: SyncBlocksService,
     private readonly transactionService: TransactionService,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly pullTokenHoldersQueue: Queue,
+
+    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
+    private readonly pullTokenInfoQueue: Queue,
   ) {
     //
   }
@@ -76,6 +88,12 @@ export class FastPullTokensService {
       return;
     }
     this.pullingTokens = true;
+
+    // clear all queue for meta info & token holders sync
+    await Promise.all([
+      this.pullTokenHoldersQueue.empty(),
+      this.pullTokenInfoQueue.empty(),
+    ]);
 
     try {
       const factory = await this.communityFactoryService.getCurrentFactory();
