@@ -80,18 +80,6 @@ export class TokensService {
     }
   }
 
-  async loadTokenContractAndUpdateMintAddress(token: Token) {
-    const contract = await this.getTokenContractsBySaleAddress(
-      token.sale_address as Encoded.ContractAddress,
-    );
-    const priceData = await this.getTokeLivePrice(token);
-
-    this.tokensRepository.update(token.sale_address, {
-      address: contract?.tokenContractInstance?.$options.address,
-      ...priceData,
-    });
-  }
-
   findAll(): Promise<Token[]> {
     return this.tokensRepository.find();
   }
@@ -201,13 +189,15 @@ export class TokensService {
     const { instance } = await this.getTokenContractsBySaleAddress(
       token.sale_address as Encoded.ContractAddress,
     );
-    const metaInfo = await instance.metaInfo();
-    if (metaInfo.token.address) {
-      await this.tokensRepository.update(token.sale_address, {
-        address: metaInfo.token.address,
-      });
+    if (!instance) {
+      return null;
     }
-    return metaInfo.token.address;
+
+    const priceData = await this.getTokeLivePrice(token);
+
+    await this.tokensRepository.update(token.sale_address, priceData);
+
+    return priceData.address;
   }
 
   async createToken(
@@ -381,6 +371,10 @@ export class TokensService {
       price_data,
       market_cap,
       market_cap_data,
+      address:
+        metaInfo?.token?.address || tokenContractInstance?.$options.address,
+      name: metaInfo?.token?.name,
+      symbol: metaInfo?.token?.symbol,
       beneficiary_address: metaInfo?.beneficiary,
       bonding_curve_address: metaInfo?.bondingCurve,
       owner_address: metaInfo?.owner,

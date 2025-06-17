@@ -9,6 +9,10 @@ import { SyncTransactionsService } from './sync-transactions.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { FixHoldersService } from './fix-holders.service';
+import {
+  TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES,
+  TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE,
+} from '@/configs/constants';
 
 @Injectable()
 export class SyncBlocksService {
@@ -49,7 +53,9 @@ export class SyncBlocksService {
     this.syncingLatestBlocks = true;
     this.logger.log(`syncTransactions::: ${this.latestBlockNumber}`);
 
-    const result = await this.validateBlocksRange(10);
+    const result = await this.validateBlocksRange(
+      TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE,
+    );
     if (result.callers.length > 0) {
       await this.fixHoldersService.syncLatestBlockCallers(result.callers);
     }
@@ -63,7 +69,7 @@ export class SyncBlocksService {
       return;
     }
     this.syncingPastBlocks = true;
-    await this.validateBlocksRange(100);
+    await this.validateBlocksRange(TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES);
     this.syncingPastBlocks = false;
   }
 

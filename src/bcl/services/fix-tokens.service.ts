@@ -37,7 +37,7 @@ export class FixTokensService {
     });
     for (const token of tokens) {
       try {
-        await this.tokensService.loadTokenContractAndUpdateMintAddress(token);
+        await this.tokensService.getTokenAex9Address(token);
       } catch (error: any) {
         this.logger.error(
           `FixTokensService: ${token.sale_address} - ${error.message}`,

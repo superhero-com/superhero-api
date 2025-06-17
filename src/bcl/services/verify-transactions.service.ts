@@ -9,7 +9,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { LessThan, Repository } from 'typeorm';
 import { SyncBlocksService } from './sync-blocks.service';
-import { TX_FUNCTIONS } from '@/configs/constants';
+import {
+  FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+  TX_FUNCTIONS,
+  WAIT_TIME_WHEN_REQUEST_FAILED,
+} from '@/configs/constants';
 
 @Injectable()
 export class VerifyTransactionsService {
@@ -35,7 +39,10 @@ export class VerifyTransactionsService {
     const transactions = await this.transactionRepository.find({
       where: {
         verified: false,
-        block_height: LessThan(this.syncBlocksService.currentBlockNumber - 10),
+        block_height: LessThan(
+          this.syncBlocksService.currentBlockNumber -
+            FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+        ),
       },
       order: {
         created_at: 'ASC',
@@ -52,7 +59,9 @@ export class VerifyTransactionsService {
 
     this.verifyingTransactions = false;
     // wait 3 seconds before the next call
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await new Promise((resolve) =>
+      setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+    );
 
     this.fixFailedTransactions(); // recursive call, until all transactions are verified
   }

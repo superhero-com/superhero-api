@@ -1,3 +1,8 @@
+import {
+  MAX_RETRIES_WHEN_REQUEST_FAILED,
+  WAIT_TIME_WHEN_REQUEST_FAILED,
+} from '@/configs/constants';
+
 /**
  * Fetches JSON data from the specified URL.
  *
@@ -18,9 +23,11 @@ export async function fetchJson<T = any>(
     }
     return response.json() as Promise<T>;
   } catch (error) {
-    if (totalRetries < 3 && !shouldNotRetry) {
+    if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED && !shouldNotRetry) {
       totalRetries++;
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) =>
+        setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+      );
       return fetchJson(url, options, shouldNotRetry, totalRetries);
     }
     throw error;

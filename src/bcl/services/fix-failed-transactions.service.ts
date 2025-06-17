@@ -1,4 +1,4 @@
-import { TX_FUNCTIONS } from '@/configs';
+import { MAX_RETRIES_FOR_FAILED_TRANSACTIONS, TX_FUNCTIONS } from '@/configs';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
@@ -58,7 +58,7 @@ export class FixFailedTransactionsService {
         await this.failedTransactionsRepository.delete(failedTransaction.hash);
         return;
       }
-      if (failedTransaction?.retries > 10) {
+      if (failedTransaction?.retries > MAX_RETRIES_FOR_FAILED_TRANSACTIONS) {
         return;
       }
       await this.transactionService.saveTransaction(transaction);

@@ -1,5 +1,10 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
+import {
+  MAX_RETRIES_WHEN_REQUEST_FAILED,
+  TOTAL_BLOCKS_TO_HAVE_STABLE_DATA,
+  WAIT_TIME_WHEN_REQUEST_FAILED,
+} from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
@@ -43,10 +48,19 @@ export class FastPullTokensService {
     this.isPullingLatestCreatedTokens = true;
     const factory = await this.communityFactoryService.getCurrentFactory();
 
+    const from =
+      this.syncBlocksService.latestBlockNumber -
+      TOTAL_BLOCKS_TO_HAVE_STABLE_DATA;
+    if (from < 0) {
+      this.logger.error(
+        `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
+      );
+      return;
+    }
     const queryString = new URLSearchParams({
       direction: 'backward',
       limit: '100',
-      scope: `gen:${this.syncBlocksService.latestBlockNumber - 100}-${this.syncBlocksService.latestBlockNumber}`,
+      scope: `gen:${from}-${this.syncBlocksService.latestBlockNumber}`,
       type: 'contract_call',
       contract: factory.address,
     }).toString();
@@ -102,9 +116,11 @@ export class FastPullTokensService {
     try {
       result = await fetchJson(url);
     } catch (error) {
-      if (totalRetries < 3) {
+      if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
         totalRetries++;
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) =>
+          setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+        );
         return this.loadCreatedCommunityFromMdw(
           url,
           factory,
