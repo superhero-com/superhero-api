@@ -19,8 +19,12 @@ export class AppController {
 
   @ApiOperation({ operationId: 'getApiStats' })
   @Get('/api/stats')
-  getApiStats() {
+  async getApiStats() {
     const duration = moment.duration(moment().diff(this.appService.startedAt));
+    const queueMetrics = await Promise.all([
+      this.appService.failedQueueMetrics(),
+      this.appService.completedQueueMetrics(),
+    ]);
     return {
       fullSyncing: this.syncBlocksService.fullSyncing,
       currentBlockNumber: this.syncBlocksService.currentBlockNumber,
@@ -34,8 +38,8 @@ export class AppController {
       uptime: `${duration.days()}d ${duration.hours()}h ${duration.minutes()}m ${duration.seconds()}s`,
       uptimeDurationSeconds: duration.asSeconds(),
       queueMetrics: {
-        failed: this.appService.failedQueueMetrics(),
-        completed: this.appService.completedQueueMetrics(),
+        failed: queueMetrics[0],
+        completed: queueMetrics[1],
       },
     };
   }
