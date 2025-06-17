@@ -1,5 +1,5 @@
 import { ScheduleModule } from '@nestjs/schedule';
-import { BullBoardModule } from '@nestql/bull-board';
+import { BullBoardModule } from './bull-board/bull-board.module';
 
 import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
