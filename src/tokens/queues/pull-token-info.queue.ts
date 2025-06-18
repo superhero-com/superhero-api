@@ -40,7 +40,6 @@ export class PullTokenInfoQueue {
         },
         {
           jobId: `syncTokenHolders-${job.data.saleAddress}`,
-          removeOnComplete: true,
         },
       );
     } catch (error) {

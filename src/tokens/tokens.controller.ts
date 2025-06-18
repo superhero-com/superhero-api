@@ -207,7 +207,6 @@ export class TokensController {
         },
         {
           jobId: `syncTokenHolders-${token.sale_address}`,
-          removeOnComplete: true,
         },
       );
     }

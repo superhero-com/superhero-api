@@ -607,7 +607,6 @@ export class TokensService {
       },
       {
         jobId: `pullTokenInfo-${token.sale_address}`,
-        removeOnComplete: true,
       },
     );
 
