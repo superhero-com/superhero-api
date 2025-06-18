@@ -3,7 +3,7 @@ import { TokensService } from '@/tokens/tokens.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
 
 @Injectable()
 export class FixTokensService {
@@ -47,5 +47,22 @@ export class FixTokensService {
       }
     }
     this.fixingTokens = false;
+  }
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async fixTokensWithNoPrice() {
+    const tokens = await this.tokensRepository.find({
+      where: {
+        price: LessThanOrEqual(1),
+      },
+      order: {
+        total_supply: 'DESC',
+      },
+      take: 100,
+    });
+    for (const token of tokens) {
+      const priceData = await this.tokensService.getTokeLivePrice(token);
+      await this.tokensRepository.update(token.sale_address, priceData);
+    }
   }
 }
