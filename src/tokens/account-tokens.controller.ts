@@ -23,6 +23,8 @@ export class AccountTokensController {
   constructor(
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
+    @InjectRepository(Token)
+    private readonly tokenRepository: Repository<Token>,
     private readonly communityFactoryService: CommunityFactoryService,
     private readonly tokensService: TokensService,
   ) {
@@ -59,6 +61,43 @@ export class AccountTokensController {
     @Query('order_by') orderBy: string = 'balance',
     @Query('order_direction') orderDirection: 'DESC' | 'DESC' = 'DESC',
   ): Promise<Pagination<TokenHolder>> {
+    // when it's creator_address or owner_address, we should fetch all tokens based no matter if the balance is 0 or not
+    if (creator_address || owner_address) {
+      const queryBuilder = this.tokenRepository.createQueryBuilder('token');
+      if (creator_address) {
+        queryBuilder.where('token.creator_address = :address', {
+          address: address,
+        });
+      }
+      if (owner_address) {
+        queryBuilder.orWhere('token.owner_address = :address', {
+          address: address,
+        });
+      }
+      const tokensQueryResult = await paginate<Token>(queryBuilder, {
+        page,
+        limit,
+      });
+      const address = owner_address || creator_address;
+      // get the token holders for each token
+      const tokenHoldersQueryBuilder =
+        await this.tokenHolderRepository.createQueryBuilder('token_holder');
+      tokenHoldersQueryBuilder.where('token_holder.address = :address', {
+        address: address,
+      });
+
+      const holdings = await tokenHoldersQueryBuilder.getMany();
+      return {
+        ...tokensQueryResult,
+        items: tokensQueryResult.items?.map((token) => ({
+          token,
+          address,
+          balance:
+            holdings.find((holder) => holder.aex9_address === token.address)
+              ?.balance || '0',
+        })),
+      } as any;
+    }
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
@@ -88,14 +127,12 @@ export class AccountTokensController {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
         creator_address,
       });
-    } else {
-      queryBuilder.andWhere('token_holder.balance > 0');
-    }
-
-    if (owner_address) {
+    } else if (owner_address) {
       queryBuilder.andWhere('token.owner_address = :owner_address', {
         owner_address,
       });
+    } else {
+      queryBuilder.andWhere('token_holder.balance > 0');
     }
 
     if (search) {
