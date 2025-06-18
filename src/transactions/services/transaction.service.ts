@@ -3,16 +3,13 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TX_FUNCTIONS } from '@/configs';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
-import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
@@ -32,9 +29,6 @@ export class TransactionService {
 
     @InjectRepository(TokenHolder)
     private tokenHolderRepository: Repository<TokenHolder>,
-
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
   ) {
     // this._testTransaction(
     //   'th_8B9qcMtArB59kBAHKKzPo4JXyECgBUBDH415gy8a3K69yr837',
@@ -384,16 +378,17 @@ export class TransactionService {
     } catch (error) {
       this.logger.error('Error updating token holder', error);
     }
-
-    void this.syncTokenHoldersQueue.add(
-      {
-        saleAddress: token.sale_address,
-      },
-      {
-        jobId: `syncTokenHolders-${token.sale_address}`,
-        removeOnComplete: true,
-      },
-    );
+    try {
+      await this.tokenService.loadAndSaveTokenHoldersFromMdw(
+        token.sale_address as Encoded.ContractAddress,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Error loading and saving token holders from mdw`,
+        error,
+        error.stack,
+      );
+    }
   }
 
   async deleteNonValidTransactionsInBlock(
