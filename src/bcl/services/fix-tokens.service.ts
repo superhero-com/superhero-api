@@ -49,8 +49,13 @@ export class FixTokensService {
     this.fixingTokens = false;
   }
 
+  isFixingTokensWithNoPrice = false;
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fixTokensWithNoPrice() {
+    if (this.isFixingTokensWithNoPrice) {
+      return;
+    }
+    this.isFixingTokensWithNoPrice = true;
     const tokens = await this.tokensRepository.find({
       where: {
         price: LessThanOrEqual(1),
@@ -61,8 +66,8 @@ export class FixTokensService {
       take: 100,
     });
     for (const token of tokens) {
-      const priceData = await this.tokensService.getTokeLivePrice(token);
-      await this.tokensRepository.update(token.sale_address, priceData);
+      await this.tokensService.syncTokenPrice(token);
     }
+    this.isFixingTokensWithNoPrice = false;
   }
 }
