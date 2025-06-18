@@ -23,7 +23,9 @@ export class PullTokenInfoQueue {
     //
   }
 
-  @Process()
+  @Process({
+    concurrency: 5,
+  })
   async process(job: Job<IPullTokenInfoQueue>) {
     this.logger.log(`PullTokenInfoQueue->started:${job.data.saleAddress}`);
     try {

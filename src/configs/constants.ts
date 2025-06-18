@@ -99,6 +99,6 @@ export const MAX_RETRIES_FOR_FAILED_TRANSACTIONS = 10;
 
 export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 
-export const SYNCING_ENABLED = false;
-export const LIVE_SYNCING_ENABLED = false;
-export const PERIODIC_SYNCING_ENABLED = false;
+export const SYNCING_ENABLED = true;
+export const LIVE_SYNCING_ENABLED = true;
+export const PERIODIC_SYNCING_ENABLED = true;

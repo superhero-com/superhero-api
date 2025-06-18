@@ -34,7 +34,9 @@ export class SyncTokenHoldersQueue {
   /**
    * @param job
    */
-  @Process()
+  @Process({
+    concurrency: 10,
+  })
   async process(job: Job<ISyncTokenHoldersQueue>) {
     this.logger.log(`SyncTokenHoldersQueue->started:${job.data.saleAddress}`);
     try {
