@@ -593,12 +593,14 @@ export class TokensService {
     };
 
     let token;
+    let isNewToken = false;
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
       await this.tokensRepository.update(tokenExists.sale_address, tokenData);
       token = await this.findByAddress(tokenExists.sale_address);
     } else {
       token = await this.tokensRepository.save(tokenData);
+      isNewToken = true;
     }
 
     await this.pullTokenInfoQueue.add(
@@ -607,6 +609,7 @@ export class TokensService {
       },
       {
         jobId: `pullTokenInfo-${token.sale_address}`,
+        lifo: isNewToken,
       },
     );
 

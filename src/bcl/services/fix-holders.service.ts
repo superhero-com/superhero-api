@@ -145,7 +145,7 @@ export class FixHoldersService {
   async checkTokensWithoutHolders() {
     const tokens = await this.tokensRepository
       .createQueryBuilder('token')
-      .where('token.holders_count <= :holdersCount', { holdersCount: 1 })
+      .where('token.holders_count = :holdersCount', { holdersCount: 0 })
       .orderBy('token.total_supply', 'DESC')
       .take(MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS)
       .getMany();
