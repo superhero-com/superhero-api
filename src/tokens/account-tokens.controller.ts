@@ -78,12 +78,11 @@ export class AccountTokensController {
         page,
         limit,
       });
-      const address = owner_address || creator_address;
       // get the token holders for each token
       const tokenHoldersQueryBuilder =
         await this.tokenHolderRepository.createQueryBuilder('token_holder');
       tokenHoldersQueryBuilder.where('token_holder.address = :address', {
-        address: address,
+        address: owner_address || creator_address,
       });
 
       const holdings = await tokenHoldersQueryBuilder.getMany();
@@ -91,7 +90,7 @@ export class AccountTokensController {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
           token,
-          address,
+          address: owner_address || creator_address,
           balance:
             holdings.find((holder) => holder.aex9_address === token.address)
               ?.balance || '0',
