@@ -9,7 +9,7 @@ export class AeSdkService {
     this.sdk = new AeSdk({
       onCompiler: new CompilerHttp('https://v7.compiler.aepps.com'),
       nodes,
-      gasPrice: 1000000000000000000,
+      gasLimit: 100000000000000000000000,
     });
 
     this.sdk.selectNode(ACTIVE_NETWORK.name);
