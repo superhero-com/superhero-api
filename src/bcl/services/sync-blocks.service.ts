@@ -12,6 +12,8 @@ import { FixHoldersService } from './fix-holders.service';
 import {
   TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES,
   TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE,
+  PERIODIC_SYNCING_ENABLED,
+  LIVE_SYNCING_ENABLED,
 } from '@/configs/constants';
 
 @Injectable()
@@ -47,6 +49,9 @@ export class SyncBlocksService {
   totalTicks = 0;
   @Cron(CronExpression.EVERY_MINUTE)
   async syncLatestBlocks() {
+    if (!LIVE_SYNCING_ENABLED) {
+      return;
+    }
     if (this.syncingLatestBlocks) {
       return;
     }
@@ -65,6 +70,9 @@ export class SyncBlocksService {
   syncingPastBlocks = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async syncPast100Blocks() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (this.syncingPastBlocks) {
       return;
     }
@@ -115,6 +123,9 @@ export class SyncBlocksService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async doFullBlockSync() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (this.fullSyncing) {
       return;
     }

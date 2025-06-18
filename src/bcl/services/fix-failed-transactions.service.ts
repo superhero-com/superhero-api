@@ -1,4 +1,8 @@
-import { MAX_RETRIES_FOR_FAILED_TRANSACTIONS, TX_FUNCTIONS } from '@/configs';
+import {
+  MAX_RETRIES_FOR_FAILED_TRANSACTIONS,
+  PERIODIC_SYNCING_ENABLED,
+  TX_FUNCTIONS,
+} from '@/configs';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
@@ -27,6 +31,9 @@ export class FixFailedTransactionsService {
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async fixFailedTransactions() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (this.fixingFailedTransactions) {
       return;
     }

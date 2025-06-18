@@ -2,25 +2,27 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
 import {
   MAX_RETRIES_WHEN_REQUEST_FAILED,
+  PERIODIC_SYNCING_ENABLED,
+  SYNCING_ENABLED,
   TOTAL_BLOCKS_TO_HAVE_STABLE_DATA,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Token } from '@/tokens/entities/token.entity';
+import {
+  PULL_TOKEN_INFO_QUEUE,
+  SYNC_TOKEN_HOLDERS_QUEUE,
+} from '@/tokens/queues/constants';
 import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
-import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { CommunityFactory } from 'bctsl-sdk';
 import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { CommunityFactory } from 'bctsl-sdk';
-import {
-  SYNC_TOKEN_HOLDERS_QUEUE,
-  PULL_TOKEN_INFO_QUEUE,
-} from '@/tokens/queues/constants';
 
 @Injectable()
 export class FastPullTokensService {
@@ -51,6 +53,9 @@ export class FastPullTokensService {
   isPullingLatestCreatedTokens = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async pullLatestCreatedTokens() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (
       this.isPullingLatestCreatedTokens ||
       !this.syncBlocksService.latestBlockNumber
@@ -87,13 +92,17 @@ export class FastPullTokensService {
     if (this.pullingTokens) {
       return;
     }
-    this.pullingTokens = true;
-
     // clear all queue for meta info & token holders sync
     await Promise.all([
       this.pullTokenHoldersQueue.empty(),
       this.pullTokenInfoQueue.empty(),
     ]);
+
+    if (!SYNCING_ENABLED) {
+      return;
+    }
+
+    this.pullingTokens = true;
 
     try {
       const factory = await this.communityFactoryService.getCurrentFactory();

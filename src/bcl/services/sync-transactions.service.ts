@@ -1,5 +1,5 @@
 import { WebSocketService } from '@/ae/websocket.service';
-import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
+import { ACTIVE_NETWORK, LIVE_SYNCING_ENABLED, TX_FUNCTIONS } from '@/configs';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
@@ -28,6 +28,9 @@ export class SyncTransactionsService {
   }
 
   setupLiveSync() {
+    if (!LIVE_SYNCING_ENABLED) {
+      return;
+    }
     let syncedTransactions = [];
 
     this.websocketService.subscribeForTransactionsUpdates(

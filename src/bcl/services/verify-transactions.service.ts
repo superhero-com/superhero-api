@@ -11,6 +11,7 @@ import { LessThan, Repository } from 'typeorm';
 import { SyncBlocksService } from './sync-blocks.service';
 import {
   FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+  PERIODIC_SYNCING_ENABLED,
   TX_FUNCTIONS,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs/constants';
@@ -32,6 +33,9 @@ export class VerifyTransactionsService {
 
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fixFailedTransactions() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (this.verifyingTransactions) {
       return;
     }

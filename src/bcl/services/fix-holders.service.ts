@@ -1,4 +1,7 @@
-import { MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS } from '@/configs/constants';
+import {
+  MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS,
+  PERIODIC_SYNCING_ENABLED,
+} from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
@@ -126,6 +129,9 @@ export class FixHoldersService {
   // auto fix job, that will search for all tokens that have 0 holders and double-check them
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fixBrokenHolders() {
+    if (!PERIODIC_SYNCING_ENABLED) {
+      return;
+    }
     if (this.fixingTokensHolders) {
       return;
     }
