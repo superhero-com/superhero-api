@@ -628,8 +628,6 @@ export class TokensService {
       const result = await fetchJson(url);
       const transactions = result.data;
 
-      // TODO: mybe we need to loop through all the transactions
-
       for (const transaction of transactions) {
         const tokenName = transaction?.tx?.arguments?.[1]?.value;
         if (tokenName === name) {
