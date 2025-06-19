@@ -19,6 +19,10 @@ export class FixTokensService {
     //
   }
 
+  onModuleInit() {
+    this.fixTokensWithNoPrice();
+  }
+
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fixTokensAddresses() {
     if (this.fixingTokens) {

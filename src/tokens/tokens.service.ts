@@ -657,6 +657,7 @@ export class TokensService {
       {
         jobId: `pullTokenInfo-${token.sale_address}`,
         lifo: isNewToken,
+        removeOnComplete: true,
       },
     );
 

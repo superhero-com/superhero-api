@@ -43,6 +43,7 @@ export class FixHoldersService {
       },
       {
         jobId: `syncTokenHolders-${token.sale_address}`,
+        removeOnComplete: true,
       },
     );
   }

@@ -201,12 +201,12 @@ export class TokensController {
     const count = await queryBuilder.getCount();
     if (count <= 1) {
       void this.syncTokenHoldersQueue.add(
-        SYNC_TOKEN_HOLDERS_QUEUE,
         {
           saleAddress: token.sale_address,
         },
         {
           jobId: `syncTokenHolders-${token.sale_address}`,
+          removeOnComplete: true,
         },
       );
     }
