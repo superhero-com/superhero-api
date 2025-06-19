@@ -3,7 +3,7 @@ import { TokensService } from '@/tokens/tokens.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Equal, IsNull, Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 @Injectable()
 export class FixTokensService {
@@ -56,15 +56,12 @@ export class FixTokensService {
       return;
     }
     this.isFixingTokensWithNoPrice = true;
-    const tokens = await this.tokensRepository.find({
-      where: {
-        price: Equal(0n),
-      },
-      order: {
-        total_supply: 'DESC',
-      },
-      take: 100,
-    });
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.price = :price', { price: '0' })
+      .orderBy('token.total_supply', 'DESC')
+      .take(100)
+      .getMany();
     for (const token of tokens) {
       await this.tokensService.syncTokenPrice(token);
     }
