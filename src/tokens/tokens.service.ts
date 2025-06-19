@@ -330,7 +330,24 @@ export class TokensService {
     return this.contracts[saleAddress];
   }
 
-  async getTokeLivePrice(token: Token) {
+  async getTokeLivePrice(token: Token): Promise<
+    Partial<{
+      price: BigNumber;
+      sell_price: BigNumber;
+      total_supply: BigNumber;
+      market_cap: BigNumber;
+      address: string;
+      name: string;
+      symbol: string;
+      beneficiary_address: string;
+      bonding_curve_address: string;
+      owner_address: string;
+      dao_balance: BigNumber;
+      price_data: any;
+      sell_price_data: any;
+      market_cap_data: any;
+    }>
+  > {
     const contract = await this.getTokenContracts(token);
     if (!contract) {
       return {};

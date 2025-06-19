@@ -60,7 +60,6 @@ export class FixTokensService {
       .createQueryBuilder('token')
       .where('token.price = :price', { price: '0' })
       .orderBy('token.total_supply', 'DESC')
-      .take(100)
       .getMany();
     for (const token of tokens) {
       await this.tokensService.syncTokenPrice(token);
