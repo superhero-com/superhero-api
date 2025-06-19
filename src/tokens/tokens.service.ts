@@ -341,18 +341,48 @@ export class TokensService {
       tokenContractInstance
         .total_supply?.()
         .then((res) => new BigNumber(res.decodedResult))
-        .catch(() => new BigNumber('0')),
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: total_supply`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch(() => new BigNumber('0')),
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: price`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
       instance
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch(() => new BigNumber('0')),
-      instance.metaInfo().catch(() => {
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: sell_price`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
+      instance.metaInfo().catch((error) => {
+        this.logger.error(
+          `getTokeLivePrice->error:: metaInfo`,
+          token.sale_address,
+          error,
+          error.stack,
+        );
         return { token: {} };
       }),
     ]);

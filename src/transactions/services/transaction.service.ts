@@ -40,7 +40,10 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
   ): Promise<Transaction> {
-    if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction?.tx?.function)) {
+    if (
+      !Object.keys(TX_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
+      rawTransaction?.tx?.returnType === 'revert'
+    ) {
       return;
     }
     let saleAddress;
@@ -49,6 +52,9 @@ export class TransactionService {
     } else {
       saleAddress = rawTransaction.tx.contractId;
       if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
+        if (!rawTransaction.tx.return.value.length) {
+          return;
+        }
         saleAddress = rawTransaction.tx.return.value[1].value;
       }
 
