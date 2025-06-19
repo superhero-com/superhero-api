@@ -59,7 +59,8 @@ export class FixTokensService {
     const tokens = await this.tokensRepository
       .createQueryBuilder('token')
       .where('token.price = :price', { price: '0' })
-      .orderBy('token.total_supply', 'DESC')
+      .orderBy('token.created_at', 'DESC')
+      .take(100)
       .getMany();
     for (const token of tokens) {
       await this.tokensService.syncTokenPrice(token);
