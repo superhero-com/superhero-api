@@ -1,5 +1,11 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { Controller, Get, Param, UseInterceptors } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  UseInterceptors,
+  NotFoundException,
+} from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
@@ -9,7 +15,7 @@ import { Token } from '../../tokens/entities/token.entity';
 import { TokensService } from '../../tokens/tokens.service';
 import { TokenPriceMovementDto } from '../dto/token-stats.dto';
 
-@Controller('api/tokens')
+@Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
@@ -36,6 +42,10 @@ export class TokenPerformanceController {
   async performance(@Param('address') address: string) {
     const token = await this.tokensService.getToken(address);
 
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
+
     const past_24h = await this.getTokenPriceMovement(
       token,
       moment().subtract(24, 'hours'),
@@ -56,7 +66,7 @@ export class TokenPerformanceController {
       moment(token.created_at).subtract(30, 'days'),
     );
     return {
-      token_id: token.id,
+      token_id: token.sale_address,
       past_24h,
       past_7d,
       past_30d,
@@ -67,8 +77,8 @@ export class TokenPerformanceController {
   async getTokenPriceMovement(token: Token, date: Moment) {
     const startingTransaction = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
@@ -82,8 +92,8 @@ export class TokenPerformanceController {
       .getRawOne();
     const highestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),
@@ -97,8 +107,8 @@ export class TokenPerformanceController {
       .getRawOne();
     const lowestPriceQuery = await this.transactionsRepository
       .createQueryBuilder('transactions')
-      .where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
       })
       .andWhere('transactions.created_at > :date', {
         date: date.toDate(),

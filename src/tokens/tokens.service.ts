@@ -1,15 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { IsNull, Not, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { ACTIVE_NETWORK } from '@/configs';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { fetchJson } from '@/utils/common';
-import { ICommunityFactorySchema, ITransaction } from '@/utils/types';
+import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
@@ -21,13 +20,14 @@ import { Queue } from 'bull';
 import moment from 'moment';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 
 type TokenContracts = {
   instance?: TokenSale;
   tokenContractInstance?: ContractWithMethods<ContractMethodsBase>;
   token?: Token;
+  lastUsedAt?: number;
 };
 
 @Injectable()
@@ -48,64 +48,17 @@ export class TokensService {
 
     private aePricingService: AePricingService,
 
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
-    @InjectQueue(SYNC_TRANSACTIONS_QUEUE)
-    private readonly syncTransactionsQueue: Queue,
-
     private communityFactoryService: CommunityFactoryService,
+
+    @InjectQueue(PULL_TOKEN_INFO_QUEUE)
+    private readonly pullTokenInfoQueue: Queue,
   ) {
     this.init();
   }
 
   factoryContract: CommunityFactory;
   async init() {
-    await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
-    await Promise.all([
-      this.syncTransactionsQueue.empty(),
-      this.syncTokenHoldersQueue.empty(),
-    ]);
-    console.log('--------------------------------');
-    console.log('init tokens service');
-    console.log('--------------------------------');
-    const factory = await this.communityFactoryService.getCurrentFactory();
-    this.factoryContract = await this.communityFactoryService.loadFactory(
-      factory.address,
-    );
-    void this.loadFactoryTokens(factory);
-  }
-
-  async loadFactoryTokens(factory: ICommunityFactorySchema) {
-    const communities = await this.loadCreatedCommunityFromMdw(
-      `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?contract=${factory.address}&limit=100`,
-      factory,
-    );
-
-    const tokens = communities.sort((a, b) => {
-      if (!a.total_supply || !b.total_supply) return 0;
-      return b.total_supply.minus(a.total_supply).toNumber();
-    });
-    for (const token of tokens) {
-      const liveTokenData = await this.getTokeLivePrice(token);
-      await this.tokensRepository.update(token.id, liveTokenData);
-      this.contracts[token.sale_address].token = token;
-      try {
-        void this.syncTokenHoldersQueue.add(
-          {
-            saleAddress: token.sale_address,
-          },
-          {
-            jobId: `syncTokenHolders-${token.sale_address}`,
-            removeOnComplete: true,
-          },
-        );
-        void this.syncTransactionsQueue.add({
-          saleAddress: token.sale_address,
-        });
-      } catch (error) {
-        //
-      }
-    }
+    // await this.findAndRemoveDuplicatedTokensBaseSaleAddress();
   }
 
   async findAndRemoveDuplicatedTokensBaseSaleAddress() {
@@ -131,136 +84,25 @@ export class TokensService {
     }
   }
 
-  async loadCreatedCommunityFromMdw(
-    url: string,
-    factory: ICommunityFactorySchema,
-    tokens: Token[] = [],
-  ): Promise<Token[]> {
-    this.logger.log('loadCreatedCommunityFromMdw->url::', url);
-    let result;
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      this.logger.error('loadCreatedCommunityFromMdw->error::', error);
-      return tokens;
-    }
-
-    for (const transaction of result.data) {
-      if (transaction.tx.function !== 'create_community') {
-        continue;
-      }
-      if (
-        !Object.keys(factory.collections).includes(
-          transaction.tx.arguments[0].value,
-        )
-      ) {
-        continue;
-      }
-      // handled reverted transactions
-      if (
-        !transaction?.tx?.return?.value?.length ||
-        transaction.tx.return.value.length < 2
-      ) {
-        continue;
-      }
-      const daoAddress = transaction?.tx?.return?.value[0]?.value;
-      const saleAddress = transaction?.tx?.return?.value[1]?.value;
-
-      const tokenExists = await this.findByAddress(saleAddress);
-      if (tokenExists?.id) {
-        // update token holders count
-        // if (tokenExists?.address) {
-        //   const tokenDataResponse = await fetchJson(
-        //     `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenExists.address}`,
-        //   );
-        //   if (tokenDataResponse?.holders !== tokenExists.holders_count) {
-        //     await this.tokensRepository.update(tokenExists.id, {
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     tokens.push({
-        //       ...tokenExists,
-        //       holders_count: tokenDataResponse?.holders,
-        //     });
-        //     continue;
-        //   }
-        // }
-        tokens.push(tokenExists);
-
-        continue;
-      }
-      const tokenName = transaction?.tx?.arguments?.[1]?.value;
-
-      const decodedData = this.factoryContract.contract.$decodeEvents(
-        transaction?.tx?.log,
-      );
-      const tokenData = {
-        total_supply: new BigNumber(0),
-        holders_count: 0,
-        address: null,
-        dao_address: daoAddress,
-        sale_address: saleAddress,
-        factory_address: factory.address,
-        creator_address: transaction?.tx?.caller_id,
-        created_at: moment(transaction?.micro_time).toDate(),
-        name: tokenName,
-        symbol: tokenName,
-      };
-
-      const fungibleToken = decodedData?.find(
-        (event) =>
-          event.contract.name === 'FungibleTokenFull' &&
-          event.contract.address !==
-          'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
-      );
-      if (fungibleToken) {
-        tokenData.address = fungibleToken.contract.address;
-        const tokenDataResponse = await fetchJson(
-          `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${tokenData.address}`,
-        );
-        tokenData.total_supply = new BigNumber(tokenDataResponse?.event_supply);
-        tokenData.holders_count = tokenDataResponse?.holders;
-      }
-
-      const token = await this.tokensRepository.save(tokenData);
-      tokens.push(token);
-      this.contracts[saleAddress] = {
-        token,
-      };
-    }
-
-    if (result.next) {
-      return await this.loadCreatedCommunityFromMdw(
-        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-        factory,
-        tokens,
-      );
-    }
-    return tokens;
-  }
-
-  async loadTokenContractAndUpdateMintAddress(token: Token) {
-    const contract = await this.getTokenContractsBySaleAddress(
-      token.sale_address as Encoded.ContractAddress,
-    );
-    const priceData = await this.getTokeLivePrice(token);
-
-    this.tokensRepository.update(token.id, {
-      address: contract?.tokenContractInstance?.$options.address,
-      ...priceData,
-    });
-  }
-
   findAll(): Promise<Token[]> {
     return this.tokensRepository.find();
   }
 
   async update(token: Token, data): Promise<Token> {
-    await this.tokensRepository.update(token.id, data);
+    await this.tokensRepository.update(token.sale_address, data);
     return this.findByAddress(token.sale_address);
   }
 
-  async findById(id: number): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ id });
+  async findById(sale_address: string): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ sale_address });
+  }
+
+  async findByNameOrSymbol(name: string) {
+    return this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.name = :name', { name })
+      .orWhere('token.symbol = :name', { name })
+      .getOne();
   }
 
   async findByAddress(
@@ -272,6 +114,7 @@ export class TokensService {
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
       .orWhere('token.name = :address', { address })
+      .orWhere('token.symbol = :address', { address })
       .getOne();
 
     if (!token) {
@@ -285,7 +128,7 @@ export class TokensService {
     const rankedQuery = `
       WITH ranked_tokens AS (
         SELECT 
-          id,
+          sale_address,
           CAST(RANK() OVER (
             ORDER BY 
               CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
@@ -297,7 +140,7 @@ export class TokensService {
       )
       SELECT rank
       FROM ranked_tokens
-      WHERE id = ${token.id}
+      WHERE sale_address = '${token.sale_address}'
     `;
 
     const [rankResult] = await this.tokensRepository.query(rankedQuery);
@@ -307,15 +150,15 @@ export class TokensService {
     } as Token & { rank: number };
   }
 
-  findOne(id: number): Promise<Token | null> {
-    return this.tokensRepository.findOneBy({ id });
+  findOne(sale_address: string): Promise<Token | null> {
+    return this.tokensRepository.findOneBy({ sale_address });
   }
 
   async syncTokenPrice(token: Token): Promise<void> {
     try {
       const data = await this.getTokeLivePrice(token);
 
-      await this.tokensRepository.update(token.id, data as any);
+      await this.tokensRepository.update(token.sale_address, data as any);
       // update token ranks
 
       // re-fetch token
@@ -328,28 +171,47 @@ export class TokensService {
     }
   }
 
-  async getToken(
-    address: string,
-    shouldSyncTransactions = true,
-  ): Promise<Token> {
+  async getToken(address: string): Promise<Token> {
     const existingToken = await this.findByAddress(address);
 
     if (existingToken) {
       return existingToken;
     }
 
-    return this.createToken(
-      address as Encoded.ContractAddress,
-      shouldSyncTransactions,
+    if (!address.startsWith('ct_')) {
+      // find by name or symbol TODO:
+      return this.pullLatestCreatedTokensByNameOrSymbol(address);
+    }
+
+    return this.createToken(address as Encoded.ContractAddress);
+  }
+
+  async getTokenAex9Address(token: Token): Promise<string> {
+    if (token.address) {
+      return token.address;
+    }
+    const { instance } = await this.getTokenContractsBySaleAddress(
+      token.sale_address as Encoded.ContractAddress,
     );
+    if (!instance) {
+      return null;
+    }
+
+    const priceData = await this.getTokeLivePrice(token);
+
+    await this.tokensRepository.update(token.sale_address, priceData);
+
+    return priceData.address;
   }
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
-    shouldSyncTransactions = true,
   ): Promise<Token | null> {
     if (!saleAddress?.startsWith('ct_')) {
-      this.logger.error('saleAddress is not a valid token address', saleAddress);
+      this.logger.error(
+        'saleAddress is not a valid token address',
+        saleAddress,
+      );
       return null;
     }
     const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
@@ -364,7 +226,7 @@ export class TokensService {
       }),
     ]);
 
-    const tokenData = {
+    const tokenData: any = {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
     };
@@ -374,35 +236,25 @@ export class TokensService {
       return existingToken;
     }
 
+    // prevent duplicate tokens by symbol
+    if (tokenData?.symbol) {
+      await this.tokensRepository.delete({
+        symbol: tokenData.symbol,
+        name: tokenData.name,
+      });
+    }
+
     const newToken = await this.tokensRepository.save(tokenData);
     const factoryAddress = await this.updateTokenFactoryAddress(newToken);
 
     if (!factoryAddress) {
-      await this.tokensRepository.delete(newToken.id);
-      return null;
-    }
-    await this.syncTokenPrice(newToken);
-    // refresh token token info
-    // TODO: should refresh token info
-    void this.syncTokenHoldersQueue.add(
-      {
-        saleAddress,
-      },
-      {
-        jobId: `syncTokenHolders-${saleAddress}`,
-        removeOnComplete: true,
-      },
-    );
-    if (shouldSyncTransactions) {
-      void this.syncTransactionsQueue.add(
-        {
-          saleAddress,
-        },
-        {
-          jobId: `syncTokenTransactions-${saleAddress}`,
-        },
+      await this.tokensRepository.delete(newToken.sale_address);
+      throw new Error(
+        `for sale address:${saleAddress}, failed to update factory address`,
       );
     }
+    await this.syncTokenPrice(newToken);
+
     return this.findByAddress(newToken.sale_address);
   }
 
@@ -412,22 +264,41 @@ export class TokensService {
     if (token.factory_address) {
       return token.factory_address as Encoded.ContractAddress;
     }
-    // 1. fetch factory create tx
-    const contractInfo = await fetchJson(
-      `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
-    );
 
-    const response = await fetchJson(
-      `${ACTIVE_NETWORK.middlewareUrl}/v2/txs/${contractInfo.source_tx_hash}`,
-    );
+    let totalRetries = 0;
+    const maxRetries = 3;
+    const retryDelay = 5000; // 5 seconds
 
-    const factory_address = response?.tx?.contract_id;
-    await this.updateTokenMetaDataFromCreateTx(
-      token,
-      camelcaseKeysDeep(response),
-    );
+    while (totalRetries < maxRetries) {
+      const contractInfo = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
+      );
+      const response = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
+      );
 
-    return factory_address as Encoded.ContractAddress;
+      if (response?.tx?.contract_id) {
+        const factory_address = response?.tx?.contract_id;
+        await this.updateTokenMetaDataFromCreateTx(
+          token,
+          camelcaseKeysDeep(response),
+        );
+        return factory_address as Encoded.ContractAddress;
+      }
+
+      this.logger.error(
+        `updateTokenFactoryAddress->error:: retry ${totalRetries + 1}/${maxRetries}`,
+        response,
+        contractInfo,
+      );
+
+      totalRetries++;
+      if (totalRetries < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
+    }
+
+    return null;
   }
 
   async getTokenContracts(token: Token) {
@@ -440,29 +311,43 @@ export class TokensService {
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts | undefined> {
     if (this.contracts[saleAddress] && this.contracts[saleAddress].instance) {
+      this.contracts[saleAddress].lastUsedAt = Date.now();
       return this.contracts[saleAddress];
     }
+    const { instance } = await initTokenSale(
+      this.aeSdkService.sdk,
+      saleAddress,
+    );
+    const tokenContractInstance = await instance?.tokenContractInstance();
 
-    try {
-      const { instance } = await initTokenSale(
-        this.aeSdkService.sdk,
-        saleAddress,
-      );
-      const tokenContractInstance = await instance?.tokenContractInstance();
+    this.contracts[saleAddress] = {
+      ...(this.contracts[saleAddress] || {}),
+      instance,
+      tokenContractInstance,
+      lastUsedAt: Date.now(),
+    };
 
-      this.contracts[saleAddress] = {
-        ...(this.contracts[saleAddress] || {}),
-        instance,
-        tokenContractInstance,
-      };
-
-      return this.contracts[saleAddress];
-    } catch (error) {
-      return undefined;
-    }
+    return this.contracts[saleAddress];
   }
 
-  private async getTokeLivePrice(token: Token) {
+  async getTokeLivePrice(token: Token): Promise<
+    Partial<{
+      price: BigNumber;
+      sell_price: BigNumber;
+      total_supply: BigNumber;
+      market_cap: BigNumber;
+      address: string;
+      name: string;
+      symbol: string;
+      beneficiary_address: string;
+      bonding_curve_address: string;
+      owner_address: string;
+      dao_balance: BigNumber;
+      price_data: any;
+      sell_price_data: any;
+      market_cap_data: any;
+    }>
+  > {
     const contract = await this.getTokenContracts(token);
     if (!contract) {
       return {};
@@ -473,18 +358,48 @@ export class TokensService {
       tokenContractInstance
         .total_supply?.()
         .then((res) => new BigNumber(res.decodedResult))
-        .catch(() => new BigNumber('0')),
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: total_supply`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch(() => new BigNumber('0')),
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: price`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
       instance
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch(() => new BigNumber('0')),
-      instance.metaInfo().catch(() => {
+        .catch((error) => {
+          this.logger.error(
+            `getTokeLivePrice->error:: sell_price`,
+            token.sale_address,
+            error,
+            error.stack,
+          );
+          return new BigNumber(0);
+        }),
+      instance.metaInfo().catch((error) => {
+        this.logger.error(
+          `getTokeLivePrice->error:: metaInfo`,
+          token.sale_address,
+          error,
+          error.stack,
+        );
         return { token: {} };
       }),
     ]);
@@ -507,6 +422,10 @@ export class TokensService {
       price_data,
       market_cap,
       market_cap_data,
+      address:
+        metaInfo?.token?.address || tokenContractInstance?.$options.address,
+      name: metaInfo?.token?.name,
+      symbol: metaInfo?.token?.symbol,
       beneficiary_address: metaInfo?.beneficiary,
       bonding_curve_address: metaInfo?.bondingCurve,
       owner_address: metaInfo?.owner,
@@ -519,14 +438,14 @@ export class TokensService {
     transaction: ITransaction,
   ): Promise<Encoded.ContractAddress> {
     const tokenData = {
-      factory_address: transaction.tx.contractId,
-      creator_address: transaction?.tx?.callerId,
-      created_at: moment(transaction?.microTime).toDate(),
+      factory_address: transaction.tx?.contractId,
+      creator_address: transaction.tx?.callerId,
+      created_at: moment(transaction.microTime).toDate(),
     };
     if (transaction?.tx.arguments?.[0]?.value) {
       tokenData['collection'] = transaction?.tx.arguments[0].value;
     }
-    await this.tokensRepository.update(token.id, tokenData);
+    await this.tokensRepository.update(token.sale_address, tokenData);
 
     return transaction.tx.contractId;
   }
@@ -545,7 +464,13 @@ export class TokensService {
     // Replace all parameter placeholders with actual values
     let finalSubQuery = subQuery;
     Object.entries(parameters).forEach(([key, value]) => {
-      finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
+      if (Array.isArray(value)) {
+        // Handle array parameters by joining them with commas and wrapping in quotes
+        const arrayValues = value.map((v) => `'${v}'`).join(',');
+        finalSubQuery = finalSubQuery.replace(`:...${key}`, arrayValues);
+      } else {
+        finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
+      }
     });
 
     if (orderBy === 'market_cap') {
@@ -585,7 +510,7 @@ export class TokensService {
       )
       SELECT all_ranked_tokens.*
       FROM all_ranked_tokens
-      INNER JOIN filtered_tokens ON all_ranked_tokens.id = filtered_tokens.id
+      INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
       ORDER BY all_ranked_tokens.${orderBy} ${orderDirection}
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}
@@ -605,7 +530,7 @@ export class TokensService {
     };
   }
 
-  async getTokenRanks(tokenIds: number[]): Promise<Map<number, number>> {
+  async getTokenRanks(tokenIds: string[]): Promise<Map<string, number>> {
     if (!tokenIds.length) {
       return new Map();
     }
@@ -624,10 +549,269 @@ export class TokensService {
         WHERE t.factory_address = '${factory.address}'
         AND t.unlisted = false
       )
-      SELECT * FROM ranked_tokens WHERE id IN (${tokenIds.join(',')})
+      SELECT * FROM ranked_tokens WHERE sale_address IN (${tokenIds.join(',')})
     `;
 
     const result = await this.tokensRepository.query(rankedQuery);
-    return new Map(result.map((token) => [token.id, token.rank]));
+    return new Map(result.map((token) => [token.sale_address, token.rank]));
+  }
+
+  async getTokenRanksByAex9Address(
+    aex9Addresses: string[],
+  ): Promise<Map<string, number>> {
+    if (!aex9Addresses.length) {
+      return new Map();
+    }
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    const rankedQuery = `
+      WITH ranked_tokens AS (
+        SELECT 
+          t.*,
+          CAST(RANK() OVER (
+            ORDER BY 
+              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
+              t.market_cap DESC,
+              t.created_at ASC
+          ) AS INTEGER) as rank
+        FROM token t
+        WHERE t.factory_address = '${factory.address}'
+        AND t.unlisted = false
+      )
+      SELECT * FROM ranked_tokens WHERE address IN ('${aex9Addresses.join("','")}')
+    `;
+
+    const result = await this.tokensRepository.query(rankedQuery);
+    return new Map(result.map((token) => [token.address, token.rank]));
+  }
+
+  async getTokensByAex9Address(aex9Addresses: string[]): Promise<Token[]> {
+    if (!aex9Addresses.length) {
+      return [];
+    }
+    return this.tokensRepository.find({
+      where: { address: In(aex9Addresses) },
+    });
+  }
+
+  async createTokenFromRawTransaction(rawTransaction: any): Promise<Token> {
+    const tx = rawTransaction.tx;
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    if (
+      tx.function !== 'create_community' ||
+      tx.return_type === 'revert' ||
+      tx.return?.value?.length < 2
+    ) {
+      return null;
+    }
+    if (
+      // If it's not supported collection, skip
+      !Object.keys(factory.collections).includes(tx.arguments[0].value)
+    ) {
+      return null;
+    }
+    const daoAddress = tx?.return?.value[0]?.value;
+    const saleAddress = tx?.return?.value[1]?.value;
+
+    const tokenName = tx?.arguments?.[1]?.value;
+    let tokenExists = await this.findByNameOrSymbol(tokenName);
+
+    if (
+      !!tokenExists?.sale_address &&
+      tokenExists.sale_address !== saleAddress
+    ) {
+      // delete token
+      await this.tokensRepository.delete(tokenExists.sale_address);
+      tokenExists = undefined;
+    }
+
+    const tokenData = {
+      total_supply: new BigNumber(0),
+      holders_count: 0,
+      address: null,
+      dao_address: daoAddress,
+      sale_address: saleAddress,
+      factory_address: factory.address,
+      creator_address: tx?.caller_id,
+      created_at: moment(rawTransaction?.microTime).toDate(),
+      name: tokenName,
+      symbol: tokenName,
+      create_tx_hash: rawTransaction?.hash,
+      ...(tokenExists || {}),
+    };
+
+    let token;
+    let isNewToken = false;
+    // TODO: should only update if the data is different
+    if (tokenExists?.sale_address) {
+      await this.tokensRepository.update(tokenExists.sale_address, tokenData);
+      token = await this.findByAddress(tokenExists.sale_address);
+    } else {
+      token = await this.tokensRepository.save(tokenData);
+      isNewToken = true;
+    }
+
+    await this.pullTokenInfoQueue.add(
+      {
+        saleAddress: token.sale_address,
+      },
+      {
+        jobId: `pullTokenInfo-${token.sale_address}`,
+        lifo: isNewToken,
+        removeOnComplete: true,
+      },
+    );
+
+    return token;
+  }
+
+  async pullLatestCreatedTokensByNameOrSymbol(name: string): Promise<Token> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    try {
+      const queryString = new URLSearchParams({
+        direction: 'backward',
+        limit: '100',
+        type: 'contract_call',
+        contract: factory.address,
+      }).toString();
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      const result = await fetchJson(url);
+      const transactions = result.data;
+
+      for (const transaction of transactions) {
+        const tokenName = transaction?.tx?.arguments?.[1]?.value;
+        if (tokenName === name) {
+          // TODO: need to save the transaction too
+          return this.createTokenFromRawTransaction(transaction);
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `pullLatestCreatedTokensByNameOrSymbol->error::`,
+        error,
+        error.stack,
+      );
+    }
+
+    return null;
+  }
+
+  async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
+    const token = await this.getToken(saleAddress);
+    const aex9Address =
+      token?.address || (await this.getTokenAex9Address(token));
+
+    const totalHolders = await this._loadHoldersData(token, aex9Address);
+    if (totalHolders.length > 0) {
+      await this.tokenHoldersRepository.delete({
+        aex9_address: aex9Address,
+      });
+      await this.tokenHoldersRepository.insert(totalHolders);
+    }
+    await this.tokensRepository.update(token.sale_address, {
+      holders_count: totalHolders.length,
+    });
+  }
+
+  async _loadHoldersData(token: Token, aex9Address: string) {
+    const _holders = await this._loadHoldersFromContract(token, aex9Address);
+    if (_holders.length > 0) {
+      return _holders;
+    }
+    return this.loadData(
+      token,
+      aex9Address,
+      `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances?by=amount&limit=100`,
+    );
+  }
+
+  async loadData(
+    token: Token,
+    aex9Address: string,
+    url: string,
+    totalHolders = [],
+  ) {
+    try {
+      const response = await fetchJson(url);
+      if (!response.data) {
+        this.logger.error(
+          `SyncTokenHoldersQueue:failed to load data from url::${url}`,
+        );
+        this.logger.error(`SyncTokenHoldersQueue:response::`, response);
+        return totalHolders;
+      }
+      const holders = response.data.filter((item) => item.amount > 0);
+      this.logger.debug(
+        `SyncTokenHoldersQueue->holders:${holders.length}`,
+        url,
+      );
+
+      for (const holder of holders) {
+        try {
+          const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances/${holder.account_id}`;
+          const holderData = await fetchJson(holderUrl);
+          if (!holderData?.amount) {
+            this.logger.warn(
+              `SyncTokenHoldersQueue->holderData:${holderUrl}`,
+              holderData,
+            );
+          }
+          totalHolders.push({
+            id: `${holderData?.account || holder.account_id}_${aex9Address}`,
+            aex9_address: aex9Address,
+            address: holderData?.account || holder.account_id,
+            balance: new BigNumber(holderData?.amount || 0),
+          });
+        } catch (error: any) {
+          this.logger.error(
+            `SyncTokenHoldersQueue->error:${error.message}`,
+            error,
+            error.stack,
+          );
+        }
+      }
+
+      if (response.next) {
+        return this.loadData(
+          token,
+          aex9Address,
+          `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
+          totalHolders,
+        );
+      }
+
+      return totalHolders;
+    } catch (error: any) {
+      this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
+      return totalHolders;
+    }
+  }
+
+  async _loadHoldersFromContract(token: Token, aex9Address: string) {
+    try {
+      const { tokenContractInstance } =
+        await this.getTokenContractsBySaleAddress(
+          token.sale_address as Encoded.ContractAddress,
+        );
+      const holderBalances = await tokenContractInstance.balances();
+      const holders = Array.from(holderBalances.decodedResult)
+        .map(([key, value]: any) => ({
+          id: `${key}_${aex9Address}`,
+          aex9_address: aex9Address,
+          address: key,
+          balance: new BigNumber(value),
+        }))
+        .filter((item) => item.balance.gt(0))
+        .sort((a, b) => b.balance.minus(a.balance).toNumber());
+
+      return holders || [];
+    } catch (error: any) {
+      this.logger.error(
+        `SyncTokenHoldersQueue->_loadHoldersFromContract:failed to load holders from contract`,
+        error,
+        error.stack,
+      );
+      return [];
+    }
   }
 }

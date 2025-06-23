@@ -1,6 +1,5 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
-import { SYNC_TRANSACTIONS_QUEUE } from '@/transactions/queues/constants';
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -34,9 +33,6 @@ import { TokensService } from './tokens.service';
       },
       {
         name: DELETE_OLD_TOKENS_QUEUE,
-      },
-      {
-        name: SYNC_TRANSACTIONS_QUEUE,
       },
     ),
   ],

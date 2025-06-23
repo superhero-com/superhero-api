@@ -12,6 +12,8 @@ import {
 export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   [NETWORK_ID_MAINNET]: {
     address: 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
+    deployed_at_block_height: 1089546,
+    bctsl_aex9_address: 'ct_dsa6octVEHPcm7wRszK6VAjPp1FTqMWa7sBFdxQ9jBT35j6VW',
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
@@ -34,6 +36,8 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
   },
   [NETWORK_ID_TESTNET]: {
     address: 'ct_vLKrYRCthfViqUuWFKGYgz7kxhvrsdAoKhZPXqzxcaEFRkZy1',
+    bctsl_aex9_address: 'ct_2cyV58CrBwi2k4kvP3mN517C1NH21zfxxYmaAyb41GXdXSsRvN',
+    deployed_at_block_height: 1097291,
     collections: {
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
         id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',

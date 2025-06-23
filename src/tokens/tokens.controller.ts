@@ -14,6 +14,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
@@ -26,8 +27,10 @@ import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { Queue } from 'bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
-@Controller('api/tokens')
+@Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokensController {
@@ -37,6 +40,9 @@ export class TokensController {
 
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
+
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly syncTokenHoldersQueue: Queue,
 
     private readonly tokensService: TokensService,
     private readonly communityFactoryService: CommunityFactoryService,
@@ -103,19 +109,20 @@ export class TokensController {
         search: `%${search}%`,
       });
     }
-    // if (factory_address) {
-    //   queryBuilder.andWhere('token.factory_address = :factory_address', {
-    //     factory_address,
-    //   });
-    // } else {
+    if (factory_address) {
+      queryBuilder.andWhere('token.factory_address = :factory_address', {
+        factory_address,
+      });
+    }
+    // else {
     //   const factory = await this.communityFactoryService.getCurrentFactory();
     //   queryBuilder.andWhere('token.factory_address = :address', {
     //     address: factory.address,
     //   });
     // }
-    // if (collection !== 'all') {
-    //   queryBuilder.andWhere('token.collection = :collection', { collection });
-    // }
+    if (collection !== 'all') {
+      queryBuilder.andWhere('token.collection = :collection', { collection });
+    }
     if (creator_address) {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
         creator_address,
@@ -127,12 +134,16 @@ export class TokensController {
         .createQueryBuilder('token_holder')
         .where('token_holder.address = :owner_address', { owner_address })
         .andWhere('token_holder.balance > 0')
-        .select('token_holder."tokenId"')
+        .select('token_holder."aex9_address"')
         .distinct(true)
         .getRawMany()
-        .then((res) => res.map((r) => r.tokenId));
+        .then((res) => res.map((r) => r.aex9_address));
 
-      queryBuilder.andWhereInIds(ownedTokens);
+      // queryBuilder.andWhereInIds(ownedTokens);
+
+      queryBuilder.andWhere('token.address IN (:...aex9_addresses)', {
+        aex9_addresses: ownedTokens,
+      });
     }
 
     return this.tokensService.queryTokensWithRanks(
@@ -182,9 +193,23 @@ export class TokensController {
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
     queryBuilder.orderBy(`token_holder.balance`, 'DESC');
-    queryBuilder.where('token_holder.tokenId = :tokenId', {
-      tokenId: token.id,
+    queryBuilder.where('token_holder.aex9_address = :aex9_address', {
+      aex9_address: token.address,
     });
+
+    // check if count is 0
+    const count = await queryBuilder.getCount();
+    if (count <= 1) {
+      void this.syncTokenHoldersQueue.add(
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `syncTokenHolders-${token.sale_address}`,
+          removeOnComplete: true,
+        },
+      );
+    }
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });
   }
@@ -238,7 +263,7 @@ export class TokensController {
       target_rank AS (
         SELECT rank
         FROM ranked_tokens
-        WHERE id = ${token.id}
+        WHERE sale_address = '${token.sale_address}'
       ),
       adjusted_limits AS (
         SELECT 

@@ -82,3 +82,23 @@ export const TX_FUNCTIONS = {
   sell: 'sell',
   create_community: 'create_community',
 } as const;
+
+export const WAIT_TIME_WHEN_REQUEST_FAILED = 3000; // 3 seconds
+export const MAX_RETRIES_WHEN_REQUEST_FAILED = 3;
+
+/**
+ * sync config
+ */
+export const TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE = 10;
+export const TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES = 100;
+
+export const TOTAL_BLOCKS_TO_HAVE_STABLE_DATA = 100;
+
+export const FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN = 10;
+export const MAX_RETRIES_FOR_FAILED_TRANSACTIONS = 10;
+
+export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
+
+export const SYNCING_ENABLED = true;
+export const LIVE_SYNCING_ENABLED = true;
+export const PERIODIC_SYNCING_ENABLED = true;

@@ -1,12 +1,16 @@
 import { ScheduleModule } from '@nestjs/schedule';
+import { BullBoardModule } from './bull-board/bull-board.module';
 
 import { BullModule } from '@nestjs/bull';
+import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { BclModule } from './bcl/bcl.module';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
@@ -14,15 +18,7 @@ import {
   SYNC_TOKEN_HOLDERS_QUEUE,
 } from './tokens/queues/constants';
 import { TokensModule } from './tokens/tokens.module';
-import {
-  SAVE_TRANSACTION_QUEUE,
-  SYNC_TRANSACTIONS_QUEUE,
-  VALIDATE_TRANSACTIONS_QUEUE,
-} from './transactions/queues/constants';
 import { TransactionsModule } from './transactions/transactions.module';
-import { AePricingModule } from './ae-pricing/ae-pricing.module';
-import { CacheModule } from '@nestjs/cache-manager';
-import { BclModule } from './bcl/bcl.module';
 
 @Module({
   imports: [
@@ -42,16 +38,7 @@ import { BclModule } from './bcl/bcl.module';
         name: SYNC_TOKEN_HOLDERS_QUEUE,
       },
       {
-        name: SAVE_TRANSACTION_QUEUE,
-      },
-      {
-        name: SYNC_TRANSACTIONS_QUEUE,
-      },
-      {
         name: DELETE_OLD_TOKENS_QUEUE,
-      },
-      {
-        name: VALIDATE_TRANSACTIONS_QUEUE,
       },
     ),
     TypeOrmModule.forRoot({
@@ -63,6 +50,7 @@ import { BclModule } from './bcl/bcl.module';
     TransactionsModule,
     AePricingModule,
     BclModule,
+    BullBoardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

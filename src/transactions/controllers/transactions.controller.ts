@@ -24,7 +24,8 @@ import { Repository } from 'typeorm';
 import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
-@Controller('api/transactions')
+
+@Controller('transactions')
 @ApiTags('Transactions')
 export class TransactionsController {
   constructor(
@@ -67,17 +68,26 @@ export class TransactionsController {
   ): Promise<Pagination<Transaction>> {
     const queryBuilder =
       this.transactionsRepository.createQueryBuilder('transactions');
-    if (includes === 'token') {
-      queryBuilder.leftJoinAndSelect('transactions.token', 'token');
+    if (includes === 'token' || account_address) {
+      queryBuilder.leftJoinAndMapOne(
+        'transactions.token',
+        'token',
+        'token',
+        'token.sale_address = transactions.sale_address',
+      );
     } else {
-      queryBuilder.leftJoin('transactions.token', 'token');
+      queryBuilder.leftJoinAndSelect(
+        'token',
+        'token',
+        'token.sale_address = transactions.sale_address',
+      );
     }
     queryBuilder.orderBy(`transactions.created_at`, 'DESC');
 
     if (token_address) {
       const token = await this.tokenService.getToken(token_address);
-      queryBuilder.where('transactions."tokenId" = :tokenId', {
-        tokenId: token.id,
+      queryBuilder.where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
       });
     } else {
       const factory = await this.communityFactoryService.getCurrentFactory();

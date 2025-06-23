@@ -3,16 +3,13 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TX_FUNCTIONS } from '@/configs';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
-import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Queue } from 'bull';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
@@ -32,9 +29,6 @@ export class TransactionService {
 
     @InjectRepository(TokenHolder)
     private tokenHolderRepository: Repository<TokenHolder>,
-
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
   ) {
     // this._testTransaction(
     //   'th_8B9qcMtArB59kBAHKKzPo4JXyECgBUBDH415gy8a3K69yr837',
@@ -45,24 +39,38 @@ export class TransactionService {
     rawTransaction: ITransaction,
     token?: Token,
     shouldBroadcast?: boolean,
-    shouldValidate?: boolean,
   ): Promise<Transaction> {
-    if (!Object.keys(TX_FUNCTIONS).includes(rawTransaction.tx.function)) {
+    if (
+      !Object.keys(TX_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
+      rawTransaction?.tx?.returnType === 'revert'
+    ) {
       return;
     }
-    // prevent transaction duplication
-    let saleAddress = rawTransaction.tx.contractId;
-    if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
-      saleAddress = rawTransaction.tx.return.value[1].value;
+    let saleAddress;
+    if (token?.sale_address) {
+      saleAddress = token.sale_address;
+    } else {
+      saleAddress = rawTransaction.tx.contractId;
+      if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
+        if (!rawTransaction.tx.return.value.length) {
+          return;
+        }
+        saleAddress = rawTransaction.tx.return.value[1].value;
+      }
+
+      /**
+       * if the token doesn't exists get token will create it.
+       */
+      token = await this.tokenService.getToken(saleAddress);
     }
 
-    /**
-     * if the token doesn't exists get token will create it and call sync token
-     * transactions, if the token exists it will just return the token.
-     * this will cause create community transaction to be saved twice.
-     */
     if (!token) {
-      token = await this.tokenService.getToken(saleAddress, !shouldBroadcast);
+      token =
+        await this.tokenService.createTokenFromRawTransaction(rawTransaction);
+      // creat token from tx
+      if (!token) {
+        return;
+      }
     }
 
     const exists = await this.transactionRepository
@@ -72,7 +80,7 @@ export class TransactionService {
       })
       .getOne();
 
-    if (!!exists && (!shouldValidate || exists.verified)) {
+    if (!!exists) {
       return exists;
     }
 
@@ -83,16 +91,8 @@ export class TransactionService {
       volume,
       total_supply,
       protocol_reward,
+      _should_revalidate,
     } = await this.parseTransactionData(rawTransaction);
-
-    // if volume is 0 & tx type is not create_community ignore it
-    if (
-      (volume.isZero() &&
-        rawTransaction.tx.function !== TX_FUNCTIONS.create_community) ||
-      rawTransaction.tx.returnType === 'revert'
-    ) {
-      return;
-    }
 
     if (
       rawTransaction.tx.function == TX_FUNCTIONS.create_community &&
@@ -107,7 +107,7 @@ export class TransactionService {
 
     const decodedData = rawTransaction.tx.decodedData;
 
-    const priceChangeData = decodedData.find(
+    const priceChangeData = decodedData?.find(
       (data) => data.name === 'PriceChange',
     );
     const _unit_price = _amount.div(volume);
@@ -129,6 +129,7 @@ export class TransactionService {
       ]);
 
     const txData = {
+      sale_address: saleAddress,
       tx_type: rawTransaction.tx.function,
       tx_hash: rawTransaction.hash,
       block_height: rawTransaction.blockHeight,
@@ -142,23 +143,11 @@ export class TransactionService {
       total_supply,
       market_cap,
       created_at: moment(rawTransaction.microTime).toDate(),
-      verified: false,
+      verified:
+        !_should_revalidate &&
+        moment().diff(moment(rawTransaction.microTime), 'hours') >= 5,
     };
-    // if transaction 2 days old
-    if (!!exists?.id) {
-      await this.transactionRepository.update(exists.id, {
-        ...txData,
-        verified: true,
-      });
-      return exists;
-    }
-    if (moment().diff(moment(rawTransaction.microTime), 'days') >= 1) {
-      txData.verified = true;
-    }
-    const transaction = this.transactionRepository.save({
-      token,
-      ...txData,
-    } as any);
+    const transaction = await this.transactionRepository.save(txData);
 
     if (!this.isTokenSupportedCollection(token)) {
       return transaction;
@@ -182,6 +171,7 @@ export class TransactionService {
     amount: BigNumber;
     total_supply: BigNumber;
     protocol_reward: BigNumber;
+    _should_revalidate: boolean;
   }> {
     const decodedData = rawTransaction.tx.decodedData;
     let volume = new BigNumber(0);
@@ -189,48 +179,52 @@ export class TransactionService {
     let total_supply = new BigNumber(0);
     let protocol_reward = new BigNumber(0);
 
-    if (decodedData.length) {
-      try {
-        if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
-          const mints = decodedData.filter((data) => data.name === 'Mint');
-          protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-          volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-          amount = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-          );
-          total_supply = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-          ).plus(volume);
-        }
+    if (!decodedData || decodedData.length == 0) {
+      return {
+        volume,
+        amount,
+        total_supply,
+        protocol_reward,
+        _should_revalidate: true,
+      };
+    }
 
-        if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
-          if (decodedData.find((data) => data.name === 'PriceChange')) {
-            const mints = decodedData.filter((data) => data.name === 'Mint');
-            protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-            volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
-            amount = new BigNumber(
-              toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
-            );
-            total_supply = new BigNumber(
-              toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
-            ).plus(volume);
-          }
-        }
+    if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+      const mints = decodedData.filter((data) => data.name === 'Mint');
+      protocol_reward = new BigNumber(toAe(mints[0].args[1]));
+      volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+      amount = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+      );
+      total_supply = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+      ).plus(volume);
+    }
 
-        if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
-          volume = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
-          );
-          amount = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
-          );
-          total_supply = new BigNumber(
-            toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
-          ).minus(volume);
-        }
-      } catch (error) {
-        //
+    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+      if (decodedData.find((data) => data.name === 'PriceChange')) {
+        const mints = decodedData.filter((data) => data.name === 'Mint');
+        protocol_reward = new BigNumber(toAe(mints[0].args[1]));
+        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+        amount = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[0]),
+        );
+        total_supply = new BigNumber(
+          toAe(decodedData.find((data) => data.name === 'Buy').args[2]),
+        ).plus(volume);
       }
+    }
+
+    if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+      volume = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
+      );
+      amount = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Sell').args[0]),
+      );
+      total_supply = new BigNumber(
+        toAe(decodedData.find((data) => data.name === 'Sell').args[1]),
+      ).minus(volume);
     }
 
     return {
@@ -238,12 +232,14 @@ export class TransactionService {
       amount,
       total_supply,
       protocol_reward,
+      _should_revalidate: false,
     };
   }
 
   async decodeTransactionData(
     token: Token,
     rawTransaction: ITransaction,
+    retries = 0,
   ): Promise<ITransaction> {
     try {
       const factory = await this.communityFactoryService.loadFactory(
@@ -258,7 +254,15 @@ export class TransactionService {
           decodedData,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
+      if (retries < 3) {
+        return this.decodeTransactionData(token, rawTransaction, retries + 1);
+      }
+      this.logger.error(
+        `decodeTransactionData->error:: retry ${retries}/3`,
+        error,
+        error.stack,
+      );
       return rawTransaction;
     }
   }
@@ -286,8 +290,8 @@ export class TransactionService {
   async getTokenTransactionsCount(token: Token): Promise<number> {
     const queryBuilder = this.transactionRepository
       .createQueryBuilder('token_transactions')
-      .where('token_transactions."tokenId" = :token_id', {
-        token_id: token.id,
+      .where('token_transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
       });
     return queryBuilder.getCount();
   }
@@ -319,12 +323,19 @@ export class TransactionService {
   ): Promise<void> {
     try {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
+      const tokenHolderCount = await this.tokenHolderRepository
+        .createQueryBuilder('token_holders')
+        .where('token_holders.aex9_address = :aex9_address', {
+          aex9_address: token.address,
+        })
+        .getCount();
+
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
-        .where('token_holders."tokenId" = :token_id', {
-          token_id: token.id,
+        .where('token_holders.aex9_address = :aex9_address', {
+          aex9_address: token.address,
         })
-        .andWhere('token_holders."address" = :address', {
+        .andWhere('token_holders.address = :address', {
           address: rawTransaction.tx.callerId,
         })
         .getOne();
@@ -338,12 +349,16 @@ export class TransactionService {
         if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.plus(bigNumberVolume),
+            last_tx_hash: rawTransaction.hash,
+            block_number: rawTransaction.blockHeight,
           });
         }
         // if is sell
         if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.minus(bigNumberVolume),
+            last_tx_hash: rawTransaction.hash,
+            block_number: rawTransaction.blockHeight,
           });
         }
         if (token.holders_count == 0) {
@@ -354,28 +369,32 @@ export class TransactionService {
       } else {
         // create token holder
         await this.tokenHolderRepository.save({
-          token: token,
+          id: `${rawTransaction.tx.callerId}_${token.address}`,
+          aex9_address: token.address,
           address: rawTransaction.tx.callerId,
           balance: bigNumberVolume,
+          last_tx_hash: rawTransaction.hash,
+          block_number: rawTransaction.blockHeight,
         });
         // increment token holders count
         await this.tokenService.update(token, {
-          holders_count: token.holders_count + 1,
+          holders_count: tokenHolderCount + 1,
         });
       }
     } catch (error) {
       this.logger.error('Error updating token holder', error);
     }
-
-    void this.syncTokenHoldersQueue.add(
-      {
-        saleAddress: token.sale_address,
-      },
-      {
-        jobId: `syncTokenHolders-${token.sale_address}`,
-        delay: 1000 * 60 * 3, // 3 minutes
-      },
-    );
+    try {
+      await this.tokenService.loadAndSaveTokenHoldersFromMdw(
+        token.sale_address as Encoded.ContractAddress,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Error loading and saving token holders from mdw`,
+        error,
+        error.stack,
+      );
+    }
   }
 
   async deleteNonValidTransactionsInBlock(

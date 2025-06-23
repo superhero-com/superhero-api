@@ -1,34 +1,25 @@
-import BigNumber from 'bignumber.js';
 import { IPriceDto } from '@/tokens/dto/price.dto';
-import { Token } from '@/tokens/entities/token.entity';
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import BigNumber from 'bignumber.js';
 import {
   Column,
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
 } from 'typeorm';
 
 @Entity({
   name: 'transactions',
 })
 export class Transaction {
-  @PrimaryGeneratedColumn()
-  id: number;
-
   @Index()
-  @ManyToOne(() => Token, (token) => token.transactions, {
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'tokenId' })
-  token: Token;
+  @PrimaryColumn()
+  tx_hash: string;
 
   @Index()
   @Column()
-  tx_hash: string;
+  sale_address: string;
 
   @Column()
   tx_type: string; // buy/sell/create_community

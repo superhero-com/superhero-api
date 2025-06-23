@@ -19,7 +19,7 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   app.enableCors();
-
+  app.setGlobalPrefix('api');
   await app.listen(process.env.APP_PORT ?? 3000);
 }
 void bootstrap();
