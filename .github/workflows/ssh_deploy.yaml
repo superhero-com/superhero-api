@@ -71,6 +71,7 @@ jobs:
             AE_NETWORK_ID,
             DB_USER,
             DB_PASSWORD,
+            DB_DATABASE,
             API_HOST_PORT,
             HOST_DATA_DIR,
             SHA
