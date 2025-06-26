@@ -632,7 +632,8 @@ export class TokensService {
       dao_address: daoAddress,
       sale_address: saleAddress,
       factory_address: factory.address,
-      creator_address: tx?.callerId,
+      creator_address:
+        tx?.callerId || tx?.caller_id || tokenExists?.creator_address,
       created_at: moment(
         rawTransaction?.microTime ||
           rawTransaction?.micro_time ||
