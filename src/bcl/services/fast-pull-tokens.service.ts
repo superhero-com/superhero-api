@@ -108,7 +108,7 @@ export class FastPullTokensService {
       const factory = await this.communityFactoryService.getCurrentFactory();
 
       const queryString = new URLSearchParams({
-        direction: 'forward',
+        direction: 'backward',
         limit: '100',
         type: 'contract_call',
         contract: factory.address,
