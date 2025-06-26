@@ -628,15 +628,15 @@ export class TokensService {
       total_supply: new BigNumber(0),
       holders_count: 0,
       address: null,
+      ...(tokenExists || {}),
       dao_address: daoAddress,
       sale_address: saleAddress,
       factory_address: factory.address,
-      creator_address: tx?.caller_id,
+      creator_address: tx?.callerId,
       created_at: moment(rawTransaction?.microTime).toDate(),
       name: tokenName,
       symbol: tokenName,
       create_tx_hash: rawTransaction?.hash,
-      ...(tokenExists || {}),
     };
 
     let token;
