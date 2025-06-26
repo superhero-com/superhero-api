@@ -56,6 +56,20 @@ export class TransactionService {
           return;
         }
         saleAddress = rawTransaction.tx.return.value[1].value;
+        // remove any transaction with the same sale address
+        await this.transactionRepository
+          .createQueryBuilder('transactions')
+          .delete()
+          .where('transactions.sale_address = :sale_address', {
+            sale_address: saleAddress,
+          })
+          .andWhere('transactions.tx_type = :tx_type', {
+            tx_type: TX_FUNCTIONS.create_community,
+          })
+          .andWhere('transactions.tx_hash != :tx_hash', {
+            tx_hash: rawTransaction.hash,
+          })
+          .execute();
       }
 
       /**
