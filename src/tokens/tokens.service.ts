@@ -633,7 +633,11 @@ export class TokensService {
       sale_address: saleAddress,
       factory_address: factory.address,
       creator_address: tx?.callerId,
-      created_at: moment(rawTransaction?.microTime).toDate(),
+      created_at: moment(
+        rawTransaction?.microTime ||
+          rawTransaction?.micro_time ||
+          tokenExists?.created_at,
+      ).toDate(),
       name: tokenName,
       symbol: tokenName,
       create_tx_hash: rawTransaction?.hash,
