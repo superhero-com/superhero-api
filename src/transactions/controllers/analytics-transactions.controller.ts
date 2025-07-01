@@ -233,7 +233,7 @@ export class AnalyticsTransactionsController {
       )
       .addSelect("transaction.market_cap->>'ae'", 'market_cap')
       .where("transaction.market_cap->>'ae' IS NOT NULL")
-      .andWhere('transaction.created_at < :start_date', {
+      .andWhere('transaction.created_at <= :start_date', {
         start_date: $date.toDate(),
       })
       .orderBy('transaction.sale_address')
