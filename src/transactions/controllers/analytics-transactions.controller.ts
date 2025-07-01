@@ -194,7 +194,7 @@ export class AnalyticsTransactionsController {
     description: 'Returns the sum of market caps for all tokens per day',
     type: [DailyMarketCapSumDto],
   })
-  @CacheTTL(1000)
+  @CacheTTL(20)
   @Get('daily-market-cap-sum')
   async listDailyMarketCapSum(
     @Query('start_date') start_date?: string,
@@ -205,41 +205,6 @@ export class AnalyticsTransactionsController {
       token_sale_addresses = [token_sale_addresses];
     }
 
-    const tokensQuery = this.transactionsRepository
-      .createQueryBuilder('transaction')
-      .select('DISTINCT transaction.sale_address')
-      .where("transaction.market_cap->>'ae' IS NOT NULL");
-
-    if (token_sale_addresses?.length) {
-      const tokens = await this.tokensRepository.find({
-        where: {
-          sale_address: In(token_sale_addresses),
-        },
-      });
-      const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
-      tokensQuery.andWhere(
-        'transaction.sale_address IN (:...uniqueTokenSaleAddresses)',
-        {
-          uniqueTokenSaleAddresses,
-        },
-      );
-    }
-
-    if (start_date) {
-      tokensQuery.andWhere('transaction.created_at >= :start_date', {
-        start_date,
-      });
-    }
-    if (end_date) {
-      tokensQuery.andWhere('transaction.created_at <= :end_date', {
-        end_date,
-      });
-    }
-
-    const tokens = await tokensQuery.getRawMany();
-    const tokenSaleAddresses = tokens.map((t) => t.sale_address);
-
-    // Generate a complete date range
     const startDate = start_date ? new Date(start_date) : new Date();
     const endDate = end_date ? new Date(end_date) : new Date();
     const dateRange = [];
@@ -249,84 +214,41 @@ export class AnalyticsTransactionsController {
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    // Get market cap data for each token
-    const tokenMarketCaps = new Map();
-    for (const tokenSaleAddress of tokenSaleAddresses) {
-      const tokenQuery = this.transactionsRepository
-        .createQueryBuilder('transaction')
-        .select('DATE(transaction.created_at) as date')
-        .addSelect("MAX(transaction.market_cap->>'ae') as sum")
-        .where("transaction.market_cap->>'ae' IS NOT NULL")
-        .andWhere('transaction.sale_address = :sale_address', {
-          sale_address: tokenSaleAddress,
-        })
-        .groupBy('DATE(transaction.created_at)')
-        .orderBy('DATE(transaction.created_at)', 'ASC');
+    const results = await Promise.all(
+      dateRange.map((date) =>
+        this.getMarketCapSum(date.toISOString().split('T')[0]),
+      ),
+    );
 
-      if (start_date) {
-        tokenQuery.andWhere('transaction.created_at >= :start_date', {
-          start_date,
-        });
-      }
-      if (end_date) {
-        tokenQuery.andWhere('transaction.created_at <= :end_date', {
-          end_date,
-        });
-      }
+    return results.sort((a, b) => a.date.localeCompare(b.date));
+  }
 
-      const results = await tokenQuery.getRawMany();
+  private async getMarketCapSum(date: string) {
+    const $date = moment(date);
+    const smartTransactionQuery = this.transactionsRepository
+      .createQueryBuilder('transaction')
+      .select(
+        'DISTINCT ON (transaction.sale_address) transaction.sale_address',
+        'sale_address',
+      )
+      .addSelect("transaction.market_cap->>'ae'", 'market_cap')
+      .where("transaction.market_cap->>'ae' IS NOT NULL")
+      .andWhere('transaction.created_at < :start_date', {
+        start_date: $date.toDate(),
+      })
+      .orderBy('transaction.sale_address')
+      .addOrderBy('transaction.created_at', 'DESC');
+    const smartTokens = await smartTransactionQuery.getRawMany();
 
-      // Create a map of date to market cap for this token
-      const marketCapMap = new Map();
-      results.forEach((result) => {
-        const value = result.sum;
-        // Only store non-NaN values
-        if (value && value !== 'NaN' && !isNaN(parseFloat(value))) {
-          marketCapMap.set(result.date.toISOString().split('T')[0], value);
-        }
-      });
+    // Calculate total market cap sum
+    const totalMarketCapSum = smartTokens.reduce((sum, token) => {
+      const marketCap = parseFloat(token.market_cap);
+      return sum + (isNaN(marketCap) ? 0 : marketCap);
+    }, 0);
 
-      // Fill in missing dates with previous day's value for this token
-      let lastKnownValue = '0';
-      const filledData = dateRange.map((date) => {
-        const dateStr = date.toISOString().split('T')[0];
-        const currentValue = marketCapMap.get(dateStr);
-        if (
-          currentValue &&
-          currentValue !== 'NaN' &&
-          !isNaN(parseFloat(currentValue))
-        ) {
-          lastKnownValue = currentValue;
-        }
-        return {
-          date: dateStr,
-          sum: lastKnownValue,
-        };
-      });
-
-      tokenMarketCaps.set(tokenSaleAddress, filledData);
-    }
-
-    // Sum up market caps across all tokens for each day
-    const dailySums = dateRange.map((date) => {
-      const dateStr = date.toISOString().split('T')[0];
-      let totalSum = 0;
-      for (const tokenData of tokenMarketCaps.values()) {
-        const tokenDayData = tokenData.find((d) => d.date === dateStr);
-        if (
-          tokenDayData &&
-          tokenDayData.sum !== 'NaN' &&
-          !isNaN(parseFloat(tokenDayData.sum))
-        ) {
-          totalSum += parseFloat(tokenDayData.sum);
-        }
-      }
-      return {
-        date: dateStr,
-        sum: totalSum.toString(),
-      };
-    });
-
-    return dailySums;
+    return {
+      date: $date.format('YYYY-MM-DD'),
+      sum: totalMarketCapSum,
+    } as any;
   }
 }
