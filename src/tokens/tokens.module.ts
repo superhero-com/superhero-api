@@ -18,10 +18,12 @@ import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
+import { Transaction } from '@/transactions/entities/transaction.entity';
+import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Token, TokenHolder]),
+    TypeOrmModule.forFeature([Token, TokenHolder, Transaction]),
     AeModule,
     AePricingModule,
     BullModule.registerQueue(
@@ -47,6 +49,7 @@ import { TokensService } from './tokens.service';
     PullTokenInfoQueue,
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,
+    UpdateTrendingTokensService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

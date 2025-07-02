@@ -90,6 +90,7 @@ export class TokensController {
       'name',
       'price',
       'created_at',
+      'trending_score',
     ];
     if (!allowedSortFields.includes(orderBy)) {
       orderBy = 'market_cap';

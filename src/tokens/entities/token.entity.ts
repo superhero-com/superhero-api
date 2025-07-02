@@ -155,6 +155,21 @@ export class Token {
   })
   total_supply: BigNumber;
 
+  @Index()
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 6,
+    default: 0,
+  })
+  trending_score: number;
+
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+  })
+  trending_score_update_at: Date;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
