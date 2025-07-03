@@ -102,3 +102,16 @@ export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 export const SYNCING_ENABLED = true;
 export const LIVE_SYNCING_ENABLED = true;
 export const PERIODIC_SYNCING_ENABLED = true;
+
+/**
+ * Trending Score Configuration
+ */
+export const TRENDING_SCORE_CONFIG = {
+  // Weights for trending score calculation
+  TRANSACTION_WEIGHT: 0.6, // w1 - weight for unique transactions in 24h
+  VOLUME_WEIGHT: 0.4, // w2 - weight for investment velocity
+
+  // Time window for trending calculations
+  TIME_WINDOW_HOURS: 24,
+  MAX_LIFETIME_MINUTES: 1440, // 24 hours in minutes
+} as const;

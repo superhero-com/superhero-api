@@ -6,7 +6,7 @@ import { In, IsNull, Repository } from 'typeorm';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { ACTIVE_NETWORK } from '@/configs';
+import { ACTIVE_NETWORK, TRENDING_SCORE_CONFIG } from '@/configs';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
@@ -22,6 +22,7 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -29,6 +30,12 @@ type TokenContracts = {
   token?: Token;
   lastUsedAt?: number;
 };
+
+interface TrendingMetrics {
+  uniqueTransactions24h: number;
+  investmentVolume24h: number;
+  lifetimeMinutes: number;
+}
 
 @Injectable()
 export class TokensService {
@@ -41,6 +48,9 @@ export class TokensService {
 
     @InjectRepository(TokenHolder)
     private tokenHoldersRepository: Repository<TokenHolder>,
+
+    @InjectRepository(Transaction)
+    private transactionsRepository: Repository<Transaction>,
 
     private aeSdkService: AeSdkService,
 
@@ -818,5 +828,228 @@ export class TokensService {
       );
       return [];
     }
+  }
+
+  /**
+   * Calculate 24-hour trending metrics for a token
+   */
+  async calculateTokenTrendingMetrics(token: Token): Promise<TrendingMetrics> {
+    const twentyFourHoursAgo = moment().subtract(
+      TRENDING_SCORE_CONFIG.TIME_WINDOW_HOURS,
+      'hours',
+    );
+
+    // Calculate unique transactions in 24h
+    const uniqueTransactionsResult = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .select('COUNT(DISTINCT transactions.address)', 'count')
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
+      })
+      .andWhere('transactions.created_at >= :start_date', {
+        start_date: twentyFourHoursAgo.toDate(),
+      })
+      .getRawOne();
+
+    // Calculate investment volume in AE in 24h (only buy transactions)
+    const investmentVolumeResult = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .select(
+        "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
+        'volume',
+      )
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
+      })
+      .andWhere('transactions.created_at >= :start_date', {
+        start_date: twentyFourHoursAgo.toDate(),
+      })
+      .andWhere('transactions.tx_type = :tx_type', {
+        tx_type: 'buy',
+      })
+      .getRawOne();
+
+    // Calculate lifetime minutes (within last 24 hours, max 1440)
+    const tokenCreatedAt = moment(token.created_at);
+    const now = moment();
+    const lifetimeMinutes = Math.min(
+      now.diff(tokenCreatedAt, 'minutes'),
+      TRENDING_SCORE_CONFIG.MAX_LIFETIME_MINUTES,
+    );
+
+    return {
+      uniqueTransactions24h: parseInt(
+        uniqueTransactionsResult?.count || '0',
+        10,
+      ),
+      investmentVolume24h: parseFloat(investmentVolumeResult?.volume || '0'),
+      lifetimeMinutes: Math.max(lifetimeMinutes, 1), // Prevent division by zero
+    };
+  }
+
+  /**
+   * Calculate trending score for a single token
+   */
+  async calculateTokenTrendingScore(token: Token): Promise<number> {
+    const metrics = await this.calculateTokenTrendingMetrics(token);
+
+    // If no activity, return 0
+    if (
+      metrics.uniqueTransactions24h === 0 &&
+      metrics.investmentVolume24h === 0
+    ) {
+      return 0;
+    }
+
+    // Simple score without normalization (for single token)
+    const volumePerMinute =
+      metrics.investmentVolume24h / metrics.lifetimeMinutes;
+
+    return (
+      TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * metrics.uniqueTransactions24h +
+      TRENDING_SCORE_CONFIG.VOLUME_WEIGHT * volumePerMinute
+    );
+  }
+
+  /**
+   * Calculate normalized trending scores for all tokens
+   */
+  async calculateAllTokensTrendingScores(): Promise<TrendingMetrics[]> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    // Get all tokens
+    const tokens = await this.tokensRepository.find({
+      where: {
+        factory_address: factory.address,
+        unlisted: false,
+      },
+    });
+
+    // Calculate raw metrics for all tokens
+    const tokenMetrics = await Promise.all(
+      tokens.map(async (token) => ({
+        token,
+        metrics: await this.calculateTokenTrendingMetrics(token),
+      })),
+    );
+
+    // Filter out tokens with no activity
+    const activeTokens = tokenMetrics.filter(
+      ({ metrics }) =>
+        metrics.uniqueTransactions24h > 0 || metrics.investmentVolume24h > 0,
+    );
+
+    if (activeTokens.length === 0) {
+      return [];
+    }
+
+    // Calculate volume per minute for each token
+    const tokensWithVolumePerMinute = activeTokens.map(
+      ({ token, metrics }) => ({
+        token,
+        metrics,
+        volumePerMinute: metrics.investmentVolume24h / metrics.lifetimeMinutes,
+      }),
+    );
+
+    // Find min/max values for normalization
+    const transactions = tokensWithVolumePerMinute.map(
+      ({ metrics }) => metrics.uniqueTransactions24h,
+    );
+    const volumePerMinutes = tokensWithVolumePerMinute.map(
+      ({ volumePerMinute }) => volumePerMinute,
+    );
+
+    const minTransactions = Math.min(...transactions);
+    const maxTransactions = Math.max(...transactions);
+    const minVolumePerMinute = Math.min(...volumePerMinutes);
+    const maxVolumePerMinute = Math.max(...volumePerMinutes);
+
+    // Normalize and calculate final scores
+    return tokensWithVolumePerMinute.map(({ metrics, volumePerMinute }) => ({
+      // Min-Max normalization (0-1 range)
+      uniqueTransactions24h:
+        maxTransactions > minTransactions
+          ? (metrics.uniqueTransactions24h - minTransactions) /
+            (maxTransactions - minTransactions)
+          : 0,
+      investmentVolume24h:
+        maxVolumePerMinute > minVolumePerMinute
+          ? (volumePerMinute - minVolumePerMinute) /
+            (maxVolumePerMinute - minVolumePerMinute)
+          : 0,
+      lifetimeMinutes: Math.max(metrics.lifetimeMinutes, 1), // Prevent division by zero
+    }));
+  }
+
+  /**
+   * Calculate and update trending score for a single token
+   */
+  async updateTokenTrendingScore(token: Token): Promise<void> {
+    try {
+      const metrics = await this.calculateTokenTrendingMetrics(token);
+
+      // Simple score calculation without normalization
+      // Using raw values with reasonable scaling
+      const volumePerMinute =
+        metrics.investmentVolume24h / metrics.lifetimeMinutes;
+
+      // Scale the metrics to reasonable values
+      const scaledTransactions = metrics.uniqueTransactions24h * 0.1; // Scale down transactions
+      const scaledVolumePerMinute = volumePerMinute * 10; // Scale up volume per minute
+
+      const trendingScore =
+        TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * scaledTransactions +
+        TRENDING_SCORE_CONFIG.VOLUME_WEIGHT * scaledVolumePerMinute;
+
+      // Update the token's trending score in the database
+      await this.tokensRepository.update(token.sale_address, {
+        trending_score: Math.max(0, trendingScore), // Ensure non-negative
+        trending_score_update_at: new Date(),
+      });
+
+      this.logger.debug(
+        `Updated trending score for token ${token.symbol}: ${trendingScore}`,
+        {
+          saleAddress: token.sale_address,
+          metrics,
+          trendingScore,
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to update trending score for token ${token.sale_address}`,
+        error,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  /**
+   * Calculate and update trending scores for multiple tokens
+   */
+  async updateMultipleTokensTrendingScores(tokens: Token[]): Promise<void> {
+    const updatePromises = tokens.map((token) =>
+      this.updateTokenTrendingScore(token),
+    );
+    await Promise.allSettled(updatePromises);
+  }
+
+  /**
+   * Calculate and update trending scores for all tokens
+   */
+  async updateAllTokensTrendingScores(): Promise<void> {
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
+    const tokens = await this.tokensRepository.find({
+      where: {
+        factory_address: factory.address,
+        unlisted: false,
+      },
+    });
+
+    this.logger.log(`Updating trending scores for ${tokens.length} tokens`);
+    await this.updateMultipleTokensTrendingScores(tokens);
+    this.logger.log(`Finished updating trending scores for all tokens`);
   }
 }

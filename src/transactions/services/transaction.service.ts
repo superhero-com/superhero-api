@@ -176,6 +176,7 @@ export class TransactionService {
       });
       // update token holder
       await this.updateTokenHolder(token, rawTransaction, volume);
+      await this.tokenService.updateTokenTrendingScore(token);
     }
     return transaction;
   }
