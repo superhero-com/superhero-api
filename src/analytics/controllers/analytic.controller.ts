@@ -50,7 +50,7 @@ export class AnalyticController {
   @Get('past-24-hours')
   async getPast24HoursAnalytics() {
     const startDate = moment().subtract(24, 'hours').toDate();
-    const endDate = moment().toDate();
+    const endDate = moment().add(1, 'day').toDate();
     const analyticsData =
       await this.cacheDailyAnalyticsDataService.getDateAnalytics(
         startDate,
