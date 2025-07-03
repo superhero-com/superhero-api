@@ -115,7 +115,7 @@ export class CacheDailyAnalyticsDataService {
     const totalTransactions = transactions.length;
     const totalMarketCap = await this.getMarketCapSum(date);
     const totalVolume = transactions.reduce(
-      (acc, transaction) => acc.plus(transaction.volume),
+      (acc, transaction) => acc.plus(transaction.amount?.ae ?? 0),
       new BigNumber(0),
     );
     const totalCreatedTokens = transactions.filter(
