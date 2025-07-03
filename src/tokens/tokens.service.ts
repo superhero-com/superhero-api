@@ -1008,14 +1008,14 @@ export class TokensService {
         trending_score_update_at: new Date(),
       });
 
-      this.logger.debug(
-        `Updated trending score for token ${token.symbol}: ${trendingScore}`,
-        {
-          saleAddress: token.sale_address,
-          metrics,
-          trendingScore,
-        },
-      );
+      // this.logger.debug(
+      //   `Updated trending score for token ${token.symbol}: ${trendingScore}`,
+      //   {
+      //     saleAddress: token.sale_address,
+      //     metrics,
+      //     trendingScore,
+      //   },
+      // );
     } catch (error) {
       this.logger.error(
         `Failed to update trending score for token ${token.sale_address}`,

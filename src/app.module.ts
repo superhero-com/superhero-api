@@ -19,6 +19,7 @@ import {
 } from './tokens/queues/constants';
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     TransactionsModule,
     AePricingModule,
     BclModule,
+    AnalyticsModule,
     BullBoardModule,
   ],
   controllers: [AppController],
