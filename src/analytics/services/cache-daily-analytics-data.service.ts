@@ -5,8 +5,9 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BigNumber } from 'bignumber.js';
 import moment from 'moment';
-import { Between, Repository } from 'typeorm';
+import { Between, LessThan, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
+import { Token } from '@/tokens/entities/token.entity';
 
 @Injectable()
 export class CacheDailyAnalyticsDataService {
@@ -19,6 +20,9 @@ export class CacheDailyAnalyticsDataService {
 
     @InjectRepository(Transaction)
     private transactionsRepository: Repository<Transaction>,
+
+    @InjectRepository(Token)
+    private tokensRepository: Repository<Token>,
   ) {
     //
   }
@@ -88,7 +92,9 @@ export class CacheDailyAnalyticsDataService {
     }
   }
   async pullAnalyticsData(date: Date) {
-    const analyticsData = await this.getDateAnalytics(date);
+    const startOfDay = moment(date).startOf('day').toDate();
+    const endOfDay = moment(date).endOf('day').toDate();
+    const analyticsData = await this.getDateAnalytics(startOfDay, endOfDay);
     // console.log('analyticsData', analyticsData);
     // update or insert
     const analytic = await this.analyticsRepository.upsert(analyticsData, {
@@ -97,13 +103,16 @@ export class CacheDailyAnalyticsDataService {
     return analytic;
   }
 
-  private async getDateAnalytics(date: Date) {
-    const startOfDay = moment(date).startOf('day').toDate();
-    const endOfDay = moment(date).endOf('day').toDate();
-
+  async getDateAnalytics(startOfDay: Date, endOfDay: Date) {
     const transactions = await this.transactionsRepository.find({
       where: {
         created_at: Between(startOfDay, endOfDay),
+      },
+    });
+    // total created tokens before end of day
+    const totalTokens = await this.tokensRepository.count({
+      where: {
+        created_at: LessThan(endOfDay),
       },
     });
 
@@ -113,7 +122,7 @@ export class CacheDailyAnalyticsDataService {
     );
 
     const totalTransactions = transactions.length;
-    const totalMarketCap = await this.getMarketCapSum(date);
+    const totalMarketCap = await this.getMarketCapSum(endOfDay);
     const totalVolume = transactions.reduce(
       (acc, transaction) => acc.plus(transaction.amount?.ae ?? 0),
       new BigNumber(0),
@@ -124,10 +133,10 @@ export class CacheDailyAnalyticsDataService {
     const totalActiveAccounts = totalUniqueUsers.size;
 
     return {
-      date,
+      date: moment(startOfDay).format('YYYY-MM-DD'),
       total_market_cap_sum: totalMarketCap,
       total_volume_sum: totalVolume,
-      total_tokens: totalTransactions,
+      total_tokens: totalTokens,
       total_transactions: totalTransactions,
       total_created_tokens: totalCreatedTokens,
       total_active_accounts: totalActiveAccounts,

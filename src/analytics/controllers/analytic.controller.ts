@@ -46,4 +46,16 @@ export class AnalyticController {
     });
     return analytics;
   }
+
+  @Get('past-24-hours')
+  async getPast24HoursAnalytics() {
+    const startDate = moment().subtract(24, 'hours').toDate();
+    const endDate = moment().toDate();
+    const analyticsData =
+      await this.cacheDailyAnalyticsDataService.getDateAnalytics(
+        startDate,
+        endDate,
+      );
+    return analyticsData;
+  }
 }
