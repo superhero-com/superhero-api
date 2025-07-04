@@ -379,9 +379,9 @@ export class TransactionHistoryService {
         timeframe: '7 days',
       },
       '30d': {
-        interval: '1 day',
-        unit: 'day',
-        size: 1,
+        interval: '4 hours',
+        unit: 'hour',
+        size: 4,
         timeframe: '30 days',
       },
     };
