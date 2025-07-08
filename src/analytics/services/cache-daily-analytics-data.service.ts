@@ -32,7 +32,7 @@ export class CacheDailyAnalyticsDataService {
   }
 
   isPullingDailyAnalyticsData = false;
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  @Cron(CronExpression.EVERY_HOUR)
   async pullDailyAnalyticsData() {
     if (this.isPullingDailyAnalyticsData) {
       return;
