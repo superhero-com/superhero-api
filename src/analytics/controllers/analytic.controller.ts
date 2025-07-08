@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
@@ -32,6 +32,11 @@ export class AnalyticController {
     const endDate = moment(
       end_date ?? moment().add(1, 'day').format('YYYY-MM-DD'),
     ).toDate();
+
+    // if the dates are not valid, return an error
+    if (startDate > endDate) {
+      throw new BadRequestException('Start date must be before end date');
+    }
 
     if (force_pull) {
       await this.cacheDailyAnalyticsDataService.pullAnalyticsDataByDateRange(

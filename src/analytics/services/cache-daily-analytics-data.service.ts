@@ -95,11 +95,13 @@ export class CacheDailyAnalyticsDataService {
     const startOfDay = moment(date).startOf('day').toDate();
     const endOfDay = moment(date).endOf('day').toDate();
     const analyticsData = await this.getDateAnalytics(startOfDay, endOfDay);
+    // delete the data if it exists
+    await this.analyticsRepository.delete({
+      date: startOfDay,
+    });
     // console.log('analyticsData', analyticsData);
     // update or insert
-    const analytic = await this.analyticsRepository.upsert(analyticsData, {
-      conflictPaths: ['date'],
-    });
+    const analytic = await this.analyticsRepository.insert(analyticsData);
     return analytic;
   }
 
