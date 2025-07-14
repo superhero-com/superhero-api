@@ -97,8 +97,7 @@ export class HistoricalController {
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
-  @CacheTTL(10)
-  // @CacheTTL(1000)
+  @CacheTTL(5)
   @Get(':address/history')
   async getPaginatedHistory(
     @Param('address') address: string,
@@ -129,7 +128,7 @@ export class HistoricalController {
     required: false,
     example: '7d',
   })
-  @CacheTTL(5 * 60 * 1000)
+  @CacheTTL(5)
   @Get('/preview/:address')
   async getForPreview(
     @Param('address') address: string,

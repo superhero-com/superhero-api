@@ -410,7 +410,7 @@ export class TransactionHistoryService {
       .getRawMany();
 
     let result;
-    if (data.length === 0) {
+    if (data.length <= 1) {
       // If no transactions found for interval, get latest 4 transactions
       const latestTransactions = await this.transactionsRepository
         .createQueryBuilder('transactions')
