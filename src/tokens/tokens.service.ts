@@ -851,7 +851,7 @@ export class TokensService {
       })
       .getRawOne();
 
-    // Calculate investment volume in AE in 24h (only buy transactions)
+    // Calculate investment volume in AE in 24h (buy and create_community transactions)
     const investmentVolumeResult = await this.transactionsRepository
       .createQueryBuilder('transactions')
       .select(
@@ -864,8 +864,8 @@ export class TokensService {
       .andWhere('transactions.created_at >= :start_date', {
         start_date: twentyFourHoursAgo.toDate(),
       })
-      .andWhere('transactions.tx_type = :tx_type', {
-        tx_type: 'buy',
+      .andWhere('transactions.tx_type IN (:...tx_types)', {
+        tx_types: ['buy', 'create_community'],
       })
       .getRawOne();
 
