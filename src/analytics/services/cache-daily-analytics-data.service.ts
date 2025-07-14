@@ -61,7 +61,7 @@ export class CacheDailyAnalyticsDataService {
       });
       startDate = firstTransaction?.created_at;
     } else {
-      startDate = moment().toDate();
+      startDate = moment().subtract(5, 'day').toDate();
     }
 
     const endDate = moment().subtract(1, 'day').toDate();
