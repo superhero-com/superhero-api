@@ -20,6 +20,7 @@ import {
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { AffiliationModule } from './affiliation/affiliation.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     BclModule,
     AnalyticsModule,
     BullBoardModule,
+    AffiliationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
