@@ -61,10 +61,10 @@ export class CacheDailyAnalyticsDataService {
       });
       startDate = firstTransaction?.created_at;
     } else {
-      startDate = moment().subtract(5, 'day').toDate();
+      startDate = moment().subtract(7, 'day').toDate();
     }
 
-    const endDate = moment().subtract(1, 'day').toDate();
+    const endDate = moment().add(1, 'day').toDate();
 
     await this.pullAnalyticsDataByDateRange(startDate, endDate);
 
