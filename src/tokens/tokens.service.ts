@@ -32,9 +32,34 @@ type TokenContracts = {
 };
 
 interface TrendingMetrics {
-  uniqueTransactions24h: number;
-  investmentVolume24h: number;
+  uniqueTransactions: number;
+  minUniqueTransactions: number;
+  maxUniqueTransactions: number;
+  investmentVolume: number;
+  minInvestmentVolume: number;
+  maxInvestmentVolume: number;
   lifetimeMinutes: number;
+  minLifetimeMinutes: number;
+  maxLifetimeMinutes: number;
+
+  tx_normalization: {
+    formula: string;
+    result: number;
+  };
+  volume_normalization: {
+    formula: string;
+    result: number;
+  };
+
+  volume_step_2_normalization: {
+    formula: string;
+    result: number;
+  };
+
+  trending_score: {
+    formula: string;
+    result: number;
+  };
 }
 
 @Injectable()
@@ -839,183 +864,170 @@ export class TokensService {
       'hours',
     );
 
-    // Calculate unique transactions in 24h
-    const uniqueTransactionsResult = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .select('COUNT(DISTINCT transactions.address)', 'count')
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
-      })
-      .andWhere('transactions.created_at >= :start_date', {
-        start_date: twentyFourHoursAgo.toDate(),
-      })
-      .getRawOne();
+    const [
+      uniqueTransactionsResult,
+      transactionCountsPerToken,
+      volumePerToken,
+      investmentVolumeResult,
+    ] = await Promise.all([
+      // Calculate unique transactions in 24h
+      this.transactionsRepository
+        .createQueryBuilder('transactions')
+        .select('COUNT(DISTINCT transactions.address)', 'count')
+        .where('transactions.sale_address = :sale_address', {
+          sale_address: token.sale_address,
+        })
+        .andWhere('transactions.created_at >= :start_date', {
+          start_date: twentyFourHoursAgo.toDate(),
+        })
+        .getRawOne(),
+      // Calculate min/max transactions per unique address
 
-    // Calculate investment volume in AE in 24h (buy and create_community transactions)
-    const investmentVolumeResult = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .select(
-        "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
-        'volume',
-      )
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
-      })
-      .andWhere('transactions.created_at >= :start_date', {
-        start_date: twentyFourHoursAgo.toDate(),
-      })
-      .andWhere('transactions.tx_type IN (:...tx_types)', {
-        tx_types: ['buy', 'create_community'],
-      })
-      .getRawOne();
+      this.transactionsRepository
+        .createQueryBuilder('transactions')
+        .select([
+          'MIN(address_counts.transaction_count) as min_transactions',
+          'MAX(address_counts.transaction_count) as max_transactions',
+        ])
+        .from((subQuery) => {
+          return subQuery
+            .addSelect('COUNT(*)', 'transaction_count')
+            .from(Transaction, 'transactions')
+            .where('transactions.created_at >= :start_date', {
+              start_date: twentyFourHoursAgo.toDate(),
+            })
+            .groupBy('transactions.sale_address');
+        }, 'address_counts')
+        .getRawOne(),
+
+      this.transactionsRepository
+        .createQueryBuilder('transactions')
+        .select([
+          'MIN(address_counts.volume) as min_volume',
+          'MAX(address_counts.volume) as max_volume',
+        ])
+        .from((subQuery) => {
+          return subQuery
+            .addSelect(
+              "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
+              'volume',
+            )
+            .from(Transaction, 'transactions')
+            .where('transactions.created_at >= :start_date', {
+              start_date: twentyFourHoursAgo.toDate(),
+            })
+            .groupBy('transactions.sale_address');
+        }, 'address_counts')
+        .getRawOne(),
+
+      this.transactionsRepository
+        .createQueryBuilder('transactions')
+        .select(
+          "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
+          'volume',
+        )
+        .where('transactions.sale_address = :sale_address', {
+          sale_address: token.sale_address,
+        })
+        .andWhere('transactions.created_at >= :start_date', {
+          start_date: twentyFourHoursAgo.toDate(),
+        })
+        .andWhere('transactions.tx_type IN (:...tx_types)', {
+          tx_types: ['buy', 'create_community'],
+        })
+        .getRawOne(),
+    ]);
 
     // Calculate lifetime minutes (within last 24 hours, max 1440)
     const tokenCreatedAt = moment(token.created_at);
     const now = moment();
-    const lifetimeMinutes = Math.min(
+    let lifetimeMinutes = Math.min(
       now.diff(tokenCreatedAt, 'minutes'),
       TRENDING_SCORE_CONFIG.MAX_LIFETIME_MINUTES,
     );
 
+    const uniqueTransactions = parseInt(
+      uniqueTransactionsResult?.count || '0',
+      10,
+    );
+    const minUniqueTransactions = parseInt(
+      transactionCountsPerToken?.min_transactions || '0',
+      10,
+    );
+    const maxUniqueTransactions = parseInt(
+      transactionCountsPerToken?.max_transactions || '0',
+      10,
+    );
+    const investmentVolume = parseFloat(investmentVolumeResult.volume || '0');
+    const minInvestmentVolume = parseFloat(volumePerToken?.min_volume || '0');
+    const maxInvestmentVolume = parseFloat(volumePerToken?.max_volume || '0');
+    lifetimeMinutes = Math.max(lifetimeMinutes, 1); // Prevent division by zero
+    const minLifetimeMinutes = 1; // Minimum possible lifetime
+    const maxLifetimeMinutes = TRENDING_SCORE_CONFIG.MAX_LIFETIME_MINUTES;
+
+    const volume_normalization_result =
+      (investmentVolume - minInvestmentVolume) /
+      (maxInvestmentVolume - minInvestmentVolume);
+    const tx_normalization_result =
+      (uniqueTransactions - minUniqueTransactions) /
+      (maxUniqueTransactions - minUniqueTransactions);
     return {
-      uniqueTransactions24h: parseInt(
-        uniqueTransactionsResult?.count || '0',
-        10,
-      ),
-      investmentVolume24h: parseFloat(investmentVolumeResult?.volume || '0'),
-      lifetimeMinutes: Math.max(lifetimeMinutes, 1), // Prevent division by zero
-    };
-  }
+      uniqueTransactions,
+      minUniqueTransactions,
+      maxUniqueTransactions,
+      investmentVolume,
+      minInvestmentVolume,
+      maxInvestmentVolume,
+      lifetimeMinutes,
+      minLifetimeMinutes,
+      maxLifetimeMinutes,
 
-  /**
-   * Calculate trending score for a single token
-   */
-  async calculateTokenTrendingScore(token: Token): Promise<number> {
-    const metrics = await this.calculateTokenTrendingMetrics(token);
-
-    // If no activity, return 0
-    if (
-      metrics.uniqueTransactions24h === 0 &&
-      metrics.investmentVolume24h === 0
-    ) {
-      return 0;
-    }
-
-    // Simple score without normalization (for single token)
-    const volumePerMinute =
-      metrics.investmentVolume24h / metrics.lifetimeMinutes;
-
-    return (
-      TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * metrics.uniqueTransactions24h +
-      TRENDING_SCORE_CONFIG.VOLUME_WEIGHT * volumePerMinute
-    );
-  }
-
-  /**
-   * Calculate normalized trending scores for all tokens
-   */
-  async calculateAllTokensTrendingScores(): Promise<TrendingMetrics[]> {
-    const factory = await this.communityFactoryService.getCurrentFactory();
-
-    // Get all tokens
-    const tokens = await this.tokensRepository.find({
-      where: {
-        factory_address: factory.address,
-        unlisted: false,
+      tx_normalization: {
+        formula: `(${uniqueTransactions} - ${minUniqueTransactions}) / (${maxUniqueTransactions} - ${minUniqueTransactions})`,
+        result: tx_normalization_result,
       },
-    });
-
-    // Calculate raw metrics for all tokens
-    const tokenMetrics = await Promise.all(
-      tokens.map(async (token) => ({
-        token,
-        metrics: await this.calculateTokenTrendingMetrics(token),
-      })),
-    );
-
-    // Filter out tokens with no activity
-    const activeTokens = tokenMetrics.filter(
-      ({ metrics }) =>
-        metrics.uniqueTransactions24h > 0 || metrics.investmentVolume24h > 0,
-    );
-
-    if (activeTokens.length === 0) {
-      return [];
-    }
-
-    // Calculate volume per minute for each token
-    const tokensWithVolumePerMinute = activeTokens.map(
-      ({ token, metrics }) => ({
-        token,
-        metrics,
-        volumePerMinute: metrics.investmentVolume24h / metrics.lifetimeMinutes,
-      }),
-    );
-
-    // Find min/max values for normalization
-    const transactions = tokensWithVolumePerMinute.map(
-      ({ metrics }) => metrics.uniqueTransactions24h,
-    );
-    const volumePerMinutes = tokensWithVolumePerMinute.map(
-      ({ volumePerMinute }) => volumePerMinute,
-    );
-
-    const minTransactions = Math.min(...transactions);
-    const maxTransactions = Math.max(...transactions);
-    const minVolumePerMinute = Math.min(...volumePerMinutes);
-    const maxVolumePerMinute = Math.max(...volumePerMinutes);
-
-    // Normalize and calculate final scores
-    return tokensWithVolumePerMinute.map(({ metrics, volumePerMinute }) => ({
-      // Min-Max normalization (0-1 range)
-      uniqueTransactions24h:
-        maxTransactions > minTransactions
-          ? (metrics.uniqueTransactions24h - minTransactions) /
-            (maxTransactions - minTransactions)
-          : 0,
-      investmentVolume24h:
-        maxVolumePerMinute > minVolumePerMinute
-          ? (volumePerMinute - minVolumePerMinute) /
-            (maxVolumePerMinute - minVolumePerMinute)
-          : 0,
-      lifetimeMinutes: Math.max(metrics.lifetimeMinutes, 1), // Prevent division by zero
-    }));
+      volume_normalization: {
+        formula: `(${investmentVolume} - ${minInvestmentVolume}) / (${maxInvestmentVolume} - ${minInvestmentVolume})`,
+        result: volume_normalization_result,
+      },
+      volume_step_2_normalization: {
+        formula: `(${volume_normalization_result} / ${lifetimeMinutes})`,
+        result: volume_normalization_result / lifetimeMinutes,
+      },
+      trending_score: {
+        formula: `${TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT} * ${tx_normalization_result} + ${TRENDING_SCORE_CONFIG.VOLUME_WEIGHT} * (${volume_normalization_result} / ${lifetimeMinutes})`,
+        result:
+          TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * tx_normalization_result +
+          TRENDING_SCORE_CONFIG.VOLUME_WEIGHT *
+            (volume_normalization_result / lifetimeMinutes),
+      },
+    } as any;
   }
 
   /**
    * Calculate and update trending score for a single token
    */
-  async updateTokenTrendingScore(token: Token): Promise<void> {
+  async updateTokenTrendingScore(token: Token): Promise<{
+    metrics: TrendingMetrics;
+    token: Token;
+  }> {
     try {
       const metrics = await this.calculateTokenTrendingMetrics(token);
 
-      // Simple score calculation without normalization
-      // Using raw values with reasonable scaling
-      const volumePerMinute =
-        metrics.investmentVolume24h / metrics.lifetimeMinutes;
-
-      // Scale the metrics to reasonable values
-      const scaledTransactions = metrics.uniqueTransactions24h * 0.1; // Scale down transactions
-      const scaledVolumePerMinute = volumePerMinute * 10; // Scale up volume per minute
-
-      const trendingScore =
-        TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * scaledTransactions +
-        TRENDING_SCORE_CONFIG.VOLUME_WEIGHT * scaledVolumePerMinute;
-
       // Update the token's trending score in the database
       await this.tokensRepository.update(token.sale_address, {
-        trending_score: Math.max(0, trendingScore), // Ensure non-negative
+        trending_score: metrics.trending_score.result, // Ensure non-negative
         trending_score_update_at: new Date(),
       });
 
-      // this.logger.debug(
-      //   `Updated trending score for token ${token.symbol}: ${trendingScore}`,
-      //   {
-      //     saleAddress: token.sale_address,
-      //     metrics,
-      //     trendingScore,
-      //   },
-      // );
+      return {
+        metrics,
+        token: {
+          ...token,
+          trending_score: metrics.trending_score.result,
+          trending_score_update_at: new Date(),
+        },
+      };
     } catch (error) {
       this.logger.error(
         `Failed to update trending score for token ${token.sale_address}`,
@@ -1033,23 +1045,5 @@ export class TokensService {
       this.updateTokenTrendingScore(token),
     );
     await Promise.allSettled(updatePromises);
-  }
-
-  /**
-   * Calculate and update trending scores for all tokens
-   */
-  async updateAllTokensTrendingScores(): Promise<void> {
-    const factory = await this.communityFactoryService.getCurrentFactory();
-
-    const tokens = await this.tokensRepository.find({
-      where: {
-        factory_address: factory.address,
-        unlisted: false,
-      },
-    });
-
-    this.logger.log(`Updating trending scores for ${tokens.length} tokens`);
-    await this.updateMultipleTokensTrendingScores(tokens);
-    this.logger.log(`Finished updating trending scores for all tokens`);
   }
 }

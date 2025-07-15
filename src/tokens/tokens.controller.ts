@@ -300,92 +300,17 @@ export class TokensController {
     };
   }
 
-  @ApiQuery({ name: 'price', type: 'number', required: true })
-  @ApiQuery({ name: 'token_address', type: 'string', required: false })
-  @ApiQuery({ name: 'factory_address', type: 'string', required: false })
-  @ApiQuery({ name: 'supply', type: 'string', required: false })
-  @ApiOperation({ operationId: 'estimatePrice', deprecated: true })
-  @ApiOkResponsePaginated(TokenDto)
-  @Get('contracts/estimate-price')
-  async estimatePrice(
-    @Query('token_address') token_address = undefined,
-    @Query('factory_address') factory_address = undefined,
-    @Query('price') price = 1,
-    @Query('supply') supply = 0,
-  ): Promise<any> {
-    let totalSupply = supply;
-    let factoryAddress = factory_address;
-    if (token_address) {
-      const token = await this.tokensService.findByAddress(token_address);
-      totalSupply = token.total_supply.toNumber();
-      factoryAddress = token.factory_address;
-    }
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @ApiOperation({ operationId: 'getTokenScore' })
+  @CacheTTL(1)
+  @Get(':address/score')
+  async getTokenScore(@Param('address') address: string): Promise<any> {
+    const token = await this.tokensService.findByAddress(address);
 
-    const calculators = {
-      default: (targetValue, supply) => {
-        // Define the integral function from supply to supply + x
-        function integralFunction(x) {
-          return (
-            Math.exp(0.00000000002 * (supply + x)) / 0.00000000002 -
-            Math.exp(0.00000000002 * supply) / 0.00000000002 -
-            1 * x -
-            targetValue
-          );
-        }
-
-        // Set an initial guess dynamically based on the target
-        const initialGuess = Math.max(1000000, targetValue * 1000);
-
-        // Define the tolerance and the maximum number of iterations
-        const tolerance = 1e-5;
-        const maxIterations = 10000;
-
-        // Define the bisection method
-        let low = 0; // Set a lower bound
-        let high = initialGuess; // Set an upper bound
-        let x = (low + high) / 2; // Midpoint between low and high
-        let iteration = 0;
-        let error = Math.abs(integralFunction(x));
-
-        // Perform bisection method
-        while (error > tolerance && iteration < maxIterations) {
-          // Check if the function changes signs
-          if (integralFunction(low) * integralFunction(x) < 0) {
-            high = x; // If sign changes, move the high bound
-            x = (low + high) / 2; // New midpoint
-          } else {
-            low = x; // If no sign change, move the low bound
-            x = low + high / 4; // New midpoint
-          }
-          error = Math.abs(integralFunction(x)); // Update error
-          iteration++;
-        }
-
-        // Check if the solver succeeded
-        if (iteration >= maxIterations) {
-          throw new Error(
-            'Solver did not converge within the max number of iterations.',
-          );
-        }
-
-        return x;
-      },
-    };
-
-    let findXForTarget = calculators.default;
-
-    if (Object.keys(calculators).includes(factoryAddress)) {
-      findXForTarget = calculators[factoryAddress];
-    }
-
-    const x = findXForTarget(
-      price,
-      new BigNumber(totalSupply).shiftedBy(-18).toNumber(),
-    );
-
-    return {
-      price,
-      x,
-    };
+    return this.tokensService.updateTokenTrendingScore(token);
   }
 }
