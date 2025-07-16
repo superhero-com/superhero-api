@@ -22,6 +22,13 @@ export class AffiliationCode {
   })
   private_code: string;
 
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+    default: null,
+  })
+  public claimed_at: Date;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
