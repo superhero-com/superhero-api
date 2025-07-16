@@ -10,16 +10,18 @@ async function bootstrap() {
       : ['error'],
   });
 
+  app.enableCors();
+  app.setGlobalPrefix('api');
+
   const config = new DocumentBuilder()
     .setTitle('WORD CRAFT Scan')
     .setDescription('The WORD CRAFT Scan API')
     .setVersion('1.0')
     .build();
+
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  app.enableCors();
-  app.setGlobalPrefix('api');
   await app.listen(process.env.APP_PORT ?? 3000);
 }
 void bootstrap();
