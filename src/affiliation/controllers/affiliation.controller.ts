@@ -30,10 +30,6 @@ export class AffiliationController {
     summary: 'Get invite link',
   })
   async getJoinInviteInfo(@Param('code') code: string) {
-    /**
-     * TODO:
-     * - make sure this affiliation has non claimed codes.
-     */
     return this.affiliationRepository.findOne({ where: { code } });
   }
 
@@ -53,6 +49,18 @@ export class AffiliationController {
       access_code,
     );
 
+    // make sure this user didn't claim any code yet.
+    const claimedCode = await this.affiliationCodeRepository.findOne({
+      where: { claimed_by: `${provider}@${userInfo.id}` },
+    });
+    if (claimedCode) {
+      if (claimedCode?.claimed_at) {
+        throw new Error('User already claimed a code');
+      }
+      // delete the claimed code
+      await this.affiliationCodeRepository.delete(claimedCode.id);
+    }
+
     // Check if the affiliation exists and has non-claimed codes
     const affiliation = await this.affiliationRepository.findOne({
       where: { code },
@@ -71,6 +79,15 @@ export class AffiliationController {
       throw new Error('No available codes for this affiliation');
     }
 
+    // shuffle availableCodes and pick one
+    const invitationCode =
+      availableCodes[Math.floor(Math.random() * availableCodes.length)];
+
+    // update the code with the user info
+    await this.affiliationCodeRepository.update(invitationCode.id, {
+      claimed_by: `${provider}@${userInfo.id}`,
+    });
+
     // Return the user info along with affiliation details
     return {
       user: userInfo,
@@ -78,6 +95,7 @@ export class AffiliationController {
         code: affiliation.code,
         available_codes: availableCodes.length,
       },
+      invitationCode,
     };
   }
 

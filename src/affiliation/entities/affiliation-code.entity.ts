@@ -29,6 +29,13 @@ export class AffiliationCode {
   })
   public claimed_at: Date;
 
+  @Column({
+    type: 'varchar',
+    nullable: true,
+    default: null, // `${provider}@${user_id}`
+  })
+  public claimed_by: string;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
