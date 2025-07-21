@@ -58,7 +58,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'price', 'market_cap', 'created_at'],
+    enum: ['name', 'price', 'market_cap', 'created_at', 'holders_count'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -91,6 +91,7 @@ export class TokensController {
       'price',
       'created_at',
       'trending_score',
+      'holders_count',
     ];
     if (!allowedSortFields.includes(orderBy)) {
       orderBy = 'market_cap';
