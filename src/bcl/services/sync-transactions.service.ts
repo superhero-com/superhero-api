@@ -58,67 +58,74 @@ export class SyncTransactionsService {
     this.logger.debug(
       `SyncTransactionsService->fetchAndSyncTransactions: ${url}`,
     );
-    const response = await fetchJson(url);
-
-    const items =
-      response?.data?.filter(
-        (item) =>
-          !validated_hashes.includes(item.hash) &&
-          item?.tx?.return_type !== 'revert',
-      ) || [];
-
-    for (const item of items) {
-      if (
-        item?.tx?.caller_id &&
-        !callers.includes(item?.tx?.caller_id) &&
-        item?.tx?.type !== 'SpendTx'
-      ) {
-        callers.push(item?.tx?.caller_id);
-      }
-    }
-
-    const transactions = items
-      ?.filter(
-        (item) =>
-          !validated_hashes.includes(item.hash) &&
-          Object.values(TX_FUNCTIONS).includes(item.tx.function) &&
-          item?.tx?.return_type !== 'revert',
-      )
-      .map((item: ITransaction) => camelcaseKeysDeep(item));
-
     try {
-      for (const transaction of transactions) {
-        try {
-          const result =
-            await this.transactionService.saveTransaction(transaction);
-          if (result?.tx_hash) {
-            validated_hashes.push(transaction.hash);
-          }
-        } catch (error: any) {
-          this.logger.error(
-            `Failed to save transaction ${transaction.hash}`,
-            error.stack,
-          );
-          await this.failedTransactionsRepository.save({
-            hash: transaction.hash,
-            error: error.message,
-            error_trace: error.stack,
-          });
+      const response = await fetchJson(url, undefined, true); //
+
+      const items =
+        response?.data?.filter(
+          (item) =>
+            !validated_hashes.includes(item.hash) &&
+            item?.tx?.return_type !== 'revert',
+        ) || [];
+
+      for (const item of items) {
+        if (
+          item?.tx?.caller_id &&
+          !callers.includes(item?.tx?.caller_id) &&
+          item?.tx?.type !== 'SpendTx'
+        ) {
+          callers.push(item?.tx?.caller_id);
         }
       }
+
+      const transactions = items
+        ?.filter(
+          (item) =>
+            !validated_hashes.includes(item.hash) &&
+            Object.values(TX_FUNCTIONS).includes(item.tx.function) &&
+            item?.tx?.return_type !== 'revert',
+        )
+        .map((item: ITransaction) => camelcaseKeysDeep(item));
+
+      try {
+        for (const transaction of transactions) {
+          try {
+            const result =
+              await this.transactionService.saveTransaction(transaction);
+            if (result?.tx_hash) {
+              validated_hashes.push(transaction.hash);
+            }
+          } catch (error: any) {
+            this.logger.error(
+              `Failed to save transaction ${transaction.hash}`,
+              error.stack,
+            );
+            await this.failedTransactionsRepository.save({
+              hash: transaction.hash,
+              error: error.message,
+              error_trace: error.stack,
+            });
+          }
+        }
+      } catch (error: any) {
+        this.logger.debug('transactions', transactions);
+        this.logger.error(
+          `Failed to fetch and sync transactions ${url}`,
+          error.stack,
+        );
+      }
+
+      if (response.next) {
+        return this.fetchAndSyncTransactions(
+          `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
+          validated_hashes,
+          callers,
+        );
+      }
     } catch (error: any) {
-      this.logger.debug('transactions', transactions);
       this.logger.error(
         `Failed to fetch and sync transactions ${url}`,
         error.stack,
-      );
-    }
-
-    if (response.next) {
-      return this.fetchAndSyncTransactions(
-        `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
-        validated_hashes,
-        callers,
       );
     }
 
