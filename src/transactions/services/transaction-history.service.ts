@@ -3,7 +3,7 @@ import { Token } from '@/tokens/entities/token.entity';
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Moment } from 'moment';
+import moment, { Moment } from 'moment';
 import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
 import { Transaction } from '../entities/transaction.entity';
@@ -436,6 +436,15 @@ export class TransactionHistoryService {
         end_time: item.truncated_time,
       }));
     }
+
+    // prevent duplicate with same end_time
+    result = result.filter(
+      (item, index) =>
+        index ==
+        result.findIndex((t) =>
+          moment(t.end_time).isSame(moment(item.end_time)),
+        ),
+    );
 
     return {
       result,
