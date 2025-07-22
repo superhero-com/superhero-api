@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { In, IsNull, LessThan, Repository } from 'typeorm';
 
 import { Token } from '../entities/token.entity';
 import { TokensService } from '../tokens.service';
@@ -25,9 +25,10 @@ export class UpdateTrendingTokensService {
     //
   }
 
-  onModuleInit() {
-    this.updateTrendingTokens();
-    this.fixOldTrendingTokens();
+  async onModuleInit() {
+    await this.fixAllNanTrendingTokens();
+    await this.updateTrendingTokens();
+    await this.fixOldTrendingTokens();
   }
 
   isUpdatingTrendingTokens = false;
@@ -111,5 +112,19 @@ export class UpdateTrendingTokensService {
       }
     }
     this.isFixingOldTrendingTokens = false;
+  }
+
+  async fixAllNanTrendingTokens() {
+    const tokens = await this.tokensRepository.find({
+      where: {
+        trending_score: IsNull(),
+      },
+    });
+
+    for (const token of tokens) {
+      this.tokensRepository.update(token.sale_address, {
+        trending_score: 0,
+      });
+    }
   }
 }
