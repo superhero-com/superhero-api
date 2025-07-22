@@ -25,10 +25,10 @@ export class UpdateTrendingTokensService {
     //
   }
 
-  async onModuleInit() {
-    await this.fixAllNanTrendingTokens();
-    await this.updateTrendingTokens();
-    await this.fixOldTrendingTokens();
+  onModuleInit() {
+    this.fixAllNanTrendingTokens();
+    this.updateTrendingTokens();
+    this.fixOldTrendingTokens();
   }
 
   isUpdatingTrendingTokens = false;
