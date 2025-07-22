@@ -8,7 +8,10 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import moment from 'moment';
 import { CronExpression } from '@nestjs/schedule';
 import { Cron } from '@nestjs/schedule';
-import { TRENDING_SCORE_CONFIG } from '@/configs';
+import {
+  TRENDING_SCORE_CONFIG,
+  UPDATE_TRENDING_TOKENS_ENABLED,
+} from '@/configs';
 
 @Injectable()
 export class UpdateTrendingTokensService {
@@ -34,7 +37,7 @@ export class UpdateTrendingTokensService {
   isUpdatingTrendingTokens = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async updateTrendingTokens() {
-    if (this.isUpdatingTrendingTokens) {
+    if (this.isUpdatingTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
       return;
     }
     this.isUpdatingTrendingTokens = true;
@@ -82,7 +85,7 @@ export class UpdateTrendingTokensService {
   isFixingOldTrendingTokens = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async fixOldTrendingTokens() {
-    if (this.isFixingOldTrendingTokens) {
+    if (this.isFixingOldTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
       return;
     }
     this.isFixingOldTrendingTokens = true;
@@ -117,7 +120,7 @@ export class UpdateTrendingTokensService {
   async fixAllNanTrendingTokens() {
     const tokens = await this.tokensRepository.find({
       where: {
-        trending_score: IsNull(),
+        trending_score: 'Nan' as any,
       },
     });
 

@@ -102,6 +102,7 @@ export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 export const SYNCING_ENABLED = true;
 export const LIVE_SYNCING_ENABLED = true;
 export const PERIODIC_SYNCING_ENABLED = true;
+export const UPDATE_TRENDING_TOKENS_ENABLED = true;
 
 /**
  * Trending Score Configuration
