@@ -31,7 +31,7 @@ export class UpdateTrendingTokensService {
   }
 
   isUpdatingTrendingTokens = false;
-  @Cron(CronExpression.EVERY_DAY_AT_10AM)
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async updateTrendingTokens() {
     if (this.isUpdatingTrendingTokens) {
       return;
@@ -79,7 +79,7 @@ export class UpdateTrendingTokensService {
   }
 
   isFixingOldTrendingTokens = false;
-  @Cron(CronExpression.EVERY_DAY_AT_10AM)
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async fixOldTrendingTokens() {
     if (this.isFixingOldTrendingTokens) {
       return;
@@ -96,7 +96,7 @@ export class UpdateTrendingTokensService {
       order: {
         trending_score_update_at: 'ASC',
       },
-      take: 1000,
+      take: 100,
     });
 
     for (const token of tokens) {
