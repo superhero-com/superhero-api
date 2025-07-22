@@ -972,13 +972,14 @@ export class TokensService {
       (uniqueTransactions - minUniqueTransactions) /
       (maxUniqueTransactions - minUniqueTransactions);
 
-    let final_trending_score =
+    const calculated_trending_score =
       TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * tx_normalization_result +
       TRENDING_SCORE_CONFIG.VOLUME_WEIGHT *
         (volume_normalization_result / lifetimeMinutes);
 
-    if (final_trending_score < 0) {
-      final_trending_score = 0;
+    let final_trending_score_result = calculated_trending_score;
+    if (calculated_trending_score < 0) {
+      final_trending_score_result = 0;
     }
 
     return {
@@ -1006,7 +1007,8 @@ export class TokensService {
       },
       trending_score: {
         formula: `${TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT} * ${tx_normalization_result} + ${TRENDING_SCORE_CONFIG.VOLUME_WEIGHT} * (${volume_normalization_result} / ${lifetimeMinutes})`,
-        result: final_trending_score,
+        result: final_trending_score_result,
+        calculated_trending_score,
       },
     } as any;
   }
