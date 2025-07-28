@@ -2,11 +2,12 @@ import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
-import { ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import moment from 'moment';
 import { CacheDailyAnalyticsDataService } from '../services/cache-daily-analytics-data.service';
 
 @Controller('analytics')
+@ApiTags('Analytics')
 export class AnalyticController {
   constructor(
     @InjectRepository(Analytic)
@@ -21,6 +22,9 @@ export class AnalyticController {
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiQuery({ name: 'force_pull', type: 'boolean', required: false })
+  @ApiOperation({
+    operationId: 'getAnalyticsData',
+  })
   async getAnalyticsData(
     @Query('start_date') start_date: string,
     @Query('end_date') end_date: string,
@@ -53,6 +57,9 @@ export class AnalyticController {
   }
 
   @Get('past-24-hours')
+  @ApiOperation({
+    operationId: 'getPast24HoursAnalytics',
+  })
   async getPast24HoursAnalytics() {
     const startDate = moment().subtract(24, 'hours').toDate();
     const endDate = moment().add(1, 'day').toDate();
