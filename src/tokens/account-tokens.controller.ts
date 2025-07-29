@@ -85,11 +85,22 @@ export class AccountTokensController {
         address: owner_address || creator_address,
       });
 
+      const tokenIds = tokensQueryResult.items
+        .map((holder) => holder.address)
+        .filter((address): address is string => address !== undefined);
+
+      const tokenRanks = await this.tokensService.getTokenRanksByAex9Address(
+        tokenIds as any,
+      );
+
       const holdings = await tokenHoldersQueryBuilder.getMany();
       return {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
-          token,
+          token: {
+            ...token,
+            rank: tokenRanks.get(token.address as any),
+          },
           address: owner_address || creator_address,
           balance:
             holdings.find((holder) => holder.aex9_address === token.address)
