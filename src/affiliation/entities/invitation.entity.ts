@@ -30,14 +30,34 @@ export class Invitation {
   sender_address: string;
 
   @Index()
-  @Column()
-  receiver_address: string;
+  @Column({
+    nullable: true,
+  })
+  invitee_address: string;
+
+  @Index()
+  @Column({
+    unique: true,
+  })
+  receiver_address: string; // The temporary address for the invitee
 
   @Column({
     enum: ['pending', 'claimed', 'revoked'],
     default: 'pending',
   })
   status: string;
+
+  // claim tx hash
+  @Column({
+    nullable: true,
+  })
+  claim_tx_hash: string;
+
+  // revoke tx hash
+  @Column({
+    nullable: true,
+  })
+  revoke_tx_hash: string;
 
   @Column({
     type: 'timestamp',
