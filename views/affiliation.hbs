@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Affiliation Tree</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-org-chart@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-flextree@2.1.2/build/d3-flextree.js"></script>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            background-color: #f0f2f5;
+        }
+
+        #chart-container {
+            height: 100vh;
+            width: 100vw;
+            position: relative;
+        }
+
+        .node-card {
+            fill: white;
+            stroke: #e0e0e0;
+            stroke-width: 1px;
+            rx: 6;
+            ry: 6;
+        }
+
+        .node-title {
+            fill: #2c3e50;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .node-content {
+            fill: #666;
+            font-size: 11px;
+        }
+
+        .node-card:hover {
+            filter: brightness(0.95);
+        }
+
+        .link {
+            stroke: #2c3e50;
+            stroke-width: 1.5px;
+        }
+
+        .node-card.selected {
+            stroke: #2c3e50;
+            stroke-width: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="chart-container"></div>
+
+    <script>
+        // const affiliationData = {
+        //     "inviters": [
+        //         {
+        //             "address": "ak_2Eu8n8MWvZ2dQmsKu1zeabZjEG6F1vc1S5syHZkvAZHTj9yaKM",
+        //             "invitees": [
+        //                 "ak_iSSBP7jtehNXPf1gi2ayC17oJhQmbqoVyEzJ3vUqBJDsyBQSo",
+        //                 "ak_2v23p1NvqBEAW29oG2AXHQJAXkyxuu2o6dXQe82EuESGHB4NU6"
+        //             ]
+        //         },
+        //         {
+        //             "address": "ak_2v23p1NvqBEAW29oG2AXHQJAXkyxuu2o6dXQe82EuESGHB4NU6",
+        //             "invitees": [
+        //                 "ak_2TUYfKHxYQLV3qetcrwmauXpTzpujm3L76h3SMRqRuYuPPHKCA"
+        //             ]
+        //         }
+        //     ]
+        // };
+
+        function formatAddress(address) {
+            return `${address.slice(0, 7)}...${address.slice(-4)}`;
+        }
+
+        function buildOrgChartData(data) {
+            const nodes = {};
+            const rootNodes = new Set();
+            const allAddresses = new Set();
+
+            // First pass: Create all nodes and collect all addresses
+            data.inviters.forEach(inviter => {
+                allAddresses.add(inviter.address);
+                inviter.invitees.forEach(invitee => {
+                    allAddresses.add(invitee);
+                });
+            });
+
+            // Create root node
+            nodes['root'] = {
+                nodeId: 'root',
+                parentNodeId: null,
+                width: 342,
+                height: 146,
+                borderWidth: 1,
+                borderRadius: 5,
+                borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
+                backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
+                template: `
+                    <div style="padding: 10px; text-align: center;">
+                        <div style="font-size: 14px; font-weight: 500;">BCL Affiliation Tree</div>
+                        <div style="font-size: 12px; color: #666;">Total Inviters: ${data.inviters.length}</div>
+                    </div>
+                `,
+                connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
+                connectorLineWidth: 5,
+                dashArray: "",
+                expanded: true,
+                directSubordinates: data.inviters.length,
+                totalSubordinates: data.inviters.length
+            };
+
+            // Create nodes for all addresses
+            allAddresses.forEach(address => {
+                nodes[address] = {
+                    nodeId: address,
+                    parentNodeId: null, // Start with no parent
+                    width: 342,
+                    height: 146,
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
+                    backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
+                    template: `
+                        <div style="padding: 10px; text-align: center;">
+                            <div style="font-size: 14px; font-weight: 500;">${formatAddress(address)}</div>
+                            <div style="font-size: 12px; color: #666;">Invited: 0</div>
+                        </div>
+                    `,
+                    connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
+                    connectorLineWidth: 5,
+                    dashArray: "",
+                    expanded: false,
+                    directSubordinates: 0,
+                    totalSubordinates: 0
+                };
+            });
+
+            // Build the relationship map
+            const relationshipMap = new Map();
+            data.inviters.forEach(inviter => {
+                relationshipMap.set(inviter.address, inviter.invitees);
+            });
+
+            // Function to check for cycles
+            function hasCycle(nodeId, visited = new Set(), path = new Set()) {
+                if (path.has(nodeId)) return true;
+                if (visited.has(nodeId)) return false;
+
+                visited.add(nodeId);
+                path.add(nodeId);
+
+                const children = relationshipMap.get(nodeId) || [];
+                for (const child of children) {
+                    if (hasCycle(child, visited, path)) return true;
+                }
+
+                path.delete(nodeId);
+                return false;
+            }
+
+            // Second pass: Build relationships and update invitee counts
+            data.inviters.forEach(inviter => {
+                const inviteeCount = inviter.invitees.length;
+                nodes[inviter.address].directSubordinates = inviteeCount;
+                nodes[inviter.address].totalSubordinates = inviteeCount;
+                nodes[inviter.address].template = `
+                    <div style="padding: 10px; text-align: center;">
+                        <div style="font-size: 14px; font-weight: 500;">${formatAddress(inviter.address)}</div>
+                        <div style="font-size: 12px; color: #666;">Invited: ${inviteeCount}</div>
+                    </div>
+                `;
+
+                // Only set parent if it doesn't create a cycle
+                inviter.invitees.forEach(invitee => {
+                    if (nodes[invitee] && !hasCycle(invitee)) {
+                        nodes[invitee].parentNodeId = inviter.address;
+                    }
+                });
+            });
+
+            // Find root nodes (nodes that are not invitees of any other node)
+            const inviteeSet = new Set();
+            data.inviters.forEach(inviter => {
+                inviter.invitees.forEach(invitee => {
+                    inviteeSet.add(invitee);
+                });
+            });
+
+            // Add all inviters that are not invitees as root nodes
+            data.inviters.forEach(inviter => {
+                if (!inviteeSet.has(inviter.address)) {
+                    rootNodes.add(inviter.address);
+                }
+            });
+
+            // If no root nodes found, use the first inviter as root
+            if (rootNodes.size === 0 && data.inviters.length > 0) {
+                rootNodes.add(data.inviters[0].address);
+            }
+
+            // Update parentNodeId for root nodes to point to our new root
+            rootNodes.forEach(rootId => {
+                nodes[rootId].parentNodeId = 'root';
+            });
+
+            // Set remaining nodes with no parent to be children of root
+            Object.values(nodes).forEach(node => {
+                if (node.nodeId !== 'root' && node.parentNodeId === null) {
+                    node.parentNodeId = 'root';
+                }
+            });
+
+            // Convert nodes object to array
+            return Object.values(nodes);
+        }
+
+        function renderChart(affiliationData) {
+            const chartData = buildOrgChartData(affiliationData);
+            console.log("chartData::", chartData);
+
+            const chart = new d3.OrgChart()
+                .container('#chart-container')
+                .data(chartData)
+                .svgWidth(window.innerWidth)
+                .svgHeight(window.innerHeight)
+                .initialZoom(0.6)
+                .onNodeClick(d => console.log(d + ' node clicked'))
+                .nodeContent(function (d, i, arr, state) {
+                    const color = '#FFFFFF';
+                    return `
+            <div style="font-family: 'Inter', sans-serif;background-color:${color}; position:absolute;margin-top:-1px; margin-left:-1px;width:${d.width}px;height:${d.height}px;border-radius:10px;border: 1px solid #E4E2E9">
+               <div style="background-color:${color};position:absolute;margin-top:-25px;margin-left:${15}px;border-radius:100px;width:50px;height:50px;" ></div>
+               <a href="https://wordcraft.fun/accounts/${d.data.nodeId}" target="_blank">
+                    <img src="https://avatars.superherowallet.com/${d.data.nodeId}" style="position:absolute;margin-top:-20px;margin-left:${20}px;border-radius:100px;width:40px;height:40px;" />
+                </a>
+               
+              <div style="color:#08011E;position:absolute;right:20px;top:17px;font-size:10px;"><i class="fas fa-ellipsis-h"></i></div>
+
+              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> ${d.data.nodeId.slice(0, 7)}...${d.data.nodeId.slice(-4)}</div>
+
+           </div>
+  `;
+                })
+                .render();
+        }
+
+        const transactions = []
+        const registerInvitations = {}
+        const revokedInvitations = []
+        async function fetchTransactions(url = "/v3/transactions?contract=ct_2GG42rs2FDPTXuUCWHMn98bu5Ab6mgNxY7KdGAKUNsrLqutNxZ&limit=100") {
+            const response = await fetch(`https://mainnet.aeternity.io/mdw/${url}`);
+            const data = await response.json();
+            transactions.push(...data.data)
+            if (data.next) {
+                await fetchTransactions(data.next)
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            await fetchTransactions()
+            // Collect Revoked Invitations
+            for (const transaction of transactions) {
+                if (transaction.tx.function === "revoke_invitation_code") {
+                    for (const args of transaction.tx.arguments) {
+                        if (args.type === "list") {
+                            for (const invitee of args.value) {
+                                revokedInvitations.push(invitee.value)
+                            }
+                        }
+                    }
+                }
+            }
+            // Collect Register Invitations
+            for (const transaction of transactions) {
+                if (transaction.tx.function === "register_invitation_code") {
+                    const caller = transaction.tx.caller_id
+                    let inviteesAccounts = []
+                    for (const args of transaction.tx.arguments) {
+                        if (args.type === "list") {
+                            for (const invitee of args.value) {
+                                if (invitee.type === "address" && !revokedInvitations.includes(invitee.value)) {
+                                    inviteesAccounts.push(invitee.value)
+                                }
+                            }
+                        }
+                    }
+                    if (inviteesAccounts.length > 0) {
+                        if (!registerInvitations[caller]) {
+                            registerInvitations[caller] = {
+                                inviteesAccounts: inviteesAccounts,
+                                invitedAccounts: []
+                            }
+                        } else {
+                            registerInvitations[caller].inviteesAccounts.push(...inviteesAccounts)
+                        }
+                    }
+                }
+            }
+            // Collect Redeemed Invitations
+            for (const transaction of transactions) {
+                if (transaction.tx.function === "redeem_invitation_code") {
+                    const inviteeAccount = transaction.tx.caller_id
+
+                    // search in registerInvitations[*].inviteesAccounts
+                    for (const [inviter, data] of Object.entries(registerInvitations)) {
+                        if (data.inviteesAccounts.includes(inviteeAccount)) {
+                            const invitedAccounts = transaction.tx.arguments.map(arg => arg.value)
+                            registerInvitations[inviter].invitedAccounts.push(...invitedAccounts)
+                        }
+                    }
+                }
+            }
+
+            // build affiliation data
+            const affiliationData = {
+                inviters: []
+            }
+            for (const [inviter, data] of Object.entries(registerInvitations)) {
+                if (data.invitedAccounts?.length) {
+                    affiliationData.inviters.push({
+                        address: inviter,
+                        invitees: data.invitedAccounts
+                    })
+                }
+            }
+            console.log("affiliationData::", JSON.stringify(affiliationData, null, 2))
+            setTimeout(() => {
+                renderChart(affiliationData)
+            }, 3000)
+            // var chart;
+            // d3.csv(
+            //     'https://raw.githubusercontent.com/bumbeishvili/sample-data/main/org.csv'
+            // ).then(data => {
+            //     setTimeout(() => {
+            //         chart = new d3.OrgChart()
+            //             .container('#chart-container')
+            //             .data(data)
+            //             .render();
+            //     }, 3000)
+            // });
+        });
+    </script>
+</body>
+
+</html>
