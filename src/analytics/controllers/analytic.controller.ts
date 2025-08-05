@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query, Render } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
@@ -69,5 +69,11 @@ export class AnalyticController {
         endDate,
       );
     return analyticsData;
+  }
+
+  @Get('preview')
+  @Render('analytics')
+  root() {
+    return { message: 'Hello world!' };
   }
 }

@@ -2,10 +2,12 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
+  Param,
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
@@ -52,5 +54,21 @@ export class AccountsController {
       query.orderBy(`account.${orderBy}`, orderDirection);
     }
     return paginate(query, { page, limit });
+  }
+
+  // single account
+  @ApiOperation({ operationId: 'getAccount' })
+  @ApiParam({ name: 'address', type: 'string' })
+  @Get(':address')
+  async getAccount(@Param('address') address: string) {
+    const account = await this.accountRepository.findOne({
+      where: { address },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    return account;
   }
 }

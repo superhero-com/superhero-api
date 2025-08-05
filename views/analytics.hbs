@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wordcraft Analytics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Inter", sans-serif;
+      }
+
+      body {
+        background-color: #f8fafc;
+        color: #1e293b;
+        padding: 1rem;
+        min-height: 100vh;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+      }
+
+      h1 {
+        font-size: 1.75rem;
+        color: #0f172a;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .stat-card {
+        background: white;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-width: 0; /* Prevents overflow */
+      }
+
+      .stat-card h2 {
+        font-size: 0.75rem;
+        margin-bottom: 0.25rem;
+        color: #475569;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .stat-card .value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #0f172a;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .stat-card .value.usd-value {
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #64748b;
+        margin-top: 0.25rem;
+      }
+
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+
+      .chart-container {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        height: 300px;
+      }
+
+      .chart-container.large {
+        grid-column: span 2;
+        height: 400px;
+      }
+
+      .chart-container h2 {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+        color: #475569;
+      }
+
+      .chart-wrapper {
+        height: calc(100% - 2rem);
+        position: relative;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 2rem;
+        color: #64748b;
+      }
+
+      .date-range {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .date-range > div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        min-width: 150px;
+      }
+
+      .date-range label {
+        font-size: 0.875rem;
+        color: #475569;
+      }
+
+      .date-range input {
+        padding: 0.5rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        color: #1e293b;
+        width: 100%;
+      }
+
+      .date-range button {
+        padding: 0.5rem 1rem;
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        align-self: flex-end;
+        white-space: nowrap;
+      }
+
+      .date-range button:hover {
+        background-color: #2563eb;
+      }
+
+      @media (max-width: 1400px) {
+        .container {
+          padding: 0 1rem;
+        }
+      }
+
+      @media (max-width: 768px) {
+        .stats-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .charts-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .date-range {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .date-range > div {
+          width: 100%;
+        }
+
+        .date-range button {
+          width: 100%;
+          margin-top: 0.5rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>BCL Analytics Dashboard</h1>
+      </div>
+
+      <div class="date-range">
+        <div>
+          <label for="startDate">Start Date:</label>
+          <input type="date" id="startDate" />
+        </div>
+        <div>
+          <label for="endDate">End Date:</label>
+          <input type="date" id="endDate" />
+        </div>
+        <button onclick="updateDashboard()">Apply</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h2>Total Unique Wallet Accounts</h2>
+          <div class="value" id="totalUsers">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Total Created Tokens</h2>
+          <div class="value" id="totalTokens">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Past 24h Active Accounts</h2>
+          <div class="value" id="todayActiveUsers">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Past 24h Trade Volume</h2>
+          <div class="value" id="todayVolume">-</div>
+          <div class="value usd-value" id="todayVolumeUSD">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Past 24h Created Tokens</h2>
+          <div class="value" id="todayTokens">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Total MarketCap</h2>
+          <div class="value" id="totalMarketCap">-</div>
+          <div class="value usd-value" id="totalMarketCapUSD">-</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container">
+          <h2>Daily MarketCap Sum (AE)</h2>
+          <div class="chart-wrapper">
+            <canvas id="marketCapChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Cumulative Tokens Created</h2>
+          <div class="chart-wrapper">
+            <canvas id="cumulativeTokensChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily Created Tokens</h2>
+          <div class="chart-wrapper">
+            <canvas id="tokensChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily Trade Volume (AE)</h2>
+          <div class="chart-wrapper">
+            <canvas id="volumeChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily Active Accounts</h2>
+          <div class="chart-wrapper">
+            <canvas id="activeUsersChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily Transactions</h2>
+          <div class="chart-wrapper">
+            <canvas id="transactionsChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // const API_URL = 'http://localhost:3000/api';
+      const API_URL = "/api";
+      {{!-- const API_URL = "https://mainnet.api.wordcraft.fun/api"; --}}
+      // Chart instances
+      let tokensChart = null;
+      let volumeChart = null;
+      let activeUsersChart = null;
+      let transactionsChart = null;
+      let marketCapChart = null;
+      let cumulativeTokensChart = null;
+
+      // Store analytics data globally
+      let analyticsData = [];
+
+      // Destroy existing chart if it exists
+      function destroyChart(chart) {
+        if (chart) {
+          chart.destroy();
+        }
+      }
+
+      // Format number with commas
+      function formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      }
+
+      // Format date for display
+      function formatDate(dateString) {
+        return moment(dateString).format("MMM D");
+      }
+
+      // Get date range from inputs
+      function getDateRange() {
+        const startDate = document.getElementById("startDate").value;
+        const endDate = document.getElementById("endDate").value;
+        return {
+          startDate: moment(startDate).format("YYYY-MM-DD"),
+          endDate: moment(endDate).format("YYYY-MM-DD"),
+        };
+      }
+
+      // Set default date range (last 2 weeks)
+      function setDefaultDateRange() {
+        const endDate = moment();
+        const startDate = moment().subtract(14, "days");
+
+        document.getElementById("startDate").value =
+          startDate.format("YYYY-MM-DD");
+        document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+      }
+
+      // Format AE amount (18 decimals)
+      function formatAEAmount(amount, precision = 1e18) {
+        // Convert to number and handle 18 decimals
+        const value = parseFloat(amount);
+
+        // Format with appropriate units
+        if (value >= 1e12) {
+          return (value / 1e12).toFixed(2) + " T AE";
+        } else if (value >= 1e9) {
+          return (value / 1e9).toFixed(2) + " B AE";
+        } else if (value >= 1e6) {
+          return (value / 1e6).toFixed(2) + " M AE";
+        } else if (value >= 1e3) {
+          return (value / 1e3).toFixed(2) + " K AE";
+        } else {
+          return value.toFixed(2) + " AE";
+        }
+      }
+
+      // Format AE amount for chart display (shorter version)
+      function formatAEAmountShort(amount) {
+        const value = parseFloat(amount);
+        // const value = parseFloat(amount) / 1e18;
+
+        if (value >= 1e12) {
+          return (value / 1e12).toFixed(2) + "T";
+        } else if (value >= 1e9) {
+          return (value / 1e9).toFixed(2) + "B";
+        } else if (value >= 1e6) {
+          return (value / 1e6).toFixed(2) + "M";
+        } else if (value >= 1e3) {
+          return (value / 1e3).toFixed(2) + "K";
+        } else {
+          return value.toFixed(2);
+        }
+      }
+
+      // Format USD amount
+      function formatUSDAmount(amount) {
+        if (amount >= 1e12) {
+          return "$" + (amount / 1e12).toFixed(2) + " T USD";
+        } else if (amount >= 1e9) {
+          return "$" + (amount / 1e9).toFixed(2) + " B USD";
+        } else if (amount >= 1e6) {
+          return "$" + (amount / 1e6).toFixed(2) + " M USD";
+        } else if (amount >= 1e3) {
+          return "$" + (amount / 1e3).toFixed(2) + " K USD";
+        } else {
+          return "$" + amount.toFixed(2) + " USD";
+        }
+      }
+
+      // Fetch AE price from CoinGecko
+      async function fetchAEPrice() {
+        try {
+          const response = await fetch(
+            "https://api.coingecko.com/api/v3/simple/price?ids=aeternity&vs_currencies=usd"
+          );
+          const data = await response.json();
+          return data.aeternity.usd;
+        } catch (error) {
+          console.error("Error fetching AE price:", error);
+          return 0;
+        }
+      }
+
+      // Convert AE to USD
+      function convertAEToUSD(aeAmount, aePrice, decimals = 1e18) {
+        return aeAmount * aePrice;
+        // return (aeAmount / decimals) * aePrice;
+      }
+
+      // Fetch analytics data from unified API
+      async function fetchAnalyticsData(startDate, endDate) {
+        try {
+          const response = await fetch(
+            `${API_URL}/analytics?start_date=${startDate}&end_date=${endDate}`
+          );
+          const data = await response.json();
+          
+          // Sort data by date in ascending order
+          const sortedData = [...data].sort(
+            (a, b) => moment(a.date).valueOf() - moment(b.date).valueOf()
+          );
+          
+          analyticsData = sortedData;
+          return sortedData;
+        } catch (error) {
+          console.error("Error fetching analytics data:", error);
+          return [];
+        }
+      }
+
+
+
+      // Update total unique users from analytics data
+      function updateTotalUsers() {
+        // Calculate total unique users from all data
+        const uniqueUsers = new Set();
+        analyticsData.forEach(item => {
+          for (let i = 0; i < parseInt(item.total_active_accounts); i++) {
+            uniqueUsers.add(`user_${item.date}_${i}`);
+          }
+        });
+        
+        document.getElementById("totalUsers").textContent = formatNumber(uniqueUsers.size);
+      }
+
+
+
+      // Update total market cap from latest data
+      async function updateTotalMarketCap() {
+        try {
+          if (analyticsData.length === 0) return;
+          
+          const latestData = analyticsData[analyticsData.length - 1];
+          const totalMarketCap = parseFloat(latestData.total_market_cap_sum);
+          
+          document.getElementById("totalMarketCap").textContent = formatAEAmount(totalMarketCap, 1);
+
+          // Fetch AE price and calculate USD market cap
+          const aePrice = await fetchAEPrice();
+          const usdMarketCap = totalMarketCap * aePrice;
+          document.getElementById("totalMarketCapUSD").textContent = formatUSDAmount(usdMarketCap);
+        } catch (error) {
+          console.error("Error updating total market cap:", error);
+        }
+      }
+
+      // Create tokens chart
+      function createTokensChart() {
+        try {
+          const chartData = analyticsData.map(item => ({
+            date: item.date,
+            count: parseInt(item.total_created_tokens) || 0
+          }));
+
+          // Destroy existing chart
+          destroyChart(tokensChart);
+
+          tokensChart = new Chart(document.getElementById("tokensChart"), {
+            type: "line",
+            data: {
+              labels: chartData.map((item) => formatDate(item.date)),
+              datasets: [
+                {
+                  label: "Tokens Created",
+                  data: chartData.map((item) => item.count),
+                  borderColor: "#3b82f6",
+                  backgroundColor: "rgba(59, 130, 246, 0.1)",
+                  tension: 0.4,
+                  fill: true,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false,
+                },
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: {
+                    color: "rgba(0, 0, 0, 0.05)",
+                  },
+                },
+                x: {
+                  grid: {
+                    display: false,
+                  },
+                },
+              },
+            },
+          });
+
+          return chartData;
+        } catch (error) {
+          console.error("Error creating tokens chart:", error);
+          return [];
+        }
+      }
+
+      // Create volume chart
+      async function createVolumeChart() {
+        try {
+          const chartData = analyticsData.map(item => ({
+            date: item.date,
+            volume_ae: parseFloat(item.total_volume_sum) || 0
+          }));
+
+          // Get current AE price
+          const aePrice = await fetchAEPrice();
+
+          // Destroy existing chart
+          destroyChart(volumeChart);
+
+          volumeChart = new Chart(document.getElementById("volumeChart"), {
+            type: "bar",
+            data: {
+              labels: chartData.map((item) => formatDate(item.date)),
+              datasets: [
+                {
+                  label: "Trade Volume (AE)",
+                  data: chartData.map((item) => item.volume_ae),
+                  backgroundColor: "#10b981",
+                  borderRadius: 4,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  display: false,
+                },
+                tooltip: {
+                  callbacks: {
+                    label: function (context) {
+                      const aeAmount = context.raw;
+                      const usdAmount = convertAEToUSD(aeAmount, aePrice, 1);
+                      return [
+                        formatAEAmount(aeAmount, 1),
+                        formatUSDAmount(usdAmount),
+                      ];
+                    },
+                  },
+                },
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  grid: {
+                    color: "rgba(0, 0, 0, 0.05)",
+                  },
+                  ticks: {
+                    callback: function (value) {
+                      return formatAEAmountShort(value);
+                    },
+                  },
+                },
+                x: {
+                  grid: {
+                    display: false,
+                  },
+                },
+              },
+            },
+          });
+
+          return chartData;
+        } catch (error) {
+          console.error("Error creating volume chart:", error);
+          return [];
+        }
+      }
+
+      // Create active users chart
+      function createActiveUsersChart() {
+        try {
+          const chartData = analyticsData.map(item => ({
+            date: item.date,
+            active_users: parseInt(item.total_active_accounts) || 0
+          }));
+
+          // Destroy existing chart
+          destroyChart(activeUsersChart);
+
+          activeUsersChart = new Chart(
+            document.getElementById("activeUsersChart"),
+            {
+              type: "line",
+              data: {
+                labels: chartData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Active Accounts",
+                    data: chartData.map((item) => item.active_users),
+                    borderColor: "#8b5cf6",
+                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: false,
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: {
+                      color: "rgba(0, 0, 0, 0.05)",
+                    },
+                  },
+                  x: {
+                    grid: {
+                      display: false,
+                    },
+                  },
+                },
+              },
+            }
+          );
+
+          return chartData;
+        } catch (error) {
+          console.error("Error creating active users chart:", error);
+          return [];
+        }
+      }
+
+      // Create transactions chart
+      function createTransactionsChart() {
+        try {
+          const chartData = analyticsData.map(item => ({
+            date: item.date,
+            transaction_count: parseInt(item.total_transactions) || 0
+          }));
+
+          // Destroy existing chart
+          destroyChart(transactionsChart);
+
+          transactionsChart = new Chart(
+            document.getElementById("transactionsChart"),
+            {
+              type: "bar",
+              data: {
+                labels: chartData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Transactions",
+                    data: chartData.map((item) => item.transaction_count),
+                    backgroundColor: "#f59e0b",
+                    borderRadius: 4,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: false,
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: {
+                      color: "rgba(0, 0, 0, 0.05)",
+                    },
+                  },
+                  x: {
+                    grid: {
+                      display: false,
+                    },
+                  },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating transactions chart:", error);
+        }
+      }
+
+      // Create market cap chart
+      async function createMarketCapChart() {
+        try {
+          const chartData = analyticsData.map(item => ({
+            date: item.date,
+            sum: parseFloat(item.total_market_cap_sum) || 0
+          }));
+
+          // Get current AE price
+          const aePrice = await fetchAEPrice();
+
+          // Destroy existing chart
+          destroyChart(marketCapChart);
+
+          marketCapChart = new Chart(
+            document.getElementById("marketCapChart"),
+            {
+              type: "line",
+              data: {
+                labels: chartData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "MarketCap (AE)",
+                    data: chartData.map((item) => item.sum),
+                    borderColor: "#ec4899",
+                    backgroundColor: "rgba(236, 72, 153, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: false,
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: function (context) {
+                        const aeAmount = context.raw;
+                        const usdAmount = convertAEToUSD(aeAmount, aePrice, 1);
+                        return [
+                          formatAEAmount(aeAmount, 1),
+                          formatUSDAmount(usdAmount),
+                        ];
+                      },
+                    },
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: {
+                      color: "rgba(0, 0, 0, 0.05)",
+                    },
+                    ticks: {
+                      callback: function (value) {
+                        return formatAEAmountShort(value);
+                      },
+                    },
+                  },
+                  x: {
+                    grid: {
+                      display: false,
+                    },
+                  },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating market cap chart:", error);
+        }
+      }
+
+      // Create cumulative tokens chart
+      function createCumulativeTokensChart() {
+        try {
+          if (analyticsData.length === 0) {
+            return;
+          }
+          
+
+          // Destroy existing chart
+          destroyChart(cumulativeTokensChart);
+
+          cumulativeTokensChart = new Chart(
+            document.getElementById("cumulativeTokensChart"),
+            {
+              type: "line",
+              data: {
+                labels: analyticsData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Cumulative Tokens Created",
+                    data: analyticsData.map((item) => item.total_tokens),
+                    borderColor: "#f43f5e",
+                    backgroundColor: "rgba(244, 63, 94, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: {
+                    display: false,
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: {
+                      color: "rgba(0, 0, 0, 0.05)",
+                    },
+                  },
+                  x: {
+                    grid: {
+                      display: false,
+                    },
+                  },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating cumulative tokens chart:", error);
+        }
+      }
+
+      // Fetch past 24 hours data for today's metrics
+      async function fetchPast24HoursData() {
+        try {
+          const response = await fetch(`${API_URL}/analytics/past-24-hours`);
+          const data = await response.json();
+          console.log('==================');
+          console.log(data);
+          console.log('==================');
+          return data;
+        } catch (error) {
+          console.error("Error fetching past 24 hours data:", error);
+          return null;
+        }
+      }
+
+      // Update today's metrics
+      async function updateTodayMetrics() {
+        try {
+          // Fetch past 24 hours data
+          const todayData = await fetchPast24HoursData();
+          if (!todayData) return;
+          
+          // Get current AE price
+          const aePrice = await fetchAEPrice();
+          
+          // Past 24h tokens
+          document.getElementById("todayTokens").textContent = formatNumber(
+            parseInt(todayData.total_created_tokens) || 0
+          );
+          document.getElementById("totalTokens").textContent = formatNumber(todayData.total_tokens);
+
+          // Past 24h volume
+          const volumeAE = parseFloat(todayData.total_volume_sum) || 0;
+          const volumeUSD = convertAEToUSD(volumeAE, aePrice);
+          document.getElementById("todayVolume").textContent = formatAEAmount(volumeAE);
+          document.getElementById("todayVolumeUSD").textContent = formatUSDAmount(volumeUSD);
+
+          // Past 24h active users
+          document.getElementById("todayActiveUsers").textContent = formatNumber(
+            parseInt(todayData.total_active_accounts) || 0
+          );
+        } catch (error) {
+          console.error("Error updating today's metrics:", error);
+        }
+      }
+
+      // Update all charts and metrics
+      async function updateDashboard() {
+        try {
+          const { startDate, endDate } = getDateRange();
+          
+          // Fetch data from unified API
+          await fetchAnalyticsData(startDate, endDate);
+          
+          // Update all charts
+          createTokensChart();
+          await createVolumeChart();
+          createActiveUsersChart();
+          createTransactionsChart();
+          await createMarketCapChart();
+          createCumulativeTokensChart();
+          
+          // Update metrics
+          await updateTodayMetrics();
+          updateTotalUsers();
+          await updateTotalMarketCap();
+        } catch (error) {
+          console.error("Error updating dashboard:", error);
+        }
+      }
+
+      // On page load, initialize dashboard
+      (async function () {
+        setDefaultDateRange();
+        await updateDashboard();
+      })();
+    </script>
+  </body>
+</html>

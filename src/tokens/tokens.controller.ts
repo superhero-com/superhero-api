@@ -16,7 +16,6 @@ import {
 } from '@nestjs/swagger';
 import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
-import BigNumber from 'bignumber.js';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { Repository } from 'typeorm';
