@@ -8,10 +8,12 @@ import { InvitationService } from './services/invitation.service';
 import { AeModule } from '@/ae/ae.module';
 import { Invitation } from './entities/invitation.entity';
 import { InvitationsController } from './controllers/invitations.controller';
+import { AccountModule } from '@/account/account.module';
 
 @Module({
   imports: [
     AeModule,
+    AccountModule,
     TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation]),
   ],
   providers: [OAuthService, InvitationService],

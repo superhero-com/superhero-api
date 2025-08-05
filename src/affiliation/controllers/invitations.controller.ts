@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Invitation } from '../entities/invitation.entity';
+import { Account } from '@/account/entities/account.entity';
 
 @Controller('invitations')
 @ApiTags('Invitations')
@@ -41,6 +42,13 @@ export class InvitationsController {
     if (orderBy) {
       query.orderBy(`invitation.${orderBy}`, orderDirection);
     }
+    // left join account and map as nested account object
+    query.leftJoinAndMapOne(
+      'invitation.account',
+      Account,
+      'account',
+      'account.address = invitation.invitee_address',
+    );
     return paginate(query, { page, limit });
   }
 }
