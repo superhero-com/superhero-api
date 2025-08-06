@@ -133,14 +133,138 @@
                 };
             },
 
-            createRootNode(totalInviters) {
+            createRootNode(totalInviters, totalVolume = 0) {
                 const node = this.createBaseNode('root', null);
                 return {
                     ...node,
                     template: `
-                        <div style="padding: 10px; text-align: center;">
-                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.medium}; font-weight: 500;">BCL Affiliation Tree</div>
-                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.small}; color: #666;">Total Inviters: ${totalInviters}</div>
+                        <div style="
+                            font-family: '${CHART_CONFIG.styles.fontFamily}', sans-serif;
+                            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 50%, #581c87 100%);
+                            position: absolute;
+                            margin-top: -1px; 
+                            margin-left: -1px;
+                            width: ${CHART_CONFIG.node.width}px;
+                            height: ${CHART_CONFIG.node.height}px;
+                            border-radius: 20px;
+                            border: 3px solid #fbbf24;
+                            box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+                            overflow: hidden;
+                            position: relative;
+                        ">
+                            <!-- Decorative Elements -->
+                            <div style="
+                                position: absolute;
+                                top: -50px;
+                                right: -50px;
+                                width: 100px;
+                                height: 100px;
+                                background: rgba(255, 255, 255, 0.1);
+                                border-radius: 50%;
+                            "></div>
+                            <div style="
+                                position: absolute;
+                                bottom: -30px;
+                                left: -30px;
+                                width: 60px;
+                                height: 60px;
+                                background: rgba(255, 255, 255, 0.05);
+                                border-radius: 50%;
+                            "></div>
+
+                            <!-- Header Section -->
+                            <div style="
+                                text-align: center;
+                                padding: 30px 20px 20px;
+                                position: relative;
+                                z-index: 2;
+                            ">
+                                <!-- Crown Icon -->
+                                <div style="
+                                    font-size: 48px;
+                                    margin-bottom: 15px;
+                                    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+                                ">👑</div>
+                                
+                                <!-- Title -->
+                                <h1 style="
+                                    margin: 0 0 8px 0;
+                                    font-size: 24px;
+                                    font-weight: 800;
+                                    color: white;
+                                    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                                    letter-spacing: 0.5px;
+                                ">BCL Affiliation Tree</h1>
+                                
+                                <!-- Subtitle -->
+                                <p style="
+                                    margin: 0 0 25px 0;
+                                    font-size: 14px;
+                                    color: rgba(255, 255, 255, 0.9);
+                                    font-weight: 500;
+                                ">Network Overview Dashboard</p>
+                            </div>
+
+                            <!-- Stats Section -->
+                            <div style="
+                                background: rgba(255, 255, 255, 0.1);
+                                backdrop-filter: blur(10px);
+                                margin: 0 20px;
+                                border-radius: 12px;
+                                padding: 20px;
+                                position: relative;
+                                z-index: 2;
+                            ">
+                                <!-- Total Inviters -->
+                                <div style="text-align: center; margin-bottom: 10px;">
+                                    <div style="
+                                        font-size: 28px;
+                                        font-weight: 900;
+                                        color: #fbbf24;
+                                        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                                        margin-bottom: 5px;
+                                    ">${totalInviters}</div>
+                                    <div style="
+                                        font-size: 12px;
+                                        color: rgba(255, 255, 255, 0.8);
+                                        font-weight: 600;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.5px;
+                                    ">Root Inviters</div>
+                                </div>
+                                <!-- Total Volume -->
+                                <div style="text-align: center;">
+                                    <div style="
+                                        font-size: 28px;
+                                        font-weight: 900;
+                                        color: #10b981;
+                                        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                                        margin-bottom: 5px;
+                                    ">${Number(totalVolume).toFixed(2)}</div>
+                                    <div style="
+                                        font-size: 12px;
+                                        color: rgba(255, 255, 255, 0.8);
+                                        font-weight: 600;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.5px;
+                                        line-height: 1.2;
+                                    ">Total AE Volume</div>
+                                </div>
+                            </div>
+
+                            <!-- Footer -->
+                            <div style="
+                                text-align: center;
+                                padding: 20px;
+                                position: relative;
+                                z-index: 2;
+                            ">
+                                <div style="
+                                    font-size: 12px;
+                                    color: rgba(255, 255, 255, 0.6);
+                                    font-weight: 500;
+                                ">Blockchain Community Layer</div>
+                            </div>
                         </div>
                     `,
                     expanded: true,
@@ -165,38 +289,224 @@
 
         // Template Generator
         const TemplateGenerator = {
+            getHeaderGradient(depth) {
+                // Define different gradients for each hierarchy level
+                const gradients = [
+                    'linear-gradient(135deg, #667EEA 0%, #764BA2 100%)', // Level 0 - Purple
+                    'linear-gradient(135deg, #4FACFE 0%, #00F2FE 100%)', // Level 1 - Blue
+                    'linear-gradient(135deg, #43E97B 0%, #38F9D7 100%)', // Level 2 - Green
+                    'linear-gradient(135deg, #FA709A 0%, #FEE140 100%)', // Level 3 - Pink to Yellow
+                    'linear-gradient(135deg, #A8EDEA 0%, #FED6E3 100%)', // Level 4 - Mint to Pink
+                    'linear-gradient(135deg, #FF9A9E 0%, #FECFEF 100%)', // Level 5 - Coral to Pink
+                    'linear-gradient(135deg, #FFECD2 0%, #FCB69F 100%)', // Level 6 - Peach
+                    'linear-gradient(135deg, #A18CD1 0%, #FBC2EB 100%)', // Level 7 - Lavender
+                    'linear-gradient(135deg, #FFD3A5 0%, #FD9853 100%)', // Level 8 - Orange
+                    'linear-gradient(135deg, #8EC5FC 0%, #E0C3FC 100%)'  // Level 9 - Light Blue to Purple
+                ];
+                
+                // Cycle through gradients if depth exceeds available gradients
+                return gradients[depth % gradients.length];
+            },
+
             generateNodeContent(nodeData) {
                 const address = nodeData.nodeId;
                 const data = addressData[address];
+                const depth = nodeData.depth || 0; // Get the depth from node data
                 
                 if (address === 'root') {
-                    return ''; // Root node template is handled by NodeFactory
+                    return nodeData.template; // Root node template is handled by NodeFactory
                 }
 
-                const stats = [
-                    { label: 'Total AE Volume', value: Utils.safeGet(data, 'total_volume', 0, (value) => Number(value || '0').toFixed(2)) },
-                    { label: 'Total TX', value: Utils.safeGet(data, 'total_tx_count') },
-                    { label: 'Total TX (Buy)', value: Utils.safeGet(data, 'total_buy_tx_count') },
-                    { label: 'Total TX (Sell)', value: Utils.safeGet(data, 'total_sell_tx_count') },
-                    { label: 'Total Created Tokens', value: Utils.safeGet(data, 'total_created_tokens') },
-                    { label: 'Total Created Invitations', value: Utils.safeGet(data, 'total_invitation_count') },
-                    { label: 'Total Claimed Invitations', value: Utils.safeGet(data, 'total_claimed_invitation_count') },
-                    { label: 'Total Revoked Invitations', value: Utils.safeGet(data, 'total_revoked_invitation_count') },
+                const headerGradient = this.getHeaderGradient(depth);
+
+                // Organize stats into categories for better visual hierarchy
+                const activityStats = [
+                    { 
+                        icon: '💰', 
+                        label: 'AE Volume', 
+                        value: Utils.safeGet(data, 'total_volume', 0, (value) => Number(value || '0').toFixed(2)),
+                        unit: 'AE',
+                        color: '#10B981'
+                    },
+                    { 
+                        icon: '🔄', 
+                        label: 'Total TX', 
+                        value: Utils.safeGet(data, 'total_tx_count'),
+                        color: '#3B82F6'
+                    },
+                    { 
+                        icon: '📈', 
+                        label: 'Buy TX', 
+                        value: Utils.safeGet(data, 'total_buy_tx_count'),
+                        color: '#10B981'
+                    },
+                    { 
+                        icon: '📉', 
+                        label: 'Sell TX', 
+                        value: Utils.safeGet(data, 'total_sell_tx_count'),
+                        color: '#EF4444'
+                    }
                 ];
 
-                const statsHtml = stats
-                    .map(stat => `<div style="font-size:${CHART_CONFIG.styles.fontSize.large};color:${CHART_CONFIG.styles.textColor};margin-left:20px;margin-top:32px"> ${stat.label}: ${stat.value}</div>`)
+                const creationStats = [
+                    { 
+                        icon: '🪙', 
+                        label: 'Created Tokens', 
+                        value: Utils.safeGet(data, 'total_created_tokens'),
+                        color: '#F59E0B'
+                    },
+                    { 
+                        icon: '📧', 
+                        label: 'Sent Invites', 
+                        value: Utils.safeGet(data, 'total_invitation_count'),
+                        color: '#8B5CF6'
+                    },
+                    { 
+                        icon: '✅', 
+                        label: 'Claimed', 
+                        value: Utils.safeGet(data, 'total_claimed_invitation_count'),
+                        color: '#10B981'
+                    },
+                    { 
+                        icon: '❌', 
+                        label: 'Revoked', 
+                        value: Utils.safeGet(data, 'total_revoked_invitation_count'),
+                        color: '#EF4444'
+                    }
+                ];
+
+                const activityStatsHtml = activityStats
+                    .map(stat => `
+                        <div style="display: flex; align-items: center; margin-bottom: 8px; padding: 6px 8px; background: #F8FAFC; border-radius: 6px;">
+                            <span style="font-size: 16px; margin-right: 8px;">${stat.icon}</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 11px; color: #64748B; font-weight: 500;">${stat.label}</div>
+                                <div style="font-size: 14px; color: ${stat.color}; font-weight: 600;">${stat.value}${stat.unit ? ' ' + stat.unit : ''}</div>
+                            </div>
+                        </div>
+                    `)
+                    .join('');
+
+                const creationStatsHtml = creationStats
+                    .map(stat => `
+                        <div style="display: flex; align-items: center; margin-bottom: 8px; padding: 6px 8px; background: #F8FAFC; border-radius: 6px;">
+                            <span style="font-size: 16px; margin-right: 8px;">${stat.icon}</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 11px; color: #64748B; font-weight: 500;">${stat.label}</div>
+                                <div style="font-size: 14px; color: ${stat.color}; font-weight: 600;">${stat.value}</div>
+                            </div>
+                        </div>
+                    `)
                     .join('');
 
                 return `
-                    <div style="font-family: '${CHART_CONFIG.styles.fontFamily}', sans-serif;background-color:${CHART_CONFIG.styles.backgroundColor}; position:absolute;margin-top:-1px; margin-left:-1px;width:${CHART_CONFIG.node.width}px;height:${CHART_CONFIG.node.height}px;border-radius:10px;border: 1px solid #E4E2E9">
-                        <div style="background-color:${CHART_CONFIG.styles.backgroundColor};position:absolute;margin-top:-25px;margin-left:15px;border-radius:100px;width:50px;height:50px;"></div>
-                        <a href="${CHART_CONFIG.api.accountsBaseUrl}${address}" target="_blank">
-                            <img src="${CHART_CONFIG.api.avatarBaseUrl}${address}" style="position:absolute;margin-top:-20px;margin-left:20px;border-radius:100px;width:40px;height:40px;" />
-                        </a>
-                        <div style="color:${CHART_CONFIG.styles.textColor};position:absolute;right:20px;top:17px;font-size:${CHART_CONFIG.styles.fontSize.tiny};"><i class="fas fa-ellipsis-h"></i></div>
-                        <div style="font-size:${CHART_CONFIG.styles.fontSize.large};color:${CHART_CONFIG.styles.textColor};margin-left:20px;margin-top:32px"> ${Utils.formatAddress(address)}</div>
-                        ${statsHtml}
+                    <div style="
+                        font-family: '${CHART_CONFIG.styles.fontFamily}', sans-serif;
+                        background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+                        position: absolute;
+                        margin-top: -1px; 
+                        margin-left: -1px;
+                        width: ${CHART_CONFIG.node.width}px;
+                        height: ${CHART_CONFIG.node.height}px;
+                        border-radius: 16px;
+                        border: 2px solid #E2E8F0;
+                        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+                        overflow: hidden;
+                    ">
+                        <!-- Header Section -->
+                        <div style="
+                            background: ${headerGradient};
+                            padding: 16px;
+                            position: relative;
+                        ">
+                            <!-- Profile Avatar -->
+                            <div style="
+                                position: absolute;
+                                top: 10px;
+                                left: 16px;
+                                width: 40px;
+                                height: 40px;
+                                border-radius: 50%;
+                                border: 4px solid white;
+                                background: white;
+                                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+                                overflow: hidden;
+                            ">
+                                <a href="${CHART_CONFIG.api.accountsBaseUrl}${address}" target="_blank">
+                                    <img src="${CHART_CONFIG.api.avatarBaseUrl}${address}" 
+                                         style="width: 100%; height: 100%; object-fit: cover;" />
+                                </a>
+                            </div>
+                            
+                            <!-- User Info -->
+                            <div style="margin-left: 80px; color: white;">
+                                <div style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">
+                                    ${Utils.formatAddress(address)}
+                                </div>
+                                <div style="font-size: 12px; opacity: 0.9;">
+                                    Platform Member
+                                </div>
+                            </div>
+                            
+                            <!-- Menu Icon -->
+                            <div style="
+                                position: absolute;
+                                top: 16px;
+                                right: 16px;
+                                color: white;
+                                opacity: 0.8;
+                                cursor: pointer;
+                            ">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                                </svg>
+                            </div>
+                        </div>
+
+                        <!-- Content Section -->
+                        <div style="padding: 20px 16px;">
+                            <!-- Trading Activity Section -->
+                            <div style="margin-bottom: 20px;">
+                                <h4 style="
+                                    margin: 0 0 12px 0;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: #374151;
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.5px;
+                                ">Trading Activity</h4>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                    ${activityStatsHtml}
+                                </div>
+                            </div>
+
+                            <!-- Creation & Invitations Section -->
+                            <div>
+                                <h4 style="
+                                    margin: 0 0 12px 0;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: #374151;
+                                    text-transform: uppercase;
+                                    letter-spacing: 0.5px;
+                                ">Creation & Invitations</h4>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                    ${creationStatsHtml}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Status Indicator -->
+                        <div style="
+                            position: absolute;
+                            bottom: 12px;
+                            right: 12px;
+                            width: 8px;
+                            height: 8px;
+                            background: #10B981;
+                            border-radius: 50%;
+                            box-shadow: 0 0 0 2px white, 0 0 0 4px #10B981;
+                        "></div>
                     </div>
                 `;
             }
@@ -228,8 +538,11 @@
             createNodes(data, allAddresses) {
                 const nodes = {};
 
-                // Create root node
-                nodes['root'] = NodeFactory.createRootNode(data.length);
+                // Calculate total volume from all invitees
+                const totalVolume = this.calculateTotalVolume(data);
+
+                // Create root node with total volume
+                nodes['root'] = NodeFactory.createRootNode(data.length, totalVolume);
 
                 // Create nodes for all addresses
                 allAddresses.forEach(address => {
@@ -237,6 +550,32 @@
                 });
 
                 return nodes;
+            },
+
+            calculateTotalVolume(data) {
+                let totalVolume = 0;
+                
+                // Sum volume from all inviters (senders)
+                data.forEach(inviter => {
+                    const senderData = this.addressData[inviter.sender_address];
+                    if (senderData && senderData.total_volume) {
+                        totalVolume += Number(senderData.total_volume || 0);
+                    }
+                    
+                    // Sum volume from all invitees
+                    if (inviter.invitees && Array.isArray(inviter.invitees)) {
+                        inviter.invitees.forEach(invitee => {
+                            if (invitee && invitee.address) {
+                                const inviteeData = this.addressData[invitee.address];
+                                if (inviteeData && inviteeData.total_volume) {
+                                    totalVolume += Number(inviteeData.total_volume || 0);
+                                }
+                            }
+                        });
+                    }
+                });
+                
+                return totalVolume;
             },
 
             buildRelationshipMap(data) {
@@ -289,6 +628,38 @@
                             nodes[invitee.address].parentNodeId = inviter.sender_address;
                         }
                     });
+                });
+            },
+
+            calculateDepths(nodes) {
+                // Calculate depth for each node based on its hierarchy position
+                const visited = new Set();
+                
+                const calculateNodeDepth = (nodeId, currentDepth = 0) => {
+                    if (visited.has(nodeId)) return;
+                    visited.add(nodeId);
+                    
+                    const node = nodes[nodeId];
+                    if (!node) return;
+                    
+                    node.depth = currentDepth;
+                    
+                    // Find all children of this node
+                    Object.values(nodes).forEach(childNode => {
+                        if (childNode.parentNodeId === nodeId) {
+                            calculateNodeDepth(childNode.nodeId, currentDepth + 1);
+                        }
+                    });
+                };
+                
+                // Start from root node with depth 0
+                calculateNodeDepth('root', 0);
+                
+                // Handle any orphaned nodes that might not be connected to root
+                Object.values(nodes).forEach(node => {
+                    if (node.depth === undefined) {
+                        node.depth = 0; // Default depth for orphaned nodes
+                    }
                 });
             },
 
@@ -353,6 +724,9 @@
 
             // Step 5: Connect orphaned nodes to root
             DataProcessor.establishRootConnections(data, nodes);
+
+            // Step 6: Calculate depth for each node
+            DataProcessor.calculateDepths(nodes);
 
             // Convert nodes object to array
             return Object.values(nodes);
