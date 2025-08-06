@@ -289,6 +289,56 @@
 
         // Template Generator
         const TemplateGenerator = {
+            // Simple hash function to convert string to number (similar to Jdenticon approach)
+            hashCode(str) {
+                let hash = 0;
+                if (str.length === 0) return hash;
+                for (let i = 0; i < str.length; i++) {
+                    const char = str.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash; // Convert to 32bit integer
+                }
+                return Math.abs(hash);
+            },
+
+            // Generate HSL color from hash (similar to Jdenticon's color generation)
+            generateColorFromAddress(address) {
+                if (!address || address === 'root') {
+                    return { hue: 240, saturation: 70, lightness: 50 }; // Default purple for root
+                }
+
+                const hash = this.hashCode(address);
+                
+                // Generate hue (0-360) from hash
+                const hue = hash % 360;
+                
+                // Generate saturation (50-80) for vibrant but not overwhelming colors
+                const saturation = 50 + (hash % 30);
+                
+                // Generate lightness (40-60) for good contrast with white text
+                const lightness = 40 + (hash % 20);
+                
+                return { hue, saturation, lightness };
+            },
+
+            // Create gradient from address-based colors
+            getHeaderGradientFromAddress(parentAddress, nodeAddress) {
+                // Use parent address for color generation to group children visually
+                const baseAddress = parentAddress || nodeAddress;
+                const { hue, saturation, lightness } = this.generateColorFromAddress(baseAddress);
+                
+                // Create two related colors for gradient
+                const color1Hue = hue;
+                const color2Hue = (hue + 30) % 360; // Shift hue by 30 degrees for gradient effect
+                
+                // Slightly adjust saturation and lightness for the second color
+                const color1 = `hsl(${color1Hue}, ${saturation}%, ${lightness}%)`;
+                const color2 = `hsl(${color2Hue}, ${saturation - 10}%, ${lightness + 10}%)`;
+                
+                return `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`;
+            },
+
+            // Fallback method (keeping for reference but not used)
             getHeaderGradient(depth) {
                 // Define different gradients for each hierarchy level
                 const gradients = [
@@ -311,13 +361,14 @@
             generateNodeContent(nodeData) {
                 const address = nodeData.nodeId;
                 const data = addressData[address];
-                const depth = nodeData.depth || 0; // Get the depth from node data
+                const parentAddress = nodeData.parentNodeId; // Get parent address for color generation
                 
                 if (address === 'root') {
                     return nodeData.template; // Root node template is handled by NodeFactory
                 }
 
-                const headerGradient = this.getHeaderGradient(depth);
+                // Generate gradient based on parent address (or own address if no parent)
+                const headerGradient = this.getHeaderGradientFromAddress(parentAddress, address);
 
                 // Organize stats into categories for better visual hierarchy
                 const activityStats = [
