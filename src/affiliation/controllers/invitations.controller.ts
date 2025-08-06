@@ -44,10 +44,17 @@ export class InvitationsController {
     }
     // left join account and map as nested account object
     query.leftJoinAndMapOne(
-      'invitation.account',
+      'invitation.invitee',
       Account,
-      'account',
-      'account.address = invitation.invitee_address',
+      'invitee',
+      'invitee.address = invitation.invitee_address',
+    );
+    // sender_address leftjoinandmapone account
+    query.leftJoinAndMapOne(
+      'invitation.sender',
+      Account,
+      'sender',
+      'sender.address = invitation.sender_address',
     );
     return paginate(query, { page, limit });
   }

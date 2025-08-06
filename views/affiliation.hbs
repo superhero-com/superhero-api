@@ -86,25 +86,32 @@
             return `${address.slice(0, 7)}...${address.slice(-4)}`;
         }
 
+        const addressData = {}
         function buildOrgChartData(data) {
             const nodes = {};
             const rootNodes = new Set();
             const allAddresses = new Set();
 
             // First pass: Create all nodes and collect all addresses
-            data.inviters.forEach(inviter => {
-                allAddresses.add(inviter.address);
+            data.forEach(inviter => {
+                allAddresses.add(inviter.sender_address);
+                addressData[inviter.sender_address] = inviter.sender;
                 inviter.invitees.forEach(invitee => {
-                    allAddresses.add(invitee);
+                    if (invitee?.address) {
+                        allAddresses.add(invitee.address);
+                        addressData[invitee.address] = invitee;
+                    }
                 });
             });
+
+            console.log("addressData::", addressData)
 
             // Create root node
             nodes['root'] = {
                 nodeId: 'root',
                 parentNodeId: null,
                 width: 342,
-                height: 146,
+                height: 246,
                 borderWidth: 1,
                 borderRadius: 5,
                 borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
@@ -112,16 +119,41 @@
                 template: `
                     <div style="padding: 10px; text-align: center;">
                         <div style="font-size: 14px; font-weight: 500;">BCL Affiliation Tree</div>
-                        <div style="font-size: 12px; color: #666;">Total Inviters: ${data.inviters.length}</div>
+                        <div style="font-size: 12px; color: #666;">Total Inviters: ${data.length}</div>
                     </div>
                 `,
                 connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
                 connectorLineWidth: 5,
                 dashArray: "",
                 expanded: true,
-                directSubordinates: data.inviters.length,
-                totalSubordinates: data.inviters.length
+                directSubordinates: data.length,
+                totalSubordinates: data.length
             };
+
+            data.forEach((inv) => {
+                nodes[inv.sender_address] = {
+                    nodeId: inv.sender_address,
+                    parentNodeId: null, // Start with no parent
+                    width: 342,
+                    height: 246,
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
+                    backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
+                    template: `
+                        <div style="padding: 10px; text-align: center;">
+                            <div style="font-size: 14px; font-weight: 500;">${formatAddress(inv.sender_address)}</div>
+                            <div style="font-size: 12px; color: #666;">Invited: 0</div>
+                        </div>
+                    `,
+                    connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
+                    connectorLineWidth: 5,
+                    dashArray: "",
+                    expanded: false,
+                    directSubordinates: 0,
+                    totalSubordinates: 0
+                }
+            })
 
             // Create nodes for all addresses
             allAddresses.forEach(address => {
@@ -129,7 +161,7 @@
                     nodeId: address,
                     parentNodeId: null, // Start with no parent
                     width: 342,
-                    height: 146,
+                    height: 246,
                     borderWidth: 1,
                     borderRadius: 5,
                     borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
@@ -151,9 +183,18 @@
 
             // Build the relationship map
             const relationshipMap = new Map();
-            data.inviters.forEach(inviter => {
-                relationshipMap.set(inviter.address, inviter.invitees);
-            });
+
+            data.forEach((inv) => {
+                const invitees = [];
+                if (inv.invitees) {
+                    inv.invitees.forEach((invitee) => {
+                        if (invitee?.address) {
+                            invitees.push(invitee.address);
+                        }
+                    })
+                }
+                relationshipMap.set(inv.sender_address, invitees);
+            })
 
             // Function to check for cycles
             function hasCycle(nodeId, visited = new Set(), path = new Set()) {
@@ -173,56 +214,65 @@
             }
 
             // Second pass: Build relationships and update invitee counts
-            data.inviters.forEach(inviter => {
+            data.forEach(inviter => {
                 const inviteeCount = inviter.invitees.length;
-                nodes[inviter.address].directSubordinates = inviteeCount;
-                nodes[inviter.address].totalSubordinates = inviteeCount;
-                nodes[inviter.address].template = `
+                nodes[inviter.sender_address].directSubordinates = inviteeCount;
+                nodes[inviter.sender_address].totalSubordinates = inviteeCount;
+                nodes[inviter.sender_address].template = `
                     <div style="padding: 10px; text-align: center;">
-                        <div style="font-size: 14px; font-weight: 500;">${formatAddress(inviter.address)}</div>
+                        <div style="font-size: 14px; font-weight: 500;">${formatAddress(inviter.sender_address)}</div>
                         <div style="font-size: 12px; color: #666;">Invited: ${inviteeCount}</div>
                     </div>
                 `;
 
                 // Only set parent if it doesn't create a cycle
                 inviter.invitees.forEach(invitee => {
-                    if (nodes[invitee] && !hasCycle(invitee)) {
-                        nodes[invitee].parentNodeId = inviter.address;
+                    if (!invitee) {
+                        return;
+                    }
+                    if (nodes[invitee.address] && !hasCycle(invitee.address)) {
+                        nodes[invitee.address].parentNodeId = inviter.sender_address;
                     }
                 });
             });
 
-            // Find root nodes (nodes that are not invitees of any other node)
+            // Find all nodes that should be direct children of root
             const inviteeSet = new Set();
-            data.inviters.forEach(inviter => {
+            data.forEach(inviter => {
                 inviter.invitees.forEach(invitee => {
-                    inviteeSet.add(invitee);
+                    if (invitee?.address) {
+                        inviteeSet.add(invitee.address);
+                    }
                 });
             });
 
-            // Add all inviters that are not invitees as root nodes
-            data.inviters.forEach(inviter => {
-                if (!inviteeSet.has(inviter.address)) {
-                    rootNodes.add(inviter.address);
-                }
-            });
-
-            // If no root nodes found, use the first inviter as root
-            if (rootNodes.size === 0 && data.inviters.length > 0) {
-                rootNodes.add(data.inviters[0].address);
-            }
-
-            // Update parentNodeId for root nodes to point to our new root
-            rootNodes.forEach(rootId => {
-                nodes[rootId].parentNodeId = 'root';
-            });
-
-            // Set remaining nodes with no parent to be children of root
+            // First, set all nodes without parents to be children of root
             Object.values(nodes).forEach(node => {
                 if (node.nodeId !== 'root' && node.parentNodeId === null) {
                     node.parentNodeId = 'root';
                 }
             });
+
+            // Then identify true root nodes (inviters who are not invitees)
+            data.forEach(inviter => {
+                if (!inviteeSet.has(inviter.sender_address)) {
+                    rootNodes.add(inviter.sender_address);
+                    // Ensure these are direct children of root
+                    if (nodes[inviter.sender_address]) {
+                        nodes[inviter.sender_address].parentNodeId = 'root';
+                    }
+                }
+            });
+
+            // If no natural root nodes found, use the first inviter as root
+            if (rootNodes.size === 0 && data.length > 0) {
+                rootNodes.add(data[0].sender_address);
+                if (nodes[data[0].sender_address]) {
+                    nodes[data[0].sender_address].parentNodeId = 'root';
+                }
+            }
+
+            console.log("rootNodes::", rootNodes);
 
             // Convert nodes object to array
             return Object.values(nodes);
@@ -241,6 +291,7 @@
                 .onNodeClick(d => console.log(d + ' node clicked'))
                 .nodeContent(function (d, i, arr, state) {
                     const color = '#FFFFFF';
+                    const nodeData = addressData[d.data.nodeId];
                     return `
             <div style="font-family: 'Inter', sans-serif;background-color:${color}; position:absolute;margin-top:-1px; margin-left:-1px;width:${d.width}px;height:${d.height}px;border-radius:10px;border: 1px solid #E4E2E9">
                <div style="background-color:${color};position:absolute;margin-top:-25px;margin-left:${15}px;border-radius:100px;width:50px;height:50px;" ></div>
@@ -251,6 +302,10 @@
               <div style="color:#08011E;position:absolute;right:20px;top:17px;font-size:10px;"><i class="fas fa-ellipsis-h"></i></div>
 
               <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> ${d.data.nodeId.slice(0, 7)}...${d.data.nodeId.slice(-4)}</div>
+              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX: ${nodeData?.total_tx_count || 0}</div>
+              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX (Buy): ${nodeData?.total_buy_tx_count || 0}</div>
+              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX (Sell): ${nodeData?.total_sell_tx_count || 0}</div>
+              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total Created Tokens (Sell): ${nodeData?.total_created_tokens || 0}</div>
 
            </div>
   `;
@@ -258,6 +313,7 @@
                 .render();
         }
 
+        const invitations = []
         const transactions = []
         const registerInvitations = {}
         const revokedInvitations = []
@@ -270,76 +326,50 @@
             }
         }
 
+        async function fetchInvitations(page = 1) {
+            const response = await fetch(`/api/invitations?page=${page}&limit=100`)
+            const data = await response.json()
+            console.log("========================")
+            console.log("data::", data)
+            console.log("========================")
+            invitations.push(...(data.items || []))
+            if (data.meta.totalPages > page) {
+                await fetchInvitations(page + 1)
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', async function () {
-            await fetchTransactions()
+            await fetchInvitations()
+            let customData = {};
+            for (const invitation of invitations) {
+                if (!invitation.invitee_address) {
+                    continue
+                }
+                
+                if (!customData[invitation.sender_address]) {
+                    customData[invitation.sender_address] = {
+                        sender_address: invitation.sender_address,
+                        sender: invitation.sender,
+                        invitees: [],
+                        amount: 0
+                    }
+                }
+
+                customData[invitation.sender_address].amount += invitation.amount
+                if (invitation.invitee) {
+                    customData[invitation.sender_address].invitees.push(invitation.invitee)
+                }
+            }
+
+            console.log('=====================')
+            console.log('customData::', customData)
+            console.log('customData->entries::', Object.values(customData))
+            console.log('=====================')
+            //await fetchTransactions()
             // Collect Revoked Invitations
-            for (const transaction of transactions) {
-                if (transaction.tx.function === "revoke_invitation_code") {
-                    for (const args of transaction.tx.arguments) {
-                        if (args.type === "list") {
-                            for (const invitee of args.value) {
-                                revokedInvitations.push(invitee.value)
-                            }
-                        }
-                    }
-                }
-            }
-            // Collect Register Invitations
-            for (const transaction of transactions) {
-                if (transaction.tx.function === "register_invitation_code") {
-                    const caller = transaction.tx.caller_id
-                    let inviteesAccounts = []
-                    for (const args of transaction.tx.arguments) {
-                        if (args.type === "list") {
-                            for (const invitee of args.value) {
-                                if (invitee.type === "address" && !revokedInvitations.includes(invitee.value)) {
-                                    inviteesAccounts.push(invitee.value)
-                                }
-                            }
-                        }
-                    }
-                    if (inviteesAccounts.length > 0) {
-                        if (!registerInvitations[caller]) {
-                            registerInvitations[caller] = {
-                                inviteesAccounts: inviteesAccounts,
-                                invitedAccounts: []
-                            }
-                        } else {
-                            registerInvitations[caller].inviteesAccounts.push(...inviteesAccounts)
-                        }
-                    }
-                }
-            }
-            // Collect Redeemed Invitations
-            for (const transaction of transactions) {
-                if (transaction.tx.function === "redeem_invitation_code") {
-                    const inviteeAccount = transaction.tx.caller_id
-
-                    // search in registerInvitations[*].inviteesAccounts
-                    for (const [inviter, data] of Object.entries(registerInvitations)) {
-                        if (data.inviteesAccounts.includes(inviteeAccount)) {
-                            const invitedAccounts = transaction.tx.arguments.map(arg => arg.value)
-                            registerInvitations[inviter].invitedAccounts.push(...invitedAccounts)
-                        }
-                    }
-                }
-            }
-
-            // build affiliation data
-            const affiliationData = {
-                inviters: []
-            }
-            for (const [inviter, data] of Object.entries(registerInvitations)) {
-                if (data.invitedAccounts?.length) {
-                    affiliationData.inviters.push({
-                        address: inviter,
-                        invitees: data.invitedAccounts
-                    })
-                }
-            }
-            console.log("affiliationData::", JSON.stringify(affiliationData, null, 2))
+            
             setTimeout(() => {
-                renderChart(affiliationData)
+                renderChart(Object.values(customData))
             }, 3000)
             // var chart;
             // d3.csv(
