@@ -64,140 +64,200 @@
     <div id="chart-container"></div>
 
     <script>
-        // const affiliationData = {
-        //     "inviters": [
-        //         {
-        //             "address": "ak_2Eu8n8MWvZ2dQmsKu1zeabZjEG6F1vc1S5syHZkvAZHTj9yaKM",
-        //             "invitees": [
-        //                 "ak_iSSBP7jtehNXPf1gi2ayC17oJhQmbqoVyEzJ3vUqBJDsyBQSo",
-        //                 "ak_2v23p1NvqBEAW29oG2AXHQJAXkyxuu2o6dXQe82EuESGHB4NU6"
-        //             ]
-        //         },
-        //         {
-        //             "address": "ak_2v23p1NvqBEAW29oG2AXHQJAXkyxuu2o6dXQe82EuESGHB4NU6",
-        //             "invitees": [
-        //                 "ak_2TUYfKHxYQLV3qetcrwmauXpTzpujm3L76h3SMRqRuYuPPHKCA"
-        //             ]
-        //         }
-        //     ]
-        // };
-
-        function formatAddress(address) {
-            return `${address.slice(0, 7)}...${address.slice(-4)}`;
-        }
-
-        const addressData = {}
-        function buildOrgChartData(data) {
-            const nodes = {};
-            const rootNodes = new Set();
-            const allAddresses = new Set();
-
-            // First pass: Create all nodes and collect all addresses
-            data.forEach(inviter => {
-                allAddresses.add(inviter.sender_address);
-                addressData[inviter.sender_address] = inviter.sender;
-                inviter.invitees.forEach(invitee => {
-                    if (invitee?.address) {
-                        allAddresses.add(invitee.address);
-                        addressData[invitee.address] = invitee;
-                    }
-                });
-            });
-
-            console.log("addressData::", addressData)
-
-            // Create root node
-            nodes['root'] = {
-                nodeId: 'root',
-                parentNodeId: null,
+        // Configuration Constants
+        const CHART_CONFIG = {
+            node: {
                 width: 342,
-                height: 246,
+                height: 500,
                 borderWidth: 1,
                 borderRadius: 5,
                 borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
                 backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
-                template: `
-                    <div style="padding: 10px; text-align: center;">
-                        <div style="font-size: 14px; font-weight: 500;">BCL Affiliation Tree</div>
-                        <div style="font-size: 12px; color: #666;">Total Inviters: ${data.length}</div>
-                    </div>
-                `,
                 connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
-                connectorLineWidth: 5,
-                dashArray: "",
-                expanded: true,
-                directSubordinates: data.length,
-                totalSubordinates: data.length
-            };
-
-            data.forEach((inv) => {
-                nodes[inv.sender_address] = {
-                    nodeId: inv.sender_address,
-                    parentNodeId: null, // Start with no parent
-                    width: 342,
-                    height: 246,
-                    borderWidth: 1,
-                    borderRadius: 5,
-                    borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
-                    backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
-                    template: `
-                        <div style="padding: 10px; text-align: center;">
-                            <div style="font-size: 14px; font-weight: 500;">${formatAddress(inv.sender_address)}</div>
-                            <div style="font-size: 12px; color: #666;">Invited: 0</div>
-                        </div>
-                    `,
-                    connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
-                    connectorLineWidth: 5,
-                    dashArray: "",
-                    expanded: false,
-                    directSubordinates: 0,
-                    totalSubordinates: 0
+                connectorLineWidth: 5
+            },
+            chart: {
+                initialZoom: 0.6,
+                renderDelay: 1000,
+               
+            },
+            api: {
+                invitationsPath: '/api/invitations',
+                accountsBaseUrl: 'https://wordcraft.fun/accounts/',
+                avatarBaseUrl: 'https://avatars.superherowallet.com/',
+                pageLimit: 100
+            },
+            styles: {
+                fontFamily: 'Inter',
+                backgroundColor: '#FFFFFF',
+                textColor: '#08011E',
+                fontSize: {
+                    large: '15px',
+                    medium: '14px',
+                    small: '12px',
+                    tiny: '10px'
                 }
-            })
+            }
+        };
 
-            // Create nodes for all addresses
-            allAddresses.forEach(address => {
-                nodes[address] = {
-                    nodeId: address,
-                    parentNodeId: null, // Start with no parent
-                    width: 342,
-                    height: 246,
-                    borderWidth: 1,
-                    borderRadius: 5,
-                    borderColor: { red: 15, green: 140, blue: 121, alpha: 1 },
-                    backgroundColor: { red: 51, green: 182, blue: 208, alpha: 1 },
-                    template: `
-                        <div style="padding: 10px; text-align: center;">
-                            <div style="font-size: 14px; font-weight: 500;">${formatAddress(address)}</div>
-                            <div style="font-size: 12px; color: #666;">Invited: 0</div>
-                        </div>
-                    `,
-                    connectorLineColor: { red: 220, green: 189, blue: 207, alpha: 1 },
-                    connectorLineWidth: 5,
+        // Utility Functions
+        const Utils = {
+            formatAddress(address) {
+                if (!address) return '';
+                return `${address.slice(0, 7)}...${address.slice(-4)}`;
+            },
+
+            safeGet(obj, path, defaultValue = 0, formatter = (value) => value) {
+                return formatter(path.split('.').reduce((current, key) => current?.[key], obj) ?? defaultValue);
+            }
+        };
+
+        // Node Factory
+        const NodeFactory = {
+            createBaseNode(nodeId, parentNodeId = null) {
+                return {
+                    nodeId,
+                    parentNodeId,
+                    width: CHART_CONFIG.node.width,
+                    height: CHART_CONFIG.node.height,
+                    borderWidth: CHART_CONFIG.node.borderWidth,
+                    borderRadius: CHART_CONFIG.node.borderRadius,
+                    borderColor: CHART_CONFIG.node.borderColor,
+                    backgroundColor: CHART_CONFIG.node.backgroundColor,
+                    connectorLineColor: CHART_CONFIG.node.connectorLineColor,
+                    connectorLineWidth: CHART_CONFIG.node.connectorLineWidth,
                     dashArray: "",
                     expanded: false,
                     directSubordinates: 0,
                     totalSubordinates: 0
                 };
-            });
+            },
 
-            // Build the relationship map
-            const relationshipMap = new Map();
+            createRootNode(totalInviters) {
+                const node = this.createBaseNode('root', null);
+                return {
+                    ...node,
+                    template: `
+                        <div style="padding: 10px; text-align: center;">
+                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.medium}; font-weight: 500;">BCL Affiliation Tree</div>
+                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.small}; color: #666;">Total Inviters: ${totalInviters}</div>
+                        </div>
+                    `,
+                    expanded: true,
+                    directSubordinates: totalInviters,
+                    totalSubordinates: totalInviters
+                };
+            },
 
-            data.forEach((inv) => {
-                const invitees = [];
-                if (inv.invitees) {
-                    inv.invitees.forEach((invitee) => {
-                        if (invitee?.address) {
-                            invitees.push(invitee.address);
-                        }
-                    })
+            createAddressNode(address, inviteeCount = 0) {
+                const node = this.createBaseNode(address, null);
+                return {
+                    ...node,
+                    template: `
+                        <div style="padding: 10px; text-align: center;">
+                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.medium}; font-weight: 500;">${Utils.formatAddress(address)}</div>
+                            <div style="font-size: ${CHART_CONFIG.styles.fontSize.small}; color: #666;">Invited: ${inviteeCount}</div>
+                        </div>
+                    `
+                };
+            }
+        };
+
+        // Template Generator
+        const TemplateGenerator = {
+            generateNodeContent(nodeData) {
+                const address = nodeData.nodeId;
+                const data = addressData[address];
+                
+                if (address === 'root') {
+                    return ''; // Root node template is handled by NodeFactory
                 }
-                relationshipMap.set(inv.sender_address, invitees);
-            })
 
-            // Function to check for cycles
-            function hasCycle(nodeId, visited = new Set(), path = new Set()) {
+                const stats = [
+                    { label: 'Total AE Volume', value: Utils.safeGet(data, 'total_volume', 0, (value) => Number(value || '0').toFixed(2)) },
+                    { label: 'Total TX', value: Utils.safeGet(data, 'total_tx_count') },
+                    { label: 'Total TX (Buy)', value: Utils.safeGet(data, 'total_buy_tx_count') },
+                    { label: 'Total TX (Sell)', value: Utils.safeGet(data, 'total_sell_tx_count') },
+                    { label: 'Total Created Tokens', value: Utils.safeGet(data, 'total_created_tokens') },
+                    { label: 'Total Created Invitations', value: Utils.safeGet(data, 'total_invitation_count') },
+                    { label: 'Total Claimed Invitations', value: Utils.safeGet(data, 'total_claimed_invitation_count') },
+                    { label: 'Total Revoked Invitations', value: Utils.safeGet(data, 'total_revoked_invitation_count') },
+                ];
+
+                const statsHtml = stats
+                    .map(stat => `<div style="font-size:${CHART_CONFIG.styles.fontSize.large};color:${CHART_CONFIG.styles.textColor};margin-left:20px;margin-top:32px"> ${stat.label}: ${stat.value}</div>`)
+                    .join('');
+
+                return `
+                    <div style="font-family: '${CHART_CONFIG.styles.fontFamily}', sans-serif;background-color:${CHART_CONFIG.styles.backgroundColor}; position:absolute;margin-top:-1px; margin-left:-1px;width:${CHART_CONFIG.node.width}px;height:${CHART_CONFIG.node.height}px;border-radius:10px;border: 1px solid #E4E2E9">
+                        <div style="background-color:${CHART_CONFIG.styles.backgroundColor};position:absolute;margin-top:-25px;margin-left:15px;border-radius:100px;width:50px;height:50px;"></div>
+                        <a href="${CHART_CONFIG.api.accountsBaseUrl}${address}" target="_blank">
+                            <img src="${CHART_CONFIG.api.avatarBaseUrl}${address}" style="position:absolute;margin-top:-20px;margin-left:20px;border-radius:100px;width:40px;height:40px;" />
+                        </a>
+                        <div style="color:${CHART_CONFIG.styles.textColor};position:absolute;right:20px;top:17px;font-size:${CHART_CONFIG.styles.fontSize.tiny};"><i class="fas fa-ellipsis-h"></i></div>
+                        <div style="font-size:${CHART_CONFIG.styles.fontSize.large};color:${CHART_CONFIG.styles.textColor};margin-left:20px;margin-top:32px"> ${Utils.formatAddress(address)}</div>
+                        ${statsHtml}
+                    </div>
+                `;
+            }
+        };
+
+        // Data Processing Module
+        const DataProcessor = {
+            addressData: {},
+
+            collectAddressData(data) {
+                const allAddresses = new Set();
+                
+                data.forEach(inviter => {
+                    allAddresses.add(inviter.sender_address);
+                    this.addressData[inviter.sender_address] = inviter.sender;
+                    
+                    inviter.invitees.forEach(invitee => {
+                        if (invitee?.address) {
+                            allAddresses.add(invitee.address);
+                            this.addressData[invitee.address] = invitee;
+                        }
+                    });
+                });
+
+                console.log("addressData::", this.addressData);
+                return allAddresses;
+            },
+
+            createNodes(data, allAddresses) {
+                const nodes = {};
+
+                // Create root node
+                nodes['root'] = NodeFactory.createRootNode(data.length);
+
+                // Create nodes for all addresses
+                allAddresses.forEach(address => {
+                    nodes[address] = NodeFactory.createAddressNode(address);
+                });
+
+                return nodes;
+            },
+
+            buildRelationshipMap(data) {
+                const relationshipMap = new Map();
+
+                data.forEach((inv) => {
+                    const invitees = [];
+                    if (inv.invitees) {
+                        inv.invitees.forEach((invitee) => {
+                            if (invitee?.address) {
+                                invitees.push(invitee.address);
+                            }
+                        });
+                    }
+                    relationshipMap.set(inv.sender_address, invitees);
+                });
+
+                return relationshipMap;
+            },
+
+            hasCycle(nodeId, relationshipMap, visited = new Set(), path = new Set()) {
                 if (path.has(nodeId)) return true;
                 if (visited.has(nodeId)) return false;
 
@@ -206,183 +266,203 @@
 
                 const children = relationshipMap.get(nodeId) || [];
                 for (const child of children) {
-                    if (hasCycle(child, visited, path)) return true;
+                    if (this.hasCycle(child, relationshipMap, visited, path)) return true;
                 }
 
                 path.delete(nodeId);
                 return false;
-            }
+            },
 
-            // Second pass: Build relationships and update invitee counts
-            data.forEach(inviter => {
-                const inviteeCount = inviter.invitees.length;
-                nodes[inviter.sender_address].directSubordinates = inviteeCount;
-                nodes[inviter.sender_address].totalSubordinates = inviteeCount;
-                nodes[inviter.sender_address].template = `
-                    <div style="padding: 10px; text-align: center;">
-                        <div style="font-size: 14px; font-weight: 500;">${formatAddress(inviter.sender_address)}</div>
-                        <div style="font-size: 12px; color: #666;">Invited: ${inviteeCount}</div>
-                    </div>
-                `;
+            establishRelationships(data, nodes, relationshipMap) {
+                // Build parent-child relationships and update invitee counts
+                data.forEach(inviter => {
+                    const inviteeCount = inviter.invitees.length;
+                    nodes[inviter.sender_address].directSubordinates = inviteeCount;
+                    nodes[inviter.sender_address].totalSubordinates = inviteeCount;
+                    nodes[inviter.sender_address].template = NodeFactory.createAddressNode(inviter.sender_address, inviteeCount).template;
 
-                // Only set parent if it doesn't create a cycle
-                inviter.invitees.forEach(invitee => {
-                    if (!invitee) {
-                        return;
-                    }
-                    if (nodes[invitee.address] && !hasCycle(invitee.address)) {
-                        nodes[invitee.address].parentNodeId = inviter.sender_address;
+                    // Set parent relationships (avoid cycles)
+                    inviter.invitees.forEach(invitee => {
+                        if (!invitee) return;
+                        
+                        if (nodes[invitee.address] && !this.hasCycle(invitee.address, relationshipMap)) {
+                            nodes[invitee.address].parentNodeId = inviter.sender_address;
+                        }
+                    });
+                });
+            },
+
+            establishRootConnections(data, nodes) {
+                const rootNodes = new Set();
+                
+                // Find all invitees
+                const inviteeSet = new Set();
+                data.forEach(inviter => {
+                    inviter.invitees.forEach(invitee => {
+                        if (invitee?.address) {
+                            inviteeSet.add(invitee.address);
+                        }
+                    });
+                });
+
+                // Connect orphaned nodes to root
+                Object.values(nodes).forEach(node => {
+                    if (node.nodeId !== 'root' && node.parentNodeId === null) {
+                        node.parentNodeId = 'root';
                     }
                 });
-            });
 
-            // Find all nodes that should be direct children of root
-            const inviteeSet = new Set();
-            data.forEach(inviter => {
-                inviter.invitees.forEach(invitee => {
-                    if (invitee?.address) {
-                        inviteeSet.add(invitee.address);
+                // Identify natural root nodes (inviters who are not invitees)
+                data.forEach(inviter => {
+                    if (!inviteeSet.has(inviter.sender_address)) {
+                        rootNodes.add(inviter.sender_address);
+                        if (nodes[inviter.sender_address]) {
+                            nodes[inviter.sender_address].parentNodeId = 'root';
+                        }
                     }
                 });
-            });
 
-            // First, set all nodes without parents to be children of root
-            Object.values(nodes).forEach(node => {
-                if (node.nodeId !== 'root' && node.parentNodeId === null) {
-                    node.parentNodeId = 'root';
-                }
-            });
-
-            // Then identify true root nodes (inviters who are not invitees)
-            data.forEach(inviter => {
-                if (!inviteeSet.has(inviter.sender_address)) {
-                    rootNodes.add(inviter.sender_address);
-                    // Ensure these are direct children of root
-                    if (nodes[inviter.sender_address]) {
-                        nodes[inviter.sender_address].parentNodeId = 'root';
+                // Fallback: use first inviter as root if no natural roots found
+                if (rootNodes.size === 0 && data.length > 0) {
+                    rootNodes.add(data[0].sender_address);
+                    if (nodes[data[0].sender_address]) {
+                        nodes[data[0].sender_address].parentNodeId = 'root';
                     }
                 }
-            });
 
-            // If no natural root nodes found, use the first inviter as root
-            if (rootNodes.size === 0 && data.length > 0) {
-                rootNodes.add(data[0].sender_address);
-                if (nodes[data[0].sender_address]) {
-                    nodes[data[0].sender_address].parentNodeId = 'root';
-                }
+                console.log("rootNodes::", rootNodes);
+                return rootNodes;
             }
+        };
 
-            console.log("rootNodes::", rootNodes);
+        // Make addressData globally accessible for template generation
+        const addressData = DataProcessor.addressData;
+
+        function buildOrgChartData(data) {
+            // Step 1: Collect all address data
+            const allAddresses = DataProcessor.collectAddressData(data);
+
+            // Step 2: Create all nodes
+            const nodes = DataProcessor.createNodes(data, allAddresses);
+
+            // Step 3: Build relationship map
+            const relationshipMap = DataProcessor.buildRelationshipMap(data);
+
+            // Step 4: Establish parent-child relationships
+            DataProcessor.establishRelationships(data, nodes, relationshipMap);
+
+            // Step 5: Connect orphaned nodes to root
+            DataProcessor.establishRootConnections(data, nodes);
 
             // Convert nodes object to array
             return Object.values(nodes);
         }
 
+        // Chart Renderer
+        const ChartRenderer = {
+            create(affiliationData) {
+                const chartData = buildOrgChartData(affiliationData);
+                console.log("chartData::", chartData);
+
+                const chart = new d3.OrgChart()
+                    .container('#chart-container')
+                    .data(chartData)
+                    .svgWidth(window.innerWidth)
+                    .svgHeight(window.innerHeight)
+                    .nodeHeight((d) => CHART_CONFIG.node.height)
+                    .nodeWidth((d) => CHART_CONFIG.node.width)
+                    .initialZoom(CHART_CONFIG.chart.initialZoom)
+                    .onNodeClick(d => console.log(d + ' node clicked'))
+                    .nodeContent((d, i, arr, state) => TemplateGenerator.generateNodeContent(d.data))
+                    .render();
+
+                return chart;
+            }
+        };
+
         function renderChart(affiliationData) {
-            const chartData = buildOrgChartData(affiliationData);
-            console.log("chartData::", chartData);
-
-            const chart = new d3.OrgChart()
-                .container('#chart-container')
-                .data(chartData)
-                .svgWidth(window.innerWidth)
-                .svgHeight(window.innerHeight)
-                .initialZoom(0.6)
-                .onNodeClick(d => console.log(d + ' node clicked'))
-                .nodeContent(function (d, i, arr, state) {
-                    const color = '#FFFFFF';
-                    const nodeData = addressData[d.data.nodeId];
-                    return `
-            <div style="font-family: 'Inter', sans-serif;background-color:${color}; position:absolute;margin-top:-1px; margin-left:-1px;width:${d.width}px;height:${d.height}px;border-radius:10px;border: 1px solid #E4E2E9">
-               <div style="background-color:${color};position:absolute;margin-top:-25px;margin-left:${15}px;border-radius:100px;width:50px;height:50px;" ></div>
-               <a href="https://wordcraft.fun/accounts/${d.data.nodeId}" target="_blank">
-                    <img src="https://avatars.superherowallet.com/${d.data.nodeId}" style="position:absolute;margin-top:-20px;margin-left:${20}px;border-radius:100px;width:40px;height:40px;" />
-                </a>
-               
-              <div style="color:#08011E;position:absolute;right:20px;top:17px;font-size:10px;"><i class="fas fa-ellipsis-h"></i></div>
-
-              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> ${d.data.nodeId.slice(0, 7)}...${d.data.nodeId.slice(-4)}</div>
-              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX: ${nodeData?.total_tx_count || 0}</div>
-              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX (Buy): ${nodeData?.total_buy_tx_count || 0}</div>
-              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total TX (Sell): ${nodeData?.total_sell_tx_count || 0}</div>
-              <div style="font-size:15px;color:#08011E;margin-left:20px;margin-top:32px"> Total Created Tokens (Sell): ${nodeData?.total_created_tokens || 0}</div>
-
-           </div>
-  `;
-                })
-                .render();
+            return ChartRenderer.create(affiliationData);
         }
 
-        const invitations = []
-        const transactions = []
-        const registerInvitations = {}
-        const revokedInvitations = []
-        async function fetchTransactions(url = "/v3/transactions?contract=ct_2GG42rs2FDPTXuUCWHMn98bu5Ab6mgNxY7KdGAKUNsrLqutNxZ&limit=100") {
-            const response = await fetch(`https://mainnet.aeternity.io/mdw/${url}`);
-            const data = await response.json();
-            transactions.push(...data.data)
-            if (data.next) {
-                await fetchTransactions(data.next)
-            }
-        }
+        // Data Fetching Module
+        const DataFetcher = {
+            invitations: [],
 
-        async function fetchInvitations(page = 1) {
-            const response = await fetch(`/api/invitations?page=${page}&limit=100`)
-            const data = await response.json()
-            console.log("========================")
-            console.log("data::", data)
-            console.log("========================")
-            invitations.push(...(data.items || []))
-            if (data.meta.totalPages > page) {
-                await fetchInvitations(page + 1)
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', async function () {
-            await fetchInvitations()
-            let customData = {};
-            for (const invitation of invitations) {
-                if (!invitation.invitee_address) {
-                    continue
+            async fetchInvitations(page = 1) {
+                try {
+                    const response = await fetch(`${CHART_CONFIG.api.invitationsPath}?page=${page}&limit=${CHART_CONFIG.api.pageLimit}`);
+                    const data = await response.json();
+                    
+                    console.log("========================");
+                    console.log("data::", data);
+                    console.log("========================");
+                    
+                    this.invitations.push(...(data.items || []));
+                    
+                    if (data.meta.totalPages > page) {
+                        await this.fetchInvitations(page + 1);
+                    }
+                } catch (error) {
+                    console.error('Error fetching invitations:', error);
                 }
+            },
+
+            processInvitationData() {
+                const customData = {};
                 
-                if (!customData[invitation.sender_address]) {
-                    customData[invitation.sender_address] = {
-                        sender_address: invitation.sender_address,
-                        sender: invitation.sender,
-                        invitees: [],
-                        amount: 0
+                for (const invitation of this.invitations) {
+                    if (!invitation.invitee_address) {
+                        continue;
+                    }
+                    
+                    if (!customData[invitation.sender_address]) {
+                        customData[invitation.sender_address] = {
+                            sender_address: invitation.sender_address,
+                            sender: invitation.sender,
+                            invitees: [],
+                            amount: 0
+                        };
+                    }
+
+                    customData[invitation.sender_address].amount += invitation.amount;
+                    
+                    if (invitation.invitee) {
+                        customData[invitation.sender_address].invitees.push(invitation.invitee);
                     }
                 }
 
-                customData[invitation.sender_address].amount += invitation.amount
-                if (invitation.invitee) {
-                    customData[invitation.sender_address].invitees.push(invitation.invitee)
+                console.log('=====================');
+                console.log('customData::', customData);
+                console.log('customData->entries::', Object.values(customData));
+                console.log('=====================');
+
+                return Object.values(customData);
+            }
+        };
+
+        // Application Main
+        const AffiliationApp = {
+            async initialize() {
+                try {
+                    // Fetch invitation data
+                    await DataFetcher.fetchInvitations();
+                    
+                    // Process the data
+                    const processedData = DataFetcher.processInvitationData();
+                    
+                    // Render the chart after a delay
+                    setTimeout(() => {
+                        renderChart(processedData);
+                    }, CHART_CONFIG.chart.renderDelay);
+                    
+                } catch (error) {
+                    console.error('Error initializing affiliation app:', error);
                 }
             }
+        };
 
-            console.log('=====================')
-            console.log('customData::', customData)
-            console.log('customData->entries::', Object.values(customData))
-            console.log('=====================')
-            //await fetchTransactions()
-            // Collect Revoked Invitations
-            
-            setTimeout(() => {
-                renderChart(Object.values(customData))
-            }, 3000)
-            // var chart;
-            // d3.csv(
-            //     'https://raw.githubusercontent.com/bumbeishvili/sample-data/main/org.csv'
-            // ).then(data => {
-            //     setTimeout(() => {
-            //         chart = new d3.OrgChart()
-            //             .container('#chart-container')
-            //             .data(data)
-            //             .render();
-            //     }, 3000)
-            // });
-        });
+        // Initialize the application when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => AffiliationApp.initialize());
     </script>
 </body>
 
