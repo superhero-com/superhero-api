@@ -1055,4 +1055,10 @@ export class TokensService {
     );
     await Promise.allSettled(updatePromises);
   }
+
+  async deleteTokensWhereDaoAddressIsNull(): Promise<void> {
+    await this.tokensRepository.delete({
+      dao_address: IsNull(),
+    });
+  }
 }
