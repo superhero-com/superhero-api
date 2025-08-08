@@ -37,6 +37,7 @@ export class TrendingTagsController {
     //
   }
 
+  @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -52,10 +53,16 @@ export class TrendingTagsController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'score',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
+    @Query('search') search: string = '',
   ) {
     const query = this.trendingTagRepository.createQueryBuilder('trending_tag');
     if (orderBy) {
       query.orderBy(`trending_tag.${orderBy}`, orderDirection);
+    }
+    if (search) {
+      query.where('trending_tag.tag ILIKE :search', {
+        search: `%${search}%`,
+      });
     }
     return paginate(query, { page, limit });
   }
