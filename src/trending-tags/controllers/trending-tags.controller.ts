@@ -1,17 +1,30 @@
 import {
+  Body,
   Controller,
   DefaultValuePipe,
   Get,
   NotFoundException,
   Param,
   ParseIntPipe,
+  Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+  ApiSecurity,
+  ApiBody,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { TrendingTag } from '../entities/trending-tags.entity';
+import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
+import { TrendingTagsService } from '../services/trending-tags.service';
+import { ApiKeyGuard } from '../guards/api-key.guard';
 
 @Controller('trending-tags')
 @ApiTags('Trending Tags')
@@ -19,6 +32,7 @@ export class TrendingTagsController {
   constructor(
     @InjectRepository(TrendingTag)
     private readonly trendingTagRepository: Repository<TrendingTag>,
+    private readonly trendingTagsService: TrendingTagsService,
   ) {
     //
   }
@@ -60,5 +74,36 @@ export class TrendingTagsController {
     }
 
     return trendingTag;
+  }
+
+  @Post()
+  @UseGuards(ApiKeyGuard)
+  @ApiOperation({
+    operationId: 'createTrendingTags',
+    summary: 'Create trending tags from external provider',
+    description:
+      'Creates trending tags from external provider data. Tags are normalized (uppercase, alphanumeric only, camelCase to kebab-case) and duplicates are skipped.',
+  })
+  @ApiSecurity('api-key')
+  @ApiBody({
+    type: CreateTrendingTagsDto,
+    description: 'Trending tags data from external provider',
+  })
+  async createTrendingTags(
+    @Body() createTrendingTagsDto: CreateTrendingTagsDto,
+  ) {
+    const results = await this.trendingTagsService.createTrendingTags(
+      createTrendingTagsDto,
+    );
+
+    return {
+      message: 'Trending tags processing completed',
+      results: {
+        created: results.created,
+        skipped: results.skipped,
+        total_processed: createTrendingTagsDto.items.length,
+        errors: results.errors,
+      },
+    };
   }
 }

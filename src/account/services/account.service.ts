@@ -74,7 +74,9 @@ export class AccountService {
             "SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL))",
             'total_volume',
           )
-          .where('transactions.address = :address', { address: address.address })
+          .where('transactions.address = :address', {
+            address: address.address,
+          })
           .getRawOne();
 
         const accountData = {
