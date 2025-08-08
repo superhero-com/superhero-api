@@ -105,6 +105,13 @@ export const PERIODIC_SYNCING_ENABLED = true;
 export const UPDATE_TRENDING_TOKENS_ENABLED = true;
 export const PULL_INVITATIONS_ENABLED = true;
 export const PULL_ACCOUNTS_ENABLED = true;
+export const PULL_TRENDING_TAGS_ENABLED = true;
+
+/**
+ * API Keys and Security
+ */
+export const TRENDING_TAGS_API_KEY =
+  process.env.TRENDING_TAGS_API_KEY || 'your-secret-key-here-xxrf8ca2929';
 
 /**
  * Trending Score Configuration
