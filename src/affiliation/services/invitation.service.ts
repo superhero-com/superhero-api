@@ -1,14 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Invitation } from '../entities/invitation.entity';
-import { ACTIVE_NETWORK } from '@/configs/network';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { PULL_INVITATIONS_ENABLED } from '@/configs/constants';
+import { ACTIVE_NETWORK } from '@/configs/network';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
-import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { toAe } from '@aeternity/aepp-sdk';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import moment from 'moment';
+import { Repository } from 'typeorm';
+import { Invitation } from '../entities/invitation.entity';
 
 @Injectable()
 export class InvitationService {
@@ -18,56 +19,58 @@ export class InvitationService {
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
     private communityFactoryService: CommunityFactoryService,
-  ) {}
+  ) {
+    //
+  }
 
   onModuleInit() {
-    this.pullAndSaveInvitations(1000000);
+    if (PULL_INVITATIONS_ENABLED) {
+      this.pullAndSaveInvitations();
+    }
   }
 
   async createInvitation(invitation: Invitation): Promise<Invitation> {
     return this.invitationRepository.save(invitation);
   }
 
-  async pullAndSaveInvitations(blockHeight: number) {
-    // delete all invitations
-    // await this.invitationRepository.delete({
-    //   amount: LessThan(1000),
-    // });
-    // return;
-    console.log('pullAndSaveInvitations', blockHeight);
-    const factory = await this.communityFactoryService.getCurrentFactory();
+  isPlullingInvitations = false;
+  async pullAndSaveInvitations() {
+    if (this.isPlullingInvitations) {
+      return;
+    }
+    this.isPlullingInvitations = true;
+    try {
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-    const queryString = new URLSearchParams({
-      direction: 'forward',
-      // limit: '4',
-      limit: '100',
-      // scope: `gen:${from}-${this.syncBlocksService.latestBlockNumber}`,
-      type: 'contract_call',
-      contract: factory.affiliation_address,
-    }).toString();
+      const queryString = new URLSearchParams({
+        direction: 'forward',
+        limit: '100',
+        type: 'contract_call',
+        contract: factory.affiliation_address,
+      }).toString();
 
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    await this.loadInvitationsFromMdw(url);
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      await this.loadInvitationsFromMdw(url);
+    } catch (error) {
+      this.logger.error('Error pulling and saving invitations', error);
+    }
+    this.isPlullingInvitations = false;
   }
 
   async loadInvitationsFromMdw(url: string) {
     const result = await fetchJson(url);
-    // console.log('===============================================');
-    // console.log('===============================================');
-    // console.log('===============================================');
-    // console.log('loadInvitationsFromMdw', result);
 
     const data = result?.data ?? [];
     for (const item of data) {
       await this.saveInvitationTransaction(camelcaseKeysDeep(item));
     }
 
-    // if (result.next) {
-    //   return await this.loadInvitationsFromMdw(
-    //     `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-    //   );
-    // }
-    // return result;
+    if (result.next) {
+      return await this.loadInvitationsFromMdw(
+        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
+      );
+    }
+    return result;
   }
 
   async saveInvitationTransaction(transaction: ITransaction) {

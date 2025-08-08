@@ -103,6 +103,8 @@ export const SYNCING_ENABLED = true;
 export const LIVE_SYNCING_ENABLED = true;
 export const PERIODIC_SYNCING_ENABLED = true;
 export const UPDATE_TRENDING_TOKENS_ENABLED = true;
+export const PULL_INVITATIONS_ENABLED = true;
+export const PULL_ACCOUNTS_ENABLED = true;
 
 /**
  * Trending Score Configuration
