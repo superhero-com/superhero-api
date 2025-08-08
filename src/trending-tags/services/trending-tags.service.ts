@@ -60,10 +60,10 @@ export class TrendingTagsService {
    */
   async createTrendingTags(
     data: CreateTrendingTagsDto,
-  ): Promise<{ created: number; skipped: number; errors: string[] }> {
+  ): Promise<{ created: number; updated: number; errors: string[] }> {
     const results = {
       created: 0,
-      skipped: 0,
+      updated: 0,
       errors: [] as string[],
     };
 
@@ -84,27 +84,36 @@ export class TrendingTagsService {
           where: { tag: normalizedTag },
         });
 
-        if (existingTag) {
-          results.skipped++;
-          this.logger.debug(`Tag "${normalizedTag}" already exists, skipping`);
-          continue;
-        }
-
         const token =
           await this.tokensService.findByNameOrSymbol(normalizedTag);
 
-        // Create new trending tag
-        const trendingTag = this.trendingTagRepository.create({
-          tag: normalizedTag,
-          score: parseFloat(item.score),
-          source: data.provider,
-          description: null,
-          token_sale_address: token?.sale_address || null,
-        });
+        if (existingTag) {
+          // Update existing tag
+          existingTag.score = parseFloat(item.score);
+          existingTag.source = data.provider;
 
-        await this.trendingTagRepository.save(trendingTag);
-        results.created++;
-        this.logger.debug(`Created trending tag: ${normalizedTag}`);
+          // Update token_sale_address if we found a token and it's not already set
+          if (token?.sale_address && !existingTag.token_sale_address) {
+            existingTag.token_sale_address = token.sale_address;
+          }
+
+          await this.trendingTagRepository.save(existingTag);
+          results.updated++;
+          this.logger.debug(`Updated trending tag: ${normalizedTag}`);
+        } else {
+          // Create new trending tag
+          const trendingTag = this.trendingTagRepository.create({
+            tag: normalizedTag,
+            score: parseFloat(item.score),
+            source: data.provider,
+            description: null,
+            token_sale_address: token?.sale_address || null,
+          });
+
+          await this.trendingTagRepository.save(trendingTag);
+          results.created++;
+          this.logger.debug(`Created trending tag: ${normalizedTag}`);
+        }
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';

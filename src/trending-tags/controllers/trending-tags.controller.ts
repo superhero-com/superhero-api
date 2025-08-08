@@ -80,9 +80,9 @@ export class TrendingTagsController {
   @UseGuards(ApiKeyGuard)
   @ApiOperation({
     operationId: 'createTrendingTags',
-    summary: 'Create trending tags from external provider',
+    summary: 'Create or update trending tags from external provider',
     description:
-      'Creates trending tags from external provider data. Tags are normalized (uppercase, alphanumeric only, camelCase to kebab-case) and duplicates are skipped.',
+      'Creates new trending tags or updates existing ones from external provider data. Tags are normalized (uppercase, alphanumeric only, camelCase to kebab-case). Existing tags are updated with new scores and token associations.',
   })
   @ApiSecurity('api-key')
   @ApiBody({
@@ -100,7 +100,7 @@ export class TrendingTagsController {
       message: 'Trending tags processing completed',
       results: {
         created: results.created,
-        skipped: results.skipped,
+        updated: results.updated,
         total_processed: createTrendingTagsDto.items.length,
         errors: results.errors,
       },
