@@ -20,6 +20,9 @@ import {
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { AffiliationModule } from './affiliation/affiliation.module';
+import { AccountModule } from './account/account.module';
+import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 
 @Module({
   imports: [
@@ -53,6 +56,9 @@ import { AnalyticsModule } from './analytics/analytics.module';
     BclModule,
     AnalyticsModule,
     BullBoardModule,
+    AffiliationModule,
+    AccountModule,
+    TrendingTagsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
