@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
+import { TokensService } from '@/tokens/tokens.service';
 
 @Injectable()
 export class TrendingTagsService {
@@ -12,6 +13,7 @@ export class TrendingTagsService {
   constructor(
     @InjectRepository(TrendingTag)
     private readonly trendingTagRepository: Repository<TrendingTag>,
+    private readonly tokensService: TokensService,
   ) {
     //
   }
@@ -88,13 +90,16 @@ export class TrendingTagsService {
           continue;
         }
 
+        const token =
+          await this.tokensService.findByNameOrSymbol(normalizedTag);
+
         // Create new trending tag
         const trendingTag = this.trendingTagRepository.create({
           tag: normalizedTag,
           score: parseFloat(item.score),
           source: data.provider,
           description: null,
-          token_sale_address: null,
+          token_sale_address: token?.sale_address || null,
         });
 
         await this.trendingTagRepository.save(trendingTag);
