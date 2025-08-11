@@ -16,11 +16,11 @@ on:
         type: string
 jobs:
   deploy_wordcraft:
-    name: Deploy develop (wordcraft)
+    name: wordcraft
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "develop-wordcraft-api"
+      CONTAINER_NAME: "develop-wordcraftfun-api-mainnet"
     secrets:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3043"
@@ -34,11 +34,11 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
   deploy_trendminer:
-    name: Deploy develop (trendminer)
+    name: trendminer
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "develop-trendminer-api"
+      CONTAINER_NAME: "develop-trendminerfun-api-mainnet"
     secrets:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3043"
