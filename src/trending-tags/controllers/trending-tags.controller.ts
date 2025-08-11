@@ -67,7 +67,12 @@ export class TrendingTagsController {
     }
 
     // left join token by trending.tag = token.tag
-    query.leftJoinAndSelect(Token, 'token', 'token.name = trending_tag.tag');
+    query.leftJoinAndMapOne(
+      'trending_tag.token',
+      'token',
+      'token',
+      'token.name = trending_tag.tag',
+    );
     return paginate(query, { page, limit });
   }
 
