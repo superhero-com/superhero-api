@@ -23,10 +23,10 @@ jobs:
         include:
           - server_name: "wordcraftfun"
             deploy_host: "api.stag.wordcraft.fun"
-            deploy_key: "${{ secrets.STAG_DEPLOY_KEY }}"
+            deploy_key_secret: "STAG_DEPLOY_KEY"
           # - server_name: "trendminerfun"
           #   deploy_host: "api.stag.trendminer.fun"
-          #   deploy_key: "${{ secrets.STAG_TRENDMINERFUN_DEPLOY_KEY }}"
+          #   deploy_key_secret: "STAG_TRENDMINERFUN_DEPLOY_KEY"
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
@@ -36,7 +36,7 @@ jobs:
       API_HOST_PORT: "3033"
       DB_DATABASE: "api"
       DEPLOY_HOST: ${{ matrix.deploy_host }}
-      DEPLOY_KEY: ${{ matrix.deploy_key }}
+      DEPLOY_KEY: ${{ secrets[matrix.deploy_key_secret] }}
       DEPLOY_USERNAME: ${{ secrets.STAG_DEPLOY_USERNAME }}
       DB_USER: ${{ secrets.STAG_DB_USER }}
       DB_PASSWORD: ${{ secrets.STAG_DB_PASSWORD }}

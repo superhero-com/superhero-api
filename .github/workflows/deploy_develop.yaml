@@ -23,10 +23,10 @@ jobs:
         include:
           - server_name: "wordcraftfun"
             deploy_host: "api.dev.wordcraft.fun"
-            deploy_key: "${{ secrets.DEV_DEPLOY_KEY }}"
+            deploy_key_secret: "DEV_DEPLOY_KEY"
           - server_name: "trendminerfun"
             deploy_host: "api.dev.trendminer.fun"
-            deploy_key: "${{ secrets.DEV_TRENDMINERFUN_DEPLOY_KEY }}"
+            deploy_key_secret: "DEV_TRENDMINERFUN_DEPLOY_KEY"
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
@@ -36,7 +36,7 @@ jobs:
       API_HOST_PORT: "3043"
       DB_DATABASE: "api"
       DEPLOY_HOST: ${{ matrix.deploy_host }}
-      DEPLOY_KEY: ${{ matrix.deploy_key }}
+      DEPLOY_KEY: ${{ secrets[matrix.deploy_key_secret] }}
       DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
       DB_USER: ${{ secrets.DEV_DB_USER }}
       DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
