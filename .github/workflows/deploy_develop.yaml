@@ -15,28 +15,36 @@ on:
         required: false
         type: string
 jobs:
-  deploy:
-    name: Deploy develop (${{ matrix.server_name }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - server_name: "wordcraftfun"
-            deploy_host: "api.dev.wordcraft.fun"
-            deploy_key_secret: "DEV_DEPLOY_KEY"
-          - server_name: "trendminerfun"
-            deploy_host: "api.dev.trendminer.fun"
-            deploy_key_secret: "DEV_TRENDMINERFUN_DEPLOY_KEY"
+  deploy_wordcraft:
+    name: Deploy develop (wordcraft)
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "develop-${{ matrix.server_name }}-api"
+      CONTAINER_NAME: "develop-wordcraft-api"
     secrets:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3043"
       DB_DATABASE: "api"
-      DEPLOY_HOST: ${{ matrix.deploy_host }}
-      DEPLOY_KEY: ${{ secrets[matrix.deploy_key_secret] }}
+      DEPLOY_HOST: "api.dev.wordcraft.fun"
+      DEPLOY_KEY: ${{ secrets.DEV_DEPLOY_KEY }}
+      DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
+      DB_USER: ${{ secrets.DEV_DB_USER }}
+      DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+  deploy_trendminer:
+    name: Deploy develop (trendminer)
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION }}
+      CONTAINER_NAME: "develop-trendminer-api"
+    secrets:
+      AE_NETWORK_ID: "ae_mainnet"
+      API_HOST_PORT: "3043"
+      DB_DATABASE: "api"
+      DEPLOY_HOST: "api.dev.trendminer.fun"
+      DEPLOY_KEY: ${{ secrets.DEV_TRENDMINERFUN_DEPLOY_KEY }}
       DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
       DB_USER: ${{ secrets.DEV_DB_USER }}
       DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
