@@ -45,9 +45,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
             "GITHUB_TOKEN=${{ secrets.NPM_GITHUB_TOKEN }}"
-  deploy:
-    if: contains(fromJSON('["develop", "staging", "main"]'), github.ref_name)
-    name: Deploy via ssh (${{ github.ref_name }})
-    uses: ./.github/workflows/deploy_${{ github.ref_name }}.yaml
+  deploy_develop:
+    if: github.ref_name == 'develop'
+    name: Deploy via ssh (develop)
+    uses: ./.github/workflows/deploy_develop.yaml
+    secrets: inherit
+    needs: buildx
+  deploy_staging:
+    if: github.ref_name == 'staging'
+    name: Deploy via ssh (staging)
+    uses: ./.github/workflows/deploy_staging.yaml
+    secrets: inherit
+    needs: buildx
+  deploy_main:
+    if: github.ref_name == 'main'
+    name: Deploy via ssh (production)
+    uses: ./.github/workflows/deploy_main.yaml
     secrets: inherit
     needs: buildx
