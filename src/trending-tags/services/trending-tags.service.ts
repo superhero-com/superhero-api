@@ -2,9 +2,8 @@ import { PULL_TRENDING_TAGS_ENABLED } from '@/configs/constants';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
-import { TokensService } from '@/tokens/tokens.service';
+import { TrendingTag } from '../entities/trending-tags.entity';
 
 @Injectable()
 export class TrendingTagsService {
@@ -13,7 +12,6 @@ export class TrendingTagsService {
   constructor(
     @InjectRepository(TrendingTag)
     private readonly trendingTagRepository: Repository<TrendingTag>,
-    private readonly tokensService: TokensService,
   ) {
     //
   }
@@ -84,18 +82,10 @@ export class TrendingTagsService {
           where: { tag: normalizedTag },
         });
 
-        const token =
-          await this.tokensService.findByNameOrSymbol(normalizedTag);
-
         if (existingTag) {
           // Update existing tag
           existingTag.score = parseFloat(item.score);
           existingTag.source = data.provider;
-
-          // Update token_sale_address if we found a token and it's not already set
-          if (token?.sale_address && !existingTag.token_sale_address) {
-            existingTag.token_sale_address = token.sale_address;
-          }
 
           await this.trendingTagRepository.save(existingTag);
           results.updated++;
@@ -107,7 +97,6 @@ export class TrendingTagsService {
             score: parseFloat(item.score),
             source: data.provider,
             description: null,
-            token_sale_address: token?.sale_address || null,
           });
 
           await this.trendingTagRepository.save(trendingTag);

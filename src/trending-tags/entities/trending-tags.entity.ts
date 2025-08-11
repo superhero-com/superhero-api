@@ -29,12 +29,6 @@ export class TrendingTag {
   @Column()
   source: string;
 
-  // Related token if already created
-  @Column({
-    nullable: true,
-  })
-  token_sale_address: string;
-
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

@@ -25,6 +25,7 @@ import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTagsService } from '../services/trending-tags.service';
 import { ApiKeyGuard } from '../guards/api-key.guard';
+import { Token } from 'src/tokens/entities/token.entity';
 
 @Controller('trending-tags')
 @ApiTags('Trending Tags')
@@ -42,7 +43,7 @@ export class TrendingTagsController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['score', 'source', 'token_sale_address', 'created_at'],
+    enum: ['score', 'source', 'created_at'],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -64,6 +65,9 @@ export class TrendingTagsController {
         search: `%${search}%`,
       });
     }
+
+    // left join token by trending.tag = token.tag
+    query.leftJoinAndSelect(Token, 'token', 'token.name = trending_tag.tag');
     return paginate(query, { page, limit });
   }
 
