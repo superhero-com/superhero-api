@@ -34,21 +34,22 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
       TRENDING_TAGS_API_KEY: ${{ secrets.DEV_TRENDING_TAGS_API_KEY }}
-  deploy_trendminer:
-    name: trendminer
-    uses: ./.github/workflows/ssh_deploy.yaml
-    with:
-      VERSION: ${{ inputs.VERSION }}
-      CONTAINER_NAME: "develop-trendminerfun-api-mainnet"
-    secrets:
-      AE_NETWORK_ID: "ae_mainnet"
-      API_HOST_PORT: "3043"
-      DB_DATABASE: "api"
-      DEPLOY_HOST: "api.dev.trendminer.fun"
-      DEPLOY_KEY: ${{ secrets.DEV_TRENDMINERFUN_DEPLOY_KEY }}
-      DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
-      DB_USER: ${{ secrets.DEV_DB_USER }}
-      DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+  # deploy_trendminer:
+  #   name: trendminer
+  #   uses: ./.github/workflows/ssh_deploy.yaml
+  #   with:
+  #     VERSION: ${{ inputs.VERSION }}
+  #     CONTAINER_NAME: "develop-trendminerfun-api-mainnet"
+  #   secrets:
+  #     AE_NETWORK_ID: "ae_mainnet"
+  #     API_HOST_PORT: "3043"
+  #     DB_DATABASE: "api"
+  #     DEPLOY_HOST: "api.dev.trendminer.fun"
+  #     DEPLOY_KEY: ${{ secrets.DEV_TRENDMINERFUN_DEPLOY_KEY }}
+  #     DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
+  #     DB_USER: ${{ secrets.DEV_DB_USER }}
+  #     DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
+  #     DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  #     DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  #     DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+  #     TRENDING_TAGS_API_KEY: ${{ secrets.DEV_TRENDMINERFUN_TRENDING_TAGS_API_KEY }}
