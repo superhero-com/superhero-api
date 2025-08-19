@@ -33,6 +33,7 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+      TRENDING_TAGS_API_KEY: ${{ secrets.STAG_TRENDING_TAGS_API_KEY }}
   # Uncomment when ready to deploy to trendminer staging
   # deploy_trendminer:
   #   name: trendminer

@@ -47,6 +47,9 @@ on:
       DOCKERHUB_REPO:
         description: "Dockerhub repository"
         required: true
+      TRENDING_TAGS_API_KEY:
+        description: "Trending tags API key"
+        required: true
 jobs:
   deploy:
     name: Deploy via ssh
@@ -63,6 +66,7 @@ jobs:
           DB_USER: "${{ secrets.DB_USER }}"
           DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
           DB_DATABASE: "${{ secrets.DB_DATABASE }}"
+          TRENDING_TAGS_API_KEY: "${{ secrets.TRENDING_TAGS_API_KEY }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
           username: "${{ secrets.DEPLOY_USERNAME }}"
@@ -74,6 +78,7 @@ jobs:
             DB_DATABASE,
             API_HOST_PORT,
             HOST_DATA_DIR,
+            TRENDING_TAGS_API_KEY,
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
@@ -92,6 +97,7 @@ jobs:
               -e DB_PASSWORD \
               -e AE_NETWORK_ID \
               -e DB_DATABASE \
+              -e TRENDING_TAGS_API_KEY \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
               -e REDIS_PORT=6379 \
