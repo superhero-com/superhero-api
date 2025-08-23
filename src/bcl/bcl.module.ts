@@ -43,7 +43,7 @@ import { VerifyTransactionsService } from './services/verify-transactions.servic
     FixHoldersService,
     VerifyTransactionsService,
   ],
-  exports: [SyncBlocksService],
+  exports: [SyncBlocksService, SyncTransactionsService],
   controllers: [DebugFailedTransactionsController],
 })
 export class BclModule {
