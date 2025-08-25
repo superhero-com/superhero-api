@@ -10,7 +10,7 @@ on:
         type: string
       CONTAINER_NAME:
         description: "Container name"
-        default: "wordcraftfun-api"
+        default: "superhero-api"
         required: false
         type: string
     secrets:
