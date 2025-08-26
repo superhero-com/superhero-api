@@ -33,6 +33,7 @@ export interface ICreatePostData {
   total_comments: number;
   tx_args: any[];
   created_at: Date;
+  post_id?: string;
 }
 
 /**
@@ -72,4 +73,22 @@ export interface IContentParsingOptions {
   maxTopics?: number;
   maxMediaItems?: number;
   sanitizeContent?: boolean;
+}
+
+/**
+ * Comment detection result
+ */
+export interface ICommentInfo {
+  isComment: boolean;
+  parentPostId?: string;
+  commentArgument?: any;
+}
+
+/**
+ * Comment processing result
+ */
+export interface ICommentProcessingResult {
+  success: boolean;
+  parentPostExists?: boolean;
+  error?: string;
 }

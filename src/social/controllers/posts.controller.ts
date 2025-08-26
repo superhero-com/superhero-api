@@ -60,7 +60,9 @@ export class PostsController {
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('search') search?: string,
   ) {
-    const query = this.postRepository.createQueryBuilder('post');
+    const query = this.postRepository
+      .createQueryBuilder('post')
+      .where('post.post_id IS NULL');
 
     // Add search functionality
     if (search) {
@@ -98,5 +100,38 @@ export class PostsController {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
     return post;
+  }
+
+  @ApiParam({ name: 'id', type: 'string', description: 'Post ID' })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
+  @ApiOperation({
+    operationId: 'getComments',
+    summary: 'Get comments for a post',
+    description: 'Retrieve paginated comments for a specific post',
+  })
+  @ApiOkResponsePaginated(PostDto)
+  @Get(':id/comments')
+  async getComments(
+    @Param('id') id: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'ASC',
+  ) {
+    // First check if the parent post exists
+    const parentPost = await this.postRepository.findOne({
+      where: { id },
+    });
+    if (!parentPost) {
+      throw new NotFoundException(`Post with ID ${id} not found`);
+    }
+
+    const query = this.postRepository
+      .createQueryBuilder('post')
+      .where('post.post_id = :parentPostId', { parentPostId: id })
+      .orderBy('post.created_at', orderDirection);
+
+    return paginate(query, { page, limit });
   }
 }

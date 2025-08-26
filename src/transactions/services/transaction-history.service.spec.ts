@@ -5,8 +5,8 @@ import { DataSource, Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 
 import { TokensService } from '@/tokens/tokens.service';
-import { TransactionHistoryService } from '../services/transaction-history.service';
-import { TransactionService } from '../services/transaction.service';
+import { TransactionHistoryService } from './transaction-history.service';
+import { TransactionService } from './transaction.service';
 
 describe('TransactionHistoryService', () => {
   let service: TransactionHistoryService;

@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
 
 @Entity({
   name: 'posts',
@@ -6,6 +13,16 @@ import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
 export class Post {
   @PrimaryColumn()
   id: string;
+
+  @Column({ nullable: true })
+  post_id: string;
+
+  @ManyToOne(() => Post, (post) => post.id, {
+    nullable: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'post_id' })
+  parent_post: Post;
 
   @Column({
     unique: true,
