@@ -155,11 +155,6 @@ export class PostService {
 
     this.isProcessing.set(processingKey, true);
 
-    // delete all posts for this contract
-    // await this.postRepository.delete({
-    //   contract_address: contract.contractAddress,
-    // });
-
     try {
       const config: IMiddlewareRequestConfig = {
         direction: 'forward',
@@ -176,11 +171,6 @@ export class PostService {
       }).toString();
 
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-
-      this.logger.log(
-        `Pulling latest posts for contract ${contract.contractAddress}`,
-        { url },
-      );
 
       const posts = await this.loadPostsFromMdw(url, contract);
 
