@@ -1,11 +1,10 @@
-import { DexToken } from './dex-token.entity';
 import {
+  Column,
   CreateDateColumn,
   Entity,
-  PrimaryColumn,
-  ManyToOne,
   JoinColumn,
-  Column,
+  ManyToOne,
+  PrimaryColumn,
 } from 'typeorm';
 import { Pair } from './pair.entity';
 

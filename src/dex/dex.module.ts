@@ -4,21 +4,33 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DexTokensController } from './controllers/dex-tokens.controller';
 import { PairsController } from './controllers/pairs.controller';
+import { PairTransactionsController } from './controllers/pair-transactions.controller';
 import { DexToken } from './entities/dex-token.entity';
 import { Pair } from './entities/pair.entity';
+import { PairTransaction } from './entities/pair-transaction.entity';
 import { DexSyncService } from './services/dex-sync.service';
 import { DexTokenService } from './services/dex-token.service';
 import { PairService } from './services/pair.service';
+import { PairTransactionService } from './services/pair-transaction.service';
 
 @Module({
   imports: [
     AeModule,
     TransactionsModule,
-    TypeOrmModule.forFeature([Pair, DexToken]),
+    TypeOrmModule.forFeature([Pair, DexToken, PairTransaction]),
   ],
-  providers: [PairService, DexTokenService, DexSyncService],
-  exports: [PairService, DexTokenService],
-  controllers: [PairsController, DexTokensController],
+  providers: [
+    PairService,
+    DexTokenService,
+    PairTransactionService,
+    DexSyncService,
+  ],
+  exports: [PairService, DexTokenService, PairTransactionService],
+  controllers: [
+    PairsController,
+    DexTokensController,
+    PairTransactionsController,
+  ],
 })
 export class DexModule {
   //

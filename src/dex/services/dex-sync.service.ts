@@ -17,6 +17,8 @@ import { Repository } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 import { DexToken } from '../entities/dex-token.entity';
 import { Pair } from '../entities/pair.entity';
+import { PairTransaction } from '../entities/pair-transaction.entity';
+import moment from 'moment';
 
 @Injectable()
 export class DexSyncService {
@@ -27,6 +29,8 @@ export class DexSyncService {
     private readonly dexTokenRepository: Repository<DexToken>,
     @InjectRepository(Pair)
     private readonly dexPairRepository: Repository<Pair>,
+    @InjectRepository(PairTransaction)
+    private readonly dexPairTransactionRepository: Repository<PairTransaction>,
 
     private aeSdkService: AeSdkService,
   ) {
@@ -38,6 +42,7 @@ export class DexSyncService {
     console.log('==== DexSyncService ====');
     console.log('========================');
     //
+    return;
 
     this.routerContract = await this.aeSdkService.sdk.initializeContract({
       aci: routerInterface,
@@ -87,7 +92,8 @@ export class DexSyncService {
       // console.log('pairInfo', pairInfo.pairAddress);
       // console.log('--------------------------------');
 
-      await this.saveDexPair(pairInfo);
+      const pair = await this.saveDexPair(pairInfo);
+      await this.saveDexPairTransaction(pair, item);
     }
     if (result.next) {
       return await this.pullDexPairsFromMdw(
@@ -116,7 +122,7 @@ export class DexSyncService {
     if (!decodedEvents) {
       return null;
     }
-    let pairAddress = decodedEvents.find(
+    const pairAddress = decodedEvents.find(
       (event) => event.contract?.name === 'IAedexV2Pair',
     )?.contract?.address;
     let token0Address = null;
@@ -214,6 +220,33 @@ export class DexSyncService {
       .getCount();
     await this.dexTokenRepository.update(token.address, {
       pairs_count: pairsCount,
+    });
+  }
+
+  private async saveDexPairTransaction(pair: Pair, item: ITransaction) {
+    const existingTransaction = await this.dexPairTransactionRepository
+      .createQueryBuilder('pairTransaction')
+      .where('pairTransaction.tx_hash = :tx_hash', {
+        tx_hash: item.hash,
+      })
+      .getOne();
+    if (existingTransaction) {
+      await this.dexPairTransactionRepository.update(
+        existingTransaction.tx_hash,
+        {
+          pair: pair,
+          tx_type: item.tx.function,
+          tx_hash: item.hash,
+          created_at: moment(item.microTime).toDate(),
+        },
+      );
+      return existingTransaction;
+    }
+    await this.dexPairTransactionRepository.save({
+      pair: pair,
+      tx_type: item.tx.function,
+      tx_hash: item.hash,
+      created_at: moment(item.microTime).toDate(),
     });
   }
 }

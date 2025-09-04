@@ -18,8 +18,8 @@ import { PairService } from '../services/pair.service';
 import { PairDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 
-@Controller('pairs')
-@ApiTags('DEX Pairs')
+@Controller('dex/pairs')
+@ApiTags('DEX')
 export class PairsController {
   constructor(private readonly pairService: PairService) {}
 
