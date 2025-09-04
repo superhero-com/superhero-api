@@ -5,6 +5,7 @@ import { Post } from '../entities/post.entity';
 import {
   ACTIVE_NETWORK,
   MAX_RETRIES_WHEN_REQUEST_FAILED,
+  PULL_SOCIAL_POSTS_ENABLED,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs';
 import { fetchJson } from '@/utils/common';
@@ -40,15 +41,16 @@ export class PostService {
   }
 
   async onModuleInit(): Promise<void> {
-    this.logger.log('Initializing PostService module...');
-    try {
-      await this.pullLatestPostsForContracts();
-      // Run cleanup for any orphaned comments from previous runs
-      await this.fixOrphanedComments();
+    if (PULL_SOCIAL_POSTS_ENABLED) {
+      try {
+        await this.pullLatestPostsForContracts();
+        // Run cleanup for any orphaned comments from previous runs
+        await this.fixOrphanedComments();
+      } catch (error) {
+        this.logger.error('Failed to initialize PostService module', error);
+        // Don't throw - allow the service to start even if initial sync fails
+      }
       this.logger.log('PostService module initialized successfully');
-    } catch (error) {
-      this.logger.error('Failed to initialize PostService module', error);
-      // Don't throw - allow the service to start even if initial sync fails
     }
   }
 
