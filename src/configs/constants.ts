@@ -106,6 +106,9 @@ export const UPDATE_TRENDING_TOKENS_ENABLED = false;
 export const PULL_INVITATIONS_ENABLED = false;
 export const PULL_ACCOUNTS_ENABLED = false;
 export const PULL_TRENDING_TAGS_ENABLED = false;
+export const PULL_SOCIAL_POSTS_ENABLED = false;
+export const PULL_DEX_TOKENS_ENABLED = false;
+export const PULL_DEX_PAIRS_ENABLED = false;
 
 /**
  * API Keys and Security
