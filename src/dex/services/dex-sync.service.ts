@@ -41,8 +41,6 @@ export class DexSyncService {
     console.log('========================');
     console.log('==== DexSyncService ====');
     console.log('========================');
-    //
-    return;
 
     this.routerContract = await this.aeSdkService.sdk.initializeContract({
       aci: routerInterface,
