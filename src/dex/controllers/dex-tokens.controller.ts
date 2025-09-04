@@ -18,8 +18,8 @@ import { DexTokenService } from '../services/dex-token.service';
 import { DexTokenDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 
-@Controller('dex-tokens')
-@ApiTags('DEX Tokens')
+@Controller('dex/tokens')
+@ApiTags('DEX')
 export class DexTokensController {
   constructor(private readonly dexTokenService: DexTokenService) {}
 

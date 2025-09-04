@@ -1,11 +1,12 @@
 import { DexToken } from './dex-token.entity';
+import { PairTransaction } from './pair-transaction.entity';
 import {
   CreateDateColumn,
   Entity,
   PrimaryColumn,
   ManyToOne,
   JoinColumn,
-  Column,
+  OneToMany,
 } from 'typeorm';
 
 @Entity({
@@ -23,10 +24,8 @@ export class Pair {
   @JoinColumn({ name: 'token1_address' })
   token1: DexToken;
 
-  @Column({
-    default: 0,
-  })
-  transactions_count: number;
+  @OneToMany(() => PairTransaction, (transaction) => transaction.pair)
+  transactions: PairTransaction[];
 
   @CreateDateColumn({
     type: 'timestamp',

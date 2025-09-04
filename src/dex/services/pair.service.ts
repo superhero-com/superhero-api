@@ -23,10 +23,15 @@ export class PairService {
     const query = this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
-      .leftJoinAndSelect('pair.token1', 'token1');
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .loadRelationCountAndMap('pair.transactions_count', 'pair.transactions');
 
     if (orderBy) {
-      query.orderBy(`pair.${orderBy}`, orderDirection);
+      if (orderBy === 'transactions_count') {
+        query.orderBy('pair.transactions_count', orderDirection);
+      } else {
+        query.orderBy(`pair.${orderBy}`, orderDirection);
+      }
     }
 
     return paginate(query, options);
@@ -37,6 +42,7 @@ export class PairService {
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
+      .loadRelationCountAndMap('pair.transactions_count', 'pair.transactions')
       .where('pair.address = :address', { address })
       .getOne();
   }
