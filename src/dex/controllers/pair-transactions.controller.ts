@@ -40,6 +40,12 @@ export class PairTransactionsController {
     description: 'Filter by specific pair address',
   })
   @ApiQuery({
+    name: 'account_address',
+    type: 'string',
+    required: false,
+    description: 'Filter by account address',
+  })
+  @ApiQuery({
     name: 'tx_type',
     type: 'string',
     required: false,
@@ -60,6 +66,7 @@ export class PairTransactionsController {
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('pair_address') pairAddress?: string,
     @Query('tx_type') txType?: string,
+    @Query('account_address') account_address?: string,
   ) {
     return this.pairTransactionService.findAll(
       { page, limit },
@@ -67,6 +74,7 @@ export class PairTransactionsController {
       orderDirection,
       pairAddress,
       txType,
+      account_address,
     );
   }
 

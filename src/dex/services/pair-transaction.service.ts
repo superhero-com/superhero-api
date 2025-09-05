@@ -21,6 +21,7 @@ export class PairTransactionService {
     orderDirection: 'ASC' | 'DESC' = 'DESC',
     pairAddress?: string,
     txType?: string,
+    account_address?: string,
   ): Promise<Pagination<PairTransaction>> {
     const query = this.pairTransactionRepository
       .createQueryBuilder('pairTransaction')
@@ -36,6 +37,13 @@ export class PairTransactionService {
     // Filter by transaction type if provided
     if (txType) {
       query.andWhere('pairTransaction.tx_type = :txType', { txType });
+    }
+
+    // Filter by account address if provided
+    if (account_address) {
+      query.andWhere('pairTransaction.account_address = :account_address', {
+        account_address,
+      });
     }
 
     // Add ordering

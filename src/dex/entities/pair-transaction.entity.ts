@@ -15,6 +15,11 @@ export class PairTransaction {
   @PrimaryColumn()
   tx_hash: string;
 
+  @Column({
+    nullable: true,
+  })
+  account_address: string;
+
   // block height
   @Column({
     default: 0,
@@ -59,6 +64,18 @@ export class PairTransaction {
     type: 'numeric',
   })
   total_supply: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  volume0: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  volume1: number;
 
   // Swap related Info jsonb
   @Column({

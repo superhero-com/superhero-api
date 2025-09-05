@@ -60,6 +60,7 @@ export class DexSyncService {
     // TEMP deleta all pairs
     await this.dexPairRepository.delete({});
     const config: IMiddlewareRequestConfig = {
+      // direction: 'backward',
       direction: 'forward',
       limit: 100,
       type: 'contract_call',
@@ -73,6 +74,7 @@ export class DexSyncService {
     }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
     await this.pullDexPairsFromMdw(url);
+    console.log('DexTokens synced');
   }
 
   async pullDexPairsFromMdw(url: string) {
@@ -112,7 +114,7 @@ export class DexSyncService {
     try {
       decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log);
     } catch (error: any) {
-      console.log('routerContract.$decodeEvents error', error?.message);
+      // console.log('routerContract.$decodeEvents error', error?.message);
     }
     if (!decodedEvents) {
       try {
@@ -146,11 +148,16 @@ export class DexSyncService {
     ) {
       token0Address = args[1].value[0]?.value;
       token1Address = args[1].value[1]?.value;
-    } else if (transaction.tx.function === TX_FUNCTIONS.add_liquidity) {
+    } else if (
+      transaction.tx.function === TX_FUNCTIONS.add_liquidity ||
+      transaction.tx.function === TX_FUNCTIONS.remove_liquidity
+    ) {
       token0Address = args[0].value;
       token1Address = args[1].value;
-      // console.log('args::', JSON.stringify(args, null, 2));
-    } else if (transaction.tx.function === TX_FUNCTIONS.add_liquidity_ae) {
+    } else if (
+      transaction.tx.function === TX_FUNCTIONS.add_liquidity_ae ||
+      transaction.tx.function === TX_FUNCTIONS.remove_liquidity_ae
+    ) {
       // this mean add new pair WAE -> Token
       token0Address = DEX_CONTRACTS.wae;
       token1Address = args[0].value;
@@ -158,13 +165,16 @@ export class DexSyncService {
       // if (transaction.tx.function?.includes('liquidity')) {
       //   return null;
       // }
-      // console.log('transaction.tx.function:', transaction.tx.function);
-      // console.log('args::', JSON.stringify(args, null, 2));
+      console.log('TODO: handle->function:', transaction.tx.function);
+      console.log('decodedEvents:', decodedEvents);
+      console.log('args::', JSON.stringify(args, null, 2));
     }
     if (!token0Address || !token1Address) {
       return null;
     }
 
+    let volume0 = 0;
+    let volume1 = 0;
     let swapInfo = null;
     const swapInfoData = decodedEvents.find(
       (event) => event.name === 'SwapTokens',
@@ -179,6 +189,11 @@ export class DexSyncService {
         amount1Out: swapped[3],
         to: swapped[4],
       };
+
+      volume0 =
+        swapInfo.amount0In !== '0' ? swapInfo.amount0In : swapInfo.amount0Out;
+      volume1 =
+        swapInfo.amount1In !== '0' ? swapInfo.amount1In : swapInfo.amount1Out;
     }
 
     let reserve0,
@@ -192,10 +207,44 @@ export class DexSyncService {
       reserve1 = syncInfoData[1]?.toString();
     }
 
+    let pairMintInfo = null;
+    const pairMintInfoData = decodedEvents.find(
+      (event) => event.name === 'PairMint',
+    )?.args;
+    if (pairMintInfoData) {
+      pairMintInfo = {
+        type: 'PairMint',
+        amount0: pairMintInfoData[1]?.toString(),
+        amount1: pairMintInfoData[2]?.toString(),
+      };
+    }
+
+    const pairBurnInfoData = decodedEvents.find(
+      (event) => event.name === 'PairBurn',
+    )?.args;
+    if (pairBurnInfoData) {
+      const args = pairBurnInfoData[2].split('|');
+      pairMintInfo = {
+        type: 'PairBurn',
+        amount0: args[0]?.toString(),
+        amount1: args[1]?.toString(),
+      };
+    }
+
     const token0 = await this.getOrCreateToken(token0Address);
     const token1 = await this.getOrCreateToken(token1Address);
 
-    return { pairAddress, token0, token1, swapInfo, reserve0, reserve1 };
+    return {
+      pairAddress,
+      token0,
+      token1,
+      swapInfo,
+      reserve0,
+      reserve1,
+      volume0,
+      volume1,
+      pairMintInfo,
+    };
   }
 
   private async getOrCreateToken(address: string) {
@@ -269,7 +318,10 @@ export class DexSyncService {
       reserve1: number;
       token0: DexToken;
       token1: DexToken;
+      volume0: number;
+      volume1: number;
       swapInfo: any;
+      pairMintInfo: any;
     },
   ) {
     const existingTransaction = await this.dexPairTransactionRepository
@@ -284,6 +336,7 @@ export class DexSyncService {
 
     await this.dexPairTransactionRepository.save({
       pair: pair,
+      account_address: transaction.tx.callerId,
       tx_type: transaction.tx.function,
       tx_hash: transaction.hash,
       block_height: transaction.blockHeight,
@@ -298,8 +351,10 @@ export class DexSyncService {
       ratio1: new BigNumber(pairInfo.reserve1)
         .div(pairInfo.reserve0)
         .toNumber(),
+      volume0: pairInfo.volume0,
+      volume1: pairInfo.volume1,
       swap_info: pairInfo.swapInfo,
-      // pair_mint_info: pairInfo.pairMintInfo,
+      pair_mint_info: pairInfo.pairMintInfo,
       created_at: moment(transaction.microTime).toDate(),
     });
   }

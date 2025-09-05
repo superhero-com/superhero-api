@@ -21,7 +21,14 @@ export class DexTokenService {
     orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<DexToken>> {
     const query = this.dexTokenRepository.createQueryBuilder('dexToken');
-
+    const allowedOrderFields = ['pairs_count', 'name', 'symbol', 'created_at'];
+    if (!allowedOrderFields.includes(orderBy)) {
+      orderBy = 'created_at';
+    }
+    const allowedOrderDirections = ['ASC', 'DESC'];
+    if (!allowedOrderDirections.includes(orderDirection)) {
+      orderDirection = 'DESC';
+    }
     if (orderBy) {
       query.orderBy(`dexToken.${orderBy}`, orderDirection);
     }
