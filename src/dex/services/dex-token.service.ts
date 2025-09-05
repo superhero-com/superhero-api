@@ -50,16 +50,26 @@ export class DexTokenService {
       .getOne();
   }
 
-  async getTokenPrice(address: string): Promise<string> {
+  async getTokenPrice(
+    address: string,
+    debug = false,
+  ): Promise<{ price: string }> {
     const pairs = await this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
       .getMany();
-    return this.getTokenPriceFromPairs(address, pairs);
+    return this.getTokenPriceFromPairs(address, pairs, debug);
   }
 
-  getTokenPriceFromPairs(address: string, pairs: Pair[]): string {
+  getTokenPriceFromPairs(
+    address: string,
+    pairs: Pair[],
+    debug = false,
+  ): { price: string; firstPath?: any; paths?: any[] } {
+    if (address === DEX_CONTRACTS.wae) {
+      return { price: '1' };
+    }
     const edges = pairs.map((pair) => {
       return {
         data: pair,
@@ -77,6 +87,10 @@ export class DexTokenService {
       firstPath.token0.address === address
         ? firstPath.ratio0
         : firstPath.ratio1;
-    return price;
+
+    if (debug) {
+      return { price, firstPath, paths };
+    }
+    return { price };
   }
 }

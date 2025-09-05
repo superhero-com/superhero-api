@@ -349,20 +349,29 @@ export class TokensService {
       this.contracts[saleAddress].lastUsedAt = Date.now();
       return this.contracts[saleAddress];
     }
-    const { instance } = await initTokenSale(
-      this.aeSdkService.sdk,
-      saleAddress,
-    );
-    const tokenContractInstance = await instance?.tokenContractInstance();
+    try {
+      const { instance } = await initTokenSale(
+        this.aeSdkService.sdk,
+        saleAddress,
+      );
+      const tokenContractInstance = await instance?.tokenContractInstance();
 
-    this.contracts[saleAddress] = {
-      ...(this.contracts[saleAddress] || {}),
-      instance,
-      tokenContractInstance,
-      lastUsedAt: Date.now(),
-    };
+      this.contracts[saleAddress] = {
+        ...(this.contracts[saleAddress] || {}),
+        instance,
+        tokenContractInstance,
+        lastUsedAt: Date.now(),
+      };
 
-    return this.contracts[saleAddress];
+      return this.contracts[saleAddress];
+    } catch (error: any) {
+      this.logger.error(
+        `getTokenContractsBySaleAddress->error:: ${saleAddress}`,
+        error,
+        error.stack,
+      );
+      return undefined;
+    }
   }
 
   async getTokeLivePrice(token: Token): Promise<

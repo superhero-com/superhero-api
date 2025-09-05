@@ -104,7 +104,10 @@ export class DexTokensController {
         `DEX token with address ${address} not found`,
       );
     }
-    const data = await this.dexTokenService.getTokenPrice(address);
-    return { token, data };
+    const { price, ...data } = await this.dexTokenService.getTokenPrice(
+      address,
+      true,
+    );
+    return { price: price, token, ...data };
   }
 }

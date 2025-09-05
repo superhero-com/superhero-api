@@ -21,6 +21,7 @@ import { PairTransaction } from '../entities/pair-transaction.entity';
 import { Pair } from '../entities/pair.entity';
 import { PairService } from './pair.service';
 import BigNumber from 'bignumber.js';
+import { DexTokenService } from './dex-token.service';
 
 @Injectable()
 export class DexSyncService {
@@ -36,6 +37,7 @@ export class DexSyncService {
 
     private aeSdkService: AeSdkService,
     private pairService: PairService,
+    private dexTokenService: DexTokenService,
   ) {
     //
   }
@@ -53,7 +55,30 @@ export class DexSyncService {
       aci: factoryInterface,
       address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
     });
-    // this.syncDexTokens();
+    this.sync();
+  }
+
+  async sync() {
+    await this.syncDexTokens();
+    await this.syncTokenPrices();
+  }
+
+  async syncTokenPrices() {
+    const pairs = await this.dexPairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .getMany();
+    const tokens = await this.dexTokenRepository.find();
+    for (const token of tokens) {
+      const { price } = this.dexTokenService.getTokenPriceFromPairs(
+        token.address,
+        pairs,
+      );
+      await this.dexTokenRepository.update(token.address, {
+        price_ae: price,
+      });
+    }
   }
 
   async syncDexTokens() {

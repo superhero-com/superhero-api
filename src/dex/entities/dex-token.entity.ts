@@ -23,6 +23,11 @@ export class DexToken {
   })
   pairs_count: number;
 
+  @Column({
+    default: '0',
+  })
+  price_ae: string;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
