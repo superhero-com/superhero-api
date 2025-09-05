@@ -20,7 +20,7 @@ export class DexTokenService {
 
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
-  ) { }
+  ) {}
 
   async findAll(
     options: IPaginationOptions,
@@ -50,12 +50,16 @@ export class DexTokenService {
       .getOne();
   }
 
-  async getTokenPrice(address: string): Promise<any> {
+  async getTokenPrice(address: string): Promise<string> {
     const pairs = await this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
       .getMany();
+    return this.getTokenPriceFromPairs(address, pairs);
+  }
+
+  getTokenPriceFromPairs(address: string, pairs: Pair[]): string {
     const edges = pairs.map((pair) => {
       return {
         data: pair,
@@ -64,12 +68,15 @@ export class DexTokenService {
       };
     });
     const paths = getPaths(address, DEX_CONTRACTS.wae, edges);
-    const price = paths.reduce((acc, path) => {
-      return acc.add(path.reduce((acc, p) => {
-        return acc.add(p.ratio0.div(p.ratio1));
-      }, new BigNumber(0)));
-    }, new BigNumber(0));
-    // const priceData = await this.aePricingService.getPriceData(price);
-    return { price, paths,  };
+    const firstPath: any = paths?.[0]?.[0];
+
+    if (!firstPath) {
+      return null;
+    }
+    const price =
+      firstPath.token0.address === address
+        ? firstPath.ratio0
+        : firstPath.ratio1;
+    return price;
   }
 }
