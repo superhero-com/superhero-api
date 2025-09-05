@@ -41,7 +41,11 @@ export class PairService {
 
     if (orderBy) {
       if (orderBy === 'transactions_count') {
-        query.orderBy('pair.transactions_count', orderDirection);
+        // Order by the count of related transactions using a subquery
+        query.orderBy(
+          `(SELECT COUNT(pt.tx_hash) FROM pair_transactions pt WHERE pt.pair_address = pair.address)`,
+          orderDirection,
+        );
       } else {
         query.orderBy(`pair.${orderBy}`, orderDirection);
       }
