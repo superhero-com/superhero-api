@@ -13,12 +13,13 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
+import moment from 'moment';
 import { Repository } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 import { DexToken } from '../entities/dex-token.entity';
-import { Pair } from '../entities/pair.entity';
 import { PairTransaction } from '../entities/pair-transaction.entity';
-import moment from 'moment';
+import { Pair } from '../entities/pair.entity';
+import { PairService } from './pair.service';
 
 @Injectable()
 export class DexSyncService {
@@ -33,6 +34,7 @@ export class DexSyncService {
     private readonly dexPairTransactionRepository: Repository<PairTransaction>,
 
     private aeSdkService: AeSdkService,
+    private pairService: PairService,
   ) {
     //
   }
@@ -54,6 +56,8 @@ export class DexSyncService {
   }
 
   async syncDexTokens() {
+    // TEMP deleta all pairs
+    await this.dexPairRepository.delete({});
     const config: IMiddlewareRequestConfig = {
       direction: 'forward',
       limit: 100,
@@ -73,16 +77,16 @@ export class DexSyncService {
   async pullDexPairsFromMdw(url: string) {
     const result = await fetchJson(url);
     const data = result?.data ?? [];
-    for (const item of camelcaseKeysDeep(data)) {
+    for (const transaction of camelcaseKeysDeep(data)) {
       if (
-        item.tx.result !== 'ok' ||
-        item.tx.return == 'invalid' ||
-        !item.tx.function
+        transaction.tx.result !== 'ok' ||
+        transaction.tx.return == 'invalid' ||
+        !transaction.tx.function
       ) {
         continue;
       }
       // console.log('--------------------------------');
-      const pairInfo = await this.extractPairInfoFromTransaction(item);
+      const pairInfo = await this.extractPairInfoFromTransaction(transaction);
       if (!pairInfo) {
         // console.log('pairInfo', pairInfo);
         continue;
@@ -90,8 +94,8 @@ export class DexSyncService {
       // console.log('pairInfo', pairInfo.pairAddress);
       // console.log('--------------------------------');
 
-      const pair = await this.saveDexPair(pairInfo);
-      await this.saveDexPairTransaction(pair, item);
+      const pair = await this.saveDexPair(pairInfo, transaction);
+      await this.saveDexPairTransaction(pair, transaction);
     }
     if (result.next) {
       return await this.pullDexPairsFromMdw(
@@ -101,17 +105,17 @@ export class DexSyncService {
     return result;
   }
 
-  async extractPairInfoFromTransaction(item: ITransaction) {
-    console.log('item.tx.function:', item.tx.function);
+  async extractPairInfoFromTransaction(transaction: ITransaction) {
+    console.log('item.tx.function:', transaction.tx.function);
     let decodedEvents = null;
     try {
-      decodedEvents = this.routerContract.$decodeEvents(item.tx.log);
+      decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log);
     } catch (error: any) {
       console.log('routerContract.$decodeEvents error', error?.message);
     }
     if (!decodedEvents) {
       try {
-        decodedEvents = this.factoryContract.$decodeEvents(item.tx.log);
+        decodedEvents = this.factoryContract.$decodeEvents(transaction.tx.log);
         // console.log('factoryContract.$decodeEvents decodedEvents', decodedEvents);
       } catch (error: any) {
         console.log('factoryContract.$decodeEvents error', error?.message);
@@ -125,35 +129,35 @@ export class DexSyncService {
     )?.contract?.address;
     let token0Address = null;
     let token1Address = null;
-    const args = item.tx.arguments;
+    const args = transaction.tx.arguments;
 
     if (
-      item.tx.function === TX_FUNCTIONS.swap_exact_tokens_for_tokens ||
-      item.tx.function === TX_FUNCTIONS.swap_tokens_for_exact_tokens ||
-      item.tx.function === TX_FUNCTIONS.swap_exact_tokens_for_ae ||
-      item.tx.function === TX_FUNCTIONS.swap_tokens_for_exact_ae
+      transaction.tx.function === TX_FUNCTIONS.swap_exact_tokens_for_tokens ||
+      transaction.tx.function === TX_FUNCTIONS.swap_tokens_for_exact_tokens ||
+      transaction.tx.function === TX_FUNCTIONS.swap_exact_tokens_for_ae ||
+      transaction.tx.function === TX_FUNCTIONS.swap_tokens_for_exact_ae
     ) {
       token0Address = args[2].value[0]?.value;
       token1Address = args[2].value[1]?.value;
     } else if (
-      item.tx.function === TX_FUNCTIONS.swap_exact_ae_for_tokens ||
-      item.tx.function === TX_FUNCTIONS.swap_ae_for_exact_tokens
+      transaction.tx.function === TX_FUNCTIONS.swap_exact_ae_for_tokens ||
+      transaction.tx.function === TX_FUNCTIONS.swap_ae_for_exact_tokens
     ) {
       token0Address = args[1].value[0]?.value;
       token1Address = args[1].value[1]?.value;
-    } else if (item.tx.function === TX_FUNCTIONS.add_liquidity) {
+    } else if (transaction.tx.function === TX_FUNCTIONS.add_liquidity) {
       token0Address = args[0].value;
       token1Address = args[1].value;
       // console.log('args::', JSON.stringify(args, null, 2));
-    } else if (item.tx.function === TX_FUNCTIONS.add_liquidity_ae) {
+    } else if (transaction.tx.function === TX_FUNCTIONS.add_liquidity_ae) {
       // this mean add new pair WAE -> Token
       token0Address = DEX_CONTRACTS.wae;
       token1Address = args[0].value;
     } else {
-      // if (item.tx.function?.includes('liquidity')) {
+      // if (transaction.tx.function?.includes('liquidity')) {
       //   return null;
       // }
-      // console.log('item.tx.function:', item.tx.function);
+      // console.log('transaction.tx.function:', transaction.tx.function);
       // console.log('args::', JSON.stringify(args, null, 2));
     }
     if (!token0Address || !token1Address) {
@@ -184,11 +188,14 @@ export class DexSyncService {
     });
   }
 
-  private async saveDexPair(pairInfo: {
-    pairAddress: string;
-    token0: DexToken;
-    token1: DexToken;
-  }) {
+  private async saveDexPair(
+    pairInfo: {
+      pairAddress: string;
+      token0: DexToken;
+      token1: DexToken;
+    },
+    transaction: ITransaction,
+  ) {
     let pair = await this.dexPairRepository.findOne({
       where: { address: pairInfo.pairAddress },
     });
@@ -200,9 +207,13 @@ export class DexSyncService {
       address: pairInfo.pairAddress,
       token0: pairInfo.token0,
       token1: pairInfo.token1,
+      created_at: moment(transaction.microTime).toDate(),
     });
-    await this.updateTokenPairsCount(pairInfo.token0);
-    await this.updateTokenPairsCount(pairInfo.token1);
+    await this.pairService.pullPairData(pair);
+    await Promise.all([
+      this.updateTokenPairsCount(pairInfo.token0),
+      this.updateTokenPairsCount(pairInfo.token1),
+    ]);
     return pair;
   }
 

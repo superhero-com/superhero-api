@@ -1,13 +1,14 @@
-import { DexToken } from './dex-token.entity';
-import { PairTransaction } from './pair-transaction.entity';
 import {
   CreateDateColumn,
   Entity,
-  PrimaryColumn,
-  ManyToOne,
   JoinColumn,
+  ManyToOne,
   OneToMany,
+  PrimaryColumn,
+  Column,
 } from 'typeorm';
+import { DexToken } from './dex-token.entity';
+import { PairTransaction } from './pair-transaction.entity';
 
 @Entity({
   name: 'pairs',
@@ -26,6 +27,24 @@ export class Pair {
 
   @OneToMany(() => PairTransaction, (transaction) => transaction.pair)
   transactions: PairTransaction[];
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  reserve0: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  reserve1: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  total_supply: number;
 
   @CreateDateColumn({
     type: 'timestamp',

@@ -15,7 +15,9 @@ export class PairTransaction {
   @PrimaryColumn()
   tx_hash: string;
 
-  @ManyToOne(() => Pair, (pair) => pair.address)
+  @ManyToOne(() => Pair, (pair) => pair.address, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'pair_address' })
   pair: Pair;
 

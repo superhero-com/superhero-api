@@ -27,6 +27,24 @@ export class PairDto {
   transactions_count: number;
 
   @ApiProperty({
+    description: 'Reserve of the first token',
+    example: '1000000000000000000000000',
+  })
+  reserve0: string;
+
+  @ApiProperty({
+    description: 'Reserve of the second token',
+    example: '1000000000000000000000000',
+  })
+  reserve1: string;
+
+  @ApiProperty({
+    description: 'Total supply of the pair',
+    example: '1000000000000000000000000',
+  })
+  total_supply: string;
+
+  @ApiProperty({
     description: 'Pair creation timestamp',
     example: '2024-01-01T00:00:00.000Z',
   })
