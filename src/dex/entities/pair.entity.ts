@@ -46,6 +46,18 @@ export class Pair {
   })
   total_supply: number;
 
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  ratio0: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  ratio1: number;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

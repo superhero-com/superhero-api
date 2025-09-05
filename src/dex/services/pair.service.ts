@@ -1,18 +1,19 @@
+import { AeSdkService } from '@/ae/ae-sdk.service';
+import { Encoded } from '@aeternity/aepp-sdk';
+import ContractWithMethods, {
+  ContractMethodsBase,
+} from '@aeternity/aepp-sdk/es/contract/Contract';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Pair } from '../entities/pair.entity';
+import BigNumber from 'bignumber.js';
+import pairInterface from 'dex-contracts-v2/build/AedexV2Pair.aci.json';
 import {
   IPaginationOptions,
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
-import { AeSdkService } from '@/ae/ae-sdk.service';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
-import { Encoded } from '@aeternity/aepp-sdk';
-import pairInterface from 'dex-contracts-v2/build/AedexV2Pair.aci.json';
+import { Repository } from 'typeorm';
+import { Pair } from '../entities/pair.entity';
 
 @Injectable()
 export class PairService {
@@ -81,6 +82,8 @@ export class PairService {
     pair.total_supply = total_supply?.toString() || '0';
     pair.reserve0 = reserves.reserve0?.toString() || '0';
     pair.reserve1 = reserves.reserve1?.toString() || '0';
+    pair.ratio0 = new BigNumber(pair.reserve0).div(pair.reserve1).toNumber();
+    pair.ratio1 = new BigNumber(pair.reserve1).div(pair.reserve0).toNumber();
     return this.pairRepository.save(pair);
   }
 }

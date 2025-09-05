@@ -20,6 +20,7 @@ import { DexToken } from '../entities/dex-token.entity';
 import { PairTransaction } from '../entities/pair-transaction.entity';
 import { Pair } from '../entities/pair.entity';
 import { PairService } from './pair.service';
+import BigNumber from 'bignumber.js';
 
 @Injectable()
 export class DexSyncService {
@@ -95,7 +96,7 @@ export class DexSyncService {
       // console.log('--------------------------------');
 
       const pair = await this.saveDexPair(pairInfo, transaction);
-      await this.saveDexPairTransaction(pair, transaction);
+      await this.saveDexPairTransaction(pair, transaction, pairInfo);
     }
     if (result.next) {
       return await this.pullDexPairsFromMdw(
@@ -106,7 +107,7 @@ export class DexSyncService {
   }
 
   async extractPairInfoFromTransaction(transaction: ITransaction) {
-    console.log('item.tx.function:', transaction.tx.function);
+    // console.log('transaction.tx.function:', transaction.tx.function);
     let decodedEvents = null;
     try {
       decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log);
@@ -164,10 +165,37 @@ export class DexSyncService {
       return null;
     }
 
+    let swapInfo = null;
+    const swapInfoData = decodedEvents.find(
+      (event) => event.name === 'SwapTokens',
+    )?.args;
+    if (swapInfoData) {
+      // console.log('swapInfoData::', swapInfoData);
+      const swapped = swapInfoData[2].split('|');
+      swapInfo = {
+        amount0In: swapped[0],
+        amount1In: swapped[1],
+        amount0Out: swapped[2],
+        amount1Out: swapped[3],
+        to: swapped[4],
+      };
+    }
+
+    let reserve0,
+      reserve1 = 0;
+
+    const syncInfoData = decodedEvents.find(
+      (event) => event.name === 'Sync',
+    )?.args;
+    if (syncInfoData) {
+      reserve0 = syncInfoData[0]?.toString();
+      reserve1 = syncInfoData[1]?.toString();
+    }
+
     const token0 = await this.getOrCreateToken(token0Address);
     const token1 = await this.getOrCreateToken(token1Address);
 
-    return { pairAddress, token0, token1 };
+    return { pairAddress, token0, token1, swapInfo, reserve0, reserve1 };
   }
 
   private async getOrCreateToken(address: string) {
@@ -232,30 +260,47 @@ export class DexSyncService {
     });
   }
 
-  private async saveDexPairTransaction(pair: Pair, item: ITransaction) {
+  private async saveDexPairTransaction(
+    pair: Pair,
+    transaction: ITransaction,
+    pairInfo: {
+      pairAddress: string;
+      reserve0: number;
+      reserve1: number;
+      token0: DexToken;
+      token1: DexToken;
+      swapInfo: any;
+    },
+  ) {
     const existingTransaction = await this.dexPairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .where('pairTransaction.tx_hash = :tx_hash', {
-        tx_hash: item.hash,
+        tx_hash: transaction.hash,
       })
       .getOne();
     if (existingTransaction) {
-      await this.dexPairTransactionRepository.update(
-        existingTransaction.tx_hash,
-        {
-          pair: pair,
-          tx_type: item.tx.function,
-          tx_hash: item.hash,
-          created_at: moment(item.microTime).toDate(),
-        },
-      );
       return existingTransaction;
     }
+
     await this.dexPairTransactionRepository.save({
       pair: pair,
-      tx_type: item.tx.function,
-      tx_hash: item.hash,
-      created_at: moment(item.microTime).toDate(),
+      tx_type: transaction.tx.function,
+      tx_hash: transaction.hash,
+      block_height: transaction.blockHeight,
+      reserve0: pairInfo.reserve0,
+      reserve1: pairInfo.reserve1,
+      total_supply: new BigNumber(pairInfo.reserve0)
+        .plus(pairInfo.reserve1)
+        .toNumber(),
+      ratio0: new BigNumber(pairInfo.reserve0)
+        .div(pairInfo.reserve1)
+        .toNumber(),
+      ratio1: new BigNumber(pairInfo.reserve1)
+        .div(pairInfo.reserve0)
+        .toNumber(),
+      swap_info: pairInfo.swapInfo,
+      // pair_mint_info: pairInfo.pairMintInfo,
+      created_at: moment(transaction.microTime).toDate(),
     });
   }
 }
