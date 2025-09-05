@@ -29,6 +29,12 @@ export class PairsController {
     required: false,
     description: 'Search pairs by token name or symbol',
   })
+  @ApiQuery({
+    name: 'token_address',
+    type: 'string',
+    required: false,
+    description: 'Search by token address',
+  })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -47,6 +53,7 @@ export class PairsController {
   @Get()
   async listAll(
     @Query('search') search = undefined,
+    @Query('token_address') token_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'created_at',
@@ -57,6 +64,7 @@ export class PairsController {
       orderBy,
       orderDirection,
       search,
+      token_address,
     );
   }
 

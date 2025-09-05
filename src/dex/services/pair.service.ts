@@ -33,6 +33,7 @@ export class PairService {
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
     search?: string,
+    token_address?: string,
   ): Promise<Pagination<Pair>> {
     const query = this.pairRepository
       .createQueryBuilder('pair')
@@ -57,6 +58,15 @@ export class PairService {
         '(token0.name ILIKE :search OR token0.symbol ILIKE :search OR token1.name ILIKE :search OR token1.symbol ILIKE :search)',
         {
           search: `%${search}%`,
+        },
+      );
+    }
+
+    if (token_address) {
+      query.andWhere(
+        '(token0.address = :token_address OR token1.address = :token_address)',
+        {
+          token_address,
         },
       );
     }

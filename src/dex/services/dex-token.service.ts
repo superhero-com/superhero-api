@@ -7,13 +7,20 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
+import { Pair } from '../entities/pair.entity';
+import { getPaths } from '../utils/paths';
+import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import BigNumber from 'bignumber.js';
 
 @Injectable()
 export class DexTokenService {
   constructor(
     @InjectRepository(DexToken)
     private readonly dexTokenRepository: Repository<DexToken>,
-  ) {}
+
+    @InjectRepository(Pair)
+    private readonly pairRepository: Repository<Pair>,
+  ) { }
 
   async findAll(
     options: IPaginationOptions,
@@ -41,5 +48,28 @@ export class DexTokenService {
       .createQueryBuilder('dexToken')
       .where('dexToken.address = :address', { address })
       .getOne();
+  }
+
+  async getTokenPrice(address: string): Promise<any> {
+    const pairs = await this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .getMany();
+    const edges = pairs.map((pair) => {
+      return {
+        data: pair,
+        t0: pair.token0.address,
+        t1: pair.token1.address,
+      };
+    });
+    const paths = getPaths(address, DEX_CONTRACTS.wae, edges);
+    const price = paths.reduce((acc, path) => {
+      return acc.add(path.reduce((acc, p) => {
+        return acc.add(p.ratio0.div(p.ratio1));
+      }, new BigNumber(0)));
+    }, new BigNumber(0));
+    // const priceData = await this.aePricingService.getPriceData(price);
+    return { price, paths,  };
   }
 }

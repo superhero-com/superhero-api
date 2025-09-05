@@ -17,11 +17,22 @@ import {
 import { DexTokenService } from '../services/dex-token.service';
 import { DexTokenDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { Pair } from '../entities/pair.entity';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { getPaths } from '../utils/paths';
+import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
 export class DexTokensController {
-  constructor(private readonly dexTokenService: DexTokenService) {}
+  constructor(
+    private readonly dexTokenService: DexTokenService,
+    @InjectRepository(Pair)
+    private readonly pairRepository: Repository<Pair>,
+  ) {
+    //
+  }
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
@@ -72,5 +83,28 @@ export class DexTokensController {
       );
     }
     return token;
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token contract address',
+  })
+  @ApiOperation({
+    operationId: 'getTokenPrice',
+    summary: 'Get DEX token price',
+    description: 'Retrieve a specific DEX token by its contract address',
+  })
+  @ApiOkResponse({ type: DexTokenDto })
+  @Get(':address/price')
+  async getTokenPrice(@Param('address') address: string) {
+    const token = await this.dexTokenService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException(
+        `DEX token with address ${address} not found`,
+      );
+    }
+    const data = await this.dexTokenService.getTokenPrice(address);
+    return { token, data };
   }
 }
