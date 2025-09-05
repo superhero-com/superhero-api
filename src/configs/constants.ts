@@ -92,6 +92,8 @@ export const TX_FUNCTIONS = {
 
   add_liquidity: 'add_liquidity',
   add_liquidity_ae: 'add_liquidity_ae',
+  remove_liquidity_ae: 'remove_liquidity_ae',
+  remove_liquidity: 'remove_liquidity',
 } as const;
 
 export const WAIT_TIME_WHEN_REQUEST_FAILED = 3000; // 3 seconds
