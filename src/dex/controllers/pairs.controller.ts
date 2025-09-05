@@ -23,6 +23,12 @@ import { ApiOkResponsePaginated } from '@/utils/api-type';
 export class PairsController {
   constructor(private readonly pairService: PairService) {}
 
+  @ApiQuery({
+    name: 'search',
+    type: 'string',
+    required: false,
+    description: 'Search pairs by token name or symbol',
+  })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
@@ -35,17 +41,23 @@ export class PairsController {
     operationId: 'listAllPairs',
     summary: 'Get all pairs',
     description:
-      'Retrieve a paginated list of all DEX pairs with optional sorting',
+      'Retrieve a paginated list of all DEX pairs with optional sorting and search by token name or symbol',
   })
   @ApiOkResponsePaginated(PairDto)
   @Get()
   async listAll(
+    @Query('search') search = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
-    return this.pairService.findAll({ page, limit }, orderBy, orderDirection);
+    return this.pairService.findAll(
+      { page, limit },
+      orderBy,
+      orderDirection,
+      search,
+    );
   }
 
   @ApiParam({

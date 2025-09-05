@@ -32,6 +32,7 @@ export class PairService {
     options: IPaginationOptions,
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
+    search?: string,
   ): Promise<Pagination<Pair>> {
     const query = this.pairRepository
       .createQueryBuilder('pair')
@@ -49,6 +50,15 @@ export class PairService {
       } else {
         query.orderBy(`pair.${orderBy}`, orderDirection);
       }
+    }
+
+    if (search) {
+      query.andWhere(
+        '(token0.name ILIKE :search OR token0.symbol ILIKE :search OR token1.name ILIKE :search OR token1.symbol ILIKE :search)',
+        {
+          search: `%${search}%`,
+        },
+      );
     }
 
     return paginate(query, options);
