@@ -17,11 +17,15 @@ import {
 import { PairService } from '../services/pair.service';
 import { PairDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { PairHistoryService } from '../services/pair-history.service';
 
 @Controller('dex/pairs')
 @ApiTags('DEX')
 export class PairsController {
-  constructor(private readonly pairService: PairService) {}
+  constructor(
+    private readonly pairService: PairService,
+    private readonly pairHistoryService: PairHistoryService,
+  ) {}
 
   @ApiQuery({
     name: 'search',
@@ -86,5 +90,42 @@ export class PairsController {
       throw new NotFoundException(`Pair with address ${address} not found`);
     }
     return pair;
+  }
+
+  @ApiOperation({ operationId: 'getPaginatedHistory' })
+  @ApiQuery({
+    name: 'interval',
+    type: 'number',
+    description: 'Interval type in seconds, default is 3600 (1 hour)',
+    required: false,
+  })
+  @ApiQuery({
+    name: 'convertTo',
+    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    required: false,
+  })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @Get(':address/history')
+  async getPaginatedHistory(
+    @Param('address') address: string,
+    @Query('interval') interval: number = 3600,
+    @Query('convertTo') convertTo: string = 'ae',
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+  ) {
+    const pair = await this.pairService.findByAddress(address);
+    return this.pairHistoryService.getPaginatedHistoricalData({
+      pair,
+      interval,
+      convertTo,
+      page,
+      limit,
+    });
   }
 }

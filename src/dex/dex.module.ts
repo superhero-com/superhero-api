@@ -12,6 +12,7 @@ import { DexSyncService } from './services/dex-sync.service';
 import { DexTokenService } from './services/dex-token.service';
 import { PairService } from './services/pair.service';
 import { PairTransactionService } from './services/pair-transaction.service';
+import { PairHistoryService } from './services/pair-history.service';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PairTransactionService } from './services/pair-transaction.service';
     DexTokenService,
     PairTransactionService,
     DexSyncService,
+    PairHistoryService,
   ],
   exports: [PairService, DexTokenService, PairTransactionService],
   controllers: [

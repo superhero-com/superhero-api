@@ -77,6 +77,24 @@ export class PairTransaction {
   })
   volume1: number;
 
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  market_cap0: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  market_cap1: number;
+
+  @Column({
+    default: 0,
+    type: 'numeric',
+  })
+  market_cap: number; // Pool Market Cap
+
   // Swap related Info jsonb
   @Column({
     type: 'jsonb',
