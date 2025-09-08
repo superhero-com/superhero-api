@@ -75,7 +75,11 @@ export class TransactionService {
       /**
        * if the token doesn't exists get token will create it.
        */
-      token = await this.tokenService.getToken(saleAddress);
+      try {
+        token = await this.tokenService.getToken(saleAddress);
+      } catch (error) {
+        this.logger.error(`Error getting token ${saleAddress}`, error);
+      }
     }
 
     if (!token) {
