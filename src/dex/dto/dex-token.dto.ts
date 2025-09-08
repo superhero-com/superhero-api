@@ -36,4 +36,10 @@ export class DexTokenDto {
     example: '2024-01-01T00:00:00.000Z',
   })
   created_at: Date;
+
+  @ApiProperty({
+    description: 'Token is AE',
+    example: false,
+  })
+  is_ae: boolean;
 }

@@ -28,6 +28,11 @@ export class DexToken {
   })
   price_ae: string;
 
+  @Column({
+    default: false,
+  })
+  is_ae: boolean;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

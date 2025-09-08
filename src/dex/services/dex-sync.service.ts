@@ -287,6 +287,7 @@ export class DexSyncService {
       name: tokenData.name,
       symbol: tokenData.symbol,
       decimals: tokenData.decimals,
+      is_ae: tokenData.address === DEX_CONTRACTS.wae,
     });
   }
 
