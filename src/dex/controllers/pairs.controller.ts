@@ -100,6 +100,11 @@ export class PairsController {
     required: false,
   })
   @ApiQuery({
+    name: 'from_token',
+    enum: ['token0', 'token1'],
+    required: false,
+  })
+  @ApiQuery({
     name: 'convertTo',
     enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
     required: false,
@@ -115,6 +120,7 @@ export class PairsController {
   async getPaginatedHistory(
     @Param('address') address: string,
     @Query('interval') interval: number = 3600,
+    @Query('from_token') fromToken: string = 'token0',
     @Query('convertTo') convertTo: string = 'ae',
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
@@ -123,6 +129,7 @@ export class PairsController {
     return this.pairHistoryService.getPaginatedHistoricalData({
       pair,
       interval,
+      fromToken,
       convertTo,
       page,
       limit,

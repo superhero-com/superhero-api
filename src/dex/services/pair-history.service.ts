@@ -17,6 +17,7 @@ export interface IGetPaginatedHistoricalDataProps {
   page: number;
   limit: number;
   convertTo?: string;
+  fromToken?: string;
 }
 export interface IGetHistoricalDataProps {
   pair: Pair;
@@ -62,12 +63,12 @@ export class PairHistoryService {
   async getPaginatedHistoricalData(
     props: IGetPaginatedHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
-    const { pair, interval, page, limit, convertTo = 'ae' } = props;
+    const { fromToken, pair, interval, page, limit, convertTo = 'ae' } = props;
     const offset = (page - 1) * limit;
 
     const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-    const value = '0';
+    const value = fromToken === 'token0' ? '0' : '1';
     const rawResults = await queryRunner.query(
       `
         WITH transactions_in_intervals AS (
