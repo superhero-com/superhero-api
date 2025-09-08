@@ -92,6 +92,39 @@ export class PairsController {
     return pair;
   }
 
+  @ApiParam({
+    name: 'from_token',
+    type: 'string',
+    description: 'Token address',
+  })
+  @ApiParam({
+    name: 'to_token',
+    type: 'string',
+    description: 'Token address',
+  })
+  @ApiOperation({
+    operationId: 'getPairByFromTokenAndToToken',
+    summary: 'Get pair by from token and to token',
+    description: 'Retrieve a specific pair by its contract address',
+  })
+  @ApiOkResponse({ type: PairDto })
+  @Get('from/:from_token/to/:to_token')
+  async getPairByFromTokenAndToToken(
+    @Param('from_token') fromToken: string,
+    @Param('to_token') toToken: string,
+  ) {
+    const pair = await this.pairService.findByFromTokenAndToToken(
+      fromToken,
+      toToken,
+    );
+    if (!pair) {
+      throw new NotFoundException(
+        `Pair with from token ${fromToken} and to token ${toToken} not found`,
+      );
+    }
+    return pair;
+  }
+
   @ApiOperation({ operationId: 'getPaginatedHistory' })
   @ApiQuery({
     name: 'interval',

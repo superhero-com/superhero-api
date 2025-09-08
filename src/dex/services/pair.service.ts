@@ -84,6 +84,21 @@ export class PairService {
       .getOne();
   }
 
+  async findByFromTokenAndToToken(
+    fromToken: string,
+    toToken: string,
+  ): Promise<Pair> {
+    return this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .where(
+        '(token0.address = :fromToken AND token1.address = :toToken) OR (token0.address = :toToken AND token1.address = :fromToken)',
+        { fromToken, toToken },
+      )
+      .getOne();
+  }
+
   async getPairContract(pair: Pair) {
     if (this.contracts[pair.address]) {
       return this.contracts[pair.address];
