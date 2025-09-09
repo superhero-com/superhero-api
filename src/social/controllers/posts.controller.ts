@@ -45,6 +45,12 @@ export class PostsController {
     required: false,
     description: 'Search term to filter posts by content or topics',
   })
+  @ApiQuery({
+    name: 'account_address',
+    type: 'string',
+    required: false,
+    description: 'Filter posts by account address',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -59,6 +65,7 @@ export class PostsController {
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('search') search?: string,
+    @Query('account_address') account_address?: string,
   ) {
     const query = this.postRepository
       .createQueryBuilder('post')
@@ -71,6 +78,12 @@ export class PostsController {
         '(post.content ILIKE :searchTerm OR CAST(post.topics AS TEXT) ILIKE :searchTerm)',
         { searchTerm },
       );
+    }
+
+    if (account_address) {
+      query.where('post.sender_address = :account_address', {
+        account_address,
+      });
     }
 
     // Add ordering
