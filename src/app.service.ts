@@ -10,6 +10,7 @@ import { SyncTransactionsService } from './bcl/services/sync-transactions.servic
 import { PostService } from './social/services/post.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
 import { ITransaction } from './utils/types';
+import { DexSyncService } from './dex/services/dex-sync.service';
 
 @Injectable()
 export class AppService {
@@ -20,6 +21,7 @@ export class AppService {
     private websocketService: WebSocketService,
     private syncTransactionsService: SyncTransactionsService,
     private postService: PostService,
+    private dexSyncService: DexSyncService,
 
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
@@ -48,6 +50,7 @@ export class AppService {
         if (!syncedTransactions.includes(transaction.hash)) {
           this.syncTransactionsService.handleLiveTransaction(transaction);
           this.postService.handleLiveTransaction(transaction);
+          this.dexSyncService.handleLiveTransaction(transaction);
         }
         syncedTransactions.push(transaction.hash);
 

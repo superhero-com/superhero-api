@@ -54,6 +54,17 @@ export class PostService {
     }
   }
 
+  async saveTransaction(transaction: ITransaction) {
+    if (
+      !this.validateTransaction(transaction) ||
+      !isContractSupported(transaction.tx.contractId)
+    ) {
+      return;
+    }
+    const contract = getContractByAddress(transaction.tx.contractId);
+    return this.savePostFromTransaction(transaction, contract);
+  }
+
   async handleLiveTransaction(
     transaction: ITransaction,
   ): Promise<IPostProcessingResult> {

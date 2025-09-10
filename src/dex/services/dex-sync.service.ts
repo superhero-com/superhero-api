@@ -63,6 +63,13 @@ export class DexSyncService {
     await this.syncTokenPrices();
   }
 
+  async handleLiveTransaction(transaction: ITransaction) {
+    if (transaction.tx.contractId !== DEX_CONTRACTS.router) {
+      return;
+    }
+    await this.saveTransaction(transaction);
+  }
+
   async syncTokenPrices() {
     const pairs = await this.dexPairRepository
       .createQueryBuilder('pair')
@@ -113,17 +120,7 @@ export class DexSyncService {
       ) {
         continue;
       }
-      // console.log('--------------------------------');
-      const pairInfo = await this.extractPairInfoFromTransaction(transaction);
-      if (!pairInfo) {
-        // console.log('pairInfo', pairInfo);
-        continue;
-      }
-      // console.log('pairInfo', pairInfo.pairAddress);
-      // console.log('--------------------------------');
-
-      const pair = await this.saveDexPair(pairInfo, transaction);
-      await this.saveDexPairTransaction(pair, transaction, pairInfo);
+      await this.saveTransaction(transaction);
     }
     if (result.next) {
       return await this.pullDexPairsFromMdw(
@@ -131,6 +128,20 @@ export class DexSyncService {
       );
     }
     return result;
+  }
+
+  async saveTransaction(transaction: ITransaction): Promise<boolean> {
+    if (transaction.tx.contractId !== DEX_CONTRACTS.router) {
+      return;
+    }
+    const pairInfo = await this.extractPairInfoFromTransaction(transaction);
+    if (!pairInfo) {
+      return;
+    }
+
+    const pair = await this.saveDexPair(pairInfo, transaction);
+    await this.saveDexPairTransaction(pair, transaction, pairInfo);
+    return true;
   }
 
   async extractPairInfoFromTransaction(transaction: ITransaction) {

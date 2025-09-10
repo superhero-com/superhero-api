@@ -27,7 +27,12 @@ import { PairHistoryService } from './services/pair-history.service';
     DexSyncService,
     PairHistoryService,
   ],
-  exports: [PairService, DexTokenService, PairTransactionService],
+  exports: [
+    PairService,
+    DexTokenService,
+    PairTransactionService,
+    DexSyncService,
+  ],
   controllers: [
     PairsController,
     DexTokensController,
