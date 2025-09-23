@@ -10,12 +10,12 @@ export const NETWORK_ID_MAINNET = 'ae_mainnet';
 export const NETWORK_ID_TESTNET = 'ae_uat';
 
 export const NETWORK_MAINNET: INetwork = {
-  url: 'https://mdw.wordcraft.fun',
+  url: 'https://mainnet.aeternity.io',
   networkId: NETWORK_ID_MAINNET,
-  middlewareUrl: 'https://mdw.wordcraft.fun/mdw',
+  middlewareUrl: 'https://mainnet.aeternity.io/mdw',
   explorerUrl: 'https://aescan.io',
   compilerUrl: 'https://v7.compiler.aepps.com',
-  websocketUrl: 'wss://mdw.wordcraft.fun/mdw/v2/websocket',
+  websocketUrl: 'wss://mainnet.aeternity.io/mdw/v2/websocket',
   name: 'Mainnet',
 };
 
