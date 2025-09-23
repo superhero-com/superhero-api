@@ -67,7 +67,14 @@ export class DexSyncService {
     if (transaction.tx.contractId !== DEX_CONTRACTS.router) {
       return;
     }
-    await this.saveTransaction(transaction);
+    const pairTransaction = await this.saveTransaction(transaction);
+    if (!pairTransaction) {
+      return;
+    }
+    const pairInfo = await this.pairService.findByAddress(
+      pairTransaction.pair.address,
+    );
+    await this.pairService.pullPairData(pairInfo);
   }
 
   async syncTokenPrices() {
@@ -130,7 +137,7 @@ export class DexSyncService {
     return result;
   }
 
-  async saveTransaction(transaction: ITransaction): Promise<boolean> {
+  async saveTransaction(transaction: ITransaction): Promise<PairTransaction> {
     if (transaction.tx.contractId !== DEX_CONTRACTS.router) {
       return;
     }
@@ -140,8 +147,7 @@ export class DexSyncService {
     }
 
     const pair = await this.saveDexPair(pairInfo, transaction);
-    await this.saveDexPairTransaction(pair, transaction, pairInfo);
-    return true;
+    return await this.saveDexPairTransaction(pair, transaction, pairInfo);
   }
 
   async extractPairInfoFromTransaction(transaction: ITransaction) {
@@ -360,7 +366,7 @@ export class DexSyncService {
       swapInfo: any;
       pairMintInfo: any;
     },
-  ) {
+  ): Promise<PairTransaction> {
     const existingTransaction = await this.dexPairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .where('pairTransaction.tx_hash = :tx_hash', {
@@ -371,7 +377,7 @@ export class DexSyncService {
       return existingTransaction;
     }
 
-    await this.dexPairTransactionRepository.save({
+    return this.dexPairTransactionRepository.save({
       pair: pair,
       account_address: transaction.tx.callerId,
       tx_type: transaction.tx.function,
