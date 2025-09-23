@@ -36,6 +36,7 @@ export class DexTokensController {
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({
     name: 'order_by',
     enum: ['pairs_count', 'name', 'symbol', 'created_at'],
@@ -53,11 +54,13 @@ export class DexTokensController {
   async listAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+    @Query('search', new DefaultValuePipe(''), ParseIntPipe) search = '',
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
     return this.dexTokenService.findAll(
       { page, limit },
+      search,
       orderBy,
       orderDirection,
     );

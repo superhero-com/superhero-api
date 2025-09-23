@@ -24,6 +24,7 @@ export class DexTokenService {
 
   async findAll(
     options: IPaginationOptions,
+    search: string = '',
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<DexToken>> {
@@ -38,6 +39,12 @@ export class DexTokenService {
     }
     if (orderBy) {
       query.orderBy(`dexToken.${orderBy}`, orderDirection);
+    }
+
+    if (search) {
+      query.andWhere('dexToken.name ILIKE :search', {
+        search: `%${search}%`,
+      });
     }
 
     return paginate(query, options);
