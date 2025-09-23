@@ -54,7 +54,7 @@ export class DexTokensController {
   async listAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-    @Query('search', new DefaultValuePipe(''), ParseIntPipe) search = '',
+    @Query('search') search = '',
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
