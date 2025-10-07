@@ -53,6 +53,11 @@ export class Post {
   @Column()
   total_comments: number;
 
+  @Column({
+    default: false,
+  })
+  is_hidden: boolean;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

@@ -9,6 +9,16 @@ export class Account {
   @PrimaryColumn()
   address: string;
 
+  @Column({
+    nullable: true,
+  })
+  bio: string;
+
+  @Column({
+    nullable: true,
+  })
+  chain_name: string;
+
   /**
    * Total volume of the account
    */
