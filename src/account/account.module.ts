@@ -9,7 +9,7 @@ import { AccountsController } from './controllers/accounts.controller';
 @Module({
   imports: [AeModule, TransactionsModule, TypeOrmModule.forFeature([Account])],
   providers: [AccountService],
-  exports: [],
+  exports: [TypeOrmModule],
   controllers: [AccountsController],
 })
 export class AccountModule {

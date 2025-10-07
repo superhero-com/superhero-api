@@ -5,9 +5,15 @@ import { Post } from './entities/post.entity';
 import { PostService } from './services/post.service';
 import { TransactionsModule } from '@/transactions/transactions.module';
 import { PostsController } from './controllers/posts.controller';
+import { AccountModule } from '@/account/account.module';
 
 @Module({
-  imports: [AeModule, TransactionsModule, TypeOrmModule.forFeature([Post])],
+  imports: [
+    AeModule,
+    AccountModule,
+    TransactionsModule,
+    TypeOrmModule.forFeature([Post]),
+  ],
   providers: [PostService],
   exports: [PostService],
   controllers: [PostsController],

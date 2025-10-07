@@ -34,6 +34,7 @@ export interface ICreatePostData {
   tx_args: any[];
   created_at: Date;
   post_id?: string;
+  is_hidden?: boolean;
 }
 
 /**
@@ -82,6 +83,16 @@ export interface ICommentInfo {
   isComment: boolean;
   parentPostId?: string;
   commentArgument?: any;
+}
+
+export interface IPostTypeInfo {
+  isComment?: boolean;
+  parentPostId?: string;
+  isBioUpdate?: boolean;
+  isBclSale?: boolean;
+  isBclTx?: boolean;
+  isBclGain?: boolean;
+  isHidden?: boolean;
 }
 
 /**

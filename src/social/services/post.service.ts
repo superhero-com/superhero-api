@@ -25,8 +25,10 @@ import {
   IMiddlewareRequestConfig,
   ICommentInfo,
   ICommentProcessingResult,
+  IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
+import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
@@ -36,6 +38,9 @@ export class PostService {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+
+    @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
   ) {
     this.logger.log('PostService initialized');
   }
@@ -307,6 +312,7 @@ export class PostService {
     return posts;
   }
 
+  // 1
   async savePostFromTransaction(
     transaction: ITransaction,
     contract: IPostContract,
@@ -319,7 +325,45 @@ export class PostService {
     }
 
     const txHash = transaction.hash;
-    const commentInfo = this.detectComment(transaction);
+    /**
+     * Handle different post type:
+     * [
+        {
+            "title": "Commnet on a Post",
+            "media": [
+                "comment:{post_id}"
+            ]
+        },
+        {
+            "title": "My new bio",
+            "media": [
+                "bio-update",
+                "hidden"
+            ]
+        },
+        {
+            "title": "See my new tokens",
+            "media": [
+                "bcl:{sale_address}"
+            ]
+        },
+        {
+            "title": "See my new tokens",
+            "media": [
+                "bcl-tx:{tx_hash}"
+            ]
+        },
+        {
+            "title": "I've made 10% gain on token x",
+            "media": [
+                "bcl-tx:{tx_hash}"
+            ]
+        }
+    ]
+
+     */
+    const postTypeInfo = this.detectPostType(transaction);
+    // const commentInfo = this.detectComment(transaction);
 
     try {
       // Check if post already exists
@@ -328,10 +372,10 @@ export class PostService {
       });
 
       // Handle existing post that needs to be converted to comment
-      if (existingPost && commentInfo.isComment && !existingPost.post_id) {
+      if (existingPost && postTypeInfo.isComment && !existingPost.post_id) {
         const result = await this.processExistingPostAsComment(
           existingPost,
-          commentInfo,
+          postTypeInfo,
           txHash,
         );
 
@@ -363,17 +407,38 @@ export class PostService {
         return null;
       }
 
+      // Update or create the user account
+      if (postTypeInfo.isBioUpdate) {
+        try {
+          const account = await this.accountRepository.findOne({
+            where: { address: transaction.tx.callerId },
+          });
+          if (account) {
+            await this.accountRepository.update(account.address, {
+              bio: content,
+            });
+          } else {
+            await this.accountRepository.save({
+              address: transaction.tx.callerId,
+              bio: content,
+            });
+          }
+        } catch (error) {
+          this.logger.error('Error updating or creating account', error);
+        }
+      }
+
       // For new comments, validate parent post exists with retry logic
-      if (commentInfo.isComment && commentInfo.parentPostId) {
+      if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
         const parentPostExists = await this.validateParentPost(
-          commentInfo.parentPostId,
+          postTypeInfo.parentPostId,
         );
         if (!parentPostExists) {
           this.logger.warn(
             'Cannot create comment: parent post not found after retries',
             {
               txHash,
-              parentPostId: commentInfo.parentPostId,
+              parentPostId: postTypeInfo.parentPostId,
             },
           );
           // Still create the comment but mark it as orphaned for later processing
@@ -400,13 +465,14 @@ export class PostService {
         total_comments: 0,
         tx_args: transaction.tx.arguments,
         created_at: moment(transaction.microTime).toDate(),
-        post_id: commentInfo.isComment ? commentInfo.parentPostId : null,
+        post_id: postTypeInfo.isComment ? postTypeInfo.parentPostId : null,
+        is_hidden: postTypeInfo.isHidden,
       };
 
       this.logger.debug('Creating new post', {
         txHash,
         postId: postData.id,
-        isComment: commentInfo.isComment,
+        isComment: postTypeInfo.isComment,
         parentPostId: postData.post_id,
         topicsCount: postData.topics.length,
         mediaCount: postData.media.length,
@@ -421,14 +487,14 @@ export class PostService {
       );
 
       // Update parent post comment count if this is a comment
-      if (commentInfo.isComment && commentInfo.parentPostId) {
-        await this.updatePostCommentCount(commentInfo.parentPostId);
+      if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
+        await this.updatePostCommentCount(postTypeInfo.parentPostId);
       }
 
       this.logger.log('Post saved successfully', {
         txHash,
         postId: post.id,
-        isComment: commentInfo.isComment,
+        isComment: postTypeInfo.isComment,
         parentPostId: postData.post_id,
         contractAddress: contract.contractAddress,
       });
@@ -497,8 +563,56 @@ export class PostService {
     return `${transaction.hash.slice(-8)}_v${contract.version}`;
   }
 
+  private detectPostType(transaction: ITransaction): IPostTypeInfo | null {
+    if (!transaction?.tx?.arguments?.[1]?.value) {
+      return null;
+    }
+    const argument = transaction.tx.arguments[1];
+
+    const postTypeInfo: IPostTypeInfo = {
+      isComment: false,
+
+      isBioUpdate: false,
+      isBclSale: false,
+      isBclTx: false,
+      isBclGain: false,
+    };
+
+    postTypeInfo.isComment = argument.value.some((arg) =>
+      arg.value?.includes('comment:'),
+    );
+    if (postTypeInfo.isComment) {
+      postTypeInfo.parentPostId = argument.value
+        .find((arg) => arg.value?.includes('comment:'))
+        ?.value?.split('comment:')[1];
+    }
+
+    postTypeInfo.isBioUpdate = argument.value.some((arg) =>
+      arg.value?.includes('bio-update'),
+    );
+
+    postTypeInfo.isHidden = argument.value.some((arg) =>
+      arg.value?.includes('hidden'),
+    );
+
+    postTypeInfo.isBclSale = argument.value.some((arg) =>
+      arg.value?.includes('bcl:'),
+    );
+
+    postTypeInfo.isBclTx = argument.value.some((arg) =>
+      arg.value?.includes('bcl-tx:'),
+    );
+
+    postTypeInfo.isBclGain = argument.value.some((arg) =>
+      arg.value?.includes('bcl-gain:'),
+    );
+
+    return postTypeInfo;
+  }
+
   /**
    * Detects if a transaction represents a comment and extracts parent post information
+   * @deprecated
    */
   private detectComment(transaction: ITransaction): ICommentInfo {
     if (!transaction?.tx?.arguments?.[1]?.value) {
@@ -588,21 +702,21 @@ export class PostService {
    */
   private async processExistingPostAsComment(
     existingPost: Post,
-    commentInfo: ICommentInfo,
+    postTypeInfo: IPostTypeInfo,
     txHash: string,
   ): Promise<ICommentProcessingResult> {
-    if (!commentInfo.isComment || !commentInfo.parentPostId) {
+    if (!postTypeInfo.isComment || !postTypeInfo.parentPostId) {
       return { success: false, error: 'Invalid comment information' };
     }
 
     // Check if parent post exists
     const parentPostExists = await this.validateParentPost(
-      commentInfo.parentPostId,
+      postTypeInfo.parentPostId,
     );
     if (!parentPostExists) {
       this.logger.warn('Parent post does not exist for comment', {
         txHash,
-        parentPostId: commentInfo.parentPostId,
+        parentPostId: postTypeInfo.parentPostId,
       });
       return {
         success: false,
@@ -614,16 +728,16 @@ export class PostService {
     try {
       // Update existing post to be a comment
       await this.postRepository.update(existingPost.id, {
-        post_id: commentInfo.parentPostId,
+        post_id: postTypeInfo.parentPostId,
       });
 
       // Update comment count for parent post
-      await this.updatePostCommentCount(commentInfo.parentPostId);
+      await this.updatePostCommentCount(postTypeInfo.parentPostId);
 
       this.logger.log('Successfully updated existing post as comment', {
         txHash,
         postId: existingPost.id,
-        parentPostId: commentInfo.parentPostId,
+        parentPostId: postTypeInfo.parentPostId,
       });
 
       return { success: true, parentPostExists: true };
@@ -633,7 +747,7 @@ export class PostService {
       this.logger.error('Failed to process existing post as comment', {
         txHash,
         postId: existingPost.id,
-        parentPostId: commentInfo.parentPostId,
+        parentPostId: postTypeInfo.parentPostId,
         error: errorMessage,
       });
       return { success: false, error: errorMessage };
