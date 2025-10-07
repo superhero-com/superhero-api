@@ -96,7 +96,7 @@ export type CurrencyRates = Record<CurrencyCode, number>;
  */
 // export type IAsset = ICoin | IToken;
 
-export type TxType = 'ContractCreateTx' | 'ContractCallTx';
+export type TxType = 'ContractCreateTx' | 'ContractCallTx' | 'SpendTx';
 
 export interface ITopHeader {
   hash: string;
@@ -153,7 +153,7 @@ export interface ITx {
   nameSalt: string;
   nonce: number;
   payerId?: string;
-  payload?: string;
+  payload?: Encoded.Any;
   pointers: any;
   result: string;
   return: ITxArguments;
