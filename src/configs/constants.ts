@@ -112,16 +112,16 @@ export const MAX_RETRIES_FOR_FAILED_TRANSACTIONS = 10;
 
 export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 
-export const SYNCING_ENABLED = false;
-export const LIVE_SYNCING_ENABLED = false;
-export const PERIODIC_SYNCING_ENABLED = false;
-export const UPDATE_TRENDING_TOKENS_ENABLED = false;
-export const PULL_INVITATIONS_ENABLED = false;
-export const PULL_ACCOUNTS_ENABLED = false;
-export const PULL_TRENDING_TAGS_ENABLED = false;
-export const PULL_SOCIAL_POSTS_ENABLED = false;
-export const PULL_DEX_TOKENS_ENABLED = false;
-export const PULL_DEX_PAIRS_ENABLED = false;
+export const SYNCING_ENABLED = true;
+export const LIVE_SYNCING_ENABLED = true;
+export const PERIODIC_SYNCING_ENABLED = true;
+export const UPDATE_TRENDING_TOKENS_ENABLED = true;
+export const PULL_INVITATIONS_ENABLED = true;
+export const PULL_ACCOUNTS_ENABLED = true;
+export const PULL_TRENDING_TAGS_ENABLED = true;
+export const PULL_SOCIAL_POSTS_ENABLED = true;
+export const PULL_DEX_TOKENS_ENABLED = true;
+export const PULL_DEX_PAIRS_ENABLED = true;
 
 /**
  * API Keys and Security

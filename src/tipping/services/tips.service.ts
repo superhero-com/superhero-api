@@ -70,8 +70,11 @@ export class TipService {
     const senderAddress = transaction.tx.senderId;
     const receiverAddress = transaction.tx.recipientId;
     const amount = toAe(transaction.tx.amount);
-    // const type = transaction.tx.function;
-    // const postId = transaction.tx.arguments[0].value;
+    if (type === 'TIP_POST') {
+      this.logger.warn('TIP_POST is not supported yet');
+      return;
+    }
+    // const postId = type === 'TIP_POST' ? type.split('TIP_POST:')[1] : null;
 
     // check if tip already exists
     const existingTip = await this.tipRepository.findOne({
@@ -83,15 +86,42 @@ export class TipService {
       return existingTip;
     }
 
+    // Ensure sender and receiver accounts exist
+    const senderAccount = await this.ensureAccountExists(senderAddress);
+    const receiverAccount = await this.ensureAccountExists(receiverAddress);
+
     const tip = await this.tipRepository.save({
       tx_hash: transaction.hash,
-      sender_address: senderAddress,
-      receiver_address: receiverAddress,
+      sender: senderAccount,
+      receiver: receiverAccount,
       amount,
       type,
       // post_id: postId,
     });
     return tip;
+  }
+
+  /**
+   * Ensures an account exists, creates it if it doesn't
+   */
+  private async ensureAccountExists(address: string): Promise<Account> {
+    try {
+      let existingAccount = await this.accountRepository.findOne({
+        where: { address },
+      });
+
+      if (!existingAccount) {
+        existingAccount = await this.accountRepository.save({
+          address,
+        });
+        this.logger.log(`Created new account: ${address}`);
+      }
+      return existingAccount;
+    } catch (error) {
+      this.logger.error(`Failed to ensure account exists: ${address}`, error);
+      // Don't throw - account creation failure shouldn't break tip processing
+    }
+    return null;
   }
 
   /**

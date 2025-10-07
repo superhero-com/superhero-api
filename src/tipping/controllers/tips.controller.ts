@@ -11,6 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Tip } from '../entities/tip.entity';
+import { Account } from '@/account/entities/account.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 
 @Controller('tips')
@@ -51,7 +52,20 @@ export class TipsController {
     @Query('receiver') receiver?: string,
     @Query('type') type?: string,
   ) {
-    const query = this.tipRepository.createQueryBuilder('tip');
+    const query = this.tipRepository
+      .createQueryBuilder('tip')
+      .leftJoinAndMapOne(
+        'tip.sender',
+        Account,
+        'sender',
+        'sender.address = tip.sender_address',
+      )
+      .leftJoinAndMapOne(
+        'tip.receiver',
+        Account,
+        'receiver',
+        'receiver.address = tip.receiver_address',
+      );
 
     if (sender) {
       query.andWhere('tip.sender_address = :sender', { sender });
@@ -69,6 +83,7 @@ export class TipsController {
     } else {
       query.orderBy(`tip.${orderBy}`, orderDirection);
     }
+    // query.select('*');
 
     return paginate(query, { page, limit });
   }
