@@ -25,7 +25,7 @@ jobs:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3043"
       DB_DATABASE: "api"
-      DEPLOY_HOST: "api.dev.tokensale.org"
+      DEPLOY_HOST: ${{ secrets.DEV_DEPLOY_HOST }}
       DEPLOY_KEY: ${{ secrets.DEV_DEPLOY_KEY }}
       DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
       DB_USER: ${{ secrets.DEV_DB_USER }}

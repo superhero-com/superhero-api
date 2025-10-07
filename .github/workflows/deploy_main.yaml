@@ -25,7 +25,7 @@ jobs:
       AE_NETWORK_ID: "ae_mainnet"
       API_HOST_PORT: "3033"
       DB_DATABASE: "api"
-      DEPLOY_HOST: "api.superhero.com"
+      DEPLOY_HOST: ${{ secrets.PROD_DEPLOY_HOST }}
       DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
       DEPLOY_USERNAME: ${{ secrets.PROD_DEPLOY_USERNAME }}
       DB_USER: ${{ secrets.PROD_DB_USER }}
@@ -33,5 +33,5 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
-      TRENDING_TAGS_API_KEY: ${{ secrets.TRENDING_TAGS_API_KEY }}
+      TRENDING_TAGS_API_KEY: ${{ secrets.PROD_TRENDING_TAGS_API_KEY }}
   
