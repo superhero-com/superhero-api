@@ -11,6 +11,7 @@ import { PostService } from './social/services/post.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
 import { ITransaction } from './utils/types';
 import { DexSyncService } from './dex/services/dex-sync.service';
+import { TipService } from './tipping/services/tips.service';
 
 @Injectable()
 export class AppService {
@@ -22,6 +23,7 @@ export class AppService {
     private syncTransactionsService: SyncTransactionsService,
     private postService: PostService,
     private dexSyncService: DexSyncService,
+    private tipService: TipService,
 
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
@@ -51,6 +53,7 @@ export class AppService {
           this.syncTransactionsService.handleLiveTransaction(transaction);
           this.postService.handleLiveTransaction(transaction);
           this.dexSyncService.handleLiveTransaction(transaction);
+          this.tipService.handleLiveTransaction(transaction);
         }
         syncedTransactions.push(transaction.hash);
 
