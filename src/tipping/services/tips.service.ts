@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { Tip } from '../entities/tip.entity';
 import { ITransaction } from '@/utils/types';
 import { decode, toAe } from '@aeternity/aepp-sdk';
+import { Post } from '@/social/entities/post.entity';
 
 @Injectable()
 export class TipService {
@@ -14,6 +15,9 @@ export class TipService {
   constructor(
     @InjectRepository(Tip)
     private readonly tipRepository: Repository<Tip>,
+
+    @InjectRepository(Post)
+    private readonly postRepository: Repository<Post>,
 
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
@@ -67,38 +71,50 @@ export class TipService {
     transaction: ITransaction,
     type: 'TIP_PROFILE' | 'TIP_POST',
   ) {
-    const senderAddress = transaction.tx.senderId;
-    const receiverAddress = transaction.tx.recipientId;
-    const amount = toAe(transaction.tx.amount);
-    if (type === 'TIP_POST') {
-      this.logger.warn('TIP_POST is not supported yet');
-      return;
-    }
-    // const postId = type === 'TIP_POST' ? type.split('TIP_POST:')[1] : null;
-
-    // check if tip already exists
     const existingTip = await this.tipRepository.findOne({
       where: {
         tx_hash: transaction.hash,
       },
     });
+
     if (existingTip) {
       return existingTip;
     }
 
-    // Ensure sender and receiver accounts exist
-    const senderAccount = await this.ensureAccountExists(senderAddress);
-    const receiverAccount = await this.ensureAccountExists(receiverAddress);
+    const senderAddress = transaction.tx.senderId;
+    const receiverAddress = transaction.tx.recipientId;
+    const amount = toAe(transaction.tx.amount);
 
-    const tip = await this.tipRepository.save({
+    // Ensure sender and receiver accounts exist
+    const [senderAccount, receiverAccount] = await Promise.all([
+      this.ensureAccountExists(senderAddress),
+      this.ensureAccountExists(receiverAddress),
+    ]);
+
+    let post = null;
+
+    if (type.startsWith('TIP_POST')) {
+      try {
+        const postId = type.split('TIP_POST:')[1];
+        post = await this.postRepository.findOne({
+          where: { id: postId },
+        });
+      } catch (error) {
+        this.logger.error('Failed to find post', {
+          postId: type,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return await this.tipRepository.save({
       tx_hash: transaction.hash,
       sender: senderAccount,
       receiver: receiverAccount,
       amount,
       type,
-      // post_id: postId,
+      post,
     });
-    return tip;
   }
 
   /**
@@ -141,7 +157,7 @@ export class TipService {
     const payloadData = decode(transaction.tx.payload).toString();
 
     const supportedPayloads = ['TIP_PROFILE', 'TIP_POST'];
-    if (!supportedPayloads.some((payload) => payloadData.includes(payload))) {
+    if (!supportedPayloads.some((payload) => payloadData.startsWith(payload))) {
       return false;
     }
 

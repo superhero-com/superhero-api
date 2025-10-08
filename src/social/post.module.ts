@@ -15,7 +15,7 @@ import { AccountModule } from '@/account/account.module';
     TypeOrmModule.forFeature([Post]),
   ],
   providers: [PostService],
-  exports: [PostService],
+  exports: [PostService, TypeOrmModule],
   controllers: [PostsController],
 })
 export class PostModule {
