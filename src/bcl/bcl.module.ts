@@ -1,6 +1,7 @@
 import { AeModule } from '@/ae/ae.module';
-import { PostModule } from '@/social/post.module';
 import { DexModule } from '@/dex/dex.module';
+import { PostModule } from '@/social/post.module';
+import { TipModule } from '@/tipping/tip.module';
 import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
@@ -37,6 +38,7 @@ import { VerifyTransactionsService } from './services/verify-transactions.servic
     ),
     PostModule,
     DexModule,
+    TipModule,
   ],
   providers: [
     SyncTransactionsService,

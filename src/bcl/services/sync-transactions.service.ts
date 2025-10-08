@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { FailedTransaction } from '../entities/failed-transaction.entity';
 import { DexSyncService } from '@/dex/services/dex-sync.service';
 import { PostService } from '@/social/services/post.service';
+import { TipService } from '@/tipping/services/tips.service';
 
 @Injectable()
 export class SyncTransactionsService {
@@ -18,6 +19,7 @@ export class SyncTransactionsService {
     private readonly transactionService: TransactionService,
     private readonly dexSyncService: DexSyncService,
     private readonly postService: PostService,
+    private readonly tipService: TipService,
 
     @InjectRepository(FailedTransaction)
     private failedTransactionsRepository: Repository<FailedTransaction>,
@@ -73,12 +75,13 @@ export class SyncTransactionsService {
           try {
             // each transaction should be passed through
             // (BCL, Social, DEX)
-            const [dex, social, bcl] = await Promise.all([
+            const [dex, social, bcl, tip] = await Promise.all([
               this.dexSyncService.saveTransaction(transaction),
               this.postService.saveTransaction(transaction),
               this.transactionService.saveTransaction(transaction),
+              this.tipService.saveTransaction(transaction),
             ]);
-            if (dex || social || bcl) {
+            if (dex || social || bcl || tip) {
               validated_hashes.push(transaction.hash);
             }
           } catch (error: any) {

@@ -70,7 +70,7 @@ export class PostsController {
     const query = this.postRepository
       .createQueryBuilder('post')
       .where('post.post_id IS NULL')
-      .andWhere('post.is_hidden = false');
+      .where('post.is_hidden = false');
 
     // Add search functionality
     if (search) {
