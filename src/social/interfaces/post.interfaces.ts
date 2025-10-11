@@ -1,4 +1,5 @@
 import { ITransaction } from '@/utils/types';
+import { Topic } from '../entities/topic.entity';
 
 /**
  * Configuration for a post contract
@@ -28,7 +29,7 @@ export interface ICreatePostData {
   sender_address: string;
   contract_address: string;
   content: string;
-  topics: string[];
+  topics: Topic[];
   media: string[];
   total_comments: number;
   tx_args: any[];

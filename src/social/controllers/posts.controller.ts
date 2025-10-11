@@ -51,6 +51,13 @@ export class PostsController {
     required: false,
     description: 'Filter posts by account address',
   })
+  @ApiQuery({
+    name: 'topics',
+    type: 'string',
+    required: false,
+    description:
+      'Filter posts by topic names (comma-separated, partial matching)',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -66,25 +73,48 @@ export class PostsController {
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('search') search?: string,
     @Query('account_address') account_address?: string,
+    @Query('topics') topics?: string,
   ) {
     const query = this.postRepository
       .createQueryBuilder('post')
+      .leftJoinAndSelect('post.topics', 'topic')
       .where('post.post_id IS NULL')
-      .where('post.is_hidden = false');
+      .andWhere('post.is_hidden = false');
 
     // Add search functionality
     if (search) {
       const searchTerm = `%${search}%`;
-      query.where(
-        '(post.content ILIKE :searchTerm OR CAST(post.topics AS TEXT) ILIKE :searchTerm)',
+      query.andWhere(
+        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
         { searchTerm },
       );
     }
 
     if (account_address) {
-      query.where('post.sender_address = :account_address', {
+      query.andWhere('post.sender_address = :account_address', {
         account_address,
       });
+    }
+
+    // Add topic filtering (search-like)
+    if (topics) {
+      const topicNames = topics
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      if (topicNames.length > 0) {
+        // Use ILIKE for case-insensitive partial matching
+        const topicConditions = topicNames
+          .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
+          .join(' OR ');
+
+        const topicParams = {};
+        topicNames.forEach((topicName, index) => {
+          topicParams[`topicSearch${index}`] = `%${topicName}%`;
+        });
+
+        query.andWhere(`(${topicConditions})`, topicParams);
+      }
     }
 
     // Add ordering
