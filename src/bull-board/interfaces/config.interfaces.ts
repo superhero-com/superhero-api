@@ -1,4 +1,4 @@
-import { QueueAdapterOptions } from '@bull-board/api/dist/typings/app';
+import { QueueAdapterOptions } from '@bull-board/api/typings/app';
 import { ExpressAdapter } from '@bull-board/express';
 import { Queue } from 'bull';
 import { BullBoard } from './bull-board.interfaces';
