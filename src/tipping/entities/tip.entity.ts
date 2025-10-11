@@ -21,16 +21,21 @@ export class Tip {
   })
   type: string; // profile | post
 
-  @ManyToOne(() => Account, (account) => account.address)
+  @ManyToOne(() => Account, (account) => account.address, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'sender_address' })
   sender: Account;
 
-  @ManyToOne(() => Account, (account) => account.address)
+  @ManyToOne(() => Account, (account) => account.address, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'receiver_address' })
   receiver: Account;
 
   @ManyToOne(() => Post, (post) => post.tx_hash, {
     nullable: true,
+    onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'post_id' })
   post: Post;
