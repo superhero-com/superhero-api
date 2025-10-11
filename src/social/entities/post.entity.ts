@@ -3,9 +3,12 @@ import {
   CreateDateColumn,
   Entity,
   JoinColumn,
+  JoinTable,
+  ManyToMany,
   ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
+import { Topic } from './topic.entity';
 
 @Entity({
   name: 'posts',
@@ -44,8 +47,22 @@ export class Post {
   @Column()
   content: string;
 
-  @Column('json', { default: [] })
-  topics: string[];
+  @ManyToMany(() => Topic, (topic) => topic.posts, {
+    cascade: true,
+    eager: false,
+  })
+  @JoinTable({
+    name: 'post_topics',
+    joinColumn: {
+      name: 'post_id',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'topic_id',
+      referencedColumnName: 'id',
+    },
+  })
+  topics: Topic[];
 
   @Column('json', { default: [] })
   media: string[];
@@ -57,6 +74,11 @@ export class Post {
     default: false,
   })
   is_hidden: boolean;
+
+  @Column({
+    default: 0,
+  })
+  version: number;
 
   @CreateDateColumn({
     type: 'timestamp',

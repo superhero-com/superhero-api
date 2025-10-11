@@ -1,4 +1,4 @@
-import { BaseAdapter } from '@bull-board/api/dist/src/queueAdapters/base';
+import { BaseAdapter } from '@bull-board/api/baseAdapter';
 
 export interface BullBoard {
   setQueues: (newBullQueues: readonly BaseAdapter[]) => void;

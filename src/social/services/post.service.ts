@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
+import { Topic } from '../entities/topic.entity';
 import {
   ACTIVE_NETWORK,
   MAX_RETRIES_WHEN_REQUEST_FAILED,
@@ -32,6 +33,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
+  syncVersion = 1;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -41,11 +43,23 @@ export class PostService {
 
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+
+    @InjectRepository(Topic)
+    private readonly topicRepository: Repository<Topic>,
   ) {
     this.logger.log('PostService initialized');
   }
 
   async onModuleInit(): Promise<void> {
+    this.logger.log('PostService module initialized successfully');
+    this.sync();
+  }
+
+  async sync() {
+    // delete posts and topics with different syncVersion with proper foreign key handling
+    // Note: This will only clear posts and topics that don't match the current syncVersion
+    await this.clearNonCompatibleData();
+
     if (PULL_SOCIAL_POSTS_ENABLED) {
       try {
         await this.pullLatestPostsForContracts();
@@ -55,7 +69,6 @@ export class PostService {
         this.logger.error('Failed to initialize PostService module', error);
         // Don't throw - allow the service to start even if initial sync fails
       }
-      this.logger.log('PostService module initialized successfully');
     }
   }
 
@@ -441,8 +454,14 @@ export class PostService {
               parentPostId: postTypeInfo.parentPostId,
             },
           );
-          // Still create the comment but mark it as orphaned for later processing
-          // This prevents data loss in case of timing issues
+          // Convert to regular post instead of comment to prevent FK constraint violation
+          const originalParentPostId = postTypeInfo.parentPostId;
+          postTypeInfo.isComment = false;
+          postTypeInfo.parentPostId = undefined;
+          this.logger.log('Converting orphaned comment to regular post', {
+            txHash,
+            originalParentPostId,
+          });
         }
       }
 
@@ -452,6 +471,9 @@ export class PostService {
         transaction.tx.arguments[1]?.value || [],
       );
 
+      // Create or get topics
+      const topics = await this.createOrGetTopics(parsedContent.topics);
+
       // Create post data with proper validation
       const postData: ICreatePostData = {
         id: this.generatePostId(transaction, contract),
@@ -460,13 +482,17 @@ export class PostService {
         sender_address: transaction.tx.callerId,
         contract_address: transaction.tx.contractId,
         content: parsedContent.content,
-        topics: parsedContent.topics,
+        topics: topics,
         media: parsedContent.media,
         total_comments: 0,
         tx_args: transaction.tx.arguments,
         created_at: moment(transaction.microTime).toDate(),
-        post_id: postTypeInfo.isComment ? postTypeInfo.parentPostId : null,
+        post_id:
+          postTypeInfo.isComment && postTypeInfo.parentPostId
+            ? postTypeInfo.parentPostId
+            : null,
         is_hidden: postTypeInfo.isHidden,
+        version: this.syncVersion,
       };
 
       this.logger.debug('Creating new post', {
@@ -478,11 +504,25 @@ export class PostService {
         mediaCount: postData.media.length,
       });
 
+      // Final validation: ensure post_id is valid if it's set
+      if (postData.post_id && postData.post_id.trim().length === 0) {
+        this.logger.warn('Removing invalid empty post_id before save', {
+          txHash,
+          postId: postData.id,
+        });
+        postData.post_id = null;
+      }
+
       // Use database transaction for consistency
       const post = await this.postRepository.manager.transaction(
         async (manager) => {
           const newPost = manager.create(Post, postData);
-          return await manager.save(newPost);
+          const savedPost = await manager.save(newPost);
+
+          // Update topic post counts
+          await this.updateTopicPostCounts(topics);
+
+          return savedPost;
         },
       );
 
@@ -582,9 +622,25 @@ export class PostService {
       arg.value?.includes('comment:'),
     );
     if (postTypeInfo.isComment) {
-      postTypeInfo.parentPostId = argument.value
+      const parentPostId = argument.value
         .find((arg) => arg.value?.includes('comment:'))
         ?.value?.split('comment:')[1];
+
+      // Validate and clean the parent post ID
+      if (parentPostId && parentPostId.trim().length > 0) {
+        postTypeInfo.parentPostId = parentPostId.trim();
+      } else {
+        this.logger.warn(
+          'Invalid comment format: missing or empty parent post ID',
+          {
+            txHash: transaction.hash,
+            parentPostId,
+          },
+        );
+        // Mark as not a comment if parent ID is invalid
+        postTypeInfo.isComment = false;
+        postTypeInfo.parentPostId = undefined;
+      }
     }
 
     postTypeInfo.isBioUpdate = argument.value.some((arg) =>
@@ -844,6 +900,124 @@ export class PostService {
       this.logger.error('Failed to run orphaned comments cleanup', {
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Creates or gets existing topics by name
+   */
+  private async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
+    if (!topicNames || topicNames.length === 0) {
+      return [];
+    }
+
+    const topics: Topic[] = [];
+
+    for (const topicName of topicNames) {
+      if (!topicName || topicName.trim().length === 0) {
+        continue;
+      }
+
+      const normalizedName = topicName.trim().toLowerCase();
+
+      // Try to find existing topic
+      let topic = await this.topicRepository.findOne({
+        where: { name: normalizedName },
+      });
+
+      // Create new topic if it doesn't exist
+      if (!topic) {
+        topic = this.topicRepository.create({
+          name: normalizedName,
+          post_count: 0,
+          version: this.syncVersion,
+        });
+        topic = await this.topicRepository.save(topic);
+        this.logger.debug('Created new topic', {
+          topicName: normalizedName,
+          version: this.syncVersion,
+        });
+      }
+
+      topics.push(topic);
+    }
+
+    return topics;
+  }
+
+  /**
+   * Updates the post count for topics
+   */
+  private async updateTopicPostCounts(topics: Topic[]): Promise<void> {
+    for (const topic of topics) {
+      try {
+        const count = await this.postRepository
+          .createQueryBuilder('post')
+          .innerJoin('post.topics', 'topic')
+          .where('topic.id = :topicId', { topicId: topic.id })
+          .getCount();
+
+        await this.topicRepository.update(topic.id, {
+          post_count: count,
+        });
+
+        this.logger.debug('Updated topic post count', {
+          topicId: topic.id,
+          topicName: topic.name,
+          postCount: count,
+        });
+      } catch (error) {
+        this.logger.error('Failed to update topic post count', {
+          topicId: topic.id,
+          topicName: topic.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /**
+   * Clears posts and topics data with different syncVersion, handling foreign key constraints properly
+   * This will only delete posts and topics that don't match the current syncVersion
+   */
+  private async clearNonCompatibleData(): Promise<void> {
+    try {
+      this.logger.log(
+        `Clearing posts and topics data with syncVersion different from ${this.syncVersion}...`,
+      );
+
+      // Use a transaction to ensure data consistency
+      await this.postRepository.manager.transaction(async (manager) => {
+        // First, clear the junction table (post_topics) for posts with different syncVersion
+        await manager.query(
+          `
+          DELETE FROM post_topics 
+          WHERE post_id IN (
+            SELECT id FROM posts WHERE version != $1
+          )
+        `,
+          [this.syncVersion],
+        );
+
+        // Then clear topics with different syncVersion (no foreign key references)
+        await manager.query('DELETE FROM topics WHERE version != $1', [
+          this.syncVersion,
+        ]);
+
+        // Finally, clear posts with different syncVersion
+        await manager.query('DELETE FROM posts WHERE version != $1', [
+          this.syncVersion,
+        ]);
+      });
+
+      this.logger.log(
+        `Successfully cleared posts and topics data with syncVersion different from ${this.syncVersion}`,
+      );
+    } catch (error) {
+      this.logger.error('Failed to clear posts and topics data', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
   }
 }

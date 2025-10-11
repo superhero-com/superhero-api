@@ -96,8 +96,6 @@ export class DexSyncService {
   }
 
   async syncDexTokens() {
-    // TEMP deleta all pairs
-    await this.dexPairRepository.delete({});
     const config: IMiddlewareRequestConfig = {
       // direction: 'backward',
       direction: 'forward',
