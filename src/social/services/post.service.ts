@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
+import { Topic } from '../entities/topic.entity';
 import {
   ACTIVE_NETWORK,
   MAX_RETRIES_WHEN_REQUEST_FAILED,
@@ -41,6 +42,9 @@ export class PostService {
 
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+
+    @InjectRepository(Topic)
+    private readonly topicRepository: Repository<Topic>,
   ) {
     this.logger.log('PostService initialized');
   }
@@ -51,6 +55,10 @@ export class PostService {
   }
 
   async sync() {
+    // delete all posts and topics with proper foreign key handling
+    // Note: This will clear ALL posts and topics. Use with caution in production!
+    // await this.clearAllData();
+
     if (PULL_SOCIAL_POSTS_ENABLED) {
       try {
         await this.pullLatestPostsForContracts();
@@ -462,6 +470,9 @@ export class PostService {
         transaction.tx.arguments[1]?.value || [],
       );
 
+      // Create or get topics
+      const topics = await this.createOrGetTopics(parsedContent.topics);
+
       // Create post data with proper validation
       const postData: ICreatePostData = {
         id: this.generatePostId(transaction, contract),
@@ -470,7 +481,7 @@ export class PostService {
         sender_address: transaction.tx.callerId,
         contract_address: transaction.tx.contractId,
         content: parsedContent.content,
-        topics: parsedContent.topics,
+        topics: topics,
         media: parsedContent.media,
         total_comments: 0,
         tx_args: transaction.tx.arguments,
@@ -504,7 +515,12 @@ export class PostService {
       const post = await this.postRepository.manager.transaction(
         async (manager) => {
           const newPost = manager.create(Post, postData);
-          return await manager.save(newPost);
+          const savedPost = await manager.save(newPost);
+
+          // Update topic post counts
+          await this.updateTopicPostCounts(topics);
+
+          return savedPost;
         },
       );
 
@@ -882,6 +898,105 @@ export class PostService {
       this.logger.error('Failed to run orphaned comments cleanup', {
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Creates or gets existing topics by name
+   */
+  private async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
+    if (!topicNames || topicNames.length === 0) {
+      return [];
+    }
+
+    const topics: Topic[] = [];
+
+    for (const topicName of topicNames) {
+      if (!topicName || topicName.trim().length === 0) {
+        continue;
+      }
+
+      const normalizedName = topicName.trim().toLowerCase();
+
+      // Try to find existing topic
+      let topic = await this.topicRepository.findOne({
+        where: { name: normalizedName },
+      });
+
+      // Create new topic if it doesn't exist
+      if (!topic) {
+        topic = this.topicRepository.create({
+          name: normalizedName,
+          post_count: 0,
+        });
+        topic = await this.topicRepository.save(topic);
+        this.logger.debug('Created new topic', { topicName: normalizedName });
+      }
+
+      topics.push(topic);
+    }
+
+    return topics;
+  }
+
+  /**
+   * Updates the post count for topics
+   */
+  private async updateTopicPostCounts(topics: Topic[]): Promise<void> {
+    for (const topic of topics) {
+      try {
+        const count = await this.postRepository
+          .createQueryBuilder('post')
+          .innerJoin('post.topics', 'topic')
+          .where('topic.id = :topicId', { topicId: topic.id })
+          .getCount();
+
+        await this.topicRepository.update(topic.id, {
+          post_count: count,
+        });
+
+        this.logger.debug('Updated topic post count', {
+          topicId: topic.id,
+          topicName: topic.name,
+          postCount: count,
+        });
+      } catch (error) {
+        this.logger.error('Failed to update topic post count', {
+          topicId: topic.id,
+          topicName: topic.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /**
+   * Clears all posts and topics data, handling foreign key constraints properly
+   * WARNING: This will delete ALL posts and topics. Use with extreme caution!
+   */
+  private async clearAllData(): Promise<void> {
+    try {
+      this.logger.log('Clearing all posts and topics data...');
+
+      // Use a transaction to ensure data consistency
+      await this.postRepository.manager.transaction(async (manager) => {
+        // First, clear the junction table (post_topics)
+        await manager.query('DELETE FROM post_topics');
+
+        // Then clear topics (no foreign key references)
+        await manager.query('DELETE FROM topics');
+
+        // Finally, clear posts (this will cascade to related tables if CASCADE is set up)
+        // If there are still foreign key issues, we'll delete in the correct order
+        await manager.query('DELETE FROM posts');
+      });
+
+      this.logger.log('Successfully cleared all posts and topics data');
+    } catch (error) {
+      this.logger.error('Failed to clear posts and topics data', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
   }
 }
