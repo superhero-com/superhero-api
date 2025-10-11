@@ -46,6 +46,11 @@ export class PostService {
   }
 
   async onModuleInit(): Promise<void> {
+    this.logger.log('PostService module initialized successfully');
+    this.sync();
+  }
+
+  async sync() {
     if (PULL_SOCIAL_POSTS_ENABLED) {
       try {
         await this.pullLatestPostsForContracts();
@@ -55,7 +60,6 @@ export class PostService {
         this.logger.error('Failed to initialize PostService module', error);
         // Don't throw - allow the service to start even if initial sync fails
       }
-      this.logger.log('PostService module initialized successfully');
     }
   }
 
