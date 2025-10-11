@@ -41,6 +41,11 @@ export class Topic {
   })
   public created_at: Date;
 
+  @Column({
+    default: 0,
+  })
+  version: number;
+
   @UpdateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

@@ -36,6 +36,7 @@ export interface ICreatePostData {
   created_at: Date;
   post_id?: string;
   is_hidden?: boolean;
+  version?: number;
 }
 
 /**

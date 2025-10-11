@@ -75,6 +75,11 @@ export class Post {
   })
   is_hidden: boolean;
 
+  @Column({
+    default: 0,
+  })
+  version: number;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

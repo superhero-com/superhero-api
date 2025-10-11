@@ -33,6 +33,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
+  syncVersion = 1;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -55,9 +56,9 @@ export class PostService {
   }
 
   async sync() {
-    // delete all posts and topics with proper foreign key handling
-    // Note: This will clear ALL posts and topics. Use with caution in production!
-    // await this.clearAllData();
+    // delete posts and topics with different syncVersion with proper foreign key handling
+    // Note: This will only clear posts and topics that don't match the current syncVersion
+    await this.clearNonCompatibleData();
 
     if (PULL_SOCIAL_POSTS_ENABLED) {
       try {
@@ -491,6 +492,7 @@ export class PostService {
             ? postTypeInfo.parentPostId
             : null,
         is_hidden: postTypeInfo.isHidden,
+        version: this.syncVersion,
       };
 
       this.logger.debug('Creating new post', {
@@ -928,9 +930,13 @@ export class PostService {
         topic = this.topicRepository.create({
           name: normalizedName,
           post_count: 0,
+          version: this.syncVersion,
         });
         topic = await this.topicRepository.save(topic);
-        this.logger.debug('Created new topic', { topicName: normalizedName });
+        this.logger.debug('Created new topic', {
+          topicName: normalizedName,
+          version: this.syncVersion,
+        });
       }
 
       topics.push(topic);
@@ -971,27 +977,42 @@ export class PostService {
   }
 
   /**
-   * Clears all posts and topics data, handling foreign key constraints properly
-   * WARNING: This will delete ALL posts and topics. Use with extreme caution!
+   * Clears posts and topics data with different syncVersion, handling foreign key constraints properly
+   * This will only delete posts and topics that don't match the current syncVersion
    */
-  private async clearAllData(): Promise<void> {
+  private async clearNonCompatibleData(): Promise<void> {
     try {
-      this.logger.log('Clearing all posts and topics data...');
+      this.logger.log(
+        `Clearing posts and topics data with syncVersion different from ${this.syncVersion}...`,
+      );
 
       // Use a transaction to ensure data consistency
       await this.postRepository.manager.transaction(async (manager) => {
-        // First, clear the junction table (post_topics)
-        await manager.query('DELETE FROM post_topics');
+        // First, clear the junction table (post_topics) for posts with different syncVersion
+        await manager.query(
+          `
+          DELETE FROM post_topics 
+          WHERE post_id IN (
+            SELECT id FROM posts WHERE version != $1
+          )
+        `,
+          [this.syncVersion],
+        );
 
-        // Then clear topics (no foreign key references)
-        await manager.query('DELETE FROM topics');
+        // Then clear topics with different syncVersion (no foreign key references)
+        await manager.query('DELETE FROM topics WHERE version != $1', [
+          this.syncVersion,
+        ]);
 
-        // Finally, clear posts (this will cascade to related tables if CASCADE is set up)
-        // If there are still foreign key issues, we'll delete in the correct order
-        await manager.query('DELETE FROM posts');
+        // Finally, clear posts with different syncVersion
+        await manager.query('DELETE FROM posts WHERE version != $1', [
+          this.syncVersion,
+        ]);
       });
 
-      this.logger.log('Successfully cleared all posts and topics data');
+      this.logger.log(
+        `Successfully cleared posts and topics data with syncVersion different from ${this.syncVersion}`,
+      );
     } catch (error) {
       this.logger.error('Failed to clear posts and topics data', {
         error: error instanceof Error ? error.message : String(error),
