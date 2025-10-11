@@ -441,8 +441,14 @@ export class PostService {
               parentPostId: postTypeInfo.parentPostId,
             },
           );
-          // Still create the comment but mark it as orphaned for later processing
-          // This prevents data loss in case of timing issues
+          // Convert to regular post instead of comment to prevent FK constraint violation
+          const originalParentPostId = postTypeInfo.parentPostId;
+          postTypeInfo.isComment = false;
+          postTypeInfo.parentPostId = undefined;
+          this.logger.log('Converting orphaned comment to regular post', {
+            txHash,
+            originalParentPostId,
+          });
         }
       }
 
@@ -465,7 +471,10 @@ export class PostService {
         total_comments: 0,
         tx_args: transaction.tx.arguments,
         created_at: moment(transaction.microTime).toDate(),
-        post_id: postTypeInfo.isComment ? postTypeInfo.parentPostId : null,
+        post_id:
+          postTypeInfo.isComment && postTypeInfo.parentPostId
+            ? postTypeInfo.parentPostId
+            : null,
         is_hidden: postTypeInfo.isHidden,
       };
 
@@ -477,6 +486,15 @@ export class PostService {
         topicsCount: postData.topics.length,
         mediaCount: postData.media.length,
       });
+
+      // Final validation: ensure post_id is valid if it's set
+      if (postData.post_id && postData.post_id.trim().length === 0) {
+        this.logger.warn('Removing invalid empty post_id before save', {
+          txHash,
+          postId: postData.id,
+        });
+        postData.post_id = null;
+      }
 
       // Use database transaction for consistency
       const post = await this.postRepository.manager.transaction(
@@ -582,9 +600,25 @@ export class PostService {
       arg.value?.includes('comment:'),
     );
     if (postTypeInfo.isComment) {
-      postTypeInfo.parentPostId = argument.value
+      const parentPostId = argument.value
         .find((arg) => arg.value?.includes('comment:'))
         ?.value?.split('comment:')[1];
+
+      // Validate and clean the parent post ID
+      if (parentPostId && parentPostId.trim().length > 0) {
+        postTypeInfo.parentPostId = parentPostId.trim();
+      } else {
+        this.logger.warn(
+          'Invalid comment format: missing or empty parent post ID',
+          {
+            txHash: transaction.hash,
+            parentPostId,
+          },
+        );
+        // Mark as not a comment if parent ID is invalid
+        postTypeInfo.isComment = false;
+        postTypeInfo.parentPostId = undefined;
+      }
     }
 
     postTypeInfo.isBioUpdate = argument.value.some((arg) =>
