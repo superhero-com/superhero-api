@@ -65,6 +65,14 @@ export class TrendingTagsService {
       errors: [] as string[],
     };
 
+    const normalizedTags = data.items.filter(
+      (item) => this.normalizeTag(item.tag)?.length,
+    );
+    // if normalizedTags length, delete all trending tags
+    if (normalizedTags.length) {
+      await this.trendingTagRepository.delete({});
+    }
+
     for (const item of data.items) {
       try {
         const normalizedTag = this.normalizeTag(item.tag);
