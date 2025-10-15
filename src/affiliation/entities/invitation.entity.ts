@@ -22,8 +22,10 @@ export class Invitation {
   block_height: number;
 
   // amount
-  @Column()
-  amount: number;
+  @Column({
+    default: '0',
+  })
+  amount: string;
 
   @Index()
   @Column()

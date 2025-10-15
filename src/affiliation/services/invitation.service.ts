@@ -119,7 +119,7 @@ export class InvitationService {
         tx_hash: transaction.hash,
         receiver_address: invitee,
         block_height: transaction.blockHeight,
-        amount: Number(amount),
+        amount: amount.toString(),
         sender_address: senderAddress,
         created_at: moment(transaction.microTime).toDate(),
       });
