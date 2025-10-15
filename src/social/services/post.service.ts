@@ -33,7 +33,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
-  syncVersion = 1;
+  syncVersion = 2;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -629,6 +629,10 @@ export class PostService {
       // Validate and clean the parent post ID
       if (parentPostId && parentPostId.trim().length > 0) {
         postTypeInfo.parentPostId = parentPostId.trim();
+        // if post id doesn't end with _v3 add it
+        if (!parentPostId.endsWith('_v3')) {
+          postTypeInfo.parentPostId = `${parentPostId}_v3`;
+        }
       } else {
         this.logger.warn(
           'Invalid comment format: missing or empty parent post ID',
