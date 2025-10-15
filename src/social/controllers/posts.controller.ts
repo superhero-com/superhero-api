@@ -78,8 +78,8 @@ export class PostsController {
     const query = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
-      .where('post.post_id IS NULL')
-      .andWhere('post.is_hidden = false');
+      // .where('post.post_id IS NULL')
+      .where('post.is_hidden = false');
 
     // Add search functionality
     if (search) {
