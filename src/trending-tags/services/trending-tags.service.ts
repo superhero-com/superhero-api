@@ -67,7 +67,7 @@ export class TrendingTagsService {
 
     // if normalizedTags length, delete all trending tags
     if (data.items.length) {
-      await this.trendingTagRepository.delete({});
+      await this.trendingTagRepository.clear();
     }
 
     for (const item of data.items) {
