@@ -5,6 +5,7 @@ import {
   ParseIntPipe,
   Query,
   Param,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,6 +14,7 @@ import { Repository } from 'typeorm';
 import { Tip } from '../entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { Post } from '@/social/entities/post.entity';
 
 @Controller('tips')
 @ApiTags('Tips')
@@ -20,6 +22,9 @@ export class TipsController {
   constructor(
     @InjectRepository(Tip)
     private readonly tipRepository: Repository<Tip>,
+
+    @InjectRepository(Post)
+    private readonly postRepository: Repository<Post>,
   ) {
     //
   }
@@ -123,10 +128,18 @@ export class TipsController {
   })
   @Get('posts/:postId/summary')
   async getPostSummary(@Param('postId') postId: string) {
+    const post = await this.postRepository.findOne({
+      where: { id: postId },
+    });
+    if (!post) {
+      throw new NotFoundException(`Post with ID ${postId} not found`);
+    }
+    const postCreator = post.sender_address;
     const result = await this.tipRepository
       .createQueryBuilder('tip')
       .select('COALESCE(SUM(CAST(tip.amount AS numeric)), 0)', 'total')
       .where('tip.post_id = :postId', { postId })
+      .andWhere('tip.sender_address != :postCreator', { postCreator })
       .getRawOne<{ total: string }>();
 
     return {
