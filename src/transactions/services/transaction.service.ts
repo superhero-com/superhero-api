@@ -1,6 +1,6 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { TX_FUNCTIONS } from '@/configs';
+import { BCL_FUNCTIONS } from '@/configs';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
@@ -41,7 +41,7 @@ export class TransactionService {
     shouldBroadcast?: boolean,
   ): Promise<Transaction> {
     if (
-      !Object.keys(TX_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
+      !Object.keys(BCL_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
       rawTransaction?.tx?.returnType === 'revert'
     ) {
       return;
@@ -51,7 +51,7 @@ export class TransactionService {
       saleAddress = token.sale_address;
     } else {
       saleAddress = rawTransaction.tx.contractId;
-      if (rawTransaction.tx.function == TX_FUNCTIONS.create_community) {
+      if (rawTransaction.tx.function == BCL_FUNCTIONS.create_community) {
         if (!rawTransaction.tx.return.value.length) {
           return;
         }
@@ -64,7 +64,7 @@ export class TransactionService {
             sale_address: saleAddress,
           })
           .andWhere('transactions.tx_type = :tx_type', {
-            tx_type: TX_FUNCTIONS.create_community,
+            tx_type: BCL_FUNCTIONS.create_community,
           })
           .andWhere('transactions.tx_hash != :tx_hash', {
             tx_hash: rawTransaction.hash,
@@ -113,7 +113,7 @@ export class TransactionService {
     } = await this.parseTransactionData(rawTransaction);
 
     if (
-      rawTransaction.tx.function == TX_FUNCTIONS.create_community &&
+      rawTransaction.tx.function == BCL_FUNCTIONS.create_community &&
       !token.factory_address
     ) {
       await this.tokenService.updateTokenMetaDataFromCreateTx(
@@ -208,7 +208,7 @@ export class TransactionService {
       };
     }
 
-    if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+    if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
       const mints = decodedData.filter((data) => data.name === 'Mint');
       protocol_reward = new BigNumber(toAe(mints[0].args[1]));
       volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
@@ -220,7 +220,7 @@ export class TransactionService {
       ).plus(volume);
     }
 
-    if (rawTransaction.tx.function === TX_FUNCTIONS.create_community) {
+    if (rawTransaction.tx.function === BCL_FUNCTIONS.create_community) {
       if (decodedData.find((data) => data.name === 'PriceChange')) {
         const mints = decodedData.filter((data) => data.name === 'Mint');
         protocol_reward = new BigNumber(toAe(mints[0].args[1]));
@@ -234,7 +234,7 @@ export class TransactionService {
       }
     }
 
-    if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+    if (rawTransaction.tx.function === BCL_FUNCTIONS.sell) {
       volume = new BigNumber(
         toAe(decodedData.find((data) => data.name === 'Burn').args[1]),
       );
@@ -365,7 +365,7 @@ export class TransactionService {
           tokenHolderBalance = new BigNumber(0);
         }
         // if is buy
-        if (rawTransaction.tx.function === TX_FUNCTIONS.buy) {
+        if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.plus(bigNumberVolume),
             last_tx_hash: rawTransaction.hash,
@@ -373,7 +373,7 @@ export class TransactionService {
           });
         }
         // if is sell
-        if (rawTransaction.tx.function === TX_FUNCTIONS.sell) {
+        if (rawTransaction.tx.function === BCL_FUNCTIONS.sell) {
           await this.tokenHolderRepository.update(tokenHolder.id, {
             balance: tokenHolderBalance.minus(bigNumberVolume),
             last_tx_hash: rawTransaction.hash,

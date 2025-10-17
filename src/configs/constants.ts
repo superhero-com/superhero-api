@@ -77,10 +77,14 @@ export const WEB_SOCKET_SUBSCRIBE = 'Subscribe';
 export const WEB_SOCKET_UNSUBSCRIBE = 'Unsubscribe';
 export const WEB_SOCKET_RECONNECT_TIMEOUT = 20000;
 
-export const TX_FUNCTIONS = {
+export const BCL_FUNCTIONS = {
   buy: 'buy',
   sell: 'sell',
   create_community: 'create_community',
+};
+
+export const TX_FUNCTIONS = {
+  ...BCL_FUNCTIONS,
 
   // dex(swap)
   swap_exact_tokens_for_tokens: 'swap_exact_tokens_for_tokens',
