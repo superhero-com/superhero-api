@@ -10,6 +10,9 @@ import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { PairSummaryDto } from '../dto/pair-summary.dto';
+import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -56,6 +59,8 @@ export class PairHistoryService {
     private aeSdkService: AeSdkService,
 
     @InjectDataSource() private readonly dataSource: DataSource,
+
+    private aePricingService: AePricingService,
   ) {
     //
   }
@@ -455,4 +460,178 @@ export class PairHistoryService {
   //     token,
   //   } as ITransactionPreview;
   // }
+
+  async getPairSummary(pair: Pair, token?: string): Promise<PairSummaryDto> {
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    try {
+      // Determine which token to use for volume calculations
+      let volumeToken = '0'; // Default to token0
+      let isToken0WAE = false;
+      let isToken1WAE = false;
+
+      // Check if token0 or token1 is WAE
+      if (pair.token0?.address === DEX_CONTRACTS.wae) {
+        isToken0WAE = true;
+      }
+      if (pair.token1?.address === DEX_CONTRACTS.wae) {
+        isToken1WAE = true;
+      }
+
+      // Determine which token to use based on parameter or WAE default
+      if (token) {
+        // If token parameter is provided, use it
+        if (token === pair.token0?.address) {
+          volumeToken = '0';
+        } else if (token === pair.token1?.address) {
+          volumeToken = '1';
+        } else {
+          // If token doesn't match either token in the pair, default to token0
+          volumeToken = '0';
+        }
+      } else {
+        // If no token specified, default to WAE if available
+        if (isToken0WAE) {
+          volumeToken = '0';
+        } else if (isToken1WAE) {
+          volumeToken = '1';
+        } else {
+          // If no WAE found, default to token0
+          volumeToken = '0';
+        }
+      }
+      // Get total volume for the selected token
+      const volumeResult = await queryRunner.query(
+        `
+          SELECT 
+            COALESCE(SUM(volume${volumeToken}), 0) as total_volume
+          FROM pair_transactions 
+          WHERE pair_address = $1
+        `,
+        [pair.address],
+      );
+
+      // Get current reserves for locked value
+      const reservesResult = await queryRunner.query(
+        `
+          SELECT 
+            reserve0,
+            reserve1,
+            ratio0,
+            ratio1
+          FROM pairs 
+          WHERE address = $1
+        `,
+        [pair.address],
+      );
+
+      // Get data for different time periods
+      const now = moment();
+      const periods = {
+        '24h': now.clone().subtract(24, 'hours'),
+        '7d': now.clone().subtract(7, 'days'),
+        '30d': now.clone().subtract(30, 'days'),
+      };
+
+      const periodData = {};
+
+      for (const [period, startDate] of Object.entries(periods)) {
+        // Get volume for the period
+        const periodVolumeResult = await queryRunner.query(
+          `
+            SELECT 
+              COALESCE(SUM(volume${volumeToken}), 0) as total_volume
+            FROM pair_transactions 
+            WHERE pair_address = $1 AND created_at >= $2
+          `,
+          [pair.address, startDate.toDate()],
+        );
+
+        // Get price changes for the period
+        // We want the price of the OTHER token in terms of the selected token
+        // If volumeToken is '0' (WAE), we want ratio1 (token1/token0) - price of token1 in terms of token0 (WAE)
+        // If volumeToken is '1' (WAE), we want ratio0 (token0/token1) - price of token0 in terms of token1 (WAE)
+        const otherToken = volumeToken === '0' ? '1' : '0';
+        const priceResult = await queryRunner.query(
+          `
+            SELECT 
+              (SELECT ratio${otherToken} FROM pair_transactions 
+               WHERE pair_address = $1 AND created_at >= $2 
+               ORDER BY created_at ASC LIMIT 1) as start_price,
+              (SELECT ratio${otherToken} FROM pair_transactions 
+               WHERE pair_address = $1 
+               ORDER BY created_at DESC LIMIT 1) as current_price
+          `,
+          [pair.address, startDate.toDate()],
+        );
+
+        // Calculate volume in AE
+        const periodVolumeAE = new BigNumber(
+          periodVolumeResult[0]?.total_volume || 0,
+        );
+
+        // Calculate price change
+        const priceData = priceResult[0];
+        let priceChange = {
+          percentage: '0.00',
+          value: '0',
+        };
+
+        if (priceData && priceData.start_price && priceData.current_price) {
+          const startPrice = new BigNumber(priceData.start_price);
+          const currentPrice = new BigNumber(priceData.current_price);
+          const changeValue = currentPrice.minus(startPrice);
+          const changePercentage = startPrice.isZero()
+            ? 0
+            : changeValue.dividedBy(startPrice).multipliedBy(100);
+
+          priceChange = {
+            percentage: changePercentage.toString(),
+            value: changeValue.toString(),
+          };
+        }
+
+        // Get price data for the period volume in multiple currencies
+        const periodVolumePriceData =
+          await this.aePricingService.getPriceData(periodVolumeAE);
+        periodData[period] = {
+          volume: periodVolumePriceData,
+          price_change: priceChange,
+        };
+      }
+
+      // Calculate total volume in AE for the selected token
+      const totalVolumeAE = new BigNumber(volumeResult[0]?.total_volume || 0);
+
+      // Get price data for total volume in multiple currencies
+      const totalVolumePriceData =
+        await this.aePricingService.getPriceData(totalVolumeAE);
+
+      // Calculate locked value (current reserves) for the selected token
+      const currentReserves = reservesResult[0];
+      const lockedValueAE = new BigNumber(
+        currentReserves?.[`reserve${volumeToken}`] || 0,
+      );
+
+      // Get price data for locked value in multiple currencies
+      const lockedValuePriceData =
+        await this.aePricingService.getPriceData(lockedValueAE);
+
+      return {
+        address: pair.address,
+        volume_token:
+          volumeToken === '0' ? pair.token0?.address : pair.token1?.address,
+        token_position: volumeToken,
+        total_volume: totalVolumePriceData,
+        total_locked_value: lockedValuePriceData,
+        change: {
+          '24h': periodData['24h'],
+          '7d': periodData['7d'],
+          '30d': periodData['30d'],
+        },
+      };
+    } finally {
+      await queryRunner.release();
+    }
+  }
 }
