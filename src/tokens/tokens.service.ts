@@ -510,8 +510,17 @@ export class TokensService {
     Object.entries(parameters).forEach(([key, value]) => {
       if (Array.isArray(value)) {
         // Handle array parameters by joining them with commas and wrapping in quotes
-        const arrayValues = value.map((v) => `'${v}'`).join(',');
-        finalSubQuery = finalSubQuery.replace(`:...${key}`, arrayValues);
+        if (value.length === 0) {
+          // Handle empty arrays by replacing with a condition that always evaluates to false
+          finalSubQuery = finalSubQuery.replace(
+            `IN (:...${key})`,
+            "IN (SELECT '' WHERE 1 = 0)",
+          );
+          finalSubQuery = finalSubQuery.replace(`:...${key}`, 'NULL');
+        } else {
+          const arrayValues = value.map((v) => `'${v}'`).join(',');
+          finalSubQuery = finalSubQuery.replace(`:...${key}`, arrayValues);
+        }
       } else {
         finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
       }
