@@ -506,8 +506,8 @@ export class PairHistoryService {
           SELECT 
             COALESCE(SUM(
               CASE 
-                WHEN $2 = '0' THEN volume0 * ratio0
-                WHEN $2 = '1' THEN volume1 * ratio1
+                WHEN $2 = '0' THEN volume0 * ratio1
+                WHEN $2 = '1' THEN volume1 * ratio0
                 ELSE 0
               END
             ), 0) as total_volume
