@@ -13,6 +13,7 @@ import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { PairSummaryDto } from '../dto/pair-summary.dto';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import { PairSummaryService } from './pair-summary.service';
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -61,6 +62,8 @@ export class PairHistoryService {
     @InjectDataSource() private readonly dataSource: DataSource,
 
     private aePricingService: AePricingService,
+
+    private pairSummaryService: PairSummaryService,
   ) {
     //
   }
@@ -461,7 +464,43 @@ export class PairHistoryService {
   //   } as ITransactionPreview;
   // }
 
-  async getPairSummary(pair: Pair, token?: string): Promise<PairSummaryDto> {
+  async getPairSummary(
+    pair: Pair,
+    token?: string,
+    useCache: boolean = true,
+  ): Promise<PairSummaryDto> {
+    // Try to get cached summary first if useCache is true
+    if (useCache) {
+      const cachedSummary =
+        await this.pairSummaryService.getSummaryByPairAddress(pair.address);
+      if (cachedSummary) {
+        return {
+          address: pair.address,
+          volume_token: cachedSummary.volume_token,
+          token_position: cachedSummary.token_position,
+          total_volume: cachedSummary.total_volume,
+          change: {
+            '24h': cachedSummary.change_24h,
+            '7d': cachedSummary.change_7d,
+            '30d': cachedSummary.change_30d,
+          },
+        };
+      }
+    }
+
+    // Calculate fresh summary data
+    const summaryData = await this.calculatePairSummary(pair, token);
+
+    // Cache the calculated data
+    await this.pairSummaryService.createOrUpdateSummary(pair, summaryData);
+
+    return summaryData;
+  }
+
+  async calculatePairSummary(
+    pair: Pair,
+    token?: string,
+  ): Promise<PairSummaryDto> {
     const queryRunner = this.dataSource.createQueryRunner();
 
     try {
