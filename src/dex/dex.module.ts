@@ -1,4 +1,5 @@
 import { AeModule } from '@/ae/ae.module';
+import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { TransactionsModule } from '@/transactions/transactions.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -17,6 +18,7 @@ import { PairHistoryService } from './services/pair-history.service';
 @Module({
   imports: [
     AeModule,
+    AePricingModule,
     TransactionsModule,
     TypeOrmModule.forFeature([Pair, DexToken, PairTransaction]),
   ],

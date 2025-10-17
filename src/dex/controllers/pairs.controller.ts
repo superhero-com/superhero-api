@@ -15,7 +15,7 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { PairService } from '../services/pair.service';
-import { PairDto } from '../dto';
+import { PairDto, PairSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { PairHistoryService } from '../services/pair-history.service';
 
@@ -167,5 +167,40 @@ export class PairsController {
       page,
       limit,
     });
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Pair contract address',
+  })
+  @ApiQuery({
+    name: 'token',
+    type: 'string',
+    required: false,
+    description:
+      'Token address to use as base for volume calculations (token0 or token1). If not provided, defaults to WAE if one of the tokens is WAE',
+  })
+  @ApiOperation({
+    operationId: 'getPairSummary',
+    summary: 'Get pair summary',
+    description:
+      'Get comprehensive summary data for a pair including volume, locked value, and price changes. Volume calculations can be based on token0, token1, or default to WAE if available.',
+  })
+  @ApiOkResponse({ type: PairSummaryDto })
+  @Get(':address/summary')
+  async getPairSummary(
+    @Param('address') address: string,
+    @Query('token') token?: string,
+  ) {
+    const pair = await this.pairService.findByAddress(address);
+    if (!pair) {
+      throw new NotFoundException(`Pair with address ${address} not found`);
+    }
+    const summary = await this.pairHistoryService.getPairSummary(pair, token);
+    return {
+      ...summary,
+      pair,
+    };
   }
 }
