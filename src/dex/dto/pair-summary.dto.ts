@@ -75,12 +75,6 @@ export class PairSummaryDto {
   total_volume: IPriceDto;
 
   @ApiProperty({
-    description: 'Total locked value (liquidity) data',
-    type: () => PriceDto,
-  })
-  total_locked_value: IPriceDto;
-
-  @ApiProperty({
     description: 'Data for different time periods (24h, 7d, 30d)',
     type: () => ChangeData,
   })

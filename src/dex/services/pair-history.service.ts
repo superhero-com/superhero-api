@@ -500,29 +500,29 @@ export class PairHistoryService {
           volumeToken = '0';
         }
       }
-      // Get total volume for the selected token
+      // Get total volume for the selected token - FIXED: Convert to WAE value using ratio
       const volumeResult = await queryRunner.query(
         `
           SELECT 
-            COALESCE(SUM(volume${volumeToken}), 0) as total_volume
+            COALESCE(SUM(
+              CASE 
+                WHEN $2 = '0' THEN volume0 * ratio0
+                WHEN $2 = '1' THEN volume1 * ratio1
+                ELSE 0
+              END
+            ), 0) as total_volume
           FROM pair_transactions 
           WHERE pair_address = $1
+            AND tx_type IN (
+              'swap_exact_tokens_for_tokens',
+              'swap_tokens_for_exact_tokens', 
+              'swap_exact_tokens_for_ae',
+              'swap_tokens_for_exact_ae',
+              'swap_exact_ae_for_tokens',
+              'swap_ae_for_exact_tokens'
+            )
         `,
-        [pair.address],
-      );
-
-      // Get current reserves for locked value
-      const reservesResult = await queryRunner.query(
-        `
-          SELECT 
-            reserve0,
-            reserve1,
-            ratio0,
-            ratio1
-          FROM pairs 
-          WHERE address = $1
-        `,
-        [pair.address],
+        [pair.address, volumeToken],
       );
 
       // Get data for different time periods
@@ -536,15 +536,30 @@ export class PairHistoryService {
       const periodData = {};
 
       for (const [period, startDate] of Object.entries(periods)) {
-        // Get volume for the period
+        // Get volume for the period - FIXED: Convert to WAE value using ratio
         const periodVolumeResult = await queryRunner.query(
           `
             SELECT 
-              COALESCE(SUM(volume${volumeToken}), 0) as total_volume
+              COALESCE(SUM(
+                CASE 
+                  WHEN $3 = '0' THEN volume0 * ratio1
+                  WHEN $3 = '1' THEN volume1 * ratio0
+                  ELSE 0
+                END
+              ), 0) as total_volume
             FROM pair_transactions 
-            WHERE pair_address = $1 AND created_at >= $2
+            WHERE pair_address = $1 
+              AND created_at >= $2
+              AND tx_type IN (
+                'swap_exact_tokens_for_tokens',
+                'swap_tokens_for_exact_tokens', 
+                'swap_exact_tokens_for_ae',
+                'swap_tokens_for_exact_ae',
+                'swap_exact_ae_for_tokens',
+                'swap_ae_for_exact_tokens'
+              )
           `,
-          [pair.address, startDate.toDate()],
+          [pair.address, startDate.toDate(), volumeToken],
         );
 
         // Get price changes for the period
@@ -607,29 +622,19 @@ export class PairHistoryService {
       const totalVolumePriceData =
         await this.aePricingService.getPriceData(totalVolumeAE);
 
-      // Calculate locked value (current reserves) for the selected token
-      const currentReserves = reservesResult[0];
-      const lockedValueAE = new BigNumber(
-        currentReserves?.[`reserve${volumeToken}`] || 0,
-      );
-
-      // Get price data for locked value in multiple currencies
-      const lockedValuePriceData =
-        await this.aePricingService.getPriceData(lockedValueAE);
-
       return {
         address: pair.address,
         volume_token:
           volumeToken === '0' ? pair.token0?.address : pair.token1?.address,
         token_position: volumeToken,
         total_volume: totalVolumePriceData,
-        total_locked_value: lockedValuePriceData,
         change: {
           '24h': periodData['24h'],
           '7d': periodData['7d'],
           '30d': periodData['30d'],
         },
-      };
+        volumeResult,
+      } as any;
     } finally {
       await queryRunner.release();
     }

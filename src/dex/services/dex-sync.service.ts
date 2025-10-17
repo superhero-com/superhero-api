@@ -46,6 +46,7 @@ export class DexSyncService {
     console.log('========================');
     console.log('==== DexSyncService ====');
     console.log('========================');
+    // await this.dexPairTransactionRepository.clear();
 
     this.routerContract = await this.aeSdkService.sdk.initializeContract({
       aci: routerInterface,
@@ -148,6 +149,22 @@ export class DexSyncService {
     return await this.saveDexPairTransaction(pair, transaction, pairInfo);
   }
 
+  /**
+   * Validates and converts volume to proper decimal format
+   * @param volume - Volume amount as string
+   * @returns Validated volume number
+   */
+  private validateAndConvertVolume(volume: string): number {
+    if (!volume || volume === '0' || volume === 'NaN' || volume === 'undefined')
+      return 0;
+
+    const bigNumber = new BigNumber(volume);
+    if (bigNumber.isNaN() || bigNumber.isLessThanOrEqualTo(0)) return 0;
+
+    // Ensure volume is in proper decimal format
+    return bigNumber.toNumber();
+  }
+
   async extractPairInfoFromTransaction(transaction: ITransaction) {
     // console.log('transaction.tx.function:', transaction.tx.function);
     let decodedEvents = null;
@@ -230,10 +247,17 @@ export class DexSyncService {
         to: swapped[4],
       };
 
-      volume0 =
-        swapInfo.amount0In !== '0' ? swapInfo.amount0In : swapInfo.amount0Out;
-      volume1 =
-        swapInfo.amount1In !== '0' ? swapInfo.amount1In : swapInfo.amount1Out;
+      // FIXED: Count total money movement in both directions for accurate volume
+      // Sum both input and output amounts to get true trading volume
+      const totalVolume0 = new BigNumber(swapInfo.amount0In || '0')
+        .plus(swapInfo.amount0Out || '0')
+        .toString();
+      const totalVolume1 = new BigNumber(swapInfo.amount1In || '0')
+        .plus(swapInfo.amount1Out || '0')
+        .toString();
+
+      volume0 = this.validateAndConvertVolume(totalVolume0);
+      volume1 = this.validateAndConvertVolume(totalVolume1);
     }
 
     let reserve0,
@@ -257,6 +281,9 @@ export class DexSyncService {
         amount0: pairMintInfoData[1]?.toString(),
         amount1: pairMintInfoData[2]?.toString(),
       };
+      // FIXED: Don't count liquidity operations as volume - these are not trading activities
+      volume0 = this.validateAndConvertVolume('0');
+      volume1 = this.validateAndConvertVolume('0');
     }
 
     const pairBurnInfoData = decodedEvents.find(
