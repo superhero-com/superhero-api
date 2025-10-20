@@ -41,18 +41,9 @@ export class PairSummary {
 
   @Column({
     type: 'jsonb',
+    nullable: true,
   })
-  change_24h: any;
-
-  @Column({
-    type: 'jsonb',
-  })
-  change_7d: any;
-
-  @Column({
-    type: 'jsonb',
-  })
-  change_30d: any;
+  change: any;
 
   @CreateDateColumn({
     type: 'timestamp',

@@ -26,9 +26,7 @@ export class PairSummaryService {
       existingSummary.volume_token = summaryData.volume_token;
       existingSummary.token_position = summaryData.token_position;
       existingSummary.total_volume = summaryData.total_volume;
-      existingSummary.change_24h = summaryData.change['24h'];
-      existingSummary.change_7d = summaryData.change['7d'];
-      existingSummary.change_30d = summaryData.change['30d'];
+      existingSummary.change = summaryData.change;
 
       return this.pairSummaryRepository.save(existingSummary);
     } else {
@@ -38,9 +36,7 @@ export class PairSummaryService {
         volume_token: summaryData.volume_token,
         token_position: summaryData.token_position,
         total_volume: summaryData.total_volume,
-        change_24h: summaryData.change['24h'],
-        change_7d: summaryData.change['7d'],
-        change_30d: summaryData.change['30d'],
+        change: summaryData.change,
       });
 
       return this.pairSummaryRepository.save(newSummary);
