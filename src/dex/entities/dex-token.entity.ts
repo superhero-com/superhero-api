@@ -1,5 +1,12 @@
 import { IPriceDto } from '@/tokens/dto/price.dto';
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToOne,
+  PrimaryColumn,
+} from 'typeorm';
+import { DexTokenSummary } from './dex-token-summary.entity';
 
 @Entity({
   name: 'dex_tokens',
@@ -40,4 +47,7 @@ export class DexToken {
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
   public created_at: Date;
+
+  @OneToOne(() => DexTokenSummary, (summary) => summary.token)
+  summary: DexTokenSummary;
 }

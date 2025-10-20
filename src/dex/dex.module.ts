@@ -16,13 +16,21 @@ import { PairService } from './services/pair.service';
 import { PairTransactionService } from './services/pair-transaction.service';
 import { PairHistoryService } from './services/pair-history.service';
 import { PairSummaryService } from './services/pair-summary.service';
+import { DexTokenSummary } from './entities/dex-token-summary.entity';
+import { DexTokenSummaryService } from './services/dex-token-summary.service';
 
 @Module({
   imports: [
     AeModule,
     AePricingModule,
     TransactionsModule,
-    TypeOrmModule.forFeature([Pair, DexToken, PairTransaction, PairSummary]),
+    TypeOrmModule.forFeature([
+      Pair,
+      DexToken,
+      PairTransaction,
+      PairSummary,
+      DexTokenSummary,
+    ]),
   ],
   providers: [
     PairService,
@@ -31,6 +39,7 @@ import { PairSummaryService } from './services/pair-summary.service';
     DexSyncService,
     PairHistoryService,
     PairSummaryService,
+    DexTokenSummaryService,
   ],
   exports: [
     PairService,
@@ -38,6 +47,7 @@ import { PairSummaryService } from './services/pair-summary.service';
     PairTransactionService,
     DexSyncService,
     PairSummaryService,
+    DexTokenSummaryService,
   ],
   controllers: [
     PairsController,

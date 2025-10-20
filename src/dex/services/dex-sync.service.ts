@@ -25,6 +25,7 @@ import { DexTokenService } from './dex-token.service';
 import { PairSummaryService } from './pair-summary.service';
 import { PairHistoryService } from './pair-history.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { DexTokenSummaryService } from './dex-token-summary.service';
 
 @Injectable()
 export class DexSyncService {
@@ -44,6 +45,7 @@ export class DexSyncService {
     private pairSummaryService: PairSummaryService,
     private pairHistoryService: PairHistoryService,
     private aePricingService: AePricingService,
+    private tokenSummaryService: DexTokenSummaryService,
   ) {
     //
   }
@@ -103,6 +105,7 @@ export class DexSyncService {
       await this.dexTokenRepository.update(token.address, {
         price: price_data,
       });
+      await this.tokenSummaryService.createOrUpdateSummary(token.address);
     }
     for (const pair of pairs) {
       await this.pairSummaryService.createOrUpdateSummary(pair);
