@@ -41,6 +41,27 @@ export function parsePostContent(
 }
 
 /**
+ * Normalize topic name according to business rules:
+ * - Convert camelCase to kebab-case
+ * - Convert to uppercase
+ * - Keep all characters (no removal)
+ * - Clean up multiple hyphens and leading/trailing hyphens
+ */
+function normalizeTopic(topic: string): string {
+  // Remove the # prefix if present
+  const withoutHash = topic.startsWith('#') ? topic.slice(1) : topic;
+
+  // First, convert camelCase to kebab-case
+  const kebabCase = withoutHash.replace(/([a-z])([A-Z])/g, '$1-$2');
+
+  // Convert to uppercase (but keep all characters)
+  const normalized = kebabCase.toUpperCase();
+
+  // Clean up multiple hyphens and leading/trailing hyphens
+  return normalized.replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
+/**
  * Extracts hashtags from content
  */
 export function extractTopics(
@@ -54,8 +75,8 @@ export function extractTopics(
   const topics = content
     .split(/\s+/)
     .filter((word) => word.startsWith('#') && word.length > 1)
-    .map((topic) => topic.toLowerCase().replace(/[^a-z0-9#_]/g, ''))
-    .filter((topic) => topic.length > 1 && topic.length <= 50) // Reasonable length limits
+    .map((topic) => normalizeTopic(topic))
+    .filter((topic) => topic.length > 0 && topic.length <= 50) // Reasonable length limits
     .slice(0, maxTopics);
 
   // Remove duplicates while preserving order
