@@ -22,6 +22,10 @@ import { Pair } from '../entities/pair.entity';
 import { PairService } from './pair.service';
 import BigNumber from 'bignumber.js';
 import { DexTokenService } from './dex-token.service';
+import { PairSummaryService } from './pair-summary.service';
+import { PairHistoryService } from './pair-history.service';
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { DexTokenSummaryService } from './dex-token-summary.service';
 
 @Injectable()
 export class DexSyncService {
@@ -38,6 +42,10 @@ export class DexSyncService {
     private aeSdkService: AeSdkService,
     private pairService: PairService,
     private dexTokenService: DexTokenService,
+    private pairSummaryService: PairSummaryService,
+    private pairHistoryService: PairHistoryService,
+    private aePricingService: AePricingService,
+    private tokenSummaryService: DexTokenSummaryService,
   ) {
     //
   }
@@ -60,7 +68,7 @@ export class DexSyncService {
   }
 
   async sync() {
-    await this.syncDexTokens();
+    // await this.syncDexTokens();
     await this.syncTokenPrices();
   }
 
@@ -90,9 +98,17 @@ export class DexSyncService {
         token.address,
         pairs,
       );
+
+      const price_data = await this.aePricingService.getPriceData(
+        new BigNumber(price),
+      );
       await this.dexTokenRepository.update(token.address, {
-        price_ae: price,
+        price: price_data,
       });
+      await this.tokenSummaryService.createOrUpdateSummary(token.address);
+    }
+    for (const pair of pairs) {
+      await this.pairSummaryService.createOrUpdateSummary(pair);
     }
   }
 

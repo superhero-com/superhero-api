@@ -15,13 +15,14 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { DexTokenService } from '../services/dex-token.service';
-import { DexTokenDto } from '../dto';
+import { DexTokenDto, DexTokenSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Pair } from '../entities/pair.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { getPaths } from '../utils/paths';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import { DexTokenSummaryService } from '../services/dex-token-summary.service';
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
@@ -30,6 +31,7 @@ export class DexTokensController {
     private readonly dexTokenService: DexTokenService,
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
+    private readonly dexTokenSummaryService: DexTokenSummaryService,
   ) {
     //
   }
@@ -112,5 +114,30 @@ export class DexTokensController {
       true,
     );
     return { price: price, token, ...data };
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token contract address',
+  })
+  @ApiOperation({
+    operationId: 'getDexTokenSummary',
+    summary: 'Get DEX token summary',
+    description:
+      'Get comprehensive summary data for a token including aggregated volume and price changes across all pools where the token appears.',
+  })
+  @ApiOkResponse({ type: DexTokenSummaryDto })
+  @Get(':address/summary')
+  async getTokenSummary(@Param('address') address: string) {
+    const token = await this.dexTokenService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException(
+        `DEX token with address ${address} not found`,
+      );
+    }
+    const summary =
+      await this.dexTokenSummaryService.createOrUpdateSummary(address);
+    return { ...summary, address };
   }
 }

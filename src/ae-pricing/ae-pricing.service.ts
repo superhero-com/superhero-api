@@ -21,6 +21,12 @@ export class AePricingService {
     const rates =
       await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
     if (!rates) {
+      this.latestRates = await this.coinPriceRepository.findOne({
+        where: {},
+        order: {
+          created_at: 'DESC',
+        },
+      });
       return this.latestRates;
     }
     this.latestRates = await this.coinPriceRepository.save({

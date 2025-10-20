@@ -77,6 +77,7 @@ export class PairSummaryDto {
   @ApiProperty({
     description: 'Data for different time periods (24h, 7d, 30d)',
     type: () => ChangeData,
+    nullable: true,
   })
   change: {
     '24h': PeriodData;

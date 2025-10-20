@@ -1,18 +1,18 @@
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Pair } from '../entities/pair.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
-import { DataSource, Repository } from 'typeorm';
-import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
-import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { PairSummaryDto } from '../dto/pair-summary.dto';
+import { DataSource } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import { PairSummaryDto } from '../dto/pair-summary.dto';
+import { Pair } from '../entities/pair.entity';
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -53,9 +53,6 @@ export class PairHistoryService {
     ContractWithMethods<ContractMethodsBase>
   > = {};
   constructor(
-    @InjectRepository(Pair)
-    private readonly pairRepository: Repository<Pair>,
-
     private aeSdkService: AeSdkService,
 
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -369,99 +366,109 @@ export class PairHistoryService {
   //   return tokenHistory;
   // }
 
-  // async getForPreview(token: Token, intervalType: '1d' | '7d' | '30d') {
-  //   if (!token) return { result: [], timeframe: '' };
-  //   const types = {
-  //     '1d': {
-  //       interval: '20 minutes',
-  //       unit: 'minute',
-  //       size: 20,
-  //       timeframe: '1 day',
-  //     },
-  //     '7d': {
-  //       interval: '1 hour',
-  //       unit: 'hour',
-  //       size: 1,
-  //       timeframe: '7 days',
-  //     },
-  //     '30d': {
-  //       interval: '4 hours',
-  //       unit: 'hour',
-  //       size: 4,
-  //       timeframe: '30 days',
-  //     },
-  //   };
-  //   const { interval, unit, size, timeframe } = types[intervalType];
+  async getForPreview(pair: Pair, intervalType: '1d' | '7d' | '30d') {
+    if (!pair) return { result: [], timeframe: '' };
+    const types = {
+      '1d': {
+        interval: '20 minutes',
+        unit: 'minute',
+        size: 20,
+        timeframe: '1 day',
+      },
+      '7d': {
+        interval: '1 hour',
+        unit: 'hour',
+        size: 1,
+        timeframe: '7 days',
+      },
+      '30d': {
+        interval: '4 hours',
+        unit: 'hour',
+        size: 4,
+        timeframe: '30 days',
+      },
+    };
+    const { interval, unit, size, timeframe } = types[intervalType];
 
-  //   // Create dynamic truncation based on the interval unit and size
-  //   const truncationQuery =
-  //     size > 1
-  //       ? `DATE_TRUNC('${unit}', transactions.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM transactions.created_at) / ${size})`
-  //       : `DATE_TRUNC('${unit}', transactions.created_at)`; // For single units like '1 day'
+    const queryRunner = this.dataSource.createQueryRunner();
 
-  //   const data = await this.transactionsRepository
-  //     .createQueryBuilder('transactions')
-  //     .where('')
-  //     .select([
-  //       `${truncationQuery} AS truncated_time`,
-  //       "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-  //     ])
-  //     .where('transactions.sale_address = :sale_address', {
-  //       sale_address: token.sale_address,
-  //     })
-  //     .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
-  //     .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
-  //     .groupBy('truncated_time')
-  //     .orderBy('truncated_time', 'DESC')
-  //     .getRawMany();
+    try {
+      // Create dynamic truncation based on the interval unit and size
+      const truncationQuery =
+        size > 1
+          ? `DATE_TRUNC('${unit}', created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM created_at) / ${size})`
+          : `DATE_TRUNC('${unit}', created_at)`; // For single units like '1 day'
 
-  //   let result;
-  //   if (data.length <= 1) {
-  //     // If no transactions found for interval, get latest 4 transactions
-  //     const latestTransactions = await this.transactionsRepository
-  //       .createQueryBuilder('transactions')
-  //       .select([
-  //         'transactions.created_at as truncated_time',
-  //         "CAST(transactions.buy_price->>'ae' AS FLOAT) as max_buy_price",
-  //       ])
-  //       .where('transactions.sale_address = :sale_address', {
-  //         sale_address: token.sale_address,
-  //       })
-  //       .andWhere(`transactions.buy_price->>'ae' != 'NaN'`)
-  //       .orderBy('transactions.created_at', 'DESC')
-  //       .limit(4)
-  //       .getRawMany();
+      const data = await queryRunner.query(
+        `
+          SELECT 
+            ${truncationQuery} AS truncated_time,
+            MAX(CAST(NULLIF(ratio0, 'NaN') AS decimal)) AS max_ratio0,
+            MAX(CAST(NULLIF(ratio1, 'NaN') AS decimal)) AS max_ratio1
+          FROM pair_transactions 
+          WHERE pair_address = $1
+            AND created_at >= NOW() - INTERVAL '${timeframe}'
+            AND (ratio0 != 'NaN' OR ratio1 != 'NaN')
+          GROUP BY truncated_time
+          ORDER BY truncated_time DESC
+        `,
+        [pair.address],
+      );
 
-  //     result = latestTransactions.map((item) => ({
-  //       last_price: item.max_buy_price,
-  //       end_time: item.truncated_time,
-  //     }));
-  //   } else {
-  //     result = data.map((item) => ({
-  //       last_price: item.max_buy_price,
-  //       end_time: item.truncated_time,
-  //     }));
-  //   }
+      let result;
+      if (data.length <= 1) {
+        // If no transactions found for interval, get latest 4 transactions
+        const latestTransactions = await queryRunner.query(
+          `
+            SELECT 
+              created_at as truncated_time,
+              CAST(NULLIF(ratio0, 'NaN') AS decimal) as max_ratio0,
+              CAST(NULLIF(ratio1, 'NaN') AS decimal) as max_ratio1
+            FROM pair_transactions 
+            WHERE pair_address = $1
+              AND (ratio0 != 'NaN' OR ratio1 != 'NaN')
+            ORDER BY created_at DESC
+            LIMIT 4
+          `,
+          [pair.address],
+        );
 
-  //   // prevent duplicate with same end_time
-  //   result = result.filter(
-  //     (item, index) =>
-  //       index ==
-  //       result.findIndex((t) =>
-  //         moment(t.end_time).isSame(moment(item.end_time)),
-  //       ),
-  //   );
+        result = latestTransactions.map((item) => ({
+          last_price: item.max_ratio0 || item.max_ratio1 || '0',
+          end_time: item.truncated_time,
+        }));
+      } else {
+        result = data.map((item) => ({
+          last_price: item.max_ratio0 || item.max_ratio1 || '0',
+          end_time: item.truncated_time,
+        }));
+      }
 
-  //   return {
-  //     result,
-  //     count: result.length,
-  //     timeframe,
-  //     interval,
-  //     token,
-  //   } as ITransactionPreview;
-  // }
+      // prevent duplicate with same end_time
+      result = result.filter(
+        (item, index) =>
+          index ==
+          result.findIndex((t) =>
+            moment(t.end_time).isSame(moment(item.end_time)),
+          ),
+      );
 
-  async getPairSummary(pair: Pair, token?: string): Promise<PairSummaryDto> {
+      return {
+        result,
+        count: result.length,
+        timeframe,
+        interval,
+        pair,
+      } as ITransactionPreview;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async calculatePairSummary(
+    pair: Pair,
+    token?: string,
+  ): Promise<PairSummaryDto> {
     const queryRunner = this.dataSource.createQueryRunner();
 
     try {

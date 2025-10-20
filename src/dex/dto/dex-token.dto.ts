@@ -1,4 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { DexTokenSummaryDto } from './dex-token-summary.dto';
+import { PriceDto } from '@/tokens/dto/price.dto';
 
 export class DexTokenDto {
   @ApiProperty({
@@ -42,4 +44,17 @@ export class DexTokenDto {
     example: false,
   })
   is_ae: boolean;
+
+  @ApiProperty({
+    description: 'Price Data',
+  })
+  price: PriceDto;
+
+  @ApiProperty({
+    description:
+      'Aggregated volume and price change summary across all pools for this token',
+    type: () => DexTokenSummaryDto,
+    nullable: true,
+  })
+  summary: DexTokenSummaryDto;
 }

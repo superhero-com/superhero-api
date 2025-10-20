@@ -10,7 +10,6 @@ import {
 import { Pair } from '../entities/pair.entity';
 import { getPaths } from '../utils/paths';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
-import BigNumber from 'bignumber.js';
 
 @Injectable()
 export class DexTokenService {
@@ -28,7 +27,9 @@ export class DexTokenService {
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<DexToken>> {
-    const query = this.dexTokenRepository.createQueryBuilder('dexToken');
+    const query = this.dexTokenRepository
+      .createQueryBuilder('dexToken')
+      .leftJoinAndSelect('dexToken.summary', 'summary');
     const allowedOrderFields = ['pairs_count', 'name', 'symbol', 'created_at'];
     if (!allowedOrderFields.includes(orderBy)) {
       orderBy = 'created_at';
@@ -53,6 +54,7 @@ export class DexTokenService {
   async findByAddress(address: string): Promise<DexToken> {
     return this.dexTokenRepository
       .createQueryBuilder('dexToken')
+      .leftJoinAndSelect('dexToken.summary', 'summary')
       .where('dexToken.address = :address', { address })
       .getOne();
   }
@@ -92,8 +94,8 @@ export class DexTokenService {
     }
     const price =
       firstPath.token0.address === address
-        ? firstPath.ratio0
-        : firstPath.ratio1;
+        ? firstPath.ratio1
+        : firstPath.ratio0;
 
     if (debug) {
       return { price, firstPath, paths };
