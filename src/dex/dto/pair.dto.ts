@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { DexTokenDto } from './dex-token.dto';
+import { PairSummaryDto } from './pair-summary.dto';
 
 export class PairDto {
   @ApiProperty({
@@ -49,4 +50,13 @@ export class PairDto {
     example: '2024-01-01T00:00:00.000Z',
   })
   created_at: Date;
+}
+
+export class PairWithSummaryDto extends PairDto {
+  @ApiProperty({
+    description: 'Pair summary data including volume and price changes',
+    type: () => PairSummaryDto,
+    required: false,
+  })
+  summary?: PairSummaryDto;
 }

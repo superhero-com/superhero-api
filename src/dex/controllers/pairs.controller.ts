@@ -15,7 +15,7 @@ import {
   ApiOkResponse,
 } from '@nestjs/swagger';
 import { PairService } from '../services/pair.service';
-import { PairDto, PairSummaryDto } from '../dto';
+import { PairDto, PairSummaryDto, PairWithSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { PairHistoryService } from '../services/pair-history.service';
 import { PairSummaryService } from '../services/pair-summary.service';
@@ -55,7 +55,7 @@ export class PairsController {
     description:
       'Retrieve a paginated list of all DEX pairs with optional sorting and search by token name or symbol',
   })
-  @ApiOkResponsePaginated(PairDto)
+  @ApiOkResponsePaginated(PairWithSummaryDto)
   @Get()
   async listAll(
     @Query('search') search = undefined,
