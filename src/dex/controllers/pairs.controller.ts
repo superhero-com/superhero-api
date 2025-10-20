@@ -18,6 +18,7 @@ import { PairService } from '../services/pair.service';
 import { PairDto, PairSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { PairHistoryService } from '../services/pair-history.service';
+import { PairSummaryService } from '../services/pair-summary.service';
 
 @Controller('dex/pairs')
 @ApiTags('DEX')
@@ -25,6 +26,7 @@ export class PairsController {
   constructor(
     private readonly pairService: PairService,
     private readonly pairHistoryService: PairHistoryService,
+    private readonly pairSummaryService: PairSummaryService,
   ) {}
 
   @ApiQuery({
@@ -197,7 +199,7 @@ export class PairsController {
     if (!pair) {
       throw new NotFoundException(`Pair with address ${address} not found`);
     }
-    const summary = await this.pairHistoryService.getPairSummary(pair, token);
+    const summary = await this.pairSummaryService.createOrUpdateSummary(pair);
     return {
       ...summary,
       pair,
