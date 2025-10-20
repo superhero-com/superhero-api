@@ -39,6 +39,7 @@ export class PairService {
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
+      .leftJoinAndSelect('pair.summary', 'summary')
       .loadRelationCountAndMap('pair.transactions_count', 'pair.transactions');
 
     if (orderBy) {
@@ -79,6 +80,7 @@ export class PairService {
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
+      .leftJoinAndSelect('pair.summary', 'summary')
       .loadRelationCountAndMap('pair.transactions_count', 'pair.transactions')
       .where('pair.address = :address', { address })
       .getOne();
@@ -92,6 +94,7 @@ export class PairService {
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
+      .leftJoinAndSelect('pair.summary', 'summary')
       .where(
         '(token0.address = :fromToken AND token1.address = :toToken) OR (token0.address = :toToken AND token1.address = :fromToken)',
         { fromToken, toToken },

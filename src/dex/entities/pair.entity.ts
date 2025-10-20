@@ -4,11 +4,13 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   PrimaryColumn,
   Column,
 } from 'typeorm';
 import { DexToken } from './dex-token.entity';
 import { PairTransaction } from './pair-transaction.entity';
+import { PairSummary } from './pair-summary.entity';
 
 @Entity({
   name: 'pairs',
@@ -27,6 +29,9 @@ export class Pair {
 
   @OneToMany(() => PairTransaction, (transaction) => transaction.pair)
   transactions: PairTransaction[];
+
+  @OneToOne(() => PairSummary, (summary) => summary.pair)
+  summary: PairSummary;
 
   @Column({
     default: 0,
