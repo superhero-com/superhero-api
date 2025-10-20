@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { rmSync } = require('fs');
 
 // Define the path to the package.json file
 const packageJsonPath = path.join(
@@ -38,5 +39,12 @@ fs.readFile(packageJsonPath, 'utf8', (err, data) => {
       return;
     }
     console.log('Successfully updated package.json to use "type": "commonjs"');
+    // Clean the build directory in a cross-platform way
+    try {
+      const buildDir = path.join(__dirname, '../node_modules/bctsl-sdk/.build');
+      rmSync(buildDir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('Warning cleaning bctsl-sdk .build folder:', e.message);
+    }
   });
 });
