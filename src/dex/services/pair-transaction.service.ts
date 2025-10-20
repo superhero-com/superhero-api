@@ -22,6 +22,7 @@ export class PairTransactionService {
     pairAddress?: string,
     txType?: string,
     account_address?: string,
+    tokenAddress?: string,
   ): Promise<Pagination<PairTransaction>> {
     const query = this.pairTransactionRepository
       .createQueryBuilder('pairTransaction')
@@ -44,6 +45,16 @@ export class PairTransactionService {
       query.andWhere('pairTransaction.account_address = :account_address', {
         account_address,
       });
+    }
+
+    // Filter by token address if provided
+    if (tokenAddress) {
+      query.andWhere(
+        '(pair.token0.address = :tokenAddress OR pair.token1.address = :tokenAddress)',
+        {
+          tokenAddress,
+        },
+      );
     }
 
     // Add ordering
