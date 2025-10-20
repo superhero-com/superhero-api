@@ -14,13 +14,14 @@
 
 You usually want the **value of T’s reserves across all pools**, *not* the whole pool TVL (which would double-count the other assets when you add per-token TVLs).
 
-[
+$$
 \text{TokenTVL}*T = \sum*{p \in P} \big( r_T^{(p)} \times price(T \rightarrow AE) \big)
-]
+$$
+
 Optionally also show “Pool TVL where T appears”:
-[
+$$
 \text{PoolsTVL}*T = \sum*{p \in P} \big( r_T^{(p)} \times price(T \rightarrow AE) + r_X^{(p)} \times price(X \rightarrow AE) \big)
-]
+$$
 …but for a token info page, **TokenTVL_T** is the standard, avoids double-counting, and reflects *how much T liquidity* exists on the DEX.
 
 ---
@@ -29,23 +30,23 @@ Optionally also show “Pool TVL where T appears”:
 
 Sum **all swaps involving T** across all pools over the last 24h, valued in a common unit (AE or USD). Value each trade at execution price if you have it; otherwise approximate with per-trade pool mid-price at the time (or current price if you must).
 
-[
+$$
 \text{Vol}*{24h}(T) = \sum*{\text{trades } i \text{ in last 24h where } T \text{ is in/out}} \big( \text{amount}_i^{T} \times price(T \rightarrow AE \text{ at } t_i) \big)
-]
+$$
 
 If you only have per-pool 24h volume in quote units, convert and sum:
-[
+$$
 \text{Vol}*{24h}(T) = \sum*{p \in P} \big( \text{Vol}_{24h}^{(p)}(\text{in } T\text{-terms}) \times price(T \rightarrow AE) \big)
-]
+$$
 
 ---
 
 # Total (All-Time) Volume (for T)
 
 Same as 24h but over all historical trades (or maintain a rolling counter), aggregated across all pools containing T:
-[
+$$
 \text{Vol}*{\text{all}}(T) = \sum*{p \in P} \text{Vol}_{\text{all}}^{(p)}(\text{in } T\text{-terms}) \times price(T \rightarrow AE)
-]
+$$
 
 ---
 
@@ -58,18 +59,18 @@ Compute a robust price for T using a **liquidity-weighted TWAP** over the main p
 
 * Per-pool TWAP price (TWAP_p(T\rightarrow AE)).
 * Aggregate with liquidity weights (w_p) (e.g., based on active liquidity or pool TVL in AE):
-  [
+$$
   Price_{\text{now}} = \frac{\sum_p w_p \cdot TWAP_{p,\text{now}}}{\sum_p w_p},\quad
   Price_{24h} = \frac{\sum_p w_p \cdot TWAP_{p,24h}}{\sum_p w_p}
-  ]
-  [
-  %\Delta_{24h} = \frac{Price_{\text{now}} - Price_{24h}}{Price_{24h}} \times 100%
-  ]
+$$
+$$
+  Delta_{24h} = \frac{Price_{\text{now}} - Price_{24h}}{Price_{24h}} \times 100%
+$$
 
 **2) Volume change:**
-[
-%\Delta \text{Vol}*{24h} = \frac{\text{Vol}*{last,24h}(T) - \text{Vol}*{prev,24h}(T)}{\text{Vol}*{prev,24h}(T)} \times 100%
-]
+$$
+Delta \text{Vol}*{24h} = \frac{\text{Vol}*{last,24h}(T) - \text{Vol}*{prev,24h}(T)}{\text{Vol}*{prev,24h}(T)} \times 100%
+$$
 
 ---
 
