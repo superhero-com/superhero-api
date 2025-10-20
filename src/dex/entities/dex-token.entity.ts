@@ -1,3 +1,4 @@
+import { IPriceDto } from '@/tokens/dto/price.dto';
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
 
 @Entity({
@@ -24,9 +25,10 @@ export class DexToken {
   pairs_count: number;
 
   @Column({
-    default: '0',
+    type: 'json',
+    nullable: true,
   })
-  price_ae: string;
+  price: IPriceDto;
 
   @Column({
     default: false,
