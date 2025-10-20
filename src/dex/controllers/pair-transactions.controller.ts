@@ -40,6 +40,12 @@ export class PairTransactionsController {
     description: 'Filter by specific pair address',
   })
   @ApiQuery({
+    name: 'token_address',
+    type: 'string',
+    required: false,
+    description: 'Filter by account address',
+  })
+  @ApiQuery({
     name: 'account_address',
     type: 'string',
     required: false,
@@ -65,6 +71,7 @@ export class PairTransactionsController {
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('pair_address') pairAddress?: string,
+    @Query('token_address') tokenAddress?: string,
     @Query('tx_type') txType?: string,
     @Query('account_address') account_address?: string,
   ) {
@@ -75,6 +82,7 @@ export class PairTransactionsController {
       pairAddress,
       txType,
       account_address,
+      tokenAddress,
     );
   }
 
