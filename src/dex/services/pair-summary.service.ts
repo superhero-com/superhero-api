@@ -14,9 +14,14 @@ export class PairSummaryService {
     private pairHistoryService: PairHistoryService,
   ) {}
 
-  async createOrUpdateSummary(pair: Pair): Promise<PairSummary> {
-    const summaryData =
-      await this.pairHistoryService.calculatePairSummary(pair);
+  async createOrUpdateSummary(
+    pair: Pair,
+    token?: string,
+  ): Promise<PairSummary> {
+    const summaryData = await this.pairHistoryService.calculatePairSummary(
+      pair,
+      token,
+    );
     const existingSummary = await this.pairSummaryRepository.findOne({
       where: { pair_address: pair.address },
     });

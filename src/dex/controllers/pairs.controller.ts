@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -17,11 +18,14 @@ import {
 import { PairService } from '../services/pair.service';
 import { PairDto, PairSummaryDto, PairWithSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { PairHistoryService } from '../services/pair-history.service';
+import {
+  PairHistoryService,
+  ITransactionPreview,
+} from '../services/pair-history.service';
 import { PairSummaryService } from '../services/pair-summary.service';
 
 @Controller('dex/pairs')
-@ApiTags('DEX')
+@ApiTags('Dex Pair')
 export class PairsController {
   constructor(
     private readonly pairService: PairService,
@@ -199,10 +203,41 @@ export class PairsController {
     if (!pair) {
       throw new NotFoundException(`Pair with address ${address} not found`);
     }
-    const summary = await this.pairSummaryService.createOrUpdateSummary(pair);
+    const summary = await this.pairSummaryService.createOrUpdateSummary(
+      pair,
+      token,
+    );
     return {
       ...summary,
       pair,
     };
+  }
+
+  @ApiOperation({ operationId: 'getPairPreview' })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Pair contract address',
+  })
+  @ApiQuery({
+    name: 'interval',
+    enum: ['1d', '7d', '30d'],
+    required: false,
+    example: '7d',
+  })
+  @ApiOkResponse({ type: Object })
+  @Get('/:address/preview')
+  async getForPreview(
+    @Param('address') address: string,
+    @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
+  ): Promise<ITransactionPreview> {
+    if (!address || address == 'null') {
+      throw new BadRequestException('Address is required');
+    }
+    const pair = await this.pairService.findByAddress(address);
+    if (!pair) {
+      throw new NotFoundException(`Pair with address ${address} not found`);
+    }
+    return this.pairHistoryService.getForPreview(pair, interval);
   }
 }
