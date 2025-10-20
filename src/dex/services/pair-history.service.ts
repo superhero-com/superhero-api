@@ -1,18 +1,18 @@
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { Pair } from '../entities/pair.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
-import { DataSource, Repository } from 'typeorm';
-import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
-import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { PairSummaryDto } from '../dto/pair-summary.dto';
+import { DataSource } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import { PairSummaryDto } from '../dto/pair-summary.dto';
+import { Pair } from '../entities/pair.entity';
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -53,8 +53,6 @@ export class PairHistoryService {
     ContractWithMethods<ContractMethodsBase>
   > = {};
   constructor(
-    @InjectRepository(Pair)
-    private readonly pairRepository: Repository<Pair>,
 
     private aeSdkService: AeSdkService,
 
@@ -461,7 +459,10 @@ export class PairHistoryService {
   //   } as ITransactionPreview;
   // }
 
-  async getPairSummary(pair: Pair, token?: string): Promise<PairSummaryDto> {
+  async calculatePairSummary(
+    pair: Pair,
+    token?: string,
+  ): Promise<PairSummaryDto> {
     const queryRunner = this.dataSource.createQueryRunner();
 
     try {
