@@ -92,8 +92,8 @@ export class DexTokenService {
     }
     const price =
       firstPath.token0.address === address
-        ? firstPath.ratio0
-        : firstPath.ratio1;
+        ? firstPath.ratio1
+        : firstPath.ratio0;
 
     if (debug) {
       return { price, firstPath, paths };
