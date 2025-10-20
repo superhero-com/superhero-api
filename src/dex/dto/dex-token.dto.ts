@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { DexTokenSummaryDto } from './dex-token-summary.dto';
+import { PriceDto } from '@/tokens/dto/price.dto';
 
 export class DexTokenDto {
   @ApiProperty({
@@ -43,6 +44,11 @@ export class DexTokenDto {
     example: false,
   })
   is_ae: boolean;
+
+  @ApiProperty({
+    description: 'Price Data',
+  })
+  price: PriceDto;
 
   @ApiProperty({
     description:
