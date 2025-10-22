@@ -39,7 +39,18 @@ export class DexTokensController {
   @ApiQuery({ name: 'search', type: 'string', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['pairs_count', 'name', 'symbol', 'created_at'],
+    enum: [
+      'pairs_count',
+      'name',
+      'symbol',
+      'created_at',
+      'price',
+      'tvl',
+      '24hchange',
+      '24hvolume',
+      '7dchange',
+      '7dvolume',
+    ],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
