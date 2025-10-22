@@ -68,7 +68,7 @@ export class DexSyncService {
   }
 
   async sync() {
-    // await this.syncDexTokens();
+    await this.syncDexTokens();
     await this.syncTokenPrices();
   }
 
@@ -94,13 +94,14 @@ export class DexSyncService {
       .getMany();
     const tokens = await this.dexTokenRepository.find();
     for (const token of tokens) {
-      const { price } = this.dexTokenService.getTokenPriceFromPairs(
-        token.address,
-        pairs,
-      );
+      const priceAnalysis =
+        await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
+          token.address,
+          DEX_CONTRACTS.wae,
+        );
 
       const price_data = await this.aePricingService.getPriceData(
-        new BigNumber(price),
+        new BigNumber(priceAnalysis.medianPrice),
       );
       await this.dexTokenRepository.update(token.address, {
         price: price_data,
