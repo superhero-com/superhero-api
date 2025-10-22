@@ -95,9 +95,12 @@ export class DexTokenService {
     }
 
     if (search) {
-      query.andWhere('dexToken.name ILIKE :search', {
-        search: `%${search}%`,
-      });
+      query.andWhere(
+        '(dexToken.name ILIKE :search OR dexToken.symbol ILIKE :search)',
+        {
+          search: `%${search}%`,
+        },
+      );
     }
 
     return paginate(query, options);
