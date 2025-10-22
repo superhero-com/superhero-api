@@ -14,6 +14,7 @@ import {
 } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Pair } from '../entities/pair.entity';
+import { getPaths } from '../utils/paths';
 
 @Injectable()
 export class PairService {
@@ -102,6 +103,61 @@ export class PairService {
       .getOne();
   }
 
+  async findPairsForTokens(
+    fromToken: string,
+    toToken: string,
+  ): Promise<Pair[]> {
+    return this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .leftJoinAndSelect('pair.summary', 'summary')
+      .where(
+        '(token0.address = :fromToken AND token1.address = :toToken) OR (token0.address = :toToken AND token1.address = :fromToken)',
+        { fromToken, toToken },
+      )
+      .getMany();
+  }
+
+  async getAllPairsForPathFinding(): Promise<Pair[]> {
+    return this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .leftJoinAndSelect('pair.summary', 'summary')
+      .getMany();
+  }
+
+  async findSwapPaths(
+    fromToken: string,
+    toToken: string,
+  ): Promise<{ paths: Pair[][]; directPairs: Pair[] }> {
+    // Get all pairs to build the complete graph
+    const allPairs = await this.getAllPairsForPathFinding();
+
+    // Check for direct pairs
+    const directPairs = allPairs.filter(
+      (pair) =>
+        (pair.token0.address === fromToken &&
+          pair.token1.address === toToken) ||
+        (pair.token0.address === toToken && pair.token1.address === fromToken),
+    );
+
+    // Build edges for path finding
+    const edges = allPairs.map((pair) => ({
+      data: pair,
+      t0: pair.token0.address,
+      t1: pair.token1.address,
+    }));
+
+    // Find all possible paths (including direct and multi-hop)
+    const paths = getPaths(fromToken, toToken, edges);
+
+    return {
+      paths,
+      directPairs,
+    };
+  }
   async getPairContract(pair: Pair) {
     if (this.contracts[pair.address]) {
       return this.contracts[pair.address];
