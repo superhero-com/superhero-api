@@ -1,3 +1,4 @@
+import { ApiOkResponsePaginated } from '@/utils/api-type';
 import {
   Controller,
   DefaultValuePipe,
@@ -8,21 +9,18 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiTags,
-  ApiOkResponse,
 } from '@nestjs/swagger';
-import { DexTokenService } from '../services/dex-token.service';
-import { DexTokenDto, DexTokenSummaryDto } from '../dto';
-import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { Pair } from '../entities/pair.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { getPaths } from '../utils/paths';
-import { DEX_CONTRACTS } from '../config/dex-contracts.config';
+import { DexTokenDto, DexTokenSummaryDto } from '../dto';
+import { Pair } from '../entities/pair.entity';
 import { DexTokenSummaryService } from '../services/dex-token-summary.service';
+import { DexTokenService } from '../services/dex-token.service';
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
