@@ -75,14 +75,12 @@ export class DexTokenSummaryService {
       if (!pairRatio) continue;
 
       // Try to find the price of the other token through WAE
-      const otherTokenPrice = this.dexTokenService.getTokenPriceFromPairs(
-        otherTokenAddress,
-        await this.pairRepository
-          .createQueryBuilder('pair')
-          .leftJoinAndSelect('pair.token0', 'token0')
-          .leftJoinAndSelect('pair.token1', 'token1')
-          .getMany(),
-      )?.price;
+      const otherTokenPrice = await this.dexTokenService
+        .getTokenPriceWithLiquidityAnalysis(
+          otherTokenAddress,
+          DEX_CONTRACTS.wae,
+        )
+        ?.then((analysis) => analysis?.medianPrice);
 
       if (otherTokenPrice) {
         // Calculate our token price: otherTokenPrice / pairRatio
@@ -298,10 +296,9 @@ export class DexTokenSummaryService {
           await this.aePricingService.getPriceData(periodVolumeAE);
 
         // Price change approximation: compare current routed price vs earliest price in period from any WAE pair if present
-        const currentPrice = this.dexTokenService.getTokenPriceFromPairs(
-          tokenAddress,
-          pairs,
-        )?.price;
+        const currentPrice = await this.dexTokenService
+          .getTokenPriceWithLiquidityAnalysis(tokenAddress, DEX_CONTRACTS.wae)
+          .then((analysis) => analysis?.medianPrice);
 
         let startPrice: string | null = null;
         // Prefer WAE pairs for historical start price

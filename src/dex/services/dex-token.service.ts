@@ -118,43 +118,165 @@ export class DexTokenService {
     address: string,
     debug = false,
   ): Promise<{ price: string }> {
-    const pairs = await this.pairRepository
+    const analysis = await this.getTokenPriceWithLiquidityAnalysis(
+      address,
+      DEX_CONTRACTS.wae,
+      debug,
+    );
+
+    return { price: analysis?.medianPrice || '1' };
+  }
+
+  /**
+   * Calculate the best token price by analyzing all possible liquidity paths
+   * Uses liquidity-weighted pricing to get the most accurate price
+   */
+  async getTokenPriceWithLiquidityAnalysis(
+    address: string,
+    baseToken: string = DEX_CONTRACTS.wae,
+    debug = false,
+  ): Promise<{
+    price: string;
+    confidence: number;
+    bestPath: Pair[];
+    allPaths: Array<{
+      path: Pair[];
+      price: string;
+      liquidity: number;
+      confidence: number;
+    }>;
+    liquidityWeightedPrice: string;
+    medianPrice: string;
+  } | null> {
+    if (address === baseToken) {
+      return {
+        price: '1',
+        confidence: 1,
+        bestPath: [],
+        allPaths: [],
+        liquidityWeightedPrice: '1',
+        medianPrice: '1',
+      };
+    }
+
+    // Get all pairs to build the complete graph
+    const allPairs = await this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
       .getMany();
-    return this.getTokenPriceFromPairs(address, pairs, debug);
-  }
 
-  getTokenPriceFromPairs(
-    address: string,
-    pairs: Pair[],
-    debug = false,
-  ): { price: string; firstPath?: any; paths?: any[] } {
-    if (address === DEX_CONTRACTS.wae) {
-      return { price: '1' };
-    }
-    const edges = pairs.map((pair) => {
-      return {
-        data: pair,
-        t0: pair.token0.address,
-        t1: pair.token1.address,
-      };
-    });
-    const paths = getPaths(address, DEX_CONTRACTS.wae, edges);
-    const firstPath: any = paths?.[0]?.[0];
+    // Build edges for path finding
+    const edges = allPairs.map((pair) => ({
+      data: pair,
+      t0: pair.token0.address,
+      t1: pair.token1.address,
+    }));
 
-    if (!firstPath) {
+    // Find all possible paths
+    const paths = getPaths(address, baseToken, edges);
+
+    if (!paths || paths.length === 0) {
       return null;
     }
-    const price =
-      firstPath.token0.address === address
-        ? firstPath.ratio1
-        : firstPath.ratio0;
+
+    // Calculate price and liquidity for each path
+    const pathAnalysis = paths.map((path: Pair[]) => {
+      let price = '1';
+      let totalLiquidity = 0;
+      let confidence = 1;
+
+      // Calculate price by multiplying ratios along the path
+      for (let i = 0; i < path.length; i++) {
+        const pair = path[i];
+        const isToken0 = pair.token0.address === address;
+        const ratio = isToken0 ? pair.ratio1 : pair.ratio0;
+        if (i === 0) {
+          price = ratio.toString();
+        } else {
+          // For multi-hop paths, we need to adjust the calculation
+          // This is a simplified approach - in practice, you'd need more complex logic
+          price = (parseFloat(price) * parseFloat(ratio.toString())).toString();
+        }
+
+        // Calculate liquidity (using reserve values as proxy)
+        const reserve0 = parseFloat(String(pair.reserve0 || '0'));
+        const reserve1 = parseFloat(String(pair.reserve1 || '0'));
+        const pairLiquidity = Math.min(reserve0, reserve1);
+        totalLiquidity += pairLiquidity;
+
+        // Reduce confidence for longer paths
+        confidence *= 0.9;
+      }
+
+      return {
+        path,
+        price,
+        liquidity: totalLiquidity,
+        confidence,
+      };
+    });
+
+    // Sort by liquidity (highest first)
+    pathAnalysis.sort((a, b) => b.liquidity - a.liquidity);
+
+    const bestPath = pathAnalysis[0];
+    const bestPrice = bestPath.price;
+
+    // Calculate liquidity-weighted price
+    const totalLiquidity = pathAnalysis.reduce(
+      (sum, p) => sum + p.liquidity,
+      0,
+    );
+    const liquidityWeightedPrice =
+      pathAnalysis.length > 0
+        ? pathAnalysis
+            .reduce((sum, p) => {
+              const weight = p.liquidity / totalLiquidity;
+              return sum + parseFloat(p.price) * weight;
+            }, 0)
+            .toString()
+        : bestPrice;
+
+    // Calculate median price
+    const prices = pathAnalysis
+      .map((p) => parseFloat(p.price))
+      .sort((a, b) => a - b);
+    const medianPrice =
+      prices.length > 0
+        ? (prices.length % 2 === 0
+            ? (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
+            : prices[Math.floor(prices.length / 2)]
+          ).toString()
+        : bestPrice;
+
+    // Calculate overall confidence based on liquidity and path quality
+    const avgConfidence =
+      pathAnalysis.reduce((sum, p) => sum + p.confidence, 0) /
+      pathAnalysis.length;
+    const liquidityFactor = Math.min(totalLiquidity / 1000, 1); // Normalize liquidity
+    const overallConfidence = avgConfidence * liquidityFactor;
+
+    const result = {
+      price: bestPrice,
+      confidence: overallConfidence,
+      bestPath: bestPath.path,
+      allPaths: pathAnalysis,
+      liquidityWeightedPrice,
+      medianPrice,
+    };
 
     if (debug) {
-      return { price, firstPath, paths };
+      return result;
     }
-    return { price };
+
+    return {
+      price: bestPrice,
+      confidence: overallConfidence,
+      bestPath: bestPath.path,
+      allPaths: pathAnalysis,
+      liquidityWeightedPrice,
+      medianPrice,
+    };
   }
 }
