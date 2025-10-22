@@ -131,6 +131,74 @@ export class PairsController {
     return pair;
   }
 
+  @ApiParam({
+    name: 'from_token',
+    type: 'string',
+    description: 'Token address',
+  })
+  @ApiParam({
+    name: 'to_token',
+    type: 'string',
+    description: 'Token address',
+  })
+  @ApiOperation({
+    operationId: 'findPairsForTokens',
+    summary: 'Get all possible swap paths between two tokens',
+    description:
+      'Find all possible swap paths from one token to another, including direct pairs and multi-hop paths',
+  })
+  @ApiOkResponse({
+    type: Object,
+    description:
+      'Returns all possible swap paths with direct pairs and multi-hop paths',
+    schema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PairDto' },
+          },
+          description:
+            'All possible swap paths, where each path is an array of pairs',
+        },
+        directPairs: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/PairDto' },
+          description: 'Direct pairs between the tokens (if any)',
+        },
+        hasDirectPath: {
+          type: 'boolean',
+          description: 'Whether there is a direct pair between the tokens',
+        },
+        totalPaths: {
+          type: 'number',
+          description: 'Total number of possible paths',
+        },
+      },
+    },
+  })
+  @Get('from/:from_token/to/:to_token/providers')
+  async findPairsForTokens(
+    @Param('from_token') fromToken: string,
+    @Param('to_token') toToken: string,
+  ) {
+    const result = await this.pairService.findSwapPaths(fromToken, toToken);
+
+    if (result.paths.length === 0) {
+      throw new NotFoundException(
+        `No swap paths found from token ${fromToken} to token ${toToken}`,
+      );
+    }
+
+    return {
+      ...result,
+      hasDirectPath: result.directPairs.length > 0,
+      totalPaths: result.paths.length,
+    };
+  }
+
   @ApiOperation({ operationId: 'getPaginatedHistory' })
   @ApiQuery({
     name: 'interval',

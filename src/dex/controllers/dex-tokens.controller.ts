@@ -130,6 +130,84 @@ export class DexTokensController {
     type: 'string',
     description: 'Token contract address',
   })
+  @ApiQuery({
+    name: 'base_token',
+    type: 'string',
+    required: false,
+    description: 'Base token for price calculation (default: WAE)',
+  })
+  @ApiQuery({
+    name: 'debug',
+    type: 'boolean',
+    required: false,
+    description: 'Include detailed path analysis',
+  })
+  @ApiOperation({
+    operationId: 'getTokenPriceWithLiquidityAnalysis',
+    summary: 'Get comprehensive token price analysis',
+    description:
+      'Get detailed price analysis including liquidity-weighted pricing, confidence metrics, and all possible paths',
+  })
+  @ApiOkResponse({
+    type: Object,
+    description: 'Comprehensive price analysis with liquidity weighting',
+    schema: {
+      type: 'object',
+      properties: {
+        price: { type: 'string', description: 'Best price found' },
+        confidence: { type: 'number', description: 'Price confidence (0-1)' },
+        bestPath: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/PairDto' },
+          description: 'Best liquidity path',
+        },
+        allPaths: {
+          type: 'array',
+          description: 'All possible paths with analysis',
+        },
+        liquidityWeightedPrice: {
+          type: 'string',
+          description: 'Liquidity-weighted average price',
+        },
+        medianPrice: {
+          type: 'string',
+          description: 'Median price across all paths',
+        },
+      },
+    },
+  })
+  @Get(':address/price/analysis')
+  async getTokenPriceAnalysis(
+    @Param('address') address: string,
+    @Query('base_token') baseToken?: string,
+    @Query('debug') debug?: boolean,
+  ) {
+    const token = await this.dexTokenService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException(
+        `DEX token with address ${address} not found`,
+      );
+    }
+
+    const analysis =
+      await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
+        address,
+        baseToken,
+        debug,
+      );
+
+    if (!analysis) {
+      throw new NotFoundException(`No price paths found for token ${address}`);
+    }
+
+    return analysis;
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token contract address',
+  })
   @ApiOperation({
     operationId: 'getDexTokenSummary',
     summary: 'Get DEX token summary',
