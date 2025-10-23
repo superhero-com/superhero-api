@@ -10,12 +10,14 @@ import { HistoricalController } from './controllers/historical.controller';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TransactionsController } from './controllers/transactions.controller';
 import { Transaction } from './entities/transaction.entity';
+import { TokenPerformance } from './entities/token-performance.entity';
 import { TransactionHistoryService } from './services/transaction-history.service';
 import { TransactionService } from './services/transaction.service';
+import { TokenPerformanceService } from './services/token-performance.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Transaction]),
+    TypeOrmModule.forFeature([Transaction, TokenPerformance]),
     BullModule.registerQueue({
       name: SYNC_TOKEN_HOLDERS_QUEUE,
     }),
@@ -23,8 +25,12 @@ import { TransactionService } from './services/transaction.service';
     TokensModule,
     AePricingModule,
   ],
-  providers: [TransactionService, TransactionHistoryService],
-  exports: [TypeOrmModule, TransactionService],
+  providers: [
+    TransactionService,
+    TransactionHistoryService,
+    TokenPerformanceService,
+  ],
+  exports: [TypeOrmModule, TransactionService, TokenPerformanceService],
   controllers: [
     TransactionsController,
     HistoricalController,
