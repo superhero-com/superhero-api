@@ -146,7 +146,6 @@ export class TokensService {
   ): Promise<Token | null> {
     const token = await this.tokensRepository
       .createQueryBuilder('token')
-      .leftJoinAndSelect('token.performance', 'token_performance')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
       .orWhere('token.name = :address', { address })
@@ -564,10 +563,10 @@ export class TokensService {
       )
       SELECT 
         all_ranked_tokens.*,
-        row_to_json(token_performance.*) as performance
+        row_to_json(token_performance_view.*) as performance
       FROM all_ranked_tokens
       INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
-      LEFT JOIN token_performance ON all_ranked_tokens.sale_address = token_performance.sale_address
+      LEFT JOIN token_performance_view ON all_ranked_tokens.sale_address = token_performance_view.sale_address
       ORDER BY all_ranked_tokens.${orderBy} ${orderDirection}
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}

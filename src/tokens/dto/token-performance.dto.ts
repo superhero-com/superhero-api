@@ -16,10 +16,4 @@ export class TokenPerformanceDto {
 
   @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
   all_time: PerformancePeriodDto;
-
-  @ApiProperty()
-  created_at: Date;
-
-  @ApiProperty()
-  updated_at: Date;
 }

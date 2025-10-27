@@ -5,11 +5,9 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  OneToOne,
   PrimaryColumn,
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
-import { TokenPerformance } from './token-performance.entity';
 
 @Entity()
 export class Token {
@@ -171,9 +169,6 @@ export class Token {
     nullable: true,
   })
   trending_score_update_at: Date;
-
-  @OneToOne(() => TokenPerformance, (performance) => performance.token)
-  performance: TokenPerformance;
 
   @CreateDateColumn({
     type: 'timestamp',

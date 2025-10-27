@@ -12,6 +12,9 @@ export class PerformancePeriodDto {
   current: PriceDto;
 
   @ApiProperty()
+  current_date: Date;
+
+  @ApiProperty()
   current_change: number;
 
   @ApiProperty()
@@ -24,28 +27,13 @@ export class PerformancePeriodDto {
   high: PriceDto;
 
   @ApiProperty()
-  high_change: number;
-
-  @ApiProperty()
-  high_change_percent: number;
-
-  @ApiProperty({ enum: ChangeDirection })
-  high_change_direction: string;
+  high_date: Date;
 
   @ApiProperty({ type: () => PriceDto })
   low: PriceDto;
 
   @ApiProperty()
-  low_change: number;
-
-  @ApiProperty()
-  low_change_percent: number;
-
-  @ApiProperty({ enum: ChangeDirection })
-  low_change_direction: string;
-
-  @ApiProperty()
-  current_token_price: string;
+  low_date: Date;
 
   @ApiProperty()
   last_updated: Date;
