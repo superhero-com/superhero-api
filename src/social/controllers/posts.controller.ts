@@ -20,6 +20,7 @@ import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { PostDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { Token } from '@/tokens/entities/token.entity';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -78,7 +79,12 @@ export class PostsController {
     const query = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
-      // .where('post.post_id IS NULL')
+      .leftJoinAndMapOne(
+        'topic.token',
+        Token,
+        'token',
+        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
+      )
       .where('post.is_hidden = false');
 
     // Add search functionality
