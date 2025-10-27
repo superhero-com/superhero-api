@@ -5,7 +5,6 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
   OneToOne,
   PrimaryColumn,
 } from 'typeorm';
@@ -174,7 +173,6 @@ export class Token {
   trending_score_update_at: Date;
 
   @OneToOne(() => TokenPerformance, (performance) => performance.token)
-  @JoinColumn({ name: 'performance_id' })
   performance: TokenPerformance;
 
   @CreateDateColumn({

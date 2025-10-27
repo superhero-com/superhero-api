@@ -4,7 +4,7 @@ import {
   CreateDateColumn,
   Entity,
   JoinColumn,
-  ManyToOne,
+  OneToOne,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -21,7 +21,7 @@ export class TokenPerformance {
   @PrimaryColumn()
   sale_address: string;
 
-  @ManyToOne(() => Token, { onDelete: 'CASCADE' })
+  @OneToOne(() => Token, (token) => token.performance, { onDelete: 'CASCADE' })
   @JoinColumn({
     name: 'sale_address',
     referencedColumnName: 'sale_address',
