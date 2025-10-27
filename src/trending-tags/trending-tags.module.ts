@@ -9,7 +9,7 @@ import { TokensModule } from '@/tokens/tokens.module';
 @Module({
   imports: [AeModule, TokensModule, TypeOrmModule.forFeature([TrendingTag])],
   providers: [TrendingTagsService],
-  exports: [],
+  exports: [TypeOrmModule],
   controllers: [TrendingTagsController],
 })
 export class TrendingTagsModule {
