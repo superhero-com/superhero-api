@@ -12,6 +12,7 @@ import {
 @Entity({
   name: 'transactions',
 })
+@Index('IDX_TRANSACTION_SALE_ADDRESS_CREATED_AT', ['sale_address', 'created_at'])
 export class Transaction {
   @Index()
   @PrimaryColumn()

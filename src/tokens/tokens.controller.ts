@@ -275,8 +275,11 @@ export class TokensController {
           END as upper_limit,
           ${Math.floor(limit / 2)} as lower_limit
       )
-      SELECT *
+      SELECT 
+        ranked_tokens.*,
+        row_to_json(token_performance.*) as performance
       FROM ranked_tokens
+      LEFT JOIN token_performance ON ranked_tokens.sale_address = token_performance.sale_address
       WHERE rank >= (
         SELECT rank FROM target_rank
       ) - (SELECT lower_limit FROM adjusted_limits)

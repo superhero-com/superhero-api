@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { TopicDto } from './topic.dto';
 
 export class PostDto {
   @ApiProperty({
@@ -47,10 +48,9 @@ export class PostDto {
 
   @ApiProperty({
     description: 'Array of topics/hashtags associated with the post',
-    type: [String],
-    example: ['#blockchain', '#hello', '#firstpost'],
+    type: () => [TopicDto],
   })
-  topics: string[];
+  topics: TopicDto[];
 
   @ApiProperty({
     description: 'Array of media URLs associated with the post',

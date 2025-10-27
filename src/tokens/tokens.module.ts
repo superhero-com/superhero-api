@@ -20,10 +20,18 @@ import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
+import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { TokenPerformanceView } from './entities/tokens-performance.view';
+import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Token, TokenHolder, Transaction]),
+    TypeOrmModule.forFeature([
+      Token,
+      TokenHolder,
+      TokenPerformanceView,
+      Transaction,
+    ]),
     AeModule,
     AePricingModule,
     BullModule.registerQueue(
@@ -42,6 +50,7 @@ import { UpdateTrendingTokensService } from './services/update-trending-tokens.s
     TokensController,
     AccountTokensController,
     AnalyticTokensController,
+    TokenPerformanceController,
   ],
   providers: [
     TokensService,
@@ -50,6 +59,7 @@ import { UpdateTrendingTokensService } from './services/update-trending-tokens.s
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,
     UpdateTrendingTokensService,
+    RefreshPerformanceViewService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

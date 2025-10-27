@@ -7,7 +7,6 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsTransactionsController } from './controllers/analytics-transactions.controller';
 import { HistoricalController } from './controllers/historical.controller';
-import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TransactionsController } from './controllers/transactions.controller';
 import { Transaction } from './entities/transaction.entity';
 import { TransactionHistoryService } from './services/transaction-history.service';
@@ -28,7 +27,6 @@ import { TransactionService } from './services/transaction.service';
   controllers: [
     TransactionsController,
     HistoricalController,
-    TokenPerformanceController,
     AnalyticsTransactionsController,
   ],
 })

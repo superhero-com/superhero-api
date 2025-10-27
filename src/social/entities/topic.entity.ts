@@ -3,10 +3,12 @@ import {
   CreateDateColumn,
   Entity,
   ManyToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Post } from './post.entity';
+import { Token } from '@/tokens/entities/token.entity';
 
 @Entity({
   name: 'topics',
@@ -34,6 +36,11 @@ export class Topic {
 
   @ManyToMany(() => Post, (post) => post.topics)
   posts: Post[];
+
+  @OneToOne(() => Token, {
+    persistence: false,
+  })
+  token?: Token;
 
   @CreateDateColumn({
     type: 'timestamp',
