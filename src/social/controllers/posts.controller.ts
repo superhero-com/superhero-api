@@ -21,6 +21,7 @@ import { Post } from '../entities/post.entity';
 import { PostDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
+import { TokenPerformance } from '@/tokens/entities/token-performance.entity';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -84,6 +85,12 @@ export class PostsController {
         Token,
         'token',
         'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
+      )
+      .leftJoinAndMapOne(
+        'token.performance',
+        TokenPerformance,
+        'token_performance',
+        'token.sale_address = token_performance.sale_address',
       )
       .where('post.is_hidden = false');
 
