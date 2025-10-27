@@ -1,19 +1,19 @@
+import { TokensService } from '@/tokens/tokens.service';
+import { TokenPriceMovementDto } from '@/transactions/dto/token-stats.dto';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   Controller,
   Get,
+  NotFoundException,
   Param,
   UseInterceptors,
-  NotFoundException,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
-import moment, { Moment } from 'moment';
-import { Transaction } from '@/transactions/entities/transaction.entity';
+import moment from 'moment';
 import { Repository } from 'typeorm';
-import { Token } from '@/tokens/entities/token.entity';
-import { TokensService } from '@/tokens/tokens.service';
-import { TokenPriceMovementDto } from '@/transactions/dto/token-stats.dto';
+import { Token } from '../entities/token.entity';
+import { TokenPerformanceView } from '../entities/tokens-performance.view';
 import { TokenPerformanceService } from '../services/token-performance.service';
 
 @Controller('tokens')
@@ -21,9 +21,8 @@ import { TokenPerformanceService } from '../services/token-performance.service';
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
-    @InjectRepository(Transaction)
-    private readonly transactionsRepository: Repository<Transaction>,
-
+    @InjectRepository(Token)
+    private readonly tokenRepository: Repository<Token>,
     private readonly tokensService: TokensService,
     private readonly tokenPerformanceService: TokenPerformanceService,
   ) {
@@ -78,22 +77,22 @@ export class TokenPerformanceController {
     }
 
     // Calculate fresh performance data
-    const past_24h = await this.getTokenPriceMovement(
+    const past_24h = await this.tokenPerformanceService.getTokenPriceMovement(
       token,
       moment().subtract(24, 'hours'),
     );
 
-    const past_7d = await this.getTokenPriceMovement(
+    const past_7d = await this.tokenPerformanceService.getTokenPriceMovement(
       token,
       moment().subtract(7, 'days'),
     );
 
-    const past_30d = await this.getTokenPriceMovement(
+    const past_30d = await this.tokenPerformanceService.getTokenPriceMovement(
       token,
       moment().subtract(30, 'days'),
     );
 
-    const all_time = await this.getTokenPriceMovement(
+    const all_time = await this.tokenPerformanceService.getTokenPriceMovement(
       token,
       moment(token.created_at).subtract(30, 'days'),
     );
@@ -121,91 +120,43 @@ export class TokenPerformanceController {
     };
   }
 
-  async getTokenPriceMovement(token: Token, date: Moment) {
-    const startingTransaction = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
+  @ApiOperation({
+    operationId: 'performanceRaw',
+    summary: 'Get token performance without cache (using database view)',
+    description:
+      'Calculates performance data in real-time using database view. Useful for analysis and comparison with cached data.',
+  })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @Get(':address/performance-raw')
+  @CacheTTL(60 * 1000)
+  @ApiResponse({
+    type: TokenPriceMovementDto,
+  })
+  async performanceRaw(@Param('address') address: string) {
+    const token = await this.tokensService.getToken(address);
+
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
+
+    // Query the view directly for this token
+    const viewData = await this.tokenRepository
+      .createQueryBuilder('token')
+      .leftJoinAndMapOne(
+        'token.performance_view',
+        TokenPerformanceView,
+        'perf',
+        'perf.sale_address = token.sale_address',
+      )
+      .where('token.sale_address = :saleAddress', {
+        saleAddress: token.sale_address,
       })
-      .andWhere('transactions.created_at > :date', {
-        date: date.toDate(),
-      })
-      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
-      .orderBy('transactions.created_at', 'ASC')
-      .select([
-        'transactions.buy_price as buy_price',
-        'transactions.created_at as created_at',
-      ])
-      .getRawOne();
-    const highestPriceQuery = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
-      })
-      .andWhere('transactions.created_at > :date', {
-        date: date.toDate(),
-      })
-      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
-      .orderBy("transactions.buy_price->>'ae'", 'DESC')
-      .select([
-        'transactions.buy_price as buy_price',
-        'transactions.created_at as created_at',
-      ])
-      .getRawOne();
-    const lowestPriceQuery = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
-      })
-      .andWhere('transactions.created_at > :date', {
-        date: date.toDate(),
-      })
-      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
-      .orderBy("transactions.buy_price->>'ae'", 'ASC')
-      .select([
-        'transactions.buy_price as buy_price',
-        'transactions.created_at as created_at',
-      ])
-      .getRawOne();
+      .getOne();
 
-    const current = startingTransaction?.buy_price ?? token?.price_data;
-    const high = highestPriceQuery?.buy_price ?? token?.price_data;
-    const low = lowestPriceQuery?.buy_price ?? token?.price_data;
-
-    const current_token_price = token?.price_data?.ae;
-
-    const high_change = current_token_price - high?.ae;
-    const high_change_percent = (high_change / current_token_price) * 100;
-    const high_change_direction = high_change > 0 ? 'up' : 'down';
-
-    const low_change = current_token_price - low?.ae;
-    const low_change_percent = (low_change / current_token_price) * 100;
-    const low_change_direction = low_change > 0 ? 'up' : 'down';
-
-    const current_change = current_token_price - current?.ae;
-    const current_change_percent = (current_change / current_token_price) * 100;
-    const current_change_direction = current_change > 0 ? 'up' : 'down';
-
-    return {
-      current,
-      current_date: startingTransaction?.created_at,
-      current_change,
-      current_change_percent,
-      current_change_direction,
-
-      high,
-      high_date: highestPriceQuery?.created_at,
-      high_change,
-      high_change_percent,
-      high_change_direction,
-
-      low,
-      low_date: lowestPriceQuery?.created_at,
-      low_change,
-      low_change_percent,
-      low_change_direction,
-
-      current_token_price,
-    };
+    return viewData;
   }
 }

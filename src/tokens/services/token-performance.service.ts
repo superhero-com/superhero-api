@@ -5,12 +5,16 @@ import { TokenPerformance } from '../entities/token-performance.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { PriceMovementDto } from '@/transactions/dto/token-stats.dto';
 import { PriceDto } from '@/tokens/dto/price.dto';
+import { Transaction } from '@/transactions/entities/transaction.entity';
+import { Moment } from 'moment';
 
 @Injectable()
 export class TokenPerformanceService {
   constructor(
     @InjectRepository(TokenPerformance)
     private readonly tokenPerformanceRepository: Repository<TokenPerformance>,
+    @InjectRepository(Transaction)
+    private readonly transactionsRepository: Repository<Transaction>,
   ) {}
 
   /**
@@ -191,5 +195,99 @@ export class TokenPerformanceService {
     tokenSaleAddress: string,
   ): Promise<TokenPerformance | null> {
     return this.getPerformanceData(tokenSaleAddress);
+  }
+
+  /**
+   * Calculate token price movement for a given time period
+   * Shared method used by both controller and update service
+   */
+  async getTokenPriceMovement(token: Token, date: Moment) {
+    const startingTransaction = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy('transactions.created_at', 'ASC')
+      .select([
+        'transactions.buy_price as buy_price',
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
+
+    const highestPriceQuery = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy("transactions.buy_price->>'ae'", 'DESC')
+      .select([
+        'transactions.buy_price as buy_price',
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
+
+    const lowestPriceQuery = await this.transactionsRepository
+      .createQueryBuilder('transactions')
+      .where('transactions.sale_address = :sale_address', {
+        sale_address: token.sale_address,
+      })
+      .andWhere('transactions.created_at > :date', {
+        date: date.toDate(),
+      })
+      .andWhere("transactions.buy_price->>'ae' != 'NaN'")
+      .orderBy("transactions.buy_price->>'ae'", 'ASC')
+      .select([
+        'transactions.buy_price as buy_price',
+        'transactions.created_at as created_at',
+      ])
+      .getRawOne();
+
+    const current = startingTransaction?.buy_price ?? token?.price_data;
+    const high = highestPriceQuery?.buy_price ?? token?.price_data;
+    const low = lowestPriceQuery?.buy_price ?? token?.price_data;
+
+    const current_token_price = token?.price_data?.ae;
+
+    const high_change = current_token_price - high?.ae;
+    const high_change_percent = (high_change / current_token_price) * 100;
+    const high_change_direction = high_change > 0 ? 'up' : 'down';
+
+    const low_change = current_token_price - low?.ae;
+    const low_change_percent = (low_change / current_token_price) * 100;
+    const low_change_direction = low_change > 0 ? 'up' : 'down';
+
+    const current_change = current_token_price - current?.ae;
+    const current_change_percent = (current_change / current_token_price) * 100;
+    const current_change_direction = current_change > 0 ? 'up' : 'down';
+
+    return {
+      current,
+      current_date: startingTransaction?.created_at,
+      current_change,
+      current_change_percent,
+      current_change_direction,
+
+      high,
+      high_date: highestPriceQuery?.created_at,
+      high_change,
+      high_change_percent,
+      high_change_direction,
+
+      low,
+      low_date: lowestPriceQuery?.created_at,
+      low_change,
+      low_change_percent,
+      low_change_direction,
+
+      current_token_price,
+    };
   }
 }

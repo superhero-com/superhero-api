@@ -22,7 +22,9 @@ import { TokensService } from './tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 import { TokenPerformanceService } from './services/token-performance.service';
+import { UpdateTokenPerformanceService } from './services/update-token-performance.service';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { TokenPerformanceView } from './entities/tokens-performance.view';
 
 @Module({
   imports: [
@@ -30,6 +32,7 @@ import { TokenPerformanceController } from './controllers/token-performance.cont
       Token,
       TokenHolder,
       TokenPerformance,
+      TokenPerformanceView, // Registered for queries, but synchronize:false prevents auto-creation
       Transaction,
     ]),
     AeModule,
@@ -60,6 +63,7 @@ import { TokenPerformanceController } from './controllers/token-performance.cont
     RemoveOldTokensQueue,
     UpdateTrendingTokensService,
     TokenPerformanceService,
+    UpdateTokenPerformanceService,
   ],
   exports: [
     TypeOrmModule,
