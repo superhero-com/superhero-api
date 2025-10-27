@@ -1,20 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { PerformancePeriodDto } from './performance-period.dto';
 
 export class TokenPerformanceDto {
   @ApiProperty()
   sale_address: string;
 
-  @ApiProperty({ type: Object, nullable: true })
-  past_24h: any;
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  past_24h: PerformancePeriodDto;
 
-  @ApiProperty({ type: Object, nullable: true })
-  past_7d: any;
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  past_7d: PerformancePeriodDto;
 
-  @ApiProperty({ type: Object, nullable: true })
-  past_30d: any;
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  past_30d: PerformancePeriodDto;
 
-  @ApiProperty({ type: Object, nullable: true })
-  all_time: any;
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  all_time: PerformancePeriodDto;
 
   @ApiProperty()
   created_at: Date;
@@ -22,4 +23,3 @@ export class TokenPerformanceDto {
   @ApiProperty()
   updated_at: Date;
 }
-
