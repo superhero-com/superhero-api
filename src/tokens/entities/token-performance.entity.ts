@@ -33,28 +33,28 @@ export class TokenPerformance {
     type: 'json',
     nullable: true,
   })
-  past_24h_data: any;
+  past_24h: any;
 
   // Past 7d performance data
   @Column({
     type: 'json',
     nullable: true,
   })
-  past_7d_data: any;
+  past_7d: any;
 
   // Past 30d performance data
   @Column({
     type: 'json',
     nullable: true,
   })
-  past_30d_data: any;
+  past_30d: any;
 
   // All time performance data
   @Column({
     type: 'json',
     nullable: true,
   })
-  all_time_data: any;
+  all_time: any;
 
   @CreateDateColumn({
     type: 'timestamp',

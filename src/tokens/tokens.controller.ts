@@ -105,7 +105,6 @@ export class TokensController {
       .select('token.*')
       .where('token.unlisted = false');
     queryBuilder.leftJoinAndSelect('token.performance', 'token_performance');
-    //
 
     if (search) {
       queryBuilder.andWhere('token.name ILIKE :search', {

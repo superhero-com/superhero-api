@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PriceDto } from './price.dto';
+import { TokenPerformanceDto } from './token-performance.dto';
 
 export class TokenDto {
   @ApiProperty()
@@ -15,7 +16,13 @@ export class TokenDto {
   sale_address: string;
 
   @ApiProperty()
+  create_tx_hash: string;
+
+  @ApiProperty()
   creator_address: string;
+
+  @ApiProperty()
+  dao_address: string;
 
   @ApiProperty()
   owner_address: string;
@@ -31,6 +38,15 @@ export class TokenDto {
 
   @ApiProperty()
   metaInfo: Record<string, string>;
+
+  @ApiProperty()
+  unlisted: boolean;
+
+  @ApiProperty()
+  last_sync_tx_count: number;
+
+  @ApiProperty()
+  tx_count: number;
 
   /**
    * Basic Token Info
@@ -61,11 +77,13 @@ export class TokenDto {
 
   @ApiProperty()
   sell_price: string;
+
   @ApiProperty()
   sell_price_data: PriceDto;
 
   @ApiProperty()
   market_cap: string;
+
   @ApiProperty()
   market_cap_data: PriceDto;
 
@@ -74,6 +92,15 @@ export class TokenDto {
 
   @ApiProperty()
   dao_balance: string;
+
+  @ApiProperty()
+  trending_score: number;
+
+  @ApiProperty()
+  trending_score_update_at: Date;
+
+  @ApiProperty({ type: () => TokenPerformanceDto, nullable: true })
+  performance: TokenPerformanceDto;
 
   @ApiProperty()
   public created_at: Date;

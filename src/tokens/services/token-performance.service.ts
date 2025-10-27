@@ -32,10 +32,10 @@ export class TokenPerformanceService {
 
     const performanceDataToStore = {
       sale_address: token.sale_address,
-      past_24h_data: performanceData.past_24h as any,
-      past_7d_data: performanceData.past_7d as any,
-      past_30d_data: performanceData.past_30d as any,
-      all_time_data: performanceData.all_time as any,
+      past_24h: performanceData.past_24h as any,
+      past_7d: performanceData.past_7d as any,
+      past_30d: performanceData.past_30d as any,
+      all_time: performanceData.all_time as any,
     };
 
     if (existing) {
@@ -99,10 +99,10 @@ export class TokenPerformanceService {
     all_time: PriceMovementDto;
   } {
     return {
-      past_24h: this.convertToPriceMovementDto(performance.past_24h_data),
-      past_7d: this.convertToPriceMovementDto(performance.past_7d_data),
-      past_30d: this.convertToPriceMovementDto(performance.past_30d_data),
-      all_time: this.convertToPriceMovementDto(performance.all_time_data),
+      past_24h: this.convertToPriceMovementDto(performance.past_24h),
+      past_7d: this.convertToPriceMovementDto(performance.past_7d),
+      past_30d: this.convertToPriceMovementDto(performance.past_30d),
+      all_time: this.convertToPriceMovementDto(performance.all_time),
     };
   }
 
