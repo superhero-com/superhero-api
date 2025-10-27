@@ -22,6 +22,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TokenPerformanceView } from './entities/tokens-performance.view';
+import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { TokenPerformanceView } from './entities/tokens-performance.view';
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,
     UpdateTrendingTokensService,
+    RefreshPerformanceViewService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

@@ -1,4 +1,4 @@
-import { ViewColumn, ViewEntity } from 'typeorm';
+import { Index, ViewColumn, ViewEntity } from 'typeorm';
 
 /**
  * TokenPerformanceView - A database view for efficient batch queries and JOINs
@@ -27,6 +27,7 @@ import { ViewColumn, ViewEntity } from 'typeorm';
  */
 @ViewEntity({
   name: 'token_performance_view',
+  materialized: true,
   synchronize: true,
   expression: `
     WITH base_data AS (
@@ -362,6 +363,7 @@ import { ViewColumn, ViewEntity } from 'typeorm';
 })
 export class TokenPerformanceView {
   @ViewColumn()
+  @Index()
   sale_address: string;
 
   @ViewColumn()
