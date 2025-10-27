@@ -11,9 +11,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import moment, { Moment } from 'moment';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Repository } from 'typeorm';
-import { Token } from '../../tokens/entities/token.entity';
-import { TokensService } from '../../tokens/tokens.service';
-import { TokenPriceMovementDto } from '../dto/token-stats.dto';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokensService } from '@/tokens/tokens.service';
+import { TokenPriceMovementDto } from '@/transactions/dto/token-stats.dto';
+import { TokenPerformanceService } from '../services/token-performance.service';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -24,6 +25,7 @@ export class TokenPerformanceController {
     private readonly transactionsRepository: Repository<Transaction>,
 
     private readonly tokensService: TokensService,
+    private readonly tokenPerformanceService: TokenPerformanceService,
   ) {
     //
   }
@@ -46,6 +48,36 @@ export class TokenPerformanceController {
       throw new NotFoundException('Token not found');
     }
 
+    // Check if we have recent cached performance data
+    const cachedPerformance =
+      await this.tokenPerformanceService.getPerformanceData(token.sale_address);
+
+    if (cachedPerformance) {
+      // Check if data is recent (within 1 hour)
+      const isRecent =
+        await this.tokenPerformanceService.isPerformanceDataRecent(
+          token.sale_address,
+          1,
+        );
+
+      if (isRecent) {
+        // Return cached data
+        const performanceData =
+          this.tokenPerformanceService.convertToPerformanceDto(
+            cachedPerformance,
+          );
+
+        return {
+          token_id: token.sale_address,
+          past_24h: performanceData.past_24h,
+          past_7d: performanceData.past_7d,
+          past_30d: performanceData.past_30d,
+          all_time: performanceData.all_time,
+        };
+      }
+    }
+
+    // Calculate fresh performance data
     const past_24h = await this.getTokenPriceMovement(
       token,
       moment().subtract(24, 'hours'),
@@ -65,12 +97,27 @@ export class TokenPerformanceController {
       token,
       moment(token.created_at).subtract(30, 'days'),
     );
+
+    // Add last_updated field to performance data
+    const performanceDataWithTimestamp = {
+      past_24h: { ...past_24h, last_updated: new Date() },
+      past_7d: { ...past_7d, last_updated: new Date() },
+      past_30d: { ...past_30d, last_updated: new Date() },
+      all_time: { ...all_time, last_updated: new Date() },
+    };
+
+    // Store the calculated performance data
+    await this.tokenPerformanceService.storePerformanceData(
+      token,
+      performanceDataWithTimestamp,
+    );
+
     return {
       token_id: token.sale_address,
-      past_24h,
-      past_7d,
-      past_30d,
-      all_time,
+      past_24h: performanceDataWithTimestamp.past_24h,
+      past_7d: performanceDataWithTimestamp.past_7d,
+      past_30d: performanceDataWithTimestamp.past_30d,
+      all_time: performanceDataWithTimestamp.all_time,
     };
   }
 

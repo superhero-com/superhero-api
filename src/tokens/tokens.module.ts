@@ -7,6 +7,7 @@ import { AccountTokensController } from './account-tokens.controller';
 import { AnalyticTokensController } from './analytics-tokens.controller';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
+import { TokenPerformance } from './entities/token-performance.entity';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -20,10 +21,17 @@ import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
+import { TokenPerformanceService } from './services/token-performance.service';
+import { TokenPerformanceController } from './controllers/token-performance.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Token, TokenHolder, Transaction]),
+    TypeOrmModule.forFeature([
+      Token,
+      TokenHolder,
+      TokenPerformance,
+      Transaction,
+    ]),
     AeModule,
     AePricingModule,
     BullModule.registerQueue(
@@ -42,6 +50,7 @@ import { UpdateTrendingTokensService } from './services/update-trending-tokens.s
     TokensController,
     AccountTokensController,
     AnalyticTokensController,
+    TokenPerformanceController,
   ],
   providers: [
     TokensService,
@@ -50,8 +59,14 @@ import { UpdateTrendingTokensService } from './services/update-trending-tokens.s
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,
     UpdateTrendingTokensService,
+    TokenPerformanceService,
   ],
-  exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
+  exports: [
+    TypeOrmModule,
+    TokensService,
+    TokenWebsocketGateway,
+    TokenPerformanceService,
+  ],
 })
 export class TokensModule {
   onModuleInit() {
