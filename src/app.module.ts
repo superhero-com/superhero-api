@@ -26,6 +26,7 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 import { PostModule } from './social/post.module';
 import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
+import { GraffitiModule } from './graffiti/graffiti.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { TipModule } from './tipping/tip.module';
     PostModule,
     DexModule,
     TipModule,
+    GraffitiModule,
   ],
   controllers: [AppController],
   providers: [AppService],
