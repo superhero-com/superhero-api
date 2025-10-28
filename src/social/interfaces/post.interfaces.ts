@@ -24,6 +24,7 @@ export interface IParsedPostContent {
  */
 export interface ICreatePostData {
   id: string;
+  slug: string;
   type: string;
   tx_hash: string;
   sender_address: string;

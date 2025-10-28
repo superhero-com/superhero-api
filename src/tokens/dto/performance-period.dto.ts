@@ -38,4 +38,3 @@ export class PerformancePeriodDto {
   @ApiProperty()
   last_updated: Date;
 }
-

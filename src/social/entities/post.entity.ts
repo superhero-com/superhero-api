@@ -20,6 +20,9 @@ export class Post {
   @Column({ nullable: true })
   post_id: string;
 
+  @Column({ nullable: true })
+  slug: string;
+
   @ManyToOne(() => Post, (post) => post.id, {
     nullable: true,
     onDelete: 'CASCADE',

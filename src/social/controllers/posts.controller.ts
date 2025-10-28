@@ -151,7 +151,7 @@ export class PostsController {
   @Get(':id')
   async getById(@Param('id') id: string) {
     const post = await this.postRepository.findOne({
-      where: { id },
+      where: [{ id }, { slug: id }],
     });
     if (!post) {
       throw new NotFoundException(`Post with ID ${id} not found`);

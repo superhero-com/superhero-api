@@ -33,7 +33,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
-  syncVersion = 4;
+  syncVersion = 5;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -475,8 +475,11 @@ export class PostService {
       const topics = await this.createOrGetTopics(parsedContent.topics);
 
       // Create post data with proper validation
+      const id = this.generatePostId(transaction, contract);
+      const slug = this.generatePostSlug(parsedContent.content, id);
       const postData: ICreatePostData = {
-        id: this.generatePostId(transaction, contract),
+        id: id,
+        slug: slug,
         type: transaction.tx.function || 'unknown',
         tx_hash: txHash,
         sender_address: transaction.tx.callerId,
@@ -601,6 +604,21 @@ export class PostService {
 
     // Fallback to hash-based ID if return value is not available
     return `${transaction.hash.slice(-8)}_v${contract.version}`;
+  }
+
+  private generatePostSlug(content: string, postId: string): string {
+    const suffix = postId.split('_')[0];
+    const base = this.normalizeSlugPart(content).slice(0, 30);
+    const combined = base ? `${base}-${suffix}` : suffix;
+    return combined.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  private normalizeSlugPart(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}._~-]+/gu, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   private detectPostType(transaction: ITransaction): IPostTypeInfo | null {

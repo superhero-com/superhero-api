@@ -56,4 +56,3 @@ export class TopicDto {
   })
   version: number;
 }
-
