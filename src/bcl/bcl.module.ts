@@ -1,7 +1,4 @@
 import { AeModule } from '@/ae/ae.module';
-import { DexModule } from '@/dex/dex.module';
-import { PostModule } from '@/social/post.module';
-import { TipModule } from '@/tipping/tip.module';
 import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
@@ -14,14 +11,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DebugFailedTransactionsController } from './controllers/debug-failed-transactions.controller';
 import { FailedTransaction } from './entities/failed-transaction.entity';
 import { SyncedBlock } from './entities/synced-block.entity';
-import { FastPullTokensService } from './services/fast-pull-tokens.service';
-import { FixFailedTransactionsService } from './services/fix-failed-transactions.service';
-import { FixHoldersService } from './services/fix-holders.service';
-import { FixTokensService } from './services/fix-tokens.service';
 import { SyncBlocksService } from './services/sync-blocks.service';
 import { SyncTransactionsService } from './services/sync-transactions.service';
-import { VerifyTransactionsService } from './services/verify-transactions.service';
 
+/**
+ * @deprecated
+ */
 @Module({
   imports: [
     AeModule,
@@ -36,18 +31,18 @@ import { VerifyTransactionsService } from './services/verify-transactions.servic
         name: PULL_TOKEN_INFO_QUEUE,
       },
     ),
-    PostModule,
-    DexModule,
-    TipModule,
+    // PostModule,
+    // DexModule,
+    // TipModule,
   ],
   providers: [
-    SyncTransactionsService,
-    SyncBlocksService,
-    FixFailedTransactionsService,
-    FixTokensService,
-    FastPullTokensService,
-    FixHoldersService,
-    VerifyTransactionsService,
+    // SyncTransactionsService,
+    // SyncBlocksService,
+    // FixFailedTransactionsService,
+    // FixTokensService,
+    // FastPullTokensService,
+    // FixHoldersService,
+    // VerifyTransactionsService,
   ],
   exports: [SyncBlocksService, SyncTransactionsService],
   controllers: [DebugFailedTransactionsController],

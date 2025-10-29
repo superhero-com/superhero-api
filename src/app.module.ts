@@ -15,12 +15,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
-import { DexModule } from './dex/dex.module';
 import { MdwModule } from './mdw/mdw.module';
 import { DexPluginModule } from './plugins/dex/dex-plugin.module';
 import { SocialPluginModule } from './plugins/social/social-plugin.module';
 import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';
-import { TipModule } from './tipping/tip.module';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -69,10 +67,8 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
     AffiliationModule,
     AccountModule,
     TrendingTagsModule,
-    DexModule,
-    TipModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

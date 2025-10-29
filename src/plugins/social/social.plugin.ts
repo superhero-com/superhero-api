@@ -1,17 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Account } from '@/account/entities/account.entity';
 import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Topic } from '@/plugins/social/entities/topic.entity';
-import { Account } from '@/account/entities/account.entity';
+import { parsePostContent } from '@/plugins/social/utils/content-parser.util';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import moment from 'moment';
+import { Repository } from 'typeorm';
 import {
   POST_CONTRACTS,
   getContractByAddress,
   isContractSupported,
-} from '@/social/config/post-contracts.config';
-import { parsePostContent } from '@/plugins/social/utils/content-parser.util';
-import moment from 'moment';
+} from './config/post-contracts.config';
 
 @Injectable()
 export class SocialPlugin implements MdwPlugin {
@@ -26,7 +26,7 @@ export class SocialPlugin implements MdwPlugin {
     private readonly accountRepository: Repository<Account>,
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
-  ) {}
+  ) { }
 
   startFromHeight(): number {
     // Start from a reasonable height where social contracts were deployed

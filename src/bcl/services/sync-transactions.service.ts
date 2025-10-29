@@ -7,9 +7,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 import { FailedTransaction } from '../entities/failed-transaction.entity';
-import { DexSyncService } from '@/dex/services/dex-sync.service';
-import { PostService } from '@/social/services/post.service';
-import { TipService } from '@/tipping/services/tips.service';
+import { DexSyncService } from '@/plugins/dex/services/dex-sync.service';
+import { PostService } from '@/plugins/social/services/post.service';
+import { TipService } from '@/plugins/tipping/services/tips.service';
 
 @Injectable()
 export class SyncTransactionsService {

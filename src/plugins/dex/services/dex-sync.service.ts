@@ -1,8 +1,9 @@
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 
+import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
-import { IMiddlewareRequestConfig } from '@/social/interfaces/post.interfaces';
+import { IMiddlewareRequestConfig } from '@/plugins/social/interfaces/post.interfaces';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
@@ -11,6 +12,7 @@ import ContractWithMethods, {
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
 import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
@@ -19,13 +21,11 @@ import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 import { DexToken } from '../entities/dex-token.entity';
 import { PairTransaction } from '../entities/pair-transaction.entity';
 import { Pair } from '../entities/pair.entity';
-import { PairService } from './pair.service';
-import BigNumber from 'bignumber.js';
-import { DexTokenService } from './dex-token.service';
-import { PairSummaryService } from './pair-summary.service';
-import { PairHistoryService } from './pair-history.service';
-import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DexTokenSummaryService } from './dex-token-summary.service';
+import { DexTokenService } from './dex-token.service';
+import { PairHistoryService } from './pair-history.service';
+import { PairSummaryService } from './pair-summary.service';
+import { PairService } from './pair.service';
 
 @Injectable()
 export class DexSyncService {

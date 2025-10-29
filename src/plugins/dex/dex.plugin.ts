@@ -1,27 +1,27 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
-import { DexToken } from '@/dex/entities/dex-token.entity';
-import { Pair } from '@/dex/entities/pair.entity';
-import { PairTransaction } from '@/dex/entities/pair-transaction.entity';
-import { DEX_CONTRACTS } from '@/dex/config/dex-contracts.config';
-import { TX_FUNCTIONS } from '@/configs';
-import { AeSdkService } from '@/ae/ae-sdk.service';
-import { PairService } from '@/dex/services/pair.service';
-import { DexTokenService } from '@/dex/services/dex-token.service';
-import { PairSummaryService } from '@/dex/services/pair-summary.service';
-import { PairHistoryService } from '@/dex/services/pair-history.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
-import { DexTokenSummaryService } from '@/dex/services/dex-token-summary.service';
-import BigNumber from 'bignumber.js';
-import moment from 'moment';
+import { AeSdkService } from '@/ae/ae-sdk.service';
+import { TX_FUNCTIONS } from '@/configs';
+import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import BigNumber from 'bignumber.js';
 import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
+import moment from 'moment';
+import { Repository } from 'typeorm';
+import { DEX_CONTRACTS } from './config/dex-contracts.config';
+import { DexToken } from './entities/dex-token.entity';
+import { PairTransaction } from './entities/pair-transaction.entity';
+import { Pair } from './entities/pair.entity';
+import { DexTokenSummaryService } from './services/dex-token-summary.service';
+import { DexTokenService } from './services/dex-token.service';
+import { PairHistoryService } from './services/pair-history.service';
+import { PairSummaryService } from './services/pair-summary.service';
+import { PairService } from './services/pair.service';
 
 @Injectable()
 export class DexPlugin implements MdwPlugin {
