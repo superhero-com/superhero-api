@@ -12,7 +12,7 @@ import { Topic } from './topic.entity';
 import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
-  name: 'posts',
+  name: 'social_posts',
 })
 export class Post {
   @PrimaryColumn()
@@ -56,7 +56,7 @@ export class Post {
     eager: false,
   })
   @JoinTable({
-    name: 'post_topics',
+    name: 'social_post_topics',
     joinColumn: {
       name: 'post_id',
       referencedColumnName: 'id',

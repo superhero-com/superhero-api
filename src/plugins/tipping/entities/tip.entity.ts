@@ -11,7 +11,7 @@ import { Post } from '@/plugins/social/entities/post.entity';
 import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
-  name: 'tips',
+  name: 'tipping_tips',
 })
 export class Tip {
   @PrimaryColumn()

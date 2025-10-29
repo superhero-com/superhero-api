@@ -10,7 +10,7 @@ import { Pair } from './pair.entity';
 import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
-  name: 'pair_transactions',
+  name: 'dex_transactions',
 })
 export class PairTransaction {
   @PrimaryColumn()
