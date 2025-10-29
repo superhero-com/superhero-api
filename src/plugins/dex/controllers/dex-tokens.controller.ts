@@ -17,10 +17,10 @@ import {
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DexTokenDto, DexTokenSummaryDto } from '@/dex/dto';
-import { Pair } from '@/dex/entities/pair.entity';
-import { DexTokenSummaryService } from '@/dex/services/dex-token-summary.service';
-import { DexTokenService } from '@/dex/services/dex-token.service';
+import { DexTokenDto, DexTokenSummaryDto } from '../dto';
+import { Pair } from '../entities/pair.entity';
+import { DexTokenSummaryService } from '../services/dex-token-summary.service';
+import { DexTokenService } from '../services/dex-token.service';
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
@@ -151,6 +151,30 @@ export class DexTokensController {
   @ApiOkResponse({
     type: Object,
     description: 'Comprehensive price analysis with liquidity weighting',
+    schema: {
+      type: 'object',
+      properties: {
+        price: { type: 'string', description: 'Best price found' },
+        confidence: { type: 'number', description: 'Price confidence (0-1)' },
+        bestPath: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/PairDto' },
+          description: 'Best liquidity path',
+        },
+        allPaths: {
+          type: 'array',
+          description: 'All possible paths with analysis',
+        },
+        liquidityWeightedPrice: {
+          type: 'string',
+          description: 'Liquidity-weighted average price',
+        },
+        medianPrice: {
+          type: 'string',
+          description: 'Median price across all paths',
+        },
+      },
+    },
   })
   @Get(':address/price/analysis')
   async getTokenPriceAnalysis(
@@ -204,5 +228,3 @@ export class DexTokensController {
     return { ...summary, address };
   }
 }
-
-

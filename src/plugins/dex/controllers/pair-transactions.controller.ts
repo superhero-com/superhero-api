@@ -14,8 +14,8 @@ import {
   ApiTags,
   ApiOkResponse,
 } from '@nestjs/swagger';
-import { PairTransactionService } from '@/dex/services/pair-transaction.service';
-import { PairTransactionDto } from '@/dex/dto';
+import { PairTransactionService } from '../services/pair-transaction.service';
+import { PairTransactionDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 
 @Controller('dex/transactions')
@@ -144,5 +144,3 @@ export class PairTransactionsController {
     );
   }
 }
-
-

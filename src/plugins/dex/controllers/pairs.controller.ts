@@ -15,14 +15,14 @@ import {
   ApiTags,
   ApiOkResponse,
 } from '@nestjs/swagger';
-import { PairService } from '@/dex/services/pair.service';
-import { PairDto, PairSummaryDto, PairWithSummaryDto } from '@/dex/dto';
+import { PairService } from '../services/pair.service';
+import { PairDto, PairSummaryDto, PairWithSummaryDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import {
   PairHistoryService,
   ITransactionPreview,
-} from '@/dex/services/pair-history.service';
-import { PairSummaryService } from '@/dex/services/pair-summary.service';
+} from '../services/pair-history.service';
+import { PairSummaryService } from '../services/pair-summary.service';
 
 @Controller('dex/pairs')
 @ApiTags('Dex Pair')
@@ -151,6 +151,33 @@ export class PairsController {
     type: Object,
     description:
       'Returns all possible swap paths with direct pairs and multi-hop paths',
+    schema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          items: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/PairDto' },
+          },
+          description:
+            'All possible swap paths, where each path is an array of pairs',
+        },
+        directPairs: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/PairDto' },
+          description: 'Direct pairs between the tokens (if any)',
+        },
+        hasDirectPath: {
+          type: 'boolean',
+          description: 'Whether there is a direct pair between the tokens',
+        },
+        totalPaths: {
+          type: 'number',
+          description: 'Total number of possible paths',
+        },
+      },
+    },
   })
   @Get('from/:from_token/to/:to_token/providers')
   async findPairsForTokens(
@@ -282,5 +309,3 @@ export class PairsController {
     return this.pairHistoryService.getForPreview(pair, interval);
   }
 }
-
-
