@@ -44,7 +44,7 @@ import { SyncTransactionsService } from './services/sync-transactions.service';
     // FixHoldersService,
     // VerifyTransactionsService,
   ],
-  exports: [SyncBlocksService, SyncTransactionsService],
+  // exports: [SyncBlocksService, SyncTransactionsService],
   controllers: [DebugFailedTransactionsController],
 })
 export class BclModule {

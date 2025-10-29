@@ -6,10 +6,7 @@ import moment, { Moment } from 'moment';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
 import { WebSocketService } from './ae/websocket.service';
-import { SyncTransactionsService } from './bcl/services/sync-transactions.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
-
-
 @Injectable()
 export class AppService {
   startedAt: Moment;
@@ -17,7 +14,6 @@ export class AppService {
     private communityFactoryService: CommunityFactoryService,
     private aePricingService: AePricingService,
     private websocketService: WebSocketService,
-    private syncTransactionsService: SyncTransactionsService,
 
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
@@ -38,8 +34,7 @@ export class AppService {
   }
 
   setupLiveSync() {
-    let syncedTransactions = [];
-
+    // Live sync handlers are currently disabled
     // this.websocketService.subscribeForTransactionsUpdates(
     //   (transaction: ITransaction) => {
     //     // Prevent duplicate transactions
@@ -50,7 +45,6 @@ export class AppService {
     //       this.tipService.handleLiveTransaction(transaction);
     //     }
     //     syncedTransactions.push(transaction.hash);
-
     //     // Reset synced transactions after 100 transactions
     //     if (syncedTransactions.length > 100) {
     //       syncedTransactions = [];
