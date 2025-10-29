@@ -9,6 +9,7 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { Topic } from './topic.entity';
+import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
   name: 'posts',
@@ -66,6 +67,10 @@ export class Post {
     },
   })
   topics: Topic[];
+
+  @ManyToOne(() => MdwTx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
+  mdwTx: MdwTx;
 
   @Column('json', { default: [] })
   media: string[];

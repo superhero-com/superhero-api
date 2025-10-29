@@ -172,6 +172,7 @@ export interface ITx {
 
 export interface ITransaction {
   blockHeight: number;
+  blockHash: string;
   claim: any; // TODO find type
   hash: Encoded.TxHash;
   incomplete?: boolean;

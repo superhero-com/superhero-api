@@ -26,7 +26,10 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 import { PostModule } from './social/post.module';
 import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
-import { MdwModule } from './mdw/mdw';
+import { MdwModule } from './mdw/mdw.module';
+import { DexPluginModule } from './plugins/dex/dex-plugin.module';
+import { SocialPluginModule } from './plugins/social/social-plugin.module';
+import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';
 
 @Module({
   imports: [
@@ -55,6 +58,9 @@ import { MdwModule } from './mdw/mdw';
     }),
     AeModule,
     MdwModule,
+    DexPluginModule,
+    SocialPluginModule,
+    TippingPluginModule,
     TokensModule,
     TransactionsModule,
     AePricingModule,
