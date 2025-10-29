@@ -6,12 +6,21 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AccountModule } from './account/account.module';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
+import { AffiliationModule } from './affiliation/affiliation.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
+import { DexModule } from './dex/dex.module';
+import { MdwModule } from './mdw/mdw.module';
+import { DexPluginModule } from './plugins/dex/dex-plugin.module';
+import { SocialPluginModule } from './plugins/social/social-plugin.module';
+import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';
+import { TipModule } from './tipping/tip.module';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -19,17 +28,7 @@ import {
 } from './tokens/queues/constants';
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
-import { AnalyticsModule } from './analytics/analytics.module';
-import { AffiliationModule } from './affiliation/affiliation.module';
-import { AccountModule } from './account/account.module';
 import { TrendingTagsModule } from './trending-tags/trending-tags.module';
-import { PostModule } from './social/post.module';
-import { DexModule } from './dex/dex.module';
-import { TipModule } from './tipping/tip.module';
-import { MdwModule } from './mdw/mdw.module';
-import { DexPluginModule } from './plugins/dex/dex-plugin.module';
-import { SocialPluginModule } from './plugins/social/social-plugin.module';
-import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';
 
 @Module({
   imports: [
@@ -70,7 +69,6 @@ import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';
     AffiliationModule,
     AccountModule,
     TrendingTagsModule,
-    PostModule,
     DexModule,
     TipModule,
   ],

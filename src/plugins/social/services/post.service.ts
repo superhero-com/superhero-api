@@ -1,8 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Post } from '../entities/post.entity';
-import { Topic } from '../entities/topic.entity';
+import { Account } from '@/account/entities/account.entity';
 import {
   ACTIVE_NETWORK,
   MAX_RETRIES_WHEN_REQUEST_FAILED,
@@ -10,26 +6,30 @@ import {
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs';
 import { fetchJson } from '@/utils/common';
-import moment from 'moment';
 import { ITransaction } from '@/utils/types';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
+import moment from 'moment';
+import { Repository } from 'typeorm';
 import {
   POST_CONTRACTS,
   getContractByAddress,
   isContractSupported,
 } from '../config/post-contracts.config';
+import { Post } from '../entities/post.entity';
+import { Topic } from '../entities/topic.entity';
 import {
-  IPostContract,
-  ICreatePostData,
-  IPostProcessingResult,
-  IMiddlewareResponse,
-  IMiddlewareRequestConfig,
   ICommentInfo,
   ICommentProcessingResult,
+  ICreatePostData,
+  IMiddlewareRequestConfig,
+  IMiddlewareResponse,
+  IPostContract,
+  IPostProcessingResult,
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
-import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {

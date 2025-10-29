@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { Tip } from '../entities/tip.entity';
 import { ITransaction } from '@/utils/types';
 import { decode, toAe } from '@aeternity/aepp-sdk';
-import { Post } from '@/social/entities/post.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
 
 @Injectable()
 export class TipService {

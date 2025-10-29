@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Tip } from '@/tipping/entities/tip.entity';
-import { Post } from '@/social/entities/post.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
 import { Account } from '@/account/entities/account.entity';
 import { decode, toAe } from '@aeternity/aepp-sdk';
 

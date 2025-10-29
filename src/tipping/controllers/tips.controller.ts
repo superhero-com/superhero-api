@@ -14,7 +14,7 @@ import { Repository } from 'typeorm';
 import { Tip } from '../entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { Post } from '@/social/entities/post.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
 
 @Controller('tips')
 @ApiTags('Tips')

@@ -7,7 +7,7 @@ import {
   ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
-import { Post } from '@/social/entities/post.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
 import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({

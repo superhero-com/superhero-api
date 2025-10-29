@@ -2,15 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
-import { Post } from '@/social/entities/post.entity';
-import { Topic } from '@/social/entities/topic.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
+import { Topic } from '@/plugins/social/entities/topic.entity';
 import { Account } from '@/account/entities/account.entity';
 import {
   POST_CONTRACTS,
   getContractByAddress,
   isContractSupported,
 } from '@/social/config/post-contracts.config';
-import { parsePostContent } from '@/social/utils/content-parser.util';
+import { parsePostContent } from '@/plugins/social/utils/content-parser.util';
 import moment from 'moment';
 
 @Injectable()
