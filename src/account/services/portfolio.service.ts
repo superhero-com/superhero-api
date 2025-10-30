@@ -190,73 +190,199 @@ export class PortfolioService {
     }
 
     // Pre-fetch token prices for all tokens and timestamps efficiently
-    // Build a cache: saleAddress -> Map<timestampMs, price>
+    // For each token, we need the price at each timestamp (most recent transaction <= timestamp)
+    // This is optimized by caching transactions per token upfront
     const tokenPriceCache = new Map<string, Map<number, number>>();
     const uniqueTokens = Array.from(new Set([...tokenMap.values()].map(t => t.sale_address).filter(Boolean)));
     
     if (uniqueTokens.length > 0 && timestamps.length > 0) {
-      // Pre-calculate prices for each token at each timestamp
-      // For each token, get the most recent transaction price <= each timestamp
-      // This is expensive, so we'll optimize by fetching latest transaction per token first
-      // and using it for all timestamps >= that transaction date
+      // For each token, fetch all transactions with prices, ordered by date
+      // Then for each timestamp, find the most recent transaction <= that timestamp
+      const allTokenTxs = await this.transactionRepository
+        .createQueryBuilder('tx')
+        .where('tx.sale_address IN (:...saleAddresses)', { saleAddresses: uniqueTokens })
+        .andWhere(`tx.buy_price->>'ae' != 'NaN'`)
+        .andWhere(`tx.buy_price->>'ae' IS NOT NULL`)
+        .andWhere(`(tx.tx_type = 'buy' OR tx.tx_type = 'sell' OR tx.tx_type = 'create_community')`)
+        .andWhere('tx.created_at <= :endDate', { endDate: end.toDate() })
+        .orderBy('tx.sale_address', 'ASC')
+        .addOrderBy('tx.created_at', 'ASC')
+        .getMany();
       
-      // Fetch latest transaction per token (most efficient - single query)
-      const latestTxs = await this.dataSource.query(
-        `
-        SELECT DISTINCT ON (tx.sale_address)
-          tx.sale_address,
-          tx.buy_price,
-          tx.created_at
-        FROM transactions tx
-        WHERE tx.sale_address = ANY($1)
-          AND tx.buy_price->>'ae' != 'NaN'
-          AND tx.buy_price->>'ae' IS NOT NULL
-          AND (tx.tx_type = 'buy' OR tx.tx_type = 'sell' OR tx.tx_type = 'create_community')
-          AND tx.created_at <= $2
-        ORDER BY tx.sale_address, tx.created_at DESC
-        `,
-        [uniqueTokens, end.toDate()]
-      );
+      // Group transactions by sale_address
+      const txsByToken = new Map<string, Transaction[]>();
+      for (const tx of allTokenTxs) {
+        if (!txsByToken.has(tx.sale_address)) {
+          txsByToken.set(tx.sale_address, []);
+        }
+        txsByToken.get(tx.sale_address)!.push(tx);
+      }
       
-      // Build price cache: for each token, use latest price for all timestamps >= transaction date
-      for (const result of latestTxs) {
-        const saleAddress = result.sale_address;
-        const buyPrice = typeof result.buy_price === 'string' ? JSON.parse(result.buy_price) : result.buy_price;
-        const price = Number(buyPrice?.ae);
-        if (!isNaN(price) && price > 0 && result.created_at) {
-          const priceMap = new Map<number, number>();
-          const txTimestampMs = moment(result.created_at).valueOf();
-          // Use this price for all timestamps >= transaction date
+      // For each token, build price map for all timestamps efficiently
+      // Strategy: iterate through transactions once, marking all later timestamps with that price
+      for (const [saleAddress, txs] of txsByToken.entries()) {
+        const priceMap = new Map<number, number>();
+        
+        // For each transaction, apply its price to all timestamps >= transaction date
+        for (const tx of txs) {
+          const price = Number(tx.buy_price?.ae);
+          if (isNaN(price) || price <= 0) continue;
+          
+          const txMs = moment(tx.created_at).valueOf();
+          
+          // Update all timestamps >= this transaction date with this price
+          // (later transactions will overwrite if they have a later date)
           for (const timestamp of timestamps) {
             const tsMs = timestamp.valueOf();
-            if (tsMs >= txTimestampMs) {
+            if (tsMs >= txMs) {
               priceMap.set(tsMs, price);
             }
           }
-          if (priceMap.size > 0) {
-            tokenPriceCache.set(saleAddress, priceMap);
+        }
+        
+        if (priceMap.size > 0) {
+          tokenPriceCache.set(saleAddress, priceMap);
+        }
+      }
+      
+      this.logger.debug(`Pre-fetched prices for ${tokenPriceCache.size} tokens across ${timestamps.length} timestamps`);
+    }
+
+    // Pre-compute AE balance for all timestamps (most efficient)
+    const aeBalanceCache = new Map<number, number>();
+    const currentAeBalance = await this.aeSdkService.sdk.getBalance(address as any);
+    let runningAeBalance = new BigNumber(currentAeBalance);
+    
+    // Process transactions in reverse chronological order to build balance cache
+    const aeTxsAfterStart = allTransactions
+      .filter(tx => moment(tx.created_at).isAfter(start))
+      .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
+    
+    // Initialize with current balance for all timestamps
+    // runningAeBalance is already in aettos (wei), convert to AE
+    const currentAeBalanceNumber = Number(toAe(runningAeBalance.toString()));
+    for (const timestamp of timestamps) {
+      aeBalanceCache.set(timestamp.valueOf(), currentAeBalanceNumber);
+    }
+    
+    // Work backwards through transactions, updating balances as we go
+    for (const tx of aeTxsAfterStart) {
+      const txMs = moment(tx.created_at).valueOf();
+      
+      // Reverse this transaction's effect on balance
+      if (tx.amount && typeof tx.amount === 'object' && 'ae' in tx.amount) {
+        const aeAmountValue = tx.amount.ae;
+        if (
+          aeAmountValue != null &&
+          typeof aeAmountValue === 'number' &&
+          !isNaN(aeAmountValue) &&
+          isFinite(aeAmountValue) &&
+          aeAmountValue > 0
+        ) {
+          if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
+            // They spent AE, so add it back for historical balance
+            runningAeBalance = runningAeBalance.plus(new BigNumber(aeAmountValue).multipliedBy(1e18));
+          } else if (tx.tx_type === 'sell') {
+            // They received AE, so subtract it for historical balance
+            runningAeBalance = runningAeBalance.minus(new BigNumber(aeAmountValue).multipliedBy(1e18));
           }
         }
       }
       
-      this.logger.debug(`Pre-fetched prices for ${tokenPriceCache.size} tokens`);
+      // Update all timestamps before this transaction with the new balance
+      const updatedBalance = Number(toAe(runningAeBalance.toString()));
+      for (const timestamp of timestamps) {
+        const tsMs = timestamp.valueOf();
+        if (tsMs < txMs) {
+          aeBalanceCache.set(tsMs, updatedBalance);
+        }
+      }
     }
 
-    // Calculate portfolio value for each timestamp
+    // Pre-compute token balances for all tokens and timestamps
+    const tokenBalanceCache = new Map<string, Map<number, number>>();
+    for (const holder of accountTokens) {
+      const token = tokenMapByAex9.get(holder.aex9_address);
+      if (!token || !token.sale_address) continue;
+      
+      const balanceMap = new Map<number, number>();
+      let runningBalance = new BigNumber(holder.balance);
+      const decimals = Number(token.decimals) || 18;
+      
+      // Get transactions for this token, sorted by date descending
+      const tokenTxs = allTransactions
+        .filter(tx => tx.sale_address === token.sale_address && tx.address === address)
+        .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
+      
+      // Initialize with current balance for all timestamps
+      for (const timestamp of timestamps) {
+        balanceMap.set(timestamp.valueOf(), Number(runningBalance.toString()) / Math.pow(10, decimals));
+      }
+      
+      // Work backwards through transactions
+      for (const tx of tokenTxs) {
+        const txMs = moment(tx.created_at).valueOf();
+        
+        // Reverse transaction effect
+        if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
+          runningBalance = runningBalance.minus(tx.volume);
+        } else if (tx.tx_type === 'sell') {
+          runningBalance = runningBalance.plus(tx.volume);
+        }
+        
+        // Update all timestamps before this transaction
+        for (const timestamp of timestamps) {
+          const tsMs = timestamp.valueOf();
+          if (tsMs < txMs) {
+            balanceMap.set(tsMs, Math.max(0, Number(runningBalance.toString()) / Math.pow(10, decimals)));
+          }
+        }
+      }
+      
+      tokenBalanceCache.set(token.sale_address, balanceMap);
+    }
+
+    // Calculate portfolio value for each timestamp using pre-computed balances
     const snapshots: PortfolioHistorySnapshot[] = [];
     for (let i = 0; i < timestamps.length; i++) {
       const timestamp = timestamps[i];
-      const snapshot = await this.getPortfolioSnapshotAtTimestamp(
-        address,
-        accountTokens,
-        timestamp,
-        convertTo,
-        allTransactions,
-        aePriceHistory,
-        tokenMapByAex9,
-        tokenHolderMap,
-        tokenPriceCache,
-      );
+      const tsMs = timestamp.valueOf();
+      
+      // Get pre-computed AE balance
+      const aeBalance = aeBalanceCache.get(tsMs) || 0;
+      
+      // Calculate tokens value using pre-computed balances and prices
+      let tokensValueAe = 0;
+      for (const holder of accountTokens) {
+        const token = tokenMapByAex9.get(holder.aex9_address);
+        if (!token || !token.sale_address) continue;
+        
+        const tokenBalance = tokenBalanceCache.get(token.sale_address)?.get(tsMs) || 0;
+        if (tokenBalance > 0) {
+          const tokenPrice = tokenPriceCache.get(token.sale_address)?.get(tsMs) || 0;
+          if (tokenPrice > 0) {
+            tokensValueAe += tokenBalance * tokenPrice;
+          }
+        }
+      }
+      
+      const totalValueAe = aeBalance + tokensValueAe;
+      
+      const snapshot: PortfolioHistorySnapshot = {
+        timestamp: timestamp.toDate(),
+        total_value_ae: totalValueAe,
+        ae_balance: aeBalance,
+        tokens_value_ae: tokensValueAe,
+      };
+      
+      // Convert to requested currency using historical AE price
+      if (convertTo !== 'ae' && aePriceHistory && aePriceHistory.length > 0) {
+        const aePriceAtTimestamp = this.getAePriceAtTimestamp(timestamp, aePriceHistory, convertTo);
+        if (aePriceAtTimestamp > 0) {
+          snapshot.total_value_usd = totalValueAe * aePriceAtTimestamp;
+        }
+      }
+      
       snapshots.push(snapshot);
       
       // Debug log for first, middle, and last snapshots
