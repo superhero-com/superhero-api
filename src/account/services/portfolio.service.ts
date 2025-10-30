@@ -136,6 +136,59 @@ export class PortfolioService {
       }
     }
 
+    // Pre-fetch all tokens and token holders to avoid repeated queries
+    const aex9Addresses = accountTokens.map(h => h.aex9_address);
+    const tokens = aex9Addresses.length > 0
+      ? await this.tokenRepository
+          .createQueryBuilder('token')
+          .where('token.address IN (:...aex9Addresses)', { aex9Addresses })
+          .getMany()
+      : [];
+    
+    // Get all unique sale addresses from tokens and transactions
+    const allSaleAddresses = new Set<string>();
+    for (const token of tokens) {
+      if (token.sale_address) {
+        allSaleAddresses.add(token.sale_address);
+      }
+    }
+    if (allTransactions) {
+      for (const tx of allTransactions) {
+        if (tx.sale_address) {
+          allSaleAddresses.add(tx.sale_address);
+        }
+      }
+    }
+    
+    // Fetch any missing tokens by sale_address
+    const saleAddressesArray = Array.from(allSaleAddresses);
+    const tokensBySaleAddress = saleAddressesArray.length > 0
+      ? await this.tokenRepository
+          .createQueryBuilder('token')
+          .where('token.sale_address IN (:...saleAddresses)', {
+            saleAddresses: saleAddressesArray,
+          })
+          .getMany()
+      : [];
+    
+    // Build token maps
+    const tokenMap = new Map<string, Token>();
+    const tokenMapByAex9 = new Map<string, Token>();
+    for (const token of [...tokens, ...tokensBySaleAddress]) {
+      if (token.sale_address) {
+        tokenMap.set(token.sale_address, token);
+      }
+      if (token.address) {
+        tokenMapByAex9.set(token.address, token);
+      }
+    }
+    
+    // Pre-fetch all token holders
+    const tokenHolderMap = new Map<string, TokenHolder>();
+    for (const holder of accountTokens) {
+      tokenHolderMap.set(holder.aex9_address, holder);
+    }
+
     // Calculate portfolio value for each timestamp
     const snapshots: PortfolioHistorySnapshot[] = [];
     for (let i = 0; i < timestamps.length; i++) {
@@ -147,6 +200,8 @@ export class PortfolioService {
         convertTo,
         allTransactions,
         aePriceHistory,
+        tokenMapByAex9,
+        tokenHolderMap,
       );
       snapshots.push(snapshot);
       
@@ -222,6 +277,7 @@ export class PortfolioService {
 
   /**
    * Get portfolio snapshot at a specific timestamp
+   * Optimized version that uses pre-fetched data
    */
   private async getPortfolioSnapshotAtTimestamp(
     address: string,
@@ -230,6 +286,8 @@ export class PortfolioService {
     convertTo: string,
     allTransactions?: Transaction[],
     aePriceHistory?: Array<[number, number]> | null,
+    tokenMap?: Map<string, Token>,
+    tokenHolderMap?: Map<string, TokenHolder>,
   ): Promise<PortfolioHistorySnapshot> {
     // Calculate historical AE balance
     const aeBalance = await this.getAEBalanceAtTimestamp(
@@ -244,12 +302,23 @@ export class PortfolioService {
     const tokenSaleAddresses = new Set<string>();
     
     // Start with current account tokens (from TokenHolder - includes transfers/sends)
-    for (const holder of accountTokens) {
-      const token = await this.tokenRepository.findOne({
-        where: { address: holder.aex9_address },
-      });
-      if (token && token.sale_address) {
-        tokenSaleAddresses.add(token.sale_address);
+    if (tokenMap) {
+      // Use pre-fetched token map
+      for (const holder of accountTokens) {
+        const token = tokenMap.get(holder.aex9_address);
+        if (token && token.sale_address) {
+          tokenSaleAddresses.add(token.sale_address);
+        }
+      }
+    } else {
+      // Fallback: fetch tokens individually (slower)
+      for (const holder of accountTokens) {
+        const token = await this.tokenRepository.findOne({
+          where: { address: holder.aex9_address },
+        });
+        if (token && token.sale_address) {
+          tokenSaleAddresses.add(token.sale_address);
+        }
       }
     }
     
@@ -264,44 +333,25 @@ export class PortfolioService {
         }
       }
     }
-    
-    if (tokenSaleAddresses.size > 0) {
-      this.logger.debug(`Found ${tokenSaleAddresses.size} unique token sale addresses (from TokenHolder + transactions) at ${timestamp.toISOString()}`);
-    }
-
-    // Batch fetch all tokens at once
-    const saleAddressesArray = Array.from(tokenSaleAddresses);
-    const tokens = saleAddressesArray.length > 0
-      ? await this.tokenRepository
-          .createQueryBuilder('token')
-          .where('token.sale_address IN (:...saleAddresses)', {
-            saleAddresses: saleAddressesArray,
-          })
-          .getMany()
-      : [];
-    const tokenMap = new Map<string, Token>();
-    for (const token of tokens) {
-      if (token.sale_address) {
-        tokenMap.set(token.sale_address, token);
-      }
-    }
 
     // Calculate tokens value at this timestamp
     let tokensValueAe = 0;
+    const timestampMs = timestamp.valueOf();
+    
     for (const saleAddress of tokenSaleAddresses) {
-      const token = tokenMap.get(saleAddress);
+      const token = tokenMap?.get(saleAddress);
       if (!token) {
-        this.logger.debug(`Token not found for sale_address ${saleAddress} at ${timestamp.toISOString()}`);
         continue;
       }
 
-      // Get historical token balance at this timestamp
+      // Get historical token balance at this timestamp (uses pre-fetched tokenHolder if available)
       const tokenBalance = await this.getTokenBalanceAtTimestamp(
         address,
         saleAddress,
         timestamp,
         allTransactions,
         token,
+        tokenHolderMap?.get(token.address),
       );
 
       if (tokenBalance > 0) {
@@ -315,12 +365,7 @@ export class PortfolioService {
         if (tokenPrice > 0) {
           const tokenValue = tokenBalance * tokenPrice;
           tokensValueAe += tokenValue;
-          this.logger.debug(`Token ${saleAddress}: balance=${tokenBalance.toFixed(6)}, price=${tokenPrice.toFixed(8)} AE, value=${tokenValue.toFixed(6)} AE`);
-        } else {
-          this.logger.debug(`Token ${saleAddress}: balance=${tokenBalance.toFixed(6)} but price=0, skipping`);
         }
-      } else {
-        this.logger.debug(`Token ${saleAddress}: balance=0 at ${timestamp.toISOString()}`);
       }
     }
 
@@ -437,20 +482,24 @@ export class PortfolioService {
     timestamp: Moment,
     allTransactions?: Transaction[],
     token?: Token,
+    tokenHolder?: TokenHolder,
   ): Promise<number> {
     try {
       // Start with current token holder balance (this includes all transfers/sends from blockchain)
       let balance = new BigNumber(0);
-      if (token && token.address) {
-        const tokenHolder = await this.tokenHolderRepository.findOne({
+      if (tokenHolder) {
+        // Use pre-fetched token holder
+        balance = new BigNumber(tokenHolder.balance);
+      } else if (token && token.address) {
+        // Fallback: fetch token holder if not provided
+        const holder = await this.tokenHolderRepository.findOne({
           where: {
             aex9_address: token.address,
             address: address,
           },
         });
-        if (tokenHolder) {
-          balance = new BigNumber(tokenHolder.balance);
-          this.logger.debug(`Starting with current TokenHolder balance for ${saleAddress}: ${balance.toString()}`);
+        if (holder) {
+          balance = new BigNumber(holder.balance);
         }
       }
 
