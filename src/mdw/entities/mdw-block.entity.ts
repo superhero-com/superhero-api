@@ -26,6 +26,20 @@ export class MdwBlock {
   @Column({ type: 'timestamp' })
   timestamp: Date;
 
+  @Column({ default: 0 })
+  transactions_count: number;
+
+  @Column({ default: 0 })
+  micro_blocks_count: number;
+
+  @Column({
+    type: 'numeric',
+    precision: 78, // total digits (fits uint256)
+    scale: 0, // no decimals — store in base units (wei, satoshi, etc.)
+    default: '0',
+  })
+  beneficiary_reward: string;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

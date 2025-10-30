@@ -116,7 +116,7 @@ export class IndexerService implements OnModuleInit {
       // Get tip height from MDW
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
       const status = await fetchJson(`${middlewareUrl}/v3/status`);
-      const tipHeight = status.top_block_height;
+      const tipHeight = status.mdw_height;
 
       if (tipHeight <= syncState.last_synced_height) {
         return; // No new blocks
@@ -158,49 +158,92 @@ export class IndexerService implements OnModuleInit {
   private async syncBlocks(startHeight: number, endHeight: number) {
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
-    for (let height = startHeight; height <= endHeight; height++) {
-      try {
-        const block = await fetchJson(`${middlewareUrl}/v3/blocks/${height}`);
+    try {
+      // Use batch endpoint to fetch multiple blocks at once
+      const limit = Math.min(endHeight - startHeight + 1, 100);
+      const scope = `gen:${startHeight}-${endHeight}`;
+      let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
+      const blocksToSave: Partial<MdwBlock>[] = [];
 
-        await this.blockRepository.save({
-          height: block.height,
-          hash: block.hash,
-          parent_hash: block.prev_hash,
-          timestamp: new Date(block.time),
-        });
+      // Process all pages
+      while (url) {
+        const response = await fetchJson(url);
+        const blocks = response?.data || [];
 
-        this.logger.debug(`Synced block ${height}`);
-      } catch (error) {
-        this.logger.error(`Failed to sync block ${height}`, error);
+        // Convert blocks to entity format
+        for (const block of blocks) {
+          blocksToSave.push({
+            height: block.height,
+            hash: block.hash,
+            parent_hash: block.prev_hash || block.prev_key_hash,
+            timestamp: new Date(block.time),
+            transactions_count: block.transactions_count,
+            micro_blocks_count: block.micro_blocks_count,
+            beneficiary_reward: block.beneficiary_reward,
+          });
+        }
+
+        // Check if there's a next page
+        url = response.next ? `${middlewareUrl}${response.next}` : null;
       }
+
+      // Batch save all blocks
+      if (blocksToSave.length > 0) {
+        await this.blockRepository.save(blocksToSave);
+        this.logger.debug(
+          `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to sync blocks ${startHeight}-${endHeight}`,
+        error,
+      );
     }
   }
 
   private async syncTransactions(startHeight: number, endHeight: number) {
-    const pageLimit = this.configService.get<number>('mdw.pageLimit', 100);
+    const pageLimit = Math.min(
+      this.configService.get<number>('mdw.pageLimit', 100),
+      100,
+    );
+    // sync & save all transactions from startHeight to endHeight
+    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
+
+    const queryParams = new URLSearchParams({
+      direction: 'forward',
+      limit: pageLimit.toString(),
+      scope: `gen:${startHeight}-${endHeight}`,
+    });
+
+    const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
+    await this.processTransactionPage(url);
 
     // Get all unique contract IDs and functions from plugins
-    const contractIds = this.pluginRegistry.getUniqueContractIds();
-    const functions = this.pluginRegistry.getUniqueFunctions();
-    const types = this.pluginRegistry.getUniqueTypes();
+    // const contractIds = this.pluginRegistry.getUniqueContractIds();
+    // const functions = this.pluginRegistry.getUniqueFunctions();
+    // const types = this.pluginRegistry.getUniqueTypes();
 
-    // Sync contract call transactions
-    if (types.includes('contract_call') && contractIds.length > 0) {
-      await this.syncContractCallTransactions(
-        startHeight,
-        endHeight,
-        contractIds,
-        functions,
-        pageLimit,
-      );
-    }
+    // // Sync contract call transactions
+    // if (types.includes('contract_call') && contractIds.length > 0) {
+    //   await this.syncContractCallTransactions(
+    //     startHeight,
+    //     endHeight,
+    //     contractIds,
+    //     functions,
+    //     pageLimit,
+    //   );
+    // }
 
-    // Sync spend transactions (for tips)
-    if (types.includes('spend')) {
-      await this.syncSpendTransactions(startHeight, endHeight, pageLimit);
-    }
+    // // Sync spend transactions (for tips)
+    // if (types.includes('spend')) {
+    //   await this.syncSpendTransactions(startHeight, endHeight, pageLimit);
+    // }
   }
 
+  /**
+   * @deprecated
+   */
   private async syncContractCallTransactions(
     startHeight: number,
     endHeight: number,
@@ -230,6 +273,9 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
+  /**
+   * @deprecated
+   */
   private async syncSpendTransactions(
     startHeight: number,
     endHeight: number,
@@ -263,20 +309,17 @@ export class IndexerService implements OnModuleInit {
 
       for (const tx of transactions) {
         const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-
-        // Check if transaction matches any plugin filters
-        if (this.matchesAnyPlugin(camelTx)) {
-          const mdwTx = this.convertToMdwTx(camelTx);
-          mdwTxs.push(mdwTx);
-        }
+        const mdwTx = this.convertToMdwTx(camelTx);
+        mdwTxs.push(mdwTx);
       }
 
       if (mdwTxs.length > 0) {
         // Save transactions
         await this.txRepository.save(mdwTxs);
 
+        const pluginsTx = mdwTxs.filter((tx) => this.matchesAnyPlugin(tx.raw));
         // Dispatch to plugins
-        await this.dispatchToPlugins(mdwTxs);
+        await this.dispatchToPlugins(pluginsTx);
       }
 
       // Process next page if available
