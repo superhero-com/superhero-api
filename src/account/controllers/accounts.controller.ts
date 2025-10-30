@@ -12,6 +12,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
+import { PortfolioService } from '../services/portfolio.service';
+import moment from 'moment';
 
 @Controller('accounts')
 @ApiTags('Accounts')
@@ -19,6 +21,7 @@ export class AccountsController {
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    private readonly portfolioService: PortfolioService,
   ) {
     //
   }
@@ -70,5 +73,36 @@ export class AccountsController {
     }
 
     return account;
+  }
+
+  // Portfolio history endpoint
+  @ApiOperation({ operationId: 'getPortfolioHistory' })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiQuery({ name: 'startDate', type: 'string', required: false, description: 'Start date (ISO 8601)' })
+  @ApiQuery({ name: 'endDate', type: 'string', required: false, description: 'End date (ISO 8601)' })
+  @ApiQuery({ name: 'interval', type: 'number', required: false, description: 'Interval in seconds (default: 86400 for daily)' })
+  @ApiQuery({
+    name: 'convertTo',
+    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    required: false,
+    description: 'Currency to convert to (default: ae)',
+  })
+  @Get(':address/portfolio/history')
+  async getPortfolioHistory(
+    @Param('address') address: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('interval', new DefaultValuePipe(86400), ParseIntPipe) interval?: number,
+    @Query('convertTo') convertTo?: 'ae' | 'usd' | 'eur' | 'aud' | 'brl' | 'cad' | 'chf' | 'gbp' | 'xau',
+  ) {
+    const start = startDate ? moment(startDate) : undefined;
+    const end = endDate ? moment(endDate) : undefined;
+
+    return await this.portfolioService.getPortfolioHistory(address, {
+      startDate: start,
+      endDate: end,
+      interval,
+      convertTo: convertTo || 'ae',
+    });
   }
 }

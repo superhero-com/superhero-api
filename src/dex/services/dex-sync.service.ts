@@ -94,19 +94,29 @@ export class DexSyncService {
       .getMany();
     const tokens = await this.dexTokenRepository.find();
     for (const token of tokens) {
-      const priceAnalysis =
-        await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
-          token.address,
-          DEX_CONTRACTS.wae,
-        );
+      try {
+        const priceAnalysis =
+          await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
+            token.address,
+            DEX_CONTRACTS.wae,
+          );
 
-      const price_data = await this.aePricingService.getPriceData(
-        new BigNumber(priceAnalysis.medianPrice),
-      );
-      await this.dexTokenRepository.update(token.address, {
-        price: price_data,
-      });
-      await this.tokenSummaryService.createOrUpdateSummary(token.address);
+        if (!priceAnalysis || !priceAnalysis.medianPrice) {
+          continue; // Skip tokens without price analysis
+        }
+
+        const price_data = await this.aePricingService.getPriceData(
+          new BigNumber(priceAnalysis.medianPrice),
+        );
+        await this.dexTokenRepository.update(token.address, {
+          price: price_data,
+        });
+        await this.tokenSummaryService.createOrUpdateSummary(token.address);
+      } catch (error) {
+        // Log error but continue processing other tokens
+        console.error(`Error syncing token ${token.address}:`, error);
+        continue;
+      }
     }
     for (const pair of pairs) {
       await this.pairSummaryService.createOrUpdateSummary(pair);
