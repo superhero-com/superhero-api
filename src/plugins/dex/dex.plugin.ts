@@ -1,7 +1,7 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { TX_FUNCTIONS } from '@/configs';
-import { MdwPlugin, Tx } from '@/mdw/plugins/mdw-plugin.interface';
+import { MdwPlugin, Tx } from '@/mdw-sync/plugins/mdw-plugin.interface';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,

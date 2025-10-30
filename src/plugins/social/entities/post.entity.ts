@@ -1,4 +1,4 @@
-import { Tx } from '@/mdw/entities/tx.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 import {
   Column,
   CreateDateColumn,

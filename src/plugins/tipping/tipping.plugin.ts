@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MdwPlugin, Tx } from '@/mdw/plugins/mdw-plugin.interface';
+import { MdwPlugin, Tx } from '@/mdw-sync/plugins/mdw-plugin.interface';
 import { Tip } from '@/plugins/tipping/entities/tip.entity';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Account } from '@/plugins/account/entities/account.entity';

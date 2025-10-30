@@ -15,7 +15,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './plugins/bcl/bcl.module';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
-import { MdwModule } from './mdw/mdw.module';
+import { MdwModule } from './mdw-sync/mdw.module';
 import { DexPluginModule } from './plugins/dex/dex-plugin.module';
 import { SocialPluginModule } from './plugins/social/social-plugin.module';
 import { TippingPluginModule } from './plugins/tipping/tipping-plugin.module';

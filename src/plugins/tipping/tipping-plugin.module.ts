@@ -1,7 +1,7 @@
 import { AccountModule } from '@/plugins/account/account.module';
 import { Account } from '@/plugins/account/entities/account.entity';
 import { AeModule } from '@/ae/ae.module';
-import { MDW_PLUGIN } from '@/mdw/plugins/plugin.tokens';
+import { MDW_PLUGIN } from '@/mdw-sync/plugins/plugin.tokens';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Tip } from '@/plugins/tipping/entities/tip.entity';
 import { Module } from '@nestjs/common';

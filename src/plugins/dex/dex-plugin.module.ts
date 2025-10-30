@@ -1,6 +1,6 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
-import { MDW_PLUGIN } from '@/mdw/plugins/plugin.tokens';
+import { MDW_PLUGIN } from '@/mdw-sync/plugins/plugin.tokens';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DexTokensController } from './controllers/dex-tokens.controller';
