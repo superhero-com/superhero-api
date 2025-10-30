@@ -83,6 +83,14 @@ export class PortfolioService {
 
     // Batch fetch all transactions for this account up to the end date for efficiency
     const allTransactions = await this.getAllAccountTransactions(address, end);
+    this.logger.debug(`Found ${allTransactions.length} transactions for ${address} up to ${end.toISOString()}`);
+    if (allTransactions.length > 0) {
+      const txTypes = allTransactions.reduce((acc, tx) => {
+        acc[tx.tx_type] = (acc[tx.tx_type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      this.logger.debug(`Transaction types: ${JSON.stringify(txTypes)}`);
+    }
 
     // Fetch historical AE prices from CoinGecko (if converting to fiat)
     let aePriceHistory: Array<[number, number]> | null = null;
@@ -231,12 +239,20 @@ export class PortfolioService {
     );
 
     // Get all unique token sale addresses from transactions (includes tokens that were sold)
+    // Exclude 'create_community' transactions as they don't represent token holdings
     const tokenSaleAddresses = new Set<string>();
     if (allTransactions) {
       for (const tx of allTransactions) {
-        if (tx.sale_address && moment(tx.created_at).isSameOrBefore(timestamp)) {
+        if (
+          tx.sale_address &&
+          tx.tx_type !== 'create_community' &&
+          moment(tx.created_at).isSameOrBefore(timestamp)
+        ) {
           tokenSaleAddresses.add(tx.sale_address);
         }
+      }
+      if (tokenSaleAddresses.size > 0) {
+        this.logger.debug(`Found ${tokenSaleAddresses.size} unique token sale addresses from transactions at ${timestamp.toISOString()}`);
       }
     } else {
       // Fallback: use current account tokens
@@ -271,7 +287,10 @@ export class PortfolioService {
     let tokensValueAe = 0;
     for (const saleAddress of tokenSaleAddresses) {
       const token = tokenMap.get(saleAddress);
-      if (!token) continue;
+      if (!token) {
+        this.logger.debug(`Token not found for sale_address ${saleAddress} at ${timestamp.toISOString()}`);
+        continue;
+      }
 
       // Get historical token balance at this timestamp
       const tokenBalance = await this.getTokenBalanceAtTimestamp(
@@ -291,8 +310,14 @@ export class PortfolioService {
         );
 
         if (tokenPrice > 0) {
-          tokensValueAe += tokenBalance * tokenPrice;
+          const tokenValue = tokenBalance * tokenPrice;
+          tokensValueAe += tokenValue;
+          this.logger.debug(`Token ${saleAddress}: balance=${tokenBalance.toFixed(6)}, price=${tokenPrice.toFixed(8)} AE, value=${tokenValue.toFixed(6)} AE`);
+        } else {
+          this.logger.debug(`Token ${saleAddress}: balance=${tokenBalance.toFixed(6)} but price=0, skipping`);
         }
+      } else {
+        this.logger.debug(`Token ${saleAddress}: balance=0 at ${timestamp.toISOString()}`);
       }
     }
 
@@ -365,12 +390,24 @@ export class PortfolioService {
     address: string,
     endDate: Moment,
   ): Promise<Transaction[]> {
-    return await this.transactionRepository
+    const transactions = await this.transactionRepository
       .createQueryBuilder('tx')
       .where('tx.address = :address', { address })
       .andWhere('tx.created_at <= :endDate', { endDate: endDate.toDate() })
       .orderBy('tx.created_at', 'ASC')
       .getMany();
+    
+    // Also check total transactions for this address (debug)
+    const totalCount = await this.transactionRepository
+      .createQueryBuilder('tx')
+      .where('tx.address = :address', { address })
+      .getCount();
+    
+    if (totalCount > transactions.length) {
+      this.logger.warn(`Query filtered ${totalCount - transactions.length} transactions due to endDate=${endDate.toISOString()}. Total transactions for ${address}: ${totalCount}, filtered: ${transactions.length}`);
+    }
+    
+    return transactions;
   }
 
   /**
@@ -404,11 +441,16 @@ export class PortfolioService {
 
       // Calculate balance by summing up transactions
       let balance = new BigNumber(0);
+      this.logger.debug(`Calculating token balance for ${saleAddress} at ${timestamp.toISOString()}: found ${transactions.length} transactions`);
       for (const tx of transactions) {
         if (tx.tx_type === 'buy') {
           balance = balance.plus(tx.volume);
+          this.logger.debug(`  Buy tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
         } else if (tx.tx_type === 'sell') {
           balance = balance.minus(tx.volume);
+          this.logger.debug(`  Sell tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
+        } else {
+          this.logger.debug(`  Skipping tx ${tx.tx_hash}: type=${tx.tx_type}`);
         }
       }
 
@@ -457,6 +499,7 @@ export class PortfolioService {
       // If someone bought tokens after this timestamp, they spent AE, so add it back
       // If someone sold tokens after this timestamp, they received AE, so subtract it
       // Note: tx.amount.ae is in AE, but balance is in aettos, so we need to convert
+      this.logger.debug(`Calculating AE balance for ${address} at ${timestamp.toISOString()}: current balance = ${toAe(balance.toString())} AE, transactions after: ${transactionsAfter.length}`);
       for (const tx of transactionsAfter) {
         if (tx.amount && typeof tx.amount === 'object' && 'ae' in tx.amount) {
           const aeAmountValue = tx.amount.ae;
@@ -473,17 +516,24 @@ export class PortfolioService {
               const aeAmountAettos = new BigNumber(aeAmountValue).multipliedBy(
                 new BigNumber(10).pow(18),
               );
+              const balanceBefore = balance;
               if (tx.tx_type === 'buy') {
                 // They spent AE, so add it back to get historical balance
                 balance = balance.plus(aeAmountAettos);
+                this.logger.debug(`  Buy tx ${tx.tx_hash} at ${moment(tx.created_at).toISOString()}: spent ${aeAmountValue} AE, balance ${toAe(balanceBefore.toString())} -> ${toAe(balance.toString())} AE`);
               } else if (tx.tx_type === 'sell') {
                 // They received AE, so subtract it to get historical balance
                 balance = balance.minus(aeAmountAettos);
+                this.logger.debug(`  Sell tx ${tx.tx_hash} at ${moment(tx.created_at).toISOString()}: received ${aeAmountValue} AE, balance ${toAe(balanceBefore.toString())} -> ${toAe(balance.toString())} AE`);
               }
             } catch (error) {
-              this.logger.warn(`Invalid AE amount in transaction ${tx.tx_hash}: ${aeAmountValue}`);
+              this.logger.warn(`Invalid AE amount in transaction ${tx.tx_hash}: ${aeAmountValue}`, error);
             }
+          } else {
+            this.logger.debug(`  Skipping tx ${tx.tx_hash}: invalid AE amount: ${aeAmountValue}`);
           }
+        } else {
+          this.logger.debug(`  Skipping tx ${tx.tx_hash}: no amount.ae field`);
         }
       }
 
