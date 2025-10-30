@@ -479,6 +479,7 @@ export class PortfolioService {
     allTransactions?: Transaction[],
     aePriceHistory?: Array<[number, number]> | null,
     tokenMap?: Map<string, Token>,
+    tokenMapByAex9?: Map<string, Token>,
     tokenHolderMap?: Map<string, TokenHolder>,
     tokenPriceCache?: Map<string, Map<number, number>>,
   ): Promise<PortfolioHistorySnapshot> {
@@ -495,10 +496,10 @@ export class PortfolioService {
     const tokenSaleAddresses = new Set<string>();
     
     // Start with current account tokens (from TokenHolder - includes transfers/sends)
-    if (tokenMap) {
-      // Use pre-fetched token map
+    if (tokenMapByAex9) {
+      // Use pre-fetched token map keyed by aex9_address
       for (const holder of accountTokens) {
-        const token = tokenMap.get(holder.aex9_address);
+        const token = tokenMapByAex9.get(holder.aex9_address);
         if (token && token.sale_address) {
           tokenSaleAddresses.add(token.sale_address);
         }
