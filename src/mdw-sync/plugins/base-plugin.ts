@@ -75,7 +75,7 @@ export abstract class BasePlugin implements Plugin {
                 { last_synced_height: tx.block_height },
               );
             }
-          } catch (error) {
+          } catch (error: any) {
             this.logger.error(
               `[${this.name}] Failed to process transaction ${tx.tx_hash}`,
               error.stack,
@@ -94,7 +94,7 @@ export abstract class BasePlugin implements Plugin {
       this.logger.log(
         `[${this.name}] Historical sync completed. Processed ${processedCount} transactions`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[${this.name}] Historical sync failed`, error.stack);
     }
   }

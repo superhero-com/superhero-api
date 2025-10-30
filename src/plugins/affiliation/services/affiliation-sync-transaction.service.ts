@@ -23,7 +23,7 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
   async processTransaction(tx: Tx): Promise<void> {
     try {
       await this.saveInvitationTransaction(tx);
-    } catch (error) {
+    } catch (error: any) {
       this.handleError(error, tx, 'AffiliationSyncTransactionService');
     }
   }

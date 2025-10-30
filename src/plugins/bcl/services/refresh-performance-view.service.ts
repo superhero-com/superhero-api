@@ -34,7 +34,7 @@ export class RefreshPerformanceViewService {
       this.logger.log(
         `Materialized view refreshed successfully in ${duration}ms`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         'Failed to refresh materialized view',
         error instanceof Error ? error.stack : String(error),

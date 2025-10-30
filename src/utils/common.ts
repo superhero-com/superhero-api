@@ -22,7 +22,7 @@ export async function fetchJson<T = any>(
       return null;
     }
     return response.json() as Promise<T>;
-  } catch (error) {
+  } catch (error: any) {
     if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED && !shouldNotRetry) {
       totalRetries++;
       await new Promise((resolve) =>

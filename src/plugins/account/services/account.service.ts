@@ -90,7 +90,7 @@ export class AccountService {
 
         await this.accountRepository.save(accountData);
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error pulling and saving accounts', error);
     }
     this.isPullingAccounts = false;

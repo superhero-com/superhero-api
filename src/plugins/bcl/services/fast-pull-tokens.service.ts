@@ -144,7 +144,7 @@ export class FastPullTokensService {
     let result: any;
     try {
       result = await fetchJson(url);
-    } catch (error) {
+    } catch (error: any) {
       if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
         totalRetries++;
         await new Promise((resolve) =>

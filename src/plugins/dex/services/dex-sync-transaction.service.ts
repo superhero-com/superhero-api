@@ -60,7 +60,7 @@ export class DexSyncTransactionService extends BasePluginSyncService {
         aci: factoryInterface,
         address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to initialize contracts', error);
     }
   }

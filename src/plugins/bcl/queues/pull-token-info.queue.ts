@@ -43,7 +43,7 @@ export class PullTokenInfoQueue {
           removeOnComplete: true,
         },
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`PullTokenInfoQueue->error`, error);
     }
   }

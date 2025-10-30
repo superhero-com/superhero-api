@@ -77,7 +77,7 @@ export class TransactionService {
        */
       try {
         token = await this.tokenService.getToken(saleAddress);
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Error getting token ${saleAddress}`, error);
       }
     }
@@ -400,7 +400,7 @@ export class TransactionService {
           holders_count: tokenHolderCount + 1,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error updating token holder', error);
     }
     try {

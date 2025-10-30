@@ -51,7 +51,7 @@ export class TippingSyncTransactionService extends BasePluginSyncService {
         return false;
       }
       return payloadData as 'TIP_PROFILE' | 'TIP_POST';
-    } catch (error) {
+    } catch (error: any) {
       return false;
     }
   }
@@ -88,7 +88,7 @@ export class TippingSyncTransactionService extends BasePluginSyncService {
         post = await this.postRepository.findOne({
           where: { id: postId },
         });
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Failed to find post', {
           postId: type,
           error: error instanceof Error ? error.message : String(error),
@@ -122,7 +122,7 @@ export class TippingSyncTransactionService extends BasePluginSyncService {
         this.logger.log(`Created new account: ${address}`);
       }
       return existingAccount;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to ensure account exists: ${address}`, error);
       return null;
     }

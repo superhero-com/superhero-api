@@ -53,7 +53,7 @@ export class TippingPlugin extends BasePlugin {
             return supportedPayloads.some((payload) =>
               payloadData.startsWith(payload),
             );
-          } catch (error) {
+          } catch (error: any) {
             return false;
           }
         },

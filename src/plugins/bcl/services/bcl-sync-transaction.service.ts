@@ -15,7 +15,7 @@ export class BclSyncTransactionService extends BasePluginSyncService {
     try {
       // Use the existing TransactionService to handle BCL transactions
       await this.transactionService.saveTransaction(tx.raw, null, true);
-    } catch (error) {
+    } catch (error: any) {
       this.handleError(error, tx, 'BclSyncTransactionService');
     }
   }

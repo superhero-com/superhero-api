@@ -65,7 +65,7 @@ export class PostService {
         await this.pullLatestPostsForContracts();
         // Run cleanup for any orphaned comments from previous runs
         await this.fixOrphanedComments();
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Failed to initialize PostService module', error);
         // Don't throw - allow the service to start even if initial sync fails
       }
@@ -112,7 +112,7 @@ export class PostService {
         postId: post?.id,
       });
       return { success: true, post };
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -210,7 +210,7 @@ export class PostService {
       );
 
       return posts;
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -238,7 +238,7 @@ export class PostService {
 
     try {
       result = await fetchJson(url);
-    } catch (error) {
+    } catch (error: any) {
       if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
         const nextRetry = totalRetries + 1;
         const errorMessage =
@@ -297,7 +297,7 @@ export class PostService {
         if (post) {
           successfulPosts.push(post);
         }
-      } catch (error) {
+      } catch (error: any) {
         failedCount++;
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -436,7 +436,7 @@ export class PostService {
               bio: content,
             });
           }
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('Error updating or creating account', error);
         }
       }
@@ -543,7 +543,7 @@ export class PostService {
       });
 
       return post;
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -755,7 +755,7 @@ export class PostService {
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
           retryDelay *= 2; // Exponential backoff
         }
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Error during parent post validation', {
           parentPostId,
           attempt,
@@ -819,7 +819,7 @@ export class PostService {
       });
 
       return { success: true, parentPostExists: true };
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       this.logger.error('Failed to process existing post as comment', {
@@ -851,7 +851,7 @@ export class PostService {
         parentPostId,
         commentCount: count,
       });
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       this.logger.error('Failed to update comment count', {
@@ -906,7 +906,7 @@ export class PostService {
               originalParentId: comment.post_id,
             });
           }
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('Failed to fix orphaned comment', {
             commentId: comment.id,
             parentId: comment.post_id,
@@ -918,7 +918,7 @@ export class PostService {
       this.logger.log(
         `Orphaned comments cleanup completed: ${fixedCount} fixed`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to run orphaned comments cleanup', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -988,7 +988,7 @@ export class PostService {
           topicName: topic.name,
           postCount: count,
         });
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Failed to update topic post count', {
           topicId: topic.id,
           topicName: topic.name,
@@ -1035,7 +1035,7 @@ export class PostService {
       this.logger.log(
         `Successfully cleared posts and topics data with syncVersion different from ${this.syncVersion}`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to clear posts and topics data', {
         error: error instanceof Error ? error.message : String(error),
       });

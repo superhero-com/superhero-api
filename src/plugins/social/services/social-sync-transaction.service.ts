@@ -127,7 +127,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
             bio: content,
           });
         }
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Error updating or creating account', error);
       }
     }
@@ -319,7 +319,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
         .where('post.id = :parentPostId', { parentPostId })
         .getOne();
       return !!parentPost;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error during parent post validation', {
         parentPostId,
         error: error instanceof Error ? error.message : String(error),
@@ -385,7 +385,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
           topicName: topic.name,
           postCount: count,
         });
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Failed to update topic post count', {
           topicId: topic.id,
           topicName: topic.name,
@@ -411,7 +411,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
         parentPostId,
         commentCount: count,
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to update comment count', {
         parentPostId,
         error: error instanceof Error ? error.message : String(error),

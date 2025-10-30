@@ -49,7 +49,7 @@ export class AePricingService {
           created_at: 'DESC',
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       //
     }
     if (!latestRates) {
@@ -67,7 +67,7 @@ export class AePricingService {
     CURRENCIES.forEach(({ code }) => {
       try {
         prices[code] = price.multipliedBy(this.latestRates.rates![code]) as any;
-      } catch (error) {
+      } catch (error: any) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;
       }

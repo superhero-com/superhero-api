@@ -94,7 +94,7 @@ export class OAuthService {
         email: primaryEmail,
         provider: 'github',
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('GitHub OAuth verification failed:', error);
       throw new BadRequestException('Failed to verify GitHub OAuth code');
     }
@@ -121,7 +121,7 @@ export class OAuthService {
         email: response.email,
         provider: 'google',
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Google token verification failed:', error);
       throw new BadRequestException('Failed to verify Google token');
     }
@@ -151,7 +151,7 @@ export class OAuthService {
         email: userData.email || '', // X doesn't always provide email
         provider: 'x',
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('X token verification failed:', error);
       throw new BadRequestException('Failed to verify X token');
     }

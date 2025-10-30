@@ -126,7 +126,7 @@ export class IndexerService implements OnModuleInit {
           last_synced_hash: '', // Will be updated when we store the block
         },
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Sync failed', error);
     } finally {
       this.isRunning = false;
@@ -173,7 +173,7 @@ export class IndexerService implements OnModuleInit {
           `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
         );
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to sync blocks ${startHeight}-${endHeight}`,
         error,
@@ -227,7 +227,7 @@ export class IndexerService implements OnModuleInit {
         const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
         await this.processTransactionPage(nextUrl);
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to process transaction page', error);
     }
   }
@@ -254,7 +254,7 @@ export class IndexerService implements OnModuleInit {
 
       // Save transaction - TxSubscriber will emit events for plugins
       await this.txRepository.save(mdwTx);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }
   }

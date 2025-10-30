@@ -102,7 +102,7 @@ export function extractMedia(
       .slice(0, maxMediaItems);
 
     return media;
-  } catch (error) {
+  } catch (error: any) {
     console.warn('Error extracting media from arguments:', error);
     return [];
   }

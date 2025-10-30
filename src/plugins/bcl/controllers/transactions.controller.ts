@@ -140,7 +140,7 @@ export class TransactionsController {
         const tx =
           await this.transactionService.saveTransaction(mdwTransaction);
         return tx as unknown as TransactionDto;
-      } catch (error) {
+      } catch (error: any) {
         throw new NotFoundException(
           `Transaction with hash ${tx_hash} not found`,
         );

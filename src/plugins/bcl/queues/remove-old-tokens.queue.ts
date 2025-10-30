@@ -34,7 +34,7 @@ export class RemoveOldTokensQueue {
         .delete()
         .execute();
       this.logger.debug(`RemoveOldTokensQueue->completed`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`RemoveOldTokensQueue->error`, error);
     }
   }

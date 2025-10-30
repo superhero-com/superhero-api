@@ -99,7 +99,7 @@ export class TipService {
         post = await this.postRepository.findOne({
           where: { id: postId },
         });
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('Failed to find post', {
           postId: type,
           error: error instanceof Error ? error.message : String(error),
@@ -133,7 +133,7 @@ export class TipService {
         this.logger.log(`Created new account: ${address}`);
       }
       return existingAccount;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to ensure account exists: ${address}`, error);
       // Don't throw - account creation failure shouldn't break tip processing
     }

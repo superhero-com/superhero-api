@@ -201,7 +201,7 @@ export class TokensService {
         sale_address: token.sale_address,
         data,
       });
-    } catch (error) {
+    } catch (error: any) {
       //
     }
   }
@@ -1058,7 +1058,7 @@ export class TokensService {
           trending_score_update_at: new Date(),
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to update trending score for token ${token.sale_address}`,
         error,

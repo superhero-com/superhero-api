@@ -51,7 +51,7 @@ export class InvitationService {
 
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
       await this.loadInvitationsFromMdw(url);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error pulling and saving invitations', error);
     }
     this.isPlullingInvitations = false;
