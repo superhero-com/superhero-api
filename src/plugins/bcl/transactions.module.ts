@@ -1,8 +1,6 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { TokensModule } from '@/plugins/bcl/tokens.module';
-import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsTransactionsController } from './controllers/analytics-transactions.controller';
@@ -15,9 +13,6 @@ import { TransactionService } from './services/transaction.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Transaction]),
-    BullModule.registerQueue({
-      name: SYNC_TOKEN_HOLDERS_QUEUE,
-    }),
     AeModule,
     TokensModule,
     AePricingModule,

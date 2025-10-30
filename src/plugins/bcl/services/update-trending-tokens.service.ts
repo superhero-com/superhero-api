@@ -1,17 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, Repository } from 'typeorm';
+import { In, LessThan, Repository } from 'typeorm';
 
-import { Token } from '../../plugins/bcl/entities/token.entity';
-import { TokensService } from '../tokens.service';
-import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
-import moment from 'moment';
-import { CronExpression } from '@nestjs/schedule';
-import { Cron } from '@nestjs/schedule';
 import {
   TRENDING_SCORE_CONFIG,
   UPDATE_TRENDING_TOKENS_ENABLED,
 } from '@/configs';
+import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import moment from 'moment';
+import { Token } from '../entities/token.entity';
+import { TokensService } from './tokens.service';
 
 @Injectable()
 export class UpdateTrendingTokensService {

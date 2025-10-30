@@ -1,3 +1,6 @@
+import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   Controller,
   DefaultValuePipe,
@@ -14,20 +17,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { Repository } from 'typeorm';
-import { TokenHolderDto } from '../plugins/bcl/dto/token-holder.dto';
-import { TokenDto } from '../plugins/bcl/dto/token.dto';
-import { TokenHolder } from '../plugins/bcl/entities/token-holders.entity';
-import { Token } from '../plugins/bcl/entities/token.entity';
-import { ApiOkResponsePaginated } from '../utils/api-type';
-import { TokensService } from '../plugins/bcl/services/tokens.service';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
-import { Queue } from 'bull';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokenHolderDto } from '../dto/token-holder.dto';
+import { TokenDto } from '../dto/token.dto';
+import { TokenHolder } from '../entities/token-holders.entity';
+import { Token } from '../entities/token.entity';
+import { TokensService } from '../services/tokens.service';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -39,9 +36,6 @@ export class TokensController {
 
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
-
-    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
-    private readonly syncTokenHoldersQueue: Queue,
 
     private readonly tokensService: TokensService,
     private readonly communityFactoryService: CommunityFactoryService,
@@ -201,15 +195,16 @@ export class TokensController {
     // check if count is 0
     const count = await queryBuilder.getCount();
     if (count <= 1) {
-      void this.syncTokenHoldersQueue.add(
-        {
-          saleAddress: token.sale_address,
-        },
-        {
-          jobId: `syncTokenHolders-${token.sale_address}`,
-          removeOnComplete: true,
-        },
-      );
+      // TODO:: enable
+      // void this.syncTokenHoldersQueue.add(
+      //   {
+      //     saleAddress: token.sale_address,
+      //   },
+      //   {
+      //     jobId: `syncTokenHolders-${token.sale_address}`,
+      //     removeOnComplete: true,
+      //   },
+      // );
     }
 
     return paginate<TokenHolder>(queryBuilder, { page, limit });

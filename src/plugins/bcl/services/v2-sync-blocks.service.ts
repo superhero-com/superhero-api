@@ -1,20 +1,20 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import {
+  LIVE_SYNCING_ENABLED,
+  PERIODIC_SYNCING_ENABLED,
+  TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES,
+  TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE,
+} from '@/configs/constants';
+import { ACTIVE_NETWORK } from '@/configs/network';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
-import { SyncTransactionsService } from './sync-transactions.service';
-import { ACTIVE_NETWORK } from '@/configs/network';
-import { TransactionService } from '@/transactions/services/transaction.service';
 import { FixHoldersService } from './fix-holders.service';
-import {
-  TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES,
-  TOTAL_BLOCKS_TO_SYNC_EVERY_MINUTE,
-  PERIODIC_SYNCING_ENABLED,
-  LIVE_SYNCING_ENABLED,
-} from '@/configs/constants';
+import { SyncTransactionsService } from './sync-transactions.service';
+import { TransactionService } from './transaction.service';
 
 @Injectable()
 export class SyncBlocksService {

@@ -1,6 +1,11 @@
+import {
+  FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+  PERIODIC_SYNCING_ENABLED,
+  TX_FUNCTIONS,
+  WAIT_TIME_WHEN_REQUEST_FAILED,
+} from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
-import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';
@@ -9,12 +14,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { LessThan, Repository } from 'typeorm';
 import { SyncBlocksService } from './sync-blocks.service';
-import {
-  FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
-  PERIODIC_SYNCING_ENABLED,
-  TX_FUNCTIONS,
-  WAIT_TIME_WHEN_REQUEST_FAILED,
-} from '@/configs/constants';
+import { TransactionService } from './transaction.service';
 
 @Injectable()
 export class VerifyTransactionsService {
@@ -45,7 +45,7 @@ export class VerifyTransactionsService {
         verified: false,
         block_height: LessThan(
           this.syncBlocksService.currentBlockNumber -
-            FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+          FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
         ),
       },
       order: {

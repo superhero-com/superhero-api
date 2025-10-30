@@ -1,4 +1,5 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { ApiOkResponsePaginated } from '@/utils/api-type';
 import {
   Controller,
   DefaultValuePipe,
@@ -11,11 +12,10 @@ import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
-import { ApiOkResponsePaginated } from '../utils/api-type';
-import { TokenHolderDto } from '../plugins/bcl/dto/token-holder.dto';
-import { TokenHolder } from '../plugins/bcl/entities/token-holders.entity';
-import { Token } from '../plugins/bcl/entities/token.entity';
-import { TokensService } from './tokens.service';
+import { TokenHolderDto } from '../dto/token-holder.dto';
+import { TokenHolder } from '../entities/token-holders.entity';
+import { Token } from '../entities/token.entity';
+import { TokensService } from '../services/tokens.service';
 
 @Controller('accounts')
 @ApiTags('Account Tokens')

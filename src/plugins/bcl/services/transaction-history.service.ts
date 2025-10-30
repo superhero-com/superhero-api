@@ -5,12 +5,12 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { DataSource, Repository } from 'typeorm';
-import { HistoricalDataDto } from '../../plugins/bcl/dto/historical-data.dto';
-import { Transaction } from '../../plugins/bcl/entities/transaction.entity';
+import { HistoricalDataDto } from '../dto/historical-data.dto';
+import { Transaction } from '../entities/transaction.entity';
 
 export interface IGetPaginatedHistoricalDataProps {
   token: Token;
-  interval: number; // number of seconds
+  interval: number; // numberof seconds
   page: number;
   limit: number;
   convertTo?: string;
@@ -47,7 +47,7 @@ export class TransactionHistoryService {
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
@@ -187,16 +187,16 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.transactionsRepository
-            .createQueryBuilder('transactions')
-            .where('transactions.sale_address = :sale_address', {
-              sale_address: props.token.sale_address,
-            })
-            .andWhere('transactions.created_at < :start', {
-              start: startDate.toDate(),
-            })
-            .orderBy('transactions.created_at', 'DESC')
-            .limit(1)
-            .getOne()
+          .createQueryBuilder('transactions')
+          .where('transactions.sale_address = :sale_address', {
+            sale_address: props.token.sale_address,
+          })
+          .andWhere('transactions.created_at < :start', {
+            start: startDate.toDate(),
+          })
+          .orderBy('transactions.created_at', 'DESC')
+          .limit(1)
+          .getOne()
         : undefined;
 
     return this.processAggregatedHistoricalData(

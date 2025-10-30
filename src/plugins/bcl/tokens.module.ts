@@ -1,12 +1,17 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
+import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AccountTokensController } from './account-tokens.controller';
-import { AnalyticTokensController } from './analytics-tokens.controller';
+import { AccountTokensController } from './controllers/account-tokens.controller';
+import { AnalyticTokensController } from './controllers/analytics-tokens.controller';
+import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { TokensController } from './controllers/tokens.controller';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
+import { TokenPerformanceView } from './entities/tokens-performance.view';
+import { TokenWebsocketGateway } from './gateways/token-websocket.gateway';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -15,14 +20,9 @@ import {
 import { PullTokenInfoQueue } from './queues/pull-token-info.queue';
 import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
-import { TokenWebsocketGateway } from './gateways/token-websocket.gateway';
-import { TokensController } from './tokens.controller';
-import { TokensService } from './services/tokens.service';
-import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
-import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
-import { TokenPerformanceController } from './controllers/token-performance.controller';
-import { TokenPerformanceView } from './entities/tokens-performance.view';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
+import { TokensService } from './services/tokens.service';
+import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 
 @Module({
   imports: [

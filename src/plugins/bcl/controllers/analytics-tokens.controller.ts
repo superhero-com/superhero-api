@@ -5,9 +5,9 @@ import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { Repository } from 'typeorm';
-import { DailyTokenCountDto } from '../plugins/bcl/dto/daily-token-count.dto';
-import { MarketCapSumDto } from '../plugins/bcl/dto/market-cap-sum.dto';
-import { Token } from '../plugins/bcl/entities/token.entity';
+import { DailyTokenCountDto } from '../dto/daily-token-count.dto';
+import { MarketCapSumDto } from '../dto/market-cap-sum.dto';
+import { Token } from '../entities/token.entity';
 
 @Controller('analytics')
 @ApiTags('Analytics')
