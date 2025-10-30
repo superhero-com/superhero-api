@@ -64,7 +64,8 @@ export class DexSyncService {
       aci: factoryInterface,
       address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
     });
-    this.sync();
+    // TODO: enable
+    // this.sync();
   }
 
   async sync() {

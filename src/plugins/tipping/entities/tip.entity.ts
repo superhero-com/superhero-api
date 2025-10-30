@@ -1,4 +1,4 @@
-import { Account } from '@/account/entities/account.entity';
+import { Account } from '@/plugins/account/entities/account.entity';
 import { Tx } from '@/mdw/entities/tx.entity';
 import { Post } from '@/plugins/social/entities/post.entity';
 import {

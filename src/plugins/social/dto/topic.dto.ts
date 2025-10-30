@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TokenDto } from '@/tokens/dto/token.dto';
+import { TokenDto } from '@/plugins/bcl/dto/token.dto';
 
 export class TopicDto {
   @ApiProperty({

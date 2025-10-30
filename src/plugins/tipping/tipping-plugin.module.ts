@@ -1,5 +1,5 @@
-import { AccountModule } from '@/account/account.module';
-import { Account } from '@/account/entities/account.entity';
+import { AccountModule } from '@/plugins/account/account.module';
+import { Account } from '@/plugins/account/entities/account.entity';
 import { AeModule } from '@/ae/ae.module';
 import { MDW_PLUGIN } from '@/mdw/plugins/plugin.tokens';
 import { Post } from '@/plugins/social/entities/post.entity';

@@ -6,14 +6,14 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AccountModule } from './account/account.module';
+import { AccountModule } from './plugins/account/account.module';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
-import { AffiliationModule } from './affiliation/affiliation.module';
+import { AffiliationModule } from './plugins/affiliation/affiliation.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { BclModule } from './bcl/bcl.module';
+import { BclModule } from './plugins/bcl/bcl.module';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import { MdwModule } from './mdw/mdw.module';
 import { DexPluginModule } from './plugins/dex/dex-plugin.module';
@@ -24,8 +24,8 @@ import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
 } from './tokens/queues/constants';
-import { TokensModule } from './tokens/tokens.module';
-import { TransactionsModule } from './transactions/transactions.module';
+import { TokensModule } from './plugins/bcl/tokens.module';
+import { TransactionsModule } from './plugins/bcl/transactions.module';
 import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 
 @Module({

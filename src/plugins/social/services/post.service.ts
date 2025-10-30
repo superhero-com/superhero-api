@@ -1,4 +1,4 @@
-import { Account } from '@/account/entities/account.entity';
+import { Account } from '@/plugins/account/entities/account.entity';
 import {
   ACTIVE_NETWORK,
   MAX_RETRIES_WHEN_REQUEST_FAILED,

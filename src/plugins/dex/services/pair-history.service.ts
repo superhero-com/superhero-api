@@ -1,6 +1,6 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
-import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
+import { HistoricalDataDto } from '@/plugins/bcl/dto/historical-data.dto';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,

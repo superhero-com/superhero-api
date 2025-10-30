@@ -1,4 +1,4 @@
-import { Account } from '@/account/entities/account.entity';
+import { Account } from '@/plugins/account/entities/account.entity';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { ITransaction } from '@/utils/types';
 import { decode, toAe } from '@aeternity/aepp-sdk';

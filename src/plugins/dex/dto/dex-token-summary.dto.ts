@@ -1,4 +1,4 @@
-import { IPriceDto, PriceDto } from '@/tokens/dto/price.dto';
+import { IPriceDto, PriceDto } from '@/plugins/bcl/dto/price.dto';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class DexTokenPeriodData {

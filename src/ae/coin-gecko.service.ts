@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
-import { IPriceDto } from '@/tokens/dto/price.dto';
+import { IPriceDto } from '@/plugins/bcl/dto/price.dto';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
 

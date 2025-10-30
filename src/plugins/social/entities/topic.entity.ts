@@ -8,7 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Post } from './post.entity';
-import { Token } from '@/tokens/entities/token.entity';
+import { Token } from '@/plugins/bcl/entities/token.entity';
 
 @Entity({
   name: 'topics',

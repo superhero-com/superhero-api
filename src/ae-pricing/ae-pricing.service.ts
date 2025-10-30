@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
-import { IPriceDto } from '@/tokens/dto/price.dto';
+import { IPriceDto } from '@/plugins/bcl/dto/price.dto';
 import { Repository } from 'typeorm';
 import { CoinPrice } from './entities/coin-price.entity';
 

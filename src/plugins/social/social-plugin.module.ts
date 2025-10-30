@@ -3,10 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { SocialPlugin } from './social.plugin';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Topic } from '@/plugins/social/entities/topic.entity';
-import { Account } from '@/account/entities/account.entity';
+import { Account } from '@/plugins/account/entities/account.entity';
 import { MDW_PLUGIN } from '@/mdw/plugins/plugin.tokens';
 import { AeModule } from '@/ae/ae.module';
-import { AccountModule } from '@/account/account.module';
+import { AccountModule } from '@/plugins/account/account.module';
 import { TopicsController } from './controllers/topics.controller';
 import { PostsController } from './controllers/posts.controller';
 @Module({

@@ -20,8 +20,8 @@ import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { PostDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { Token } from '@/tokens/entities/token.entity';
-import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
+import { Token } from '@/plugins/bcl/entities/token.entity';
+import { TokenPerformanceView } from '@/plugins/bcl/entities/tokens-performance.view';
 
 @Controller('posts')
 @ApiTags('Posts')

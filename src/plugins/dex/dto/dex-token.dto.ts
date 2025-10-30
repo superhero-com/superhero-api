@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { DexTokenSummaryDto } from './dex-token-summary.dto';
-import { PriceDto } from '@/tokens/dto/price.dto';
+import { PriceDto } from '@/plugins/bcl/dto/price.dto';
 
 export class DexTokenDto {
   @ApiProperty({
