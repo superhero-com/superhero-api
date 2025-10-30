@@ -80,17 +80,29 @@ export class CoinGeckoService {
       await this.pullData();
     }
 
+    // Ensure rates are loaded
+    if (this.rates === null) {
+      this.logger.error('CoinGecko rates are null after pullData');
+      throw new Error('CoinGecko rates not available');
+    }
+
     const prices = {
       ae: price,
     };
 
     CURRENCIES.forEach(({ code }) => {
       try {
-        prices[code] = this.rates![code]
-          ? price.multipliedBy(this.rates![code])
-          : null;
+        const rate = this.rates![code];
+        if (rate != null && typeof rate === 'number') {
+          const converted = price.multipliedBy(rate);
+          prices[code] = converted;
+          this.logger.debug(`Converted ${price.toString()} AE to ${code}: ${converted.toString()} (rate: ${rate})`);
+        } else {
+          this.logger.warn(`No rate available for ${code}`);
+          prices[code] = null;
+        }
       } catch (error) {
-        // console.warn(`Failed to calculate price for ${code}`);
+        this.logger.error(`Failed to calculate price for ${code}:`, error);
         prices[code] = null;
       }
     });
