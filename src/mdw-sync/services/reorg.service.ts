@@ -5,7 +5,6 @@ import { KeyBlock } from '../entities/key-block.entity';
 import { Tx } from '../entities/tx.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
-import { PluginRegistryService } from './plugin-registry.service';
 import { fetchJson } from '@/utils/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -22,7 +21,6 @@ export class ReorgService {
     private syncStateRepository: Repository<SyncState>,
     @InjectRepository(PluginSyncState)
     private pluginSyncStateRepository: Repository<PluginSyncState>,
-    private pluginRegistry: PluginRegistryService,
     private configService: ConfigService,
     private dataSource: DataSource,
   ) {}
@@ -80,7 +78,7 @@ export class ReorgService {
       }
 
       return false;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error during reorg detection', error);
       return false;
     }
@@ -123,25 +121,10 @@ export class ReorgService {
 
       await queryRunner.commitTransaction();
 
-      // Notify plugins about reorg
-      const plugins = this.pluginRegistry.getPlugins();
-      for (const plugin of plugins) {
-        if (plugin.onReorg) {
-          try {
-            await plugin.onReorg(divergenceHeight);
-          } catch (error) {
-            this.logger.error(
-              `Plugin ${plugin.name} reorg handler failed`,
-              error,
-            );
-          }
-        }
-      }
-
       this.logger.log(
-        `Reorg handled successfully from height ${divergenceHeight}`,
+        `Reorg handled successfully from height ${divergenceHeight}. Plugin data will be cleaned via cascade deletes.`,
       );
-    } catch (error) {
+    } catch (error: any) {
       await queryRunner.rollbackTransaction();
       this.logger.error('Failed to handle reorg', error);
       throw error;
