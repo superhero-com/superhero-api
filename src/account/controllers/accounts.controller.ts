@@ -59,23 +59,7 @@ export class AccountsController {
     return paginate(query, { page, limit });
   }
 
-  // single account
-  @ApiOperation({ operationId: 'getAccount' })
-  @ApiParam({ name: 'address', type: 'string' })
-  @Get(':address')
-  async getAccount(@Param('address') address: string) {
-    const account = await this.accountRepository.findOne({
-      where: { address },
-    });
-
-    if (!account) {
-      throw new NotFoundException('Account not found');
-    }
-
-    return account;
-  }
-
-  // Portfolio history endpoint
+  // Portfolio history endpoint - MUST come before :address route to avoid route conflict
   @ApiOperation({ operationId: 'getPortfolioHistory' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiQuery({ name: 'startDate', type: 'string', required: false, description: 'Start date (ISO 8601)' })
@@ -104,5 +88,21 @@ export class AccountsController {
       interval,
       convertTo: convertTo || 'ae',
     });
+  }
+
+  // single account - MUST come after more specific routes
+  @ApiOperation({ operationId: 'getAccount' })
+  @ApiParam({ name: 'address', type: 'string' })
+  @Get(':address')
+  async getAccount(@Param('address') address: string) {
+    const account = await this.accountRepository.findOne({
+      where: { address },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    return account;
   }
 }
