@@ -52,7 +52,7 @@ export class IndexerService implements OnModuleInit {
         id: 'global',
         last_synced_height: 0,
         last_synced_hash: '',
-        tip_height: status.top_block_height,
+        tip_height: status.mdw_height,
       });
     }
   }
