@@ -238,9 +238,22 @@ export class PortfolioService {
       allTransactions,
     );
 
-    // Get all unique token sale addresses from transactions
-    // Include buy, sell, and create_community transactions (creators receive tokens)
+    // Get all unique token sale addresses from:
+    // 1. Current TokenHolder balances (includes all transfers/sends from blockchain)
+    // 2. Historical transactions (for tokens that were sold)
     const tokenSaleAddresses = new Set<string>();
+    
+    // Start with current account tokens (from TokenHolder - includes transfers/sends)
+    for (const holder of accountTokens) {
+      const token = await this.tokenRepository.findOne({
+        where: { address: holder.aex9_address },
+      });
+      if (token && token.sale_address) {
+        tokenSaleAddresses.add(token.sale_address);
+      }
+    }
+    
+    // Also include tokens from transactions (for tokens that were sold but might have been held historically)
     if (allTransactions) {
       for (const tx of allTransactions) {
         if (
@@ -250,19 +263,10 @@ export class PortfolioService {
           tokenSaleAddresses.add(tx.sale_address);
         }
       }
-      if (tokenSaleAddresses.size > 0) {
-        this.logger.debug(`Found ${tokenSaleAddresses.size} unique token sale addresses from transactions at ${timestamp.toISOString()}`);
-      }
-    } else {
-      // Fallback: use current account tokens
-      for (const holder of accountTokens) {
-        const token = await this.tokenRepository.findOne({
-          where: { address: holder.aex9_address },
-        });
-        if (token && token.sale_address) {
-          tokenSaleAddresses.add(token.sale_address);
-        }
-      }
+    }
+    
+    if (tokenSaleAddresses.size > 0) {
+      this.logger.debug(`Found ${tokenSaleAddresses.size} unique token sale addresses (from TokenHolder + transactions) at ${timestamp.toISOString()}`);
     }
 
     // Batch fetch all tokens at once
@@ -410,7 +414,8 @@ export class PortfolioService {
   }
 
   /**
-   * Get token balance at a specific timestamp by tracking transactions
+   * Get token balance at a specific timestamp
+   * Uses current TokenHolder balance (which includes all transfers/sends) and reverses transactions after the timestamp
    */
   private async getTokenBalanceAtTimestamp(
     address: string,
@@ -420,38 +425,54 @@ export class PortfolioService {
     token?: Token,
   ): Promise<number> {
     try {
-      // Use provided transactions or fetch them
-      let transactions: Transaction[];
+      // Start with current token holder balance (this includes all transfers/sends from blockchain)
+      let balance = new BigNumber(0);
+      if (token && token.address) {
+        const tokenHolder = await this.tokenHolderRepository.findOne({
+          where: {
+            aex9_address: token.address,
+            address: address,
+          },
+        });
+        if (tokenHolder) {
+          balance = new BigNumber(tokenHolder.balance);
+          this.logger.debug(`Starting with current TokenHolder balance for ${saleAddress}: ${balance.toString()}`);
+        }
+      }
+
+      // Use provided transactions or fetch transactions after the timestamp
+      let transactionsAfter: Transaction[];
       if (allTransactions) {
-        transactions = allTransactions.filter(
+        transactionsAfter = allTransactions.filter(
           (tx) =>
             tx.sale_address === saleAddress &&
-            moment(tx.created_at).isSameOrBefore(timestamp),
+            tx.address === address &&
+            moment(tx.created_at).isAfter(timestamp),
         );
       } else {
-        transactions = await this.transactionRepository
+        transactionsAfter = await this.transactionRepository
           .createQueryBuilder('tx')
           .where('tx.address = :address', { address })
           .andWhere('tx.sale_address = :saleAddress', { saleAddress })
-          .andWhere('tx.created_at <= :timestamp', { timestamp: timestamp.toDate() })
+          .andWhere('tx.created_at > :timestamp', { timestamp: timestamp.toDate() })
           .orderBy('tx.created_at', 'ASC')
           .getMany();
       }
 
-      // Calculate balance by summing up transactions
-      // Include: buy (add tokens), create_community (creator receives tokens), sell (remove tokens)
-      let balance = new BigNumber(0);
-      this.logger.debug(`Calculating token balance for ${saleAddress} at ${timestamp.toISOString()}: found ${transactions.length} transactions`);
-      for (const tx of transactions) {
+      // Reverse transactions after the timestamp to get historical balance
+      // If someone bought tokens after this timestamp, they received tokens, so subtract it
+      // If someone sold tokens after this timestamp, they lost tokens, so add it back
+      // If someone created a token after this timestamp, they received tokens, so subtract it
+      this.logger.debug(`Reversing ${transactionsAfter.length} transactions after ${timestamp.toISOString()} for ${saleAddress}`);
+      for (const tx of transactionsAfter) {
         if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
-          // Both buy and create_community add tokens to the user's balance
-          balance = balance.plus(tx.volume);
-          this.logger.debug(`  ${tx.tx_type} tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
-        } else if (tx.tx_type === 'sell') {
+          // They received tokens after this timestamp, so subtract to get historical balance
           balance = balance.minus(tx.volume);
-          this.logger.debug(`  Sell tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
-        } else {
-          this.logger.debug(`  Skipping tx ${tx.tx_hash}: type=${tx.tx_type}`);
+          this.logger.debug(`  Reverse ${tx.tx_type} tx ${tx.tx_hash}: subtract volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
+        } else if (tx.tx_type === 'sell') {
+          // They lost tokens after this timestamp, so add back to get historical balance
+          balance = balance.plus(tx.volume);
+          this.logger.debug(`  Reverse sell tx ${tx.tx_hash}: add volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
         }
       }
 
