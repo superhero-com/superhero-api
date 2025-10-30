@@ -238,14 +238,13 @@ export class PortfolioService {
       allTransactions,
     );
 
-    // Get all unique token sale addresses from transactions (includes tokens that were sold)
-    // Exclude 'create_community' transactions as they don't represent token holdings
+    // Get all unique token sale addresses from transactions
+    // Include buy, sell, and create_community transactions (creators receive tokens)
     const tokenSaleAddresses = new Set<string>();
     if (allTransactions) {
       for (const tx of allTransactions) {
         if (
           tx.sale_address &&
-          tx.tx_type !== 'create_community' &&
           moment(tx.created_at).isSameOrBefore(timestamp)
         ) {
           tokenSaleAddresses.add(tx.sale_address);
@@ -440,12 +439,14 @@ export class PortfolioService {
       }
 
       // Calculate balance by summing up transactions
+      // Include: buy (add tokens), create_community (creator receives tokens), sell (remove tokens)
       let balance = new BigNumber(0);
       this.logger.debug(`Calculating token balance for ${saleAddress} at ${timestamp.toISOString()}: found ${transactions.length} transactions`);
       for (const tx of transactions) {
-        if (tx.tx_type === 'buy') {
+        if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
+          // Both buy and create_community add tokens to the user's balance
           balance = balance.plus(tx.volume);
-          this.logger.debug(`  Buy tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
+          this.logger.debug(`  ${tx.tx_type} tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
         } else if (tx.tx_type === 'sell') {
           balance = balance.minus(tx.volume);
           this.logger.debug(`  Sell tx ${tx.tx_hash}: volume=${tx.volume.toString()}, new balance=${balance.toString()}`);
