@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
@@ -39,13 +41,16 @@ export interface CoinGeckoMarketResponse {
 
 @Injectable()
 export class CoinGeckoService {
+  private readonly logger = new Logger(CoinGeckoService.name);
   rates: CurrencyRates | null = null;
   last_pull_time: Moment;
 
   /**
    * CoinGeckoService class responsible for pulling data at regular intervals.
    */
-  constructor() {
+  constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {
     setInterval(() => this.pullData(), 1000 * 60 * 5); // 5 minutes
     this.pullData();
   }
@@ -119,6 +124,73 @@ export class CoinGeckoService {
         })) as any
       )[coinId];
     } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch historical price data for a coin (with caching)
+   * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
+   * @param vsCurrency - The target currency (e.g., 'usd')
+   * @param days - Number of days of history to fetch (1, 7, 14, 30, 90, 180, 365, max)
+   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'
+   * @returns Array of [timestamp_ms, price] pairs
+   */
+  async fetchHistoricalPrice(
+    coinId: string,
+    vsCurrency: string,
+    days: number = 365,
+    interval: 'daily' | 'hourly' = 'daily',
+  ): Promise<Array<[number, number]> | null> {
+    // Create cache key based on coin, currency, days, and interval
+    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval}`;
+    
+    // Try to get from cache first
+    try {
+      const cached = await this.cacheManager.get<Array<[number, number]>>(cacheKey);
+      if (cached) {
+        this.logger.debug(`Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval})`);
+        return cached;
+      }
+    } catch (error) {
+      this.logger.warn(`Cache read error for ${cacheKey}:`, error);
+    }
+
+    // If not in cache, fetch from CoinGecko
+    try {
+      const response = await this.fetchFromApi(
+        `/coins/${coinId}/market_chart`,
+        {
+          vs_currency: vsCurrency,
+          days: String(days),
+          interval: interval,
+        }
+      ) as { prices?: [number, number][]; status?: { error_code: number; error_message: string } };
+      
+      // Check for CoinGecko API errors (e.g., rate limiting)
+      if (response?.status?.error_code) {
+        this.logger.error(`CoinGecko API error: ${response.status.error_code} - ${response.status.error_message}`);
+        return null;
+      }
+      
+      const prices = response?.prices || null;
+      
+      // Cache the result for 1 hour (3600 seconds)
+      // Historical data doesn't change frequently, so this reduces API calls significantly
+      if (prices && prices.length > 0) {
+        try {
+          await this.cacheManager.set(cacheKey, prices, 3600 * 1000); // TTL in milliseconds
+          this.logger.debug(`Cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval}): ${prices.length} data points`);
+        } catch (error) {
+          this.logger.warn(`Cache write error for ${cacheKey}:`, error);
+        }
+      } else {
+        this.logger.warn(`CoinGecko returned empty or invalid price data for ${coinId}`);
+      }
+      
+      return prices;
+    } catch (error) {
+      this.logger.warn(`Failed to fetch historical price for ${coinId}:`, error);
       return null;
     }
   }

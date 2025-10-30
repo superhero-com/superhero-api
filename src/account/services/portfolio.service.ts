@@ -7,6 +7,8 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { CoinGeckoService } from '@/ae/coin-gecko.service';
+import { AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
 
 export interface PortfolioHistorySnapshot {
@@ -14,7 +16,7 @@ export interface PortfolioHistorySnapshot {
   total_value_ae: number;
   ae_balance: number;
   tokens_value_ae: number;
-  total_value_usd?: number;
+  total_value_usd?: number; // USD value (or other fiat if convertTo != 'usd')
 }
 
 export interface GetPortfolioHistoryOptions {
@@ -37,6 +39,7 @@ export class PortfolioService {
     private readonly transactionRepository: Repository<Transaction>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly aeSdkService: AeSdkService,
+    private readonly coinGeckoService: CoinGeckoService,
   ) {}
 
   /**
@@ -81,17 +84,64 @@ export class PortfolioService {
     // Batch fetch all transactions for this account up to the end date for efficiency
     const allTransactions = await this.getAllAccountTransactions(address, end);
 
+    // Fetch historical AE prices from CoinGecko (if converting to fiat)
+    let aePriceHistory: Array<[number, number]> | null = null;
+    if (convertTo !== 'ae') {
+      // CoinGecko's /market_chart endpoint returns data relative to NOW, not a specific date range
+      // So we need to request enough days to cover our date range from today
+      const daysFromNow = moment().diff(start, 'days');
+      // CoinGecko supports: 1, 7, 14, 30, 90, 180, 365, max
+      // Request 365 days to ensure we get historical data (it will include our date range if it's within the last year)
+      const days = 365;
+      
+      // Determine interval based on requested interval (seconds)
+      const priceInterval: 'daily' | 'hourly' = interval >= 86400 ? 'daily' : 'hourly';
+
+      this.logger.debug(`Fetching AE price history from CoinGecko: ${days} days (covering ${daysFromNow} days ago), ${priceInterval} interval, currency: ${convertTo}`);
+      aePriceHistory = await this.coinGeckoService.fetchHistoricalPrice(
+        AETERNITY_COIN_ID,
+        convertTo,
+        days,
+        priceInterval,
+      );
+
+      if (aePriceHistory && aePriceHistory.length > 0) {
+        // Filter prices to only include those within our date range
+        const startMs = start.valueOf();
+        const endMs = end.valueOf();
+        const beforeFilter = aePriceHistory.length;
+        aePriceHistory = aePriceHistory.filter(
+          ([timestampMs]) => timestampMs >= startMs && timestampMs <= endMs
+        );
+
+        if (aePriceHistory.length > 0) {
+          this.logger.log(`Fetched ${aePriceHistory.length} price points from CoinGecko (${beforeFilter} before filtering). First: ${aePriceHistory[0][1]} ${convertTo} at ${moment(aePriceHistory[0][0]).toISOString()}, Last: ${aePriceHistory[aePriceHistory.length - 1][1]} ${convertTo} at ${moment(aePriceHistory[aePriceHistory.length - 1][0]).toISOString()}`);
+        } else {
+          this.logger.warn(`No price points found within date range after filtering. Requested range: ${start.toISOString()} to ${end.toISOString()}, CoinGecko first timestamp: ${moment(aePriceHistory[0]?.[0]).toISOString()}, CoinGecko last timestamp: ${moment(aePriceHistory[aePriceHistory.length - 1]?.[0]).toISOString()}. This means the requested date range is outside CoinGecko's available data.`);
+        }
+      } else {
+        this.logger.error(`No AE price history fetched from CoinGecko for ${convertTo}. This will cause portfolio values to not fluctuate with AE price.`);
+      }
+    }
+
     // Calculate portfolio value for each timestamp
     const snapshots: PortfolioHistorySnapshot[] = [];
-    for (const timestamp of timestamps) {
+    for (let i = 0; i < timestamps.length; i++) {
+      const timestamp = timestamps[i];
       const snapshot = await this.getPortfolioSnapshotAtTimestamp(
         address,
         accountTokens,
         timestamp,
         convertTo,
         allTransactions,
+        aePriceHistory,
       );
       snapshots.push(snapshot);
+      
+      // Debug log for first, middle, and last snapshots
+      if (i === 0 || i === Math.floor(timestamps.length / 2) || i === timestamps.length - 1) {
+        this.logger.debug(`[${i}/${timestamps.length}] Snapshot at ${timestamp.toISOString()}: totalValueAe=${snapshot.total_value_ae.toFixed(6)}, totalValueUSD=${snapshot.total_value_usd?.toFixed(2) || 'N/A'} ${convertTo}`);
+      }
     }
 
     return snapshots;
@@ -142,11 +192,17 @@ export class PortfolioService {
       tokens_value_ae: tokensValueAe,
     };
 
-    // Add converted value if requested
+    // Add converted value if requested (use current price from CoinGecko)
     if (convertTo !== 'ae') {
-      // TODO: Implement currency conversion using AE pricing service
-      // For now, return same value
-      snapshot.total_value_usd = totalValueAe;
+      try {
+        const priceData = await this.coinGeckoService.getPriceData(new BigNumber(totalValueAe));
+        const convertedValue = priceData[convertTo];
+        if (convertedValue) {
+          snapshot.total_value_usd = Number(convertedValue.toString());
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to convert portfolio value to ${convertTo}:`, error);
+      }
     }
 
     return snapshot;
@@ -161,6 +217,7 @@ export class PortfolioService {
     timestamp: Moment,
     convertTo: string,
     allTransactions?: Transaction[],
+    aePriceHistory?: Array<[number, number]> | null,
   ): Promise<PortfolioHistorySnapshot> {
     // Calculate historical AE balance
     const aeBalance = await this.getAEBalanceAtTimestamp(
@@ -244,11 +301,23 @@ export class PortfolioService {
       tokens_value_ae: tokensValueAe,
     };
 
-    // Convert to requested currency if needed
+    // Convert to requested currency using historical AE price at this timestamp
     if (convertTo !== 'ae') {
-      // TODO: Implement currency conversion using AE pricing service
-      // For now, return same value
-      snapshot.total_value_usd = totalValueAe;
+      if (aePriceHistory && aePriceHistory.length > 0) {
+        const aePriceAtTimestamp = this.getAePriceAtTimestamp(timestamp, aePriceHistory, convertTo);
+        if (aePriceAtTimestamp > 0) {
+          // Convert total value from AE to fiat currency
+          snapshot.total_value_usd = totalValueAe * aePriceAtTimestamp;
+        } else {
+          // Fallback: use latest price if no historical price found
+          this.logger.warn(`No AE price found for timestamp ${timestamp.toISOString()}, using totalValueAe as fallback`);
+          snapshot.total_value_usd = totalValueAe;
+        }
+      } else {
+        // No price history available at all
+        this.logger.error(`No AE price history available for conversion to ${convertTo} at ${timestamp.toISOString()}. Setting total_value_usd = total_value_ae.`);
+        snapshot.total_value_usd = totalValueAe;
+      }
     }
 
     return snapshot;
@@ -426,6 +495,64 @@ export class PortfolioService {
         return 0;
       }
     }
+  }
+
+  /**
+   * Get AE price at a specific timestamp from historical price data
+   * @param timestamp - The target timestamp (Moment object)
+   * @param priceHistory - Array of [timestamp_ms, price] pairs from CoinGecko
+   * @param currency - The currency code (usd, eur, etc.) - used for logging only
+   * @returns The price at the timestamp, or 0 if not found
+   */
+  private getAePriceAtTimestamp(
+    timestamp: Moment,
+    priceHistory: Array<[number, number]>,
+    currency: string,
+  ): number {
+    if (!priceHistory || priceHistory.length === 0) {
+      this.logger.warn(`No price history available for currency ${currency}`);
+      return 0;
+    }
+
+    // CoinGecko returns timestamps in milliseconds, convert our timestamp to match
+    const targetTimeMs = timestamp.valueOf();
+
+    // Find the closest price point (CoinGecko prices are sorted by timestamp)
+    let closestPrice = 0;
+    let minDiff = Infinity;
+    let closestIndex = -1;
+
+    for (let i = 0; i < priceHistory.length; i++) {
+      const [priceTimeMs, price] = priceHistory[i];
+      const diff = Math.abs(priceTimeMs - targetTimeMs);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestPrice = price;
+        closestIndex = i;
+      }
+      // Early exit optimization: if we've passed the target time, break (assuming sorted)
+      if (priceTimeMs > targetTimeMs) {
+        break;
+      }
+    }
+
+    // Only return price if we found something reasonably close (within 24 hours)
+    if (minDiff <= 24 * 60 * 60 * 1000) {
+      return closestPrice;
+    }
+
+    // Fallback: use the first price if target is before all data, or last price if after
+    if (targetTimeMs < priceHistory[0][0]) {
+      this.logger.debug(`Timestamp ${timestamp.toISOString()} is before price history, using first price ${priceHistory[0][1]}`);
+      return priceHistory[0][1];
+    }
+    if (targetTimeMs > priceHistory[priceHistory.length - 1][0]) {
+      this.logger.debug(`Timestamp ${timestamp.toISOString()} is after price history, using last price ${priceHistory[priceHistory.length - 1][1]}`);
+      return priceHistory[priceHistory.length - 1][1];
+    }
+
+    this.logger.warn(`Could not find AE price for timestamp ${timestamp.toISOString()}, minDiff: ${minDiff}ms (${(minDiff / (60 * 60 * 1000)).toFixed(1)} hours), closestIndex: ${closestIndex}, priceHistory range: ${moment(priceHistory[0][0]).toISOString()} to ${moment(priceHistory[priceHistory.length - 1][0]).toISOString()}`);
+    return 0;
   }
 }
 

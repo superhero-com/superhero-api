@@ -13,7 +13,7 @@ import { TokensModule } from '@/tokens/tokens.module';
 
 @Module({
   imports: [
-    AeModule,
+    AeModule, // Includes CoinGeckoService
     TransactionsModule,
     TokensModule,
     TypeOrmModule.forFeature([Account, TokenHolder, Token, Transaction]),
