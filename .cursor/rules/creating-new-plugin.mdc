@@ -1,0 +1,412 @@
+---
+description: Guide for creating a new blockchain transaction plugin
+---
+# Creating a New Plugin - Step-by-Step Guide
+
+Follow this guide when creating a new plugin to process blockchain transactions.
+
+## Plugin Structure
+
+Every plugin consists of 4 files:
+1. **Plugin class** - Defines metadata and filters
+2. **Sync Service** - Contains business logic for processing transactions
+3. **Listener** - Listens to events and dispatches to sync service
+4. **Module** - Wires everything together with dependency injection
+
+---
+
+## Step 1: Create the Plugin Class
+
+**Location**: `src/plugins/{plugin-name}/{plugin-name}.plugin.ts`
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { BasePlugin } from '@/mdw-sync/plugins/base-plugin';
+import { PluginFilter } from '@/mdw-sync/plugins/plugin.interface';
+import { BasePluginSyncService } from '@/mdw-sync/plugins/base-plugin-sync.service';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
+import { YourSyncService } from './services/your-sync-transaction.service';
+
+@Injectable()
+export class YourPlugin extends BasePlugin {
+  readonly version = 1; // Increment when resyncing is needed
+  readonly name = 'your-plugin-name';
+  protected readonly logger = new Logger(YourPlugin.name);
+
+  constructor(
+    @InjectRepository(Tx)
+    protected readonly txRepository: Repository<Tx>,
+    @InjectRepository(PluginSyncState)
+    protected readonly pluginSyncStateRepository: Repository<PluginSyncState>,
+    private readonly yourSyncService: YourSyncService,
+  ) {
+    super();
+  }
+
+  protected getSyncService(): BasePluginSyncService {
+    return this.yourSyncService;
+  }
+
+  startFromHeight(): number {
+    // Return the block height where contract was deployed
+    // Or use config: const factory = BCL_FACTORY[ACTIVE_NETWORK.id];
+    return 100000;
+  }
+
+  filters(): PluginFilter[] {
+    return [
+      {
+        type: 'contract_call' as const, // or 'spend'
+        contractIds: ['ct_...'], // Contract addresses to monitor
+        functions: ['function_name_1', 'function_name_2'], // Optional
+      },
+      // For SpendTx with custom logic:
+      // {
+      //   type: 'spend' as const,
+      //   predicate: (tx: Partial<Tx>) => {
+      //     // Custom filtering logic
+      //     return tx.raw?.tx?.payload?.includes('CUSTOM_PREFIX');
+      //   },
+      // },
+    ];
+  }
+}
+```
+
+**Key Points**:
+- `version` - Increment to trigger full re-sync of plugin data
+- `name` - Unique identifier for the plugin
+- `startFromHeight()` - Where to start syncing from
+- `filters()` - Defines which transactions this plugin processes
+- Must inject `Tx` and `PluginSyncState` repositories for base class
+
+---
+
+## Step 2: Create the Sync Service
+
+**Location**: `src/plugins/{plugin-name}/services/{plugin-name}-sync-transaction.service.ts`
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { BasePluginSyncService } from '@/mdw-sync/plugins/base-plugin-sync.service';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { YourEntity } from '../entities/your.entity';
+
+@Injectable()
+export class YourSyncTransactionService extends BasePluginSyncService {
+  protected readonly logger = new Logger(YourSyncTransactionService.name);
+
+  constructor(
+    @InjectRepository(YourEntity)
+    private readonly yourRepository: Repository<YourEntity>,
+    // Inject other services/repositories as needed
+  ) {
+    super();
+  }
+
+  async processTransaction(tx: Tx): Promise<void> {
+    try {
+      // Extract data from transaction
+      const data = this.extractDataFromTx(tx);
+      
+      // Check if already processed
+      const existing = await this.yourRepository.findOne({
+        where: { tx_hash: tx.tx_hash },
+      });
+      
+      if (existing) {
+        return; // Already processed
+      }
+
+      // Save to database
+      await this.yourRepository.save({
+        tx_hash: tx.tx_hash,
+        block_height: tx.block_height,
+        // ... your plugin-specific fields
+        created_at: new Date(parseInt(tx.micro_time)),
+      });
+
+      this.logger.log(`Processed transaction ${tx.tx_hash}`);
+    } catch (error: any) {
+      this.handleError(error, tx, 'YourSyncTransactionService');
+    }
+  }
+
+  private extractDataFromTx(tx: Tx) {
+    // Access transaction data via tx.raw
+    const rawTx = tx.raw;
+    const args = rawTx.tx?.arguments || [];
+    
+    // Parse and return relevant data
+    return {
+      // your extracted data
+    };
+  }
+}
+```
+
+**Key Points**:
+- Extends `BasePluginSyncService` for common functionality
+- Implements `processTransaction(tx: Tx)` - this is where your business logic goes
+- Use `this.handleError()` for consistent error handling
+- Access raw transaction data via `tx.raw` (type: `ITransaction`)
+- Always check for duplicates before saving
+
+---
+
+## Step 3: Create the Listener
+
+**Location**: `src/plugins/{plugin-name}/listeners/{plugin-name}-tx.listener.ts`
+
+```typescript
+import { BasePluginTxListener } from '@/mdw-sync/plugins/base-plugin-tx.listener';
+import { Plugin } from '@/mdw-sync/plugins/plugin.interface';
+import { BasePluginSyncService } from '@/mdw-sync/plugins/base-plugin-sync.service';
+import { Injectable, Logger } from '@nestjs/common';
+import { YourPlugin } from '../your.plugin';
+import { YourSyncTransactionService } from '../services/your-sync-transaction.service';
+
+@Injectable()
+export class YourTxListener extends BasePluginTxListener {
+  protected readonly logger = new Logger(YourTxListener.name);
+
+  constructor(
+    private readonly yourPlugin: YourPlugin,
+    private readonly yourSyncService: YourSyncTransactionService,
+  ) {
+    super();
+  }
+
+  protected getPlugin(): Plugin {
+    return this.yourPlugin;
+  }
+
+  protected getSyncService(): BasePluginSyncService {
+    return this.yourSyncService;
+  }
+}
+```
+
+**Key Points**:
+- Extends `BasePluginTxListener` - automatic event handling
+- Just implement two getter methods
+- No need to write event handling logic - it's inherited
+
+---
+
+## Step 4: Create the Plugin Module
+
+**Location**: `src/plugins/{plugin-name}/{plugin-name}-plugin.module.ts`
+
+```typescript
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { MDW_PLUGIN } from '@/mdw-sync/plugins/plugin.tokens';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
+import { YourPlugin } from './your.plugin';
+import { YourTxListener } from './listeners/your-tx.listener';
+import { YourSyncTransactionService } from './services/your-sync-transaction.service';
+import { YourEntity } from './entities/your.entity';
+// Import other entities, controllers, services as needed
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([
+      Tx, // Required for BasePlugin
+      PluginSyncState, // Required for BasePlugin
+      YourEntity, // Your plugin entities
+      // ... other entities
+    ]),
+    // Import other modules if needed
+  ],
+  controllers: [
+    // Your controllers
+  ],
+  providers: [
+    YourPlugin,
+    {
+      provide: MDW_PLUGIN,
+      useClass: YourPlugin,
+    },
+    YourTxListener,
+    YourSyncTransactionService,
+    // Other services
+  ],
+  exports: [YourPlugin, TypeOrmModule],
+})
+export class YourPluginModule {}
+```
+
+**Key Points**:
+- Must import `TypeOrmModule.forFeature([Tx, PluginSyncState, ...])` for BasePlugin
+- Provide plugin with `MDW_PLUGIN` token for registration
+- Include listener and sync service in providers
+- Export plugin for potential use by other modules
+
+---
+
+## Step 5: Register in App Module
+
+**Location**: `src/app.module.ts`
+
+```typescript
+import { YourPluginModule } from './plugins/your-plugin/your-plugin.module';
+
+@Module({
+  imports: [
+    // ... other imports
+    YourPluginModule, // Add here
+  ],
+})
+export class AppModule {}
+```
+
+---
+
+## Transaction Data Structure
+
+When processing transactions, you have access to:
+
+```typescript
+interface Tx {
+  tx_hash: string;           // Transaction hash
+  block_height: number;      // Block number
+  block_hash: string;        // Block hash
+  micro_time: string;        // Timestamp (milliseconds as string)
+  type: string;              // 'ContractCallTx', 'SpendTx', etc.
+  contract_id: string;       // Contract address (for ContractCallTx)
+  function: string;          // Function name (for ContractCallTx)
+  caller_id: string;         // Caller address
+  sender_id: string;         // Sender address (for SpendTx)
+  recipient_id: string;      // Recipient address (for SpendTx)
+  raw: ITransaction;         // Full raw transaction data
+}
+```
+
+Access detailed data via `tx.raw`:
+- `tx.raw.tx.arguments` - Function arguments
+- `tx.raw.tx.return` - Return value
+- `tx.raw.tx.log` - Event logs (decode with contract ACI)
+- `tx.raw.tx.amount` - Amount (for SpendTx)
+- `tx.raw.tx.payload` - Payload (for SpendTx)
+
+---
+
+## Filter Types
+
+### Contract Call Filter
+```typescript
+{
+  type: 'contract_call' as const,
+  contractIds: ['ct_abc...', 'ct_def...'], // Optional
+  functions: ['buy', 'sell'], // Optional
+}
+```
+
+### Spend Transaction Filter
+```typescript
+{
+  type: 'spend' as const,
+  predicate: (tx: Partial<Tx>) => {
+    // Custom logic
+    return tx.raw?.tx?.payload?.includes('TIP_');
+  },
+}
+```
+
+### Combining Filters
+Return multiple filters to match any of them (OR logic):
+```typescript
+filters(): PluginFilter[] {
+  return [
+    { type: 'contract_call', contractIds: ['ct_router'] },
+    { type: 'contract_call', contractIds: ['ct_factory'] },
+  ];
+}
+```
+
+---
+
+## Database Cascade Constraints
+
+**IMPORTANT**: All plugin entity tables should have a foreign key to `mdw_tx` with `ON DELETE CASCADE`:
+
+```typescript
+@Entity()
+export class YourEntity {
+  @Column()
+  tx_hash: string;
+
+  @ManyToOne(() => Tx, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
+  tx: Tx;
+  
+  // ... other fields
+}
+```
+
+This ensures that when transactions are deleted during a reorg, your plugin data is automatically cleaned up.
+
+---
+
+## Testing Your Plugin
+
+1. **Start the application** - The plugin will automatically register
+2. **Check logs** - Look for `[YourPlugin] Starting historical transaction sync`
+3. **Verify data** - Query your plugin's tables to ensure data is being saved
+4. **Test real-time** - Trigger a transaction and verify it's processed immediately
+
+---
+
+## Common Patterns
+
+### Decoding Contract Events
+```typescript
+import contractACI from './contract.aci.json';
+
+// Initialize contract (in sync service constructor)
+const contract = await this.aeSdkService.sdk.initializeContract({
+  aci: contractACI,
+  address: contractAddress,
+});
+
+// Decode events
+const events = contract.$decodeEvents(tx.raw.tx.log);
+const swapEvent = events.find(e => e.name === 'SwapTokens');
+```
+
+### Handling Related Entities
+```typescript
+// Ensure related entity exists
+let relatedEntity = await this.relatedRepository.findOne({
+  where: { id: entityId },
+});
+
+if (!relatedEntity) {
+  relatedEntity = await this.createRelatedEntity(entityId);
+}
+```
+
+### Updating Aggregates
+```typescript
+// Update counts or totals
+await this.parentRepository.increment(
+  { id: parentId },
+  'total_count',
+  1,
+);
+```
+
+---
+
+## References
+
+- **Example Plugins**: See [dex.plugin.ts](mdc:src/plugins/dex/dex.plugin.ts), [social.plugin.ts](mdc:src/plugins/social/social.plugin.ts)
+- **Base Classes**: [base-plugin.ts](mdc:src/mdw-sync/plugins/base-plugin.ts), [base-plugin-sync.service.ts](mdc:src/mdw-sync/plugins/base-plugin-sync.service.ts)
+- **Plugin Interface**: [plugin.interface.ts](mdc:src/mdw-sync/plugins/plugin.interface.ts)

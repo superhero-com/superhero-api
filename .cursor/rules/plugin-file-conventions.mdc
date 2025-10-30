@@ -1,0 +1,50 @@
+---
+globs: src/plugins/**/*.plugin.ts,src/plugins/**/services/*-sync-transaction.service.ts,src/plugins/**/listeners/*-tx.listener.ts,src/plugins/**/*-plugin.module.ts
+---
+# Plugin File Conventions
+
+When editing plugin files, follow these conventions:
+
+## Plugin Class (`*.plugin.ts`)
+- Must extend `BasePlugin`
+- Readonly properties: `name`, `version`
+- Must inject: `Tx` repository, `PluginSyncState` repository, sync service
+- Implement: `startFromHeight()`, `filters()`, `getSyncService()`
+- NO business logic - only metadata and configuration
+
+## Sync Service (`*-sync-transaction.service.ts`)
+- Must extend `BasePluginSyncService`
+- Must implement: `processTransaction(tx: Tx): Promise<void>`
+- Contains ALL business logic for processing transactions
+- Use `this.handleError(error, tx, 'ServiceName')` for errors
+- Access transaction data via `tx.raw` (ITransaction type)
+
+## Listener (`*-tx.listener.ts`)
+- Must extend `BasePluginTxListener`
+- Inject: plugin instance and sync service
+- Implement: `getPlugin()` and `getSyncService()`
+- NO additional logic - base class handles everything
+
+## Module (`*-plugin.module.ts`)
+- Must import `TypeOrmModule.forFeature([Tx, PluginSyncState, ...])` 
+- Provide plugin with `MDW_PLUGIN` token
+- Include listener and sync service in providers
+- Export plugin and TypeOrmModule
+
+## Error Handling
+Always use try-catch with typed errors:
+```typescript
+try {
+  // logic
+} catch (error: any) {
+  this.handleError(error, tx, 'ServiceName');
+}
+```
+
+## Entity Relations
+All plugin entities should have CASCADE delete on tx relation:
+```typescript
+@ManyToOne(() => Tx, { onDelete: 'CASCADE' })
+@JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
+tx: Tx;
+```
