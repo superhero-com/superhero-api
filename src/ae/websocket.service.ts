@@ -65,7 +65,7 @@ export class WebSocketService {
       this.subscribersQueue.forEach((message) => {
         this.wsClient.send(JSON.stringify(message));
       });
-    } catch (error) {
+    } catch (error: any) {
       setTimeout(() => {
         this.handleWebsocketOpen();
       }, WEB_SOCKET_RECONNECT_TIMEOUT);
@@ -120,7 +120,7 @@ export class WebSocketService {
             source: WEB_SOCKET_SOURCE.mdw,
           }),
         );
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('subscribeForChannel->error::', error);
       }
     }
@@ -197,7 +197,7 @@ export class WebSocketService {
       Object.values(
         this.subscribers[data.subscription as WebSocketChannelName],
       ).forEach((subscriberCb) => subscriberCb(data.payload));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('handleWebsocketMessage->error::', error);
     }
   }
@@ -220,7 +220,7 @@ export class WebSocketService {
       this.wsClient.removeEventListener('close', this.handleWebsocketClose);
       this.wsClient.removeEventListener('message', this.handleWebsocketClose);
       clearInterval(this.reconnectInterval);
-    } catch (error) {
+    } catch (error: any) {
       //
     }
   }

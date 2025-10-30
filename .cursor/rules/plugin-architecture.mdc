@@ -1,0 +1,32 @@
+---
+alwaysApply: true
+---
+# Plugin Architecture Overview
+
+This project uses an **event-driven plugin architecture** for processing blockchain transactions.
+
+## Core Components
+
+### Base Classes (All plugins extend these)
+- **BasePlugin** ([base-plugin.ts](mdc:src/mdw-sync/plugins/base-plugin.ts)) - Provides `syncHistoricalTransactions()` implementation
+- **BasePluginSyncService** ([base-plugin-sync.service.ts](mdc:src/mdw-sync/plugins/base-plugin-sync.service.ts)) - Common filter matching and error handling
+- **BasePluginTxListener** ([base-plugin-tx.listener.ts](mdc:src/mdw-sync/plugins/base-plugin-tx.listener.ts)) - Listens to `tx.created` events
+
+### Transaction Flow
+1. **IndexerService** ([indexer.service.ts](mdc:src/mdw-sync/services/indexer.service.ts)) saves ALL transactions to database
+2. **TxSubscriber** ([tx.subscriber.ts](mdc:src/mdw-sync/subscribers/tx.subscriber.ts)) emits `tx.created` event
+3. **Plugin Listeners** filter and forward matching transactions to sync services
+4. **Sync Services** process transactions and update plugin-specific tables
+
+## Existing Plugins
+- **DEX Plugin** - Tracks DEX swaps, liquidity operations
+- **Social Plugin** - Tracks posts, comments, topics
+- **Tipping Plugin** - Tracks tip transactions (SpendTx with payload)
+- **BCL Plugin** - Tracks bonding curve token operations (buy/sell/create)
+- **Affiliation Plugin** - Tracks invitation system (register/claim/revoke)
+
+## Key Principles
+- Plugins are **independent** - they react to events, not called directly
+- Data cleanup on reorg is **automatic** via database CASCADE constraints
+- All transaction processing happens in **SyncService**, not the Plugin class
+- Filters defined in Plugin class are used by both real-time listeners and historical sync

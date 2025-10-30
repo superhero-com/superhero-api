@@ -1,0 +1,44 @@
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+
+@Entity({
+  name: 'plugin_sync_state',
+})
+@Index(['plugin_name'])
+@Index(['is_active'])
+export class PluginSyncState {
+  @PrimaryColumn()
+  plugin_name: string;
+
+  @Column({
+    default: 1,
+  })
+  version: number;
+
+  @Column()
+  last_synced_height: number;
+
+  @Column()
+  start_from_height: number;
+
+  @Column({ default: true })
+  is_active: boolean;
+
+  @CreateDateColumn({
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP(6)',
+  })
+  created_at: Date;
+
+  @UpdateDateColumn({
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP(6)',
+  })
+  updated_at: Date;
+}

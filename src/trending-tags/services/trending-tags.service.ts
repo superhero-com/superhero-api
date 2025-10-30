@@ -30,7 +30,7 @@ export class TrendingTagsService {
     this.isPullingTrendingTags = true;
     try {
       // TODO
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error pulling and saving trending tags', error);
     }
     this.isPullingTrendingTags = false;
@@ -108,7 +108,7 @@ export class TrendingTagsService {
           results.created++;
           this.logger.debug(`Created trending tag: ${normalizedTag}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
         results.errors.push(

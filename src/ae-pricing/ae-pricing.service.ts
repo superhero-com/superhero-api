@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
-import { IPriceDto } from '@/tokens/dto/price.dto';
+import { IPriceDto } from '@/plugins/bcl/dto/price.dto';
 import { Repository } from 'typeorm';
 import { CoinPrice } from './entities/coin-price.entity';
 
@@ -49,7 +49,7 @@ export class AePricingService {
           created_at: 'DESC',
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       //
     }
     if (!latestRates) {
@@ -67,7 +67,7 @@ export class AePricingService {
     CURRENCIES.forEach(({ code }) => {
       try {
         prices[code] = price.multipliedBy(this.latestRates.rates![code]) as any;
-      } catch (error) {
+      } catch (error: any) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;
       }

@@ -1,5 +1,5 @@
 import { TX_FUNCTIONS } from '@/configs';
-import { Transaction } from '@/transactions/entities/transaction.entity';
+import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,7 +7,7 @@ import { BigNumber } from 'bignumber.js';
 import moment from 'moment';
 import { Between, LessThan, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
-import { Token } from '@/tokens/entities/token.entity';
+import { Token } from '@/plugins/bcl/entities/token.entity';
 
 @Injectable()
 export class CacheDailyAnalyticsDataService {

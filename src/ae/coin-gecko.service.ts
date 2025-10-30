@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
-import { IPriceDto } from '@/tokens/dto/price.dto';
+import { IPriceDto } from '@/plugins/bcl/dto/price.dto';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
 
@@ -85,7 +85,7 @@ export class CoinGeckoService {
         prices[code] = this.rates![code]
           ? price.multipliedBy(this.rates![code])
           : null;
-      } catch (error) {
+      } catch (error: any) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;
       }
@@ -118,7 +118,7 @@ export class CoinGeckoService {
           vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
         })) as any
       )[coinId];
-    } catch (error) {
+    } catch (error: any) {
       return null;
     }
   }

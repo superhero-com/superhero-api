@@ -172,11 +172,14 @@ export interface ITx {
 
 export interface ITransaction {
   blockHeight: number;
+  blockHash: string;
   claim: any; // TODO find type
   hash: Encoded.TxHash;
   incomplete?: boolean;
   microIndex: number;
   microTime: number;
+  signatures: string[];
+  encodedTx: string;
   pending: boolean; // There are cases that not only the IPendingTransaction can be pending
   rawTx?: any; // TODO find type
   tipUrl?: string;
