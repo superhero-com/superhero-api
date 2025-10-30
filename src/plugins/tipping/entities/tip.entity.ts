@@ -42,7 +42,7 @@ export class Tip {
   post: Post;
 
   @ManyToOne(() => Tx, (tx) => tx.hash, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
+  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
   tx: Tx;
 
   @Column({

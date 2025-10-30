@@ -232,7 +232,7 @@ export class IndexerService implements OnModuleInit {
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,
-      block_hash: tx.blockHash?.toString() || '',
+      // micro_block_hash: tx.blockHash?.toString() || '',
       micro_index: tx.microIndex?.toString() || '0',
       micro_time: tx.microTime?.toString() || '0',
       signatures: tx.signatures || [],
