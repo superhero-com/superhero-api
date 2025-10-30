@@ -22,6 +22,9 @@ export class SyncState {
   @Column()
   tip_height: number;
 
+  @Column({ default: false })
+  is_bulk_mode: boolean;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
