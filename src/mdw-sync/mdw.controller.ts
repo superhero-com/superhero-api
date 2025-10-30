@@ -1,18 +1,18 @@
 import { Controller, Get } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MdwSyncState } from './entities/mdw-sync-state.entity';
-import { MdwPluginSyncState } from './entities/mdw-plugin-sync-state.entity';
+import { SyncState } from './entities/sync-state.entity';
+import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { Tx } from './entities/tx.entity';
 
 @Controller('mdw')
 export class MdwController {
   constructor(
-    @InjectRepository(MdwSyncState)
-    private syncStateRepository: Repository<MdwSyncState>,
-    @InjectRepository(MdwPluginSyncState)
-    private pluginSyncStateRepository: Repository<MdwPluginSyncState>,
+    @InjectRepository(SyncState)
+    private syncStateRepository: Repository<SyncState>,
+    @InjectRepository(PluginSyncState)
+    private pluginSyncStateRepository: Repository<PluginSyncState>,
 
     @InjectRepository(Tx)
     private mdwTxRepository: Repository<Tx>,

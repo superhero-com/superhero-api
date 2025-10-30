@@ -6,8 +6,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { DataSource, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
-import { MdwPluginSyncState } from '../entities/mdw-plugin-sync-state.entity';
-import { MdwSyncState } from '../entities/mdw-sync-state.entity';
+import { PluginSyncState } from '../entities/plugin-sync-state.entity';
+import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { PluginRegistryService } from './plugin-registry.service';
 import { ReorgService } from './reorg.service';
@@ -23,10 +23,10 @@ export class IndexerService implements OnModuleInit {
     private txRepository: Repository<Tx>,
     @InjectRepository(KeyBlock)
     private blockRepository: Repository<KeyBlock>,
-    @InjectRepository(MdwSyncState)
-    private syncStateRepository: Repository<MdwSyncState>,
-    @InjectRepository(MdwPluginSyncState)
-    private pluginSyncStateRepository: Repository<MdwPluginSyncState>,
+    @InjectRepository(SyncState)
+    private syncStateRepository: Repository<SyncState>,
+    @InjectRepository(PluginSyncState)
+    private pluginSyncStateRepository: Repository<PluginSyncState>,
     private pluginRegistry: PluginRegistryService,
     private reorgService: ReorgService,
     private configService: ConfigService,

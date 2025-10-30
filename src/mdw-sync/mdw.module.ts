@@ -3,8 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { Tx } from './entities/tx.entity';
 import { KeyBlock } from './entities/key-block.entity';
-import { MdwSyncState } from './entities/mdw-sync-state.entity';
-import { MdwPluginSyncState } from './entities/mdw-plugin-sync-state.entity';
+import { SyncState } from './entities/sync-state.entity';
+import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { IndexerService } from './services/indexer.service';
 import { ReorgService } from './services/reorg.service';
@@ -21,7 +21,7 @@ import { TippingPlugin } from '@/plugins/tipping/tipping.plugin';
 @Module({
   imports: [
     ConfigModule.forFeature(mdwConfig),
-    TypeOrmModule.forFeature([Tx, KeyBlock, MdwSyncState, MdwPluginSyncState]),
+    TypeOrmModule.forFeature([Tx, KeyBlock, SyncState, PluginSyncState]),
     // Import plugin modules so their providers are visible in this context
     DexPluginModule,
     SocialPluginModule,

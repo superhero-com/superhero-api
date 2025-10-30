@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { Tx } from '../entities/tx.entity';
-import { MdwSyncState } from '../entities/mdw-sync-state.entity';
-import { MdwPluginSyncState } from '../entities/mdw-plugin-sync-state.entity';
+import { SyncState } from '../entities/sync-state.entity';
+import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './plugin-registry.service';
 import { fetchJson } from '@/utils/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,10 +18,10 @@ export class ReorgService {
     private blockRepository: Repository<KeyBlock>,
     @InjectRepository(Tx)
     private txRepository: Repository<Tx>,
-    @InjectRepository(MdwSyncState)
-    private syncStateRepository: Repository<MdwSyncState>,
-    @InjectRepository(MdwPluginSyncState)
-    private pluginSyncStateRepository: Repository<MdwPluginSyncState>,
+    @InjectRepository(SyncState)
+    private syncStateRepository: Repository<SyncState>,
+    @InjectRepository(PluginSyncState)
+    private pluginSyncStateRepository: Repository<PluginSyncState>,
     private pluginRegistry: PluginRegistryService,
     private configService: ConfigService,
     private dataSource: DataSource,
@@ -107,7 +107,7 @@ export class ReorgService {
 
       // Update sync state
       await queryRunner.manager.update(
-        MdwSyncState,
+        SyncState,
         { id: 'global' },
         {
           last_synced_height: divergenceHeight - 1,

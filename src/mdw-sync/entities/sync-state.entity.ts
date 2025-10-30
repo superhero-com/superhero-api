@@ -7,9 +7,9 @@ import {
 } from 'typeorm';
 
 @Entity({
-  name: 'mdw_sync_state',
+  name: 'sync_state',
 })
-export class MdwSyncState {
+export class SyncState {
   @PrimaryColumn({ default: 'global' })
   id: string;
 

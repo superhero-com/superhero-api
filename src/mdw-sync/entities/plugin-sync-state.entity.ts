@@ -8,11 +8,11 @@ import {
 } from 'typeorm';
 
 @Entity({
-  name: 'mdw_plugin_sync_state',
+  name: 'plugin_sync_state',
 })
 @Index(['plugin_name'])
 @Index(['is_active'])
-export class MdwPluginSyncState {
+export class PluginSyncState {
   @PrimaryColumn()
   plugin_name: string;
 
