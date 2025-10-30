@@ -77,7 +77,7 @@ export abstract class BasePlugin implements Plugin {
             }
           } catch (error: any) {
             this.logger.error(
-              `[${this.name}] Failed to process transaction ${tx.tx_hash}`,
+              `[${this.name}] Failed to process transaction ${tx.hash}`,
               error.stack,
             );
           }

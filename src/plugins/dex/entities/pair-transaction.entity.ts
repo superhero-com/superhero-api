@@ -33,7 +33,7 @@ export class PairTransaction {
   @JoinColumn({ name: 'pair_address' })
   pair: Pair;
 
-  @ManyToOne(() => Tx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tx, (tx) => tx.hash, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
   tx: Tx;
 

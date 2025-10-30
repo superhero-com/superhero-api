@@ -57,13 +57,13 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
     for (let i = 0; i < invitees.length; i++) {
       await this.invitationRepository.save({
         invitee_address: invitees[i],
-        register_tx_hash: tx.tx_hash,
+        register_tx_hash: tx.hash,
         amount: amounts[i],
       });
     }
 
     await this.invitationRepository.save({
-      register_tx_hash: tx.tx_hash,
+      register_tx_hash: tx.hash,
       inviter_address: senderAddress,
       block_height: tx.block_height,
       amount: '0',
@@ -86,7 +86,7 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
     }
 
     await this.invitationRepository.update(invitation.id, {
-      claim_tx_hash: tx.tx_hash,
+      claim_tx_hash: tx.hash,
       status: 'claimed',
       status_updated_at: moment(tx.micro_time).toDate(),
     });
@@ -108,7 +108,7 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
       }
 
       await this.invitationRepository.update(invitation.id, {
-        revoke_tx_hash: tx.tx_hash,
+        revoke_tx_hash: tx.hash,
         status: 'revoked',
         status_updated_at: moment(tx.micro_time).toDate(),
       });

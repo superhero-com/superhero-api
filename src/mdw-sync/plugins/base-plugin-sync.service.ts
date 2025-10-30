@@ -66,7 +66,7 @@ export abstract class BasePluginSyncService {
    */
   protected handleError(error: Error, tx: Tx, context: string): void {
     this.logger.error(
-      `${context}: Failed to process transaction ${tx.tx_hash}`,
+      `${context}: Failed to process transaction ${tx.hash}`,
       error.stack,
     );
   }

@@ -230,10 +230,13 @@ export class IndexerService implements OnModuleInit {
 
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
     return {
-      tx_hash: tx.hash,
+      hash: tx.hash,
       block_height: tx.blockHeight,
       block_hash: tx.blockHash?.toString() || '',
+      micro_index: tx.microIndex?.toString() || '0',
       micro_time: tx.microTime?.toString() || '0',
+      signatures: tx.signatures || [],
+      encoded_tx: tx.encodedTx || '',
       type: tx.tx?.type || '',
       contract_id: tx.tx?.contractId,
       function: tx.tx?.function,

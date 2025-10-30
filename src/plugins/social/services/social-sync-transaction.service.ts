@@ -80,12 +80,12 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
   ): Promise<Post | null> {
     if (!this.validateTransaction(tx)) {
       this.logger.warn('Invalid transaction data', {
-        hash: tx?.tx_hash,
+        hash: tx?.hash,
       });
       return null;
     }
 
-    const txHash = tx.tx_hash;
+    const txHash = tx.hash;
 
     // Check if post already exists
     const existingPost = await this.postRepository.findOne({
@@ -221,7 +221,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
     }
 
     // Fallback to hash-based ID if return value is not available
-    return `${tx.tx_hash.slice(-8)}_v${contract.version}`;
+    return `${tx.hash.slice(-8)}_v${contract.version}`;
   }
 
   private generatePostSlug(content: string, postId: string): string {
@@ -280,7 +280,7 @@ export class SocialSyncTransactionService extends BasePluginSyncService {
         this.logger.warn(
           'Invalid comment format: missing or empty parent post ID',
           {
-            txHash: tx.tx_hash,
+            txHash: tx.hash,
             parentPostId,
           },
         );

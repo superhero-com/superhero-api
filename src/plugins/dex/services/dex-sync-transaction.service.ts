@@ -330,7 +330,7 @@ export class DexSyncTransactionService extends BasePluginSyncService {
     const existingTransaction = await this.dexPairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .where('pairTransaction.tx_hash = :tx_hash', {
-        tx_hash: tx.tx_hash,
+        tx_hash: tx.hash,
       })
       .getOne();
 
@@ -342,7 +342,7 @@ export class DexSyncTransactionService extends BasePluginSyncService {
       pair: pair,
       account_address: tx.caller_id,
       tx_type: tx.function,
-      tx_hash: tx.tx_hash,
+      tx_hash: tx.hash,
       block_height: tx.block_height,
       reserve0: pairInfo.reserve0,
       reserve1: pairInfo.reserve1,

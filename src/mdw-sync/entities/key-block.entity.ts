@@ -17,7 +17,7 @@ export class KeyBlock {
   @PrimaryColumn()
   hash: string;
 
-  @Column()
+  @Column({ unique: true })
   height: number;
 
   @Column()

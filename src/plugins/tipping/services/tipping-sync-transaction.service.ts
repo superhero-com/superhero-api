@@ -62,7 +62,7 @@ export class TippingSyncTransactionService extends BasePluginSyncService {
   ): Promise<Tip | null> {
     const existingTip = await this.tipRepository.findOne({
       where: {
-        tx_hash: tx.tx_hash,
+        tx_hash: tx.hash,
       },
     });
 
@@ -97,7 +97,7 @@ export class TippingSyncTransactionService extends BasePluginSyncService {
     }
 
     return await this.tipRepository.save({
-      tx_hash: tx.tx_hash,
+      tx_hash: tx.hash,
       sender: senderAccount,
       receiver: receiverAccount,
       amount,

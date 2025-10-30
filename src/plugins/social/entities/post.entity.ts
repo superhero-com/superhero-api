@@ -68,7 +68,7 @@ export class Post {
   })
   topics: Topic[];
 
-  @ManyToOne(() => Tx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tx, (tx) => tx.hash, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
   tx: Tx;
 

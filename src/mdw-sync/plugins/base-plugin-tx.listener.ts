@@ -39,10 +39,7 @@ export abstract class BasePluginTxListener {
       // Process the transaction
       await syncService.processTransaction(tx);
     } catch (error: any) {
-      this.logger.error(
-        `Failed to handle transaction ${tx.tx_hash}`,
-        error.stack,
-      );
+      this.logger.error(`Failed to handle transaction ${tx.hash}`, error.stack);
     }
   }
 }

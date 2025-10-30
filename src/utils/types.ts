@@ -178,6 +178,8 @@ export interface ITransaction {
   incomplete?: boolean;
   microIndex: number;
   microTime: number;
+  signatures: string[];
+  encodedTx: string;
   pending: boolean; // There are cases that not only the IPendingTransaction can be pending
   rawTx?: any; // TODO find type
   tipUrl?: string;
