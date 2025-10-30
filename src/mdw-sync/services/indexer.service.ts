@@ -186,42 +186,35 @@ export class IndexerService implements OnModuleInit {
   private async syncBlocks(startHeight: number, endHeight: number) {
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
-    try {
-      // Use batch endpoint to fetch multiple blocks at once
-      const limit = Math.min(endHeight - startHeight + 1, 100);
-      const scope = `gen:${startHeight}-${endHeight}`;
-      let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
-      const blocksToSave: Partial<KeyBlock>[] = [];
+    // Use batch endpoint to fetch multiple blocks at once
+    const limit = Math.min(endHeight - startHeight + 1, 100);
+    const scope = `gen:${startHeight}-${endHeight}`;
+    let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
+    const blocksToSave: Partial<KeyBlock>[] = [];
 
-      // Process all pages
-      while (url) {
-        const response = await fetchJson(url);
-        const blocks = response?.data || [];
+    // Process all pages
+    while (url) {
+      const response = await fetchJson(url);
+      const blocks = response?.data || [];
 
-        // Convert blocks to entity format
-        for (const block of blocks) {
-          blocksToSave.push({
-            ...block,
-            timestamp: block.time,
-            created_at: new Date(block.time),
-          });
-        }
-
-        // Check if there's a next page
-        url = response.next ? `${middlewareUrl}${response.next}` : null;
+      // Convert blocks to entity format
+      for (const block of blocks) {
+        blocksToSave.push({
+          ...block,
+          timestamp: block.time,
+          created_at: new Date(block.time),
+        });
       }
 
-      // Batch save all blocks
-      if (blocksToSave.length > 0) {
-        await this.blockRepository.save(blocksToSave);
-        this.logger.debug(
-          `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
-        );
-      }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to sync blocks ${startHeight}-${endHeight}`,
-        error,
+      // Check if there's a next page
+      url = response.next ? `${middlewareUrl}${response.next}` : null;
+    }
+
+    // Batch save all blocks
+    if (blocksToSave.length > 0) {
+      await this.blockRepository.save(blocksToSave);
+      this.logger.debug(
+        `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
       );
     }
   }
@@ -229,58 +222,50 @@ export class IndexerService implements OnModuleInit {
   private async syncMicroBlocks(startHeight: number, endHeight: number) {
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
-    try {
-      // Get all key-blocks in the height range
-      const keyBlocks = await this.blockRepository.find({
-        where: {
-          height: Between(startHeight, endHeight) as any,
-        },
-      });
+    // Get all key-blocks in the height range
+    const keyBlocks = await this.blockRepository.find({
+      where: {
+        height: Between(startHeight, endHeight) as any,
+      },
+    });
 
-      if (keyBlocks.length === 0) {
-        return;
-      }
+    if (keyBlocks.length === 0) {
+      return;
+    }
 
-      const microBlocksToSave: Partial<MicroBlock>[] = [];
+    const microBlocksToSave: Partial<MicroBlock>[] = [];
 
-      // Process key-blocks in parallel batches (3-4 at a time)
-      const parallelBatchSize = this.configService.get<number>(
-        'mdw.microBlocksParallelBatchSize',
-        4,
+    // Process key-blocks in parallel batches (3-4 at a time)
+    const parallelBatchSize = this.configService.get<number>(
+      'mdw.microBlocksParallelBatchSize',
+      4,
+    );
+    for (let i = 0; i < keyBlocks.length; i += parallelBatchSize) {
+      const batch = keyBlocks.slice(i, i + parallelBatchSize);
+
+      // Fetch micro-blocks for multiple key-blocks concurrently
+      // Use Promise.all to fail fast on any error
+      const batchPromises = batch.map((keyBlock) =>
+        this.fetchMicroBlocksForKeyBlock(keyBlock, middlewareUrl),
       );
-      for (let i = 0; i < keyBlocks.length; i += parallelBatchSize) {
-        const batch = keyBlocks.slice(i, i + parallelBatchSize);
 
-        // Fetch micro-blocks for multiple key-blocks concurrently
-        const batchPromises = batch.map((keyBlock) =>
-          this.fetchMicroBlocksForKeyBlock(keyBlock, middlewareUrl),
-        );
+      const batchResults = await Promise.all(batchPromises);
 
-        const batchResults = await Promise.allSettled(batchPromises);
-
-        // Collect results from all batches
-        for (const result of batchResults) {
-          if (result.status === 'fulfilled') {
-            microBlocksToSave.push(...result.value);
-          } else {
-            this.logger.error(
-              `Failed to fetch micro-blocks batch: ${result.reason}`,
-            );
-          }
-        }
+      // Collect results from all batches
+      for (const result of batchResults) {
+        microBlocksToSave.push(...result);
       }
+    }
 
-      // Batch save all micro-blocks
-      if (microBlocksToSave.length > 0) {
-        await this.microBlockRepository.save(microBlocksToSave);
-        this.logger.debug(
-          `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
-        );
+    // Batch save all micro-blocks (split into smaller batches to avoid PostgreSQL parameter limits)
+    if (microBlocksToSave.length > 0) {
+      const saveBatchSize = 1000; // Safe batch size for PostgreSQL
+      for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
+        const batch = microBlocksToSave.slice(i, i + saveBatchSize);
+        await this.microBlockRepository.save(batch);
       }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to sync micro-blocks ${startHeight}-${endHeight}`,
-        error,
+      this.logger.debug(
+        `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
       );
     }
   }
@@ -294,46 +279,38 @@ export class IndexerService implements OnModuleInit {
   ): Promise<Partial<MicroBlock>[]> {
     const microBlocksToSave: Partial<MicroBlock>[] = [];
 
-    try {
-      let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
+    let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
 
-      // Handle pagination
-      while (microBlocksUrl) {
-        const response = await fetchJson(microBlocksUrl);
-        const microBlocks = response?.data || [];
+    // Handle pagination
+    while (microBlocksUrl) {
+      const response = await fetchJson(microBlocksUrl);
+      const microBlocks = response?.data || [];
 
-        // Convert micro-blocks to entity format
-        for (const microBlock of microBlocks) {
-          microBlocksToSave.push({
-            hash: microBlock.hash,
-            height: microBlock.height,
-            prev_hash: microBlock.prev_hash,
-            prev_key_hash: microBlock.prev_key_hash,
-            state_hash: microBlock.state_hash,
-            time: microBlock.time.toString(),
-            transactions_count: microBlock.transactions_count,
-            flags: microBlock.flags,
-            version: microBlock.version,
-            gas: microBlock.gas,
-            micro_block_index: microBlock.micro_block_index,
-            pof_hash: microBlock.pof_hash,
-            signature: microBlock.signature,
-            txs_hash: microBlock.txs_hash,
-            created_at: new Date(microBlock.time),
-          });
-        }
-
-        // Check if there's a next page
-        microBlocksUrl = response.next
-          ? `${middlewareUrl}${response.next}`
-          : null;
+      // Convert micro-blocks to entity format
+      for (const microBlock of microBlocks) {
+        microBlocksToSave.push({
+          hash: microBlock.hash,
+          height: microBlock.height,
+          prev_hash: microBlock.prev_hash,
+          prev_key_hash: microBlock.prev_key_hash,
+          state_hash: microBlock.state_hash,
+          time: microBlock.time.toString(),
+          transactions_count: microBlock.transactions_count,
+          flags: microBlock.flags,
+          version: microBlock.version,
+          gas: microBlock.gas,
+          micro_block_index: microBlock.micro_block_index,
+          pof_hash: microBlock.pof_hash,
+          signature: microBlock.signature,
+          txs_hash: microBlock.txs_hash,
+          created_at: new Date(microBlock.time),
+        });
       }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to fetch micro-blocks for key-block ${keyBlock.hash}`,
-        error,
-      );
-      throw error;
+
+      // Check if there's a next page
+      microBlocksUrl = response.next
+        ? `${middlewareUrl}${response.next}`
+        : null;
     }
 
     return microBlocksToSave;
@@ -367,52 +344,45 @@ export class IndexerService implements OnModuleInit {
     url: string,
     useBulkMode = false,
   ): Promise<void> {
-    try {
-      const response = await fetchJson(url);
-      const transactions = response?.data || [];
+    const response = await fetchJson(url);
+    const transactions = response?.data || [];
 
-      if (transactions.length === 0) {
-        return;
-      }
+    if (transactions.length === 0) {
+      return;
+    }
 
-      // Convert transactions
-      const mdwTxs: Partial<Tx>[] = [];
+    // Convert transactions
+    const mdwTxs: Partial<Tx>[] = [];
 
-      for (const tx of transactions) {
-        const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-        const mdwTx = this.convertToMdwTx(camelTx);
-        mdwTxs.push(mdwTx);
-      }
+    for (const tx of transactions) {
+      const camelTx = camelcaseKeysDeep(tx) as ITransaction;
+      const mdwTx = this.convertToMdwTx(camelTx);
+      mdwTxs.push(mdwTx);
+    }
 
-      if (mdwTxs.length > 0) {
-        if (useBulkMode) {
-          // Use bulk insert for better performance
-          try {
-            await this.bulkInsertTransactions(mdwTxs);
-          } catch (error: any) {
-            this.logger.error(
-              `Bulk insert failed for page, trying repository.save as fallback`,
-              error,
-            );
-            // Fallback to repository.save if bulk insert fails
-            await this.txRepository.save(mdwTxs);
-          }
-        } else {
-          // Save transactions - TxSubscriber will emit events for plugins
+    if (mdwTxs.length > 0) {
+      if (useBulkMode) {
+        // Use bulk insert for better performance
+        try {
+          await this.bulkInsertTransactions(mdwTxs);
+        } catch (error: any) {
+          this.logger.error(
+            `Bulk insert failed for page, trying repository.save as fallback`,
+            error,
+          );
+          // Fallback to repository.save if bulk insert fails
           await this.txRepository.save(mdwTxs);
         }
+      } else {
+        // Save transactions - TxSubscriber will emit events for plugins
+        await this.txRepository.save(mdwTxs);
       }
+    }
 
-      // Process next page if available
-      if (response.next) {
-        const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
-        await this.processTransactionPage(nextUrl, useBulkMode);
-      }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process transaction page: ${error.message}`,
-        error.stack || error,
-      );
+    // Process next page if available
+    if (response.next) {
+      const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
+      await this.processTransactionPage(nextUrl, useBulkMode);
     }
   }
 
