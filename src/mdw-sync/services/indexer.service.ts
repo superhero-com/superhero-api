@@ -152,13 +152,10 @@ export class IndexerService implements OnModuleInit {
         // Convert blocks to entity format
         for (const block of blocks) {
           blocksToSave.push({
-            height: block.height,
-            hash: block.hash,
-            parent_hash: block.prev_hash || block.prev_key_hash,
+            ...block,
             timestamp: new Date(block.time),
-            transactions_count: block.transactions_count,
-            micro_blocks_count: block.micro_blocks_count,
-            beneficiary_reward: block.beneficiary_reward,
+            created_at: new Date(block.timestamp),
+            updated_at: new Date(block.timestamp),
           });
         }
 

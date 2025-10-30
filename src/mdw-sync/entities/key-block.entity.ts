@@ -12,7 +12,8 @@ import {
 })
 @Index(['height'])
 @Index(['hash'])
-@Index(['parent_hash'])
+@Index(['prev_hash'])
+@Index(['prev_key_hash'])
 export class KeyBlock {
   @PrimaryColumn()
   height: number;
@@ -21,7 +22,22 @@ export class KeyBlock {
   hash: string;
 
   @Column()
-  parent_hash: string;
+  prev_hash: string;
+
+  @Column()
+  prev_key_hash: string;
+
+  @Column()
+  state_hash: string;
+
+  @Column()
+  beneficiary: string;
+
+  @Column()
+  miner: string;
+
+  @Column({ type: 'bigint' })
+  time: string;
 
   @Column({ type: 'timestamp' })
   timestamp: Date;
@@ -39,6 +55,24 @@ export class KeyBlock {
     default: '0',
   })
   beneficiary_reward: string;
+
+  @Column({ type: 'text' })
+  flags: string;
+
+  @Column({ type: 'text' })
+  info: string;
+
+  @Column({ type: 'bigint' })
+  nonce: string;
+
+  @Column({ type: 'jsonb' })
+  pow: number[];
+
+  @Column({ type: 'bigint' })
+  target: string;
+
+  @Column({ type: 'int' })
+  version: number;
 
   @CreateDateColumn({
     type: 'timestamp',
