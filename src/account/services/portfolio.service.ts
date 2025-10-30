@@ -380,6 +380,12 @@ export class PortfolioService {
         const aePriceAtTimestamp = this.getAePriceAtTimestamp(timestamp, aePriceHistory, convertTo);
         if (aePriceAtTimestamp > 0) {
           snapshot.total_value_usd = totalValueAe * aePriceAtTimestamp;
+          // Debug log for last snapshot (current value)
+          if (i === timestamps.length - 1) {
+            this.logger.debug(`[CURRENT] Converting ${totalValueAe} AE to ${convertTo} using price ${aePriceAtTimestamp}: result = ${snapshot.total_value_usd}`);
+          }
+        } else {
+          this.logger.warn(`[${i}/${timestamps.length}] No valid AE price found for timestamp ${timestamp.toISOString()}`);
         }
       }
       
