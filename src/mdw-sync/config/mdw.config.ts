@@ -15,5 +15,9 @@ export default registerAs('mdw', () => ({
   bulkModePageLimit: parseInt(process.env.BULK_MODE_PAGE_LIMIT || '100', 10),
   parallelWorkers: parseInt(process.env.PARALLEL_WORKERS || '6', 10),
   bulkModeThreshold: parseInt(process.env.BULK_MODE_THRESHOLD || '100', 10),
+  microBlocksParallelBatchSize: parseInt(
+    process.env.MICRO_BLOCKS_PARALLEL_BATCH_SIZE || '4',
+    10,
+  ),
   middlewareUrl: ACTIVE_NETWORK.middlewareUrl,
 }));
