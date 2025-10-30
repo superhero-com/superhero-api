@@ -56,17 +56,17 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
 
     for (let i = 0; i < invitees.length; i++) {
       await this.invitationRepository.save({
-        address: invitees[i],
+        invitee_address: invitees[i],
         register_tx_hash: tx.tx_hash,
         amount: amounts[i],
       });
     }
 
     await this.invitationRepository.save({
-      tx_hash: tx.tx_hash,
-      address: senderAddress,
+      register_tx_hash: tx.tx_hash,
+      inviter_address: senderAddress,
       block_height: tx.block_height,
-      amount: 0,
+      amount: '0',
       status: 'registered',
       created_at: moment(tx.micro_time).toDate(),
     });
@@ -77,7 +77,7 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
 
     const invitation = await this.invitationRepository.findOne({
       where: {
-        address: transaction.callerId,
+        invitee_address: transaction.callerId,
       },
     });
 
@@ -100,7 +100,7 @@ export class AffiliationSyncTransactionService extends BasePluginSyncService {
 
     for (const address of addresses) {
       const invitation = await this.invitationRepository.findOne({
-        where: { address },
+        where: { invitee_address: address },
       });
 
       if (!invitation) {
