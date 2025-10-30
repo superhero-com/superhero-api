@@ -357,6 +357,8 @@ export class PortfolioService {
 
   /**
    * Get token price at a specific timestamp
+   * Uses the buy_price from the most recent transaction (which reflects price after bonding curve updates)
+   * Includes buy, sell, and create_community transactions (create_community also has buy_price after initial buy)
    */
   private async getTokenPriceAtTimestamp(
     saleAddress: string,
@@ -364,26 +366,38 @@ export class PortfolioService {
     convertTo: string = 'ae',
   ): Promise<number> {
     // Find the most recent transaction before or at this timestamp
+    // buy_price on a transaction represents the price AFTER that transaction (post-bonding curve)
+    // This includes buy, sell, and create_community transactions (all affect price)
     const transaction = await this.transactionRepository
       .createQueryBuilder('tx')
       .where('tx.sale_address = :saleAddress', { saleAddress })
       .andWhere('tx.created_at <= :timestamp', { timestamp: timestamp.toDate() })
       .andWhere(`tx.buy_price->>'${convertTo}' != 'NaN'`)
       .andWhere(`tx.buy_price->>'${convertTo}' IS NOT NULL`)
+      .andWhere(`(tx.tx_type = 'buy' OR tx.tx_type = 'sell' OR tx.tx_type = 'create_community')`)
       .orderBy('tx.created_at', 'DESC')
       .limit(1)
       .getOne();
 
     if (!transaction || !transaction.buy_price) {
+      this.logger.debug(`No transaction found for token ${saleAddress} at ${timestamp.toISOString()}`);
       return 0;
     }
 
     const price = transaction.buy_price[convertTo];
-    if (!price || price === 'NaN') {
+    if (!price || price === 'NaN' || price === null) {
+      this.logger.debug(`Invalid buy_price for token ${saleAddress} at ${timestamp.toISOString()}: ${price}`);
       return 0;
     }
 
-    return Number(price);
+    const priceNumber = Number(price);
+    if (isNaN(priceNumber) || priceNumber <= 0) {
+      this.logger.debug(`Invalid price number for token ${saleAddress} at ${timestamp.toISOString()}: ${priceNumber}`);
+      return 0;
+    }
+
+    this.logger.debug(`Token ${saleAddress} price at ${timestamp.toISOString()}: ${priceNumber} ${convertTo} (from tx ${transaction.tx_hash})`);
+    return priceNumber;
   }
 
   /**
