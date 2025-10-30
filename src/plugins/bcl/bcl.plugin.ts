@@ -1,14 +1,14 @@
+import { BCL_FUNCTIONS } from '@/configs/constants';
+import { BCL_FACTORY } from '@/configs/contracts';
+import { ACTIVE_NETWORK_ID } from '@/configs/network';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { BasePlugin } from '@/mdw-sync/plugins/base-plugin';
+import { BasePluginSyncService } from '@/mdw-sync/plugins/base-plugin-sync.service';
+import { PluginFilter } from '@/mdw-sync/plugins/plugin.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { BasePlugin } from '@/mdw-sync/plugins/base-plugin';
-import { PluginFilter } from '@/mdw-sync/plugins/plugin.interface';
-import { BasePluginSyncService } from '@/mdw-sync/plugins/base-plugin-sync.service';
-import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
-import { BCL_FACTORY } from '@/configs/contracts';
-import { ACTIVE_NETWORK } from '@/configs/network';
-import { BCL_FUNCTIONS } from '@/configs/constants';
 import { BclSyncTransactionService } from './services/bcl-sync-transaction.service';
 
 @Injectable()
@@ -32,12 +32,12 @@ export class BclPlugin extends BasePlugin {
   }
 
   startFromHeight(): number {
-    const factory = BCL_FACTORY[ACTIVE_NETWORK.id];
+    const factory = BCL_FACTORY[ACTIVE_NETWORK_ID];
     return factory.deployed_at_block_height || 0;
   }
 
   filters(): PluginFilter[] {
-    const factory = BCL_FACTORY[ACTIVE_NETWORK.id];
+    const factory = BCL_FACTORY[ACTIVE_NETWORK_ID];
     return [
       {
         type: 'contract_call' as const,

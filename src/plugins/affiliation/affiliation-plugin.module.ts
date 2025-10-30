@@ -14,7 +14,7 @@ import { AffiliationController } from './controllers/affiliation.controller';
 import { InvitationsController } from './controllers/invitations.controller';
 import { AffiliationService } from './services/affiliation.service';
 import { InvitationService } from './services/invitation.service';
-import { OauthService } from './services/oauth.service';
+import { OAuthService } from './services/oauth.service';
 
 @Module({
   imports: [
@@ -38,7 +38,7 @@ import { OauthService } from './services/oauth.service';
     AffiliationSyncTransactionService,
     AffiliationService,
     InvitationService,
-    OauthService,
+    OAuthService,
   ],
   exports: [AffiliationPlugin, TypeOrmModule],
 })
