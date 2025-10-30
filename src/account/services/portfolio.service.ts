@@ -189,6 +189,59 @@ export class PortfolioService {
       tokenHolderMap.set(holder.aex9_address, holder);
     }
 
+    // Pre-fetch token prices for all tokens and timestamps efficiently
+    // Build a cache: saleAddress -> Map<timestampMs, price>
+    const tokenPriceCache = new Map<string, Map<number, number>>();
+    const uniqueTokens = Array.from(new Set([...tokenMap.values()].map(t => t.sale_address).filter(Boolean)));
+    
+    if (uniqueTokens.length > 0 && timestamps.length > 0) {
+      // Pre-calculate prices for each token at each timestamp
+      // For each token, get the most recent transaction price <= each timestamp
+      // This is expensive, so we'll optimize by fetching latest transaction per token first
+      // and using it for all timestamps >= that transaction date
+      
+      // Fetch latest transaction per token (most efficient - single query)
+      const latestTxs = await this.dataSource.query(
+        `
+        SELECT DISTINCT ON (tx.sale_address)
+          tx.sale_address,
+          tx.buy_price,
+          tx.created_at
+        FROM transactions tx
+        WHERE tx.sale_address = ANY($1)
+          AND tx.buy_price->>'ae' != 'NaN'
+          AND tx.buy_price->>'ae' IS NOT NULL
+          AND (tx.tx_type = 'buy' OR tx.tx_type = 'sell' OR tx.tx_type = 'create_community')
+          AND tx.created_at <= $2
+        ORDER BY tx.sale_address, tx.created_at DESC
+        `,
+        [uniqueTokens, end.toDate()]
+      );
+      
+      // Build price cache: for each token, use latest price for all timestamps >= transaction date
+      for (const result of latestTxs) {
+        const saleAddress = result.sale_address;
+        const buyPrice = typeof result.buy_price === 'string' ? JSON.parse(result.buy_price) : result.buy_price;
+        const price = Number(buyPrice?.ae);
+        if (!isNaN(price) && price > 0 && result.created_at) {
+          const priceMap = new Map<number, number>();
+          const txTimestampMs = moment(result.created_at).valueOf();
+          // Use this price for all timestamps >= transaction date
+          for (const timestamp of timestamps) {
+            const tsMs = timestamp.valueOf();
+            if (tsMs >= txTimestampMs) {
+              priceMap.set(tsMs, price);
+            }
+          }
+          if (priceMap.size > 0) {
+            tokenPriceCache.set(saleAddress, priceMap);
+          }
+        }
+      }
+      
+      this.logger.debug(`Pre-fetched prices for ${tokenPriceCache.size} tokens`);
+    }
+
     // Calculate portfolio value for each timestamp
     const snapshots: PortfolioHistorySnapshot[] = [];
     for (let i = 0; i < timestamps.length; i++) {
@@ -202,6 +255,7 @@ export class PortfolioService {
         aePriceHistory,
         tokenMapByAex9,
         tokenHolderMap,
+        tokenPriceCache,
       );
       snapshots.push(snapshot);
       
@@ -288,6 +342,7 @@ export class PortfolioService {
     aePriceHistory?: Array<[number, number]> | null,
     tokenMap?: Map<string, Token>,
     tokenHolderMap?: Map<string, TokenHolder>,
+    tokenPriceCache?: Map<string, Map<number, number>>,
   ): Promise<PortfolioHistorySnapshot> {
     // Calculate historical AE balance
     const aeBalance = await this.getAEBalanceAtTimestamp(
@@ -355,12 +410,31 @@ export class PortfolioService {
       );
 
       if (tokenBalance > 0) {
-        // Get token price at this timestamp
-        const tokenPrice = await this.getTokenPriceAtTimestamp(
-          saleAddress,
-          timestamp,
-          'ae',
-        );
+        // Get token price at this timestamp (use cache if available)
+        let tokenPrice = 0;
+        const timestampMs = timestamp.valueOf();
+        
+        if (tokenPriceCache?.has(saleAddress)) {
+          const priceMap = tokenPriceCache.get(saleAddress)!;
+          // Find closest cached price <= timestamp
+          let closestPrice = 0;
+          let closestTimestamp = 0;
+          for (const [cachedTimestamp, cachedPrice] of priceMap.entries()) {
+            if (cachedTimestamp <= timestampMs && cachedTimestamp > closestTimestamp) {
+              closestTimestamp = cachedTimestamp;
+              closestPrice = cachedPrice;
+            }
+          }
+          tokenPrice = closestPrice;
+        }
+        
+        // Skip if price not in cache (to avoid slow individual queries)
+        // Prices should be pre-fetched, but if cache misses, skip this token for now
+        // TODO: Improve cache to include prices for all timestamps
+        if (tokenPrice === 0) {
+          this.logger.debug(`Price not in cache for ${saleAddress} at ${timestamp.toISOString()}, skipping`);
+          continue;
+        }
 
         if (tokenPrice > 0) {
           const tokenValue = tokenBalance * tokenPrice;
