@@ -1,5 +1,5 @@
 import { Account } from '@/plugins/account/entities/account.entity';
-import { MdwPlugin, Tx } from '@/mdw-sync/plugins/mdw-plugin.interface';
+import { Plugin, Tx } from '@/mdw-sync/plugins/plugin.interface';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Topic } from '@/plugins/social/entities/topic.entity';
 import { parsePostContent } from '@/plugins/social/utils/content-parser.util';
@@ -14,7 +14,8 @@ import {
 } from './config/post-contracts.config';
 
 @Injectable()
-export class SocialPlugin implements MdwPlugin {
+export class SocialPlugin implements Plugin {
+  version = 1;
   name = 'social';
   private readonly logger = new Logger(SocialPlugin.name);
   syncVersion = 5;

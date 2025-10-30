@@ -1,30 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { MdwPlugin, MdwPluginFilter } from '../plugins/mdw-plugin.interface';
+import { Plugin, PluginFilter } from '../plugins/plugin.interface';
 import { MDW_PLUGIN } from '../plugins/plugin.tokens';
 
 @Injectable()
 export class PluginRegistryService {
   private readonly logger = new Logger(PluginRegistryService.name);
-  private plugins: MdwPlugin[] = [];
+  private plugins: Plugin[] = [];
 
   constructor(
-    @Inject(MDW_PLUGIN) private readonly pluginProviders: MdwPlugin[],
+    @Inject(MDW_PLUGIN) private readonly pluginProviders: Plugin[],
   ) {
     this.plugins = pluginProviders || [];
     this.logger.log(`Registered ${this.plugins.length} plugins`);
   }
 
-  getPlugins(): MdwPlugin[] {
+  getPlugins(): Plugin[] {
     return this.plugins;
   }
 
-  getPluginByName(name: string): MdwPlugin | undefined {
+  getPluginByName(name: string): Plugin | undefined {
     return this.plugins.find((plugin) => plugin.name === name);
   }
 
-  getAllFilters(): MdwPluginFilter[] {
-    const allFilters: MdwPluginFilter[] = [];
+  getAllFilters(): PluginFilter[] {
+    const allFilters: PluginFilter[] = [];
 
     for (const plugin of this.plugins) {
       const pluginFilters = plugin.filters();

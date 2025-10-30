@@ -20,11 +20,11 @@ Create a new file `src/plugins/your-domain/your-domain.plugin.ts`:
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MdwPlugin, Transaction } from '@/mdw/plugins/mdw-plugin.interface';
+import { Plugin, Transaction } from '@/mdw/plugins/mdw-plugin.interface';
 import { YourEntity } from './entities/your-entity.entity';
 
 @Injectable()
-export class YourDomainPlugin implements MdwPlugin {
+export class YourDomainPlugin implements Plugin {
   name = 'your-domain';
   private readonly logger = new Logger(YourDomainPlugin.name);
 

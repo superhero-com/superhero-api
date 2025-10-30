@@ -1,7 +1,7 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { TX_FUNCTIONS } from '@/configs';
-import { MdwPlugin, Tx } from '@/mdw-sync/plugins/mdw-plugin.interface';
+import { Plugin, Tx } from '@/mdw-sync/plugins/plugin.interface';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
@@ -24,7 +24,8 @@ import { PairSummaryService } from './services/pair-summary.service';
 import { PairService } from './services/pair.service';
 
 @Injectable()
-export class DexPlugin implements MdwPlugin {
+export class DexPlugin implements Plugin {
+  version = 1;
   name = 'dex';
   private readonly logger = new Logger(DexPlugin.name);
 

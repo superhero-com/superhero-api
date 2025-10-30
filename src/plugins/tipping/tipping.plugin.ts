@@ -1,14 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MdwPlugin, Tx } from '@/mdw-sync/plugins/mdw-plugin.interface';
+import { Plugin, Tx } from '@/mdw-sync/plugins/plugin.interface';
 import { Tip } from '@/plugins/tipping/entities/tip.entity';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Account } from '@/plugins/account/entities/account.entity';
 import { decode, toAe } from '@aeternity/aepp-sdk';
 
 @Injectable()
-export class TippingPlugin implements MdwPlugin {
+export class TippingPlugin implements Plugin {
+  version = 1;
   name = 'tipping';
   private readonly logger = new Logger(TippingPlugin.name);
 
