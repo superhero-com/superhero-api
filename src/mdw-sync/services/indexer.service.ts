@@ -153,9 +153,8 @@ export class IndexerService implements OnModuleInit {
         for (const block of blocks) {
           blocksToSave.push({
             ...block,
-            timestamp: new Date(block.time),
-            created_at: new Date(block.timestamp),
-            updated_at: new Date(block.timestamp),
+            timestamp: block.time,
+            created_at: new Date(block.time),
           });
         }
 

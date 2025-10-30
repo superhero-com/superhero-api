@@ -4,11 +4,10 @@ import {
   Entity,
   Index,
   PrimaryColumn,
-  UpdateDateColumn,
 } from 'typeorm';
 
 @Entity({
-  name: 'kbs',
+  name: 'key_blocks',
 })
 @Index(['height'])
 @Index(['hash'])
@@ -16,10 +15,10 @@ import {
 @Index(['prev_key_hash'])
 export class KeyBlock {
   @PrimaryColumn()
-  height: number;
-
-  @Column({ unique: true })
   hash: string;
+
+  @Column()
+  height: number;
 
   @Column()
   prev_hash: string;
@@ -36,11 +35,13 @@ export class KeyBlock {
   @Column()
   miner: string;
 
-  @Column({ type: 'bigint' })
+  @Column({
+    type: 'numeric',
+    precision: 78, // total digits (fits uint256)
+    scale: 0, // no decimals — store in base units (wei, satoshi, etc.)
+    default: '0',
+  })
   time: string;
-
-  @Column({ type: 'timestamp' })
-  timestamp: Date;
 
   @Column({ default: 0 })
   transactions_count: number;
@@ -62,13 +63,23 @@ export class KeyBlock {
   @Column({ type: 'text' })
   info: string;
 
-  @Column({ type: 'bigint' })
+  @Column({
+    type: 'numeric',
+    precision: 78, // total digits (fits uint256)
+    scale: 0, // no decimals — store in base units (wei, satoshi, etc.)
+    default: '0',
+  })
   nonce: string;
 
   @Column({ type: 'jsonb' })
   pow: number[];
 
-  @Column({ type: 'bigint' })
+  @Column({
+    type: 'numeric',
+    precision: 78, // total digits (fits uint256)
+    scale: 0, // no decimals — store in base units (wei, satoshi, etc.)
+    default: '0',
+  })
   target: string;
 
   @Column({ type: 'int' })
@@ -79,10 +90,4 @@ export class KeyBlock {
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
   created_at: Date;
-
-  @UpdateDateColumn({
-    type: 'timestamp',
-    default: () => 'CURRENT_TIMESTAMP(6)',
-  })
-  updated_at: Date;
 }
