@@ -17,6 +17,5 @@ export interface Plugin {
   version: number;
   startFromHeight(): number;
   filters(): PluginFilter[];
-  onTransactionsSaved(txs: Partial<Tx>[]): Promise<void>;
-  onReorg?(rollBackToHeight: number): Promise<void>;
+  syncHistoricalTransactions(): Promise<void>;
 }

@@ -1,6 +1,8 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
 import { MDW_PLUGIN } from '@/mdw-sync/plugins/plugin.tokens';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DexTokensController } from './controllers/dex-tokens.controller';
@@ -20,10 +22,13 @@ import { PairSummaryService } from './services/pair-summary.service';
 import { PairTransactionService } from './services/pair-transaction.service';
 import { PairService } from './services/pair.service';
 import { DexTxListener } from './listeners/dex-tx.listener';
+import { DexSyncTransactionService } from './services/dex-sync-transaction.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Tx,
+      PluginSyncState,
       Pair,
       DexToken,
       PairTransaction,
@@ -46,6 +51,8 @@ import { DexTxListener } from './listeners/dex-tx.listener';
     },
     // Listeners
     DexTxListener,
+    // Sync Service
+    DexSyncTransactionService,
     // Ensure DI for Dex dependencies not exported by DexModule
     PairHistoryService,
     PairService,

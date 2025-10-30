@@ -14,8 +14,8 @@ import { AppService } from './app.service';
 import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import { MdwModule } from './mdw-sync/mdw.module';
 import { AccountModule } from './plugins/account/account.module';
-import { AffiliationModule } from './plugins/affiliation/affiliation.module';
-import { BclModule } from './plugins/bcl/bcl.module';
+import { AffiliationPluginModule } from './plugins/affiliation/affiliation-plugin.module';
+import { BclPluginModule } from './plugins/bcl/bcl-plugin.module';
 import { TokensModule } from './plugins/bcl/tokens.module';
 import { TransactionsModule } from './plugins/bcl/transactions.module';
 import { DexPluginModule } from './plugins/dex/dex-plugin.module';
@@ -42,13 +42,13 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
     DexPluginModule,
     SocialPluginModule,
     TippingPluginModule,
+    BclPluginModule,
+    AffiliationPluginModule,
     TokensModule,
     TransactionsModule,
     AePricingModule,
-    BclModule,
     AnalyticsModule,
     BullBoardModule,
-    AffiliationModule,
     AccountModule,
     TrendingTagsModule,
   ],

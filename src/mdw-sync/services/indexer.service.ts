@@ -9,7 +9,6 @@ import { KeyBlock } from '../entities/key-block.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
-import { PluginRegistryService } from './plugin-registry.service';
 import { ReorgService } from './reorg.service';
 
 @Injectable()
@@ -27,7 +26,6 @@ export class IndexerService implements OnModuleInit {
     private syncStateRepository: Repository<SyncState>,
     @InjectRepository(PluginSyncState)
     private pluginSyncStateRepository: Repository<PluginSyncState>,
-    private pluginRegistry: PluginRegistryService,
     private reorgService: ReorgService,
     private configService: ConfigService,
     private dataSource: DataSource,
@@ -35,7 +33,6 @@ export class IndexerService implements OnModuleInit {
 
   async onModuleInit() {
     await this.initializeSyncState();
-    await this.initializePluginSyncStates();
     this.startSync();
   }
 
@@ -54,34 +51,6 @@ export class IndexerService implements OnModuleInit {
         last_synced_hash: '',
         tip_height: status.mdw_height,
       });
-    }
-  }
-
-  private async initializePluginSyncStates() {
-    const plugins = this.pluginRegistry.getPlugins();
-
-    for (const plugin of plugins) {
-      let existing = await this.pluginSyncStateRepository.findOne({
-        where: { plugin_name: plugin.name },
-      });
-
-      if (existing && existing.version !== plugin.version) {
-        await this.pluginSyncStateRepository.delete({
-          plugin_name: plugin.name,
-        });
-        existing = null;
-        // TODO: should send to the plugin all the transactions that were synced before the version change
-      }
-
-      if (!existing) {
-        await this.pluginSyncStateRepository.save({
-          version: plugin.version,
-          plugin_name: plugin.name,
-          last_synced_height: plugin.startFromHeight() - 1,
-          start_from_height: plugin.startFromHeight(),
-          is_active: true,
-        });
-      }
     }
   }
 
@@ -239,7 +208,7 @@ export class IndexerService implements OnModuleInit {
         return;
       }
 
-      // Convert and filter transactions
+      // Convert transactions
       const mdwTxs: Partial<Tx>[] = [];
 
       for (const tx of transactions) {
@@ -249,12 +218,8 @@ export class IndexerService implements OnModuleInit {
       }
 
       if (mdwTxs.length > 0) {
-        // Save transactions
+        // Save transactions - TxSubscriber will emit events for plugins
         await this.txRepository.save(mdwTxs);
-
-        const pluginsTx = mdwTxs.filter((tx) => this.matchesAnyPlugin(tx.raw));
-        // Dispatch to plugins
-        await this.dispatchToPlugins(pluginsTx);
       }
 
       // Process next page if available
@@ -265,54 +230,6 @@ export class IndexerService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to process transaction page', error);
     }
-  }
-
-  private matchesAnyPlugin(tx: ITransaction): boolean {
-    const plugins = this.pluginRegistry.getPlugins();
-
-    for (const plugin of plugins) {
-      const filters = plugin.filters();
-
-      for (const filter of filters) {
-        if (this.matchesFilter(tx, filter)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
-
-  private matchesFilter(tx: ITransaction, filter: any): boolean {
-    // Check type
-    if (filter.type && tx.tx?.type !== filter.type) {
-      return false;
-    }
-
-    // Check contract ID
-    if (filter.contractIds && filter.contractIds.length > 0) {
-      if (
-        !tx.tx?.contractId ||
-        !filter.contractIds.includes(tx.tx.contractId)
-      ) {
-        return false;
-      }
-    }
-
-    // Check function
-    if (filter.functions && filter.functions.length > 0) {
-      if (!tx.tx?.function || !filter.functions.includes(tx.tx.function)) {
-        return false;
-      }
-    }
-
-    // Check predicate
-    if (filter.predicate) {
-      const mdwTx = this.convertToMdwTx(tx);
-      return filter.predicate(mdwTx);
-    }
-
-    return true;
   }
 
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
@@ -331,61 +248,12 @@ export class IndexerService implements OnModuleInit {
     };
   }
 
-  private async dispatchToPlugins(mdwTxs: Partial<Tx>[]) {
-    const plugins = this.pluginRegistry.getPlugins();
-
-    for (const plugin of plugins) {
-      try {
-        // Check if plugin should receive these transactions
-        const pluginSyncState = await this.pluginSyncStateRepository.findOne({
-          where: { plugin_name: plugin.name },
-        });
-
-        if (!pluginSyncState || !pluginSyncState.is_active) {
-          continue;
-        }
-
-        // Filter transactions for this plugin
-        const relevantTxs = mdwTxs.filter((tx) => {
-          const filters = plugin.filters();
-          return filters.some((filter) => this.matchesFilter(tx.raw, filter));
-        });
-
-        if (relevantTxs.length > 0) {
-          await plugin.onTransactionsSaved(relevantTxs);
-
-          // Update plugin sync state
-          const maxHeight = Math.max(
-            ...relevantTxs.map((tx) => tx.block_height),
-          );
-          await this.pluginSyncStateRepository.update(
-            { plugin_name: plugin.name },
-            { last_synced_height: maxHeight },
-          );
-        }
-      } catch (error) {
-        this.logger.error(
-          `Plugin ${plugin.name} failed to process transactions`,
-          error,
-        );
-      }
-    }
-  }
-
   async handleLiveTransaction(transaction: ITransaction) {
     try {
-      // Check if transaction matches any plugin filters
-      if (!this.matchesAnyPlugin(transaction)) {
-        return;
-      }
-
       const mdwTx = this.convertToMdwTx(transaction);
 
-      // Save transaction
+      // Save transaction - TxSubscriber will emit events for plugins
       await this.txRepository.save(mdwTx);
-
-      // Dispatch to plugins immediately
-      await this.dispatchToPlugins([mdwTx]);
     } catch (error) {
       this.logger.error('Failed to handle live transaction', error);
     }
