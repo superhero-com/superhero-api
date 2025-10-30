@@ -128,13 +128,20 @@ export class CoinGeckoService {
    */
   async fetchCoinCurrencyRates(coinId: string): Promise<CurrencyRates | null> {
     try {
-      return (
-        (await this.fetchFromApi('/simple/price', {
-          ids: coinId,
-          vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
-        })) as any
-      )[coinId];
+      const response = await this.fetchFromApi('/simple/price', {
+        ids: coinId,
+        vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
+      }) as any;
+      
+      const rates = response[coinId];
+      if (rates) {
+        this.logger.debug(`Fetched CoinGecko rates for ${coinId}:`, JSON.stringify(rates));
+        return rates;
+      }
+      this.logger.warn(`No rates found in CoinGecko response for ${coinId}`);
+      return null;
     } catch (error) {
+      this.logger.error(`Failed to fetch CoinGecko rates for ${coinId}:`, error);
       return null;
     }
   }
