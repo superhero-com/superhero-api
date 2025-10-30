@@ -442,10 +442,14 @@ export class PortfolioService {
     // Add converted value if requested (use current price from CoinGecko)
     if (convertTo !== 'ae') {
       try {
+        // getPriceData multiplies the amount by the rate, so passing totalValueAe is correct
         const priceData = await this.coinGeckoService.getPriceData(new BigNumber(totalValueAe));
         const convertedValue = priceData[convertTo];
         if (convertedValue) {
           snapshot.total_value_usd = Number(convertedValue.toString());
+          this.logger.debug(`Converted ${totalValueAe} AE to ${convertTo}: ${snapshot.total_value_usd}`);
+        } else {
+          this.logger.warn(`No conversion rate available for ${convertTo}`);
         }
       } catch (error) {
         this.logger.warn(`Failed to convert portfolio value to ${convertTo}:`, error);

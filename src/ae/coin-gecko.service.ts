@@ -58,11 +58,10 @@ export class CoinGeckoService {
   /**
    * Fetches the coin currency rates for Aeternity and assigns them to the `rates` property.
    */
-  pullData() {
-    this.fetchCoinCurrencyRates(AETERNITY_COIN_ID).then((rates) => {
-      this.rates = rates;
-      this.last_pull_time = moment();
-    });
+  async pullData() {
+    const rates = await this.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    this.rates = rates;
+    this.last_pull_time = moment();
   }
 
   isPullTimeExpired() {
