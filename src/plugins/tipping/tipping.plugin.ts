@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
+import { MdwPlugin, Tx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Tip } from '@/plugins/tipping/entities/tip.entity';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Account } from '@/account/entities/account.entity';
@@ -19,7 +19,9 @@ export class TippingPlugin implements MdwPlugin {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
-  ) {}
+  ) {
+    //
+  }
 
   startFromHeight(): number {
     // Start from a reasonable height where tipping was implemented
@@ -30,7 +32,7 @@ export class TippingPlugin implements MdwPlugin {
     return [
       {
         type: 'spend' as const,
-        predicate: (tx: Partial<MdwTx>) => {
+        predicate: (tx: Partial<Tx>) => {
           if (tx.raw?.tx?.type !== 'SpendTx') {
             return false;
           }
@@ -54,7 +56,7 @@ export class TippingPlugin implements MdwPlugin {
     ];
   }
 
-  async onTransactionsSaved(txs: Partial<MdwTx>[]): Promise<void> {
+  async onTransactionsSaved(txs: Partial<Tx>[]): Promise<void> {
     for (const tx of txs) {
       try {
         await this.processTransaction(tx);
@@ -71,7 +73,7 @@ export class TippingPlugin implements MdwPlugin {
     // Tipping plugin doesn't need special reorg handling as it uses FK cascade
   }
 
-  private async processTransaction(tx: Partial<MdwTx>): Promise<void> {
+  private async processTransaction(tx: Partial<Tx>): Promise<void> {
     const type = this.validateTransaction(tx);
     if (!type) {
       return;
@@ -81,7 +83,7 @@ export class TippingPlugin implements MdwPlugin {
   }
 
   private validateTransaction(
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
   ): false | 'TIP_PROFILE' | 'TIP_POST' {
     if (!tx || tx.raw?.tx?.type !== 'SpendTx') {
       return false;
@@ -107,7 +109,7 @@ export class TippingPlugin implements MdwPlugin {
   }
 
   private async saveTipFromTransaction(
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
     type: 'TIP_PROFILE' | 'TIP_POST',
   ): Promise<Tip | null> {
     const existingTip = await this.tipRepository.findOne({

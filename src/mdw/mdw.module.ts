@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { MdwTx } from './entities/mdw-tx.entity';
-import { MdwBlock } from './entities/mdw-block.entity';
+import { Tx } from './entities/tx.entity';
+import { KeyBlock } from './entities/key-block.entity';
 import { MdwSyncState } from './entities/mdw-sync-state.entity';
 import { MdwPluginSyncState } from './entities/mdw-plugin-sync-state.entity';
 import { PluginRegistryService } from './services/plugin-registry.service';
@@ -21,12 +21,7 @@ import { TippingPlugin } from '@/plugins/tipping/tipping.plugin';
 @Module({
   imports: [
     ConfigModule.forFeature(mdwConfig),
-    TypeOrmModule.forFeature([
-      MdwTx,
-      MdwBlock,
-      MdwSyncState,
-      MdwPluginSyncState,
-    ]),
+    TypeOrmModule.forFeature([Tx, KeyBlock, MdwSyncState, MdwPluginSyncState]),
     // Import plugin modules so their providers are visible in this context
     DexPluginModule,
     SocialPluginModule,

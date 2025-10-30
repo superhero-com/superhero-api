@@ -55,4 +55,4 @@ import { PairService } from './services/pair.service';
   ],
   exports: [DexPlugin],
 })
-export class DexPluginModule { }
+export class DexPluginModule {}

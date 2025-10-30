@@ -1,3 +1,4 @@
+import { Tx } from '@/mdw/entities/tx.entity';
 import {
   Column,
   CreateDateColumn,
@@ -9,7 +10,6 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { Topic } from './topic.entity';
-import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
   name: 'social_posts',
@@ -68,9 +68,9 @@ export class Post {
   })
   topics: Topic[];
 
-  @ManyToOne(() => MdwTx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
-  mdwTx: MdwTx;
+  tx: Tx;
 
   @Column('json', { default: [] })
   media: string[];

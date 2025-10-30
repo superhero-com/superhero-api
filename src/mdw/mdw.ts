@@ -1,11 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Tx } from './entities/tx.entity';
-import { TxSyncService } from './services/tx-sync.service';
-
 @Module({
-  imports: [TypeOrmModule.forFeature([Tx])],
-  providers: [TxSyncService],
+  imports: [TypeOrmModule.forFeature([])],
+  providers: [],
   exports: [],
   controllers: [],
 })

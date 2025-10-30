@@ -1,16 +1,16 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-import { MdwTx } from '../entities/mdw-tx.entity';
-import { MdwBlock } from '../entities/mdw-block.entity';
-import { MdwSyncState } from '../entities/mdw-sync-state.entity';
-import { MdwPluginSyncState } from '../entities/mdw-plugin-sync-state.entity';
-import { PluginRegistryService } from './plugin-registry.service';
-import { ReorgService } from './reorg.service';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
+import { DataSource, Repository } from 'typeorm';
+import { KeyBlock } from '../entities/key-block.entity';
+import { MdwPluginSyncState } from '../entities/mdw-plugin-sync-state.entity';
+import { MdwSyncState } from '../entities/mdw-sync-state.entity';
+import { Tx } from '../entities/tx.entity';
+import { PluginRegistryService } from './plugin-registry.service';
+import { ReorgService } from './reorg.service';
 
 @Injectable()
 export class IndexerService implements OnModuleInit {
@@ -19,10 +19,10 @@ export class IndexerService implements OnModuleInit {
   private syncInterval: NodeJS.Timeout;
 
   constructor(
-    @InjectRepository(MdwTx)
-    private txRepository: Repository<MdwTx>,
-    @InjectRepository(MdwBlock)
-    private blockRepository: Repository<MdwBlock>,
+    @InjectRepository(Tx)
+    private txRepository: Repository<Tx>,
+    @InjectRepository(KeyBlock)
+    private blockRepository: Repository<KeyBlock>,
     @InjectRepository(MdwSyncState)
     private syncStateRepository: Repository<MdwSyncState>,
     @InjectRepository(MdwPluginSyncState)
@@ -153,6 +153,7 @@ export class IndexerService implements OnModuleInit {
     } finally {
       this.isRunning = false;
     }
+    this.sync();
   }
 
   private async syncBlocks(startHeight: number, endHeight: number) {
@@ -163,7 +164,7 @@ export class IndexerService implements OnModuleInit {
       const limit = Math.min(endHeight - startHeight + 1, 100);
       const scope = `gen:${startHeight}-${endHeight}`;
       let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
-      const blocksToSave: Partial<MdwBlock>[] = [];
+      const blocksToSave: Partial<KeyBlock>[] = [];
 
       // Process all pages
       while (url) {
@@ -305,7 +306,7 @@ export class IndexerService implements OnModuleInit {
       }
 
       // Convert and filter transactions
-      const mdwTxs: Partial<MdwTx>[] = [];
+      const mdwTxs: Partial<Tx>[] = [];
 
       for (const tx of transactions) {
         const camelTx = camelcaseKeysDeep(tx) as ITransaction;
@@ -380,7 +381,7 @@ export class IndexerService implements OnModuleInit {
     return true;
   }
 
-  private convertToMdwTx(tx: ITransaction): Partial<MdwTx> {
+  private convertToMdwTx(tx: ITransaction): Partial<Tx> {
     return {
       tx_hash: tx.hash,
       block_height: tx.blockHeight,
@@ -396,7 +397,7 @@ export class IndexerService implements OnModuleInit {
     };
   }
 
-  private async dispatchToPlugins(mdwTxs: Partial<MdwTx>[]) {
+  private async dispatchToPlugins(mdwTxs: Partial<Tx>[]) {
     const plugins = this.pluginRegistry.getPlugins();
 
     for (const plugin of plugins) {

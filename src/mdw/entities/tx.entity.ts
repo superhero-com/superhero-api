@@ -4,28 +4,60 @@ import {
   Entity,
   Index,
   PrimaryColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 @Entity({
   name: 'txs',
 })
+@Index(['block_height'])
+@Index(['tx_hash'])
+@Index(['type'])
+@Index(['contract_id'])
+@Index(['function'])
 export class Tx {
-  @Index()
   @PrimaryColumn()
-  hash: string;
+  tx_hash: string;
 
   @Column()
   block_height: number;
 
-  @Column({
-    default: false,
-  })
-  verified: boolean;
+  @Column()
+  block_hash: string;
 
-  @Index()
+  @Column({ type: 'bigint' })
+  micro_time: string;
+
+  @Column()
+  type: string; // 'contract_call' | 'spend' | etc.
+
+  @Column({ nullable: true })
+  contract_id?: string;
+
+  @Column({ nullable: true })
+  function?: string;
+
+  @Column({ nullable: true })
+  caller_id?: string;
+
+  @Column({ nullable: true })
+  sender_id?: string;
+
+  @Column({ nullable: true })
+  recipient_id?: string;
+
+  @Column({ type: 'jsonb' })
+  raw: any;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
-  public created_at: Date;
+  created_at: Date;
+
+  @UpdateDateColumn({
+    type: 'timestamp',
+    default: () => 'CURRENT_TIMESTAMP(6)',
+  })
+  updated_at: Date;
 }

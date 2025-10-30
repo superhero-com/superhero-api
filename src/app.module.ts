@@ -71,4 +71,4 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule { }
+export class AppModule {}

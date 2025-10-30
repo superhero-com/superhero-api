@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { MdwBlock } from '../entities/mdw-block.entity';
-import { MdwTx } from '../entities/mdw-tx.entity';
+import { KeyBlock } from '../entities/key-block.entity';
+import { Tx } from '../entities/tx.entity';
 import { MdwSyncState } from '../entities/mdw-sync-state.entity';
 import { MdwPluginSyncState } from '../entities/mdw-plugin-sync-state.entity';
 import { PluginRegistryService } from './plugin-registry.service';
@@ -14,10 +14,10 @@ export class ReorgService {
   private readonly logger = new Logger(ReorgService.name);
 
   constructor(
-    @InjectRepository(MdwBlock)
-    private blockRepository: Repository<MdwBlock>,
-    @InjectRepository(MdwTx)
-    private txRepository: Repository<MdwTx>,
+    @InjectRepository(KeyBlock)
+    private blockRepository: Repository<KeyBlock>,
+    @InjectRepository(Tx)
+    private txRepository: Repository<Tx>,
     @InjectRepository(MdwSyncState)
     private syncStateRepository: Repository<MdwSyncState>,
     @InjectRepository(MdwPluginSyncState)

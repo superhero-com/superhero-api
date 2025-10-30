@@ -1,3 +1,4 @@
+import { Tx } from '@/mdw/entities/tx.entity';
 import {
   Column,
   CreateDateColumn,
@@ -7,7 +8,6 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 import { Pair } from './pair.entity';
-import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
   name: 'dex_transactions',
@@ -33,9 +33,9 @@ export class PairTransaction {
   @JoinColumn({ name: 'pair_address' })
   pair: Pair;
 
-  @ManyToOne(() => MdwTx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
-  mdwTx: MdwTx;
+  tx: Tx;
 
   @Column()
   tx_type: string;

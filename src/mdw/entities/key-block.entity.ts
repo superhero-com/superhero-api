@@ -8,12 +8,12 @@ import {
 } from 'typeorm';
 
 @Entity({
-  name: 'mdw_block',
+  name: 'kbs',
 })
 @Index(['height'])
 @Index(['hash'])
 @Index(['parent_hash'])
-export class MdwBlock {
+export class KeyBlock {
   @PrimaryColumn()
   height: number;
 

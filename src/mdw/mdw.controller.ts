@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { MdwSyncState } from './entities/mdw-sync-state.entity';
 import { MdwPluginSyncState } from './entities/mdw-plugin-sync-state.entity';
 import { PluginRegistryService } from './services/plugin-registry.service';
+import { Tx } from './entities/tx.entity';
 
 @Controller('mdw')
 export class MdwController {
@@ -12,6 +13,9 @@ export class MdwController {
     private syncStateRepository: Repository<MdwSyncState>,
     @InjectRepository(MdwPluginSyncState)
     private pluginSyncStateRepository: Repository<MdwPluginSyncState>,
+
+    @InjectRepository(Tx)
+    private mdwTxRepository: Repository<Tx>,
     private pluginRegistry: PluginRegistryService,
   ) {}
 
@@ -23,8 +27,10 @@ export class MdwController {
 
     const pluginStates = await this.pluginSyncStateRepository.find();
 
+    const totalTxs = await this.mdwTxRepository.count();
     return {
       status: 'healthy',
+      totalTxs,
       syncState: syncState
         ? {
             lastSyncedHeight: syncState.last_synced_height,

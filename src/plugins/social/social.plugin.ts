@@ -1,5 +1,5 @@
 import { Account } from '@/account/entities/account.entity';
-import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
+import { MdwPlugin, Tx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Post } from '@/plugins/social/entities/post.entity';
 import { Topic } from '@/plugins/social/entities/topic.entity';
 import { parsePostContent } from '@/plugins/social/utils/content-parser.util';
@@ -26,7 +26,9 @@ export class SocialPlugin implements MdwPlugin {
     private readonly accountRepository: Repository<Account>,
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
-  ) { }
+  ) {
+    //
+  }
 
   startFromHeight(): number {
     // Start from a reasonable height where social contracts were deployed
@@ -43,7 +45,7 @@ export class SocialPlugin implements MdwPlugin {
     ];
   }
 
-  async onTransactionsSaved(txs: Partial<MdwTx>[]): Promise<void> {
+  async onTransactionsSaved(txs: Partial<Tx>[]): Promise<void> {
     for (const tx of txs) {
       try {
         await this.processTransaction(tx);
@@ -60,7 +62,7 @@ export class SocialPlugin implements MdwPlugin {
     // Social plugin doesn't need special reorg handling as it uses FK cascade
   }
 
-  private async processTransaction(tx: Partial<MdwTx>): Promise<void> {
+  private async processTransaction(tx: Partial<Tx>): Promise<void> {
     if (!this.validateTransaction(tx) || !isContractSupported(tx.contract_id)) {
       return;
     }
@@ -76,7 +78,7 @@ export class SocialPlugin implements MdwPlugin {
     await this.savePostFromTransaction(tx, contract);
   }
 
-  private validateTransaction(tx: Partial<MdwTx>): boolean {
+  private validateTransaction(tx: Partial<Tx>): boolean {
     if (!tx) {
       return false;
     }
@@ -106,7 +108,7 @@ export class SocialPlugin implements MdwPlugin {
   }
 
   private async savePostFromTransaction(
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
     contract: any,
   ): Promise<Post | null> {
     if (!this.validateTransaction(tx)) {
@@ -245,7 +247,7 @@ export class SocialPlugin implements MdwPlugin {
     return post;
   }
 
-  private generatePostId(tx: Partial<MdwTx>, contract: any): string {
+  private generatePostId(tx: Partial<Tx>, contract: any): string {
     const returnValue = tx.raw.tx?.return?.value;
     if (returnValue) {
       return `${returnValue}_v${contract.version}`;
@@ -270,7 +272,7 @@ export class SocialPlugin implements MdwPlugin {
       .replace(/^-+|-+$/g, '');
   }
 
-  private detectPostType(tx: Partial<MdwTx>): any {
+  private detectPostType(tx: Partial<Tx>): any {
     if (!tx.raw?.tx?.arguments?.[1]?.value) {
       return {
         isComment: false,

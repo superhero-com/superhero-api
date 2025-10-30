@@ -1,4 +1,6 @@
 import { Account } from '@/account/entities/account.entity';
+import { Tx } from '@/mdw/entities/tx.entity';
+import { Post } from '@/plugins/social/entities/post.entity';
 import {
   Column,
   CreateDateColumn,
@@ -7,8 +9,6 @@ import {
   ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
-import { Post } from '@/plugins/social/entities/post.entity';
-import { MdwTx } from '@/mdw/entities/mdw-tx.entity';
 
 @Entity({
   name: 'tipping_tips',
@@ -41,9 +41,9 @@ export class Tip {
   @JoinColumn({ name: 'post_id' })
   post: Post;
 
-  @ManyToOne(() => MdwTx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tx, (tx) => tx.tx_hash, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tx_hash', referencedColumnName: 'tx_hash' })
-  mdwTx: MdwTx;
+  tx: Tx;
 
   @Column({
     default: '0',

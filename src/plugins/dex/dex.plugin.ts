@@ -1,7 +1,7 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { TX_FUNCTIONS } from '@/configs';
-import { MdwPlugin, MdwTx } from '@/mdw/plugins/mdw-plugin.interface';
+import { MdwPlugin, Tx } from '@/mdw/plugins/mdw-plugin.interface';
 import { Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
@@ -90,7 +90,7 @@ export class DexPlugin implements MdwPlugin {
     ];
   }
 
-  async onTransactionsSaved(txs: Partial<MdwTx>[]): Promise<void> {
+  async onTransactionsSaved(txs: Partial<Tx>[]): Promise<void> {
     for (const tx of txs) {
       try {
         await this.processTransaction(tx);
@@ -107,7 +107,7 @@ export class DexPlugin implements MdwPlugin {
     // DEX plugin doesn't need special reorg handling as it uses FK cascade
   }
 
-  private async processTransaction(tx: Partial<MdwTx>): Promise<void> {
+  private async processTransaction(tx: Partial<Tx>): Promise<void> {
     if (tx.contract_id !== DEX_CONTRACTS.router) {
       return;
     }
@@ -124,7 +124,7 @@ export class DexPlugin implements MdwPlugin {
   }
 
   private async saveTransaction(
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
   ): Promise<PairTransaction | null> {
     if (tx.contract_id !== DEX_CONTRACTS.router) {
       return null;
@@ -149,7 +149,7 @@ export class DexPlugin implements MdwPlugin {
     return bigNumber.toNumber();
   }
 
-  private async extractPairInfoFromTransaction(tx: Partial<MdwTx>) {
+  private async extractPairInfoFromTransaction(tx: Partial<Tx>) {
     let decodedEvents = null;
     try {
       decodedEvents = this.routerContract.$decodeEvents(tx.raw.tx.log);
@@ -318,7 +318,7 @@ export class DexPlugin implements MdwPlugin {
       token0: DexToken;
       token1: DexToken;
     },
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
   ) {
     let pair = await this.dexPairRepository.findOne({
       where: { address: pairInfo.pairAddress },
@@ -358,7 +358,7 @@ export class DexPlugin implements MdwPlugin {
 
   private async saveDexPairTransaction(
     pair: Pair,
-    tx: Partial<MdwTx>,
+    tx: Partial<Tx>,
     pairInfo: {
       pairAddress: string;
       reserve0: number;
