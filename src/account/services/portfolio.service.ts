@@ -94,8 +94,9 @@ export class PortfolioService {
       // Request 365 days to ensure we get historical data (it will include our date range if it's within the last year)
       const days = 365;
       
-      // Determine interval based on requested interval (seconds)
-      const priceInterval: 'daily' | 'hourly' = interval >= 86400 ? 'daily' : 'hourly';
+      // Always use 'daily' interval from CoinGecko - hourly data is not reliably available
+      // We'll use the closest daily price for any timestamp (including hourly requests)
+      const priceInterval: 'daily' | 'hourly' = 'daily';
 
       this.logger.debug(`Fetching AE price history from CoinGecko: ${days} days (covering ${daysFromNow} days ago), ${priceInterval} interval, currency: ${convertTo}`);
       aePriceHistory = await this.coinGeckoService.fetchHistoricalPrice(
@@ -106,21 +107,24 @@ export class PortfolioService {
       );
 
       if (aePriceHistory && aePriceHistory.length > 0) {
-        // Filter prices to only include those within our date range
+        // Note: CoinGecko returns last 365 days from today
+        // We keep ALL price history (don't filter) so getAePriceAtTimestamp can use
+        // the first/last price as fallback for dates outside CoinGecko's range
+        const coinGeckoFirstMs = aePriceHistory[0][0];
+        const coinGeckoLastMs = aePriceHistory[aePriceHistory.length - 1][0];
         const startMs = start.valueOf();
         const endMs = end.valueOf();
-        const beforeFilter = aePriceHistory.length;
-        aePriceHistory = aePriceHistory.filter(
-          ([timestampMs]) => timestampMs >= startMs && timestampMs <= endMs
-        );
-
-        if (aePriceHistory.length > 0) {
-          this.logger.log(`Fetched ${aePriceHistory.length} price points from CoinGecko (${beforeFilter} before filtering). First: ${aePriceHistory[0][1]} ${convertTo} at ${moment(aePriceHistory[0][0]).toISOString()}, Last: ${aePriceHistory[aePriceHistory.length - 1][1]} ${convertTo} at ${moment(aePriceHistory[aePriceHistory.length - 1][0]).toISOString()}`);
-        } else {
-          this.logger.warn(`No price points found within date range after filtering. Requested range: ${start.toISOString()} to ${end.toISOString()}, CoinGecko first timestamp: ${moment(aePriceHistory[0]?.[0]).toISOString()}, CoinGecko last timestamp: ${moment(aePriceHistory[aePriceHistory.length - 1]?.[0]).toISOString()}. This means the requested date range is outside CoinGecko's available data.`);
+        
+        // Log what we have vs what was requested
+        if (endMs < coinGeckoFirstMs) {
+          this.logger.warn(`Requested date range (${start.toISOString()} to ${end.toISOString()}) is before CoinGecko data starts (${moment(coinGeckoFirstMs).toISOString()}). Will use first available price for all timestamps.`);
+        } else if (startMs > coinGeckoLastMs) {
+          this.logger.warn(`Requested date range (${start.toISOString()} to ${end.toISOString()}) is after CoinGecko data ends (${moment(coinGeckoLastMs).toISOString()}). Will use last available price for all timestamps.`);
         }
+        
+        this.logger.log(`Using ${aePriceHistory.length} price points from CoinGecko. Range: ${moment(coinGeckoFirstMs).toISOString()} to ${moment(coinGeckoLastMs).toISOString()}, First price: ${aePriceHistory[0][1]} ${convertTo}, Last price: ${aePriceHistory[aePriceHistory.length - 1][1]} ${convertTo}`);
       } else {
-        this.logger.error(`No AE price history fetched from CoinGecko for ${convertTo}. This will cause portfolio values to not fluctuate with AE price.`);
+        this.logger.error(`No AE price history fetched from CoinGecko for ${convertTo}. Fetched result: ${aePriceHistory ? 'null or empty array' : 'null'}. This will cause portfolio values to not fluctuate with AE price.`);
       }
     }
 
@@ -310,12 +314,12 @@ export class PortfolioService {
           snapshot.total_value_usd = totalValueAe * aePriceAtTimestamp;
         } else {
           // Fallback: use latest price if no historical price found
-          this.logger.warn(`No AE price found for timestamp ${timestamp.toISOString()}, using totalValueAe as fallback`);
+          this.logger.warn(`No AE price found for timestamp ${timestamp.toISOString()} (aePriceHistory length: ${aePriceHistory.length}), using totalValueAe as fallback`);
           snapshot.total_value_usd = totalValueAe;
         }
       } else {
         // No price history available at all
-        this.logger.error(`No AE price history available for conversion to ${convertTo} at ${timestamp.toISOString()}. Setting total_value_usd = total_value_ae.`);
+        this.logger.error(`No AE price history available for conversion to ${convertTo} at ${timestamp.toISOString()}. aePriceHistory: ${aePriceHistory ? `length=${aePriceHistory.length}` : 'null'}. Setting total_value_usd = total_value_ae.`);
         snapshot.total_value_usd = totalValueAe;
       }
     }

@@ -169,6 +169,19 @@ export class CoinGeckoService {
       
       // Check for CoinGecko API errors (e.g., rate limiting)
       if (response?.status?.error_code) {
+        if (response.status.error_code === 429) {
+          this.logger.warn(`CoinGecko rate limit hit (429). Attempting to use cached data if available, or will wait before retry.`);
+          // Try to get from cache even if stale (it might have expired but still be useful)
+          try {
+            const staleCache = await this.cacheManager.get<Array<[number, number]>>(cacheKey);
+            if (staleCache && staleCache.length > 0) {
+              this.logger.log(`Using stale cached data due to rate limit: ${staleCache.length} price points`);
+              return staleCache;
+            }
+          } catch (cacheError) {
+            this.logger.warn(`Could not read stale cache:`, cacheError);
+          }
+        }
         this.logger.error(`CoinGecko API error: ${response.status.error_code} - ${response.status.error_message}`);
         return null;
       }
@@ -178,6 +191,11 @@ export class CoinGeckoService {
       // Cache the result for 1 hour (3600 seconds)
       // Historical data doesn't change frequently, so this reduces API calls significantly
       if (prices && prices.length > 0) {
+        // Log first and last price points for debugging
+        const firstPrice = prices[0];
+        const lastPrice = prices[prices.length - 1];
+        this.logger.log(`CoinGecko returned ${prices.length} price points. First: ${moment(firstPrice[0]).toISOString()} = ${firstPrice[1]} ${vsCurrency}, Last: ${moment(lastPrice[0]).toISOString()} = ${lastPrice[1]} ${vsCurrency}`);
+        
         try {
           await this.cacheManager.set(cacheKey, prices, 3600 * 1000); // TTL in milliseconds
           this.logger.debug(`Cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval}): ${prices.length} data points`);
@@ -185,7 +203,7 @@ export class CoinGeckoService {
           this.logger.warn(`Cache write error for ${cacheKey}:`, error);
         }
       } else {
-        this.logger.warn(`CoinGecko returned empty or invalid price data for ${coinId}`);
+        this.logger.warn(`CoinGecko returned empty or invalid price data for ${coinId}. Response keys: ${Object.keys(response || {})}`);
       }
       
       return prices;
