@@ -202,29 +202,38 @@ export class IndexerService implements OnModuleInit {
       // For each key-block, fetch its micro-blocks
       for (const keyBlock of keyBlocks) {
         try {
-          const microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
-          const response = await fetchJson(microBlocksUrl);
-          const microBlocks = response?.data || [];
+          let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
 
-          // Convert micro-blocks to entity format
-          for (const microBlock of microBlocks) {
-            microBlocksToSave.push({
-              hash: microBlock.hash,
-              height: microBlock.height,
-              prev_hash: microBlock.prev_hash,
-              prev_key_hash: microBlock.prev_key_hash,
-              state_hash: microBlock.state_hash,
-              time: microBlock.time.toString(),
-              transactions_count: microBlock.transactions_count,
-              flags: microBlock.flags,
-              version: microBlock.version,
-              gas: microBlock.gas,
-              micro_block_index: microBlock.micro_block_index,
-              pof_hash: microBlock.pof_hash,
-              signature: microBlock.signature,
-              txs_hash: microBlock.txs_hash,
-              created_at: new Date(microBlock.time),
-            });
+          // Handle pagination
+          while (microBlocksUrl) {
+            const response = await fetchJson(microBlocksUrl);
+            const microBlocks = response?.data || [];
+
+            // Convert micro-blocks to entity format
+            for (const microBlock of microBlocks) {
+              microBlocksToSave.push({
+                hash: microBlock.hash,
+                height: microBlock.height,
+                prev_hash: microBlock.prev_hash,
+                prev_key_hash: microBlock.prev_key_hash,
+                state_hash: microBlock.state_hash,
+                time: microBlock.time.toString(),
+                transactions_count: microBlock.transactions_count,
+                flags: microBlock.flags,
+                version: microBlock.version,
+                gas: microBlock.gas,
+                micro_block_index: microBlock.micro_block_index,
+                pof_hash: microBlock.pof_hash,
+                signature: microBlock.signature,
+                txs_hash: microBlock.txs_hash,
+                created_at: new Date(microBlock.time),
+              });
+            }
+
+            // Check if there's a next page
+            microBlocksUrl = response.next
+              ? `${middlewareUrl}${response.next}`
+              : null;
           }
         } catch (error: any) {
           this.logger.error(
