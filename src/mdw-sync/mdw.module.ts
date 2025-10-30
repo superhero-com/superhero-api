@@ -10,6 +10,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import mdwConfig from './config/mdw.config';
 import { KeyBlock } from './entities/key-block.entity';
+import { MicroBlock } from './entities/micro-block.entity';
 import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { SyncState } from './entities/sync-state.entity';
 import { Tx } from './entities/tx.entity';
@@ -24,7 +25,13 @@ import { TxSubscriber } from './subscribers/tx.subscriber';
   imports: [
     ConfigModule.forFeature(mdwConfig),
     EventEmitterModule.forRoot(),
-    TypeOrmModule.forFeature([Tx, KeyBlock, SyncState, PluginSyncState]),
+    TypeOrmModule.forFeature([
+      Tx,
+      KeyBlock,
+      MicroBlock,
+      SyncState,
+      PluginSyncState,
+    ]),
     // Import plugin modules so their providers are visible in this context
     DexPluginModule,
     SocialPluginModule,

@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 
 import { KeyBlock } from './key-block.entity';
+import { MicroBlock } from './micro-block.entity';
 @Entity({
   name: 'txs',
 })
@@ -24,11 +25,11 @@ export class Tx {
   @Column()
   block_hash: string;
 
-  @ManyToOne(() => KeyBlock, (block) => block.hash, {
+  @ManyToOne(() => MicroBlock, (block) => block.hash, {
     onDelete: 'CASCADE',
   })
   @JoinColumn({ name: 'block_hash', referencedColumnName: 'hash' })
-  block: KeyBlock;
+  block: MicroBlock;
 
   @Column()
   block_height: number;
@@ -54,6 +55,11 @@ export class Tx {
 
   @Column()
   type: string; // 'contract_call' | 'spend' | etc.
+
+  @Column({
+    nullable: true,
+  })
+  payload: string;
 
   @Column({ nullable: true })
   contract_id?: string; // TODO: should reference to contract

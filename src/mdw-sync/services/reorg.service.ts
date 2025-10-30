@@ -92,9 +92,14 @@ export class ReorgService {
     try {
       this.logger.log(`Handling reorg from height ${divergenceHeight}`);
 
-      // Delete transactions and blocks from divergence height onwards
+      // Delete transactions, micro-blocks, and blocks from divergence height onwards
       await queryRunner.manager.query(
         'DELETE FROM mdw_tx WHERE block_height >= $1',
+        [divergenceHeight],
+      );
+
+      await queryRunner.manager.query(
+        'DELETE FROM micro_blocks WHERE height >= $1',
         [divergenceHeight],
       );
 

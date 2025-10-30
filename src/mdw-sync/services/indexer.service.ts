@@ -1,11 +1,13 @@
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
+import { decode } from '@aeternity/aepp-sdk';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { DataSource, Repository } from 'typeorm';
+import { Between, DataSource, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
+import { MicroBlock } from '../entities/micro-block.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
@@ -22,6 +24,8 @@ export class IndexerService implements OnModuleInit {
     private txRepository: Repository<Tx>,
     @InjectRepository(KeyBlock)
     private blockRepository: Repository<KeyBlock>,
+    @InjectRepository(MicroBlock)
+    private microBlockRepository: Repository<MicroBlock>,
     @InjectRepository(SyncState)
     private syncStateRepository: Repository<SyncState>,
     @InjectRepository(PluginSyncState)
@@ -116,6 +120,7 @@ export class IndexerService implements OnModuleInit {
       );
 
       await this.syncBlocks(startHeight, endHeight);
+      await this.syncMicroBlocks(startHeight, endHeight);
       await this.syncTransactions(startHeight, endHeight);
 
       // Update sync state
@@ -177,6 +182,73 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
+  private async syncMicroBlocks(startHeight: number, endHeight: number) {
+    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
+
+    try {
+      // Get all key-blocks in the height range
+      const keyBlocks = await this.blockRepository.find({
+        where: {
+          height: Between(startHeight, endHeight) as any,
+        },
+      });
+
+      if (keyBlocks.length === 0) {
+        return;
+      }
+
+      const microBlocksToSave: Partial<MicroBlock>[] = [];
+
+      // For each key-block, fetch its micro-blocks
+      for (const keyBlock of keyBlocks) {
+        try {
+          const microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
+          const response = await fetchJson(microBlocksUrl);
+          const microBlocks = response?.data || [];
+
+          // Convert micro-blocks to entity format
+          for (const microBlock of microBlocks) {
+            microBlocksToSave.push({
+              hash: microBlock.hash,
+              height: microBlock.height,
+              prev_hash: microBlock.prev_hash,
+              prev_key_hash: microBlock.prev_key_hash,
+              state_hash: microBlock.state_hash,
+              time: microBlock.time.toString(),
+              transactions_count: microBlock.transactions_count,
+              flags: microBlock.flags,
+              version: microBlock.version,
+              gas: microBlock.gas,
+              micro_block_index: microBlock.micro_block_index,
+              pof_hash: microBlock.pof_hash,
+              signature: microBlock.signature,
+              txs_hash: microBlock.txs_hash,
+              created_at: new Date(microBlock.time),
+            });
+          }
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to fetch micro-blocks for key-block ${keyBlock.hash}`,
+            error,
+          );
+        }
+      }
+
+      // Batch save all micro-blocks
+      if (microBlocksToSave.length > 0) {
+        await this.microBlockRepository.save(microBlocksToSave);
+        this.logger.debug(
+          `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to sync micro-blocks ${startHeight}-${endHeight}`,
+        error,
+      );
+    }
+  }
+
   private async syncTransactions(startHeight: number, endHeight: number) {
     const pageLimit = Math.min(
       this.configService.get<number>('mdw.pageLimit', 100),
@@ -229,10 +301,14 @@ export class IndexerService implements OnModuleInit {
   }
 
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
+    let payload = '';
+    if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
+      payload = decode(tx?.tx?.payload).toString();
+    }
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,
-      // micro_block_hash: tx.blockHash?.toString() || '',
+      block_hash: tx.blockHash?.toString() || '',
       micro_index: tx.microIndex?.toString() || '0',
       micro_time: tx.microTime?.toString() || '0',
       signatures: tx.signatures || [],
@@ -243,7 +319,8 @@ export class IndexerService implements OnModuleInit {
       caller_id: tx.tx?.callerId,
       sender_id: tx.tx?.senderId,
       recipient_id: tx.tx?.recipientId,
-      raw: tx,
+      payload: payload,
+      raw: tx.tx,
     };
   }
 
