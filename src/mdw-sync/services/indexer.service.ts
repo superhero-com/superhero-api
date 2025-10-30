@@ -61,12 +61,21 @@ export class IndexerService implements OnModuleInit {
     const plugins = this.pluginRegistry.getPlugins();
 
     for (const plugin of plugins) {
-      const existing = await this.pluginSyncStateRepository.findOne({
+      let existing = await this.pluginSyncStateRepository.findOne({
         where: { plugin_name: plugin.name },
       });
 
+      if (existing && existing.version !== plugin.version) {
+        await this.pluginSyncStateRepository.delete({
+          plugin_name: plugin.name,
+        });
+        existing = null;
+        // TODO: should send to the plugin all the transactions that were synced before the version change
+      }
+
       if (!existing) {
         await this.pluginSyncStateRepository.save({
+          version: plugin.version,
           plugin_name: plugin.name,
           last_synced_height: plugin.startFromHeight() - 1,
           start_from_height: plugin.startFromHeight(),
@@ -215,81 +224,6 @@ export class IndexerService implements OnModuleInit {
       direction: 'forward',
       limit: pageLimit.toString(),
       scope: `gen:${startHeight}-${endHeight}`,
-    });
-
-    const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-    await this.processTransactionPage(url);
-
-    // Get all unique contract IDs and functions from plugins
-    // const contractIds = this.pluginRegistry.getUniqueContractIds();
-    // const functions = this.pluginRegistry.getUniqueFunctions();
-    // const types = this.pluginRegistry.getUniqueTypes();
-
-    // // Sync contract call transactions
-    // if (types.includes('contract_call') && contractIds.length > 0) {
-    //   await this.syncContractCallTransactions(
-    //     startHeight,
-    //     endHeight,
-    //     contractIds,
-    //     functions,
-    //     pageLimit,
-    //   );
-    // }
-
-    // // Sync spend transactions (for tips)
-    // if (types.includes('spend')) {
-    //   await this.syncSpendTransactions(startHeight, endHeight, pageLimit);
-    // }
-  }
-
-  /**
-   * @deprecated
-   */
-  private async syncContractCallTransactions(
-    startHeight: number,
-    endHeight: number,
-    contractIds: string[],
-    functions: string[],
-    pageLimit: number,
-  ) {
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
-    // Batch contract IDs to avoid URL length limits
-    const batchSize = 10;
-    for (let i = 0; i < contractIds.length; i += batchSize) {
-      const batch = contractIds.slice(i, i + batchSize);
-      const contractParam = batch.join(',');
-
-      const queryParams = new URLSearchParams({
-        direction: 'forward',
-        limit: pageLimit.toString(),
-        type: 'contract_call',
-        contract: contractParam,
-        from_height: startHeight.toString(),
-        to_height: endHeight.toString(),
-      });
-
-      const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-      await this.processTransactionPage(url);
-    }
-  }
-
-  /**
-   * @deprecated
-   */
-  private async syncSpendTransactions(
-    startHeight: number,
-    endHeight: number,
-    pageLimit: number,
-  ) {
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
-    const queryParams = new URLSearchParams({
-      direction: 'forward',
-      limit: pageLimit.toString(),
-      type: 'spend',
-      from_height: startHeight.toString(),
-      to_height: endHeight.toString(),
     });
 
     const url = `${middlewareUrl}/v3/transactions?${queryParams}`;

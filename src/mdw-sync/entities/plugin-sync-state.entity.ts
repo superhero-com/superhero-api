@@ -16,6 +16,11 @@ export class PluginSyncState {
   @PrimaryColumn()
   plugin_name: string;
 
+  @Column({
+    default: 1,
+  })
+  version: number;
+
   @Column()
   last_synced_height: number;
 

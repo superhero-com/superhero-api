@@ -8,9 +8,7 @@ export class PluginRegistryService {
   private readonly logger = new Logger(PluginRegistryService.name);
   private plugins: Plugin[] = [];
 
-  constructor(
-    @Inject(MDW_PLUGIN) private readonly pluginProviders: Plugin[],
-  ) {
+  constructor(@Inject(MDW_PLUGIN) private readonly pluginProviders: Plugin[]) {
     this.plugins = pluginProviders || [];
     this.logger.log(`Registered ${this.plugins.length} plugins`);
   }

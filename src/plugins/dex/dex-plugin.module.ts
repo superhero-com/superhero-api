@@ -19,6 +19,7 @@ import { PairHistoryService } from './services/pair-history.service';
 import { PairSummaryService } from './services/pair-summary.service';
 import { PairTransactionService } from './services/pair-transaction.service';
 import { PairService } from './services/pair.service';
+import { TxSubscriber } from './subscribers/tx.subscriber';
 
 @Module({
   imports: [
@@ -43,6 +44,8 @@ import { PairService } from './services/pair.service';
       provide: MDW_PLUGIN,
       useClass: DexPlugin,
     },
+    // Subscribers
+    TxSubscriber,
     // Ensure DI for Dex dependencies not exported by DexModule
     PairHistoryService,
     PairService,
