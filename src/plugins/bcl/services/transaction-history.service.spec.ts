@@ -2,7 +2,7 @@ import { Token } from '@/plugins/bcl/entities/token.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
-import { Transaction } from '../../plugins/bcl/entities/transaction.entity';
+import { Transaction } from '../entities/transaction.entity';
 
 import { TokensService } from '@/plugins/bcl/services/tokens.service';
 import { TransactionHistoryService } from './transaction-history.service';

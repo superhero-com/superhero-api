@@ -45,7 +45,7 @@ export class VerifyTransactionsService {
         verified: false,
         block_height: LessThan(
           this.syncBlocksService.currentBlockNumber -
-          FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
+            FIX_FAILED_TRANSACTION_WHEN_BLOCK_HEIGHT_IS_LESS_THAN,
         ),
       },
       order: {

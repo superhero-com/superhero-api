@@ -20,7 +20,7 @@ import { Queue } from 'bull';
 import moment from 'moment';
 import { TokenHolder } from '../entities/token-holders.entity';
 import { Token } from '../entities/token.entity';
-import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
+import { PULL_TOKEN_INFO_QUEUE } from '../queues/constants';
 import { TokenWebsocketGateway } from '../gateways/token-websocket.gateway';
 import { Transaction } from '@/plugins/bcl/entities/transaction.entity';
 

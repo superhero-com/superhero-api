@@ -2,7 +2,7 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-import { TokensService } from '../tokens.service';
+import { TokensService } from '../services/tokens.service';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 
 export interface ISyncTokenHoldersQueue {

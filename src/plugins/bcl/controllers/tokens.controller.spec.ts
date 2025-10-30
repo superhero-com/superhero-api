@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TokensController } from './tokens.controller';
-import { TokensService } from '../plugins/bcl/services/tokens.service';
+import { TokensService } from '../services/tokens.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { Repository } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Token } from '../plugins/bcl/entities/token.entity';
-import { TokenHolder } from '../plugins/bcl/entities/token-holders.entity';
+import { Token } from '../entities/token.entity';
+import { TokenHolder } from '../entities/token-holders.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Reflector } from '@nestjs/core';

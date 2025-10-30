@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TransactionService } from './transaction.service';
 import { Repository } from 'typeorm';
-import { Transaction } from '../../plugins/bcl/entities/transaction.entity';
+import { Transaction } from '../entities/transaction.entity';
 import { TokensService } from '@/plugins/bcl/services/tokens.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
@@ -9,7 +9,7 @@ import { TokenWebsocketGateway } from '@/plugins/bcl/gateways/token-websocket.ga
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Queue } from 'bull';
 import { Token } from '@/plugins/bcl/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/plugins/bcl/queues/constants';
 import { TX_FUNCTIONS } from '@/configs';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';

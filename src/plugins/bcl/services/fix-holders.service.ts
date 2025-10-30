@@ -5,7 +5,7 @@ import {
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/plugins/bcl/entities/token-holders.entity';
 import { Token } from '@/plugins/bcl/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/plugins/bcl/queues/constants';
 import { fetchJson } from '@/utils/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';

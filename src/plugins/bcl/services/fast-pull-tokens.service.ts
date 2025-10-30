@@ -12,9 +12,9 @@ import { Token } from '@/plugins/bcl/entities/token.entity';
 import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
-} from '@/tokens/queues/constants';
+} from '@/plugins/bcl/queues/constants';
 import { TokensService } from '@/plugins/bcl/services/tokens.service';
-import { TransactionService } from '@/transactions/services/transaction.service';
+import { TransactionService } from '@/plugins/bcl/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
 import { InjectQueue } from '@nestjs/bull';

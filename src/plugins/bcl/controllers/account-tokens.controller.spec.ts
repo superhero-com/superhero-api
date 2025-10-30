@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AccountTokensController } from './account-tokens.controller';
 import { Repository } from 'typeorm';
-import { TokenHolder } from '../plugins/bcl/entities/token-holders.entity';
+import { TokenHolder } from '../entities/token-holders.entity';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { paginate, Pagination } from 'nestjs-typeorm-paginate';

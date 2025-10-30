@@ -12,7 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
 import { Repository } from 'typeorm';
-import { Transaction } from '../../plugins/bcl/entities/transaction.entity';
+import { Transaction } from '../entities/transaction.entity';
 
 @Injectable()
 export class TransactionService {

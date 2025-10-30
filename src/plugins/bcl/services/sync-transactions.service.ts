@@ -1,5 +1,5 @@
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
-import { TransactionService } from '@/transactions/services/transaction.service';
+import { TransactionService } from '@/plugins/bcl/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Injectable, Logger } from '@nestjs/common';

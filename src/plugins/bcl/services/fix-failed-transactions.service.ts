@@ -4,7 +4,7 @@ import {
   TX_FUNCTIONS,
 } from '@/configs';
 import { ACTIVE_NETWORK } from '@/configs/network';
-import { TransactionService } from '@/transactions/services/transaction.service';
+import { TransactionService } from '@/plugins/bcl/services/transaction.service';
 import { fetchJson } from '@/utils/common';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -12,7 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 import { FailedTransaction } from '../entities/failed-transaction.entity';
-import { SyncTransactionsService } from '../../../bcl/services/sync-transactions.service';
+import { SyncTransactionsService } from './sync-transactions.service';
 
 @Injectable()
 export class FixFailedTransactionsService {

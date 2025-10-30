@@ -47,7 +47,7 @@ export class TransactionHistoryService {
     @InjectRepository(Token)
     private readonly tokenRepository: Repository<Token>,
     @InjectDataSource() private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async getOldestHistoryInfo(address: string): Promise<IOldestHistoryInfo> {
     return await this.tokenRepository
@@ -187,16 +187,16 @@ export class TransactionHistoryService {
     const firstBefore =
       props.mode === 'aggregated'
         ? await this.transactionsRepository
-          .createQueryBuilder('transactions')
-          .where('transactions.sale_address = :sale_address', {
-            sale_address: props.token.sale_address,
-          })
-          .andWhere('transactions.created_at < :start', {
-            start: startDate.toDate(),
-          })
-          .orderBy('transactions.created_at', 'DESC')
-          .limit(1)
-          .getOne()
+            .createQueryBuilder('transactions')
+            .where('transactions.sale_address = :sale_address', {
+              sale_address: props.token.sale_address,
+            })
+            .andWhere('transactions.created_at < :start', {
+              start: startDate.toDate(),
+            })
+            .orderBy('transactions.created_at', 'DESC')
+            .limit(1)
+            .getOne()
         : undefined;
 
     return this.processAggregatedHistoricalData(

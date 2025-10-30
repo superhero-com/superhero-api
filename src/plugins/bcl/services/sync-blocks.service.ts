@@ -7,7 +7,7 @@ import { Repository } from 'typeorm';
 import { SyncedBlock } from '../entities/synced-block.entity';
 import { SyncTransactionsService } from './sync-transactions.service';
 import { ACTIVE_NETWORK } from '@/configs/network';
-import { TransactionService } from '@/transactions/services/transaction.service';
+import { TransactionService } from '@/plugins/bcl/services/transaction.service';
 import { FixHoldersService } from './fix-holders.service';
 import {
   TOTAL_BLOCKS_TO_SYNC_EVERY_10_MINUTES,
