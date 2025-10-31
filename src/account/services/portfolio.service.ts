@@ -551,7 +551,6 @@ export class PortfolioService {
       if (tokenBalance > 0) {
         // Get token price at this timestamp (use cache if available)
         let tokenPrice = 0;
-        const timestampMs = timestamp.valueOf();
         
         if (tokenPriceCache?.has(saleAddress)) {
           const priceMap = tokenPriceCache.get(saleAddress)!;
