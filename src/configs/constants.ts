@@ -156,7 +156,7 @@ export const POPULAR_RANKING_CONFIG = {
 
   // weights
   WEIGHTS: {
-    comments: 2.2, // w_c (↑ more important)
+    comments: 1.7, // w_c (↑ more important)
     tipsAmountAE: 4.0, // w_ta (↑ most important)
     tipsCount: 1, // w_tc (supporting)
     interactionsPerHour: 0.2, // w_it (minor)
@@ -166,6 +166,7 @@ export const POPULAR_RANKING_CONFIG = {
     accountAge: 0.02, // w_age (very minor)
     invites: 2, // w_inv (supporting reputation)
     ownedTrends: 1.5, // w_owned (↑ important among account signals)
+    reads: 1.0, // w_reads (modest influence)
   },
 
   // time decay
@@ -201,4 +202,14 @@ export const POPULAR_RANKING_CONFIG = {
   // AE balance normalization (account balance factor)
   BALANCE_NORMALIZER_AE: 500_000, // 0.5M AE ~ full score
   BALANCE_CACHE_TTL_SECONDS: 600, // 10 minutes
+  // Bot UA denylist (lowercase substrings)
+  BOT_UA_DENYLIST: [
+    'bot',
+    'spider',
+    'crawler',
+    'preview',
+    'uptime',
+    'monitor',
+    'curl',
+  ],
 } as const;

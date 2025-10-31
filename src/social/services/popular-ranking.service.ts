@@ -12,6 +12,7 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
+import { PostReadsDaily } from '../entities/post-reads.entity';
 
 type PopularWindow = '24h' | '7d' | 'all';
 
@@ -41,6 +42,8 @@ export class PopularRankingService {
     private readonly aeSdkService: AeSdkService,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    @InjectRepository(PostReadsDaily)
+    private readonly postReadsRepository: Repository<PostReadsDaily>,
   ) {}
 
   private getWindowHours(window: PopularWindow): number {
@@ -195,6 +198,26 @@ export class PopularRankingService {
       invitesRows.map((r) => [r.sender, parseInt(r.sent || '0', 10)] as const),
     );
 
+    // Preload reads over window per post
+    const fromDate = new Date(Date.now() - hours * 3600 * 1000);
+    const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
+      fromDate.getUTCMonth() + 1,
+    ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
+    const readsQB = this.postReadsRepository
+      .createQueryBuilder('r')
+      .select('r.post_id', 'post_id')
+      .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
+      .where('r.post_id IN (:...ids)', { ids });
+    if (window !== 'all') {
+      readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
+    }
+    const readsRows = await readsQB
+      .groupBy('r.post_id')
+      .getRawMany<{ post_id: string; reads: string }>();
+    const readsByPost = new Map(
+      readsRows.map((r) => [r.post_id, parseInt(r.reads || '0', 10)] as const),
+    );
+
     const scored: PopularScoreItem[] = await Promise.all(
       candidates.map(async (post) => {
         const comments = post.total_comments || 0;
@@ -282,6 +305,8 @@ export class PopularRankingService {
         }
 
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
+        const reads = readsByPost.get(post.id) || 0;
+        const readsPerHour = reads / ageHours;
         // owned trends factor: normalize value portfolio into [0..1]
         const ownedRaw = ownedValueByAddress.get(post.sender_address) || 0;
         const normalizer =
@@ -297,6 +322,7 @@ export class PopularRankingService {
           w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
           w.tipsCount * Math.log(1 + tipsCount) +
           w.interactionsPerHour * Math.log(1 + interactionsPerHour) +
+          w.reads * Math.log(1 + readsPerHour) +
           w.trendingBoost * trendingBoost +
           w.contentQuality * contentQuality +
           w.accountBalance * accountBalanceFactor +

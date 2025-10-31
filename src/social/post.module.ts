@@ -8,6 +8,8 @@ import { TrendingTag } from '@/trending-tags/entities/trending-tags.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
+import { PostReadsDaily } from './entities/post-reads.entity';
+import { ReadsService } from './services/reads.service';
 import { PostService } from './services/post.service';
 import { PopularRankingService } from './services/popular-ranking.service';
 import { TransactionsModule } from '@/transactions/transactions.module';
@@ -20,10 +22,10 @@ import { AccountModule } from '@/account/account.module';
     AeModule,
     AccountModule,
     TransactionsModule,
-    TypeOrmModule.forFeature([Post, Topic, Tip, TrendingTag, TokenHolder, Token, Invitation]),
+    TypeOrmModule.forFeature([Post, Topic, Tip, TrendingTag, TokenHolder, Token, Invitation, PostReadsDaily]),
   ],
-  providers: [PostService, PopularRankingService],
-  exports: [PostService, PopularRankingService, TypeOrmModule],
+  providers: [PostService, PopularRankingService, ReadsService],
+  exports: [PostService, PopularRankingService, ReadsService, TypeOrmModule],
   controllers: [PostsController, TopicsController],
 })
 export class PostModule {

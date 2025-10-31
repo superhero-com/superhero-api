@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  Req,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -20,6 +21,8 @@ import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { PopularRankingService } from '../services/popular-ranking.service';
 import { PostDto } from '../dto';
+import type { Request } from 'express';
+import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
@@ -31,6 +34,7 @@ export class PostsController {
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
     private readonly popularRankingService: PopularRankingService,
+    private readonly readsService: ReadsService,
   ) {
     //
   }
@@ -194,13 +198,15 @@ export class PostsController {
     description: 'Post retrieved successfully',
   })
   @Get(':id')
-  async getById(@Param('id') id: string) {
+  async getById(@Param('id') id: string, @Req() req: Request) {
     const post = await this.postRepository.findOne({
       where: { id },
     });
     if (!post) {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
+    // fire-and-forget: do not block response
+    void this.readsService.recordRead(post.id, req);
     return post;
   }
 
