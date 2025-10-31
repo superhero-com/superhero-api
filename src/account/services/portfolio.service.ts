@@ -277,8 +277,10 @@ export class PortfolioService {
     let runningAeBalance = new BigNumber(currentAeBalance);
     
     // Process transactions in reverse chronological order to build balance cache
-    const aeTxsAfterStart = allTransactions
-      .filter(tx => moment(tx.created_at).isAfter(start))
+    // IMPORTANT: Process ALL transactions up to end (not just after start) because
+    // transactions before start affect the balance calculation when working backwards
+    const aeTxsUpToEnd = allTransactions
+      .filter(tx => moment(tx.created_at).isSameOrBefore(end))
       .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
     
     // Initialize with current balance for all timestamps
@@ -289,7 +291,7 @@ export class PortfolioService {
     }
     
     // Work backwards through transactions, updating balances as we go
-    for (const tx of aeTxsAfterStart) {
+    for (const tx of aeTxsUpToEnd) {
       const txMs = moment(tx.created_at).valueOf();
       
       // Reverse this transaction's effect on balance
