@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
@@ -39,13 +41,16 @@ export interface CoinGeckoMarketResponse {
 
 @Injectable()
 export class CoinGeckoService {
+  private readonly logger = new Logger(CoinGeckoService.name);
   rates: CurrencyRates | null = null;
   last_pull_time: Moment;
 
   /**
    * CoinGeckoService class responsible for pulling data at regular intervals.
    */
-  constructor() {
+  constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+  ) {
     setInterval(() => this.pullData(), 1000 * 60 * 5); // 5 minutes
     this.pullData();
   }
@@ -53,11 +58,10 @@ export class CoinGeckoService {
   /**
    * Fetches the coin currency rates for Aeternity and assigns them to the `rates` property.
    */
-  pullData() {
-    this.fetchCoinCurrencyRates(AETERNITY_COIN_ID).then((rates) => {
-      this.rates = rates;
-      this.last_pull_time = moment();
-    });
+  async pullData() {
+    const rates = await this.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    this.rates = rates;
+    this.last_pull_time = moment();
   }
 
   isPullTimeExpired() {
@@ -76,17 +80,29 @@ export class CoinGeckoService {
       await this.pullData();
     }
 
+    // Ensure rates are loaded
+    if (this.rates === null) {
+      this.logger.error('CoinGecko rates are null after pullData');
+      throw new Error('CoinGecko rates not available');
+    }
+
     const prices = {
       ae: price,
     };
 
     CURRENCIES.forEach(({ code }) => {
       try {
-        prices[code] = this.rates![code]
-          ? price.multipliedBy(this.rates![code])
-          : null;
+        const rate = this.rates![code];
+        if (rate != null && typeof rate === 'number') {
+          const converted = price.multipliedBy(rate);
+          prices[code] = converted;
+          this.logger.debug(`Converted ${price.toString()} AE to ${code}: ${converted.toString()} (rate: ${rate})`);
+        } else {
+          this.logger.warn(`No rate available for ${code}`);
+          prices[code] = null;
+        }
       } catch (error) {
-        // console.warn(`Failed to calculate price for ${code}`);
+        this.logger.error(`Failed to calculate price for ${code}:`, error);
         prices[code] = null;
       }
     });
@@ -112,13 +128,105 @@ export class CoinGeckoService {
    */
   async fetchCoinCurrencyRates(coinId: string): Promise<CurrencyRates | null> {
     try {
-      return (
-        (await this.fetchFromApi('/simple/price', {
-          ids: coinId,
-          vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
-        })) as any
-      )[coinId];
+      const response = await this.fetchFromApi('/simple/price', {
+        ids: coinId,
+        vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
+      }) as any;
+      
+      const rates = response[coinId];
+      if (rates) {
+        this.logger.debug(`Fetched CoinGecko rates for ${coinId}:`, JSON.stringify(rates));
+        return rates;
+      }
+      this.logger.warn(`No rates found in CoinGecko response for ${coinId}`);
+      return null;
     } catch (error) {
+      this.logger.error(`Failed to fetch CoinGecko rates for ${coinId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch historical price data for a coin (with caching)
+   * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
+   * @param vsCurrency - The target currency (e.g., 'usd')
+   * @param days - Number of days of history to fetch (1, 7, 14, 30, 90, 180, 365, max)
+   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'
+   * @returns Array of [timestamp_ms, price] pairs
+   */
+  async fetchHistoricalPrice(
+    coinId: string,
+    vsCurrency: string,
+    days: number = 365,
+    interval: 'daily' | 'hourly' = 'daily',
+  ): Promise<Array<[number, number]> | null> {
+    // Create cache key based on coin, currency, days, and interval
+    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval}`;
+    
+    // Try to get from cache first
+    try {
+      const cached = await this.cacheManager.get<Array<[number, number]>>(cacheKey);
+      if (cached) {
+        this.logger.debug(`Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval})`);
+        return cached;
+      }
+    } catch (error) {
+      this.logger.warn(`Cache read error for ${cacheKey}:`, error);
+    }
+
+    // If not in cache, fetch from CoinGecko
+    try {
+      const response = await this.fetchFromApi(
+        `/coins/${coinId}/market_chart`,
+        {
+          vs_currency: vsCurrency,
+          days: String(days),
+          interval: interval,
+        }
+      ) as { prices?: [number, number][]; status?: { error_code: number; error_message: string } };
+      
+      // Check for CoinGecko API errors (e.g., rate limiting)
+      if (response?.status?.error_code) {
+        if (response.status.error_code === 429) {
+          this.logger.warn(`CoinGecko rate limit hit (429). Attempting to use cached data if available, or will wait before retry.`);
+          // Try to get from cache even if stale (it might have expired but still be useful)
+          try {
+            const staleCache = await this.cacheManager.get<Array<[number, number]>>(cacheKey);
+            if (staleCache && staleCache.length > 0) {
+              this.logger.log(`Using stale cached data due to rate limit: ${staleCache.length} price points`);
+              return staleCache;
+            }
+          } catch (cacheError) {
+            this.logger.warn(`Could not read stale cache:`, cacheError);
+          }
+        }
+        this.logger.error(`CoinGecko API error: ${response.status.error_code} - ${response.status.error_message}`);
+        return null;
+      }
+      
+      const prices = response?.prices || null;
+      
+      // Cache the result for 1 hour (3600 seconds)
+      // Historical data doesn't change frequently, so this reduces API calls significantly
+      if (prices && prices.length > 0) {
+        // Log first and last price points for debugging
+        const firstPrice = prices[0];
+        const lastPrice = prices[prices.length - 1];
+        this.logger.log(`CoinGecko returned ${prices.length} price points. First: ${moment(firstPrice[0]).toISOString()} = ${firstPrice[1]} ${vsCurrency}, Last: ${moment(lastPrice[0]).toISOString()} = ${lastPrice[1]} ${vsCurrency}`);
+        
+        try {
+          await this.cacheManager.set(cacheKey, prices, 3600 * 1000); // TTL in milliseconds
+          this.logger.debug(`Cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval}): ${prices.length} data points`);
+        } catch (error) {
+          this.logger.warn(`Cache write error for ${cacheKey}:`, error);
+        }
+      } else {
+        this.logger.warn(`CoinGecko returned empty or invalid price data for ${coinId}. Response keys: ${Object.keys(response || {})}`);
+      }
+      
+      return prices;
+    } catch (error) {
+      this.logger.warn(`Failed to fetch historical price for ${coinId}:`, error);
       return null;
     }
   }
