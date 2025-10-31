@@ -170,7 +170,8 @@ export const POPULAR_RANKING_CONFIG = {
   },
 
   // time decay
-  GRAVITY: 1.6,
+  GRAVITY: 1.6, // 24h
+  GRAVITY_7D: 1.0,
   T_BIAS: 1.0,
 
   // content quality params
@@ -212,4 +213,13 @@ export const POPULAR_RANKING_CONFIG = {
     'monitor',
     'curl',
   ],
+  // score floors to hide zero-signal posts
+  SCORE_FLOOR_DEFAULT: 0.01, // 24h
+  SCORE_FLOOR_7D: 0.008, // 7d
+  SCORE_FLOOR_ALL: 0.1, // all-time
+
+  // candidate caps
+  MAX_CANDIDATES_24H: 500,
+  MAX_CANDIDATES_7D: 3000,
+  MAX_CANDIDATES_ALL: 10000,
 } as const;

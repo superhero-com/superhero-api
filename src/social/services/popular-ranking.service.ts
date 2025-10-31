@@ -47,19 +47,23 @@ export class PopularRankingService {
   ) {}
 
   private getWindowHours(window: PopularWindow): number {
-    return window === '24h'
-      ? POPULAR_RANKING_CONFIG.WINDOW_24H_HOURS
-      : window === '7d'
-        ? POPULAR_RANKING_CONFIG.WINDOW_7D_HOURS
-        : Number.MAX_SAFE_INTEGER; // all-time
+    if (window === '24h') {
+      return POPULAR_RANKING_CONFIG.WINDOW_24H_HOURS;
+    }
+    if (window === '7d') {
+      return POPULAR_RANKING_CONFIG.WINDOW_7D_HOURS;
+    }
+    return Number.MAX_SAFE_INTEGER; // all-time
   }
 
   private getRedisKey(window: PopularWindow): string {
-    return window === '24h'
-      ? POPULAR_RANKING_CONFIG.REDIS_KEYS.popular24h
-      : window === '7d'
-        ? POPULAR_RANKING_CONFIG.REDIS_KEYS.popular7d
-        : POPULAR_RANKING_CONFIG.REDIS_KEYS.popularAll;
+    if (window === '24h') {
+      return POPULAR_RANKING_CONFIG.REDIS_KEYS.popular24h;
+    }
+    if (window === '7d') {
+      return POPULAR_RANKING_CONFIG.REDIS_KEYS.popular7d;
+    }
+    return POPULAR_RANKING_CONFIG.REDIS_KEYS.popularAll;
   }
 
   async getPopularPosts(
@@ -92,7 +96,12 @@ export class PopularRankingService {
     }
 
     // If not cached, compute and cache
-    const fallbackMax = window === 'all' ? 10000 : 500;
+    const fallbackMax =
+      window === 'all'
+        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
+        : window === '7d'
+        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+        : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
     await this.recompute(window, maxCandidates ?? fallbackMax); // compute more than requested
     let cachedAfter: string[] = [];
     try {
@@ -365,7 +374,12 @@ export class PopularRankingService {
           w.invites * invitesFactor +
           w.ownedTrends * ownedNorm;
 
-        const gravity = window === 'all' ? 0.0 : POPULAR_RANKING_CONFIG.GRAVITY;
+        let gravity = 0.0;
+        if (window === '7d') {
+          gravity = POPULAR_RANKING_CONFIG.GRAVITY_7D;
+        } else if (window === '24h') {
+          gravity = POPULAR_RANKING_CONFIG.GRAVITY;
+        }
         const score =
           numerator /
           Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
@@ -373,10 +387,19 @@ export class PopularRankingService {
       }),
     );
 
+    // Apply score floor (hide zero-signal posts)
+    let scoreFloor: number = POPULAR_RANKING_CONFIG.SCORE_FLOOR_DEFAULT;
+    if (window === '7d') {
+      scoreFloor = POPULAR_RANKING_CONFIG.SCORE_FLOOR_7D;
+    } else if (window === 'all') {
+      scoreFloor = POPULAR_RANKING_CONFIG.SCORE_FLOOR_ALL;
+    }
+    const eligible = scored.filter((s) => s.score >= scoreFloor);
+
     // Cache in Redis ZSET
     const multi = this.redis.multi();
     multi.del(key);
-    for (const item of scored) {
+    for (const item of eligible) {
       multi.zadd(key, item.score.toString(), item.postId);
     }
     multi.expire(key, POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS);
