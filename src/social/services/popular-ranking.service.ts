@@ -363,10 +363,17 @@ export class PopularRankingService {
       }),
     );
 
+    // Apply score floor (hide zero-signal posts)
+    const scoreFloor =
+      window === 'all'
+        ? POPULAR_RANKING_CONFIG.SCORE_FLOOR_ALL
+        : POPULAR_RANKING_CONFIG.SCORE_FLOOR_DEFAULT;
+    const eligible = scored.filter((s) => s.score >= scoreFloor);
+
     // Cache in Redis ZSET
     const multi = this.redis.multi();
     multi.del(key);
-    for (const item of scored) {
+    for (const item of eligible) {
       multi.zadd(key, item.score.toString(), item.postId);
     }
     multi.expire(key, POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS);

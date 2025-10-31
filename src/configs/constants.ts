@@ -212,4 +212,7 @@ export const POPULAR_RANKING_CONFIG = {
     'monitor',
     'curl',
   ],
+  // score floors to hide zero-signal posts
+  SCORE_FLOOR_DEFAULT: 0.01, // 24h/7d
+  SCORE_FLOOR_ALL: 0.1, // all-time
 } as const;
