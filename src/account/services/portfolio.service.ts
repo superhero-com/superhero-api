@@ -766,7 +766,7 @@ export class PortfolioService {
   }
 
   /**
-   * Get AE balance at a specific timestamp by tracking transactions
+   * Get AE balance at a specific timestamp by querying balance at block height
    */
   private async getAEBalanceAtTimestamp(
     address: string,
@@ -774,69 +774,67 @@ export class PortfolioService {
     allTransactions?: Transaction[],
   ): Promise<number> {
     try {
-      // Start with current balance
-      const currentBalance = await this.aeSdkService.sdk.getBalance(address as any);
-      let balance = new BigNumber(currentBalance);
-
-      // Use provided transactions or fetch transactions after the timestamp
-      let transactionsAfter: Transaction[];
-      if (allTransactions) {
-        transactionsAfter = allTransactions.filter((tx) =>
-          moment(tx.created_at).isAfter(timestamp),
-        );
-      } else {
-        transactionsAfter = await this.transactionRepository
-          .createQueryBuilder('tx')
-          .where('tx.address = :address', { address })
-          .andWhere('tx.created_at > :timestamp', { timestamp: timestamp.toDate() })
-          .orderBy('tx.created_at', 'ASC')
-          .getMany();
-      }
-
-      // Reverse transactions after the timestamp to get historical balance
-      // If someone bought tokens after this timestamp, they spent AE, so add it back
-      // If someone sold tokens after this timestamp, they received AE, so subtract it
-      // Note: tx.amount.ae is in AE, but balance is in aettos, so we need to convert
-      this.logger.debug(`Calculating AE balance for ${address} at ${timestamp.toISOString()}: current balance = ${toAe(balance.toString())} AE, transactions after: ${transactionsAfter.length}`);
-      for (const tx of transactionsAfter) {
-        if (tx.amount && typeof tx.amount === 'object' && 'ae' in tx.amount) {
-          const aeAmountValue = tx.amount.ae;
-          // Check if it's a valid number (not NaN, null, or undefined)
-          if (
-            aeAmountValue != null &&
-            typeof aeAmountValue === 'number' &&
-            !isNaN(aeAmountValue) &&
-            isFinite(aeAmountValue) &&
-            aeAmountValue > 0
-          ) {
-            try {
-              // Convert from AE to aettos (multiply by 10^18)
-              const aeAmountAettos = new BigNumber(aeAmountValue).multipliedBy(
-                new BigNumber(10).pow(18),
-              );
-              const balanceBefore = balance;
-              if (tx.tx_type === 'buy') {
-                // They spent AE, so add it back to get historical balance
-                balance = balance.plus(aeAmountAettos);
-                this.logger.debug(`  Buy tx ${tx.tx_hash} at ${moment(tx.created_at).toISOString()}: spent ${aeAmountValue} AE, balance ${toAe(balanceBefore.toString())} -> ${toAe(balance.toString())} AE`);
-              } else if (tx.tx_type === 'sell') {
-                // They received AE, so subtract it to get historical balance
-                balance = balance.minus(aeAmountAettos);
-                this.logger.debug(`  Sell tx ${tx.tx_hash} at ${moment(tx.created_at).toISOString()}: received ${aeAmountValue} AE, balance ${toAe(balanceBefore.toString())} -> ${toAe(balance.toString())} AE`);
-              }
-            } catch (error) {
-              this.logger.warn(`Invalid AE amount in transaction ${tx.tx_hash}: ${aeAmountValue}`, error);
-            }
-          } else {
-            this.logger.debug(`  Skipping tx ${tx.tx_hash}: invalid AE amount: ${aeAmountValue}`);
-          }
-        } else {
-          this.logger.debug(`  Skipping tx ${tx.tx_hash}: no amount.ae field`);
+      // Find block height for the timestamp by finding a transaction at or before that time
+      let blockHeight: number | undefined;
+      
+      if (allTransactions && allTransactions.length > 0) {
+        // Find the most recent transaction at or before the timestamp
+        const transactionsBefore = allTransactions
+          .filter((tx) => moment(tx.created_at).isSameOrBefore(timestamp))
+          .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
+        
+        if (transactionsBefore.length > 0) {
+          blockHeight = transactionsBefore[0].block_height;
         }
       }
-
-      // Convert from aettos to AE
-      return Number(toAe(balance.toString()));
+      
+      // If no transaction found from this address, query database for any transaction near the timestamp
+      // to get an approximate block height for that time
+      if (!blockHeight) {
+        const transaction = await this.transactionRepository
+          .createQueryBuilder('tx')
+          .where('tx.created_at <= :timestamp', { timestamp: timestamp.toDate() })
+          .andWhere('tx.created_at >= :minTimestamp', { 
+            minTimestamp: moment(timestamp).subtract(1, 'hour').toDate() 
+          })
+          .orderBy('tx.created_at', 'DESC')
+          .limit(1)
+          .getOne();
+        
+        if (transaction) {
+          blockHeight = transaction.block_height;
+        } else {
+          // If no transaction found within 1 hour, try without time constraint
+          const anyTransaction = await this.transactionRepository
+            .createQueryBuilder('tx')
+            .where('tx.created_at <= :timestamp', { timestamp: timestamp.toDate() })
+            .orderBy('tx.created_at', 'DESC')
+            .limit(1)
+            .getOne();
+          
+          if (anyTransaction) {
+            blockHeight = anyTransaction.block_height;
+          }
+        }
+      }
+      
+      // If we found a block height, use SDK to get balance at that block
+      if (blockHeight) {
+        try {
+          const balance = await this.aeSdkService.sdk.getBalance(address as any, {
+            height: blockHeight,
+          });
+          this.logger.debug(`Got balance for ${address} at block ${blockHeight} (${timestamp.toISOString()}): ${toAe(balance.toString())} AE`);
+          return Number(toAe(balance.toString()));
+        } catch (sdkError) {
+          this.logger.warn(`Failed to get balance at block ${blockHeight} for ${address}, falling back to current balance:`, sdkError);
+        }
+      }
+      
+      // Fallback: use current balance if block height lookup failed
+      const currentBalance = await this.aeSdkService.sdk.getBalance(address as any);
+      this.logger.debug(`Using current balance for ${address} at ${timestamp.toISOString()}: ${toAe(currentBalance.toString())} AE`);
+      return Number(toAe(currentBalance.toString()));
     } catch (error) {
       this.logger.error(`Error fetching AE balance for ${address}:`, error);
       // Fallback to current balance
