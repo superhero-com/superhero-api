@@ -69,9 +69,10 @@ export class PortfolioService {
     const start = startDate || moment().subtract(90, 'days'); // Default to last 90 days
 
     // Validate interval to prevent infinite loop
-    const safeInterval = Math.max(1, interval); // Ensure interval is at least 1 second
+    const defaultInterval = 86400; // Default daily (24 hours)
+    const safeInterval = interval > 0 ? interval : defaultInterval;
     if (interval <= 0) {
-      this.logger.warn(`Invalid interval ${interval} provided, using default 86400 seconds`);
+      this.logger.warn(`Invalid interval ${interval} provided, using default ${defaultInterval} seconds`);
     }
 
     // Generate timestamp intervals
