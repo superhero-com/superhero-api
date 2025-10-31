@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  Req,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -18,7 +19,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
+import { PopularRankingService } from '../services/popular-ranking.service';
 import { PostDto } from '../dto';
+import type { Request } from 'express';
+import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
@@ -29,12 +33,15 @@ export class PostsController {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    private readonly popularRankingService: PopularRankingService,
+    private readonly readsService: ReadsService,
   ) {
     //
   }
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiQuery({ name: 'max', type: 'number', required: false, description: 'Max candidates to score (window=all defaults higher)' })
   @ApiQuery({
     name: 'order_by',
     enum: ['total_comments', 'created_at'],
@@ -138,6 +145,73 @@ export class PostsController {
     return paginate(query, { page, limit });
   }
 
+  @ApiQuery({ name: 'window', enum: ['24h', '7d', 'all'], required: false })
+  @ApiQuery({ name: 'debug', type: 'number', required: false, description: 'Return feature breakdown when set to 1' })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiOperation({
+    operationId: 'popular',
+    summary: 'Popular posts',
+    description: 'Returns popular posts for selected time window. Views are ignored in v1.',
+  })
+  @ApiOkResponsePaginated(PostDto)
+  @Get('popular')
+  async popular(
+    @Query('window') window: '24h' | '7d' | 'all' = '24h',
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+    @Query('max') max?: string,
+    @Query('debug') debug?: number,
+  ) {
+    const offset = (page - 1) * limit;
+    const maxCandidates = max ? Math.max(1, Math.min(50000, parseInt(max, 10) || 0)) : undefined;
+    try {
+      const posts = await this.popularRankingService.getPopularPosts(window, limit, offset, maxCandidates);
+      let totalItems: number | undefined;
+      try {
+        totalItems = await this.popularRankingService['redis'].zcard(
+          (this.popularRankingService as any)['getRedisKey'](window),
+        );
+      } catch {
+        totalItems = undefined;
+      }
+      const totalPages = totalItems ? Math.ceil(totalItems / limit) : undefined;
+      const response: any = {
+        items: posts,
+        meta: {
+          itemCount: posts.length,
+          totalItems,
+          totalPages,
+          currentPage: page,
+        },
+      };
+      if (debug === 1) {
+        response.debug = await (this.popularRankingService as any).explain(window, limit, offset);
+      }
+      return response;
+    } catch (error) {
+      const items = await this.postRepository
+        .createQueryBuilder('post')
+        .where('post.is_hidden = false')
+        .andWhere('post.post_id IS NULL')
+        .orderBy('post.created_at', 'DESC')
+        .offset(offset)
+        .limit(limit)
+        .getMany();
+      return {
+        items,
+        meta: {
+          itemCount: items.length,
+          totalItems: undefined,
+          totalPages: undefined,
+          currentPage: page,
+          fallback: true,
+          error: 'Popular ranking temporarily unavailable; returned recent posts',
+        },
+      };
+    }
+  }
+
   @ApiParam({ name: 'id', type: 'string', description: 'Post ID' })
   @ApiOperation({
     operationId: 'getById',
@@ -149,13 +223,15 @@ export class PostsController {
     description: 'Post retrieved successfully',
   })
   @Get(':id')
-  async getById(@Param('id') id: string) {
+  async getById(@Param('id') id: string, @Req() req: Request) {
     const post = await this.postRepository.findOne({
       where: { id },
     });
     if (!post) {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
+    // fire-and-forget: do not block response
+    void this.readsService.recordRead(post.id, req);
     return post;
   }
 
