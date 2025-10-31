@@ -780,7 +780,11 @@ export class PortfolioService {
       if (allTransactions && allTransactions.length > 0) {
         // Find the most recent transaction at or before the timestamp
         const transactionsBefore = allTransactions
-          .filter((tx) => moment(tx.created_at).isSameOrBefore(timestamp))
+          .filter((tx) => 
+            moment(tx.created_at).isSameOrBefore(timestamp) && 
+            tx.block_height != null && 
+            tx.block_height > 0
+          )
           .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
         
         if (transactionsBefore.length > 0) {
@@ -801,40 +805,56 @@ export class PortfolioService {
           .limit(1)
           .getOne();
         
-        if (transaction) {
+        if (transaction && transaction.block_height != null && transaction.block_height > 0) {
           blockHeight = transaction.block_height;
         } else {
           // If no transaction found within 1 hour, try without time constraint
           const anyTransaction = await this.transactionRepository
             .createQueryBuilder('tx')
             .where('tx.created_at <= :timestamp', { timestamp: timestamp.toDate() })
+            .andWhere('tx.block_height IS NOT NULL')
+            .andWhere('tx.block_height > 0')
             .orderBy('tx.created_at', 'DESC')
             .limit(1)
             .getOne();
           
-          if (anyTransaction) {
+          if (anyTransaction && anyTransaction.block_height != null && anyTransaction.block_height > 0) {
             blockHeight = anyTransaction.block_height;
           }
         }
       }
       
       // If we found a block height, use SDK to get balance at that block
-      if (blockHeight) {
+      if (blockHeight && blockHeight > 0) {
         try {
-          const balance = await this.aeSdkService.sdk.getBalance(address as any, {
+          // Try to get balance at specific block height
+          // Note: The SDK might not support this, so we catch and fallback
+          // Use Promise.race with timeout to prevent hanging
+          const balancePromise = this.aeSdkService.sdk.getBalance(address as any, {
             height: blockHeight,
-          });
+          } as any);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Balance lookup timeout')), 5000)
+          );
+          
+          const balance = await Promise.race([balancePromise, timeoutPromise]) as any;
           this.logger.debug(`Got balance for ${address} at block ${blockHeight} (${timestamp.toISOString()}): ${toAe(balance.toString())} AE`);
           return Number(toAe(balance.toString()));
-        } catch (sdkError) {
-          this.logger.warn(`Failed to get balance at block ${blockHeight} for ${address}, falling back to current balance:`, sdkError);
+        } catch (sdkError: any) {
+          // If SDK doesn't support height parameter or times out, fallback to current balance
+          this.logger.warn(`Failed to get balance at block ${blockHeight} for ${address}: ${sdkError?.message || sdkError}, falling back to current balance`);
         }
       }
       
       // Fallback: use current balance if block height lookup failed
-      const currentBalance = await this.aeSdkService.sdk.getBalance(address as any);
-      this.logger.debug(`Using current balance for ${address} at ${timestamp.toISOString()}: ${toAe(currentBalance.toString())} AE`);
-      return Number(toAe(currentBalance.toString()));
+      try {
+        const currentBalance = await this.aeSdkService.sdk.getBalance(address as any);
+        this.logger.debug(`Using current balance for ${address} at ${timestamp.toISOString()}: ${toAe(currentBalance.toString())} AE`);
+        return Number(toAe(currentBalance.toString()));
+      } catch (balanceError) {
+        this.logger.error(`Failed to get current balance for ${address}:`, balanceError);
+        return 0;
+      }
     } catch (error) {
       this.logger.error(`Error fetching AE balance for ${address}:`, error);
       // Fallback to current balance
