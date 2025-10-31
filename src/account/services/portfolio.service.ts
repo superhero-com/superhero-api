@@ -68,12 +68,34 @@ export class PortfolioService {
     const end = endDate || moment();
     const start = startDate || moment().subtract(90, 'days'); // Default to last 90 days
 
+    // Validate interval to prevent infinite loop
+    const safeInterval = Math.max(1, interval); // Ensure interval is at least 1 second
+    if (interval <= 0) {
+      this.logger.warn(`Invalid interval ${interval} provided, using default 86400 seconds`);
+    }
+
     // Generate timestamp intervals
     const timestamps: Moment[] = [];
     let current = moment(start);
-    while (current.isBefore(end) || current.isSame(end, 'day')) {
+    const maxIterations = 100000; // Safety limit to prevent infinite loops
+    let iterations = 0;
+    const endTimestamp = end.valueOf();
+    
+    while (current.valueOf() <= endTimestamp) {
+      if (iterations >= maxIterations) {
+        this.logger.error(`Timestamp generation exceeded max iterations (${maxIterations}), stopping to prevent infinite loop`);
+        break;
+      }
       timestamps.push(moment(current));
-      current.add(interval, 'seconds');
+      const previousTimestamp = current.valueOf();
+      current.add(safeInterval, 'seconds');
+      iterations++;
+      
+      // Additional safety check: if current didn't advance, break
+      if (current.valueOf() <= previousTimestamp) {
+        this.logger.error(`Timestamp generation stalled, current timestamp did not advance (${current.valueOf()} <= ${previousTimestamp}). Stopping to prevent infinite loop.`);
+        break;
+      }
     }
 
     // If no timestamps, return current snapshot
