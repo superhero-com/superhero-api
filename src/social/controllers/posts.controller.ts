@@ -41,7 +41,6 @@ export class PostsController {
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
-  @ApiQuery({ name: 'max', type: 'number', required: false, description: 'Max candidates to score (window=all defaults higher)' })
   @ApiQuery({
     name: 'order_by',
     enum: ['total_comments', 'created_at'],
@@ -160,31 +159,47 @@ export class PostsController {
     @Query('window') window: '24h' | '7d' | 'all' = '24h',
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
-    @Query('max') max?: string,
     @Query('debug') debug?: number,
   ) {
     const offset = (page - 1) * limit;
-    const maxCandidates = max ? Math.max(1, Math.min(50000, parseInt(max, 10) || 0)) : undefined;
-    const posts = await this.popularRankingService.getPopularPosts(window, limit, offset, maxCandidates);
-    // Attempt to get total from Redis ZCARD; if unavailable, approximate with page size
-    const totalItems = await this.popularRankingService['redis'].zcard(
-      (this.popularRankingService as any)['getRedisKey'](window),
-    );
-
-    const totalPages = totalItems ? Math.ceil(totalItems / limit) : undefined;
-    const response: any = {
-      items: posts,
-      meta: {
-        itemCount: posts.length,
-        totalItems,
-        totalPages,
-        currentPage: page,
-      },
-    };
-    if (debug === 1) {
-      response.debug = await (this.popularRankingService as any).explain(window, limit, offset);
+    try {
+      const posts = await this.popularRankingService.getPopularPosts(window, limit, offset);
+      const totalItems = await this.popularRankingService.getTotalCached(window);
+      const totalPages = totalItems ? Math.ceil(totalItems / limit) : undefined;
+      const response: any = {
+        items: posts,
+        meta: {
+          itemCount: posts.length,
+          totalItems,
+          totalPages,
+          currentPage: page,
+        },
+      };
+      if (debug === 1) {
+        response.debug = await (this.popularRankingService as any).explain(window, limit, offset);
+      }
+      return response;
+    } catch (error) {
+      const items = await this.postRepository
+        .createQueryBuilder('post')
+        .where('post.is_hidden = false')
+        .andWhere('post.post_id IS NULL')
+        .orderBy('post.created_at', 'DESC')
+        .offset(offset)
+        .limit(limit)
+        .getMany();
+      return {
+        items,
+        meta: {
+          itemCount: items.length,
+          totalItems: undefined,
+          totalPages: undefined,
+          currentPage: page,
+          fallback: true,
+          error: 'Popular ranking temporarily unavailable; returned recent posts',
+        },
+      };
     }
-    return response;
   }
 
   @ApiParam({ name: 'id', type: 'string', description: 'Post ID' })

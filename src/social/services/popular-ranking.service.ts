@@ -71,12 +71,17 @@ export class PopularRankingService {
     const key = this.getRedisKey(window);
 
     // Try Redis cache first
-    const cached = await this.redis.zrevrange(
-      key,
-      offset,
-      offset + limit - 1,
-      'WITHSCORES',
-    );
+    let cached: string[] = [];
+    try {
+      cached = await this.redis.zrevrange(
+        key,
+        offset,
+        offset + limit - 1,
+        'WITHSCORES',
+      );
+    } catch {
+      cached = [];
+    }
     if (cached.length > 0) {
       const ids = [] as string[];
       for (let i = 0; i < cached.length; i += 2) ids.push(cached[i]);
@@ -89,17 +94,32 @@ export class PopularRankingService {
     // If not cached, compute and cache
     const fallbackMax = window === 'all' ? 10000 : 500;
     await this.recompute(window, maxCandidates ?? fallbackMax); // compute more than requested
-    const cachedAfter = await this.redis.zrevrange(
-      key,
-      offset,
-      offset + limit - 1,
-    );
+    let cachedAfter: string[] = [];
+    try {
+      cachedAfter = await this.redis.zrevrange(
+        key,
+        offset,
+        offset + limit - 1,
+      );
+    } catch {
+      cachedAfter = [];
+    }
     if (cachedAfter.length === 0) return [];
     const posts = await this.postRepository.findBy({ id: In(cachedAfter) });
     const order = new Map(cachedAfter.map((id, idx) => [id, idx] as const));
     return posts.sort(
       (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
     );
+  }
+
+  // Public metadata helper to keep encapsulation
+  async getTotalCached(window: PopularWindow): Promise<number | undefined> {
+    const key = this.getRedisKey(window);
+    try {
+      return await this.redis.zcard(key);
+    } catch {
+      return undefined;
+    }
   }
 
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
@@ -144,7 +164,12 @@ export class PopularRankingService {
     const tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
 
     // Trending tags map (tag -> score)
-    const trending = await this.trendingTagRepository.find();
+    let trending = [] as TrendingTag[];
+    try {
+      trending = await this.trendingTagRepository.find();
+    } catch {
+      trending = [] as TrendingTag[];
+    }
     const trendingByTag = new Map(
       trending.map((t) => [t.tag.toLowerCase(), t.score] as const),
     );
@@ -169,7 +194,9 @@ export class PopularRankingService {
         ? usdValueField
         : aeValueField;
 
-    const tokenHoldings = await this.tokenHolderRepository
+    let tokenHoldings: { address: string; owned_value: string }[] = [];
+    try {
+      tokenHoldings = await this.tokenHolderRepository
       .createQueryBuilder('holder')
       .leftJoin(Token, 'token', 'token.address = holder.aex9_address')
       .select('holder.address', 'address')
@@ -180,6 +207,9 @@ export class PopularRankingService {
       .where('holder.address IN (:...authors)', { authors })
       .groupBy('holder.address')
       .getRawMany<{ address: string; owned_value: string }>();
+    } catch {
+      tokenHoldings = [];
+    }
     const ownedValueByAddress = new Map(
       tokenHoldings.map(
         (r) => [r.address, parseFloat(r.owned_value || '0')] as const,
@@ -187,13 +217,18 @@ export class PopularRankingService {
     );
 
     // Preload invites sent per author from invitations
-    const invitesRows = await this.invitationRepository
+    let invitesRows: { sender: string; sent: string }[] = [];
+    try {
+      invitesRows = await this.invitationRepository
       .createQueryBuilder('inv')
       .select('inv.sender_address', 'sender')
       .addSelect('COUNT(*)', 'sent')
       .where('inv.sender_address IN (:...authors)', { authors })
       .groupBy('inv.sender_address')
       .getRawMany<{ sender: string; sent: string }>();
+    } catch {
+      invitesRows = [];
+    }
     const invitesByAddress = new Map(
       invitesRows.map((r) => [r.sender, parseInt(r.sent || '0', 10)] as const),
     );
