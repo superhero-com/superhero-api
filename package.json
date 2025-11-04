@@ -18,7 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/bctsl-sdk/.build && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json"
+    "postinstall": "node ./scripts/update-package-type.js && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json"
   },
   "dependencies": {
     "@aeternity/aepp-sdk": "^13.3.2",
@@ -52,7 +52,10 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "typeorm": "^0.3.27",
-    "ws": "^8.18.2"
+    "ws": "^8.18.2",
+    "aws-sdk": "^2.1605.0",
+    "ipfs-http-client": "^56.0.1",
+    "is-ipfs": "^6.0.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.10",
