@@ -75,11 +75,12 @@ export class TopicsController {
     return paginate(query, { page, limit });
   }
 
-  @ApiParam({ name: 'id', type: 'string', description: 'Topic ID' })
+  @ApiParam({ name: 'id', type: 'string', description: 'Topic ID or name' })
   @ApiOperation({
     operationId: 'getTopicById',
-    summary: 'Get topic by ID',
-    description: 'Retrieve a specific topic by its unique identifier',
+    summary: 'Get topic by ID or name',
+    description:
+      'Retrieve a specific topic by its unique identifier (UUID) or name',
   })
   @ApiOkResponse({
     type: Topic,
@@ -87,12 +88,20 @@ export class TopicsController {
   })
   @Get(':id')
   async getById(@Param('id') id: string) {
+    // Check if the parameter is a valid UUID format
+    const isUUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        id,
+      );
+
     const topic = await this.topicRepository.findOne({
-      where: { id },
+      where: isUUID ? { id } : { name: id },
       relations: ['posts'],
     });
     if (!topic) {
-      throw new NotFoundException(`Topic with ID ${id} not found`);
+      throw new NotFoundException(
+        `Topic with ${isUUID ? 'ID' : 'name'} "${id}" not found`,
+      );
     }
     return topic;
   }
