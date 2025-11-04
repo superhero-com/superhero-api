@@ -100,16 +100,12 @@ export class PopularRankingService {
       window === 'all'
         ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
         : window === '7d'
-        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
-        : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+          : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
     await this.recompute(window, maxCandidates ?? fallbackMax); // compute more than requested
     let cachedAfter: string[] = [];
     try {
-      cachedAfter = await this.redis.zrevrange(
-        key,
-        offset,
-        offset + limit - 1,
-      );
+      cachedAfter = await this.redis.zrevrange(key, offset, offset + limit - 1);
     } catch {
       cachedAfter = [];
     }
@@ -206,16 +202,16 @@ export class PopularRankingService {
     let tokenHoldings: { address: string; owned_value: string }[] = [];
     try {
       tokenHoldings = await this.tokenHolderRepository
-      .createQueryBuilder('holder')
-      .leftJoin(Token, 'token', 'token.address = holder.aex9_address')
-      .select('holder.address', 'address')
-      .addSelect(
-        `SUM((CAST(holder.balance AS numeric) / NULLIF(POWER(10, token.decimals::int), 0)) * ${valueField})`,
-        'owned_value',
-      )
-      .where('holder.address IN (:...authors)', { authors })
-      .groupBy('holder.address')
-      .getRawMany<{ address: string; owned_value: string }>();
+        .createQueryBuilder('holder')
+        .leftJoin(Token, 'token', 'token.address = holder.aex9_address')
+        .select('holder.address', 'address')
+        .addSelect(
+          `SUM((CAST(holder.balance AS numeric) / NULLIF(POWER(10, token.decimals::int), 0)) * ${valueField})`,
+          'owned_value',
+        )
+        .where('holder.address IN (:...authors)', { authors })
+        .groupBy('holder.address')
+        .getRawMany<{ address: string; owned_value: string }>();
     } catch {
       tokenHoldings = [];
     }
@@ -229,12 +225,12 @@ export class PopularRankingService {
     let invitesRows: { sender: string; sent: string }[] = [];
     try {
       invitesRows = await this.invitationRepository
-      .createQueryBuilder('inv')
-      .select('inv.sender_address', 'sender')
-      .addSelect('COUNT(*)', 'sent')
-      .where('inv.sender_address IN (:...authors)', { authors })
-      .groupBy('inv.sender_address')
-      .getRawMany<{ sender: string; sent: string }>();
+        .createQueryBuilder('inv')
+        .select('inv.sender_address', 'sender')
+        .addSelect('COUNT(*)', 'sent')
+        .where('inv.sender_address IN (:...authors)', { authors })
+        .groupBy('inv.sender_address')
+        .getRawMany<{ sender: string; sent: string }>();
     } catch {
       invitesRows = [];
     }

@@ -145,13 +145,19 @@ export class PostsController {
   }
 
   @ApiQuery({ name: 'window', enum: ['24h', '7d', 'all'], required: false })
-  @ApiQuery({ name: 'debug', type: 'number', required: false, description: 'Return feature breakdown when set to 1' })
+  @ApiQuery({
+    name: 'debug',
+    type: 'number',
+    required: false,
+    description: 'Return feature breakdown when set to 1',
+  })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({
     operationId: 'popular',
     summary: 'Popular posts',
-    description: 'Returns popular posts for selected time window. Views are ignored in v1.',
+    description:
+      'Returns popular posts for selected time window. Views are ignored in v1.',
   })
   @ApiOkResponsePaginated(PostDto)
   @Get('popular')
@@ -163,8 +169,13 @@ export class PostsController {
   ) {
     const offset = (page - 1) * limit;
     try {
-      const posts = await this.popularRankingService.getPopularPosts(window, limit, offset);
-      const totalItems = await this.popularRankingService.getTotalCached(window);
+      const posts = await this.popularRankingService.getPopularPosts(
+        window,
+        limit,
+        offset,
+      );
+      const totalItems =
+        await this.popularRankingService.getTotalCached(window);
       const totalPages = totalItems ? Math.ceil(totalItems / limit) : undefined;
       const response: any = {
         items: posts,
@@ -176,7 +187,11 @@ export class PostsController {
         },
       };
       if (debug === 1) {
-        response.debug = await (this.popularRankingService as any).explain(window, limit, offset);
+        response.debug = await (this.popularRankingService as any).explain(
+          window,
+          limit,
+          offset,
+        );
       }
       return response;
     } catch (error) {
@@ -196,7 +211,8 @@ export class PostsController {
           totalPages: undefined,
           currentPage: page,
           fallback: true,
-          error: 'Popular ranking temporarily unavailable; returned recent posts',
+          error:
+            'Popular ranking temporarily unavailable; returned recent posts',
         },
       };
     }
@@ -214,9 +230,24 @@ export class PostsController {
   })
   @Get(':id')
   async getById(@Param('id') id: string, @Req() req: Request) {
-    const post = await this.postRepository.findOne({
-      where: [{ id }, { slug: id }],
-    });
+    const post = await this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.topics', 'topic')
+      .leftJoinAndMapOne(
+        'topic.token',
+        Token,
+        'token',
+        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
+      )
+      .leftJoinAndMapOne(
+        'token.performance',
+        TokenPerformanceView,
+        'token_performance_view',
+        'token.sale_address = token_performance_view.sale_address',
+      )
+      .where('(post.id = :id OR post.slug = :id)', { id })
+      .getOne();
+
     if (!post) {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }

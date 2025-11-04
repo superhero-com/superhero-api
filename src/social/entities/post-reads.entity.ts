@@ -11,5 +11,3 @@ export class PostReadsDaily {
   @Column({ type: 'integer', default: 0 })
   reads: number;
 }
-
-
