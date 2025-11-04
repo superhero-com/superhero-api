@@ -363,7 +363,7 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
 })
 export class TokenPerformanceView {
   @ViewColumn()
-  @Index()
+  @Index({ unique: true })
   sale_address: string;
 
   @ViewColumn()

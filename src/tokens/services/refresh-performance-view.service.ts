@@ -26,9 +26,34 @@ export class RefreshPerformanceViewService {
       this.logger.log('Refreshing token_performance_view materialized view...');
       const startTime = Date.now();
 
-      await this.dataSource.query(
-        'REFRESH MATERIALIZED VIEW CONCURRENTLY token_performance_view',
-      );
+      try {
+        // Try concurrent refresh first (requires unique index)
+        await this.dataSource.query(
+          'REFRESH MATERIALIZED VIEW CONCURRENTLY token_performance_view',
+        );
+      } catch (concurrentError: any) {
+        // If concurrent refresh fails, fall back to non-concurrent refresh
+        const errorMessage =
+          concurrentError?.message ||
+          concurrentError?.driverError?.message ||
+          '';
+        const errorCode =
+          concurrentError?.code || concurrentError?.driverError?.code || '';
+
+        if (
+          errorMessage.includes('cannot refresh materialized view') ||
+          errorCode === '42883'
+        ) {
+          this.logger.warn(
+            'Concurrent refresh not available (unique index may be missing), falling back to non-concurrent refresh',
+          );
+          await this.dataSource.query(
+            'REFRESH MATERIALIZED VIEW token_performance_view',
+          );
+        } else {
+          throw concurrentError;
+        }
+      }
 
       const duration = Date.now() - startTime;
       this.logger.log(
