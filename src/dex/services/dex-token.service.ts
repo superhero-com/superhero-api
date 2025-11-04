@@ -57,40 +57,40 @@ export class DexTokenService {
       // Handle special cases for JSON field ordering
       switch (orderBy) {
         case 'price':
-          query.orderBy("(dexToken.price->>'ae')::numeric", orderDirection);
+          query.orderBy('("dexToken".price->>\'ae\')::numeric', orderDirection);
           break;
         case 'tvl':
           query.orderBy(
-            "(summary.total_volume->>'ae')::numeric",
+            '("summary".total_volume->>\'ae\')::numeric',
             orderDirection,
           );
           break;
         case '24hchange':
           query.orderBy(
-            "(summary.change->'24h'->>'percentage')::numeric",
+            "(\"summary\".change->'24h'->>'percentage')::numeric",
             orderDirection,
           );
           break;
         case '24hvolume':
           query.orderBy(
-            "(summary.change->'24h'->>'volume'->>'ae')::numeric",
+            "(\"summary\".change->'24h'->>'volume'->>'ae')::numeric",
             orderDirection,
           );
           break;
         case '7dchange':
           query.orderBy(
-            "(summary.change->'7d'->>'percentage')::numeric",
+            "(\"summary\".change->'7d'->>'percentage')::numeric",
             orderDirection,
           );
           break;
         case '7dvolume':
           query.orderBy(
-            "(summary.change->'7d'->>'volume'->>'ae')::numeric",
+            "(\"summary\".change->'7d'->>'volume'->>'ae')::numeric",
             orderDirection,
           );
           break;
         default:
-          query.orderBy(`dexToken.${orderBy}`, orderDirection);
+          query.orderBy(`"dexToken".${orderBy}`, orderDirection);
       }
     }
 
