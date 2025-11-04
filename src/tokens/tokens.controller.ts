@@ -277,9 +277,9 @@ export class TokensController {
       )
       SELECT 
         ranked_tokens.*,
-        row_to_json(token_performance.*) as performance
+        row_to_json(token_performance_view.*) as performance
       FROM ranked_tokens
-      LEFT JOIN token_performance ON ranked_tokens.sale_address = token_performance.sale_address
+      LEFT JOIN token_performance_view ON ranked_tokens.sale_address = token_performance_view.sale_address
       WHERE rank >= (
         SELECT rank FROM target_rank
       ) - (SELECT lower_limit FROM adjusted_limits)
