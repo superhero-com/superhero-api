@@ -145,3 +145,81 @@ export const TRENDING_SCORE_CONFIG = {
   TIME_WINDOW_HOURS: 24,
   MAX_LIFETIME_MINUTES: 1440, // 24 hours in minutes
 } as const;
+
+/**
+ * Popular posts ranking configuration (v1)
+ */
+export const POPULAR_RANKING_CONFIG = {
+  // default time windows (hours)
+  WINDOW_24H_HOURS: 24,
+  WINDOW_7D_HOURS: 24 * 7,
+
+  // weights
+  WEIGHTS: {
+    comments: 1.7, // w_c (↑ more important)
+    tipsAmountAE: 4.0, // w_ta (↑ most important)
+    tipsCount: 1, // w_tc (supporting)
+    interactionsPerHour: 0.2, // w_it (minor)
+    trendingBoost: 0.4, // w_tr (minor)
+    contentQuality: 0.3, // w_q (minor, prevents spam)
+    accountBalance: 0.2, // w_bal (very minor)
+    accountAge: 0.02, // w_age (very minor)
+    invites: 2, // w_inv (supporting reputation)
+    ownedTrends: 1.5, // w_owned (↑ important among account signals)
+    reads: 1.0, // w_reads (modest influence)
+  },
+
+  // time decay
+  GRAVITY: 1.6, // 24h
+  GRAVITY_7D: 1.0,
+  T_BIAS: 1.0,
+
+  // content quality params
+  CONTENT: {
+    minLengthForNoPenalty: 10,
+    maxReferenceLength: 140,
+    highEmojiRatioThreshold: 0.5,
+    shortLengthThreshold: 10,
+  },
+
+  // trending scaling
+  TRENDING_MAX_SCORE: 100, // scale trending tag score to [0..1]
+
+  // redis
+  REDIS_KEYS: {
+    popular24h: 'popular:24h',
+    popular7d: 'popular:7d',
+    popularAll: 'popular:all',
+  },
+  REDIS_TTL_SECONDS: 120,
+
+  // owned trends normalization
+  OWNED_TRENDS_MAX_TRENDING_SCORE: 100,
+  OWNED_TRENDS_LOG_NORMALIZER: 10_000, // legacy (score-based)
+  OWNED_TRENDS_VALUE_CURRENCY: 'ae' as 'ae' | 'usd', // controls owned-trends currency basis
+  OWNED_TRENDS_VALUE_NORMALIZER_AE: 20000, // 20k AE portfolio ~ full score
+  OWNED_TRENDS_VALUE_NORMALIZER_USD: 500000, // $500k portfolio ~ full score
+
+  // AE balance normalization (account balance factor)
+  BALANCE_NORMALIZER_AE: 500_000, // 0.5M AE ~ full score
+  BALANCE_CACHE_TTL_SECONDS: 600, // 10 minutes
+  // Bot UA denylist (lowercase substrings)
+  BOT_UA_DENYLIST: [
+    'bot',
+    'spider',
+    'crawler',
+    'preview',
+    'uptime',
+    'monitor',
+    'curl',
+  ],
+  // score floors to hide zero-signal posts
+  SCORE_FLOOR_DEFAULT: 0.01, // 24h
+  SCORE_FLOOR_7D: 0.008, // 7d
+  SCORE_FLOOR_ALL: 0.1, // all-time
+
+  // candidate caps
+  MAX_CANDIDATES_24H: 500,
+  MAX_CANDIDATES_7D: 3000,
+  MAX_CANDIDATES_ALL: 10000,
+} as const;
