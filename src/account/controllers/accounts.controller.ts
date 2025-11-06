@@ -1,3 +1,4 @@
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   Controller,
   DefaultValuePipe,
@@ -6,15 +7,17 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
-import moment from 'moment';
 
+@UseInterceptors(CacheInterceptor)
 @Controller('accounts')
 @ApiTags('Accounts')
 export class AccountsController {
@@ -62,22 +65,49 @@ export class AccountsController {
   // Portfolio history endpoint - MUST come before :address route to avoid route conflict
   @ApiOperation({ operationId: 'getPortfolioHistory' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
-  @ApiQuery({ name: 'startDate', type: 'string', required: false, description: 'Start date (ISO 8601)' })
-  @ApiQuery({ name: 'endDate', type: 'string', required: false, description: 'End date (ISO 8601)' })
-  @ApiQuery({ name: 'interval', type: 'number', required: false, description: 'Interval in seconds (default: 86400 for daily)' })
+  @ApiQuery({
+    name: 'startDate',
+    type: 'string',
+    required: false,
+    description: 'Start date (ISO 8601)',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    type: 'string',
+    required: false,
+    description: 'End date (ISO 8601)',
+  })
+  @ApiQuery({
+    name: 'interval',
+    type: 'number',
+    required: false,
+    description: 'Interval in seconds (default: 86400 for daily)',
+  })
   @ApiQuery({
     name: 'convertTo',
     enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
     required: false,
     description: 'Currency to convert to (default: ae)',
   })
+  @CacheTTL(60 * 10) // 10 minutes
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
     @Param('address') address: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
-    @Query('interval', new DefaultValuePipe(86400), ParseIntPipe) interval?: number,
-    @Query('convertTo') convertTo?: 'ae' | 'usd' | 'eur' | 'aud' | 'brl' | 'cad' | 'chf' | 'gbp' | 'xau',
+    @Query('interval', new DefaultValuePipe(86400), ParseIntPipe)
+    interval?: number,
+    @Query('convertTo')
+    convertTo?:
+      | 'ae'
+      | 'usd'
+      | 'eur'
+      | 'aud'
+      | 'brl'
+      | 'cad'
+      | 'chf'
+      | 'gbp'
+      | 'xau',
   ) {
     const start = startDate ? moment(startDate) : undefined;
     const end = endDate ? moment(endDate) : undefined;
