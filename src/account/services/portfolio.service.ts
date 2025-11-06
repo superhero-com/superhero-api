@@ -105,19 +105,19 @@ export class PortfolioService {
     // Always use 'daily' interval from CoinGecko - hourly data is not reliably available
     // We'll use the closest daily price for any timestamp (including hourly requests)
     const priceInterval: 'daily' | 'hourly' = 'daily';
-    const aePriceHistory = await this.coinGeckoService.fetchHistoricalPrice(
+    const aePriceHistory = (await this.coinGeckoService.fetchHistoricalPrice(
       AETERNITY_COIN_ID,
       'usd', // force to usd
       days,
       priceInterval,
-    );
+    )).sort((a, b) => b[0] - a[0]);
     const currentAePrice = await this.coinGeckoService.getPriceData(new BigNumber(1));
 
     const data = await Promise.all(
       timestamps.map(async (timestamp) => {
         // the aePriceHistory is an array of [timestamp_ms, price] pairs
         // we need to find the closest price to the timestamp
-        const closestPrice = aePriceHistory.sort((a, b) => b[0] - a[0]).find(([priceTimeMs]) => {
+        const closestPrice = aePriceHistory.find(([priceTimeMs]) => {
           return priceTimeMs <= timestamp.valueOf();
         });
         const price = closestPrice ? closestPrice[1] : currentAePrice?.usd || 0;
@@ -126,6 +126,7 @@ export class PortfolioService {
           previousHeight,
           this.dataSource,
         );
+        previousHeight = blockHeight;
         const [totalBclTokensValue, aeBalance] = await Promise.all([
           this.transactionRepository
             .createQueryBuilder('tx')
