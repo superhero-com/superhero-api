@@ -13,11 +13,16 @@ import { toAe } from '@aeternity/aepp-sdk';
 import { timestampToAeHeight } from '@/utils/getBlochHeight';
 
 export interface PortfolioHistorySnapshot {
-  timestamp: Date;
-  total_value_ae: number;
-  ae_balance: number;
+  timestamp: Moment | Date;
+  blockHeight: number;
   tokens_value_ae: number;
-  total_value_usd?: number; // USD value (or other fiat if convertTo != 'usd')
+  tokens_value_usd: number;
+  total_value_ae: number;
+  total_value_usd: number;
+  ae_balance: number;
+  usd_balance: number;
+  ae_price: number;
+  version: number;
 }
 
 export interface GetPortfolioHistoryOptions {
@@ -196,10 +201,10 @@ export class PortfolioService {
           usd_balance: balance * price,
           ae_price: price,
           version: 1,
-        };
+        } as PortfolioHistorySnapshot;
       }),
     );
 
-    return data as unknown as PortfolioHistorySnapshot[];
+    return data;
   }
 }
