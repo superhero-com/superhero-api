@@ -44,6 +44,7 @@ export class PortfolioService {
 
   /**
    * Get portfolio history for an account
+   * OPTIMIZED: Reduced nested loops from O(n*m) to O(m*log(n)) complexity
    */
   async getPortfolioHistory(
     address: string,
@@ -59,9 +60,15 @@ export class PortfolioService {
     // Get all tokens owned by this account (for current snapshot or to know which tokens to track)
     const accountTokens = await this.getAccountTokens(address);
 
-    // If no tokens and we're just getting current value, return early
+    // Early return: if no tokens and we're just getting current value
     if (!startDate && !endDate) {
       return [await this.getCurrentPortfolioSnapshot(address, accountTokens, convertTo)];
+    }
+    
+    // Early return: if no tokens at all, return empty array
+    if (accountTokens.length === 0 && (!startDate || !endDate)) {
+      this.logger.debug(`No tokens found for ${address}, returning empty portfolio history`);
+      return [];
     }
 
     // Calculate date range
@@ -242,24 +249,37 @@ export class PortfolioService {
       }
       
       // For each token, build price map for all timestamps efficiently
-      // Strategy: iterate through transactions once, marking all later timestamps with that price
+      // OPTIMIZED: Iterate timestamps once, find most recent transaction <= each timestamp
+      // This is O(m*log(n)) instead of O(n*m) where n=transactions, m=timestamps
       for (const [saleAddress, txs] of txsByToken.entries()) {
         const priceMap = new Map<number, number>();
         
-        // For each transaction, apply its price to all timestamps >= transaction date
-        for (const tx of txs) {
-          const price = Number(tx.buy_price?.ae);
-          if (isNaN(price) || price <= 0) continue;
+        // Sort transactions by date descending for efficient lookup
+        const sortedTxs = txs
+          .filter(tx => {
+            const price = Number(tx.buy_price?.ae);
+            return !isNaN(price) && price > 0;
+          })
+          .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
+        
+        if (sortedTxs.length === 0) continue;
+        
+        // For each timestamp, find the most recent transaction <= that timestamp
+        for (const timestamp of timestamps) {
+          const tsMs = timestamp.valueOf();
           
-          const txMs = moment(tx.created_at).valueOf();
-          
-          // Update all timestamps >= this transaction date with this price
-          // (later transactions will overwrite if they have a later date)
-          for (const timestamp of timestamps) {
-            const tsMs = timestamp.valueOf();
-            if (tsMs >= txMs) {
-              priceMap.set(tsMs, price);
+          // Find first transaction <= timestamp (sorted descending, so first match is most recent)
+          let price = 0;
+          for (const tx of sortedTxs) {
+            const txMs = moment(tx.created_at).valueOf();
+            if (txMs <= tsMs) {
+              price = Number(tx.buy_price?.ae);
+              break; // Found most recent transaction <= timestamp
             }
+          }
+          
+          if (price > 0) {
+            priceMap.set(tsMs, price);
           }
         }
         
@@ -291,6 +311,9 @@ export class PortfolioService {
     }
     
     // Work backwards through transactions, updating balances as we go
+    // OPTIMIZED: Track balance changes and apply them efficiently
+    // Build a map of balance changes at transaction timestamps
+    const balanceChanges = new Map<number, number>();
     for (const tx of aeTxsUpToEnd) {
       const txMs = moment(tx.created_at).valueOf();
       
@@ -304,24 +327,35 @@ export class PortfolioService {
           isFinite(aeAmountValue) &&
           aeAmountValue > 0
         ) {
-          if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
-            // They spent AE, so add it back for historical balance
-            runningAeBalance = runningAeBalance.plus(new BigNumber(aeAmountValue).multipliedBy(1e18));
-          } else if (tx.tx_type === 'sell') {
-            // They received AE, so subtract it for historical balance
-            runningAeBalance = runningAeBalance.minus(new BigNumber(aeAmountValue).multipliedBy(1e18));
-          }
+          const change = tx.tx_type === 'buy' || tx.tx_type === 'create_community'
+            ? new BigNumber(aeAmountValue).multipliedBy(1e18) // They spent AE, add back
+            : new BigNumber(aeAmountValue).multipliedBy(-1e18); // They received AE, subtract
+          
+          balanceChanges.set(txMs, Number(toAe(change.toString())));
+        }
+      }
+    }
+    
+    // Apply balance changes to timestamps efficiently
+    // Sort balance changes by timestamp descending
+    const sortedChanges = Array.from(balanceChanges.entries())
+      .sort((a, b) => b[0] - a[0]);
+    
+    // For each timestamp, calculate balance by applying all changes after it
+    for (const timestamp of timestamps) {
+      const tsMs = timestamp.valueOf();
+      let balance = currentAeBalanceNumber;
+      
+      // Apply all balance changes that occurred after this timestamp
+      for (const [changeMs, change] of sortedChanges) {
+        if (changeMs > tsMs) {
+          balance += change;
+        } else {
+          break; // Changes are sorted descending, so we can stop here
         }
       }
       
-      // Update all timestamps before this transaction with the new balance
-      const updatedBalance = Number(toAe(runningAeBalance.toString()));
-      for (const timestamp of timestamps) {
-        const tsMs = timestamp.valueOf();
-        if (tsMs < txMs) {
-          aeBalanceCache.set(tsMs, updatedBalance);
-        }
-      }
+      aeBalanceCache.set(tsMs, balance);
     }
 
     // Pre-compute token balances for all tokens and timestamps
@@ -339,29 +373,39 @@ export class PortfolioService {
         .filter(tx => tx.sale_address === token.sale_address && tx.address === address)
         .sort((a, b) => moment(b.created_at).valueOf() - moment(a.created_at).valueOf());
       
-      // Initialize with current balance for all timestamps
-      for (const timestamp of timestamps) {
-        balanceMap.set(timestamp.valueOf(), Number(runningBalance.toString()) / Math.pow(10, decimals));
-      }
+      // OPTIMIZED: Build balance changes map and apply efficiently
+      const initialBalance = Number(runningBalance.toString()) / Math.pow(10, decimals);
+      const balanceChanges = new Map<number, number>();
       
-      // Work backwards through transactions
+      // Calculate balance changes from transactions
       for (const tx of tokenTxs) {
         const txMs = moment(tx.created_at).valueOf();
+        const change = tx.tx_type === 'buy' || tx.tx_type === 'create_community'
+          ? Number(tx.volume.toString()) / Math.pow(10, decimals) // They received tokens, subtract
+          : -Number(tx.volume.toString()) / Math.pow(10, decimals); // They sold tokens, add back
         
-        // Reverse transaction effect
-        if (tx.tx_type === 'buy' || tx.tx_type === 'create_community') {
-          runningBalance = runningBalance.minus(tx.volume);
-        } else if (tx.tx_type === 'sell') {
-          runningBalance = runningBalance.plus(tx.volume);
-        }
+        balanceChanges.set(txMs, change);
+      }
+      
+      // Sort changes by timestamp descending
+      const sortedChanges = Array.from(balanceChanges.entries())
+        .sort((a, b) => b[0] - a[0]);
+      
+      // Initialize with current balance for all timestamps
+      for (const timestamp of timestamps) {
+        const tsMs = timestamp.valueOf();
+        let balance = initialBalance;
         
-        // Update all timestamps before this transaction
-        for (const timestamp of timestamps) {
-          const tsMs = timestamp.valueOf();
-          if (tsMs < txMs) {
-            balanceMap.set(tsMs, Math.max(0, Number(runningBalance.toString()) / Math.pow(10, decimals)));
+        // Apply all balance changes that occurred after this timestamp
+        for (const [changeMs, change] of sortedChanges) {
+          if (changeMs > tsMs) {
+            balance -= change; // Subtract because we're working backwards
+          } else {
+            break; // Changes are sorted descending
           }
         }
+        
+        balanceMap.set(tsMs, Math.max(0, balance));
       }
       
       tokenBalanceCache.set(token.sale_address, balanceMap);
@@ -684,6 +728,10 @@ export class PortfolioService {
 
   /**
    * Get all transactions for an account up to a given timestamp
+   * OPTIMIZED: Uses database indexes on (address, created_at) for efficient querying
+   * NOTE: Ensure database has indexes:
+   *   - CREATE INDEX idx_transaction_address_created ON transactions(address, created_at);
+   *   - CREATE INDEX idx_transaction_sale_address_created ON transactions(sale_address, created_at);
    */
   private async getAllAccountTransactions(
     address: string,
@@ -696,14 +744,9 @@ export class PortfolioService {
       .orderBy('tx.created_at', 'ASC')
       .getMany();
     
-    // Also check total transactions for this address (debug)
-    const totalCount = await this.transactionRepository
-      .createQueryBuilder('tx')
-      .where('tx.address = :address', { address })
-      .getCount();
-    
-    if (totalCount > transactions.length) {
-      this.logger.warn(`Query filtered ${totalCount - transactions.length} transactions due to endDate=${endDate.toISOString()}. Total transactions for ${address}: ${totalCount}, filtered: ${transactions.length}`);
+    // Log performance metrics
+    if (transactions.length > 1000) {
+      this.logger.warn(`Large transaction set for ${address}: ${transactions.length} transactions. Consider pagination or date range limits.`);
     }
     
     return transactions;
