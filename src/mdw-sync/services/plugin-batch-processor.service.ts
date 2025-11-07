@@ -66,9 +66,6 @@ export class PluginBatchProcessorService {
       });
 
       if (!syncState) {
-        console.log("================================================")
-        console.log("Plugin sync state not found", plugin.name);
-        console.log("================================================")
         return;
       }
 
@@ -79,12 +76,11 @@ export class PluginBatchProcessorService {
       );
 
       if (matchingTransactions.length === 0) {
-        console.log("================================================")
-        console.log("No matching transactions for plugin", plugin.name, matchingTransactions.length);
-        console.log("================================================")
         return;
       }
-
+      console.log("================================================")
+      console.log("Matching transactions for plugin", plugin.name, matchingTransactions.length, syncDirection);
+      console.log("================================================")
       // Process batch - errors are handled inside processBatch
       try {
         await plugin.processBatch(matchingTransactions);
@@ -156,37 +152,53 @@ export class PluginBatchProcessorService {
 
     for (const tx of transactions) {
       // Basic filtering based on contract ID, function, and type
+      // Use OR logic: transaction matches if ANY of the specified conditions match
       const matches = filters.some((filter) => {
-        // Check type
+        let hasAnyFilter = false;
+        let matchesAny = false;
+
+        // Check type (if specified)
         if (filter.type) {
-          if (filter.type === 'contract_call' && tx.type !== 'ContractCallTx') {
-            return false;
-          }
-          if (filter.type === 'spend' && tx.type !== 'SpendTx') {
-            return false;
+          hasAnyFilter = true;
+          if (
+            (filter.type === 'contract_call' && tx.type === 'ContractCallTx') ||
+            (filter.type === 'spend' && tx.type === 'SpendTx')
+          ) {
+            matchesAny = true;
           }
         }
 
-        // Check contract ID
+        // Check contract ID (if specified)
         if (filter.contractIds && filter.contractIds.length > 0) {
-          if (!tx.contract_id || !filter.contractIds.includes(tx.contract_id)) {
-            return false;
+          hasAnyFilter = true;
+          if (tx.contract_id && filter.contractIds.includes(tx.contract_id)) {
+            matchesAny = true;
           }
         }
 
-        // Check function
+        // Check function (if specified)
         if (filter.functions && filter.functions.length > 0) {
-          if (!tx.function || !filter.functions.includes(tx.function)) {
-            return false;
+          hasAnyFilter = true;
+          if (tx.function && filter.functions.includes(tx.function)) {
+            matchesAny = true;
           }
         }
 
         // Check predicate if provided
         if (filter.predicate) {
-          return filter.predicate(tx);
+          hasAnyFilter = true;
+          if (filter.predicate(tx)) {
+            matchesAny = true;
+          }
         }
 
-        return true;
+        // If no filters are specified, match everything
+        if (!hasAnyFilter) {
+          return true;
+        }
+
+        // Match if ANY specified filter matches (OR logic)
+        return matchesAny;
       });
 
       if (matches) {
