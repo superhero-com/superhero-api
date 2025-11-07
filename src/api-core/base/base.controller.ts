@@ -270,64 +270,134 @@ export function createBaseController<T>(
       @Query('includes') includes?: string,
       @Query() allQueryParams?: Record<string, any>,
     ) {
-      const query = this.repository.createQueryBuilder(config.tableAlias);
+      // Check if we have array relations that would cause pagination issues
+      const hasArrayRelations = includes && this.configRegistry
+        ? checkHasArrayRelations(config, parseIncludesToTree(includes), this.configRegistry)
+        : false;
 
-      // Apply includes if provided (must be done before other query modifications)
-      if (includes && this.configRegistry) {
-        const includesTree = parseIncludesToTree(includes);
+      let result: any;
+
+      if (hasArrayRelations) {
+        // When we have array relations, we need to use a subquery approach:
+        // 1. First get the paginated IDs of parent entities (without joins)
+        // 2. Then fetch the full entities with relations using those IDs
         
-        // Check if we have any array relations (OneToMany) that would cause duplicate rows
-        const hasArrayRelations = checkHasArrayRelations(config, includesTree, this.configRegistry);
+        // Step 1: Build a query to get paginated parent IDs
+        const idQuery = this.repository.createQueryBuilder(config.tableAlias);
         
-        // If we have array relations, we need to use distinct to avoid duplicate parent rows
-        // This ensures pagination works correctly
-        // Note: distinct(true) tells TypeORM to deduplicate entities based on primary key
-        // when using leftJoinAndMapMany, which can create duplicate rows
-        if (hasArrayRelations) {
-          query.distinct(true);
+        // Apply filters from searchable fields
+        if (allQueryParams) {
+          const excludedParams = ['page', 'limit', 'order_by', 'order_direction', 'includes'];
+          for (const searchableField of searchableFields) {
+            const filterValue = allQueryParams[searchableField.field];
+            if (
+              filterValue !== undefined &&
+              filterValue !== null &&
+              filterValue !== '' &&
+              !excludedParams.includes(searchableField.field)
+            ) {
+              if (searchableField.resolver) {
+                searchableField.resolver(idQuery, config.tableAlias, searchableField.field, filterValue);
+              } else {
+                idQuery.andWhere(
+                  `${config.tableAlias}.${searchableField.field} = :${searchableField.field}`,
+                  { [searchableField.field]: filterValue },
+                );
+              }
+            }
+          }
         }
+
+        // Apply ordering
+        if (orderBy) {
+          idQuery.orderBy(`${config.tableAlias}.${orderBy}`, orderDirection);
+        }
+
+        // Get paginated IDs
+        const idResult = await paginate(idQuery.select(`${config.tableAlias}.${config.primaryKey}`), { page, limit });
+        const ids = idResult.items.map((item: any) => item[config.primaryKey]);
+
+        if (ids.length === 0) {
+          // No results, return empty pagination
+          return {
+            items: [],
+            metaInfo: idResult.meta,
+          };
+        }
+
+        // Step 2: Fetch full entities with relations using the paginated IDs
+        const query = this.repository.createQueryBuilder(config.tableAlias);
         
+        // Filter by the paginated IDs
+        query.where(`${config.tableAlias}.${config.primaryKey} IN (:...ids)`, { ids });
+
+        // Apply includes with relations
+        const includesTree = parseIncludesToTree(includes!);
         applyIncludesToQueryBuilder(
           query,
           config,
           includesTree,
-          this.configRegistry,
+          this.configRegistry!,
         );
-      }
 
-      // Apply filters from searchable fields
-      // Exclude pagination and sorting parameters from filters
-      if (allQueryParams) {
-        const excludedParams = ['page', 'limit', 'order_by', 'order_direction', 'includes'];
-        for (const searchableField of searchableFields) {
-          const filterValue = allQueryParams[searchableField.field];
-          // Only apply filter if value is provided and not excluded
-          if (
-            filterValue !== undefined &&
-            filterValue !== null &&
-            filterValue !== '' &&
-            !excludedParams.includes(searchableField.field)
-          ) {
-            if (searchableField.resolver) {
-              // Use custom resolver
-              searchableField.resolver(query, config.tableAlias, searchableField.field, filterValue);
-            } else {
-              // Default: exact match
-              query.andWhere(
-                `${config.tableAlias}.${searchableField.field} = :${searchableField.field}`,
-                { [searchableField.field]: filterValue },
-              );
+        // Get all entities (we already paginated by IDs)
+        const entities = await query.getMany();
+
+        // Reorder entities to match the original pagination order
+        // Create a map for O(1) lookup
+        const entityMap = new Map(entities.map((e: any) => [e[config.primaryKey], e]));
+        // Reorder based on the original ID order
+        const orderedEntities = ids.map((id: any) => entityMap.get(id)).filter(Boolean);
+
+        result = {
+          items: orderedEntities,
+          meta: idResult.meta,
+        };
+      } else {
+        // No array relations, use standard pagination
+        const query = this.repository.createQueryBuilder(config.tableAlias);
+
+        // Apply includes if provided
+        if (includes && this.configRegistry) {
+          const includesTree = parseIncludesToTree(includes);
+          applyIncludesToQueryBuilder(
+            query,
+            config,
+            includesTree,
+            this.configRegistry,
+          );
+        }
+
+        // Apply filters from searchable fields
+        if (allQueryParams) {
+          const excludedParams = ['page', 'limit', 'order_by', 'order_direction', 'includes'];
+          for (const searchableField of searchableFields) {
+            const filterValue = allQueryParams[searchableField.field];
+            if (
+              filterValue !== undefined &&
+              filterValue !== null &&
+              filterValue !== '' &&
+              !excludedParams.includes(searchableField.field)
+            ) {
+              if (searchableField.resolver) {
+                searchableField.resolver(query, config.tableAlias, searchableField.field, filterValue);
+              } else {
+                query.andWhere(
+                  `${config.tableAlias}.${searchableField.field} = :${searchableField.field}`,
+                  { [searchableField.field]: filterValue },
+                );
+              }
             }
           }
         }
-      }
 
-      // Apply ordering
-      if (orderBy) {
-        query.orderBy(`${config.tableAlias}.${orderBy}`, orderDirection);
-      }
+        // Apply ordering
+        if (orderBy) {
+          query.orderBy(`${config.tableAlias}.${orderBy}`, orderDirection);
+        }
 
-      const result = await paginate(query, { page, limit });
+        result = await paginate(query, { page, limit });
+      }
 
       // Limit array relations to 50 items if includes were used
       if (includes && this.configRegistry) {
