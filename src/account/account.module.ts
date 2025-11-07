@@ -5,7 +5,9 @@ import { Account } from './entities/account.entity';
 import { AccountService } from './services/account.service';
 import { TransactionsModule } from '@/transactions/transactions.module';
 import { AccountsController } from './controllers/accounts.controller';
+import { BclPnlController } from './controllers/bcl-pnl.controller';
 import { PortfolioService } from './services/portfolio.service';
+import { BclPnlService } from './services/bcl-pnl.service';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
@@ -18,9 +20,9 @@ import { TokensModule } from '@/tokens/tokens.module';
     TokensModule,
     TypeOrmModule.forFeature([Account, TokenHolder, Token, Transaction]),
   ],
-  providers: [AccountService, PortfolioService],
+  providers: [AccountService, PortfolioService, BclPnlService],
   exports: [TypeOrmModule],
-  controllers: [AccountsController],
+  controllers: [AccountsController, BclPnlController],
 })
 export class AccountModule {
   //

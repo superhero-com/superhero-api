@@ -11,10 +11,11 @@ import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
 import { timestampToAeHeight } from '@/utils/getBlochHeight';
+import { BclPnlService } from './bcl-pnl.service';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
-  blockHeight: number;
+  block_height: number;
   tokens_value_ae: number;
   tokens_value_usd: number;
   total_value_ae: number;
@@ -23,6 +24,40 @@ export interface PortfolioHistorySnapshot {
   usd_balance: number;
   ae_price: number;
   version: number;
+  total_pnl?: {
+    percentage: number;
+    invested: {
+      ae: number;
+      usd: number;
+    },
+    current_value: {
+      ae: number;
+      usd: number;
+    };
+    gain: {
+      ae: number;
+      usd: number;
+    };
+  };
+  tokens_pnl?: Record<string, {
+    current_unit_price: {
+      ae: number;
+      usd: number;
+    };
+    percentage: number;
+    invested: {
+      ae: number;
+      usd: number;
+    },
+    current_value: {
+      ae: number;
+      usd: number;
+    };
+    gain: {
+      ae: number;
+      usd: number;
+    };
+  }>;
 }
 
 export interface GetPortfolioHistoryOptions {
@@ -39,6 +74,7 @@ export interface GetPortfolioHistoryOptions {
   | 'chf'
   | 'gbp'
   | 'xau';
+  includePnl?: boolean; // Whether to include PNL data
 }
 
 @Injectable()
@@ -55,7 +91,9 @@ export class PortfolioService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly aeSdkService: AeSdkService,
     private readonly coinGeckoService: CoinGeckoService,
+    private readonly bclPnlService: BclPnlService,
   ) { }
+
 
   async getPortfolioHistory(
     address: string,
@@ -66,6 +104,7 @@ export class PortfolioService {
       endDate,
       interval = 86400, // Default daily (24 hours)
       convertTo = 'ae',
+      includePnl = false,
     } = options;
 
     // Calculate date range
@@ -132,7 +171,9 @@ export class PortfolioService {
           this.dataSource,
         );
         previousHeight = blockHeight;
-        const [totalBclTokensValue, aeBalance] = await Promise.all([
+        
+        // Prepare promises for parallel execution
+        const promises = [
           this.transactionRepository
             .createQueryBuilder('tx')
             .select(
@@ -183,16 +224,29 @@ export class PortfolioService {
             {
               height: blockHeight,
             } as any,
-          )
-        ]);
+          ),
+        ];
+
+        // Add PNL calculation promise only if requested
+        if (includePnl) {
+          promises.push(
+            this.bclPnlService.calculateTokenPnls(address, blockHeight),
+          );
+        }
+
+        const results = await Promise.all(promises);
+        const totalBclTokensValue = results[0];
+        const aeBalance = results[1];
+        const tokensPnl = includePnl ? results[2] : null;
 
         const balance = Number(toAe(aeBalance));
 
         const tokensValue = Number(totalBclTokensValue.net_ae);
         const tokensValueUsd = Number(totalBclTokensValue.net_usd || 0);
-        return {
+
+        const result: PortfolioHistorySnapshot = {
           timestamp,
-          blockHeight,
+          block_height: blockHeight,
           tokens_value_ae: tokensValue,
           tokens_value_usd: tokensValueUsd,
           total_value_ae: balance + tokensValue,
@@ -201,7 +255,35 @@ export class PortfolioService {
           usd_balance: balance * price,
           ae_price: price,
           version: 1,
-        } as PortfolioHistorySnapshot;
+        };
+
+        // Include PNL data only if requested
+        if (includePnl && tokensPnl) {
+          // Calculate total PNL percentage
+          const totalPnlPercentage =
+            tokensPnl.totalCostBasisAe > 0
+              ? (tokensPnl.totalGainAe / tokensPnl.totalCostBasisAe) * 100
+              : 0;
+
+          result.total_pnl = {
+            percentage: totalPnlPercentage,
+            invested: {
+              ae: tokensPnl.totalCostBasisAe,
+              usd: tokensPnl.totalCostBasisUsd,
+            },
+            current_value: {
+              ae: tokensPnl.totalCurrentValueAe,
+              usd: tokensPnl.totalCurrentValueUsd,
+            },
+            gain: {
+              ae: tokensPnl.totalGainAe,
+              usd: tokensPnl.totalGainUsd,
+            },
+          };
+          result.tokens_pnl = tokensPnl.pnls;
+        }
+
+        return result;
       }),
     );
 
