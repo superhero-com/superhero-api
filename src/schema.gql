@@ -20,6 +20,7 @@ type KeyBlock {
   hash: String!
   height: Int!
   info: String!
+  microBlocks(gas: Int, limit: Int = 100, micro_block_index: Int, offset: Int = 0, orderBy: String, orderDirection: String, transactions_count: Int, version: Int): [MicroBlock!]!
   micro_blocks_count: Int!
   miner: String!
   nonce: String!
@@ -40,6 +41,7 @@ type MicroBlock {
   gas: Int!
   hash: String!
   height: Int!
+  keyBlock: KeyBlock
   micro_block_index: Int!
   pof_hash: String!
   prev_hash: String!
@@ -48,6 +50,7 @@ type MicroBlock {
   state_hash: String!
   time: String!
   transactions_count: Int!
+  txs(caller_id: String, contract_id: String, function: String, limit: Int = 100, offset: Int = 0, orderBy: String, orderDirection: String, recipient_id: String, sender_id: String, type: String): [Tx!]!
   txs_hash: String!
   version: Int!
 }
@@ -97,6 +100,7 @@ type Tx {
   encoded_tx: String
   function: String
   hash: String!
+  keyBlock: KeyBlock
   micro_index: String!
   micro_time: String!
   payload: String
