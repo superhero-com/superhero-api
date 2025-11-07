@@ -89,6 +89,12 @@ export class AccountsController {
     required: false,
     description: 'Currency to convert to (default: ae)',
   })
+  @ApiQuery({
+    name: 'include',
+    type: 'string',
+    required: false,
+    description: 'Comma-separated list of fields to include (e.g., "pnl")',
+  })
   @CacheTTL(60 * 10) // 10 minutes
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
@@ -108,15 +114,18 @@ export class AccountsController {
       | 'chf'
       | 'gbp'
       | 'xau',
+    @Query('include') include?: string,
   ) {
     const start = startDate ? moment(startDate) : undefined;
     const end = endDate ? moment(endDate) : undefined;
+    const includeFields = include ? include.split(',').map((f) => f.trim()) : [];
 
     return await this.portfolioService.getPortfolioHistory(address, {
       startDate: start,
       endDate: end,
       interval,
       convertTo: convertTo || 'ae',
+      includePnl: includeFields.includes('pnl'),
     });
   }
 
