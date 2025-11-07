@@ -20,7 +20,7 @@ type KeyBlock {
   hash: String!
   height: Int!
   info: String!
-  microBlocks(gas: Int, limit: Int = 100, micro_block_index: Int, offset: Int = 0, orderBy: String, orderDirection: String, transactions_count: Int, version: Int): [MicroBlock!]!
+  microBlocks(gas: String, limit: Int = 100, micro_block_index: String, offset: Int = 0, orderBy: String, orderDirection: String, transactions_count: String, version: String): [MicroBlock!]!
   micro_blocks_count: Int!
   miner: String!
   nonce: String!

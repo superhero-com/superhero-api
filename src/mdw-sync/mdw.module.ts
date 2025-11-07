@@ -9,29 +9,19 @@ import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { SyncState } from './entities/sync-state.entity';
 import { Tx } from './entities/tx.entity';
 import { MdwController } from './mdw.controller';
-import { KeyBlocksResolver } from './resolvers/key-blocks.resolver';
-import { MicroBlocksResolver } from './resolvers/micro-blocks.resolver';
-import { TxsResolver } from './resolvers/txs.resolver';
 import { IndexerService } from './services/indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { ReorgService } from './services/reorg.service';
 import { TxSubscriber } from './subscribers/tx.subscriber';
 import { MDW_PLUGIN } from './plugins/plugin.tokens';
 import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
-import {
-  ENTITY_CONFIGS,
-  SYNC_STATE_CONFIG,
-  PLUGIN_SYNC_STATE_CONFIG,
-} from './config/entity-configs';
+import { ENTITY_CONFIGS } from './config/entity-configs';
 
 // Generate controllers for all entities
 const generatedControllers = createEntityControllers(ENTITY_CONFIGS);
 
-// Generate resolvers for simple entities (without custom ResolveFields)
-const generatedResolvers = createEntityResolvers([
-  SYNC_STATE_CONFIG,
-  PLUGIN_SYNC_STATE_CONFIG,
-]);
+// Generate resolvers for all entities (now supports automatic relation resolution)
+const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
 
 @Module({
   imports: [
@@ -59,12 +49,8 @@ const generatedResolvers = createEntityResolvers([
     ReorgService,
     // Subscribers
     TxSubscriber,
-    // GraphQL Resolvers - use generated for simple entities, keep custom for complex ones
-    ...generatedResolvers,
-    // Keep existing resolvers for entities with custom ResolveFields
-    KeyBlocksResolver,
-    MicroBlocksResolver,
-    TxsResolver,
+          // GraphQL Resolvers - all generated with automatic relation resolution
+          ...generatedResolvers,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
     {
       provide: MDW_PLUGIN,

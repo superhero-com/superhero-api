@@ -4,6 +4,7 @@ import { KeyBlock } from '../entities/key-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { EntityConfig } from '@/api-core/types/entity-config.interface';
+import { Field, Int } from '@nestjs/graphql';
 
 export const TX_CONFIG: EntityConfig<Tx> = {
   entity: Tx,
@@ -32,6 +33,30 @@ export const TX_CONFIG: EntityConfig<Tx> = {
     'recipient_id',
     'created_at',
   ],
+  relations: [
+    {
+      field: 'block',
+      relatedEntity: MicroBlock,
+      returnType: () => MicroBlock,
+      joinCondition: {
+        localField: 'hash',
+        parentField: 'block_hash',
+      },
+      isArray: false,
+      nullable: true,
+    },
+    {
+      field: 'keyBlock',
+      relatedEntity: KeyBlock,
+      returnType: () => KeyBlock,
+      joinCondition: {
+        localField: 'height',
+        parentField: 'block_height',
+      },
+      isArray: false,
+      nullable: true,
+    },
+  ],
 };
 
 export const MICRO_BLOCK_CONFIG: EntityConfig<MicroBlock> = {
@@ -58,6 +83,33 @@ export const MICRO_BLOCK_CONFIG: EntityConfig<MicroBlock> = {
     'gas',
     'micro_block_index',
     'created_at',
+  ],
+  relations: [
+    {
+      field: 'keyBlock',
+      relatedEntity: KeyBlock,
+      returnType: () => KeyBlock,
+      joinCondition: {
+        localField: 'hash',
+        parentField: 'prev_key_hash',
+      },
+      isArray: false,
+      nullable: true,
+    },
+    {
+      field: 'txs',
+      relatedEntity: Tx,
+      returnType: () => [Tx],
+      joinCondition: {
+        localField: 'block_hash',
+        parentField: 'hash',
+      },
+      isArray: true,
+      nullable: false,
+      filterableFields: ['type', 'function', 'sender_id', 'recipient_id', 'contract_id', 'caller_id'],
+      defaultOrderBy: 'micro_index',
+      defaultOrderDirection: 'ASC',
+    },
   ],
 };
 
@@ -89,6 +141,36 @@ export const KEY_BLOCK_CONFIG: EntityConfig<KeyBlock> = {
     'target',
     'version',
     'created_at',
+  ],
+  relations: [
+    {
+      field: 'txs',
+      relatedEntity: Tx,
+      returnType: () => [Tx],
+      joinCondition: {
+        localField: 'block_height',
+        parentField: 'height',
+      },
+      isArray: true,
+      nullable: false,
+      filterableFields: ['type', 'function', 'sender_id'],
+      defaultOrderBy: 'block_height',
+      defaultOrderDirection: 'DESC',
+    },
+    {
+      field: 'microBlocks',
+      relatedEntity: MicroBlock,
+      returnType: () => [MicroBlock],
+      joinCondition: {
+        localField: 'prev_key_hash',
+        parentField: 'hash',
+      },
+      isArray: true,
+      nullable: false,
+      filterableFields: ['transactions_count', 'gas', 'version', 'micro_block_index'],
+      defaultOrderBy: 'micro_block_index',
+      defaultOrderDirection: 'ASC',
+    },
   ],
 };
 
