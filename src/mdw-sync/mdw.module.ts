@@ -6,14 +6,21 @@ import mdwConfig from './config/mdw.config';
 import { KeyBlock } from './entities/key-block.entity';
 import { MicroBlock } from './entities/micro-block.entity';
 import { PluginSyncState } from './entities/plugin-sync-state.entity';
+import { PluginFailedTransaction } from './entities/plugin-failed-transaction.entity';
 import { SyncState } from './entities/sync-state.entity';
 import { Tx } from './entities/tx.entity';
 import { MdwController } from './mdw.controller';
 import { IndexerService } from './services/indexer.service';
+import { LiveIndexerService } from './services/live-indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
+import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
+import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
 import { ReorgService } from './services/reorg.service';
-import { TxSubscriber } from './subscribers/tx.subscriber';
 import { MDW_PLUGIN } from './plugins/plugin.tokens';
+import { BclPluginModule } from './plugins/bcl/bcl-plugin.module';
+import { BclPlugin } from './plugins/bcl/bcl.plugin';
+import { SocialPluginModule } from './plugins/social/social-plugin.module';
+import { SocialPlugin } from './plugins/social/social.plugin';
 import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
 import { ENTITY_CONFIGS } from './config/entity-configs';
 
@@ -33,11 +40,11 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
       MicroBlock,
       SyncState,
       PluginSyncState,
+      PluginFailedTransaction,
     ]),
-    // TODO: Import plugin modules so their providers are visible in this context
-    // DexPluginModule,
-    // SocialPluginModule,
-    // TippingPluginModule,
+    // Import plugin modules
+    BclPluginModule,
+    SocialPluginModule,
   ],
   controllers: [
     MdwController,
@@ -45,21 +52,28 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
   ],
   providers: [
     PluginRegistryService,
+    PluginBatchProcessorService,
+    PluginFailedTransactionService,
     IndexerService,
+    LiveIndexerService,
     ReorgService,
-    // Subscribers
-    TxSubscriber,
-          // GraphQL Resolvers - all generated with automatic relation resolution
-          ...generatedResolvers,
+    // GraphQL Resolvers - all generated with automatic relation resolution
+    ...generatedResolvers,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
     {
       provide: MDW_PLUGIN,
-      useFactory: (
-
-      ) => [],
-      inject: [],
+      useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin) => {
+        return [bclPlugin, socialPlugin];
+      },
+      inject: [BclPlugin, SocialPlugin],
     },
   ],
-  exports: [IndexerService, ReorgService, PluginRegistryService],
+  exports: [
+    IndexerService,
+    LiveIndexerService,
+    ReorgService,
+    PluginRegistryService,
+    PluginBatchProcessorService,
+  ],
 })
 export class MdwModule { }

@@ -8,6 +8,7 @@ import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { fetchJson } from '@/utils/common';
 import { ConfigService } from '@nestjs/config';
+import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 
 @Injectable()
 export class ReorgService {
@@ -25,6 +26,7 @@ export class ReorgService {
     private pluginSyncStateRepository: Repository<PluginSyncState>,
     private configService: ConfigService,
     private dataSource: DataSource,
+    private pluginBatchProcessor: PluginBatchProcessorService,
   ) {}
 
   onModuleInit() {
@@ -123,9 +125,16 @@ export class ReorgService {
     try {
       this.logger.log(`Handling reorg from height ${divergenceHeight}`);
 
+      // First, collect transaction hashes that will be deleted
+      const transactionsToDelete = await queryRunner.manager.query(
+        'SELECT hash FROM txs WHERE block_height >= $1',
+        [divergenceHeight],
+      );
+      const removedTxHashes = transactionsToDelete.map((row: any) => row.hash);
+
       // Delete transactions, micro-blocks, and blocks from divergence height onwards
       await queryRunner.manager.query(
-        'DELETE FROM mdw_tx WHERE block_height >= $1',
+        'DELETE FROM txs WHERE block_height >= $1',
         [divergenceHeight],
       );
 
@@ -159,8 +168,13 @@ export class ReorgService {
       await queryRunner.commitTransaction();
 
       this.logger.log(
-        `Reorg handled successfully from height ${divergenceHeight}. Plugin data will be cleaned via cascade deletes.`,
+        `Reorg handled successfully from height ${divergenceHeight}. ${removedTxHashes.length} transactions removed.`,
       );
+
+      // Notify plugins about removed transactions (after commit)
+      if (removedTxHashes.length > 0) {
+        await this.pluginBatchProcessor.handleReorg(removedTxHashes);
+      }
     } catch (error: any) {
       await queryRunner.rollbackTransaction();
       this.logger.error('Failed to handle reorg', error);
