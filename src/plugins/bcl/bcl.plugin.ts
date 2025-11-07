@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
@@ -23,7 +22,6 @@ export class BclPlugin extends BasePlugin {
     @InjectRepository(PluginSyncState)
     protected readonly pluginSyncStateRepository: Repository<PluginSyncState>,
     private bclPluginSyncService: BclPluginSyncService,
-    private configService: ConfigService,
   ) {
     super();
   }
