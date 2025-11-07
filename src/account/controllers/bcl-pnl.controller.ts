@@ -5,9 +5,11 @@ import {
   Param,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
+import { GetPnlQueryDto } from '../dto/get-pnl-query.dto';
+import { GetPnlResponseDto } from '../dto/pnl-response.dto';
 
 @Controller('accounts')
 @ApiTags('Accounts')
@@ -19,24 +21,19 @@ export class BclPnlController {
 
   @ApiOperation({ operationId: 'getPnl' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
-  @ApiQuery({
-    name: 'blockHeight',
-    type: 'number',
-    required: false,
-    description: 'Block height (default: current block height)',
-  })
+  @ApiOkResponse({ type: GetPnlResponseDto })
   @Get(':address/pnl')
   async getPnl(
     @Param('address') address: string,
-    @Query('blockHeight') blockHeight?: string,
+    @Query() query: GetPnlQueryDto,
   ) {
     // If blockHeight is not provided, get the current block height
     let targetBlockHeight: number;
-    if (blockHeight) {
-      targetBlockHeight = parseInt(blockHeight, 10);
-      if (isNaN(targetBlockHeight)) {
-        throw new BadRequestException('blockHeight must be a valid number');
+    if (query.blockHeight !== undefined && query.blockHeight !== null) {
+      if (isNaN(query.blockHeight) || query.blockHeight < 0) {
+        throw new BadRequestException('blockHeight must be a valid positive number');
       }
+      targetBlockHeight = query.blockHeight;
     } else {
       const currentGeneration =
         await this.aeSdkService.sdk.getCurrentGeneration();
@@ -55,7 +52,7 @@ export class BclPnlController {
         : 0;
 
     return {
-      blockHeight: targetBlockHeight,
+      block_height: targetBlockHeight,
       total_pnl: {
         percentage: totalPnlPercentage,
         invested: {

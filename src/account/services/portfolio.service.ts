@@ -15,7 +15,7 @@ import { BclPnlService } from './bcl-pnl.service';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
-  blockHeight: number;
+  block_height: number;
   tokens_value_ae: number;
   tokens_value_usd: number;
   total_value_ae: number;
@@ -246,7 +246,7 @@ export class PortfolioService {
 
         const result: PortfolioHistorySnapshot = {
           timestamp,
-          blockHeight,
+          block_height: blockHeight,
           tokens_value_ae: tokensValue,
           tokens_value_usd: tokensValueUsd,
           total_value_ae: balance + tokensValue,
