@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
@@ -152,17 +152,20 @@ export class BclTransactionsService {
     token: Token,
     tx: Tx,
     volume: BigNumber,
+    manager?: EntityManager,
   ): Promise<void> {
     try {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
-      const tokenHolderCount = await this.tokenHolderRepository
+      const repository = manager?.getRepository(TokenHolder) || this.tokenHolderRepository;
+      
+      const tokenHolderCount = await repository
         .createQueryBuilder('token_holders')
         .where('token_holders.aex9_address = :aex9_address', {
           aex9_address: token.address,
         })
         .getCount();
 
-      const tokenHolder = await this.tokenHolderRepository
+      const tokenHolder = await repository
         .createQueryBuilder('token_holders')
         .where('token_holders.aex9_address = :aex9_address', {
           aex9_address: token.address,
@@ -180,7 +183,7 @@ export class BclTransactionsService {
         }
         // if is buy
         if (tx.function === BCL_FUNCTIONS.buy) {
-          await this.tokenHolderRepository.update(tokenHolder.id, {
+          await repository.update(tokenHolder.id, {
             balance: tokenHolderBalance.plus(bigNumberVolume),
             last_tx_hash: tx.hash,
             block_number: tx.block_height,
@@ -188,20 +191,26 @@ export class BclTransactionsService {
         }
         // if is sell
         if (tx.function === BCL_FUNCTIONS.sell) {
-          await this.tokenHolderRepository.update(tokenHolder.id, {
+          await repository.update(tokenHolder.id, {
             balance: tokenHolderBalance.minus(bigNumberVolume),
             last_tx_hash: tx.hash,
             block_number: tx.block_height,
           });
         }
         if (token.holders_count == 0) {
-          await this.tokenService.update(token, {
-            holders_count: 1,
-          });
+          if (manager) {
+            await manager.getRepository(Token).update(token.sale_address, {
+              holders_count: 1,
+            });
+          } else {
+            await this.tokenService.update(token, {
+              holders_count: 1,
+            });
+          }
         }
       } else {
         // create token holder
-        await this.tokenHolderRepository.save({
+        await repository.save({
           id: `${tx.caller_id}_${token.address}`,
           aex9_address: token.address,
           address: tx.caller_id,
@@ -210,23 +219,32 @@ export class BclTransactionsService {
           block_number: tx.block_height,
         });
         // increment token holders count
-        await this.tokenService.update(token, {
-          holders_count: tokenHolderCount + 1,
-        });
+        if (manager) {
+          await manager.getRepository(Token).update(token.sale_address, {
+            holders_count: tokenHolderCount + 1,
+          });
+        } else {
+          await this.tokenService.update(token, {
+            holders_count: tokenHolderCount + 1,
+          });
+        }
       }
     } catch (error) {
       this.logger.error('Error updating token holder', error);
     }
-    try {
-      await this.tokenService.loadAndSaveTokenHoldersFromMdw(
-        token.sale_address as Encoded.ContractAddress,
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Error loading and saving token holders from mdw`,
-        error,
-        error.stack,
-      );
+    // Background operation - keep outside transaction
+    if (!manager) {
+      try {
+        await this.tokenService.loadAndSaveTokenHoldersFromMdw(
+          token.sale_address as Encoded.ContractAddress,
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Error loading and saving token holders from mdw`,
+          error,
+          error.stack,
+        );
+      }
     }
   }
 }

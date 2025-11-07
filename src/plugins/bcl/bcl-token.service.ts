@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
@@ -54,8 +54,10 @@ export class BclTokenService {
   async findByAddress(
     address: string,
     withoutRank = false,
+    manager?: EntityManager,
   ): Promise<Token | null> {
-    const token = await this.tokensRepository
+    const repository = manager?.getRepository(Token) || this.tokensRepository;
+    const token = await repository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
@@ -89,7 +91,7 @@ export class BclTokenService {
       WHERE sale_address = '${token.sale_address}'
     `;
 
-    const [rankResult] = await this.tokensRepository.query(rankedQuery);
+    const [rankResult] = await repository.query(rankedQuery);
     return {
       ...token,
       rank: rankResult?.rank,
@@ -100,9 +102,13 @@ export class BclTokenService {
    * Create token from raw transaction (Tx entity)
    * Works directly with Tx entity (no conversion needed)
    */
-  async createTokenFromRawTransaction(tx: Tx): Promise<Token | null> {
+  async createTokenFromRawTransaction(
+    tx: Tx,
+    manager?: EntityManager,
+  ): Promise<Token | null> {
     const rawTx = tx.raw || {};
     const factory = await this.communityFactoryService.getCurrentFactory();
+    const repository = manager?.getRepository(Token) || this.tokensRepository;
 
     if (
       tx.function !== 'create_community' ||
@@ -125,14 +131,14 @@ export class BclTokenService {
     const saleAddress = rawTx.return.value[1]?.value;
     const tokenName = rawTx.arguments?.[1]?.value;
 
-    let tokenExists = await this.findByNameOrSymbol(tokenName);
+    let tokenExists = await this.findByNameOrSymbol(tokenName, manager);
 
     if (
       !!tokenExists?.sale_address &&
       tokenExists.sale_address !== saleAddress
     ) {
       // delete token
-      await this.tokensRepository.delete(tokenExists.sale_address);
+      await repository.delete(tokenExists.sale_address);
       tokenExists = undefined;
     }
 
@@ -155,23 +161,26 @@ export class BclTokenService {
     let isNewToken = false;
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
-      await this.tokensRepository.update(tokenExists.sale_address, tokenData);
-      token = await this.findByAddress(tokenExists.sale_address);
+      await repository.update(tokenExists.sale_address, tokenData);
+      token = await this.findByAddress(tokenExists.sale_address, false, manager);
     } else {
-      token = await this.tokensRepository.save(tokenData);
+      token = await repository.save(tokenData);
       isNewToken = true;
     }
 
-    await this.pullTokenInfoQueue.add(
-      {
-        saleAddress: token.sale_address,
-      },
-      {
-        jobId: `pullTokenInfo-${token.sale_address}`,
-        lifo: isNewToken,
-        removeOnComplete: true,
-      },
-    );
+    // Queue job outside transaction
+    if (!manager) {
+      await this.pullTokenInfoQueue.add(
+        {
+          saleAddress: token.sale_address,
+        },
+        {
+          jobId: `pullTokenInfo-${token.sale_address}`,
+          lifo: isNewToken,
+          removeOnComplete: true,
+        },
+      );
+    }
 
     return token;
   }
@@ -179,8 +188,12 @@ export class BclTokenService {
   /**
    * Find token by name or symbol
    */
-  private async findByNameOrSymbol(name: string): Promise<Token | null> {
-    return this.tokensRepository
+  private async findByNameOrSymbol(
+    name: string,
+    manager?: EntityManager,
+  ): Promise<Token | null> {
+    const repository = manager?.getRepository(Token) || this.tokensRepository;
+    return repository
       .createQueryBuilder('token')
       .where('token.name = :name', { name })
       .orWhere('token.symbol = :name', { name })
@@ -190,17 +203,23 @@ export class BclTokenService {
   /**
    * Sync token price from live data
    */
-  async syncTokenPrice(token: Token): Promise<void> {
+  async syncTokenPrice(
+    token: Token,
+    manager?: EntityManager,
+  ): Promise<void> {
     try {
       const data = await this.getTokenLivePrice(token);
+      const repository = manager?.getRepository(Token) || this.tokensRepository;
 
-      await this.tokensRepository.update(token.sale_address, data as any);
+      await repository.update(token.sale_address, data as any);
 
-      // re-fetch token
-      this.tokenWebsocketGateway?.handleTokenUpdated({
-        sale_address: token.sale_address,
-        data,
-      });
+      // re-fetch token and broadcast outside transaction
+      if (!manager) {
+        this.tokenWebsocketGateway?.handleTokenUpdated({
+          sale_address: token.sale_address,
+          data,
+        });
+      }
     } catch (error) {
       this.logger.error(`Failed to sync token price for ${token.sale_address}`, error);
     }
@@ -245,9 +264,14 @@ export class BclTokenService {
   /**
    * Update token and return updated token
    */
-  async update(token: Token, data: Partial<Token>): Promise<Token> {
-    await this.tokensRepository.update(token.sale_address, data);
-    return this.findByAddress(token.sale_address);
+  async update(
+    token: Token,
+    data: Partial<Token>,
+    manager?: EntityManager,
+  ): Promise<Token> {
+    const repository = manager?.getRepository(Token) || this.tokensRepository;
+    await repository.update(token.sale_address, data);
+    return this.findByAddress(token.sale_address, false, manager);
   }
 
   /**
@@ -257,6 +281,7 @@ export class BclTokenService {
   async updateTokenMetaDataFromCreateTx(
     token: Token,
     tx: Tx,
+    manager?: EntityManager,
   ): Promise<Encoded.ContractAddress> {
     const tokenData: Partial<Token> = {
       factory_address: tx.contract_id,
@@ -269,7 +294,8 @@ export class BclTokenService {
       tokenData.collection = tx.raw.arguments[0].value;
     }
 
-    await this.tokensRepository.update(token.sale_address, tokenData);
+    const repository = manager?.getRepository(Token) || this.tokensRepository;
+    await repository.update(token.sale_address, tokenData);
 
     return tx.contract_id as Encoded.ContractAddress;
   }
