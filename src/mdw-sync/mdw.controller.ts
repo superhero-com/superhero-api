@@ -49,8 +49,9 @@ export class MdwController {
       plugins: pluginStates.map((state) => ({
         name: state.plugin_name,
         lastSyncedHeight: state.last_synced_height,
+        backwardSyncedHeight: state.backward_synced_height,
+        liveSyncedHeight: state.live_synced_height,
         startFromHeight: state.start_from_height,
-        isActive: state.is_active,
       })),
       registeredPlugins: this.pluginRegistry.getPlugins().map((p) => p.name),
     };

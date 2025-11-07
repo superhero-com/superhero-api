@@ -160,9 +160,23 @@ export class ReorgService {
       );
 
       // Update plugin sync states
+      // Update both backward_synced_height and live_synced_height if they exceed the divergence height
+      const newHeight = divergenceHeight - 1;
       await queryRunner.manager.query(
-        'UPDATE mdw_plugin_sync_state SET last_synced_height = LEAST(last_synced_height, $1) WHERE last_synced_height >= $1',
-        [divergenceHeight - 1],
+        `UPDATE plugin_sync_state 
+         SET last_synced_height = LEAST(last_synced_height, $1),
+             backward_synced_height = CASE 
+               WHEN backward_synced_height IS NOT NULL AND backward_synced_height >= $1 
+               THEN LEAST(backward_synced_height, $1) 
+               ELSE backward_synced_height 
+             END,
+             live_synced_height = CASE 
+               WHEN live_synced_height IS NOT NULL AND live_synced_height >= $1 
+               THEN LEAST(live_synced_height, $1) 
+               ELSE live_synced_height 
+             END
+         WHERE last_synced_height >= $1`,
+        [newHeight],
       );
 
       await queryRunner.commitTransaction();

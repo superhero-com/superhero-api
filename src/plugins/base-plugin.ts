@@ -58,14 +58,16 @@ export abstract class BasePlugin implements Plugin {
         where: { plugin_name: this.name },
       });
 
-      if (!syncState || !syncState.is_active) {
+      if (!syncState) {
         this.logger.warn(
-          `[${this.name}] Plugin sync state not found or inactive`,
+          `[${this.name}] Plugin sync state not found`,
         );
         return;
       }
 
-      const startHeight = syncState.last_synced_height + 1;
+      // Use backward_synced_height if available, otherwise fall back to last_synced_height
+      const syncedHeight = syncState.backward_synced_height ?? syncState.last_synced_height ?? syncState.start_from_height - 1;
+      const startHeight = syncedHeight + 1;
       const batchSize = 100;
       let processedCount = 0;
 
@@ -98,7 +100,10 @@ export abstract class BasePlugin implements Plugin {
             if (processedCount % 10 === 0) {
               await this.pluginSyncStateRepository.update(
                 { plugin_name: this.name },
-                { last_synced_height: tx.block_height },
+                { 
+                  last_synced_height: tx.block_height, // Keep for backward compatibility
+                  backward_synced_height: tx.block_height,
+                },
               );
             }
           } catch (error: any) {

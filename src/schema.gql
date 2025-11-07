@@ -89,9 +89,10 @@ type PaginationMeta {
 }
 
 type PluginSyncState {
+  backward_synced_height: Int
   created_at: DateTime!
-  is_active: Boolean!
   last_synced_height: Int!
+  live_synced_height: Int
   plugin_name: String!
   start_from_height: Int!
   updated_at: DateTime!

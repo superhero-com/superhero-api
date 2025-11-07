@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Between, DataSource, Repository } from 'typeorm';
+import { Between, DataSource, Repository, In } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
@@ -14,6 +14,7 @@ import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { ReorgService } from './reorg.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
+import { MicroBlockService } from './micro-block.service';
 
 @Injectable()
 export class IndexerService implements OnModuleInit {
@@ -37,10 +38,14 @@ export class IndexerService implements OnModuleInit {
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
     private pluginBatchProcessor: PluginBatchProcessorService,
+    private microBlockService: MicroBlockService,
   ) {}
 
   async onModuleInit() {
     await this.initializeSyncState();
+    // Wait for plugin sync states to be initialized before starting sync
+    // This ensures all registered plugins have sync states and won't miss transactions
+    await this.pluginRegistryService.initializePluginSyncStates();
     this.startSync();
   }
 
@@ -262,7 +267,7 @@ export class IndexerService implements OnModuleInit {
       // Fetch micro-blocks for multiple key-blocks concurrently
       // Use Promise.all to fail fast on any error
       const batchPromises = batch.map((keyBlock) =>
-        this.fetchMicroBlocksForKeyBlock(keyBlock, middlewareUrl),
+        this.microBlockService.fetchMicroBlocksForKeyBlock(keyBlock.hash),
       );
 
       const batchResults = await Promise.all(batchPromises);
@@ -286,51 +291,6 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
-  /**
-   * Fetch micro-blocks for a single key-block (handles pagination)
-   */
-  private async fetchMicroBlocksForKeyBlock(
-    keyBlock: KeyBlock,
-    middlewareUrl: string,
-  ): Promise<Partial<MicroBlock>[]> {
-    const microBlocksToSave: Partial<MicroBlock>[] = [];
-
-    let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
-
-    // Handle pagination
-    while (microBlocksUrl) {
-      const response = await fetchJson(microBlocksUrl);
-      const microBlocks = response?.data || [];
-
-      // Convert micro-blocks to entity format
-      for (const microBlock of microBlocks) {
-        microBlocksToSave.push({
-          hash: microBlock.hash,
-          height: microBlock.height,
-          prev_hash: microBlock.prev_hash,
-          prev_key_hash: microBlock.prev_key_hash,
-          state_hash: microBlock.state_hash,
-          time: microBlock.time.toString(),
-          transactions_count: microBlock.transactions_count,
-          flags: microBlock.flags,
-          version: microBlock.version,
-          gas: microBlock.gas,
-          micro_block_index: microBlock.micro_block_index,
-          pof_hash: microBlock.pof_hash,
-          signature: microBlock.signature,
-          txs_hash: microBlock.txs_hash,
-          created_at: new Date(microBlock.time),
-        });
-      }
-
-      // Check if there's a next page
-      microBlocksUrl = response.next
-        ? `${middlewareUrl}${response.next}`
-        : null;
-    }
-
-    return microBlocksToSave;
-  }
 
   private async syncTransactions(
     startHeight: number,
@@ -382,15 +342,9 @@ export class IndexerService implements OnModuleInit {
       
       if (useBulkMode) {
         // Use bulk insert for better performance
+        // Note: bulkInsertTransactions processes batches internally as they're inserted
         try {
-          await this.bulkInsertTransactions(mdwTxs);
-          // Fetch saved transactions for batch processing
-          const txHashes = mdwTxs.map((tx) => tx.hash).filter(Boolean) as string[];
-          if (txHashes.length > 0) {
-            savedTxs = await this.txRepository.find({
-              where: { hash: txHashes as any },
-            });
-          }
+          savedTxs = await this.bulkInsertTransactions(mdwTxs);
         } catch (error: any) {
           this.logger.error(
             `Bulk insert failed for page, trying repository.save as fallback`,
@@ -399,16 +353,19 @@ export class IndexerService implements OnModuleInit {
           // Fallback to repository.save if bulk insert fails
           const saved = await this.txRepository.save(mdwTxs);
           savedTxs = Array.isArray(saved) ? saved : [saved];
+          // Process batch for plugins (fallback case)
+          if (savedTxs.length > 0) {
+            await this.pluginBatchProcessor.processBatch(savedTxs, 'backward');
+          }
         }
       } else {
         // Save transactions
         const saved = await this.txRepository.save(mdwTxs);
         savedTxs = Array.isArray(saved) ? saved : [saved];
-      }
-
-      // Process batch for plugins
-      if (savedTxs.length > 0) {
-        await this.pluginBatchProcessor.processBatch(savedTxs);
+        // Process batch for plugins immediately
+        if (savedTxs.length > 0) {
+          await this.pluginBatchProcessor.processBatch(savedTxs, 'backward');
+        }
       }
     }
 
@@ -422,16 +379,19 @@ export class IndexerService implements OnModuleInit {
   /**
    * Bulk insert transactions using repository.insert() method
    * Note: repository.insert() bypasses TypeORM subscribers (unlike QueryBuilder.insert())
+   * Processes each batch immediately after insertion for plugins
+   * Returns the saved transactions fetched from the database
    */
-  private async bulkInsertTransactions(txs: Partial<Tx>[]): Promise<void> {
+  private async bulkInsertTransactions(txs: Partial<Tx>[]): Promise<Tx[]> {
     if (txs.length === 0) {
-      return;
+      return [];
     }
 
     // repository.insert() bypasses subscribers - this is the correct method
     // Split into batches to avoid SQL parameter limits
     const batchSize = 1000;
     let totalInserted = 0;
+    const allSavedTxs: Tx[] = [];
 
     for (let i = 0; i < txs.length; i += batchSize) {
       const batch = txs.slice(i, i + batchSize);
@@ -443,11 +403,50 @@ export class IndexerService implements OnModuleInit {
         // Count affected rows - insert() returns { identifiers: [], generatedMaps: [] }
         const affected = result.identifiers?.length || batch.length;
         totalInserted += affected;
+        
+        // Collect hashes of inserted transactions
+        const batchHashes = batch
+          .map((tx) => tx.hash)
+          .filter(Boolean) as string[];
+
+        // Fetch this batch immediately after insertion
+        if (batchHashes.length > 0) {
+          const savedBatchTxs = await this.txRepository.find({
+            where: { hash: In(batchHashes) },
+          });
+
+          // Process batch for plugins immediately (don't wait for full run)
+          if (savedBatchTxs.length > 0) {
+            // Process immediately - await to ensure batch is processed before next batch
+            await this.pluginBatchProcessor.processBatch(savedBatchTxs, 'backward');
+
+            // Collect for return value
+            allSavedTxs.push(...savedBatchTxs);
+          }
+        }
       } catch (error: any) {
         // Check if it's a duplicate key error (expected with orIgnore equivalent)
         if (error.code === '23505' || error.message?.includes('duplicate')) {
           // Duplicate - this is expected, count as inserted
           totalInserted += batch.length;
+          
+          // Fetch duplicates and process them
+          const batchHashes = batch
+            .map((tx) => tx.hash)
+            .filter(Boolean) as string[];
+          
+          if (batchHashes.length > 0) {
+            const savedBatchTxs = await this.txRepository.find({
+              where: { hash: In(batchHashes) },
+            });
+
+            // Process batch for plugins immediately
+            if (savedBatchTxs.length > 0) {
+              await this.pluginBatchProcessor.processBatch(savedBatchTxs, 'backward');
+
+              allSavedTxs.push(...savedBatchTxs);
+            }
+          }
           continue;
         }
 
@@ -467,8 +466,10 @@ export class IndexerService implements OnModuleInit {
     }
 
     this.logger.log(
-      `Bulk inserted ${totalInserted} transactions (${txs.length} attempted)`,
+      `Bulk inserted ${totalInserted} transactions (${txs.length} attempted), processed ${allSavedTxs.length} for plugins`,
     );
+
+    return allSavedTxs;
   }
 
   /**
@@ -567,8 +568,8 @@ export class IndexerService implements OnModuleInit {
       // Save transaction
       const savedTx = await this.txRepository.save(mdwTx);
 
-      // Process batch for plugins (single tx in array)
-      await this.pluginBatchProcessor.processBatch([savedTx]);
+      // Process batch for plugins (single tx in array) - backward sync
+      await this.pluginBatchProcessor.processBatch([savedTx], 'backward');
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }
