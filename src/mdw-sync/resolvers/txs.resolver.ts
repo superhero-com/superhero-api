@@ -1,7 +1,8 @@
-import { Resolver, Query, Args, Int } from '@nestjs/graphql';
+import { Resolver, Query, Args, Int, ResolveField, Parent } from '@nestjs/graphql';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tx } from '../entities/tx.entity';
+import { MicroBlock } from '../entities/micro-block.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 
 @Resolver(() => Tx)
@@ -9,6 +10,8 @@ export class TxsResolver {
   constructor(
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
+    @InjectRepository(MicroBlock)
+    private readonly microBlockRepository: Repository<MicroBlock>,
   ) {}
 
   @Query(() => [Tx], { name: 'txs' })
@@ -38,6 +41,16 @@ export class TxsResolver {
   async findOne(@Args('hash', { type: () => String }) hash: string) {
     return this.txRepository.findOne({
       where: { hash },
+    });
+  }
+
+  @ResolveField(() => MicroBlock, { name: 'block', nullable: true })
+  async resolveBlock(@Parent() tx: Tx): Promise<MicroBlock | null> {
+    if (!tx.block_hash) {
+      return null;
+    }
+    return this.microBlockRepository.findOne({
+      where: { hash: tx.block_hash },
     });
   }
 }
