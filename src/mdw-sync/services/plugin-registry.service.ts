@@ -95,20 +95,51 @@ export class PluginRegistryService implements OnModuleInit {
 
         if (!existing) {
           // Create new sync state for plugin
+          // Use upsert to handle race conditions where multiple services try to create the same state
           const startFromHeight = plugin.startFromHeight();
-          const syncState = this.pluginSyncStateRepository.create({
-            plugin_name: plugin.name,
-            version: plugin.version,
-            last_synced_height: startFromHeight - 1,
-            backward_synced_height: null, // Will be set when backward sync starts
-            live_synced_height: null, // Will be set when live sync starts
-            start_from_height: startFromHeight,
-          });
-
-          await this.pluginSyncStateRepository.save(syncState);
-          this.logger.log(
-            `Created sync state for plugin ${plugin.name} starting from height ${startFromHeight}`,
-          );
+          try {
+            await this.pluginSyncStateRepository.save({
+              plugin_name: plugin.name,
+              version: plugin.version,
+              last_synced_height: startFromHeight - 1,
+              backward_synced_height: null, // Will be set when backward sync starts
+              live_synced_height: null, // Will be set when live sync starts
+              start_from_height: startFromHeight,
+            });
+            this.logger.log(
+              `Created sync state for plugin ${plugin.name} starting from height ${startFromHeight}`,
+            );
+          } catch (error: any) {
+            // Handle race condition: if another process/service created it concurrently
+            if (error.code === '23505' || error.message?.includes('duplicate')) {
+              this.logger.debug(
+                `Sync state for plugin ${plugin.name} was created concurrently, fetching existing state`,
+              );
+              // Fetch the existing state that was just created
+              const createdState = await this.pluginSyncStateRepository.findOne({
+                where: { plugin_name: plugin.name },
+              });
+              if (createdState) {
+                // Verify it's properly initialized, update if needed
+                const updateData: Partial<PluginSyncState> = {};
+                if (createdState.version !== plugin.version) {
+                  updateData.version = plugin.version;
+                }
+                if (createdState.start_from_height !== startFromHeight) {
+                  updateData.start_from_height = startFromHeight;
+                  updateData.last_synced_height = startFromHeight - 1;
+                }
+                if (Object.keys(updateData).length > 0) {
+                  await this.pluginSyncStateRepository.update(
+                    { plugin_name: plugin.name },
+                    updateData,
+                  );
+                }
+              }
+            } else {
+              throw error; // Re-throw if it's a different error
+            }
+          }
         } else {
           // Check if version changed - if so, reset sync state
           if (existing.version !== plugin.version) {
