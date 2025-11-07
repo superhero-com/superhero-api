@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,7 +7,7 @@ import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 
 @Injectable()
-export class PluginRegistryService {
+export class PluginRegistryService implements OnModuleInit {
   private readonly logger = new Logger(PluginRegistryService.name);
   private plugins: Plugin[] = [];
 
@@ -18,6 +18,11 @@ export class PluginRegistryService {
   ) {
     this.plugins = pluginProviders || [];
     this.logger.log(`Registered ${this.plugins.length} plugins`);
+  }
+
+  async onModuleInit() {
+    // Initialize plugin sync states on module init to ensure they exist before any indexing starts
+    await this.initializePluginSyncStates();
   }
 
   getPlugins(): Plugin[] {
