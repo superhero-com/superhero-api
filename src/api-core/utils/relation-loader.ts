@@ -70,10 +70,16 @@ export function applyIncludesToQueryBuilder<T>(
   parentAlias: string = entityConfig.tableAlias,
   parentPath: string = '',
   depth: number = 0,
+  rootAlias?: string,
 ): void {
   // Prevent infinite recursion (max depth of 10)
   if (depth > 10) {
     return;
+  }
+
+  // Store root alias on first call
+  if (depth === 0) {
+    rootAlias = parentAlias;
   }
 
   // Process each relation in the includes tree
@@ -100,16 +106,24 @@ export function applyIncludesToQueryBuilder<T>(
     // Format: parentAlias.parentField = joinAlias.localField
     const joinCondition = `${parentAlias}.${relationConfig.joinCondition.parentField} = ${joinAlias}.${relationConfig.joinCondition.localField}`;
 
-    // Build the property path for mapping (e.g., "microBlock.txs" or just "txs")
-    const mapPath = parentPath ? `${parentPath}.${relationField}` : relationField;
+    // Build the property path for mapping
+    // For root level relations, use rootAlias.relationField (e.g., "micro_block.keyBlock")
+    // For nested relations, use parentPath.relationField (e.g., "micro_block.txs.block")
+    const mapPath = depth === 0 
+      ? `${rootAlias}.${relationField}`
+      : parentPath 
+        ? `${parentPath}.${relationField}` 
+        : `${rootAlias}.${relationField}`;
 
-    // Get the related entity's table name
+    // Get the related entity's metadata and table name
     const relatedEntityMetadata = queryBuilder.connection.getMetadata(
       relationConfig.relatedEntity,
     );
     const relatedTableName = relatedEntityMetadata.tableName;
-
+    
     // Use leftJoinAndMapOne for single relations, leftJoinAndMapMany for array relations
+    // Note: leftJoinAndMapOne/leftJoinAndMapMany can accept either entity class or table name string
+    // We use the entity class which should work, but if it doesn't, we can fall back to table name
     if (relationConfig.isArray) {
       // For array relations, we join all items
       // Note: TypeORM doesn't support limit on joined relations directly
@@ -122,6 +136,8 @@ export function applyIncludesToQueryBuilder<T>(
       );
     } else {
       // Single relation - use leftJoinAndMapOne
+      // This automatically selects all columns from the related entity and maps them
+      // The entity class should work, but if there are issues, we might need to use table name
       queryBuilder.leftJoinAndMapOne(
         mapPath,
         relationConfig.relatedEntity,
@@ -140,6 +156,7 @@ export function applyIncludesToQueryBuilder<T>(
         joinAlias,
         mapPath,
         depth + 1,
+        rootAlias,
       );
     }
   }

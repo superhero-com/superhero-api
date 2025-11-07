@@ -271,7 +271,7 @@ export function createBaseController<T>(
     ) {
       const query = this.repository.createQueryBuilder(config.tableAlias);
 
-      // Apply includes if provided
+      // Apply includes if provided (must be done before other query modifications)
       if (includes && this.configRegistry) {
         const includesTree = parseIncludesToTree(includes);
         applyIncludesToQueryBuilder(
