@@ -72,7 +72,11 @@ export class KeyBlocksController {
       query.orderBy(`key_block.${orderBy}`, orderDirection);
     }
 
-    return paginate(query, { page, limit });
+    const result = await paginate(query, { page, limit });
+    return {
+      items: result.items,
+      metaInfo: result.meta,
+    };
   }
 
   @ApiParam({ name: 'hash', type: 'string', description: 'Key block hash' })

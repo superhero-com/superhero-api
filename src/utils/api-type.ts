@@ -17,7 +17,7 @@ export const ApiOkResponsePaginated = <DataDto extends Type<unknown>>(
                 type: 'array',
                 items: { $ref: getSchemaPath(dataDto) },
               },
-              meta: {
+              metaInfo: {
                 type: 'object',
                 properties: {
                   itemCount: {
@@ -44,25 +44,8 @@ export const ApiOkResponsePaginated = <DataDto extends Type<unknown>>(
                   'currentPage',
                 ],
               },
-              links: {
-                type: 'object',
-                properties: {
-                  first: {
-                    type: 'string',
-                  },
-                  previous: {
-                    type: 'string',
-                  },
-                  next: {
-                    type: 'string',
-                  },
-                  last: {
-                    type: 'string',
-                  },
-                },
-              },
             },
-            required: ['items', 'meta'],
+            required: ['items', 'metaInfo'],
           },
         ],
       },

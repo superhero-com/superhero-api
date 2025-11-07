@@ -3,6 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
+import { PaginatedResponse } from '../types/pagination.type';
+
+const PaginatedPluginSyncStateResponse = PaginatedResponse(PluginSyncState);
 
 @Resolver(() => PluginSyncState)
 export class PluginSyncStateResolver {
@@ -11,7 +14,7 @@ export class PluginSyncStateResolver {
     private readonly pluginSyncStateRepository: Repository<PluginSyncState>,
   ) {}
 
-  @Query(() => [PluginSyncState], { name: 'pluginSyncStates' })
+  @Query(() => PaginatedPluginSyncStateResponse, { name: 'pluginSyncStates' })
   async findAll(
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 })
     page: number = 1,
@@ -35,7 +38,10 @@ export class PluginSyncStateResolver {
     }
 
     const result = await paginate(query, { page, limit });
-    return result.items;
+    return {
+      items: result.items,
+      metaInfo: result.meta,
+    };
   }
 
   @Query(() => PluginSyncState, { name: 'pluginSyncState', nullable: true })
