@@ -14,6 +14,7 @@ import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { ReorgService } from './reorg.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
+import { PluginRegistryService } from './plugin-registry.service';
 import { MicroBlockService } from './micro-block.service';
 
 @Injectable()
@@ -38,13 +39,16 @@ export class IndexerService implements OnModuleInit {
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
     private pluginBatchProcessor: PluginBatchProcessorService,
+    private pluginRegistryService: PluginRegistryService,
     private microBlockService: MicroBlockService,
   ) {}
 
   async onModuleInit() {
     await this.initializeSyncState();
-    // Wait for plugin sync states to be initialized before starting sync
-    // This ensures all registered plugins have sync states and won't miss transactions
+    // Plugin sync states are initialized by PluginRegistryService.onModuleInit()
+    // which runs before this, so they should already exist. But we verify here
+    // to ensure backward indexer doesn't start until plugins are ready.
+    // The initializePluginSyncStates() method is idempotent, so calling it again is safe.
     await this.pluginRegistryService.initializePluginSyncStates();
     this.startSync();
   }
