@@ -1,21 +1,23 @@
 import { fetchJson } from '@/utils/common';
-import { ITransaction } from '@/utils/types';
+import { ITransaction, ITopHeader } from '@/utils/types';
 import { decode } from '@aeternity/aepp-sdk';
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Between, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
+import { WebSocketService } from '@/ae/websocket.service';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LiveIndexerService.name);
-  private isRunning = false;
-  private syncInterval: NodeJS.Timeout;
+  private syncedTransactions: string[] = [];
+  private unsubscribeTransactions: (() => void) | null = null;
+  private unsubscribeKeyBlocks: (() => void) | null = null;
 
   constructor(
     @InjectRepository(Tx)
@@ -27,176 +29,114 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(SyncState)
     private syncStateRepository: Repository<SyncState>,
     private configService: ConfigService,
+    private websocketService: WebSocketService,
   ) {}
 
   async onModuleInit() {
-    this.startSync();
+    this.setupWebsocketSubscriptions();
   }
 
-  private startSync() {
-    const syncIntervalMs = this.configService.get<number>(
-      'mdw.syncIntervalMs',
-      3000,
+  private setupWebsocketSubscriptions() {
+    // Subscribe to transaction updates
+    this.unsubscribeTransactions = this.websocketService.subscribeForTransactionsUpdates(
+      (transaction: ITransaction) => {
+        // Prevent duplicate transactions
+        if (!this.syncedTransactions.includes(transaction.hash)) {
+          this.handleLiveTransaction(transaction);
+          this.syncedTransactions.push(transaction.hash);
+
+          // Reset synced transactions after 100 transactions
+          if (this.syncedTransactions.length > 100) {
+            this.syncedTransactions = [];
+          }
+        }
+      },
     );
 
-    this.syncInterval = setInterval(async () => {
-      if (!this.isRunning) {
-        await this.sync();
-      }
-    }, syncIntervalMs);
+    // Subscribe to key block updates
+    this.unsubscribeKeyBlocks = this.websocketService.subscribeForKeyBlocksUpdates(
+      (keyBlockHeader: ITopHeader) => {
+        this.handleKeyBlock(keyBlockHeader);
+      },
+    );
+
+    this.logger.log('Websocket subscriptions established for live indexing');
   }
 
-  async sync() {
-    if (this.isRunning) {
-      return;
-    }
-
-    this.isRunning = true;
-
+  async handleLiveTransaction(transaction: ITransaction) {
     try {
-      // Get current sync state
-      const syncState = await this.syncStateRepository.findOne({
-        where: { id: 'global' },
-      });
+      const mdwTx = this.convertToMdwTx(transaction);
 
-      if (!syncState) {
-        this.logger.error('No sync state found');
-        return;
-      }
+      // Save transaction - TxSubscriber will emit events for plugins (not in bulk mode)
+      await this.txRepository.save(mdwTx);
+      
+      this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
+    } catch (error: any) {
+      this.logger.error('Failed to handle live transaction', error);
+    }
+  }
 
-      // Get tip height from MDW
+  async handleKeyBlock(keyBlockHeader: ITopHeader) {
+    try {
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-      const status = await fetchJson(`${middlewareUrl}/v3/status`);
-      const tipHeight = status.mdw_height;
-
-      // Update tip height
-      await this.syncStateRepository.update(
-        { id: 'global' },
-        { tip_height: tipHeight },
+      
+      // Fetch full key block details from MDW
+      const fullBlock = await fetchJson(
+        `${middlewareUrl}/v3/key-blocks/${keyBlockHeader.hash}`,
       );
 
-      // Get current live sync height
-      const currentLiveHeight = syncState.live_synced_height ?? 0;
+      // Convert to entity format
+      const blockToSave: Partial<KeyBlock> = {
+        ...fullBlock,
+        created_at: new Date(fullBlock.time),
+      };
 
-      // Check if there are new blocks to sync
-      if (tipHeight <= currentLiveHeight) {
-        return; // No new blocks
-      }
+      // Save the key block
+      await this.blockRepository.save(blockToSave);
 
-      // Sync forward: from currentLiveHeight + 1 to tipHeight
-      const batchSize = this.configService.get<number>(
-        'mdw.backfillBatchBlocks',
-        50,
-      );
-
-      const startHeight = currentLiveHeight + 1;
-      const endHeight = Math.min(tipHeight, startHeight + batchSize - 1);
-
-      // Sync blocks, micro-blocks, and transactions forward
-      await this.syncBlocks(startHeight, endHeight);
-      await this.syncMicroBlocks(startHeight, endHeight);
-      await this.syncTransactions(startHeight, endHeight);
-
-      // Update live sync state (increase live_synced_height as we go forward)
+      // Update live_synced_height
       await this.syncStateRepository.update(
         { id: 'global' },
         {
-          live_synced_height: endHeight,
+          live_synced_height: keyBlockHeader.height,
+          tip_height: keyBlockHeader.height,
         },
       );
 
+      // Fetch and save micro-blocks for this key block
+      await this.fetchAndSaveMicroBlocks(keyBlockHeader.hash, middlewareUrl);
+
       this.logger.debug(
-        `Live sync: synced blocks ${startHeight}-${endHeight}, live_synced_height now ${endHeight}`,
+        `Live sync: saved key block ${keyBlockHeader.hash} at height ${keyBlockHeader.height}`,
       );
     } catch (error: any) {
-      this.logger.error('Live sync failed', error);
-    } finally {
-      this.isRunning = false;
-    }
-  }
-
-  private async syncBlocks(startHeight: number, endHeight: number) {
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
-    // Use batch endpoint to fetch multiple blocks at once
-    const limit = Math.min(endHeight - startHeight + 1, 100);
-    const scope = `gen:${startHeight}-${endHeight}`;
-    let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
-    const blocksToSave: Partial<KeyBlock>[] = [];
-
-    // Process all pages
-    while (url) {
-      const response = await fetchJson(url);
-      const blocks = response?.data || [];
-
-      // Convert blocks to entity format
-      for (const block of blocks) {
-        blocksToSave.push({
-          ...block,
-          timestamp: block.time,
-          created_at: new Date(block.time),
-        });
-      }
-
-      // Check if there's a next page
-      url = response.next ? `${middlewareUrl}${response.next}` : null;
-    }
-
-    // Batch save all blocks
-    if (blocksToSave.length > 0) {
-      await this.blockRepository.save(blocksToSave);
-      this.logger.debug(
-        `Live sync: synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
+      this.logger.error(
+        `Failed to handle key block ${keyBlockHeader.hash}`,
+        error,
       );
     }
   }
 
-  private async syncMicroBlocks(startHeight: number, endHeight: number) {
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
-    // Get all key-blocks in the height range
-    const keyBlocks = await this.blockRepository.find({
-      where: {
-        height: Between(startHeight, endHeight) as any,
-      },
-    });
-
-    if (keyBlocks.length === 0) {
-      return;
-    }
-
-    const microBlocksToSave: Partial<MicroBlock>[] = [];
-
-    // Process key-blocks in parallel batches (3-4 at a time)
-    const parallelBatchSize = this.configService.get<number>(
-      'mdw.microBlocksParallelBatchSize',
-      4,
-    );
-    for (let i = 0; i < keyBlocks.length; i += parallelBatchSize) {
-      const batch = keyBlocks.slice(i, i + parallelBatchSize);
-
-      // Fetch micro-blocks for multiple key-blocks concurrently
-      const batchPromises = batch.map((keyBlock) =>
-        this.fetchMicroBlocksForKeyBlock(keyBlock, middlewareUrl),
+  private async fetchAndSaveMicroBlocks(
+    keyBlockHash: string,
+    middlewareUrl: string,
+  ): Promise<void> {
+    try {
+      const microBlocks = await this.fetchMicroBlocksForKeyBlock(
+        { hash: keyBlockHash } as KeyBlock,
+        middlewareUrl,
       );
 
-      const batchResults = await Promise.all(batchPromises);
-
-      // Collect results from all batches
-      for (const result of batchResults) {
-        microBlocksToSave.push(...result);
+      if (microBlocks.length > 0) {
+        await this.microBlockRepository.save(microBlocks);
+        this.logger.debug(
+          `Live sync: saved ${microBlocks.length} micro-blocks for key block ${keyBlockHash}`,
+        );
       }
-    }
-
-    // Batch save all micro-blocks
-    if (microBlocksToSave.length > 0) {
-      const saveBatchSize = 1000; // Safe batch size for PostgreSQL
-      for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
-        const batch = microBlocksToSave.slice(i, i + saveBatchSize);
-        await this.microBlockRepository.save(batch);
-      }
-      this.logger.debug(
-        `Live sync: synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to fetch micro-blocks for key block ${keyBlockHash}`,
+        error,
       );
     }
   }
@@ -247,56 +187,6 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     return microBlocksToSave;
   }
 
-  private async syncTransactions(
-    startHeight: number,
-    endHeight: number,
-  ) {
-    // MDW has a hard limit of 100 transactions per request
-    const pageLimit = Math.min(
-      this.configService.get<number>('mdw.pageLimit', 100),
-      100, // Hard limit enforced by MDW
-    );
-
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
-    const queryParams = new URLSearchParams({
-      direction: 'forward', // Live sync uses forward direction
-      limit: pageLimit.toString(),
-      scope: `gen:${startHeight}-${endHeight}`,
-    });
-
-    const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-    await this.processTransactionPage(url);
-  }
-
-  private async processTransactionPage(url: string): Promise<void> {
-    const response = await fetchJson(url);
-    const transactions = response?.data || [];
-
-    if (transactions.length === 0) {
-      return;
-    }
-
-    // Convert transactions
-    const mdwTxs: Partial<Tx>[] = [];
-
-    for (const tx of transactions) {
-      const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-      const mdwTx = this.convertToMdwTx(camelTx);
-      mdwTxs.push(mdwTx);
-    }
-
-    // Save transactions - TxSubscriber will emit events for plugins (not in bulk mode)
-    if (mdwTxs.length > 0) {
-      await this.txRepository.save(mdwTxs);
-    }
-
-    // Process next page if available
-    if (response.next) {
-      const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
-      await this.processTransactionPage(nextUrl);
-    }
-  }
 
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
     let payload = '';
@@ -325,8 +215,12 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy() {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
+    // Unsubscribe from websocket channels
+    if (this.unsubscribeTransactions) {
+      this.unsubscribeTransactions();
+    }
+    if (this.unsubscribeKeyBlocks) {
+      this.unsubscribeKeyBlocks();
     }
   }
 }

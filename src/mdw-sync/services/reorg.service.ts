@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
@@ -11,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class ReorgService {
   private readonly logger = new Logger(ReorgService.name);
+  private isCheckingReorg = false;
 
   constructor(
     @InjectRepository(KeyBlock)
@@ -24,6 +26,27 @@ export class ReorgService {
     private configService: ConfigService,
     private dataSource: DataSource,
   ) {}
+
+  onModuleInit() {
+    void this.checkReorgPeriodically();
+  }
+
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async checkReorgPeriodically() {
+    if (this.isCheckingReorg) {
+      return;
+    }
+
+    this.isCheckingReorg = true;
+
+    try {
+      await this.detectAndHandleReorg();
+    } catch (error: any) {
+      this.logger.error('Error during periodic reorg check', error);
+    } finally {
+      this.isCheckingReorg = false;
+    }
+  }
 
   async detectAndHandleReorg(): Promise<boolean> {
     const reorgDepth = this.configService.get<number>('mdw.reorgDepth', 100);
@@ -42,17 +65,25 @@ export class ReorgService {
 
       // Get tip height from MDW
       const tipResponse = await fetchJson(`${middlewareUrl}/v3/status`);
-      const tipHeight = tipResponse.top_block_height;
+      const tipHeight = tipResponse.mdw_height || tipResponse.top_block_height;
 
-      if (tipHeight <= syncState.last_synced_height) {
-        return false; // No new blocks to check
+      // Check blocks in the reorg window: last 100 blocks (reorgDepth)
+      // Similar to validateBlocksRange pattern in sync-blocks.service.ts
+      const startHeight = Math.max(1, tipHeight - reorgDepth);
+      const endHeight = tipHeight;
+
+      // Use live_synced_height if available, otherwise fall back to last_synced_height
+      const maxSyncedHeight = syncState.live_synced_height ?? syncState.last_synced_height ?? 0;
+
+      // Only check blocks that we have synced
+      const checkEndHeight = Math.min(endHeight, maxSyncedHeight);
+
+      if (checkEndHeight < startHeight) {
+        return false; // No blocks to check
       }
 
-      // Check blocks in the reorg window
-      const startHeight = Math.max(1, tipHeight - reorgDepth);
-      const endHeight = Math.min(tipHeight, syncState.last_synced_height);
-
-      for (let height = endHeight; height >= startHeight; height--) {
+      // Check blocks from startHeight to checkEndHeight (going backward)
+      for (let height = checkEndHeight; height >= startHeight; height--) {
         const storedBlock = await this.blockRepository.findOne({
           where: { height },
         });
@@ -63,7 +94,7 @@ export class ReorgService {
 
         // Fetch block from MDW
         const mdwBlock = await fetchJson(
-          `${middlewareUrl}/v3/blocks/${height}`,
+          `${middlewareUrl}/v3/key-blocks/${height}`,
         );
 
         if (mdwBlock.hash !== storedBlock.hash) {
@@ -114,6 +145,7 @@ export class ReorgService {
         { id: 'global' },
         {
           last_synced_height: divergenceHeight - 1,
+          live_synced_height: divergenceHeight - 1, // Also update live_synced_height
           last_synced_hash: '', // Will be updated by indexer
         },
       );
