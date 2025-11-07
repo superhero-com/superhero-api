@@ -7,6 +7,9 @@ import {
   ParseIntPipe,
   Query,
   applyDecorators,
+  UseGuards,
+  BadRequestException,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -29,6 +32,7 @@ import {
   resolveRelation,
   checkHasArrayRelations,
 } from '../utils/relation-loader';
+import { RateLimitGuard } from '../guards/rate-limit.guard';
 
 /**
  * Builds a description of available relations for Swagger documentation
@@ -248,6 +252,7 @@ export function createBaseController<T>(
   @Controller(config.routePrefix)
   @ApiTags(config.swaggerTag)
   @ApiExtraModels(ResponseType)
+  @UseGuards(RateLimitGuard)
   class BaseController {
     public readonly configRegistry: EntityConfigRegistry | undefined;
 
@@ -263,13 +268,21 @@ export function createBaseController<T>(
     @Get()
     async listAll(
       @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-      @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+      @Query('limit', new DefaultValuePipe(100), ParseIntPipe)
+      limit: number = 100,
       @Query('order_by') orderBy: string = config.defaultOrderBy,
       @Query('order_direction')
       orderDirection: 'ASC' | 'DESC' = config.defaultOrderDirection || 'DESC',
       @Query('includes') includes?: string,
       @Query() allQueryParams?: Record<string, any>,
     ) {
+      // Hard limit: maximum 100 items per request
+      if (limit > 100) {
+        throw new BadRequestException(
+          'Maximum limit is 100 items per request',
+        );
+      }
+
       // Performance monitoring
       const _queryStartTime = Date.now();
       const _queryDate = new Date().toISOString();
@@ -415,6 +428,7 @@ export function createBaseController<T>(
       return {
         items: result.items,
         metaInfo: result.meta,
+        _status: HttpStatus.OK,
         _queryDate,
         _queryDurationMs,
       };
@@ -465,6 +479,7 @@ export function createBaseController<T>(
 
       return {
         ...entity,
+        _status: HttpStatus.OK,
         _queryDate,
         _queryDurationMs,
       };
