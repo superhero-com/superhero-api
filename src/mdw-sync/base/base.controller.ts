@@ -31,7 +31,7 @@ export function createBaseController<T>(config: EntityConfig<T>) {
   const searchableFields = getSearchableFields(config.entity);
   
   // Use sortable fields from metadata if orderByFields not provided in config
-  const orderByFields = config.orderByFields || sortableFields;
+  const orderByFields = config.orderByFields || sortableFields.map(f => f.field);
   
   // Build all decorators array
   const allDecorators: Array<MethodDecorator | PropertyDecorator> = [
@@ -49,7 +49,7 @@ export function createBaseController<T>(config: EntityConfig<T>) {
         name: field.field,
         type: String,
         required: false,
-        description: `Filter by ${field.field}`,
+        description: field.description || `Filter by ${field.field}`,
       }),
     ),
     ApiOperation({
