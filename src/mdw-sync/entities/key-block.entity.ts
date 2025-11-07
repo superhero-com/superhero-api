@@ -7,6 +7,8 @@ import {
 } from 'typeorm';
 import { ObjectType, Field, Int } from '@nestjs/graphql';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sortable } from '../decorators/sortable.decorator';
+import { Searchable } from '../decorators/searchable.decorator';
 
 @Entity({
   name: 'key_blocks',
@@ -20,36 +22,49 @@ export class KeyBlock {
   @PrimaryColumn()
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   hash: string;
 
   @Column({ unique: true })
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   height: number;
 
   @Column()
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   prev_hash: string;
 
   @Column()
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   prev_key_hash: string;
 
   @Column()
   @Field()
   @ApiProperty()
+  @Sortable()
   state_hash: string;
 
   @Column()
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   beneficiary: string;
 
   @Column()
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   miner: string;
 
   @Column({
@@ -60,16 +75,19 @@ export class KeyBlock {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   time: string;
 
   @Column({ default: 0 })
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
   transactions_count: number;
 
   @Column({ default: 0 })
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
   micro_blocks_count: number;
 
   @Column({
@@ -80,6 +98,7 @@ export class KeyBlock {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   beneficiary_reward: string;
 
   @Column({ type: 'text' })
@@ -100,6 +119,7 @@ export class KeyBlock {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   nonce: string;
 
   @Column({ type: 'jsonb' })
@@ -115,11 +135,14 @@ export class KeyBlock {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   target: string;
 
   @Column({ type: 'int' })
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   version: number;
 
   @CreateDateColumn({
@@ -128,5 +151,6 @@ export class KeyBlock {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   created_at: Date;
 }
