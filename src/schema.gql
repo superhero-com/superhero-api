@@ -103,7 +103,7 @@ type Query {
   keyBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedKeyBlockResponse!
   microBlock(hash: String!): MicroBlock
   microBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedMicroBlockResponse!
-  pluginSyncState(pluginName: String!): PluginSyncState
+  pluginSyncState(plugin_name: String!): PluginSyncState
   pluginSyncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedPluginSyncStateResponse!
   syncState(id: String!): SyncState
   syncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedSyncStateResponse!
