@@ -9,13 +9,15 @@ import {
   Query,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiOkResponse, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
+import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
+import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -65,66 +67,24 @@ export class AccountsController {
   // Portfolio history endpoint - MUST come before :address route to avoid route conflict
   @ApiOperation({ operationId: 'getPortfolioHistory' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
-  @ApiQuery({
-    name: 'startDate',
-    type: 'string',
-    required: false,
-    description: 'Start date (ISO 8601)',
-  })
-  @ApiQuery({
-    name: 'endDate',
-    type: 'string',
-    required: false,
-    description: 'End date (ISO 8601)',
-  })
-  @ApiQuery({
-    name: 'interval',
-    type: 'number',
-    required: false,
-    description: 'Interval in seconds (default: 86400 for daily)',
-  })
-  @ApiQuery({
-    name: 'convertTo',
-    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
-    required: false,
-    description: 'Currency to convert to (default: ae)',
-  })
-  @ApiQuery({
-    name: 'include',
-    type: 'string',
-    required: false,
-    description: 'Comma-separated list of fields to include (e.g., "pnl")',
-  })
+  @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
   @CacheTTL(60 * 10) // 10 minutes
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
     @Param('address') address: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('interval', new DefaultValuePipe(86400), ParseIntPipe)
-    interval?: number,
-    @Query('convertTo')
-    convertTo?:
-      | 'ae'
-      | 'usd'
-      | 'eur'
-      | 'aud'
-      | 'brl'
-      | 'cad'
-      | 'chf'
-      | 'gbp'
-      | 'xau',
-    @Query('include') include?: string,
+    @Query() query: GetPortfolioHistoryQueryDto,
   ) {
-    const start = startDate ? moment(startDate) : undefined;
-    const end = endDate ? moment(endDate) : undefined;
-    const includeFields = include ? include.split(',').map((f) => f.trim()) : [];
+    const start = query.startDate ? moment(query.startDate) : undefined;
+    const end = query.endDate ? moment(query.endDate) : undefined;
+    const includeFields = query.include
+      ? query.include.split(',').map((f) => f.trim())
+      : [];
 
     return await this.portfolioService.getPortfolioHistory(address, {
       startDate: start,
       endDate: end,
-      interval,
-      convertTo: convertTo || 'ae',
+      interval: query.interval || 86400,
+      convertTo: query.convertTo || 'ae',
       includePnl: includeFields.includes('pnl'),
     });
   }
