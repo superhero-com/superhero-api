@@ -270,6 +270,10 @@ export function createBaseController<T>(
       @Query('includes') includes?: string,
       @Query() allQueryParams?: Record<string, any>,
     ) {
+      // Performance monitoring
+      const _queryStartTime = Date.now();
+      const _queryDate = new Date().toISOString();
+
       // Check if we have array relations that would cause pagination issues
       const hasArrayRelations = includes && this.configRegistry
         ? checkHasArrayRelations(config, parseIncludesToTree(includes), this.configRegistry)
@@ -405,9 +409,14 @@ export function createBaseController<T>(
         limitArrayRelations(result.items, config, this.configRegistry, includesTree);
       }
 
+      // Calculate query duration
+      const _queryDurationMs = Date.now() - _queryStartTime;
+
       return {
         items: result.items,
         metaInfo: result.meta,
+        _queryDate,
+        _queryDurationMs,
       };
     }
 
@@ -417,6 +426,10 @@ export function createBaseController<T>(
       @Param(config.primaryKey) id: string,
       @Query('includes') includes?: string,
     ) {
+      // Performance monitoring
+      const _queryStartTime = Date.now();
+      const _queryDate = new Date().toISOString();
+
       const query = this.repository.createQueryBuilder(config.tableAlias);
 
       // Apply where condition
@@ -447,7 +460,14 @@ export function createBaseController<T>(
         limitArrayRelations([entity], config, this.configRegistry, includesTree);
       }
 
-      return entity;
+      // Calculate query duration
+      const _queryDurationMs = Date.now() - _queryStartTime;
+
+      return {
+        ...entity,
+        _queryDate,
+        _queryDurationMs,
+      };
     }
   }
 
