@@ -14,6 +14,11 @@ import { MicroBlocksController } from './controllers/micro-blocks.controller';
 import { TxsController } from './controllers/txs.controller';
 import { PluginSyncStateController } from './controllers/plugin-sync-state.controller';
 import { SyncStateController } from './controllers/sync-state.controller';
+import { KeyBlocksResolver } from './resolvers/key-blocks.resolver';
+import { MicroBlocksResolver } from './resolvers/micro-blocks.resolver';
+import { TxsResolver } from './resolvers/txs.resolver';
+import { PluginSyncStateResolver } from './resolvers/plugin-sync-state.resolver';
+import { SyncStateResolver } from './resolvers/sync-state.resolver';
 import { IndexerService } from './services/indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { ReorgService } from './services/reorg.service';
@@ -50,6 +55,12 @@ import { MDW_PLUGIN } from './plugins/plugin.tokens';
     ReorgService,
     // Subscribers
     TxSubscriber,
+    // GraphQL Resolvers
+    KeyBlocksResolver,
+    MicroBlocksResolver,
+    TxsResolver,
+    PluginSyncStateResolver,
+    SyncStateResolver,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
     {
       provide: MDW_PLUGIN,

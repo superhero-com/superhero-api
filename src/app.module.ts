@@ -5,6 +5,9 @@ import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { GraphQLModule } from '@nestjs/graphql';
+import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
+import { join } from 'path';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
@@ -52,6 +55,13 @@ import { MdwModule } from './mdw-sync/mdw.module';
     TypeOrmModule.forRoot({
       ...DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
+    }),
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      sortSchema: true,
+      playground: true,
+      introspection: true,
     }),
     MdwModule,
     AeModule,
