@@ -9,6 +9,11 @@ import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { SyncState } from './entities/sync-state.entity';
 import { Tx } from './entities/tx.entity';
 import { MdwController } from './mdw.controller';
+import { KeyBlocksController } from './controllers/key-blocks.controller';
+import { MicroBlocksController } from './controllers/micro-blocks.controller';
+import { TxsController } from './controllers/txs.controller';
+import { PluginSyncStateController } from './controllers/plugin-sync-state.controller';
+import { SyncStateController } from './controllers/sync-state.controller';
 import { IndexerService } from './services/indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { ReorgService } from './services/reorg.service';
@@ -31,7 +36,14 @@ import { MDW_PLUGIN } from './plugins/plugin.tokens';
     // SocialPluginModule,
     // TippingPluginModule,
   ],
-  controllers: [MdwController],
+  controllers: [
+    MdwController,
+    KeyBlocksController,
+    MicroBlocksController,
+    TxsController,
+    PluginSyncStateController,
+    SyncStateController,
+  ],
   providers: [
     PluginRegistryService,
     IndexerService,
