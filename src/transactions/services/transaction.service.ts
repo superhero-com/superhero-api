@@ -35,6 +35,11 @@ export class TransactionService {
     // );
   }
 
+  /**
+   * @deprecated Transaction saving is now handled by the BCL plugin (BclPluginSyncService.processTransaction).
+   * This method is kept for backward compatibility but will be removed in a future version.
+   * Use the plugin system for modern transaction processing.
+   */
   async saveTransaction(
     rawTransaction: ITransaction,
     token?: Token,
@@ -335,7 +340,7 @@ export class TransactionService {
   //   } = await this.parseTransactionData(rawTransaction);
   // }
 
-  private async updateTokenHolder(
+  async updateTokenHolder(
     token: Token,
     rawTransaction: ITransaction,
     volume: BigNumber,
