@@ -17,9 +17,7 @@ import { PluginBatchProcessorService } from './services/plugin-batch-processor.s
 import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
 import { ReorgService } from './services/reorg.service';
 import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
-import { BclPluginModule } from '@/plugins/bcl/bcl-plugin.module';
-import { SocialPluginModule } from '@/plugins/social/social-plugin.module';
-import { getPluginProvider } from '@/plugins';
+import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
 import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
 import { ENTITY_CONFIGS } from './config/entity-configs';
 
@@ -42,8 +40,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
       PluginFailedTransaction,
     ]),
     // Import plugin modules
-    BclPluginModule,
-    SocialPluginModule,
+    ...PLUGIN_MODULES,
   ],
   controllers: [
     MdwController,
