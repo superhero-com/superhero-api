@@ -23,20 +23,28 @@ export class PluginBatchProcessorService {
 
   /**
    * Process a batch of transactions for all plugins
+   * @param transactions - Transactions to process
+   * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync
    */
-  async processBatch(transactions: Tx[]): Promise<void> {
+  async processBatch(
+    transactions: Tx[],
+    syncDirection: 'backward' | 'live' = 'backward',
+  ): Promise<void> {
     if (transactions.length === 0) {
       return;
     }
 
     const plugins = this.pluginRegistryService.getPlugins();
     if (plugins.length === 0) {
+      console.log("================================================")
+      console.log("No plugins found");
+      console.log("================================================")
       return;
     }
 
     // Process each plugin independently
     const pluginPromises = plugins.map((plugin) =>
-      this.processBatchForPlugin(plugin, transactions),
+      this.processBatchForPlugin(plugin, transactions, syncDirection),
     );
 
     // Don't wait for all - let them process independently
@@ -49,6 +57,7 @@ export class PluginBatchProcessorService {
   private async processBatchForPlugin(
     plugin: Plugin,
     transactions: Tx[],
+    syncDirection: 'backward' | 'live',
   ): Promise<void> {
     try {
       // Get plugin sync state
@@ -56,7 +65,10 @@ export class PluginBatchProcessorService {
         where: { plugin_name: plugin.name },
       });
 
-      if (!syncState || !syncState.is_active) {
+      if (!syncState) {
+        console.log("================================================")
+        console.log("Plugin sync state not found", plugin.name);
+        console.log("================================================")
         return;
       }
 
@@ -67,6 +79,9 @@ export class PluginBatchProcessorService {
       );
 
       if (matchingTransactions.length === 0) {
+        console.log("================================================")
+        console.log("No matching transactions for plugin", plugin.name, matchingTransactions.length);
+        console.log("================================================")
         return;
       }
 
@@ -78,9 +93,21 @@ export class PluginBatchProcessorService {
         const maxHeight = Math.max(
           ...matchingTransactions.map((tx) => tx.block_height),
         );
+        
+        // Update appropriate height field based on sync direction
+        const updateData: Partial<PluginSyncState> = {
+          last_synced_height: maxHeight, // Keep for backward compatibility
+        };
+        
+        if (syncDirection === 'backward') {
+          updateData.backward_synced_height = maxHeight;
+        } else if (syncDirection === 'live') {
+          updateData.live_synced_height = maxHeight;
+        }
+        
         await this.pluginSyncStateRepository.update(
           { plugin_name: plugin.name },
-          { last_synced_height: maxHeight },
+          updateData,
         );
 
         this.logger.debug(

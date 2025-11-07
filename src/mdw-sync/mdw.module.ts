@@ -15,6 +15,7 @@ import { LiveIndexerService } from './services/live-indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
 import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
+import { MicroBlockService } from './services/micro-block.service';
 import { ReorgService } from './services/reorg.service';
 import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
@@ -52,6 +53,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     PluginRegistryService,
     PluginBatchProcessorService,
     PluginFailedTransactionService,
+    MicroBlockService,
     IndexerService,
     LiveIndexerService,
     ReorgService,

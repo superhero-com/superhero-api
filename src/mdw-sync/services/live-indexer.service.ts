@@ -12,6 +12,7 @@ import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { WebSocketService } from '@/ae/websocket.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
+import { MicroBlockService } from './micro-block.service';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -32,6 +33,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     private configService: ConfigService,
     private websocketService: WebSocketService,
     private pluginBatchProcessor: PluginBatchProcessorService,
+    private microBlockService: MicroBlockService,
   ) {}
 
   async onModuleInit() {
@@ -69,17 +71,26 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
 
+      // Ensure micro-block exists before saving transaction (foreign key constraint)
+      if (mdwTx.block_hash) {
+        await this.microBlockService.ensureMicroBlockExists(
+          mdwTx.block_hash,
+          transaction.blockHeight,
+        );
+      }
+
       // Save transaction
       const savedTx = await this.txRepository.save(mdwTx);
 
-      // Process batch for plugins (single tx in array)
-      await this.pluginBatchProcessor.processBatch([savedTx]);
+      // Process batch for plugins (single tx in array) - live sync
+      await this.pluginBatchProcessor.processBatch([savedTx], 'live');
       
       this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }
   }
+
 
   async handleKeyBlock(keyBlockHeader: ITopHeader) {
     try {
@@ -127,9 +138,8 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     middlewareUrl: string,
   ): Promise<void> {
     try {
-      const microBlocks = await this.fetchMicroBlocksForKeyBlock(
-        { hash: keyBlockHash } as KeyBlock,
-        middlewareUrl,
+      const microBlocks = await this.microBlockService.fetchMicroBlocksForKeyBlock(
+        keyBlockHash,
       );
 
       if (microBlocks.length > 0) {
@@ -144,52 +154,6 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
         error,
       );
     }
-  }
-
-  /**
-   * Fetch micro-blocks for a single key-block (handles pagination)
-   */
-  private async fetchMicroBlocksForKeyBlock(
-    keyBlock: KeyBlock,
-    middlewareUrl: string,
-  ): Promise<Partial<MicroBlock>[]> {
-    const microBlocksToSave: Partial<MicroBlock>[] = [];
-
-    let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlock.hash}/micro-blocks?limit=100`;
-
-    // Handle pagination
-    while (microBlocksUrl) {
-      const response = await fetchJson(microBlocksUrl);
-      const microBlocks = response?.data || [];
-
-      // Convert micro-blocks to entity format
-      for (const microBlock of microBlocks) {
-        microBlocksToSave.push({
-          hash: microBlock.hash,
-          height: microBlock.height,
-          prev_hash: microBlock.prev_hash,
-          prev_key_hash: microBlock.prev_key_hash,
-          state_hash: microBlock.state_hash,
-          time: microBlock.time.toString(),
-          transactions_count: microBlock.transactions_count,
-          flags: microBlock.flags,
-          version: microBlock.version,
-          gas: microBlock.gas,
-          micro_block_index: microBlock.micro_block_index,
-          pof_hash: microBlock.pof_hash,
-          signature: microBlock.signature,
-          txs_hash: microBlock.txs_hash,
-          created_at: new Date(microBlock.time),
-        });
-      }
-
-      // Check if there's a next page
-      microBlocksUrl = response.next
-        ? `${middlewareUrl}${response.next}`
-        : null;
-    }
-
-    return microBlocksToSave;
   }
 
 

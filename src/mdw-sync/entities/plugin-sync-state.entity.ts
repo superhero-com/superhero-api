@@ -15,7 +15,6 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
   name: 'plugin_sync_state',
 })
 @Index(['plugin_name'])
-@Index(['is_active'])
 @ObjectType()
 export class PluginSyncState {
   @PrimaryColumn()
@@ -39,18 +38,23 @@ export class PluginSyncState {
   @Sortable()
   last_synced_height: number;
 
+  @Column({ nullable: true })
+  @Field(() => Int, { nullable: true })
+  @ApiProperty({ required: false })
+  @Sortable()
+  backward_synced_height: number;
+
+  @Column({ nullable: true })
+  @Field(() => Int, { nullable: true })
+  @ApiProperty({ required: false })
+  @Sortable()
+  live_synced_height: number;
+
   @Column()
   @Field(() => Int)
   @ApiProperty()
   @Sortable()
   start_from_height: number;
-
-  @Column({ default: true })
-  @Field({ defaultValue: true })
-  @ApiProperty()
-  @Sortable()
-  @Searchable()
-  is_active: boolean;
 
   @CreateDateColumn({
     type: 'timestamp',
