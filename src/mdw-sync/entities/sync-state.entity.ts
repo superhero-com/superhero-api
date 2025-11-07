@@ -25,6 +25,12 @@ export class SyncState {
   @Column({ default: false })
   is_bulk_mode: boolean;
 
+  @Column({ nullable: true })
+  backward_synced_height: number;
+
+  @Column({ nullable: true })
+  live_synced_height: number;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
