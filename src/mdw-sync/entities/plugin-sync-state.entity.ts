@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ObjectType, Field, Int } from '@nestjs/graphql';
+import { ApiProperty } from '@nestjs/swagger';
 
 @Entity({
   name: 'plugin_sync_state',
@@ -17,24 +18,29 @@ import { ObjectType, Field, Int } from '@nestjs/graphql';
 export class PluginSyncState {
   @PrimaryColumn()
   @Field()
+  @ApiProperty()
   plugin_name: string;
 
   @Column({
     default: 1,
   })
   @Field(() => Int)
+  @ApiProperty()
   version: number;
 
   @Column()
   @Field(() => Int)
+  @ApiProperty()
   last_synced_height: number;
 
   @Column()
   @Field(() => Int)
+  @ApiProperty()
   start_from_height: number;
 
   @Column({ default: true })
   @Field({ defaultValue: true })
+  @ApiProperty()
   is_active: boolean;
 
   @CreateDateColumn({
@@ -42,6 +48,7 @@ export class PluginSyncState {
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
   @Field()
+  @ApiProperty()
   created_at: Date;
 
   @UpdateDateColumn({
@@ -49,5 +56,6 @@ export class PluginSyncState {
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
   @Field()
+  @ApiProperty()
   updated_at: Date;
 }
