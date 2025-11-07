@@ -13,6 +13,7 @@ import BigNumber from 'bignumber.js';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Injectable()
 export class TransactionService {
@@ -45,6 +46,7 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
   ): Promise<Transaction> {
+    return;
     if (
       !Object.keys(BCL_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
       rawTransaction?.tx?.returnType === 'revert'
@@ -260,6 +262,41 @@ export class TransactionService {
     };
   }
 
+  async decodeTxEvents(
+    token: Token,
+    tx: Tx,
+    retries = 0,
+  ): Promise<Tx> {
+    try {
+      const factory = await this.communityFactoryService.loadFactory(
+        token.factory_address as Encoded.ContractAddress,
+      );
+      const decodedData = factory.contract.$decodeEvents(tx.raw.log);
+
+      return {
+        ...tx,
+        raw: {
+          ...tx.raw,
+          decodedData,
+        },
+      };
+    } catch (error: any) {
+      if (retries < 3) {
+        return this.decodeTxEvents(token, tx, retries + 1);
+      }
+      this.logger.error(
+        `decodeTxData->error:: retry ${retries}/3`,
+        error,
+        error.stack,
+      );
+      return tx;
+    }
+  }
+
+  /**
+   * TODO: remove
+   * @deprecated
+   */
   async decodeTransactionData(
     token: Token,
     rawTransaction: ITransaction,

@@ -6,7 +6,7 @@ import { Tx } from '../entities/tx.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
-import { Plugin } from '@/plugins/plugin.interface';
+import { Plugin, SyncDirection } from '@/plugins/plugin.interface';
 import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
 
 @Injectable()
@@ -24,11 +24,11 @@ export class PluginBatchProcessorService {
   /**
    * Process a batch of transactions for all plugins
    * @param transactions - Transactions to process
-   * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync
+   * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
   async processBatch(
     transactions: Tx[],
-    syncDirection: 'backward' | 'live' = 'backward',
+    syncDirection: SyncDirection,
   ): Promise<void> {
     if (transactions.length === 0) {
       return;
@@ -57,7 +57,7 @@ export class PluginBatchProcessorService {
   private async processBatchForPlugin(
     plugin: Plugin,
     transactions: Tx[],
-    syncDirection: 'backward' | 'live',
+    syncDirection: SyncDirection,
   ): Promise<void> {
     try {
       // Get plugin sync state
@@ -83,7 +83,7 @@ export class PluginBatchProcessorService {
       console.log("================================================")
       // Process batch - errors are handled inside processBatch
       try {
-        await plugin.processBatch(matchingTransactions);
+        await plugin.processBatch(matchingTransactions, syncDirection);
 
         // Update sync state with the highest block height processed
         const maxHeight = Math.max(
@@ -100,6 +100,7 @@ export class PluginBatchProcessorService {
         } else if (syncDirection === 'live') {
           updateData.live_synced_height = maxHeight;
         }
+        // 'reorg' direction doesn't update sync state heights
         
         await this.pluginSyncStateRepository.update(
           { plugin_name: plugin.name },

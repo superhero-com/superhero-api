@@ -5,6 +5,7 @@ import { PluginFailedTransaction } from '../entities/plugin-failed-transaction.e
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { PluginRegistryService } from './plugin-registry.service';
+import { SyncDirection } from '@/plugins/plugin.interface';
 
 @Injectable()
 export class PluginFailedTransactionService {
@@ -91,11 +92,12 @@ export class PluginFailedTransactionService {
       });
 
       // Process transactions in batches
+      // Failed transaction retries are treated as 'backward' sync since they're typically historical
       const batchSize = 100;
       for (let i = 0; i < transactions.length; i += batchSize) {
         const batch = transactions.slice(i, i + batchSize);
         try {
-          await plugin.processBatch(batch);
+          await plugin.processBatch(batch, 'backward');
           // Remove successful retries from failed transactions
           const successfulHashes = batch.map((tx) => tx.hash);
           await this.failedTransactionRepository
@@ -173,7 +175,8 @@ export class PluginFailedTransactionService {
         return false;
       }
 
-      await plugin.processBatch([tx]);
+      // Failed transaction retries are treated as 'backward' sync since they're typically historical
+      await plugin.processBatch([tx], 'backward');
       await this.failedTransactionRepository.delete({
         plugin_name: pluginName,
         tx_hash: txHash,

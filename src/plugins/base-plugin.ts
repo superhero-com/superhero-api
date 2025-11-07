@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Repository, MoreThan } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
-import { Plugin, PluginFilter } from './plugin.interface';
+import { Plugin, PluginFilter, SyncDirection } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 
 export abstract class BasePlugin implements Plugin {
@@ -22,14 +22,16 @@ export abstract class BasePlugin implements Plugin {
 
   /**
    * Process a batch of transactions. Delegates to sync service.
+   * @param txs - Transactions to process
+   * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
-  async processBatch(txs: Tx[]): Promise<void> {
+  async processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void> {
     if (txs.length === 0) {
       return;
     }
 
     const syncService = this.getSyncService();
-    await syncService.processBatch(txs);
+    await syncService.processBatch(txs, syncDirection);
   }
 
   /**
@@ -93,7 +95,7 @@ export abstract class BasePlugin implements Plugin {
         const syncService = this.getSyncService();
         for (const tx of transactions) {
           try {
-            await syncService.processTransaction(tx);
+            await syncService.processTransaction(tx, 'backward');
             processedCount++;
 
             // Update sync state periodically

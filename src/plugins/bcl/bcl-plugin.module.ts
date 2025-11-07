@@ -6,19 +6,28 @@ import { TransactionsModule } from '@/transactions/transactions.module';
 import { TokensModule } from '@/tokens/tokens.module';
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
+import { BullModule } from '@nestjs/bull';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+import { TokenHolder } from '@/tokens/entities/token-holders.entity';
+import { Token } from '@/tokens/entities/token.entity';
+import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { BclPlugin } from './bcl.plugin';
 import { BclPluginSyncService } from './bcl-plugin-sync.service';
+import { BclTransactionsService } from './bcl-transactions.service';
+import { BclTokenService } from './bcl-token.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction]),
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
     AeModule,
+    BullModule.registerQueue({
+      name: PULL_TOKEN_INFO_QUEUE,
+    }),
   ],
-  providers: [BclPluginSyncService, BclPlugin],
+  providers: [BclTransactionsService, BclTokenService, BclPluginSyncService, BclPlugin],
   exports: [BclPlugin],
 })
 export class BclPluginModule {}
