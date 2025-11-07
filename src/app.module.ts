@@ -26,6 +26,7 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 import { PostModule } from './social/post.module';
 import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
+import { MdwModule } from './mdw-sync/mdw.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { TipModule } from './tipping/tip.module';
       ...DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
     }),
+    MdwModule,
     AeModule,
     TokensModule,
     TransactionsModule,
