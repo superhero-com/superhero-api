@@ -64,6 +64,40 @@ export class AccountsController {
     return paginate(query, { page, limit });
   }
 
+  /**
+   * Calculate minimum allowed interval based on the period between start and end dates
+   * @param start Start date moment object
+   * @param end End date moment object
+   * @returns Minimum interval in seconds
+   */
+  private getMinimumInterval(start?: moment.Moment, end?: moment.Moment): number {
+    if (!start || !end) {
+      // If no dates provided, default to daily interval
+      return 86400;
+    }
+
+    const periodDays = end.diff(start, 'days');
+    const periodMonths = end.diff(start, 'months', true);
+
+    // If period is in days or weeks (less than 1 month), hourly interval is okay
+    if (periodMonths < 1) {
+      return 3600; // 1 hour
+    }
+
+    // If period is 1-3 months, minimum 4 hour interval
+    if (periodMonths >= 1 && periodMonths < 3) {
+      return 14400; // 4 hours
+    }
+
+    // If period is 3-6 months, minimum 1 day interval
+    if (periodMonths >= 3 && periodMonths < 6) {
+      return 86400; // 1 day
+    }
+
+    // If period is 6+ months, minimum 1 week interval
+    return 604800; // 1 week
+  }
+
   // Portfolio history endpoint - MUST come before :address route to avoid route conflict
   @ApiOperation({ operationId: 'getPortfolioHistory' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
@@ -80,10 +114,18 @@ export class AccountsController {
       ? query.include.split(',').map((f) => f.trim())
       : [];
 
+    // Calculate minimum allowed interval based on period
+    const minimumInterval = this.getMinimumInterval(start, end);
+    const requestedInterval = query.interval || 86400;
+    
+    // Use the larger of requested interval or minimum allowed interval
+    const finalInterval = Math.max(requestedInterval, minimumInterval);
+    console.log('finalInterval', finalInterval);
+
     return await this.portfolioService.getPortfolioHistory(address, {
       startDate: start,
       endDate: end,
-      interval: query.interval || 86400,
+      interval: finalInterval,
       convertTo: query.convertTo || 'ae',
       includePnl: includeFields.includes('pnl'),
     });
