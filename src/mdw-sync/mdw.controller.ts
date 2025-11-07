@@ -36,6 +36,14 @@ export class MdwController {
             lastSyncedHeight: syncState.last_synced_height,
             tipHeight: syncState.tip_height,
             lag: syncState.tip_height - syncState.last_synced_height,
+            backwardSyncedHeight: syncState.backward_synced_height,
+            liveSyncedHeight: syncState.live_synced_height,
+            backwardSyncRemaining: syncState.backward_synced_height
+              ? syncState.backward_synced_height
+              : null,
+            liveSyncLag: syncState.live_synced_height
+              ? syncState.tip_height - syncState.live_synced_height
+              : null,
           }
         : null,
       plugins: pluginStates.map((state) => ({

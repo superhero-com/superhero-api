@@ -50,27 +50,31 @@ export class IndexerService implements OnModuleInit {
     if (!existing) {
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
       const status = await fetchJson(`${middlewareUrl}/v3/status`);
+      const tipHeight = status.mdw_height;
 
       await this.syncStateRepository.save({
         id: 'global',
         last_synced_height: 0,
         last_synced_hash: '',
-        tip_height: status.mdw_height,
+        tip_height: tipHeight,
         is_bulk_mode: false,
+        backward_synced_height: tipHeight, // Start from tip, will decrease as we sync backward
+        live_synced_height: 0, // Start from 0, will increase as live indexer syncs forward
       });
+    } else {
+      // Migrate existing sync state
+      if (existing.backward_synced_height === null || existing.backward_synced_height === undefined) {
+        await this.syncStateRepository.update(
+          { id: 'global' },
+          {
+            backward_synced_height: existing.tip_height || existing.last_synced_height,
+            live_synced_height: existing.last_synced_height || 0,
+          },
+        );
+      }
     }
   }
 
-  /**
-   * Determine if we should use bulk mode based on how far behind we are
-   */
-  private isBulkMode(lastSyncedHeight: number, tipHeight: number): boolean {
-    const threshold = this.configService.get<number>(
-      'mdw.bulkModeThreshold',
-      100,
-    );
-    return tipHeight - lastSyncedHeight > threshold;
-  }
 
   private startSync() {
     const syncIntervalMs = this.configService.get<number>(
@@ -114,20 +118,27 @@ export class IndexerService implements OnModuleInit {
       const status = await fetchJson(`${middlewareUrl}/v3/status`);
       const tipHeight = status.mdw_height;
 
-      if (tipHeight <= syncState.last_synced_height) {
-        return; // No new blocks
-      }
-
       // Update tip height
       await this.syncStateRepository.update(
         { id: 'global' },
         { tip_height: tipHeight },
       );
 
-      // Determine sync mode
-      const shouldUseBulkMode = this.isBulkMode(
-        syncState.last_synced_height,
-        tipHeight,
+      // Get target backward sync height (stop at 0 or configured start height)
+      const targetBackwardHeight = 0; // Could be configurable in the future
+      const currentBackwardHeight = syncState.backward_synced_height ?? tipHeight;
+
+      // Check if backward sync is complete
+      if (currentBackwardHeight <= targetBackwardHeight) {
+        this.logger.debug('Backward sync complete, no more blocks to sync backward');
+        return;
+      }
+
+      // Determine sync mode based on how much we need to sync backward
+      const remainingBlocks = currentBackwardHeight - targetBackwardHeight;
+      const shouldUseBulkMode = remainingBlocks > this.configService.get<number>(
+        'mdw.bulkModeThreshold',
+        100,
       );
 
       // Update bulk mode state if it changed
@@ -137,46 +148,49 @@ export class IndexerService implements OnModuleInit {
           { is_bulk_mode: shouldUseBulkMode },
         );
 
-        // Emit event when transitioning from bulk to live mode
+        // Emit event when transitioning from bulk to normal mode
         if (syncState.is_bulk_mode && !shouldUseBulkMode) {
-          this.logger.log('Transitioning from bulk mode to live mode');
+          this.logger.log('Transitioning from bulk mode to normal backward sync mode');
           this.eventEmitter.emit('sync.bulk-complete');
         } else if (!syncState.is_bulk_mode && shouldUseBulkMode) {
-          this.logger.log('Entering bulk mode for historical sync');
+          this.logger.log('Entering bulk mode for backward sync');
         }
 
         // Emit event to invalidate subscriber cache
         this.eventEmitter.emit('sync.bulk-mode-changed');
       }
 
-      // Sync new blocks
-      const startHeight = syncState.last_synced_height + 1;
+      // Sync backward: from currentBackwardHeight down to targetBackwardHeight
       const batchSize = shouldUseBulkMode
         ? this.configService.get<number>('mdw.bulkModeBatchBlocks', 1000)
         : this.configService.get<number>('mdw.backfillBatchBlocks', 50);
 
-      const endHeight = Math.min(tipHeight, startHeight + batchSize - 1);
+      // Calculate range: endHeight is higher (more recent), startHeight is lower (older)
+      // We sync from endHeight down to startHeight
+      const endHeight = currentBackwardHeight;
+      const startHeight = Math.max(targetBackwardHeight, endHeight - batchSize + 1);
 
       if (shouldUseBulkMode) {
         // Use parallel processing in bulk mode
-        await this.syncBlocksParallel(startHeight, endHeight);
+        await this.syncBlocksParallelBackward(startHeight, endHeight);
       } else {
-        // Use sequential processing in live mode
+        // Use sequential processing
         await this.syncBlocks(startHeight, endHeight);
         await this.syncMicroBlocks(startHeight, endHeight);
-        await this.syncTransactions(startHeight, endHeight);
+        await this.syncTransactions(startHeight, endHeight, true, true); // useBulkMode=true, backward=true
       }
 
-      // Update sync state
+      // Update backward sync state (decrease backward_synced_height as we go backward)
       await this.syncStateRepository.update(
         { id: 'global' },
         {
-          last_synced_height: endHeight,
+          backward_synced_height: startHeight - 1,
+          last_synced_height: startHeight - 1, // Keep for backward compatibility
           last_synced_hash: '', // Will be updated when we store the block
         },
       );
     } catch (error: any) {
-      this.logger.error('Sync failed', error);
+      this.logger.error('Backward sync failed', error);
     } finally {
       this.isRunning = false;
     }
@@ -320,6 +334,7 @@ export class IndexerService implements OnModuleInit {
     startHeight: number,
     endHeight: number,
     useBulkMode = false,
+    backward = false,
   ) {
     // MDW has a hard limit of 100 transactions per request, regardless of mode
     const pageLimit = Math.min(
@@ -331,7 +346,7 @@ export class IndexerService implements OnModuleInit {
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
     const queryParams = new URLSearchParams({
-      direction: 'forward',
+      direction: backward ? 'backward' : 'forward',
       limit: pageLimit.toString(),
       scope: `gen:${startHeight}-${endHeight}`,
     });
@@ -439,9 +454,9 @@ export class IndexerService implements OnModuleInit {
   }
 
   /**
-   * Parallel processing of multiple block ranges for bulk sync
+   * Parallel processing of multiple block ranges for bulk backward sync
    */
-  private async syncBlocksParallel(
+  private async syncBlocksParallelBackward(
     startHeight: number,
     endHeight: number,
   ): Promise<void> {
@@ -456,11 +471,12 @@ export class IndexerService implements OnModuleInit {
 
     const ranges: Array<{ start: number; end: number }> = [];
 
-    // Split the range into chunks for parallel processing
-    for (let i = startHeight; i <= endHeight; i += batchSize) {
+    // Split the range into chunks for parallel processing (going backward)
+    // Process from endHeight down to startHeight
+    for (let i = endHeight; i >= startHeight; i -= batchSize) {
       ranges.push({
-        start: i,
-        end: Math.min(i + batchSize - 1, endHeight),
+        start: Math.max(startHeight, i - batchSize + 1),
+        end: i,
       });
     }
 
@@ -469,7 +485,7 @@ export class IndexerService implements OnModuleInit {
       const batch = ranges.slice(i, i + parallelWorkers);
       await Promise.all(
         batch.map((range) =>
-          this.syncBlockRange(range.start, range.end).catch((error: any) => {
+          this.syncBlockRange(range.start, range.end, true).catch((error: any) => {
             this.logger.error(
               `Failed to sync range ${range.start}-${range.end}`,
               error,
@@ -482,7 +498,7 @@ export class IndexerService implements OnModuleInit {
       // Log progress
       const completed = Math.min(i + parallelWorkers, ranges.length);
       this.logger.log(
-        `Bulk sync progress: ${completed}/${ranges.length} ranges completed`,
+        `Backward bulk sync progress: ${completed}/${ranges.length} ranges completed`,
       );
     }
   }
@@ -493,10 +509,11 @@ export class IndexerService implements OnModuleInit {
   private async syncBlockRange(
     startHeight: number,
     endHeight: number,
+    backward = false,
   ): Promise<void> {
     await this.syncBlocks(startHeight, endHeight);
     await this.syncMicroBlocks(startHeight, endHeight);
-    await this.syncTransactions(startHeight, endHeight, true); // Use bulk mode
+    await this.syncTransactions(startHeight, endHeight, true, backward); // Use bulk mode
   }
 
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
