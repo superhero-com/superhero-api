@@ -13,6 +13,7 @@ import {
   ApiQuery,
   ApiTags,
   ApiOkResponse,
+  ApiExtraModels,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
@@ -21,8 +22,11 @@ import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { EntityConfig } from '../types/entity-config.interface';
 
 export function createBaseController<T>(config: EntityConfig<T>) {
+  const ResponseType = config.dto || config.entity;
+  
   @Controller(config.routePrefix)
   @ApiTags(config.swaggerTag)
+  @ApiExtraModels(ResponseType)
   class BaseController {
     constructor(
       @InjectRepository(config.entity)
@@ -42,7 +46,7 @@ export function createBaseController<T>(config: EntityConfig<T>) {
       summary: `Get all ${config.queryNames.plural}`,
       description: `Retrieve a paginated list of all ${config.queryNames.plural} with optional sorting`,
     })
-    @ApiOkResponsePaginated(config.entity)
+    @ApiOkResponsePaginated(ResponseType)
     @Get()
     async listAll(
       @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
@@ -75,7 +79,7 @@ export function createBaseController<T>(config: EntityConfig<T>) {
       description: `Retrieve a specific ${config.queryNames.singular} by its ${config.primaryKey}`,
     })
     @ApiOkResponse({
-      type: config.entity,
+      type: ResponseType,
       description: `${config.queryNames.singular} retrieved successfully`,
     })
     @Get(`:${config.primaryKey}`)

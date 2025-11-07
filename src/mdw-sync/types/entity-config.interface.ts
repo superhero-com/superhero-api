@@ -13,6 +13,7 @@ export interface CustomResolveFieldConfig<TEntity = any> {
 
 export interface EntityConfig<TEntity = any> {
   entity: Type<TEntity>;
+  dto?: Type<any>; // Optional: DTO class for API responses. If not provided, entity will be used
   primaryKey: string;
   defaultOrderBy: string;
   defaultOrderDirection?: 'ASC' | 'DESC';
