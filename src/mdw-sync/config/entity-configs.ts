@@ -3,7 +3,7 @@ import { MicroBlock } from '../entities/micro-block.entity';
 import { KeyBlock } from '../entities/key-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
-import { EntityConfig } from '../types/entity-config.interface';
+import { EntityConfig } from '@/api-core/types/entity-config.interface';
 
 export const TX_CONFIG: EntityConfig<Tx> = {
   entity: Tx,

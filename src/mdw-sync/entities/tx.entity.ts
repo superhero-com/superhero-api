@@ -11,8 +11,8 @@ import { ObjectType, Field, Int } from '@nestjs/graphql';
 import { GraphQLJSONObject } from 'graphql-type-json';
 import { ApiProperty } from '@nestjs/swagger';
 import { MicroBlock } from './micro-block.entity';
-import { Sortable } from '../decorators/sortable.decorator';
-import { Searchable } from '../decorators/searchable.decorator';
+import { Sortable } from '@/api-core/decorators/sortable.decorator';
+import { Searchable } from '@/api-core/decorators/searchable.decorator';
 
 @Entity({
   name: 'txs',

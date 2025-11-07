@@ -5,7 +5,7 @@ import { KeyBlock } from '../entities/key-block.entity';
 import { Tx } from '../entities/tx.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { PaginatedResponse } from '../types/pagination.type';
+import { PaginatedResponse } from '@/api-core/types/pagination.type';
 
 const PaginatedKeyBlockResponse = PaginatedResponse(KeyBlock);
 
