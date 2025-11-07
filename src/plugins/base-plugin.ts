@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Repository, MoreThan } from 'typeorm';
-import { Tx } from '../entities/tx.entity';
-import { PluginSyncState } from '../entities/plugin-sync-state.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Plugin, PluginFilter } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 
@@ -196,3 +196,4 @@ export abstract class BasePlugin implements Plugin {
     return transactions;
   }
 }
+

@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { Tx } from '../entities/tx.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Plugin } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 
@@ -43,3 +43,4 @@ export abstract class BasePluginTxListener {
     }
   }
 }
+

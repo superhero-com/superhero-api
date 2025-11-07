@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Tx } from '../../entities/tx.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 
 @Injectable()
