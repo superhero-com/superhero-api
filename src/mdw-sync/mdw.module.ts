@@ -18,6 +18,7 @@ import { PluginFailedTransactionService } from './services/plugin-failed-transac
 import { ReorgService } from './services/reorg.service';
 import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
+import { AeModule } from '@/ae/ae.module';
 import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
 import { ENTITY_CONFIGS } from './config/entity-configs';
 
@@ -39,6 +40,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
       PluginSyncState,
       PluginFailedTransaction,
     ]),
+    AeModule, // Required for WebSocketService used by LiveIndexerService
     // Import plugin modules
     ...PLUGIN_MODULES,
   ],
