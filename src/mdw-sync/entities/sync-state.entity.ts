@@ -7,6 +7,8 @@ import {
 } from 'typeorm';
 import { ObjectType, Field, Int } from '@nestjs/graphql';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sortable } from '../decorators/sortable.decorator';
+import { Searchable } from '../decorators/searchable.decorator';
 
 @Entity({
   name: 'sync_state',
@@ -16,11 +18,14 @@ export class SyncState {
   @PrimaryColumn({ default: 'global' })
   @Field()
   @ApiProperty()
+  @Sortable()
+  @Searchable()
   id: string;
 
   @Column()
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
   last_synced_height: number;
 
   @Column()
@@ -31,21 +36,25 @@ export class SyncState {
   @Column()
   @Field(() => Int)
   @ApiProperty()
+  @Sortable()
   tip_height: number;
 
   @Column({ default: false })
   @Field({ defaultValue: false })
   @ApiProperty()
+  @Sortable()
   is_bulk_mode: boolean;
 
   @Column({ nullable: true })
   @Field(() => Int, { nullable: true })
   @ApiProperty({ required: false })
+  @Sortable()
   backward_synced_height: number;
 
   @Column({ nullable: true })
   @Field(() => Int, { nullable: true })
   @ApiProperty({ required: false })
+  @Sortable()
   live_synced_height: number;
 
   @CreateDateColumn({
@@ -54,6 +63,7 @@ export class SyncState {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   created_at: Date;
 
   @UpdateDateColumn({
@@ -62,5 +72,6 @@ export class SyncState {
   })
   @Field()
   @ApiProperty()
+  @Sortable()
   updated_at: Date;
 }

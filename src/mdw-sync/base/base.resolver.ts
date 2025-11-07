@@ -4,9 +4,14 @@ import { Repository } from 'typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { PaginatedResponse } from '../types/pagination.type';
 import { EntityConfig } from '../types/entity-config.interface';
+import { getSortableFields, getSearchableFields } from '../utils/metadata-reader';
 
 export function createBaseResolver<T>(config: EntityConfig<T>) {
   const PaginatedResponseType = PaginatedResponse(config.entity);
+  
+  // Read sortable and searchable fields from entity metadata
+  const sortableFields = getSortableFields(config.entity);
+  const searchableFields = getSearchableFields(config.entity);
 
   @Resolver(() => config.entity)
   class BaseResolver {
@@ -28,6 +33,11 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
     ) {
       const query = this.repository.createQueryBuilder(config.tableAlias);
 
+      // Note: GraphQL filtering by searchable fields can be added by extending this resolver
+      // and adding @Args decorators for each searchable field, then applying filters similar
+      // to how it's done in the REST API BaseController
+
+      // Apply ordering
       if (orderBy) {
         query.orderBy(
           `${config.tableAlias}.${orderBy}`,
