@@ -7,8 +7,8 @@ import {
 } from 'typeorm';
 import { ObjectType, Field, Int } from '@nestjs/graphql';
 import { ApiProperty } from '@nestjs/swagger';
-import { Sortable } from '../decorators/sortable.decorator';
-import { Searchable } from '../decorators/searchable.decorator';
+import { Sortable } from '@/api-core/decorators/sortable.decorator';
+import { Searchable } from '@/api-core/decorators/searchable.decorator';
 
 @Entity({
   name: 'micro_blocks',

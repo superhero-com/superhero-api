@@ -17,7 +17,7 @@ import { PluginRegistryService } from './services/plugin-registry.service';
 import { ReorgService } from './services/reorg.service';
 import { TxSubscriber } from './subscribers/tx.subscriber';
 import { MDW_PLUGIN } from './plugins/plugin.tokens';
-import { createEntityControllers, createEntityResolvers } from './factories/entity-factory';
+import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
 import {
   ENTITY_CONFIGS,
   SYNC_STATE_CONFIG,
