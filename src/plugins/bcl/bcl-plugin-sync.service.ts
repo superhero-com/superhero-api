@@ -3,15 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
-import { TransactionService } from '@/transactions/services/transaction.service';
-import { TokensService } from '@/tokens/tokens.service';
+import { SyncDirection } from '../plugin.interface';
+import { BclTransactionsService } from './bcl-transactions.service';
+import { BclTokenService } from './bcl-token.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { ITransaction } from '@/utils/types';
 import { BCL_FUNCTIONS } from '@/configs';
-import { Encoded, toAe } from '@aeternity/aepp-sdk';
+import { toAe } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
 
@@ -20,8 +20,8 @@ export class BclPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(BclPluginSyncService.name);
 
   constructor(
-    private readonly transactionService: TransactionService,
-    private readonly tokenService: TokensService,
+    private readonly bclTransactionsService: BclTransactionsService,
+    private readonly bclTokenService: BclTokenService,
     private readonly aePricingService: AePricingService,
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
     @InjectRepository(Transaction)
@@ -30,44 +30,18 @@ export class BclPluginSyncService extends BasePluginSyncService {
     super();
   }
 
-  /**
-   * Convert Tx entity to ITransaction format
-   */
-  private convertTxToITransaction(tx: Tx): ITransaction {
-    return {
-      hash: tx.hash,
-      blockHeight: tx.block_height,
-      blockHash: tx.block_hash as Encoded.BlockTxHash,
-      signatures: tx.signatures,
-      encodedTx: tx.encoded_tx || '',
-      microIndex: parseInt(tx.micro_index, 10),
-      microTime: parseInt(tx.micro_time, 10),
-      pending: false,
-      tx: tx.raw || {},
-    } as ITransaction;
-  }
-
-  async processTransaction(tx: Tx): Promise<void> {
+  async processTransaction(rawTransaction: Tx, syncDirection: SyncDirection): Promise<void> {
     try {
-      const rawTransaction = this.convertTxToITransaction(tx);
-
-      // Validate transaction
-      if (
-        !Object.keys(BCL_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
-        rawTransaction?.tx?.returnType === 'revert'
-      ) {
-        return;
-      }
 
       let saleAddress: string;
       let token: Token | undefined;
 
       // Determine sale address
-      if (rawTransaction.tx.function === BCL_FUNCTIONS.create_community) {
-        if (!rawTransaction.tx.return?.value?.length) {
+      if (rawTransaction.function === BCL_FUNCTIONS.create_community) {
+        if (!rawTransaction.raw?.return?.value?.length) {
           return;
         }
-        saleAddress = rawTransaction.tx.return.value[1].value;
+        saleAddress = rawTransaction.raw?.return.value[1].value;
         // Remove any transaction with the same sale address
         await this.transactionRepository
           .createQueryBuilder('transactions')
@@ -83,19 +57,19 @@ export class BclPluginSyncService extends BasePluginSyncService {
           })
           .execute();
       } else {
-        saleAddress = rawTransaction.tx.contractId;
+        saleAddress = rawTransaction.contract_id;
       }
 
       // Get or create token
       try {
-        token = await this.tokenService.getToken(saleAddress);
+        token = await this.bclTokenService.getToken(saleAddress);
       } catch (error) {
         this.logger.error(`Error getting token ${saleAddress}`, error);
       }
 
       if (!token) {
         token =
-          await this.tokenService.createTokenFromRawTransaction(rawTransaction);
+          await this.bclTokenService.createTokenFromRawTransaction(rawTransaction);
         if (!token) {
           return;
         }
@@ -114,7 +88,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
       }
 
       // Decode transaction data
-      let decodedTransaction = await this.transactionService.decodeTransactionData(
+      const decodedTx = await this.bclTransactionsService.decodeTxEvents(
         token,
         rawTransaction,
       );
@@ -126,22 +100,22 @@ export class BclPluginSyncService extends BasePluginSyncService {
         total_supply,
         protocol_reward,
         _should_revalidate,
-      } = await this.transactionService.parseTransactionData(decodedTransaction);
+      } = await this.bclTransactionsService.parseTransactionData(decodedTx);
 
       // Handle create_community special case
       if (
-        decodedTransaction.tx.function == BCL_FUNCTIONS.create_community &&
+        decodedTx.function === BCL_FUNCTIONS.create_community &&
         !token.factory_address
       ) {
-        await this.tokenService.updateTokenMetaDataFromCreateTx(
+        await this.bclTokenService.updateTokenMetaDataFromCreateTx(
           token,
-          decodedTransaction,
+          decodedTx,
         );
-        token = await this.tokenService.findByAddress(token.sale_address);
+        token = await this.bclTokenService.findByAddress(token.sale_address);
       }
 
       // Calculate prices
-      const decodedData = decodedTransaction.tx.decodedData;
+      const decodedData = decodedTx.raw?.decodedData;
       const priceChangeData = decodedData?.find(
         (data) => data.name === 'PriceChange',
       );
@@ -167,10 +141,10 @@ export class BclPluginSyncService extends BasePluginSyncService {
       // Prepare transaction data
       const txData = {
         sale_address: saleAddress,
-        tx_type: decodedTransaction.tx.function,
-        tx_hash: decodedTransaction.hash,
-        block_height: decodedTransaction.blockHeight,
-        address: decodedTransaction.tx.callerId,
+        tx_type: decodedTx.function,
+        tx_hash: decodedTx.hash,
+        block_height: decodedTx.block_height,
+        address: decodedTx.caller_id,
         volume,
         protocol_reward,
         amount,
@@ -179,17 +153,24 @@ export class BclPluginSyncService extends BasePluginSyncService {
         buy_price,
         total_supply,
         market_cap,
-        created_at: moment(decodedTransaction.microTime).toDate(),
+        created_at: moment(parseInt(decodedTx.micro_time, 10)).toDate(),
         verified:
           !_should_revalidate &&
-          moment().diff(moment(decodedTransaction.microTime), 'hours') >= 5,
+          moment().diff(moment(parseInt(decodedTx.micro_time, 10)), 'hours') >= 5,
       };
 
       // Save transaction
       const transaction = await this.transactionRepository.save(txData);
+      // Update token's last_tx_hash and last_sync_block_height for live transactions only
+      if (syncDirection === 'live') {
+        await this.bclTokenService.update(token, {
+          last_tx_hash: decodedTx.hash,
+          last_sync_block_height: decodedTx.block_height,
+        });
+      }
 
       // Check if token is supported collection
-      const isSupported = await this.transactionService.isTokenSupportedCollection(
+      const isSupported = await this.bclTransactionsService.isTokenSupportedCollection(
         token,
       );
 
@@ -199,21 +180,21 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
       // Broadcast transaction (shouldBroadcast = true for all plugin-processed transactions)
       // it should only broadcast if token is within supported collections
-      await this.tokenService.syncTokenPrice(token);
+      await this.bclTokenService.syncTokenPrice(token);
       this.tokenWebsocketGateway?.handleTokenHistory({
         sale_address: saleAddress,
         data: txData,
         token: token,
       });
       // Update token holder
-      await this.transactionService.updateTokenHolder(
+      await this.bclTransactionsService.updateTokenHolder(
         token,
-        decodedTransaction,
+        decodedTx,
         volume,
       );
-      await this.tokenService.updateTokenTrendingScore(token);
+      await this.bclTokenService.updateTokenTrendingScore(token);
     } catch (error: any) {
-      this.handleError(error, tx, 'processTransaction');
+      this.handleError(error, rawTransaction, 'processTransaction');
       throw error; // Re-throw to let BasePluginSyncService handle it
     }
   }

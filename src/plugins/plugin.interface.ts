@@ -2,6 +2,8 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 export { Tx };
 
+export type SyncDirection = 'backward' | 'live' | 'reorg';
+
 export interface PluginFilter {
   type?: 'contract_call' | 'spend';
   contractIds?: string[];
@@ -20,8 +22,10 @@ export interface Plugin {
   syncHistoricalTransactions(): Promise<void>;
   /**
    * Process a batch of transactions. Plugins can override for optimized batch processing.
+   * @param txs - Transactions to process
+   * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
-  processBatch(txs: Tx[]): Promise<void>;
+  processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void>;
   /**
    * Handle reorg by receiving list of removed transaction hashes.
    */
