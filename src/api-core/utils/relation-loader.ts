@@ -41,6 +41,35 @@ export function resolveRelation(
 }
 
 /**
+ * Checks if the includes tree contains any array relations (OneToMany)
+ * @param entityConfig - The entity config
+ * @param includesTree - The includes tree
+ * @param configRegistry - Registry to look up related entity configs
+ * @returns true if any array relations are included
+ */
+export function checkHasArrayRelations(
+  entityConfig: EntityConfig,
+  includesTree: IncludesTree,
+  configRegistry: EntityConfigRegistry,
+): boolean {
+  for (const [relationField, nestedIncludes] of Object.entries(includesTree)) {
+    const relationConfig = resolveRelation(entityConfig, relationField);
+    if (relationConfig && relationConfig.isArray) {
+      return true;
+    }
+    
+    // Recursively check nested includes
+    if (Object.keys(nestedIncludes).length > 0) {
+      const relatedEntityConfig = configRegistry.get(relationConfig!.relatedEntity);
+      if (relatedEntityConfig && checkHasArrayRelations(relatedEntityConfig, nestedIncludes, configRegistry)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Generates a unique table alias for a relation join
  * @param parentAlias - The parent table alias
  * @param relationField - The relation field name
