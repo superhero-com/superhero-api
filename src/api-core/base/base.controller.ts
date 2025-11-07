@@ -27,6 +27,7 @@ import {
   applyIncludesToQueryBuilder,
   EntityConfigRegistry,
   resolveRelation,
+  checkHasArrayRelations,
 } from '../utils/relation-loader';
 
 /**
@@ -274,6 +275,18 @@ export function createBaseController<T>(
       // Apply includes if provided (must be done before other query modifications)
       if (includes && this.configRegistry) {
         const includesTree = parseIncludesToTree(includes);
+        
+        // Check if we have any array relations (OneToMany) that would cause duplicate rows
+        const hasArrayRelations = checkHasArrayRelations(config, includesTree, this.configRegistry);
+        
+        // If we have array relations, we need to use distinct to avoid duplicate parent rows
+        // This ensures pagination works correctly
+        // Note: distinct(true) tells TypeORM to deduplicate entities based on primary key
+        // when using leftJoinAndMapMany, which can create duplicate rows
+        if (hasArrayRelations) {
+          query.distinct(true);
+        }
+        
         applyIncludesToQueryBuilder(
           query,
           config,
