@@ -11,6 +11,11 @@ import { DexSyncService } from '@/dex/services/dex-sync.service';
 import { PostService } from '@/social/services/post.service';
 import { TipService } from '@/tipping/services/tips.service';
 
+/**
+ * @deprecated Transaction syncing is now handled by the MDW sync system and plugins.
+ * This service is kept for backward compatibility but will be removed in a future version.
+ * The plugin system (via IndexerService/LiveIndexerService) handles all transaction syncing in a modern way.
+ */
 @Injectable()
 export class SyncTransactionsService {
   private readonly logger = new Logger(SyncTransactionsService.name);
