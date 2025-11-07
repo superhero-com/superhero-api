@@ -30,6 +30,7 @@ type KeyBlock {
   target: String!
   time: String!
   transactions_count: Int!
+  txs(function: String, limit: Int = 100, offset: Int = 0, orderBy: String, orderDirection: String, sender_id: String, type: String): [Tx!]!
   version: Int!
 }
 
