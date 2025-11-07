@@ -5,6 +5,9 @@ import { Tx } from '../entities/tx.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { KeyBlock } from '../entities/key-block.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
+import { PaginatedResponse } from '../types/pagination.type';
+
+const PaginatedTxResponse = PaginatedResponse(Tx);
 
 @Resolver(() => Tx)
 export class TxsResolver {
@@ -17,7 +20,7 @@ export class TxsResolver {
     private readonly keyBlockRepository: Repository<KeyBlock>,
   ) {}
 
-  @Query(() => [Tx], { name: 'txs' })
+  @Query(() => PaginatedTxResponse, { name: 'txs' })
   async findAll(
     @Args('page', { type: () => Int, nullable: true, defaultValue: 1 })
     page: number = 1,
@@ -37,7 +40,10 @@ export class TxsResolver {
     }
 
     const result = await paginate(query, { page, limit });
-    return result.items;
+    return {
+      items: result.items,
+      metaInfo: result.meta,
+    };
   }
 
   @Query(() => Tx, { name: 'tx', nullable: true })

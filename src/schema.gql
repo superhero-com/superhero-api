@@ -55,6 +55,39 @@ type MicroBlock {
   version: Int!
 }
 
+type PaginatedKeyBlockResponse {
+  items: [KeyBlock!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedMicroBlockResponse {
+  items: [MicroBlock!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedPluginSyncStateResponse {
+  items: [PluginSyncState!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedSyncStateResponse {
+  items: [SyncState!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedTxResponse {
+  items: [Tx!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginationMeta {
+  currentPage: Int!
+  itemCount: Int!
+  itemsPerPage: Int!
+  totalItems: Int!
+  totalPages: Int!
+}
+
 type PluginSyncState {
   created_at: DateTime!
   is_active: Boolean!
@@ -67,15 +100,15 @@ type PluginSyncState {
 
 type Query {
   keyBlock(hash: String!): KeyBlock
-  keyBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): [KeyBlock!]!
+  keyBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedKeyBlockResponse!
   microBlock(hash: String!): MicroBlock
-  microBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): [MicroBlock!]!
+  microBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedMicroBlockResponse!
   pluginSyncState(pluginName: String!): PluginSyncState
-  pluginSyncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): [PluginSyncState!]!
+  pluginSyncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedPluginSyncStateResponse!
   syncState(id: String!): SyncState
-  syncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): [SyncState!]!
+  syncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedSyncStateResponse!
   tx(hash: String!): Tx
-  txs(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): [Tx!]!
+  txs(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedTxResponse!
 }
 
 type SyncState {

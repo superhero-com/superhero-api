@@ -65,7 +65,11 @@ export class PluginSyncStateController {
       query.orderBy(`plugin_sync_state.${orderBy}`, orderDirection);
     }
 
-    return paginate(query, { page, limit });
+    const result = await paginate(query, { page, limit });
+    return {
+      items: result.items,
+      metaInfo: result.meta,
+    };
   }
 
   @ApiParam({
