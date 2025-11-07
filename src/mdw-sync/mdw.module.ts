@@ -9,21 +9,29 @@ import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { SyncState } from './entities/sync-state.entity';
 import { Tx } from './entities/tx.entity';
 import { MdwController } from './mdw.controller';
-import { KeyBlocksController } from './controllers/key-blocks.controller';
-import { MicroBlocksController } from './controllers/micro-blocks.controller';
-import { TxsController } from './controllers/txs.controller';
-import { PluginSyncStateController } from './controllers/plugin-sync-state.controller';
-import { SyncStateController } from './controllers/sync-state.controller';
 import { KeyBlocksResolver } from './resolvers/key-blocks.resolver';
 import { MicroBlocksResolver } from './resolvers/micro-blocks.resolver';
 import { TxsResolver } from './resolvers/txs.resolver';
-import { PluginSyncStateResolver } from './resolvers/plugin-sync-state.resolver';
-import { SyncStateResolver } from './resolvers/sync-state.resolver';
 import { IndexerService } from './services/indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { ReorgService } from './services/reorg.service';
 import { TxSubscriber } from './subscribers/tx.subscriber';
 import { MDW_PLUGIN } from './plugins/plugin.tokens';
+import { createEntityControllers, createEntityResolvers } from './factories/entity-factory';
+import {
+  ENTITY_CONFIGS,
+  SYNC_STATE_CONFIG,
+  PLUGIN_SYNC_STATE_CONFIG,
+} from './config/entity-configs';
+
+// Generate controllers for all entities
+const generatedControllers = createEntityControllers(ENTITY_CONFIGS);
+
+// Generate resolvers for simple entities (without custom ResolveFields)
+const generatedResolvers = createEntityResolvers([
+  SYNC_STATE_CONFIG,
+  PLUGIN_SYNC_STATE_CONFIG,
+]);
 
 @Module({
   imports: [
@@ -43,11 +51,7 @@ import { MDW_PLUGIN } from './plugins/plugin.tokens';
   ],
   controllers: [
     MdwController,
-    KeyBlocksController,
-    MicroBlocksController,
-    TxsController,
-    PluginSyncStateController,
-    SyncStateController,
+    ...generatedControllers,
   ],
   providers: [
     PluginRegistryService,
@@ -55,12 +59,12 @@ import { MDW_PLUGIN } from './plugins/plugin.tokens';
     ReorgService,
     // Subscribers
     TxSubscriber,
-    // GraphQL Resolvers
+    // GraphQL Resolvers - use generated for simple entities, keep custom for complex ones
+    ...generatedResolvers,
+    // Keep existing resolvers for entities with custom ResolveFields
     KeyBlocksResolver,
     MicroBlocksResolver,
     TxsResolver,
-    PluginSyncStateResolver,
-    SyncStateResolver,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
     {
       provide: MDW_PLUGIN,
