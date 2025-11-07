@@ -6,8 +6,8 @@ import { Tx } from '../entities/tx.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
-import { Plugin } from '../plugins/plugin.interface';
-import { BasePluginSyncService } from '../plugins/base-plugin-sync.service';
+import { Plugin } from '@/plugins/plugin.interface';
+import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
 
 @Injectable()
 export class PluginBatchProcessorService {

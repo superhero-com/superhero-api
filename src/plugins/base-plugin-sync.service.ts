@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ITransaction } from '@/utils/types';
-import { Tx } from '../entities/tx.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginFilter } from './plugin.interface';
 
 export abstract class BasePluginSyncService {
@@ -86,3 +86,4 @@ export abstract class BasePluginSyncService {
     );
   }
 }
+

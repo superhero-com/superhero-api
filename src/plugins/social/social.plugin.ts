@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Tx } from '../../entities/tx.entity';
-import { PluginSyncState } from '../../entities/plugin-sync-state.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter } from '../plugin.interface';
 import { SocialPluginSyncService } from './social-plugin-sync.service';

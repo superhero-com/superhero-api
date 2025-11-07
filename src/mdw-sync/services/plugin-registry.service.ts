@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-import { Plugin, PluginFilter } from '../plugins/plugin.interface';
-import { MDW_PLUGIN } from '../plugins/plugin.tokens';
+import { Plugin, PluginFilter } from '@/plugins/plugin.interface';
+import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 
 @Injectable()
 export class PluginRegistryService {

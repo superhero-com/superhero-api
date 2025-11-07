@@ -1,4 +1,4 @@
-import { Tx } from '../entities/tx.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 export { Tx };
 
@@ -27,3 +27,4 @@ export interface Plugin {
    */
   onReorg(removedTxHashes: string[]): Promise<void>;
 }
+

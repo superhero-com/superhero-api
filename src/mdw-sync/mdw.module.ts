@@ -16,11 +16,10 @@ import { PluginRegistryService } from './services/plugin-registry.service';
 import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
 import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
 import { ReorgService } from './services/reorg.service';
-import { MDW_PLUGIN } from './plugins/plugin.tokens';
-import { BclPluginModule } from './plugins/bcl/bcl-plugin.module';
-import { BclPlugin } from './plugins/bcl/bcl.plugin';
-import { SocialPluginModule } from './plugins/social/social-plugin.module';
-import { SocialPlugin } from './plugins/social/social.plugin';
+import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
+import { BclPluginModule } from '@/plugins/bcl/bcl-plugin.module';
+import { SocialPluginModule } from '@/plugins/social/social-plugin.module';
+import { getPluginProvider } from '@/plugins';
 import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
 import { ENTITY_CONFIGS } from './config/entity-configs';
 
@@ -60,13 +59,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     // GraphQL Resolvers - all generated with automatic relation resolution
     ...generatedResolvers,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
-    {
-      provide: MDW_PLUGIN,
-      useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin) => {
-        return [bclPlugin, socialPlugin];
-      },
-      inject: [BclPlugin, SocialPlugin],
-    },
+    getPluginProvider(),
   ],
   exports: [
     IndexerService,
