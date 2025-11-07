@@ -13,6 +13,7 @@ import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { ReorgService } from './reorg.service';
+import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 
 @Injectable()
 export class IndexerService implements OnModuleInit {
@@ -35,6 +36,7 @@ export class IndexerService implements OnModuleInit {
     private configService: ConfigService,
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
+    private pluginBatchProcessor: PluginBatchProcessorService,
   ) {}
 
   async onModuleInit() {
@@ -376,21 +378,37 @@ export class IndexerService implements OnModuleInit {
     }
 
     if (mdwTxs.length > 0) {
+      let savedTxs: Tx[] = [];
+      
       if (useBulkMode) {
         // Use bulk insert for better performance
         try {
           await this.bulkInsertTransactions(mdwTxs);
+          // Fetch saved transactions for batch processing
+          const txHashes = mdwTxs.map((tx) => tx.hash).filter(Boolean) as string[];
+          if (txHashes.length > 0) {
+            savedTxs = await this.txRepository.find({
+              where: { hash: txHashes as any },
+            });
+          }
         } catch (error: any) {
           this.logger.error(
             `Bulk insert failed for page, trying repository.save as fallback`,
             error,
           );
           // Fallback to repository.save if bulk insert fails
-          await this.txRepository.save(mdwTxs);
+          const saved = await this.txRepository.save(mdwTxs);
+          savedTxs = Array.isArray(saved) ? saved : [saved];
         }
       } else {
-        // Save transactions - TxSubscriber will emit events for plugins
-        await this.txRepository.save(mdwTxs);
+        // Save transactions
+        const saved = await this.txRepository.save(mdwTxs);
+        savedTxs = Array.isArray(saved) ? saved : [saved];
+      }
+
+      // Process batch for plugins
+      if (savedTxs.length > 0) {
+        await this.pluginBatchProcessor.processBatch(savedTxs);
       }
     }
 
@@ -546,8 +564,11 @@ export class IndexerService implements OnModuleInit {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
 
-      // Save transaction - TxSubscriber will emit events for plugins
-      await this.txRepository.save(mdwTx);
+      // Save transaction
+      const savedTx = await this.txRepository.save(mdwTx);
+
+      // Process batch for plugins (single tx in array)
+      await this.pluginBatchProcessor.processBatch([savedTx]);
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }

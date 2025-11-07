@@ -19,5 +19,6 @@ export default registerAs('mdw', () => ({
     process.env.MICRO_BLOCKS_PARALLEL_BATCH_SIZE || '4',
     10,
   ),
+  pluginBatchSize: parseInt(process.env.PLUGIN_BATCH_SIZE || '100', 10),
   middlewareUrl: ACTIVE_NETWORK.middlewareUrl,
 }));

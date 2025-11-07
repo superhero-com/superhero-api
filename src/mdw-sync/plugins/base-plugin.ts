@@ -21,6 +21,32 @@ export abstract class BasePlugin implements Plugin {
   protected abstract getSyncService(): BasePluginSyncService;
 
   /**
+   * Process a batch of transactions. Delegates to sync service.
+   */
+  async processBatch(txs: Tx[]): Promise<void> {
+    if (txs.length === 0) {
+      return;
+    }
+
+    const syncService = this.getSyncService();
+    await syncService.processBatch(txs);
+  }
+
+  /**
+   * Handle reorg by receiving list of removed transaction hashes.
+   * Default implementation logs the reorg.
+   * Plugins can override for custom cleanup.
+   * Note: Transactions have already been deleted from the database at this point.
+   */
+  async onReorg(removedTxHashes: string[]): Promise<void> {
+    this.logger.log(
+      `[${this.name}] Reorg detected: ${removedTxHashes.length} transactions removed`,
+    );
+    // Plugins should override this method to handle cleanup of their own data
+    // The sync state will be updated by the reorg service
+  }
+
+  /**
    * Sync historical transactions from the database
    */
   async syncHistoricalTransactions(): Promise<void> {

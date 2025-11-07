@@ -11,6 +11,7 @@ import { MicroBlock } from '../entities/micro-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { WebSocketService } from '@/ae/websocket.service';
+import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -30,6 +31,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     private syncStateRepository: Repository<SyncState>,
     private configService: ConfigService,
     private websocketService: WebSocketService,
+    private pluginBatchProcessor: PluginBatchProcessorService,
   ) {}
 
   async onModuleInit() {
@@ -67,8 +69,11 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
 
-      // Save transaction - TxSubscriber will emit events for plugins (not in bulk mode)
-      await this.txRepository.save(mdwTx);
+      // Save transaction
+      const savedTx = await this.txRepository.save(mdwTx);
+
+      // Process batch for plugins (single tx in array)
+      await this.pluginBatchProcessor.processBatch([savedTx]);
       
       this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
     } catch (error: any) {

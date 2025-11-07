@@ -12,6 +12,21 @@ export abstract class BasePluginSyncService {
   abstract processTransaction(tx: Tx): Promise<void>;
 
   /**
+   * Process a batch of transactions. Default implementation loops through and calls processTransaction.
+   * Plugins can override for optimized batch processing.
+   */
+  async processBatch(txs: Tx[]): Promise<void> {
+    for (const tx of txs) {
+      try {
+        await this.processTransaction(tx);
+      } catch (error: any) {
+        this.handleError(error as Error, tx, 'processBatch');
+        // Continue processing other transactions even if one fails
+      }
+    }
+  }
+
+  /**
    * Check if a transaction matches all provided filters
    */
   protected matchesFilters(tx: Tx, filters: PluginFilter[]): boolean {
