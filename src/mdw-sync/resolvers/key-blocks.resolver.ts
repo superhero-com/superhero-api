@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { Tx } from '../entities/tx.entity';
+import { MicroBlock } from '../entities/micro-block.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 
 @Resolver(() => KeyBlock)
@@ -12,6 +13,8 @@ export class KeyBlocksResolver {
     private readonly keyBlockRepository: Repository<KeyBlock>,
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
+    @InjectRepository(MicroBlock)
+    private readonly microBlockRepository: Repository<MicroBlock>,
   ) {}
 
   @Query(() => [KeyBlock], { name: 'keyBlocks' })
@@ -85,6 +88,61 @@ export class KeyBlocksResolver {
       query.orderBy(`tx.${orderBy}`, orderDirection || 'DESC');
     } else {
       query.orderBy('tx.block_height', 'DESC');
+    }
+
+    query.limit(limit).offset(offset);
+
+    return query.getMany();
+  }
+
+  @ResolveField(() => [MicroBlock], { name: 'microBlocks' })
+  async resolveMicroBlocks(
+    @Parent() keyBlock: KeyBlock,
+    @Args('limit', { type: () => Int, nullable: true, defaultValue: 100 })
+    limit: number = 100,
+    @Args('offset', { type: () => Int, nullable: true, defaultValue: 0 })
+    offset: number = 0,
+    @Args('transactions_count', { type: () => Int, nullable: true })
+    transactions_count?: number,
+    @Args('gas', { type: () => Int, nullable: true })
+    gas?: number,
+    @Args('version', { type: () => Int, nullable: true })
+    version?: number,
+    @Args('micro_block_index', { type: () => Int, nullable: true })
+    micro_block_index?: number,
+    @Args('orderBy', { type: () => String, nullable: true })
+    orderBy?: string,
+    @Args('orderDirection', { type: () => String, nullable: true })
+    orderDirection?: 'ASC' | 'DESC',
+  ): Promise<MicroBlock[]> {
+    const query = this.microBlockRepository
+      .createQueryBuilder('micro_block')
+      .where('micro_block.prev_key_hash = :hash', { hash: keyBlock.hash });
+
+    if (transactions_count !== undefined) {
+      query.andWhere('micro_block.transactions_count = :transactions_count', {
+        transactions_count,
+      });
+    }
+
+    if (gas !== undefined) {
+      query.andWhere('micro_block.gas = :gas', { gas });
+    }
+
+    if (version !== undefined) {
+      query.andWhere('micro_block.version = :version', { version });
+    }
+
+    if (micro_block_index !== undefined) {
+      query.andWhere('micro_block.micro_block_index = :micro_block_index', {
+        micro_block_index,
+      });
+    }
+
+    if (orderBy) {
+      query.orderBy(`micro_block.${orderBy}`, orderDirection || 'DESC');
+    } else {
+      query.orderBy('micro_block.micro_block_index', 'ASC');
     }
 
     query.limit(limit).offset(offset);

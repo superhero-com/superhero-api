@@ -60,8 +60,10 @@ import { MdwModule } from './mdw-sync/mdw.module';
       driver: ApolloDriver,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
-      playground: true,
+      playground: false,
+      graphiql: true, // enables GraphiQL instead
       introspection: true,
+      hideSchemaDetailsFromClientErrors: true,
     }),
     MdwModule,
     AeModule,

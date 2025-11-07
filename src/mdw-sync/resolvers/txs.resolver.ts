@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tx } from '../entities/tx.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
+import { KeyBlock } from '../entities/key-block.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 
 @Resolver(() => Tx)
@@ -12,6 +13,8 @@ export class TxsResolver {
     private readonly txRepository: Repository<Tx>,
     @InjectRepository(MicroBlock)
     private readonly microBlockRepository: Repository<MicroBlock>,
+    @InjectRepository(KeyBlock)
+    private readonly keyBlockRepository: Repository<KeyBlock>,
   ) {}
 
   @Query(() => [Tx], { name: 'txs' })
@@ -51,6 +54,16 @@ export class TxsResolver {
     }
     return this.microBlockRepository.findOne({
       where: { hash: tx.block_hash },
+    });
+  }
+
+  @ResolveField(() => KeyBlock, { name: 'keyBlock', nullable: true })
+  async resolveKeyBlock(@Parent() tx: Tx): Promise<KeyBlock | null> {
+    if (!tx.block_height) {
+      return null;
+    }
+    return this.keyBlockRepository.findOne({
+      where: { height: tx.block_height },
     });
   }
 }
