@@ -41,7 +41,7 @@ export interface TransactionData {
 }
 
 @Injectable()
-export class BclTransactionDataService {
+export class TransactionDataService {
   constructor(private readonly aePricingService: AePricingService) {}
 
   /**

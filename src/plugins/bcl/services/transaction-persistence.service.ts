@@ -2,10 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { BCL_FUNCTIONS } from '@/configs';
-import { TransactionData } from './bcl-transaction-data.service';
+import { TransactionData } from './transaction-data.service';
 
 @Injectable()
-export class BclTransactionPersistenceService {
+export class TransactionPersistenceService {
   /**
    * Cleanup old create_community transactions for the same sale address
    * @param saleAddress - Sale address

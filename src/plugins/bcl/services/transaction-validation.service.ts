@@ -6,8 +6,8 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { BCL_FUNCTIONS } from '@/configs';
 
 @Injectable()
-export class BclTransactionValidationService {
-  private readonly logger = new Logger(BclTransactionValidationService.name);
+export class TransactionValidationService {
+  private readonly logger = new Logger(TransactionValidationService.name);
 
   constructor(
     @InjectRepository(Transaction)
