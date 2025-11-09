@@ -13,6 +13,7 @@ import {
 import { TransactionPersistenceService } from './transaction-persistence.service';
 import { TransactionsService } from './transactions.service';
 import { TokenService } from './token.service';
+import { TokenHolderService } from './token-holder.service';
 import { BCL_FUNCTIONS } from '@/configs';
 
 export interface ProcessTransactionResult {
@@ -32,6 +33,7 @@ export class TransactionProcessorService {
     private readonly persistenceService: TransactionPersistenceService,
     private readonly transactionsService: TransactionsService,
     private readonly tokenService: TokenService,
+    private readonly tokenHolderService: TokenHolderService,
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
   ) {}
@@ -166,7 +168,7 @@ export class TransactionProcessorService {
         }
 
         // Update token holder
-        await this.transactionsService.updateTokenHolder(
+        await this.tokenHolderService.updateTokenHolder(
           transactionToken,
           decodedTx,
           parsedData.volume,
