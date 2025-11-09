@@ -54,6 +54,9 @@ export class TransactionValidationService {
     isValid: boolean;
     saleAddress: string | null;
   }> {
+    if (!Object.values(BCL_FUNCTIONS).includes(tx.function)) {
+      return { isValid: false, saleAddress: null };
+    }
     // Check if transaction already exists
     const exists = await this.transactionExists(tx.hash);
     if (exists) {

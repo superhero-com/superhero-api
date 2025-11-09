@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
@@ -6,7 +7,8 @@ import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter } from '../plugin.interface';
 import { SocialPluginSyncService } from './social-plugin-sync.service';
-import { POST_CONTRACTS } from '@/social/config/post-contracts.config';
+import { IPostContract } from '@/social/interfaces/post.interfaces';
+import { getActiveContractAddresses } from './config/post-contracts.config';
 
 @Injectable()
 export class SocialPlugin extends BasePlugin {
@@ -20,6 +22,7 @@ export class SocialPlugin extends BasePlugin {
     @InjectRepository(PluginSyncState)
     protected readonly pluginSyncStateRepository: Repository<PluginSyncState>,
     private socialPluginSyncService: SocialPluginSyncService,
+    private readonly configService: ConfigService,
   ) {
     super();
   }
@@ -31,7 +34,11 @@ export class SocialPlugin extends BasePlugin {
   }
 
   filters(): PluginFilter[] {
-    const contractAddresses = POST_CONTRACTS.map((contract) => contract.contractAddress);
+    const contracts = this.configService.get<IPostContract[]>(
+      'social.contracts',
+      [],
+    );
+    const contractAddresses = getActiveContractAddresses(contracts);
 
     if (contractAddresses.length === 0) {
       this.logger.warn('[Social] No post contracts configured');
