@@ -134,11 +134,10 @@ export class TransactionsService {
   async isTokenSupportedCollection(token: Token): Promise<boolean> {
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    if (token.factory_address !== factory.address) {
-      return false;
-    }
-
-    if (!Object.keys(factory.collections).includes(token.collection)) {
+    if (
+      token.factory_address !== factory.address
+      && !Object.keys(factory.collections).includes(token.collection)
+    ) {
       return false;
     }
 
@@ -155,6 +154,11 @@ export class TransactionsService {
     manager?: EntityManager,
   ): Promise<void> {
     try {
+      // Early return if token.address is null (token not yet initialized)
+      if (!token.address) {
+        return;
+      }
+      
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
       const repository = manager?.getRepository(TokenHolder) || this.tokenHolderRepository;
       
@@ -181,8 +185,11 @@ export class TransactionsService {
         if (tokenHolderBalance.isNegative()) {
           tokenHolderBalance = new BigNumber(0);
         }
-        // if is buy
-        if (tx.function === BCL_FUNCTIONS.buy) {
+        // if is buy or create_community with buy event
+        if (
+          tx.function === BCL_FUNCTIONS.buy ||
+          (tx.function === BCL_FUNCTIONS.create_community && volume.gt(0))
+        ) {
           await repository.update(tokenHolder.id, {
             balance: tokenHolderBalance.plus(bigNumberVolume),
             last_tx_hash: tx.hash,
@@ -209,16 +216,24 @@ export class TransactionsService {
           }
         }
       } else {
-        // create token holder
-        await repository.save({
-          id: `${tx.caller_id}_${token.address}`,
-          aex9_address: token.address,
-          address: tx.caller_id,
-          balance: bigNumberVolume,
-          last_tx_hash: tx.hash,
-          block_number: tx.block_height,
-        });
-        // increment token holders count
+        // create token holder (only for buy/create_community with volume, not for sell)
+        if (
+          tx.function === BCL_FUNCTIONS.buy ||
+          (tx.function === BCL_FUNCTIONS.create_community && volume.gt(0))
+        ) {
+          await repository.save({
+            id: `${tx.caller_id}_${token.address}`,
+            aex9_address: token.address,
+            address: tx.caller_id,
+            balance: bigNumberVolume,
+            last_tx_hash: tx.hash,
+            block_number: tx.block_height,
+          });
+        } else {
+          // For sell transactions, don't create holder if it doesn't exist
+          return;
+        }
+        // increment token holders count (only if we created a new holder)
         if (manager) {
           await manager.getRepository(Token).update(token.sale_address, {
             holders_count: tokenHolderCount + 1,
