@@ -5,7 +5,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter } from '../plugin.interface';
-import { BclPluginSyncService } from './bcl-plugin-sync.service';
+import { BclPluginSyncService } from './services/bcl-plugin-sync.service';
 import { BCL_FACTORY } from '@/configs/contracts';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { BCL_FUNCTIONS } from '@/configs/constants';
