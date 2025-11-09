@@ -16,6 +16,7 @@ import { ReorgService } from './reorg.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { PluginRegistryService } from './plugin-registry.service';
 import { MicroBlockService } from './micro-block.service';
+import { SyncDirectionEnum } from '../types/sync-direction';
 
 @Injectable()
 export class IndexerService implements OnModuleInit {
@@ -359,7 +360,7 @@ export class IndexerService implements OnModuleInit {
           savedTxs = Array.isArray(saved) ? saved : [saved];
           // Process batch for plugins (fallback case)
           if (savedTxs.length > 0) {
-            await this.pluginBatchProcessor.processBatch(savedTxs, 'backward');
+            await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
           }
         }
       } else {
@@ -368,7 +369,7 @@ export class IndexerService implements OnModuleInit {
         savedTxs = Array.isArray(saved) ? saved : [saved];
         // Process batch for plugins immediately
         if (savedTxs.length > 0) {
-          await this.pluginBatchProcessor.processBatch(savedTxs, 'backward');
+          await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
         }
       }
     }
@@ -422,7 +423,7 @@ export class IndexerService implements OnModuleInit {
           // Process batch for plugins immediately (don't wait for full run)
           if (savedBatchTxs.length > 0) {
             // Process immediately - await to ensure batch is processed before next batch
-            await this.pluginBatchProcessor.processBatch(savedBatchTxs, 'backward');
+            await this.pluginBatchProcessor.processBatch(savedBatchTxs, SyncDirectionEnum.Backward);
 
             // Collect for return value
             allSavedTxs.push(...savedBatchTxs);
@@ -446,7 +447,7 @@ export class IndexerService implements OnModuleInit {
 
             // Process batch for plugins immediately
             if (savedBatchTxs.length > 0) {
-              await this.pluginBatchProcessor.processBatch(savedBatchTxs, 'backward');
+              await this.pluginBatchProcessor.processBatch(savedBatchTxs, SyncDirectionEnum.Backward);
 
               allSavedTxs.push(...savedBatchTxs);
             }
@@ -573,7 +574,7 @@ export class IndexerService implements OnModuleInit {
       const savedTx = await this.txRepository.save(mdwTx);
 
       // Process batch for plugins (single tx in array) - backward sync
-      await this.pluginBatchProcessor.processBatch([savedTx], 'backward');
+      await this.pluginBatchProcessor.processBatch([savedTx], SyncDirectionEnum.Backward);
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }

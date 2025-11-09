@@ -13,6 +13,7 @@ import { Tx } from '../entities/tx.entity';
 import { WebSocketService } from '@/ae/websocket.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
+import { SyncDirectionEnum } from '../types/sync-direction';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -83,7 +84,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       const savedTx = await this.txRepository.save(mdwTx);
 
       // Process batch for plugins (single tx in array) - live sync
-      await this.pluginBatchProcessor.processBatch([savedTx], 'live');
+      await this.pluginBatchProcessor.processBatch([savedTx], SyncDirectionEnum.Live);
       
       this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
     } catch (error: any) {

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { BasePluginSyncService } from '../../base-plugin-sync.service';
-import { SyncDirection } from '../../plugin.interface';
+import { SyncDirection, SyncDirectionEnum } from '../../plugin.interface';
 import { TransactionProcessorService } from './transaction-processor.service';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 
@@ -29,7 +29,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
         );
 
       // Background operations outside transaction
-      if (result && result.isSupported) {
+      if (result && result.isSupported && syncDirection === SyncDirectionEnum.Live) {
         // Broadcast transaction via WebSocket
         this.tokenWebsocketGateway?.handleTokenHistory({
           sale_address: result.txData.sale_address,

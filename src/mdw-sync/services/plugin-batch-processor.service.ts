@@ -7,6 +7,7 @@ import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
 import { Plugin, SyncDirection } from '@/plugins/plugin.interface';
+import { SyncDirectionEnum } from '../types/sync-direction';
 import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
 
 @Injectable()
@@ -95,12 +96,12 @@ export class PluginBatchProcessorService {
           last_synced_height: maxHeight, // Keep for backward compatibility
         };
         
-        if (syncDirection === 'backward') {
+        if (syncDirection === SyncDirectionEnum.Backward) {
           updateData.backward_synced_height = maxHeight;
-        } else if (syncDirection === 'live') {
+        } else if (syncDirection === SyncDirectionEnum.Live) {
           updateData.live_synced_height = maxHeight;
         }
-        // 'reorg' direction doesn't update sync state heights
+        // Reorg direction doesn't update sync state heights
         
         await this.pluginSyncStateRepository.update(
           { plugin_name: plugin.name },

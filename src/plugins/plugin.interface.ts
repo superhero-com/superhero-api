@@ -1,8 +1,8 @@
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { SyncDirection, SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 
 export { Tx };
-
-export type SyncDirection = 'backward' | 'live' | 'reorg';
+export { SyncDirection, SyncDirectionEnum };
 
 export interface PluginFilter {
   type?: 'contract_call' | 'spend';

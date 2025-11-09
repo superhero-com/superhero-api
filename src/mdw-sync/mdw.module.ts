@@ -71,3 +71,6 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
   ],
 })
 export class MdwModule { }
+
+// Re-export types for convenience
+export { SyncDirection, SyncDirectionEnum } from './types/sync-direction';

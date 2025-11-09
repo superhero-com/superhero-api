@@ -4,7 +4,7 @@ import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { SyncDirection } from '../../plugin.interface';
+import { SyncDirection, SyncDirectionEnum } from '../../plugin.interface';
 import { TransactionValidationService } from './transaction-validation.service';
 import {
   TransactionDataService,
@@ -134,7 +134,7 @@ export class TransactionProcessorService {
           await this.persistenceService.saveTransaction(txData, manager);
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
-        if (syncDirection === 'live') {
+        if (syncDirection === SyncDirectionEnum.Live) {
           transactionToken = await this.tokenService.update(
             transactionToken,
             {
@@ -161,7 +161,7 @@ export class TransactionProcessorService {
         }
 
         // Sync token price - only for live sync direction
-        if (syncDirection === 'live') {
+        if (syncDirection === SyncDirectionEnum.Live) {
           await this.tokenService.syncTokenPrice(transactionToken, manager);
         }
 

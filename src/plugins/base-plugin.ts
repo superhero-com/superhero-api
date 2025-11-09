@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { Repository, MoreThan } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
-import { Plugin, PluginFilter, SyncDirection } from './plugin.interface';
+import { Plugin, PluginFilter, SyncDirection, SyncDirectionEnum } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 
 export abstract class BasePlugin implements Plugin {
@@ -95,7 +95,7 @@ export abstract class BasePlugin implements Plugin {
         const syncService = this.getSyncService();
         for (const tx of transactions) {
           try {
-            await syncService.processTransaction(tx, 'backward');
+            await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
             processedCount++;
 
             // Update sync state periodically
