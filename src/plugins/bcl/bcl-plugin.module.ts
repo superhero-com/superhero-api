@@ -12,9 +12,9 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { BclPlugin } from './bcl.plugin';
-import { BclPluginSyncService } from './bcl-plugin-sync.service';
-import { BclTransactionsService } from './bcl-transactions.service';
-import { BclTokenService } from './bcl-token.service';
+import { BclPluginSyncService } from './services/bcl-plugin-sync.service';
+import { BclTransactionsService } from './services/bcl-transactions.service';
+import { BclTokenService } from './services/bcl-token.service';
 
 @Module({
   imports: [
