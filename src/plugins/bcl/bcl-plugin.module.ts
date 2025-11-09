@@ -19,6 +19,7 @@ import { TransactionValidationService } from './services/transaction-validation.
 import { TransactionDataService } from './services/transaction-data.service';
 import { TransactionPersistenceService } from './services/transaction-persistence.service';
 import { TransactionProcessorService } from './services/transaction-processor.service';
+import { TokenHolderService } from './services/token-holder.service';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { TransactionProcessorService } from './services/transaction-processor.se
     TransactionPersistenceService,
     TransactionsService,
     TokenService,
+    TokenHolderService,
     TransactionProcessorService,
     BclPluginSyncService,
     BclPlugin,
