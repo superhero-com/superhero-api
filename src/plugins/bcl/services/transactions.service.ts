@@ -11,8 +11,8 @@ import { Encoded, toAe } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
 
 @Injectable()
-export class BclTransactionsService {
-  private readonly logger = new Logger(BclTransactionsService.name);
+export class TransactionsService {
+  private readonly logger = new Logger(TransactionsService.name);
 
   constructor(
     private readonly communityFactoryService: CommunityFactoryService,

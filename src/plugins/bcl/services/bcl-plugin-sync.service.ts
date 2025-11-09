@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { BasePluginSyncService } from '../../base-plugin-sync.service';
 import { SyncDirection } from '../../plugin.interface';
-import { BclTransactionProcessorService } from './bcl-transaction-processor.service';
+import { TransactionProcessorService } from './transaction-processor.service';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 
 @Injectable()
@@ -10,7 +10,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(BclPluginSyncService.name);
 
   constructor(
-    private readonly transactionProcessorService: BclTransactionProcessorService,
+    private readonly transactionProcessorService: TransactionProcessorService,
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
   ) {
     super();

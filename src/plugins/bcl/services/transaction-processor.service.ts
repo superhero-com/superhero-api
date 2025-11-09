@@ -5,14 +5,14 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { SyncDirection } from '../../plugin.interface';
-import { BclTransactionValidationService } from './bcl-transaction-validation.service';
+import { TransactionValidationService } from './transaction-validation.service';
 import {
-  BclTransactionDataService,
+  TransactionDataService,
   TransactionData,
-} from './bcl-transaction-data.service';
-import { BclTransactionPersistenceService } from './bcl-transaction-persistence.service';
-import { BclTransactionsService } from './bcl-transactions.service';
-import { BclTokenService } from './bcl-token.service';
+} from './transaction-data.service';
+import { TransactionPersistenceService } from './transaction-persistence.service';
+import { TransactionsService } from './transactions.service';
+import { TokenService } from './token.service';
 import { BCL_FUNCTIONS } from '@/configs';
 
 export interface ProcessTransactionResult {
@@ -23,15 +23,15 @@ export interface ProcessTransactionResult {
 }
 
 @Injectable()
-export class BclTransactionProcessorService {
-  private readonly logger = new Logger(BclTransactionProcessorService.name);
+export class TransactionProcessorService {
+  private readonly logger = new Logger(TransactionProcessorService.name);
 
   constructor(
-    private readonly validationService: BclTransactionValidationService,
-    private readonly dataService: BclTransactionDataService,
-    private readonly persistenceService: BclTransactionPersistenceService,
-    private readonly bclTransactionsService: BclTransactionsService,
-    private readonly bclTokenService: BclTokenService,
+    private readonly validationService: TransactionValidationService,
+    private readonly dataService: TransactionDataService,
+    private readonly persistenceService: TransactionPersistenceService,
+    private readonly transactionsService: TransactionsService,
+    private readonly tokenService: TokenService,
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
   ) {}
@@ -72,14 +72,14 @@ export class BclTransactionProcessorService {
 
         // Get or create token within transaction
         try {
-          transactionToken = await this.bclTokenService.getToken(saleAddress);
+          transactionToken = await this.tokenService.getToken(saleAddress);
         } catch (error) {
           this.logger.error(`Error getting token ${saleAddress}`, error);
         }
 
         if (!transactionToken) {
           transactionToken =
-            await this.bclTokenService.createTokenFromRawTransaction(
+            await this.tokenService.createTokenFromRawTransaction(
               rawTransaction,
               manager,
             );
@@ -89,26 +89,26 @@ export class BclTransactionProcessorService {
         }
 
         // Decode transaction data (requires token)
-        const decodedTx = await this.bclTransactionsService.decodeTxEvents(
+        const decodedTx = await this.transactionsService.decodeTxEvents(
           transactionToken,
           rawTransaction,
         );
 
         // Parse transaction data
         const parsedData =
-          await this.bclTransactionsService.parseTransactionData(decodedTx);
+          await this.transactionsService.parseTransactionData(decodedTx);
 
         // Handle create_community special case
         if (
           decodedTx.function === BCL_FUNCTIONS.create_community &&
           !transactionToken.factory_address
         ) {
-          await this.bclTokenService.updateTokenMetaDataFromCreateTx(
+          await this.tokenService.updateTokenMetaDataFromCreateTx(
             transactionToken,
             decodedTx,
             manager,
           );
-          transactionToken = await this.bclTokenService.findByAddress(
+          transactionToken = await this.tokenService.findByAddress(
             transactionToken.sale_address,
             false,
             manager,
@@ -135,7 +135,7 @@ export class BclTransactionProcessorService {
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
         if (syncDirection === 'live') {
-          transactionToken = await this.bclTokenService.update(
+          transactionToken = await this.tokenService.update(
             transactionToken,
             {
               last_tx_hash: decodedTx.hash,
@@ -147,7 +147,7 @@ export class BclTransactionProcessorService {
 
         // Check if token is supported collection
         const isSupported =
-          await this.bclTransactionsService.isTokenSupportedCollection(
+          await this.transactionsService.isTokenSupportedCollection(
             transactionToken,
           );
 
@@ -162,11 +162,11 @@ export class BclTransactionProcessorService {
 
         // Sync token price - only for live sync direction
         if (syncDirection === 'live') {
-          await this.bclTokenService.syncTokenPrice(transactionToken, manager);
+          await this.tokenService.syncTokenPrice(transactionToken, manager);
         }
 
         // Update token holder
-        await this.bclTransactionsService.updateTokenHolder(
+        await this.transactionsService.updateTokenHolder(
           transactionToken,
           decodedTx,
           parsedData.volume,
@@ -174,7 +174,7 @@ export class BclTransactionProcessorService {
         );
 
         // Update token trending score
-        await this.bclTokenService.updateTokenTrendingScore(transactionToken);
+        await this.tokenService.updateTokenTrendingScore(transactionToken);
 
         return {
           transactionToken,

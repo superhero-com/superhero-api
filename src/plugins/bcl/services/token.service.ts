@@ -15,8 +15,8 @@ import { Queue } from 'bull';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 
 @Injectable()
-export class BclTokenService {
-  private readonly logger = new Logger(BclTokenService.name);
+export class TokenService {
+  private readonly logger = new Logger(TokenService.name);
 
   constructor(
     @InjectRepository(Token)
