@@ -15,6 +15,10 @@ import { BclPlugin } from './bcl.plugin';
 import { BclPluginSyncService } from './services/bcl-plugin-sync.service';
 import { BclTransactionsService } from './services/bcl-transactions.service';
 import { BclTokenService } from './services/bcl-token.service';
+import { BclTransactionValidationService } from './services/bcl-transaction-validation.service';
+import { BclTransactionDataService } from './services/bcl-transaction-data.service';
+import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
+import { BclTransactionProcessorService } from './services/bcl-transaction-processor.service';
 
 @Module({
   imports: [
@@ -27,7 +31,16 @@ import { BclTokenService } from './services/bcl-token.service';
       name: PULL_TOKEN_INFO_QUEUE,
     }),
   ],
-  providers: [BclTransactionsService, BclTokenService, BclPluginSyncService, BclPlugin],
+  providers: [
+    BclTransactionValidationService,
+    BclTransactionDataService,
+    BclTransactionPersistenceService,
+    BclTransactionsService,
+    BclTokenService,
+    BclTransactionProcessorService,
+    BclPluginSyncService,
+    BclPlugin,
+  ],
   exports: [BclPlugin],
 })
 export class BclPluginModule {}
