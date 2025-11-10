@@ -38,9 +38,6 @@ export class PluginBatchProcessorService {
 
     const plugins = this.pluginRegistryService.getPlugins();
     if (plugins.length === 0) {
-      console.log("================================================")
-      console.log("No plugins found");
-      console.log("================================================")
       return;
     }
 
@@ -100,9 +97,6 @@ export class PluginBatchProcessorService {
       if (matchingTransactions.length === 0) {
         return;
       }
-      console.log("================================================")
-      console.log("Matching transactions for plugin", plugin.name, matchingTransactions.length, syncDirection);
-      console.log("================================================")
       // Process batch - errors are handled inside processBatch
       try {
         await plugin.processBatch(matchingTransactions, syncDirection);
