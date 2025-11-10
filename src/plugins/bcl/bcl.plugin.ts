@@ -42,15 +42,28 @@ export class BclPlugin extends BasePlugin {
       return [];
     }
 
+    const contractIds = [contractAddress];
+    const functions = [
+      BCL_FUNCTIONS.buy,
+      BCL_FUNCTIONS.sell,
+      BCL_FUNCTIONS.create_community,
+    ];
+
     return [
       {
-        type: 'contract_call',
-        contractIds: [contractAddress],
-        functions: [
-          BCL_FUNCTIONS.buy,
-          BCL_FUNCTIONS.sell,
-          BCL_FUNCTIONS.create_community,
-        ],
+        predicate: (tx: Partial<Tx>) => {
+          return (
+            tx.type === 'ContractCallTx' &&
+            !!tx.contract_id &&
+            (
+              contractIds.includes(tx.contract_id as any) ||
+              (
+                !!tx.function &&
+                functions.includes(tx.function)
+              )
+            )
+          );
+        },
       },
     ];
   }

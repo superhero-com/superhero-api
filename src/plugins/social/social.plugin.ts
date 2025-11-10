@@ -47,8 +47,13 @@ export class SocialPlugin extends BasePlugin {
 
     return [
       {
-        type: 'contract_call',
-        contractIds: contractAddresses,
+        predicate: (tx: Partial<Tx>) => {
+          return (
+            tx.type === 'ContractCallTx' &&
+            !!tx.contract_id &&
+            contractAddresses.includes(tx.contract_id)
+          );
+        },
       },
     ];
   }
