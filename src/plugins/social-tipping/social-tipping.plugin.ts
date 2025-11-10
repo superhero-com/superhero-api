@@ -33,20 +33,14 @@ export class SocialTippingPlugin extends BasePlugin {
     return [
       {
         predicate: (tx: Partial<Tx>) => {
-          // Check if it's a SpendTx
-          if (tx.type !== 'SpendTx') {
-            return false;
-          }
-
-          // Check if payload exists
-          const rawTx = tx.raw as any;
-          if (!rawTx || !rawTx.tx || !rawTx.tx.payload) {
+          // Check if it's a SpendTx and has a payload
+          if (tx.type !== 'SpendTx' || !tx.raw?.payload) {
             return false;
           }
 
           // Try to decode payload and check for tip prefixes
           try {
-            const payloadData = decode(rawTx.tx.payload).toString();
+            const payloadData = decode(tx.raw.payload).toString();
             const supportedPayloads = ['TIP_PROFILE', 'TIP_POST'];
             return supportedPayloads.some((payload) =>
               payloadData.startsWith(payload),

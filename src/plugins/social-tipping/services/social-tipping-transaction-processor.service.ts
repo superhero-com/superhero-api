@@ -61,17 +61,13 @@ export class SocialTippingTransactionProcessorService {
   private validateTransaction(
     tx: Tx,
   ): false | 'TIP_PROFILE' | 'TIP_POST' {
-    if (!tx || tx.type !== 'SpendTx') {
+    if (!tx || tx.type !== 'SpendTx' || !tx.raw?.payload) {
       return false;
     }
 
-    const rawTx = tx.raw as any;
-    if (!rawTx || !rawTx.tx || !rawTx.tx.payload) {
-      return false;
-    }
 
     try {
-      const payloadData = decode(rawTx.tx.payload).toString();
+      const payloadData = decode(tx.raw.payload).toString();
       const supportedPayloads = ['TIP_PROFILE', 'TIP_POST'];
       if (
         !supportedPayloads.some((payload) => payloadData.startsWith(payload))
@@ -107,14 +103,11 @@ export class SocialTippingTransactionProcessorService {
       return existingTip;
     }
 
-    const rawTx = tx.raw as any;
-    const senderAddress = rawTx?.tx?.senderId || tx.sender_id;
-    const receiverAddress = rawTx?.tx?.recipientId || tx.recipient_id;
-    const amount = rawTx?.tx?.amount
-      ? toAe(rawTx.tx.amount)
+    const amount = tx?.raw?.amount
+      ? toAe(tx.raw.amount)
       : '0';
 
-    if (!senderAddress || !receiverAddress) {
+    if (!tx.sender_id || !tx.recipient_id) {
       throw new Error(
         `Missing sender or receiver address for transaction ${tx.hash}`,
       );
@@ -122,8 +115,8 @@ export class SocialTippingTransactionProcessorService {
 
     // Ensure sender and receiver accounts exist
     const [senderAccount, receiverAccount] = await Promise.all([
-      this.ensureAccountExists(senderAddress, manager),
-      this.ensureAccountExists(receiverAddress, manager),
+      this.ensureAccountExists(tx.sender_id, manager),
+      this.ensureAccountExists(tx.recipient_id, manager),
     ]);
 
     if (!senderAccount || !receiverAccount) {
