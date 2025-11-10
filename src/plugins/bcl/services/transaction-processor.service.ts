@@ -175,9 +175,6 @@ export class TransactionProcessorService {
           manager,
         );
 
-        // Update token trending score
-        await this.tokenService.updateTokenTrendingScore(transactionToken);
-
         return {
           transactionToken,
           txData,
@@ -186,6 +183,19 @@ export class TransactionProcessorService {
         };
       },
     );
+
+    // Update token trending score (non-critical operation outside transaction)
+    if (result?.isSupported && syncDirection === SyncDirectionEnum.Live) {
+      try {
+        await this.tokenService.updateTokenTrendingScore(result.transactionToken);
+      } catch (error) {
+        this.logger.error(
+          `Failed to update trending score for token ${result.transactionToken.sale_address}`,
+          error,
+        );
+        // Don't throw - this is a non-critical operation
+      }
+    }
 
     return result;
   }

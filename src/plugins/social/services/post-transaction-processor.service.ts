@@ -203,14 +203,6 @@ export class PostTransactionProcessorService {
         );
       }
 
-      this.logger.log('Post saved successfully', {
-        txHash,
-        postId: post.id,
-        isComment: postTypeInfo.isComment,
-        parentPostId: postData.post_id,
-        contractAddress: contract.contractAddress,
-      });
-
       return {
         post,
         success: true,
