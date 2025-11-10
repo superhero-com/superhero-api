@@ -312,17 +312,17 @@ export class CoinGeckoService {
    * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
    * @param vsCurrency - The target currency (e.g., 'usd')
    * @param days - Number of days of history to fetch (1, 7, 14, 30, 90, 180, 365, max)
-   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'
+   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'. If undefined, interval parameter is omitted from API call.
    * @returns Array of [timestamp_ms, price] pairs (never null)
    */
   async fetchHistoricalPrice(
     coinId: string,
     vsCurrency: string,
     days: number = 365,
-    interval: 'daily' | 'hourly' = 'daily',
+    interval?: 'daily' | 'hourly',
   ): Promise<Array<[number, number]>> {
     // Create cache key based on coin, currency, days, and interval
-    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval}`;
+    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval || 'none'}`;
 
     // Try to get from cache first
     try {
@@ -330,7 +330,7 @@ export class CoinGeckoService {
         await this.cacheManager.get<Array<[number, number]>>(cacheKey);
       if (cached) {
         this.logger.debug(
-          `Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval})`,
+          `Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval || 'none'})`,
         );
         return cached;
       }
@@ -340,13 +340,19 @@ export class CoinGeckoService {
 
     // If not in cache, fetch from CoinGecko
     try {
+      const searchParams: Record<string, string> = {
+        vs_currency: vsCurrency,
+        days: String(days),
+      };
+      
+      // Only add interval parameter if provided
+      if (interval) {
+        searchParams.interval = interval;
+      }
+      
       const response = (await this.fetchFromApi(
         `/coins/${coinId}/market_chart`,
-        {
-          vs_currency: vsCurrency,
-          days: String(days),
-          interval: interval,
-        },
+        searchParams,
       )) as {
         prices?: [number, number][];
         status?: { error_code: number; error_message: string };
