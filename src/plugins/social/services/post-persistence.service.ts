@@ -273,7 +273,7 @@ export class PostPersistenceService {
       media: parsedContent.media,
       total_comments: 0,
       tx_args: tx.raw?.arguments || [],
-      created_at: moment(parseInt(tx.micro_time)).toDate(),
+      created_at: moment(tx.created_at || parseInt(tx.micro_time)).toDate(),
       post_id:
         postTypeInfo.isComment && postTypeInfo.parentPostId
           ? postTypeInfo.parentPostId
