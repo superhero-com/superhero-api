@@ -92,17 +92,6 @@ export class SocialTippingTransactionProcessorService {
   ): Promise<Tip> {
     const tipRepository = manager.getRepository(Tip);
 
-    // Check if tip already exists
-    const existingTip = await tipRepository.findOne({
-      where: {
-        tx_hash: tx.hash,
-      },
-    });
-
-    if (existingTip) {
-      return existingTip;
-    }
-
     const amount = tx?.raw?.amount
       ? toAe(tx.raw.amount)
       : '0';
@@ -141,13 +130,25 @@ export class SocialTippingTransactionProcessorService {
       }
     }
 
-    return await tipRepository.save({
-      tx_hash: tx.hash,
-      sender: senderAccount,
-      receiver: receiverAccount,
-      amount,
-      type: tipType, // Save full tip type string to match TipService behavior
-      post,
+    // Use upsert to handle duplicate key violations gracefully during parallel processing
+    await tipRepository.upsert(
+      {
+        tx_hash: tx.hash,
+        sender: senderAccount,
+        receiver: receiverAccount,
+        amount,
+        type: tipType, // Save full tip type string to match TipService behavior
+        post,
+      },
+      {
+        conflictPaths: ['tx_hash'],
+        skipUpdateIfNoValuesChanged: true,
+      },
+    );
+
+    // Fetch and return the tip (either newly created or existing)
+    return await tipRepository.findOneOrFail({
+      where: { tx_hash: tx.hash },
     });
   }
 
@@ -160,17 +161,20 @@ export class SocialTippingTransactionProcessorService {
   ): Promise<Account | null> {
     try {
       const accountRepository = manager.getRepository(Account);
-      let existingAccount = await accountRepository.findOne({
+      
+      // Use upsert to handle duplicate key violations gracefully during parallel processing
+      await accountRepository.upsert(
+        { address },
+        {
+          conflictPaths: ['address'],
+          skipUpdateIfNoValuesChanged: true,
+        },
+      );
+
+      // Fetch and return the account
+      return await accountRepository.findOne({
         where: { address },
       });
-
-      if (!existingAccount) {
-        existingAccount = await accountRepository.save({
-          address,
-        });
-        this.logger.log(`Created new account: ${address}`);
-      }
-      return existingAccount;
     } catch (error) {
       this.logger.error(`Failed to ensure account exists: ${address}`, error);
       return null;
