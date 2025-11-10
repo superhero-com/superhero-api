@@ -144,7 +144,7 @@ export class ReorgService {
       );
 
       await queryRunner.manager.query(
-        'DELETE FROM mdw_block WHERE height >= $1',
+        'DELETE FROM key_blocks WHERE height >= $1',
         [divergenceHeight],
       );
 
