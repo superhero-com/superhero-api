@@ -13,6 +13,7 @@ import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
 @Injectable()
 export class PluginBatchProcessorService {
   private readonly logger = new Logger(PluginBatchProcessorService.name);
+  private syncStateCache = new Map<string, PluginSyncState | null>();
 
   constructor(
     private pluginRegistryService: PluginRegistryService,
@@ -53,6 +54,28 @@ export class PluginBatchProcessorService {
   }
 
   /**
+   * Get plugin sync state with caching
+   */
+  private async getCachedSyncState(
+    pluginName: string,
+  ): Promise<PluginSyncState | null> {
+    // Check cache first
+    if (this.syncStateCache.has(pluginName)) {
+      return this.syncStateCache.get(pluginName) ?? null;
+    }
+
+    // Fetch from database and cache
+    const syncState = await this.pluginSyncStateRepository.findOne({
+      where: { plugin_name: pluginName },
+    });
+
+    // Cache the result (even if null to avoid repeated queries)
+    this.syncStateCache.set(pluginName, syncState ?? null);
+
+    return syncState ?? null;
+  }
+
+  /**
    * Process a batch of transactions for a specific plugin
    */
   private async processBatchForPlugin(
@@ -61,10 +84,8 @@ export class PluginBatchProcessorService {
     syncDirection: SyncDirection,
   ): Promise<void> {
     try {
-      // Get plugin sync state
-      const syncState = await this.pluginSyncStateRepository.findOne({
-        where: { plugin_name: plugin.name },
-      });
+      // Get plugin sync state (cached)
+      const syncState = await this.getCachedSyncState(plugin.name);
 
       if (!syncState) {
         return;
