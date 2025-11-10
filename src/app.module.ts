@@ -30,6 +30,7 @@ import { PostModule } from './social/post.module';
 import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
 import { MdwModule } from './mdw-sync/mdw.module';
+import { SyncState } from './mdw-sync/entities/sync-state.entity';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { MdwModule } from './mdw-sync/mdw.module';
       ...DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
     }),
+    TypeOrmModule.forFeature([SyncState]),
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
