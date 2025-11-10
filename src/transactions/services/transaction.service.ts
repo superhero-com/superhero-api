@@ -46,7 +46,6 @@ export class TransactionService {
     token?: Token,
     shouldBroadcast?: boolean,
   ): Promise<Transaction> {
-    return;
     if (
       !Object.keys(BCL_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
       rawTransaction?.tx?.returnType === 'revert'

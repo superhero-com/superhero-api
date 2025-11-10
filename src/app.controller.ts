@@ -34,7 +34,10 @@ export class AppController {
     const bclBlockNumber = factory.deployed_at_block_height || 0;
     const tipHeight = syncState?.tip_height || 0;
     const backwardSyncedHeight = syncState?.backward_synced_height ?? tipHeight;
-    const remainingBlocksToSync = Math.max(0, backwardSyncedHeight - bclBlockNumber);
+    // Backward sync goes from tip down to 0 (targetBackwardHeight)
+    // Remaining blocks = current backward synced height - target backward height (0)
+    const targetBackwardHeight = 0;
+    const remainingBlocksToSync = Math.max(0, backwardSyncedHeight - targetBackwardHeight);
 
     return {
       fullSyncing: this.indexerService.getIsRunning(),
