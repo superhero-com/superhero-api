@@ -5,6 +5,7 @@ import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { fetchJson } from '@/utils/common';
@@ -241,6 +242,40 @@ export class CoinGeckoService {
     } catch (error) {
       this.logger.error(
         `Failed to fetch CoinGecko rates for ${coinId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Obtain all the coin market data (price, market cap, volume, etc...)
+   * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
+   * @param currencyCode - The target currency code (e.g., 'usd')
+   * @returns Market data response or null if fetch fails
+   */
+  async fetchCoinMarketData(
+    coinId: string,
+    currencyCode: string,
+  ): Promise<CoinGeckoMarketResponse | null> {
+    try {
+      const marketData = (await this.fetchFromApi('/coins/markets', {
+        ids: coinId,
+        vs_currency: currencyCode,
+      })) as any[];
+
+      if (marketData && marketData.length > 0) {
+        const result = camelcaseKeysDeep(marketData[0]) as CoinGeckoMarketResponse;
+        this.logger.debug(
+          `Fetched CoinGecko market data for ${coinId} in ${currencyCode}`,
+        );
+        return result;
+      }
+      this.logger.warn(`No market data found in CoinGecko response for ${coinId}`);
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch CoinGecko market data for ${coinId}:`,
         error,
       );
       return null;
