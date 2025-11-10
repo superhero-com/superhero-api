@@ -366,9 +366,18 @@ export function createBaseController<T>(
         // Reorder based on the original ID order
         const orderedEntities = ids.map((id: any) => entityMap.get(id)).filter(Boolean);
 
+        // Adjust pagination metadata to reflect actual item count
+        // Some entities may not exist (e.g., due to concurrent deletion),
+        // so we need to update itemCount to match the actual returned items
+        const actualItemCount = orderedEntities.length;
+        const adjustedMeta = {
+          ...idResult.meta,
+          itemCount: actualItemCount,
+        };
+
         result = {
           items: orderedEntities,
-          meta: idResult.meta,
+          meta: adjustedMeta,
         };
       } else {
         // No array relations, use standard pagination
