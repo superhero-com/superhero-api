@@ -28,6 +28,8 @@ export interface Plugin {
   processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void>;
   /**
    * Handle reorg by receiving list of removed transaction hashes.
+   * Also used for invalid transactions detected during verification.
+   * Plugins should clean up any data related to these removed/invalid transactions.
    */
   onReorg(removedTxHashes: string[]): Promise<void>;
 }

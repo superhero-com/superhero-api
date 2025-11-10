@@ -1,14 +1,12 @@
+import { Plugin, SyncDirection } from '@/plugins/plugin.interface';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Tx } from '../entities/tx.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
-import { PluginRegistryService } from './plugin-registry.service';
-import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
-import { Plugin, SyncDirection } from '@/plugins/plugin.interface';
+import { Tx } from '../entities/tx.entity';
 import { SyncDirectionEnum } from '../types/sync-direction';
-import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
+import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
+import { PluginRegistryService } from './plugin-registry.service';
 
 @Injectable()
 export class PluginBatchProcessorService {
@@ -20,8 +18,7 @@ export class PluginBatchProcessorService {
     private failedTransactionService: PluginFailedTransactionService,
     @InjectRepository(PluginSyncState)
     private pluginSyncStateRepository: Repository<PluginSyncState>,
-    private configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Process a batch of transactions for all plugins
@@ -105,19 +102,19 @@ export class PluginBatchProcessorService {
         const maxHeight = Math.max(
           ...matchingTransactions.map((tx) => tx.block_height),
         );
-        
+
         // Update appropriate height field based on sync direction
         const updateData: Partial<PluginSyncState> = {
           last_synced_height: maxHeight, // Keep for backward compatibility
         };
-        
+
         if (syncDirection === SyncDirectionEnum.Backward) {
           updateData.backward_synced_height = maxHeight;
         } else if (syncDirection === SyncDirectionEnum.Live) {
           updateData.live_synced_height = maxHeight;
         }
         // Reorg direction doesn't update sync state heights
-        
+
         await this.pluginSyncStateRepository.update(
           { plugin_name: plugin.name },
           updateData,
