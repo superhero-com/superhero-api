@@ -56,9 +56,17 @@ export class BlockSyncService {
       url = response.next ? `${middlewareUrl}${response.next}` : null;
     }
 
-    // Batch save all blocks
+    // Batch upsert all blocks (split into smaller batches to avoid PostgreSQL parameter limits)
+    // Using upsert to handle duplicate key violations gracefully during parallel processing
     if (blocksToSave.length > 0) {
-      await this.blockRepository.save(blocksToSave);
+      const saveBatchSize = 1000; // Safe batch size for PostgreSQL
+      for (let i = 0; i < blocksToSave.length; i += saveBatchSize) {
+        const batch = blocksToSave.slice(i, i + saveBatchSize);
+        await this.blockRepository.upsert(batch, {
+          conflictPaths: ['hash'],
+          skipUpdateIfNoValuesChanged: true,
+        });
+      }
       this.logger.debug(
         `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
       );
@@ -103,12 +111,16 @@ export class BlockSyncService {
       }
     }
 
-    // Batch save all micro-blocks (split into smaller batches to avoid PostgreSQL parameter limits)
+    // Batch upsert all micro-blocks (split into smaller batches to avoid PostgreSQL parameter limits)
+    // Using upsert to handle duplicate key violations gracefully during parallel processing
     if (microBlocksToSave.length > 0) {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
         const batch = microBlocksToSave.slice(i, i + saveBatchSize);
-        await this.microBlockRepository.save(batch);
+        await this.microBlockRepository.upsert(batch, {
+          conflictPaths: ['hash'],
+          skipUpdateIfNoValuesChanged: true,
+        });
       }
       this.logger.debug(
         `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
