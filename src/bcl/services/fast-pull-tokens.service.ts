@@ -58,8 +58,8 @@ export class FastPullTokensService {
     if (this.isPullingLatestCreatedTokens) {
       return;
     }
-    this.isPullingLatestCreatedTokens = true;
     try {
+      this.isPullingLatestCreatedTokens = true;
       // delete all tokens where dao_address is null
       await this.tokensService.deleteTokensWhereDaoAddressIsNull();
       const factory = await this.communityFactoryService.getCurrentFactory();
@@ -79,6 +79,7 @@ export class FastPullTokensService {
         this.logger.error(
           `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
         );
+        this.isPullingLatestCreatedTokens = false;
         return;
       }
       const queryString = new URLSearchParams({
