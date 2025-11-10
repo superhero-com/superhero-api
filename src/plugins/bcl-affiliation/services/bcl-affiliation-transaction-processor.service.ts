@@ -29,13 +29,8 @@ export class BclAffiliationTransactionProcessorService {
     syncDirection: SyncDirection,
   ): Promise<Invitation[] | null> {
     try {
-      const rawTx = tx.raw as any;
-      if (!rawTx || !rawTx.tx) {
-        return null;
-      }
-
       // Check transaction result
-      if (rawTx.tx.result !== 'ok') {
+      if (tx.raw.result !== 'ok') {
         return null;
       }
 
@@ -75,11 +70,10 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     manager: EntityManager,
   ): Promise<Invitation[]> {
-    const rawTx = tx.raw as any;
     const invitationRepository = manager.getRepository(Invitation);
 
-    const senderAddress = rawTx.tx.callerId || tx.caller_id;
-    const inviteesArgs = rawTx.tx.arguments?.[0];
+    const senderAddress = tx.caller_id;
+    const inviteesArgs = tx.raw.arguments?.[0];
     
     if (!inviteesArgs || !inviteesArgs.value) {
       return [];
@@ -92,7 +86,7 @@ export class BclAffiliationTransactionProcessorService {
       }
     }
 
-    const amountArgs = rawTx.tx.arguments?.[2];
+    const amountArgs = tx.raw.arguments?.[2];
     const amount = amountArgs?.value ? toAe(amountArgs.value) : '0';
     const microTime = parseInt(tx.micro_time, 10);
 
@@ -134,11 +128,10 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     manager: EntityManager,
   ): Promise<Invitation[] | null> {
-    const rawTx = tx.raw as any;
     const invitationRepository = manager.getRepository(Invitation);
 
-    const callerAddress = rawTx.tx.callerId || tx.caller_id;
-    const receiverAddress = rawTx.tx.arguments?.[0]?.value;
+    const callerAddress = tx.caller_id;
+    const receiverAddress = tx.raw.arguments?.[0]?.value;
 
     if (!callerAddress || !receiverAddress) {
       return null;
@@ -181,10 +174,9 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     manager: EntityManager,
   ): Promise<Invitation[] | null> {
-    const rawTx = tx.raw as any;
     const invitationRepository = manager.getRepository(Invitation);
 
-    const receiverAddress = rawTx.tx.arguments?.[0]?.value;
+    const receiverAddress = tx.raw.arguments?.[0]?.value;
 
     if (!receiverAddress) {
       return null;
