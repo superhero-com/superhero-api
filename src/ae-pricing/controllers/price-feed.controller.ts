@@ -22,7 +22,7 @@ export class PriceFeedController {
   @ApiOperation({
     operationId: 'getCurrencyRates',
     summary: 'Get current currency rates for Aeternity',
-    description: 'Returns current exchange rates for Aeternity in all supported currencies.',
+    description: 'Returns current exchange rates for Aeternity in all supported fiat currencies.',
   })
   @ApiOkResponse({
     description: 'Current currency rates for all supported fiat currencies',
@@ -32,13 +32,9 @@ export class PriceFeedController {
       example: { usd: 0.05, eur: 0.045, aud: 0.075, brl: 0.25, cad: 0.068, chf: 0.044, gbp: 0.039, xau: 0.000025 },
     },
   })
-  @Get('rates')
+  @Get('aeternity/rates')
   async getCurrencyRates(): Promise<CurrencyRates | null> {
-    if (!this.coinGeckoService.rates || this.coinGeckoService.isPullTimeExpired()) {
-      await this.coinGeckoService.pullData();
-    }
-    
-    return this.coinGeckoService.rates;
+    return await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
   }
 
   @ApiOperation({
@@ -85,13 +81,13 @@ export class PriceFeedController {
       ],
     },
   })
-  @Get('history')
+  @Get('aeternity/history')
   async getHistoricalPrice(
     @Query('currency') currency?: string,
     @Query('days') days?: string | number,
     @Query('interval') interval?: 'daily' | 'hourly' | 'minute',
   ): Promise<Array<[number, number]>> {
-    return this.getHistoricalPriceData(currency, days, interval);
+    return this.getHistoricalPriceData(AETERNITY_COIN_ID, currency, days, interval);
   }
 
   @ApiOperation({
@@ -110,14 +106,11 @@ export class PriceFeedController {
     description: 'Market data response',
     type: Object,
   })
-  @Get('market-data')
+  @Get('aeternity/market-data')
   async getMarketData(
     @Query('currency') currency: string = 'usd',
   ): Promise<Omit<CoinGeckoMarketResponse, 'image' | 'marketCapRank'> | null> {
-    const data = await this.coinGeckoService.fetchCoinMarketData(
-      AETERNITY_COIN_ID,
-      currency,
-    );
+    const data = await this.coinGeckoService.fetchCoinMarketData(AETERNITY_COIN_ID, currency);
     
     if (!data) {
       return null;
@@ -170,6 +163,7 @@ export class PriceFeedController {
    * Used internally by /history endpoint
    */
   private async getHistoricalPriceData(
+    coinId: string,
     currency: string = 'usd',
     days: string | number = '365',
     interval: 'daily' | 'hourly' | 'minute' = 'daily',
@@ -225,7 +219,7 @@ export class PriceFeedController {
     
     // If we need aggregated hourly data, check cache first
     if (shouldAggregateToHourly && finalDays === 1) {
-      const aggregatedCacheKey = `coingecko:historical:aggregated:hourly:${AETERNITY_COIN_ID}:${currency}:${finalDays}`;
+      const aggregatedCacheKey = `coingecko:historical:aggregated:hourly:${coinId}:${currency}:${finalDays}`;
       try {
         const cached = await this.cacheManager.get<Array<[number, number]>>(aggregatedCacheKey);
         if (cached) {
@@ -238,7 +232,7 @@ export class PriceFeedController {
     
     // Fetch data from CoinGecko
     const data = await this.coinGeckoService.fetchHistoricalPrice(
-      AETERNITY_COIN_ID,
+      coinId,
       currency,
       finalDays,
       finalInterval,
@@ -247,7 +241,7 @@ export class PriceFeedController {
     // If we need to aggregate to hourly, do it now and cache the result
     if (shouldAggregateToHourly && finalDays === 1) {
       const aggregatedData = this.aggregateToHourly(data);
-      const aggregatedCacheKey = `coingecko:historical:aggregated:hourly:${AETERNITY_COIN_ID}:${currency}:${finalDays}`;
+      const aggregatedCacheKey = `coingecko:historical:aggregated:hourly:${coinId}:${currency}:${finalDays}`;
       try {
         // Cache aggregated hourly data for 1 hour (same as raw data)
         await this.cacheManager.set(aggregatedCacheKey, aggregatedData, 3600 * 1000);
