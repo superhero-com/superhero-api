@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import BigNumber from 'bignumber.js';
@@ -55,7 +55,7 @@ export class CoinGeckoService {
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     @Optional()
-    @Inject(CoinHistoricalPriceService)
+    @Inject(forwardRef(() => CoinHistoricalPriceService))
     private historicalPriceService?: CoinHistoricalPriceService,
   ) {
     setInterval(() => this.pullData(), 1000 * 60 * 5); // 5 minutes
