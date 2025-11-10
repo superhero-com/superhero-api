@@ -38,8 +38,9 @@ export class CoinHistoricalPriceService {
         },
       });
 
+      // TypeORM returns bigint as string, convert to number
       return records.map((record) => [
-        record.timestamp_ms,
+        Number(record.timestamp_ms),
         Number(record.price),
       ]);
     } catch (error) {
@@ -73,7 +74,8 @@ export class CoinHistoricalPriceService {
         select: ['timestamp_ms'],
       });
 
-      return latest?.timestamp_ms || null;
+      // TypeORM returns bigint as string, convert to number
+      return latest?.timestamp_ms ? Number(latest.timestamp_ms) : null;
     } catch (error) {
       this.logger.error(`Failed to get latest timestamp:`, error);
       return null;
@@ -102,7 +104,8 @@ export class CoinHistoricalPriceService {
         select: ['timestamp_ms'],
       });
 
-      return oldest?.timestamp_ms || null;
+      // TypeORM returns bigint as string, convert to number
+      return oldest?.timestamp_ms ? Number(oldest.timestamp_ms) : null;
     } catch (error) {
       this.logger.error(`Failed to get oldest timestamp:`, error);
       return null;
@@ -139,13 +142,14 @@ export class CoinHistoricalPriceService {
         select: ['timestamp_ms'],
       });
 
+      // TypeORM returns bigint as string, so convert to string for Set comparison
       const existingTimestamps = new Set(
-        existing.map((record) => record.timestamp_ms),
+        existing.map((record) => String(record.timestamp_ms)),
       );
 
-      // Filter out duplicates
+      // Filter out duplicates - convert number timestamp to string for comparison
       const newData = priceData.filter(
-        ([timestamp]) => !existingTimestamps.has(timestamp),
+        ([timestamp]) => !existingTimestamps.has(String(timestamp)),
       );
 
       if (newData.length === 0) {
@@ -214,7 +218,8 @@ export class CoinHistoricalPriceService {
         return [[requestedStartMs, requestedEndMs]];
       }
 
-      const existingTimestamps = existing.map((r) => r.timestamp_ms);
+      // TypeORM returns bigint as string, convert to numbers for arithmetic operations
+      const existingTimestamps = existing.map((r) => Number(r.timestamp_ms));
       const missingRanges: Array<[number, number]> = [];
 
       // Check gap at the beginning
