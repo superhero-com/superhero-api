@@ -254,20 +254,6 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
-  async handleLiveTransaction(transaction: ITransaction) {
-    try {
-      const mdwTx = this.blockSyncService.convertToMdwTx(transaction);
-
-      // Save transaction
-      const savedTx = await this.txRepository.save(mdwTx);
-
-      // Process batch for plugins (single tx in array) - backward sync
-      await this.pluginBatchProcessor.processBatch([savedTx], SyncDirectionEnum.Backward);
-    } catch (error: any) {
-      this.logger.error('Failed to handle live transaction', error);
-    }
-  }
-
   /**
    * Get the current running status of the backward sync
    */
