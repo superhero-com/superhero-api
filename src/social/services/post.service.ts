@@ -33,7 +33,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
-  syncVersion = 5;
+  syncVersion = 6;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -608,7 +608,7 @@ export class PostService {
 
   private generatePostSlug(content: string, postId: string): string {
     const suffix = postId.split('_')[0];
-    const base = this.normalizeSlugPart(content).slice(0, 30);
+    const base = this.normalizeSlugPart(content).slice(0, 60);
     const combined = base ? `${base}-${suffix}` : suffix;
     return combined.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
   }
