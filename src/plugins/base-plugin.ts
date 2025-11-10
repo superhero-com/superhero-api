@@ -36,13 +36,14 @@ export abstract class BasePlugin implements Plugin {
 
   /**
    * Handle reorg by receiving list of removed transaction hashes.
-   * Default implementation logs the reorg.
+   * Also used for invalid transactions detected during verification.
+   * Default implementation logs the removed transactions.
    * Plugins can override for custom cleanup.
    * Note: Transactions have already been deleted from the database at this point.
    */
   async onReorg(removedTxHashes: string[]): Promise<void> {
     this.logger.log(
-      `[${this.name}] Reorg detected: ${removedTxHashes.length} transactions removed`,
+      `[${this.name}] Transactions removed (reorg or invalid): ${removedTxHashes.length} transactions`,
     );
     // Plugins should override this method to handle cleanup of their own data
     // The sync state will be updated by the reorg service
