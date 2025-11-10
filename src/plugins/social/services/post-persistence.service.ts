@@ -11,7 +11,7 @@ import moment from 'moment';
 @Injectable()
 export class PostPersistenceService {
   private readonly logger = new Logger(PostPersistenceService.name);
-  private readonly syncVersion = 5; // Match PostService syncVersion
+  private readonly syncVersion = 6; // Match PostService syncVersion
 
   constructor(
     @InjectRepository(Post)
@@ -210,7 +210,7 @@ export class PostPersistenceService {
    */
   generatePostSlug(content: string, postId: string): string {
     const suffix = postId.split('_')[0];
-    const base = this.normalizeSlugPart(content).slice(0, 30);
+    const base = this.normalizeSlugPart(content).slice(0, 60);
     const combined = base ? `${base}-${suffix}` : suffix;
     return combined.replace(/-+/g, '-').replace(/^-+|-+$/g, '');
   }
