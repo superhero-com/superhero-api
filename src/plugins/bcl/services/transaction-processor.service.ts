@@ -165,15 +165,16 @@ export class TransactionProcessorService {
         // Sync token price - only for live sync direction
         if (syncDirection === SyncDirectionEnum.Live) {
           await this.tokenService.syncTokenPrice(transactionToken, manager);
-        }
 
-        // Update token holder
-        await this.tokenHolderService.updateTokenHolder(
-          transactionToken,
-          decodedTx,
-          parsedData.volume,
-          manager,
-        );
+           // Update token holder
+          await this.tokenHolderService.updateTokenHolder(
+            transactionToken,
+            decodedTx,
+            parsedData.volume,
+            manager,
+          );
+        }
+       
 
         return {
           transactionToken,
