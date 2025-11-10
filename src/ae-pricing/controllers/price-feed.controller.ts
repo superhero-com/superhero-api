@@ -70,5 +70,88 @@ export class PriceFeedController {
     const { image, marketCapRank, ...filteredData } = data;
     return filteredData as Omit<CoinGeckoMarketResponse, 'image' | 'marketCapRank'>;
   }
+
+  @ApiOperation({
+    operationId: 'getHistoricalPrice',
+    summary: 'Get historical price data for Aeternity',
+    description: 'Returns historical price data for Aeternity in the specified currency. Used internally for portfolio calculations.',
+  })
+  @ApiQuery({
+    name: 'currency',
+    type: 'string',
+    required: false,
+    description: 'Target currency code (default: usd)',
+    example: 'usd',
+  })
+  @ApiQuery({
+    name: 'days',
+    type: 'string',
+    required: false,
+    description: 'Number of days of history to fetch. Supported values: 1, 7, 14, 30, 90, 180, 365, max (default: 365)',
+    example: '365',
+  })
+  @ApiQuery({
+    name: 'interval',
+    type: 'string',
+    enum: ['daily', 'hourly'],
+    required: false,
+    description: 'Interval for data points (default: daily). Note: hourly data may not be reliably available for all periods.',
+    example: 'daily',
+  })
+  @ApiOkResponse({
+    description: 'Historical price data as array of [timestamp_ms, price] pairs',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'array',
+        items: {
+          type: 'number',
+        },
+        minItems: 2,
+        maxItems: 2,
+        example: [1704067200000, 0.00504577],
+      },
+      example: [
+        [1704067200000, 0.00504577],
+        [1704153600000, 0.00512345],
+      ],
+    },
+  })
+  @Get('history')
+  async getHistoricalPrice(
+    @Query('currency') currency: string = 'usd',
+    @Query('days') days: string | number = '365',
+    @Query('interval') interval: 'daily' | 'hourly' = 'daily',
+  ): Promise<Array<[number, number]>> {
+    // Validate days parameter - CoinGecko supports: 1, 7, 14, 30, 90, 180, 365, max
+    const validDays = [1, 7, 14, 30, 90, 180, 365];
+    
+    // Handle 'max' string or convert to number
+    let finalDays: number;
+    if (days === 'max' || days === 'Max' || days === 'MAX') {
+      // For 'max', use 365 days (CoinGecko's fetchHistoricalPrice accepts number, not 'max' string)
+      // The service will handle the conversion internally if needed
+      finalDays = 365; // Using max available for now
+    } else {
+      const daysValue = Number(days);
+      if (isNaN(daysValue) || daysValue <= 0) {
+        finalDays = 365; // Default to 365 if invalid
+      } else if (validDays.includes(daysValue)) {
+        finalDays = daysValue;
+      } else {
+        // Find closest valid value
+        finalDays = validDays.reduce((prev, curr) => 
+          Math.abs(curr - daysValue) < Math.abs(prev - daysValue) ? curr : prev
+        );
+      }
+    }
+    
+    return await this.coinGeckoService.fetchHistoricalPrice(
+      AETERNITY_COIN_ID,
+      currency,
+      finalDays,
+      interval,
+    );
+  }
 }
 
