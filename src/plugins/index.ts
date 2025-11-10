@@ -8,6 +8,8 @@ import { DexPlugin } from './dex/dex.plugin';
 import { DexPluginModule } from './dex/dex-plugin.module';
 import { SocialTippingPlugin } from './social-tipping/social-tipping.plugin';
 import { SocialTippingPluginModule } from './social-tipping/social-tipping-plugin.module';
+import { BclAffiliationPlugin } from './bcl-affiliation/bcl-affiliation.plugin';
+import { BclAffiliationPluginModule } from './bcl-affiliation/bcl-affiliation-plugin.module';
 
 /**
  * Export all plugin modules
@@ -18,6 +20,7 @@ export const PLUGIN_MODULES: Type[] = [
   SocialPluginModule,
   DexPluginModule,
   SocialTippingPluginModule,
+  BclAffiliationPluginModule,
 ];
 
 /**
@@ -27,9 +30,9 @@ export const PLUGIN_MODULES: Type[] = [
  */
 export const getPluginProvider = (): Provider => ({
   provide: MDW_PLUGIN,
-  useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin, dexPlugin: DexPlugin, socialTippingPlugin: SocialTippingPlugin) => {
-    return [bclPlugin, socialPlugin, dexPlugin, socialTippingPlugin];
+  useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin, dexPlugin: DexPlugin, socialTippingPlugin: SocialTippingPlugin, bclAffiliationPlugin: BclAffiliationPlugin) => {
+    return [bclPlugin, socialPlugin, dexPlugin, socialTippingPlugin, bclAffiliationPlugin];
   },
-  inject: [BclPlugin, SocialPlugin, DexPlugin, SocialTippingPlugin],
+  inject: [BclPlugin, SocialPlugin, DexPlugin, SocialTippingPlugin, BclAffiliationPlugin],
 });
 
