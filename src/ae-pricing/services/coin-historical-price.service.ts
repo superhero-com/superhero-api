@@ -263,16 +263,17 @@ export class CoinHistoricalPriceService {
     existing: Array<[number, number]>,
     newData: Array<[number, number]>,
   ): Array<[number, number]> {
-    // Combine both arrays
-    const combined = [...existing, ...newData];
-
     // Create a Map to deduplicate by timestamp (newer data takes precedence)
     const mergedMap = new Map<number, number>();
-    for (const [timestamp, price] of combined) {
-      // If timestamp already exists, keep the newer one (from newData)
-      if (!mergedMap.has(timestamp) || newData.some(([t]) => t === timestamp)) {
-        mergedMap.set(timestamp, price);
-      }
+
+    // First, add all existing data
+    for (const [timestamp, price] of existing) {
+      mergedMap.set(timestamp, price);
+    }
+
+    // Then, add/overwrite with new data (newer data takes precedence)
+    for (const [timestamp, price] of newData) {
+      mergedMap.set(timestamp, price);
     }
 
     // Convert back to array and sort by timestamp
