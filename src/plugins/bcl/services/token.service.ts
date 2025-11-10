@@ -106,30 +106,29 @@ export class TokenService {
     tx: Tx,
     manager?: EntityManager,
   ): Promise<Token | null> {
-    const rawTx = tx.raw || {};
     const factory = await this.communityFactoryService.getCurrentFactory();
     const repository = manager?.getRepository(Token) || this.tokensRepository;
 
     if (
       tx.function !== 'create_community' ||
-      rawTx.return_type === 'revert' ||
-      !rawTx.return?.value?.length ||
-      rawTx.return.value.length < 2
+      tx.raw.return_type === 'revert' ||
+      !tx.raw.return?.value?.length ||
+      tx.raw.return.value.length < 2
     ) {
       return null;
     }
 
     if (
       // If it's not supported collection, skip
-      !rawTx.arguments?.[0]?.value ||
-      !Object.keys(factory.collections).includes(rawTx.arguments[0].value)
+      !tx.raw.arguments?.[0]?.value ||
+      !Object.keys(factory.collections).includes(tx.raw.arguments[0].value)
     ) {
       return null;
     }
 
-    const daoAddress = rawTx.return.value[0]?.value;
-    const saleAddress = rawTx.return.value[1]?.value;
-    const tokenName = rawTx.arguments?.[1]?.value;
+    const daoAddress = tx.raw.return.value[0]?.value;
+    const saleAddress = tx.raw.return.value[1]?.value;
+    const tokenName = tx.raw.arguments?.[1]?.value;
 
     let tokenExists = await this.findByNameOrSymbol(tokenName, manager);
 

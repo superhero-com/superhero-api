@@ -45,39 +45,7 @@ export abstract class BasePluginSyncService {
    * Check if a transaction matches a single filter
    */
   protected matchesFilter(tx: Tx, filter: PluginFilter): boolean {
-    const rawTx = tx.raw as ITransaction;
-
-    // Check type
-    if (filter.type) {
-      const txType = rawTx?.tx?.type;
-      if (filter.type === 'contract_call' && txType !== 'ContractCallTx') {
-        return false;
-      }
-      if (filter.type === 'spend' && txType !== 'SpendTx') {
-        return false;
-      }
-    }
-
-    // Check contract ID
-    if (filter.contractIds && filter.contractIds.length > 0) {
-      if (!tx.contract_id || !filter.contractIds.includes(tx.contract_id)) {
-        return false;
-      }
-    }
-
-    // Check function
-    if (filter.functions && filter.functions.length > 0) {
-      if (!tx.function || !filter.functions.includes(tx.function)) {
-        return false;
-      }
-    }
-
-    // Check predicate
-    if (filter.predicate) {
-      return filter.predicate(tx);
-    }
-
-    return true;
+    return !!filter.predicate?.(tx);
   }
 
   /**

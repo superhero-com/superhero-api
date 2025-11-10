@@ -80,6 +80,7 @@ export class DexTransactionProcessorService {
     try {
       // Check if this is a DEX router transaction
       if (tx.contract_id !== DEX_CONTRACTS.router) {
+        console.log('[dex] not a DEX router transaction', tx);
         return null;
       }
 
@@ -132,15 +133,11 @@ export class DexTransactionProcessorService {
     // Ensure contracts are initialized
     await this.ensureContractsInitialized();
 
-    const rawTx = tx.raw as any;
-    if (!rawTx || !rawTx.tx || !rawTx.tx.log) {
-      return null;
-    }
 
     let decodedEvents = null;
     try {
       if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(rawTx.tx.log);
+        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log);
       }
     } catch (error: any) {
       // Try factory contract if router fails
@@ -149,7 +146,7 @@ export class DexTransactionProcessorService {
     if (!decodedEvents) {
       try {
         if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(rawTx.tx.log);
+          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log);
         }
       } catch (error: any) {
         this.logger.debug(
@@ -172,7 +169,7 @@ export class DexTransactionProcessorService {
 
     let token0Address: string | null = null;
     let token1Address: string | null = null;
-    const args = rawTx.tx.arguments;
+    const args = tx.raw.arguments;
     const txFunction = tx.function;
 
     // Extract token addresses based on function type
