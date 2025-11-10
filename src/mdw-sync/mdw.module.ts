@@ -16,7 +16,8 @@ import { PluginRegistryService } from './services/plugin-registry.service';
 import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
 import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
 import { MicroBlockService } from './services/micro-block.service';
-import { ReorgService } from './services/reorg.service';
+import { BlockValidationService } from './services/block-validation.service';
+import { BlockSyncService } from './services/block-sync.service';
 import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
 import { AeModule } from '@/ae/ae.module';
@@ -54,9 +55,10 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     PluginBatchProcessorService,
     PluginFailedTransactionService,
     MicroBlockService,
+    BlockSyncService,
     IndexerService,
     LiveIndexerService,
-    ReorgService,
+    BlockValidationService,
     // GraphQL Resolvers - all generated with automatic relation resolution
     ...generatedResolvers,
     // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
@@ -65,7 +67,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
   exports: [
     IndexerService,
     LiveIndexerService,
-    ReorgService,
+    BlockValidationService,
     PluginRegistryService,
     PluginBatchProcessorService,
   ],
