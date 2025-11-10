@@ -184,6 +184,13 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * Get whether the live indexer is active (websocket subscriptions are established)
+   */
+  getIsActive(): boolean {
+    return this.unsubscribeTransactions !== null && this.unsubscribeKeyBlocks !== null;
+  }
+
   onModuleDestroy() {
     // Unsubscribe from websocket channels
     if (this.unsubscribeTransactions) {
