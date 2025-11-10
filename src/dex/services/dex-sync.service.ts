@@ -56,15 +56,15 @@ export class DexSyncService {
     console.log('========================');
     // await this.dexPairTransactionRepository.clear();
 
-    this.routerContract = await this.aeSdkService.sdk.initializeContract({
-      aci: routerInterface,
-      address: DEX_CONTRACTS.router as Encoded.ContractAddress,
-    });
-    this.factoryContract = await this.aeSdkService.sdk.initializeContract({
-      aci: factoryInterface,
-      address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
-    });
-    this.sync();
+    // this.routerContract = await this.aeSdkService.sdk.initializeContract({
+    //   aci: routerInterface,
+    //   address: DEX_CONTRACTS.router as Encoded.ContractAddress,
+    // });
+    // this.factoryContract = await this.aeSdkService.sdk.initializeContract({
+    //   aci: factoryInterface,
+    //   address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
+    // });
+    // this.sync();
   }
 
   async sync() {
