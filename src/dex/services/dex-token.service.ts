@@ -73,7 +73,7 @@ export class DexTokenService {
           break;
         case '24hvolume':
           query.orderBy(
-            "(\"summary\".change->'24h'->>'volume'->>'ae')::numeric",
+            "(\"summary\".change->'24h'->'volume'->>'ae')::numeric",
             orderDirection,
           );
           break;
@@ -85,7 +85,7 @@ export class DexTokenService {
           break;
         case '7dvolume':
           query.orderBy(
-            "(\"summary\".change->'7d'->>'volume'->>'ae')::numeric",
+            "(\"summary\".change->'7d'->'volume'->>'ae')::numeric",
             orderDirection,
           );
           break;
