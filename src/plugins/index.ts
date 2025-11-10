@@ -6,6 +6,8 @@ import { SocialPlugin } from './social/social.plugin';
 import { SocialPluginModule } from './social/social-plugin.module';
 import { DexPlugin } from './dex/dex.plugin';
 import { DexPluginModule } from './dex/dex-plugin.module';
+import { SocialTippingPlugin } from './social-tipping/social-tipping.plugin';
+import { SocialTippingPluginModule } from './social-tipping/social-tipping-plugin.module';
 
 /**
  * Export all plugin modules
@@ -15,6 +17,7 @@ export const PLUGIN_MODULES: Type[] = [
   BclPluginModule,
   SocialPluginModule,
   DexPluginModule,
+  SocialTippingPluginModule,
 ];
 
 /**
@@ -24,9 +27,9 @@ export const PLUGIN_MODULES: Type[] = [
  */
 export const getPluginProvider = (): Provider => ({
   provide: MDW_PLUGIN,
-  useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin, dexPlugin: DexPlugin) => {
-    return [bclPlugin, socialPlugin, dexPlugin];
+  useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin, dexPlugin: DexPlugin, socialTippingPlugin: SocialTippingPlugin) => {
+    return [bclPlugin, socialPlugin, dexPlugin, socialTippingPlugin];
   },
-  inject: [BclPlugin, SocialPlugin, DexPlugin],
+  inject: [BclPlugin, SocialPlugin, DexPlugin, SocialTippingPlugin],
 });
 
