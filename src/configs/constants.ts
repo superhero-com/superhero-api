@@ -116,16 +116,19 @@ export const MAX_RETRIES_FOR_FAILED_TRANSACTIONS = 10;
 
 export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 
-export const SYNCING_ENABLED = false;
-export const LIVE_SYNCING_ENABLED = false;
-export const PERIODIC_SYNCING_ENABLED = false;
+// Note: Old sync constants removed - syncing is now handled by MDW sync system + plugins
+// SYNCING_ENABLED - replaced by IndexerService
+// LIVE_SYNCING_ENABLED - replaced by LiveIndexerService
+// PERIODIC_SYNCING_ENABLED - replaced by IndexerService + BlockValidationService
+// PULL_INVITATIONS_ENABLED - replaced by BclAffiliationPlugin
+// PULL_SOCIAL_POSTS_ENABLED - replaced by SocialPlugin
+// PULL_DEX_TOKENS_ENABLED - unused
+// PULL_DEX_PAIRS_ENABLED - unused
+
+// Analytics/calculation jobs (not transaction syncing):
 export const UPDATE_TRENDING_TOKENS_ENABLED = false;
-export const PULL_INVITATIONS_ENABLED = false;
 export const PULL_ACCOUNTS_ENABLED = false;
 export const PULL_TRENDING_TAGS_ENABLED = false;
-export const PULL_SOCIAL_POSTS_ENABLED = false;
-export const PULL_DEX_TOKENS_ENABLED = false;
-export const PULL_DEX_PAIRS_ENABLED = false;
 
 /**
  * API Keys and Security
