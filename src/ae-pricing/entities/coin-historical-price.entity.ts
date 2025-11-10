@@ -27,7 +27,6 @@ export class CoinHistoricalPrice {
   })
   currency: string;
 
-  @Index()
   @Column({
     type: 'bigint',
   })
