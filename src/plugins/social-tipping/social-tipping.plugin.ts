@@ -32,7 +32,6 @@ export class SocialTippingPlugin extends BasePlugin {
   filters(): PluginFilter[] {
     return [
       {
-        type: 'spend',
         predicate: (tx: Partial<Tx>) => {
           // Check if it's a SpendTx
           if (tx.type !== 'SpendTx') {

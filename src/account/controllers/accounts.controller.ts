@@ -120,7 +120,6 @@ export class AccountsController {
     
     // Use the larger of requested interval or minimum allowed interval
     const finalInterval = Math.max(requestedInterval, minimumInterval);
-    console.log('finalInterval', finalInterval);
 
     return await this.portfolioService.getPortfolioHistory(address, {
       startDate: start,

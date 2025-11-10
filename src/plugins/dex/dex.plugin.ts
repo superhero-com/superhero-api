@@ -39,22 +39,31 @@ export class DexPlugin extends BasePlugin {
       return [];
     }
 
+    const contractIds = [routerAddress];
+    const functions = [
+      TX_FUNCTIONS.swap_exact_tokens_for_tokens,
+      TX_FUNCTIONS.swap_tokens_for_exact_tokens,
+      TX_FUNCTIONS.swap_exact_ae_for_tokens,
+      TX_FUNCTIONS.swap_exact_tokens_for_ae,
+      TX_FUNCTIONS.swap_ae_for_exact_tokens,
+      TX_FUNCTIONS.swap_tokens_for_exact_ae,
+      TX_FUNCTIONS.add_liquidity,
+      TX_FUNCTIONS.add_liquidity_ae,
+      TX_FUNCTIONS.remove_liquidity,
+      TX_FUNCTIONS.remove_liquidity_ae,
+    ];
+
     return [
       {
-        type: 'contract_call',
-        contractIds: [routerAddress],
-        functions: [
-          TX_FUNCTIONS.swap_exact_tokens_for_tokens,
-          TX_FUNCTIONS.swap_tokens_for_exact_tokens,
-          TX_FUNCTIONS.swap_exact_ae_for_tokens,
-          TX_FUNCTIONS.swap_exact_tokens_for_ae,
-          TX_FUNCTIONS.swap_ae_for_exact_tokens,
-          TX_FUNCTIONS.swap_tokens_for_exact_ae,
-          TX_FUNCTIONS.add_liquidity,
-          TX_FUNCTIONS.add_liquidity_ae,
-          TX_FUNCTIONS.remove_liquidity,
-          TX_FUNCTIONS.remove_liquidity_ae,
-        ],
+        predicate: (tx: Partial<Tx>) => {
+          return (
+            tx.type === 'ContractCallTx' &&
+            !!tx.contract_id &&
+            contractIds.includes(tx.contract_id) &&
+            !!tx.function &&
+            functions.includes(tx.function as any)
+          );
+        },
       },
     ];
   }

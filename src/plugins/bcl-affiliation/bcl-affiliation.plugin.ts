@@ -43,15 +43,24 @@ export class BclAffiliationPlugin extends BasePlugin {
       return [];
     }
 
+    const contractIds = [affiliationAddress];
+    const functions = [
+      'register_invitation_code',
+      'redeem_invitation_code',
+      'revoke_invitation_code',
+    ];
+
     return [
       {
-        type: 'contract_call',
-        contractIds: [affiliationAddress],
-        functions: [
-          'register_invitation_code',
-          'redeem_invitation_code',
-          'revoke_invitation_code',
-        ],
+        predicate: (tx: Partial<Tx>) => {
+          return (
+            tx.type === 'ContractCallTx' &&
+            !!tx.contract_id &&
+            contractIds.includes(tx.contract_id as any) &&
+            !!tx.function &&
+            functions.includes(tx.function)
+          );
+        },
       },
     ];
   }

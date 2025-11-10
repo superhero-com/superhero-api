@@ -158,6 +158,7 @@ export class PluginBatchProcessorService {
 
   /**
    * Filter transactions that match a plugin's filters
+   * Uses predicate functions only - filters without predicates match nothing
    */
   private filterTransactionsForPlugin(
     plugin: Plugin,
@@ -168,60 +169,13 @@ export class PluginBatchProcessorService {
       return [];
     }
 
-    // Get sync service to use filter matching
-    // We need to access the sync service through the plugin
-    // For now, we'll do basic filtering here and let the plugin do detailed filtering
     const matching: Tx[] = [];
 
     for (const tx of transactions) {
-      // Basic filtering based on contract ID, function, and type
-      // Use OR logic: transaction matches if ANY of the specified conditions match
+      // Use OR logic: transaction matches if ANY filter's predicate returns true
       const matches = filters.some((filter) => {
-        let hasAnyFilter = false;
-        let matchesAny = false;
-
-        // Check type (if specified)
-        if (filter.type) {
-          hasAnyFilter = true;
-          if (
-            (filter.type === 'contract_call' && tx.type === 'ContractCallTx') ||
-            (filter.type === 'spend' && tx.type === 'SpendTx')
-          ) {
-            matchesAny = true;
-          }
-        }
-
-        // Check contract ID (if specified)
-        if (filter.contractIds && filter.contractIds.length > 0) {
-          hasAnyFilter = true;
-          if (tx.contract_id && filter.contractIds.includes(tx.contract_id)) {
-            matchesAny = true;
-          }
-        }
-
-        // Check function (if specified)
-        if (filter.functions && filter.functions.length > 0) {
-          hasAnyFilter = true;
-          if (tx.function && filter.functions.includes(tx.function)) {
-            matchesAny = true;
-          }
-        }
-
-        // Check predicate if provided
-        if (filter.predicate) {
-          hasAnyFilter = true;
-          if (filter.predicate(tx)) {
-            matchesAny = true;
-          }
-        }
-
-        // If no filters are specified, match everything
-        if (!hasAnyFilter) {
-          return true;
-        }
-
-        // Match if ANY specified filter matches (OR logic)
-        return matchesAny;
+        // Filters without predicates match nothing (return false)
+        return !!filter.predicate?.(tx);
       });
 
       if (matches) {
