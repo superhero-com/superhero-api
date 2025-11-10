@@ -66,6 +66,15 @@ export class PostPersistenceService {
         if (attempt === maxRetries) {
           return false;
         }
+
+        // Apply exponential backoff delay before retrying on errors
+        this.logger.debug('Retrying after error with exponential backoff', {
+          parentPostId,
+          attempt,
+          nextRetryIn: retryDelay,
+        });
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        retryDelay *= 2; // Exponential backoff
       }
     }
 
