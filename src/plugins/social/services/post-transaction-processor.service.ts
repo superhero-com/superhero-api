@@ -189,8 +189,8 @@ export class PostTransactionProcessorService {
             manager,
           );
 
-          // Update topic post counts
-          await this.topicManagementService.updateTopicPostCounts(topics);
+          // Update topic post counts within the same transaction
+          await this.topicManagementService.updateTopicPostCounts(topics, manager);
 
           return savedPost;
         },

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, EntityManager } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { Topic } from '../entities/topic.entity';
 import {
@@ -521,8 +521,8 @@ export class PostService {
           const newPost = manager.create(Post, postData);
           const savedPost = await manager.save(newPost);
 
-          // Update topic post counts
-          await this.updateTopicPostCounts(topics);
+          // Update topic post counts within the same transaction
+          await this.updateTopicPostCounts(topics, manager);
 
           return savedPost;
         },
@@ -968,17 +968,30 @@ export class PostService {
 
   /**
    * Updates the post count for topics
+   * @param topics - Topics to update post counts for
+   * @param manager - Optional EntityManager to use for transaction isolation
    */
-  private async updateTopicPostCounts(topics: Topic[]): Promise<void> {
+  private async updateTopicPostCounts(
+    topics: Topic[],
+    manager?: EntityManager,
+  ): Promise<void> {
+    // Use transaction manager's repositories if provided, otherwise use injected repositories
+    const postRepository = manager
+      ? manager.getRepository(Post)
+      : this.postRepository;
+    const topicRepository = manager
+      ? manager.getRepository(Topic)
+      : this.topicRepository;
+
     for (const topic of topics) {
       try {
-        const count = await this.postRepository
+        const count = await postRepository
           .createQueryBuilder('post')
           .innerJoin('post.topics', 'topic')
           .where('topic.id = :topicId', { topicId: topic.id })
           .getCount();
 
-        await this.topicRepository.update(topic.id, {
+        await topicRepository.update(topic.id, {
           post_count: count,
         });
 
