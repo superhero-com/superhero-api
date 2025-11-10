@@ -174,6 +174,13 @@ export class BlockValidationService {
     }
   }
 
+  /**
+   * Get the current validation status
+   */
+  getIsValidating(): boolean {
+    return this.isValidating;
+  }
+
   private async fetchAllTransactionHashes(
     url: string,
     middlewareUrl: string,

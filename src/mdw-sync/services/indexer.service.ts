@@ -268,6 +268,13 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
+  /**
+   * Get the current running status of the backward sync
+   */
+  getIsRunning(): boolean {
+    return this.isRunning;
+  }
+
   onModuleDestroy() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
