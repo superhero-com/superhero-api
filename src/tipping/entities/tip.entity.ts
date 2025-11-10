@@ -5,9 +5,11 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToOne,
   PrimaryColumn,
 } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Entity({
   name: 'tips',
@@ -39,6 +41,12 @@ export class Tip {
   })
   @JoinColumn({ name: 'post_id' })
   post: Post;
+
+  @OneToOne(() => Tx, (tx) => tx.hash, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
+  tx: Tx;
 
   @Column({
     default: '0',
