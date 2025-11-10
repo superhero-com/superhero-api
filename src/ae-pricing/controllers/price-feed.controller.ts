@@ -124,7 +124,7 @@ export class PriceFeedController {
 
   /**
    * Helper method to get historical price data
-   * Used internally by both /rates and /history endpoints
+   * Used internally by /rates endpoint when days parameter is provided
    */
   private async getHistoricalPriceData(
     currency: string = 'usd',
@@ -162,60 +162,5 @@ export class PriceFeedController {
     );
   }
 
-  @ApiOperation({
-    operationId: 'getHistoricalPrice',
-    summary: 'Get historical price data for Aeternity (deprecated)',
-    description: 'DEPRECATED: Use GET /api/pricing/rates?days=X instead. Returns historical price data for Aeternity in the specified currency. Used internally for portfolio calculations.',
-    deprecated: true,
-  })
-  @ApiQuery({
-    name: 'currency',
-    type: 'string',
-    required: false,
-    description: 'Target currency code (default: usd)',
-    example: 'usd',
-  })
-  @ApiQuery({
-    name: 'days',
-    type: 'string',
-    required: false,
-    description: 'Number of days of history to fetch. Supported values: 1, 7, 14, 30, 90, 180, 365, max (default: 365)',
-    example: '365',
-  })
-  @ApiQuery({
-    name: 'interval',
-    type: 'string',
-    enum: ['daily', 'hourly'],
-    required: false,
-    description: 'Interval for data points (default: daily). Note: hourly data may not be reliably available for all periods.',
-    example: 'daily',
-  })
-  @ApiOkResponse({
-    description: 'Historical price data as array of [timestamp_ms, price] pairs',
-    schema: {
-      type: 'array',
-      items: {
-        type: 'array',
-        items: {
-          type: 'number',
-        },
-        minItems: 2,
-        maxItems: 2,
-        example: [1704067200000, 0.00504577],
-      },
-      example: [
-        [1704067200000, 0.00504577],
-        [1704153600000, 0.00512345],
-      ],
-    },
-  })
-  @Get('history')
-  async getHistoricalPrice(
-    @Query('currency') currency: string = 'usd',
-    @Query('days') days: string | number = '365',
-    @Query('interval') interval: 'daily' | 'hourly' = 'daily',
-  ): Promise<Array<[number, number]>> {
-    return this.getHistoricalPriceData(currency, days, interval);
-  }
 }
 
