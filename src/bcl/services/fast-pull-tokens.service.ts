@@ -59,40 +59,41 @@ export class FastPullTokensService {
       return;
     }
     this.isPullingLatestCreatedTokens = true;
-    // delete all tokens where dao_address is null
-    await this.tokensService.deleteTokensWhereDaoAddressIsNull();
-    const factory = await this.communityFactoryService.getCurrentFactory();
+    try {
+      // delete all tokens where dao_address is null
+      await this.tokensService.deleteTokensWhereDaoAddressIsNull();
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-    // Get tip height from MDW sync state
-    const syncState = await this.syncStateRepository.findOne({
-      where: { id: 'global' },
-    });
-    const latestBlockNumber = syncState?.tip_height || 0;
+      // Get tip height from MDW sync state
+      const syncState = await this.syncStateRepository.findOne({
+        where: { id: 'global' },
+      });
+      const latestBlockNumber = syncState?.tip_height || 0;
 
-    if (!latestBlockNumber) {
+      if (!latestBlockNumber) {
+        return;
+      }
+
+      const from = latestBlockNumber - TOTAL_BLOCKS_TO_HAVE_STABLE_DATA;
+      if (from < 0) {
+        this.logger.error(
+          `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
+        );
+        return;
+      }
+      const queryString = new URLSearchParams({
+        direction: 'backward',
+        limit: '100',
+        scope: `gen:${from}-${latestBlockNumber}`,
+        type: 'contract_call',
+        contract: factory.address,
+      }).toString();
+
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      await this.loadCreatedCommunityFromMdw(url, factory);
+    } finally {
       this.isPullingLatestCreatedTokens = false;
-      return;
     }
-
-    const from = latestBlockNumber - TOTAL_BLOCKS_TO_HAVE_STABLE_DATA;
-    if (from < 0) {
-      this.logger.error(
-        `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
-      );
-      this.isPullingLatestCreatedTokens = false;
-      return;
-    }
-    const queryString = new URLSearchParams({
-      direction: 'backward',
-      limit: '100',
-      scope: `gen:${from}-${latestBlockNumber}`,
-      type: 'contract_call',
-      contract: factory.address,
-    }).toString();
-
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    await this.loadCreatedCommunityFromMdw(url, factory);
-    this.isPullingLatestCreatedTokens = false;
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_10AM)

@@ -7,7 +7,7 @@ import { Post } from '@/social/entities/post.entity';
 @Injectable()
 export class TopicManagementService {
   private readonly logger = new Logger(TopicManagementService.name);
-  private readonly syncVersion = 5; // Match PostService syncVersion
+  private readonly syncVersion = 6; // Match PostService syncVersion
 
   constructor(
     @InjectRepository(Topic)
