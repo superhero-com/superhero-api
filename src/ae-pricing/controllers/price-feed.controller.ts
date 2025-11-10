@@ -11,8 +11,8 @@ import { CoinGeckoService, CoinGeckoMarketResponse } from '@/ae/coin-gecko.servi
 import { CurrencyRates } from '@/utils/types';
 import { AETERNITY_COIN_ID } from '@/configs';
 
-@Controller('pricing')
-@ApiTags('Pricing')
+@Controller('coins')
+@ApiTags('Coins')
 export class PriceFeedController {
   constructor(
     private readonly coinGeckoService: CoinGeckoService,
