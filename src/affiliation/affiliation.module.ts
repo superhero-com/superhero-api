@@ -1,14 +1,13 @@
+import { AccountModule } from '@/account/account.module';
+import { AeModule } from '@/ae/ae.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AffiliationController } from './controllers/affiliation.controller';
+import { InvitationsController } from './controllers/invitations.controller';
 import { AffiliationCode } from './entities/affiliation-code.entity';
 import { Affiliation } from './entities/affiliation.entity';
-import { AffiliationController } from './controllers/affiliation.controller';
-import { OAuthService } from './services/oauth.service';
-import { InvitationService } from './services/invitation.service';
-import { AeModule } from '@/ae/ae.module';
 import { Invitation } from './entities/invitation.entity';
-import { InvitationsController } from './controllers/invitations.controller';
-import { AccountModule } from '@/account/account.module';
+import { OAuthService } from './services/oauth.service';
 
 @Module({
   imports: [
@@ -16,7 +15,7 @@ import { AccountModule } from '@/account/account.module';
     AccountModule,
     TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation]),
   ],
-  providers: [OAuthService, InvitationService],
+  providers: [OAuthService],
   exports: [],
   controllers: [AffiliationController, InvitationsController],
 })
