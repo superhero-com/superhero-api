@@ -7,6 +7,17 @@ export const AETERNITY_COIN_SYMBOL = 'AE Coin';
 export const AETERNITY_COIN_NAME = 'Aeternity';
 export const AETERNITY_COIN_PRECISION = 18; // Amount of decimals
 
+/**
+ * Supported cryptocurrency coins for pricing endpoints
+ * Maps coin identifier (used in API path) to CoinGecko coin ID
+ * Currently only aeternity is supported, but this can be extended to support multiple coins
+ */
+export const SUPPORTED_COINS: Record<string, string> = {
+  aeternity: 'aeternity',
+} as const;
+
+export const DEFAULT_COIN_ID = 'aeternity';
+
 export const AETERNITY_TOKEN_BASE_DATA: Partial<IToken> = {
   address: AETERNITY_CONTRACT_ID,
   decimals: AETERNITY_COIN_PRECISION,

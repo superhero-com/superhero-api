@@ -5,6 +5,7 @@ import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { fetchJson } from '@/utils/common';
@@ -248,6 +249,40 @@ export class CoinGeckoService {
   }
 
   /**
+   * Obtain all the coin market data (price, market cap, volume, etc...)
+   * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
+   * @param currencyCode - The target currency code (e.g., 'usd')
+   * @returns Market data response or null if fetch fails
+   */
+  async fetchCoinMarketData(
+    coinId: string,
+    currencyCode: string,
+  ): Promise<CoinGeckoMarketResponse | null> {
+    try {
+      const marketData = (await this.fetchFromApi('/coins/markets', {
+        ids: coinId,
+        vs_currency: currencyCode,
+      })) as any[];
+
+      if (marketData && marketData.length > 0) {
+        const result = camelcaseKeysDeep(marketData[0]) as CoinGeckoMarketResponse;
+        this.logger.debug(
+          `Fetched CoinGecko market data for ${coinId} in ${currencyCode}`,
+        );
+        return result;
+      }
+      this.logger.warn(`No market data found in CoinGecko response for ${coinId}`);
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch CoinGecko market data for ${coinId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Reads historical price data from the fallback JSON file
    * @returns Array of [timestamp_ms, price] pairs from the JSON file
    */
@@ -277,17 +312,17 @@ export class CoinGeckoService {
    * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
    * @param vsCurrency - The target currency (e.g., 'usd')
    * @param days - Number of days of history to fetch (1, 7, 14, 30, 90, 180, 365, max)
-   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'
+   * @param interval - Interval for data points ('daily' or 'hourly'), defaults to 'daily'. If undefined, interval parameter is omitted from API call.
    * @returns Array of [timestamp_ms, price] pairs (never null)
    */
   async fetchHistoricalPrice(
     coinId: string,
     vsCurrency: string,
     days: number = 365,
-    interval: 'daily' | 'hourly' = 'daily',
+    interval?: 'daily' | 'hourly',
   ): Promise<Array<[number, number]>> {
     // Create cache key based on coin, currency, days, and interval
-    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval}`;
+    const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval || 'none'}`;
 
     // Try to get from cache first
     try {
@@ -295,7 +330,7 @@ export class CoinGeckoService {
         await this.cacheManager.get<Array<[number, number]>>(cacheKey);
       if (cached) {
         this.logger.debug(
-          `Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval})`,
+          `Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval || 'none'})`,
         );
         return cached;
       }
@@ -305,13 +340,19 @@ export class CoinGeckoService {
 
     // If not in cache, fetch from CoinGecko
     try {
+      const searchParams: Record<string, string> = {
+        vs_currency: vsCurrency,
+        days: String(days),
+      };
+      
+      // Only add interval parameter if provided
+      if (interval) {
+        searchParams.interval = interval;
+      }
+      
       const response = (await this.fetchFromApi(
         `/coins/${coinId}/market_chart`,
-        {
-          vs_currency: vsCurrency,
-          days: String(days),
-          interval: interval,
-        },
+        searchParams,
       )) as {
         prices?: [number, number][];
         status?: { error_code: number; error_message: string };
