@@ -5,13 +5,7 @@ import { Queue } from 'bull';
 import moment, { Moment } from 'moment';
 import { AePricingService } from './ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from './ae/community-factory.service';
-import { WebSocketService } from './ae/websocket.service';
-import { SyncTransactionsService } from './bcl/services/sync-transactions.service';
-import { PostService } from './social/services/post.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
-import { ITransaction } from './utils/types';
-import { DexSyncService } from './dex/services/dex-sync.service';
-import { TipService } from './tipping/services/tips.service';
 
 @Injectable()
 export class AppService {
@@ -19,18 +13,12 @@ export class AppService {
   constructor(
     private communityFactoryService: CommunityFactoryService,
     private aePricingService: AePricingService,
-    private websocketService: WebSocketService,
-    private syncTransactionsService: SyncTransactionsService,
-    private postService: PostService,
-    private dexSyncService: DexSyncService,
-    private tipService: TipService,
 
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
   ) {
     this.init();
     this.startedAt = moment();
-    this.setupLiveSync();
   }
 
   async init() {
@@ -41,28 +29,6 @@ export class AppService {
     void this.deleteOldTokensQueue.add({
       factories: [factory.address],
     });
-  }
-
-  setupLiveSync() {
-    let syncedTransactions = [];
-
-    this.websocketService.subscribeForTransactionsUpdates(
-      (transaction: ITransaction) => {
-        // Prevent duplicate transactions
-        if (!syncedTransactions.includes(transaction.hash)) {
-          this.syncTransactionsService.handleLiveTransaction(transaction);
-          this.postService.handleLiveTransaction(transaction);
-          this.dexSyncService.handleLiveTransaction(transaction);
-          this.tipService.handleLiveTransaction(transaction);
-        }
-        syncedTransactions.push(transaction.hash);
-
-        // Reset synced transactions after 100 transactions
-        if (syncedTransactions.length > 100) {
-          syncedTransactions = [];
-        }
-      },
-    );
   }
 
   @Cron(CronExpression.EVERY_HOUR)
