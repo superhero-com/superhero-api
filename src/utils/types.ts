@@ -173,6 +173,9 @@ export interface ITx {
 export interface ITransaction {
   blockHeight: number;
   claim: any; // TODO find type
+  blockHash: Encoded.BlockTxHash;
+  signatures: string[];
+  encodedTx: string;
   hash: Encoded.TxHash;
   incomplete?: boolean;
   microIndex: number;

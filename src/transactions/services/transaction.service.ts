@@ -13,6 +13,7 @@ import BigNumber from 'bignumber.js';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Injectable()
 export class TransactionService {
@@ -35,6 +36,11 @@ export class TransactionService {
     // );
   }
 
+  /**
+   * @deprecated Transaction saving is now handled by the BCL plugin (BclPluginSyncService.processTransaction).
+   * This method is kept for backward compatibility but will be removed in a future version.
+   * Use the plugin system for modern transaction processing.
+   */
   async saveTransaction(
     rawTransaction: ITransaction,
     token?: Token,
@@ -255,6 +261,41 @@ export class TransactionService {
     };
   }
 
+  async decodeTxEvents(
+    token: Token,
+    tx: Tx,
+    retries = 0,
+  ): Promise<Tx> {
+    try {
+      const factory = await this.communityFactoryService.loadFactory(
+        token.factory_address as Encoded.ContractAddress,
+      );
+      const decodedData = factory.contract.$decodeEvents(tx.raw.log);
+
+      return {
+        ...tx,
+        raw: {
+          ...tx.raw,
+          decodedData,
+        },
+      };
+    } catch (error: any) {
+      if (retries < 3) {
+        return this.decodeTxEvents(token, tx, retries + 1);
+      }
+      this.logger.error(
+        `decodeTxData->error:: retry ${retries}/3`,
+        error,
+        error.stack,
+      );
+      return tx;
+    }
+  }
+
+  /**
+   * TODO: remove
+   * @deprecated
+   */
   async decodeTransactionData(
     token: Token,
     rawTransaction: ITransaction,
@@ -335,7 +376,7 @@ export class TransactionService {
   //   } = await this.parseTransactionData(rawTransaction);
   // }
 
-  private async updateTokenHolder(
+  async updateTokenHolder(
     token: Token,
     rawTransaction: ITransaction,
     volume: BigNumber,
