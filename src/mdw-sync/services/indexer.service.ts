@@ -187,20 +187,34 @@ export class IndexerService implements OnModuleInit {
       }
 
       // Update backward sync state (decrease backward_synced_height as we go backward)
+      const newBackwardHeight = startHeight - 1;
       await this.syncStateRepository.update(
         { id: 'global' },
         {
-          backward_synced_height: startHeight - 1,
-          last_synced_height: startHeight - 1, // Keep for backward compatibility
+          backward_synced_height: newBackwardHeight,
+          last_synced_height: newBackwardHeight, // Keep for backward compatibility
           last_synced_hash: '', // Will be updated when we store the block
         },
       );
+
+      // Check if there's more work to do and continue immediately if so
+      // This allows fast continuous syncing when batches complete quickly
+      if (newBackwardHeight > targetBackwardHeight) {
+        // Schedule next sync immediately using setTimeout to avoid recursion
+        // The isRunning flag will prevent concurrent execution
+        setTimeout(() => {
+          if (!this.isRunning) {
+            this.sync().catch((err) => {
+              this.logger.error('Error in scheduled sync continuation', err);
+            });
+          }
+        }, 0);
+      }
     } catch (error: any) {
       this.logger.error('Backward sync failed', error);
     } finally {
       this.isRunning = false;
     }
-    this.sync();
   }
 
 
