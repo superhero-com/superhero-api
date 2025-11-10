@@ -197,18 +197,11 @@ export class IndexerService implements OnModuleInit {
         },
       );
 
+      this.isRunning = false;
       // Check if there's more work to do and continue immediately if so
       // This allows fast continuous syncing when batches complete quickly
       if (newBackwardHeight > targetBackwardHeight) {
-        // Schedule next sync immediately using setTimeout to avoid recursion
-        // The isRunning flag will prevent concurrent execution
-        setTimeout(() => {
-          if (!this.isRunning) {
-            this.sync().catch((err) => {
-              this.logger.error('Error in scheduled sync continuation', err);
-            });
-          }
-        }, 0);
+        return this.sync()
       }
     } catch (error: any) {
       this.logger.error('Backward sync failed', error);
