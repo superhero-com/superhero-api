@@ -51,7 +51,7 @@ export class IndexerService implements OnModuleInit {
     // to ensure backward indexer doesn't start until plugins are ready.
     // The initializePluginSyncStates() method is idempotent, so calling it again is safe.
     await this.pluginRegistryService.initializePluginSyncStates();
-    // this.startSync();
+    this.startSync();
   }
 
   private async initializeSyncState() {
