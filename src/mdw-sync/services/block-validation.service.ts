@@ -1,15 +1,13 @@
+import { fetchJson } from '@/utils/common';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { Tx } from '../entities/tx.entity';
-import { fetchJson } from '@/utils/common';
-import { ConfigService } from '@nestjs/config';
-import { PluginBatchProcessorService } from './plugin-batch-processor.service';
-import { BlockSyncService } from './block-sync.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
-import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { ITransaction } from '@/utils/types';
+import { BlockSyncService } from './block-sync.service';
+import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 
 @Injectable()
 export class BlockValidationService {
@@ -63,12 +61,14 @@ export class BlockValidationService {
       );
 
       // Refetch blocks, microblocks, and transactions using BlockSyncService
-      await this.blockSyncService.syncBlockRange(startHeight, endHeight, false);
+      // Get transaction hashes grouped by block height that were just synced
+      const syncedTxHashesByBlock = await this.blockSyncService.syncBlockRange(startHeight, endHeight, false);
 
       // For each block, compare stored transactions with refetched transactions
       // and remove transactions that no longer exist
       for (let height = startHeight; height <= endHeight; height++) {
-        await this.validateBlockTransactions(height, middlewareUrl);
+        const refetchedTxHashes = syncedTxHashesByBlock.get(height) || [];
+        await this.validateBlockTransactions(height, refetchedTxHashes);
       }
 
       this.logger.log(
@@ -82,24 +82,9 @@ export class BlockValidationService {
 
   private async validateBlockTransactions(
     blockHeight: number,
-    middlewareUrl: string,
+    refetchedTxHashes: string[],
   ): Promise<void> {
     try {
-      // Fetch transactions for this block from MDW
-      const pageLimit = Math.min(
-        this.configService.get<number>('mdw.pageLimit', 100),
-        100, // Hard limit enforced by MDW
-      );
-
-      const queryParams = new URLSearchParams({
-        direction: 'forward',
-        limit: pageLimit.toString(),
-        scope: `gen:${blockHeight}`,
-      });
-
-      const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-      const refetchedTxHashes = await this.fetchAllTransactionHashes(url, middlewareUrl);
-
       if (refetchedTxHashes.length === 0) {
         // No transactions in this block, remove all stored transactions for this block
         const storedTxs = await this.txRepository.find({
@@ -121,16 +106,16 @@ export class BlockValidationService {
         return;
       }
 
-      // Get stored transactions for this block
+      // Get stored transactions for this block that are NOT in refetched data
+      // Using Not(In(...)) to filter directly in the database query, avoiding large data in memory
       const storedTxs = await this.txRepository.find({
-        where: { block_height: blockHeight },
+        where: { 
+          block_height: blockHeight,
+          hash: Not(In(refetchedTxHashes)),
+        },
+        select: ['hash'], // Only select hash field to minimize memory usage
       });
-      const storedTxHashes = storedTxs.map((tx) => tx.hash);
-
-      // Find transactions that exist in DB but not in refetched data
-      const transactionsToRemove = storedTxHashes.filter(
-        (hash) => !refetchedTxHashes.includes(hash),
-      );
+      const transactionsToRemove = storedTxs.map((tx) => tx.hash);
 
       // Remove transactions that no longer exist
       if (transactionsToRemove.length > 0) {
@@ -181,29 +166,5 @@ export class BlockValidationService {
     return this.isValidating;
   }
 
-  private async fetchAllTransactionHashes(
-    url: string,
-    middlewareUrl: string,
-  ): Promise<string[]> {
-    const hashes: string[] = [];
-    let currentUrl: string | null = url;
-
-    while (currentUrl) {
-      const response = await fetchJson(currentUrl);
-      const transactions = response?.data || [];
-
-      for (const tx of transactions) {
-        const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-        if (camelTx.hash) {
-          hashes.push(camelTx.hash);
-        }
-      }
-
-      // Check if there's a next page
-      currentUrl = response.next ? `${middlewareUrl}${response.next}` : null;
-    }
-
-    return hashes;
-  }
 }
 

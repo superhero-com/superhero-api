@@ -121,7 +121,7 @@ export class BlockSyncService {
     endHeight: number,
     useBulkMode = false,
     backward = false,
-  ): Promise<void> {
+  ): Promise<Map<number, string[]>> {
     // MDW has a hard limit of 100 transactions per request, regardless of mode
     const pageLimit = Math.min(
       this.configService.get<number>('mdw.pageLimit', 100),
@@ -138,12 +138,15 @@ export class BlockSyncService {
     });
 
     const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-    await this.processTransactionPage(url, useBulkMode);
+    const txHashesByBlock = new Map<number, string[]>();
+    await this.processTransactionPage(url, useBulkMode, txHashesByBlock);
+    return txHashesByBlock;
   }
 
   private async processTransactionPage(
     url: string,
     useBulkMode = false,
+    txHashesByBlock: Map<number, string[]> = new Map(),
   ): Promise<void> {
     const response = await fetchJson(url);
     const transactions = response?.data || [];
@@ -159,6 +162,15 @@ export class BlockSyncService {
       const camelTx = camelcaseKeysDeep(tx) as ITransaction;
       const mdwTx = this.convertToMdwTx(camelTx);
       mdwTxs.push(mdwTx);
+      
+      // Collect transaction hash grouped by block height
+      if (mdwTx.hash && mdwTx.block_height !== undefined) {
+        const blockHeight = mdwTx.block_height;
+        if (!txHashesByBlock.has(blockHeight)) {
+          txHashesByBlock.set(blockHeight, []);
+        }
+        txHashesByBlock.get(blockHeight)!.push(mdwTx.hash);
+      }
     }
 
     if (mdwTxs.length > 0) {
@@ -196,7 +208,7 @@ export class BlockSyncService {
     // Process next page if available
     if (response.next) {
       const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
-      await this.processTransactionPage(nextUrl, useBulkMode);
+      await this.processTransactionPage(nextUrl, useBulkMode, txHashesByBlock);
     }
   }
 
@@ -298,15 +310,17 @@ export class BlockSyncService {
 
   /**
    * Sync a single block range (blocks, micro-blocks, and transactions)
+   * Returns a Map of block heights to transaction hashes that were synced
    */
   async syncBlockRange(
     startHeight: number,
     endHeight: number,
     backward = false,
-  ): Promise<void> {
+  ): Promise<Map<number, string[]>> {
     await this.syncBlocks(startHeight, endHeight);
     await this.syncMicroBlocks(startHeight, endHeight);
-    await this.syncTransactions(startHeight, endHeight, true, backward); // Use bulk mode
+    const txHashesByBlock = await this.syncTransactions(startHeight, endHeight, true, backward); // Use bulk mode
+    return txHashesByBlock;
   }
 
   convertToMdwTx(tx: ITransaction): Partial<Tx> {
