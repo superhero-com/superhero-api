@@ -4,11 +4,9 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
-  OneToOne,
-  PrimaryColumn,
+  PrimaryColumn
 } from 'typeorm';
 import { Pair } from './pair.entity';
-import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Entity({
   name: 'pair_transactions',
@@ -33,13 +31,6 @@ export class PairTransaction {
   })
   @JoinColumn({ name: 'pair_address' })
   pair: Pair;
-
-  // @OneToOne(() => Tx, (tx) => tx.hash, {
-  //   onDelete: 'CASCADE',
-  //   nullable: true,
-  // })
-  // @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
-  // tx: Tx;
 
   @Column()
   tx_type: string;

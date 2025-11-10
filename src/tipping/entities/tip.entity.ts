@@ -1,15 +1,13 @@
 import { Account } from '@/account/entities/account.entity';
+import { Post } from '@/social/entities/post.entity';
 import {
   Column,
   CreateDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
-  OneToOne,
-  PrimaryColumn,
+  PrimaryColumn
 } from 'typeorm';
-import { Post } from '@/social/entities/post.entity';
-import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Entity({
   name: 'tips',
@@ -42,18 +40,10 @@ export class Tip {
   @JoinColumn({ name: 'post_id' })
   post: Post;
 
-  // @OneToOne(() => Tx, (tx) => tx.hash, {
-  //   onDelete: 'CASCADE',
-  // })
-  // @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
-  // tx: Tx;
-
   @Column({
     default: '0',
   })
   amount: string;
-
-  //
 
   @CreateDateColumn({
     type: 'timestamp',

@@ -3,11 +3,8 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
+  PrimaryGeneratedColumn
 } from 'typeorm';
-import { Tx } from '@/mdw-sync/entities/tx.entity';
 
 @Entity({
   name: 'invitations',
@@ -19,12 +16,6 @@ export class Invitation {
   // tx hash
   @Column()
   tx_hash: string;
-
-  // @ManyToOne(() => Tx, (tx) => tx.hash, {
-  //   onDelete: 'CASCADE',
-  // })
-  // @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
-  // tx: Tx;
 
   // block height
   @Column()
