@@ -42,11 +42,11 @@ export class Tip {
   @JoinColumn({ name: 'post_id' })
   post: Post;
 
-  @OneToOne(() => Tx, (tx) => tx.hash, {
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
-  tx: Tx;
+  // @OneToOne(() => Tx, (tx) => tx.hash, {
+  //   onDelete: 'CASCADE',
+  // })
+  // @JoinColumn({ name: 'tx_hash', referencedColumnName: 'hash' })
+  // tx: Tx;
 
   @Column({
     default: '0',
