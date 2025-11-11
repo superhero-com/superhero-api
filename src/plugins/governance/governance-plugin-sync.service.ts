@@ -14,11 +14,11 @@ import { SyncDirection } from '../plugin.interface';
 import { getContractAddress } from './config/governance.config';
 import GovernancePollACI from './contract/aci/GovernancePollACI.json';
 import GovernanceRegistryACI from './contract/aci/GovernanceRegistryACI.json';
-import { GovernancePlugin } from './governance.plugin';
 
 @Injectable()
 export class GovernancePluginSyncService extends BasePluginSyncService implements OnModuleInit {
   protected readonly logger = new Logger(GovernancePluginSyncService.name);
+  readonly pluginName = 'governance';
   contractAddress: Encoded.ContractAddress;
   contracts: Record<
     Encoded.ContractAddress,
@@ -114,7 +114,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
   }
 
   async decodeData(tx: Tx): Promise<any | null> {
-    const pluginLogs = tx.logs?.[GovernancePlugin.name];
+    const pluginLogs = tx.logs?.[this.pluginName];
     if (!pluginLogs?.data?.length) {
       return null;
     }

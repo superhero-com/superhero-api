@@ -22,33 +22,70 @@ import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
       (data->'governance'->'data'->>'create_height')::int as create_height,
       (data->'governance'->'data'->>'close_at_height')::int as close_at_height,
       (
-        SELECT COALESCE(SUM(CASE WHEN v.function = 'vote' THEN 1 WHEN v.function = 'revoke_vote' THEN -1 ELSE 0 END), 0)
+        SELECT COUNT(*)::int
         FROM txs v
-        WHERE v.function IN ('vote', 'revoke_vote')
+        WHERE v.function = 'vote'
           AND v.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+          AND v.data->'governance'->'data'->>'voter' IS NOT NULL
           AND v.data->'governance' IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM txs r
+            WHERE r.function = 'revoke_vote'
+              AND r.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+              AND r.data->'governance'->'data'->>'voter' = v.data->'governance'->'data'->>'voter'
+              AND r.data->'governance' IS NOT NULL
+              AND (
+                r.block_height > v.block_height
+                OR (r.block_height = v.block_height AND r.micro_time > v.micro_time)
+              )
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM txs v2
+            WHERE v2.function = 'vote'
+              AND v2.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+              AND v2.data->'governance'->'data'->>'voter' = v.data->'governance'->'data'->>'voter'
+              AND v2.data->'governance' IS NOT NULL
+              AND (
+                v2.block_height > v.block_height
+                OR (v2.block_height = v.block_height AND v2.micro_time > v.micro_time)
+              )
+          )
       )::int as votes_count,
       (
         SELECT COALESCE(jsonb_object_agg(option_key::text, vote_count), '{}'::jsonb)
         FROM (
           SELECT 
-            (v.data->'governance'->'data'->>'option')::int as option_key,
+            (latest_votes.data->'governance'->'data'->>'option')::int as option_key,
             COUNT(*)::int as vote_count
-          FROM txs v
-          WHERE v.function = 'vote'
-            AND v.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
-            AND v.data->'governance'->'data'->>'option' IS NOT NULL
-            AND v.data->'governance' IS NOT NULL
-            AND NOT EXISTS (
-              SELECT 1
-              FROM txs r
-              WHERE r.function = 'revoke_vote'
-                AND r.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
-                AND r.data->'governance'->'data'->>'voter' = v.data->'governance'->'data'->>'voter'
-                AND r.data->'governance' IS NOT NULL
-                AND r.block_height >= v.block_height
-            )
-          GROUP BY (v.data->'governance'->'data'->>'option')::int
+          FROM (
+            SELECT DISTINCT ON (v.data->'governance'->'data'->>'voter')
+              v.*
+            FROM txs v
+            WHERE v.function = 'vote'
+              AND v.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+              AND v.data->'governance'->'data'->>'voter' IS NOT NULL
+              AND v.data->'governance'->'data'->>'option' IS NOT NULL
+              AND v.data->'governance' IS NOT NULL
+            ORDER BY 
+              v.data->'governance'->'data'->>'voter',
+              v.block_height DESC,
+              v.micro_time DESC
+          ) latest_votes
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM txs r
+            WHERE r.function = 'revoke_vote'
+              AND r.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+              AND r.data->'governance'->'data'->>'voter' = latest_votes.data->'governance'->'data'->>'voter'
+              AND r.data->'governance' IS NOT NULL
+              AND (
+                r.block_height > latest_votes.block_height
+                OR (r.block_height = latest_votes.block_height AND r.micro_time > latest_votes.micro_time)
+              )
+          )
+          GROUP BY (latest_votes.data->'governance'->'data'->>'option')::int
         ) option_counts
       ) as votes_count_by_option,
       (
