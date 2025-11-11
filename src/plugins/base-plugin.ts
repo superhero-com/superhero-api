@@ -21,6 +21,43 @@ export abstract class BasePlugin implements Plugin {
   protected abstract getSyncService(): BasePluginSyncService;
 
   /**
+   * Get queries to retrieve transactions that need auto-updating.
+   * Default implementation extracts contract IDs from filters and creates a query.
+   * Plugins can override this method to provide custom queries.
+   * @param pluginName - The plugin name
+   * @param currentVersion - The current plugin version
+   * @returns Array of query functions that return transactions needing updates
+   */
+  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, offset: number, limit: number) => Promise<Tx[]>> {
+    const filters = this.filters();
+    const contractIds: string[] = [];
+    
+    for (const filter of filters) {
+      if (filter.contractIds) {
+        contractIds.push(...filter.contractIds);
+      }
+    }
+    
+    if (contractIds.length === 0) {
+      return [];
+    }
+    
+    return [
+      async (repo, offset, limit) => repo.createQueryBuilder('tx')
+        .where('tx.contract_id IN (:...contractIds)', { contractIds })
+        .andWhere(
+          `(tx.data->>'${pluginName}' IS NULL OR (tx.data->'${pluginName}'->>'_version')::int != :version)`,
+          { version: currentVersion }
+        )
+        .orderBy('tx.block_height', 'ASC')
+        .addOrderBy('tx.micro_time', 'ASC')
+        .skip(offset)
+        .take(limit)
+        .getMany()
+    ];
+  }
+
+  /**
    * Process a batch of transactions. Delegates to sync service.
    * @param txs - Transactions to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
@@ -45,7 +82,7 @@ export abstract class BasePlugin implements Plugin {
             ...currentLogs,
             [this.name]: {
               _version: this.version,
-              ...decodedLogs,
+              data: decodedLogs,
             },
           };
 
@@ -62,7 +99,7 @@ export abstract class BasePlugin implements Plugin {
             ...currentData,
             [this.name]: {
               _version: this.version,
-              ...decodedData,
+              data: decodedData,
             },
           };
 
@@ -158,7 +195,7 @@ export abstract class BasePlugin implements Plugin {
                   ...currentLogs,
                   [this.name]: {
                     _version: this.version,
-                    ...decodedLogs,
+                    data: decodedLogs,
                   },
                 };
                 await this.txRepository.save(tx);
@@ -172,7 +209,7 @@ export abstract class BasePlugin implements Plugin {
                   ...currentData,
                   [this.name]: {
                     _version: this.version,
-                    ...decodedData,
+                    data: decodedData,
                   },
                 };
                 await this.txRepository.save(tx);
@@ -291,6 +328,190 @@ export abstract class BasePlugin implements Plugin {
     }
 
     return transactions;
+  }
+
+  /**
+   * Check if a transaction needs re-decoding based on version mismatch
+   * @param tx - Transaction to check
+   * @returns Object indicating what needs re-decoding (logs and/or data)
+   */
+  private needsReDecode(tx: Tx): { logs: boolean; data: boolean } {
+    const pluginName = this.name;
+    const currentVersion = this.version;
+
+    const logsNeedsReDecode =
+      !tx.logs?.[pluginName] ||
+      tx.logs[pluginName]?._version !== currentVersion;
+
+    const dataNeedsReDecode =
+      !tx.data?.[pluginName] ||
+      tx.data[pluginName]?._version !== currentVersion;
+
+    return {
+      logs: logsNeedsReDecode,
+      data: dataNeedsReDecode,
+    };
+  }
+
+  /**
+   * Update transactions that have version mismatches or missing plugin data.
+   * Processes transactions in batches with pagination.
+   * @param batchSize - Number of transactions to process per batch (default: 100)
+   */
+  async updateTransactions(batchSize: number = 100): Promise<void> {
+    this.logger.log(`[${this.name}] Starting update transactions`);
+
+    try {
+      const queries = this.getUpdateQueries(this.name, this.version);
+
+      if (queries.length === 0) {
+        this.logger.log(`[${this.name}] No update queries defined`);
+        return;
+      }
+
+      const syncService = this.getSyncService();
+      let totalProcessed = 0;
+      let totalUpdated = 0;
+
+      // Process each query
+      for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
+        const query = queries[queryIndex];
+        let offset = 0;
+        let hasMore = true;
+
+        this.logger.log(
+          `[${this.name}] Processing query ${queryIndex + 1}/${queries.length}`,
+        );
+
+        while (hasMore) {
+          try {
+            // Execute query with pagination
+            this.logger.debug(
+              `[${this.name}] Query ${queryIndex + 1}: Fetching batch at offset ${offset}, limit ${batchSize}`,
+            );
+            const transactions = await query(
+              this.txRepository,
+              offset,
+              batchSize,
+            );
+
+            if (transactions.length === 0) {
+              this.logger.debug(
+                `[${this.name}] Query ${queryIndex + 1}: No more transactions at offset ${offset}`,
+              );
+              hasMore = false;
+              break;
+            }
+
+            this.logger.debug(
+              `[${this.name}] Query ${queryIndex + 1}: Fetched ${transactions.length} transactions at offset ${offset}`,
+            );
+
+            // Process each transaction in the batch
+            for (const tx of transactions) {
+              try {
+                const needsReDecode = this.needsReDecode(tx);
+                let wasUpdated = false;
+
+                // Update logs if needed
+                if (needsReDecode.logs) {
+                  try {
+                    const decodedLogs = await syncService.decodeLogs(tx);
+                    if (decodedLogs !== null) {
+                      const currentLogs = tx.logs || {};
+                      tx.logs = {
+                        ...currentLogs,
+                        [this.name]: {
+                          _version: this.version,
+                          data: decodedLogs,
+                        },
+                      };
+                      await this.txRepository.save(tx);
+                      wasUpdated = true;
+                    }
+                  } catch (error: any) {
+                    this.logger.error(
+                      `[${this.name}] Failed to update logs for transaction ${tx.hash}`,
+                      error.stack,
+                    );
+                  }
+                }
+
+                // Update data if needed (after logs are saved)
+                if (needsReDecode.data) {
+                  try {
+                    const decodedData = await syncService.decodeData(tx);
+                    if (decodedData !== null) {
+                      const currentData = tx.data || {};
+                      tx.data = {
+                        ...currentData,
+                        [this.name]: {
+                          _version: this.version,
+                          data: decodedData,
+                        },
+                      };
+                      await this.txRepository.save(tx);
+                      wasUpdated = true;
+                    }
+                  } catch (error: any) {
+                    this.logger.error(
+                      `[${this.name}] Failed to update data for transaction ${tx.hash}`,
+                      error.stack,
+                    );
+                  }
+                }
+
+                totalProcessed++;
+                if (wasUpdated) {
+                  totalUpdated++;
+                }
+
+                // Log progress periodically
+                if (totalProcessed % 100 === 0) {
+                  this.logger.log(
+                    `[${this.name}] Processed ${totalProcessed} transactions, updated ${totalUpdated}`,
+                  );
+                }
+              } catch (error: any) {
+                this.logger.error(
+                  `[${this.name}] Failed to process transaction ${tx.hash} during update`,
+                  error.stack,
+                );
+                totalProcessed++;
+              }
+            }
+
+            // Check if we should continue pagination
+            if (transactions.length < batchSize) {
+              this.logger.debug(
+                `[${this.name}] Query ${queryIndex + 1}: Last page reached (${transactions.length} < ${batchSize})`,
+              );
+              hasMore = false;
+            } else {
+              offset += batchSize;
+              this.logger.debug(
+                `[${this.name}] Query ${queryIndex + 1}: Moving to next page at offset ${offset}`,
+              );
+            }
+          } catch (error: any) {
+            this.logger.error(
+              `[${this.name}] Failed to execute update query ${queryIndex + 1}`,
+              error.stack,
+            );
+            hasMore = false; // Move to next query
+          }
+        }
+      }
+
+      this.logger.log(
+        `[${this.name}] Update completed. Processed ${totalProcessed} transactions, updated ${totalUpdated}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `[${this.name}] Update transactions failed`,
+        error.stack,
+      );
+    }
   }
 }
 

@@ -33,3 +33,45 @@ export async function fetchJson<T = any>(
     throw error;
   }
 }
+
+/**
+ * Recursively convert BigInt values to strings for JSON serialization.
+ * Handles BigInt primitives, Map objects with BigInt keys, arrays, and plain objects.
+ *
+ * @param obj - The object to serialize
+ * @returns The serialized object with BigInt values converted to strings
+ */
+export function serializeBigInts(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj === 'bigint') {
+    return obj.toString();
+  }
+
+  // Handle Map objects
+  if (obj instanceof Map) {
+    const serialized: any = {};
+    for (const [key, value] of obj.entries()) {
+      // Convert BigInt keys to strings
+      const serializedKey = typeof key === 'bigint' ? key.toString() : key;
+      serialized[serializedKey] = serializeBigInts(value);
+    }
+    return serialized;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => serializeBigInts(item));
+  }
+
+  if (typeof obj === 'object') {
+    const serialized: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      serialized[key] = serializeBigInts(value);
+    }
+    return serialized;
+  }
+
+  return obj;
+}

@@ -46,6 +46,9 @@ export class GovernancePlugin extends BasePlugin {
 
     return [
       {
+        contractIds: [contractAddress],
+      },
+      {
         predicate: (tx: Partial<Tx>) => {
           return (
             tx.type === 'ContractCallTx' &&
@@ -59,6 +62,45 @@ export class GovernancePlugin extends BasePlugin {
 
   protected getSyncService(): GovernancePluginSyncService {
     return this.governancePluginSyncService;
+  }
+
+  /**
+   * Get queries to retrieve transactions that need auto-updating.
+   * Default implementation extracts contract IDs from filters and creates a query.
+   * Plugins can override this method to provide custom queries.
+   * @param pluginName - The plugin name
+   * @param currentVersion - The current plugin version
+   * @returns Array of query functions that return transactions needing updates
+   */
+  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, offset: number, limit: number) => Promise<Tx[]>> {
+    const filters = this.filters();
+    const contractIds: string[] = [];
+    
+    for (const filter of filters) {
+      if (filter.contractIds) {
+        contractIds.push(...filter.contractIds);
+      }
+    }
+    
+    if (contractIds.length === 0) {
+      return [];
+    }
+
+    const supportedFunctions = ['add_poll', 'vote', 'revoke_vote'];
+    
+    return [
+      async (repo, offset, limit) => repo.createQueryBuilder('tx')
+        .where('tx.function IN (:...supportedFunctions)', { supportedFunctions })
+        .andWhere(
+          `(tx.data->>'${pluginName}' IS NULL OR (tx.data->'${pluginName}'->>'_version')::int != :version)`,
+          { version: currentVersion }
+        )
+        .orderBy('tx.block_height', 'ASC')
+        .addOrderBy('tx.micro_time', 'ASC')
+        .skip(offset)
+        .take(limit)
+        .getMany()
+    ];
   }
 }
 
