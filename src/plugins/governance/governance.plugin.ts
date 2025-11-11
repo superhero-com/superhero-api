@@ -13,7 +13,7 @@ import { getContractAddress, getStartHeight } from './config/governance.config';
 export class GovernancePlugin extends BasePlugin {
   protected readonly logger = new Logger(GovernancePlugin.name);
   readonly name = 'governance';
-  readonly version = 1;
+  readonly version = 2;
 
   constructor(
     @InjectRepository(Tx)

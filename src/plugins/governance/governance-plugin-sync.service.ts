@@ -184,6 +184,14 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       };
     }
 
+    if (tx.function == 'revoke_vote') {
+      const decodedLogs = pluginLogs.data[0];
+      return {
+        poll_address: decodedLogs.contract.address,
+        poll: decodedLogs.args[0],
+        voter: decodedLogs.args[1],
+      };
+    }
 
     return null;
   }

@@ -22,7 +22,7 @@ import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
       (data->'governance'->'data'->>'create_height')::int as create_height,
       (data->'governance'->'data'->>'close_at_height')::int as close_at_height,
       (
-        SELECT COUNT(*)
+        SELECT COALESCE(SUM(CASE WHEN v.function = 'vote' THEN 1 WHEN v.function = 'revoke_vote' THEN -1 ELSE 0 END), 0)
         FROM txs v
         WHERE v.function IN ('vote', 'revoke_vote')
           AND v.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
@@ -39,9 +39,25 @@ import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
             AND v.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
             AND v.data->'governance'->'data'->>'option' IS NOT NULL
             AND v.data->'governance' IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM txs r
+              WHERE r.function = 'revoke_vote'
+                AND r.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+                AND r.data->'governance'->'data'->>'voter' = v.data->'governance'->'data'->>'voter'
+                AND r.data->'governance' IS NOT NULL
+                AND r.block_height >= v.block_height
+            )
           GROUP BY (v.data->'governance'->'data'->>'option')::int
         ) option_counts
-      ) as votes_count_by_option
+      ) as votes_count_by_option,
+      (
+        SELECT COUNT(*)
+        FROM txs r
+        WHERE r.function = 'revoke_vote'
+          AND r.data->'governance'->'data'->>'poll_address' = txs.data->'governance'->'data'->>'poll_address'
+          AND r.data->'governance' IS NOT NULL
+      )::int as votes_revoked_count
     FROM txs
     WHERE contract_id = 'ct_ouZib4wT9cNwgRA1pxgA63XEUd8eQRrG8PcePDEYogBc1VYTq'
       AND function = 'add_poll'
@@ -105,6 +121,10 @@ export class GovernancePoll {
 
   @ViewColumn()
   votes_count: number;
+
+
+  @ViewColumn()
+  votes_revoked_count: number;
 
   @ViewColumn()
   votes_count_by_option?: Record<string, number>;

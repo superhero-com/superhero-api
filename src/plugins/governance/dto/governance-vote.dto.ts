@@ -78,6 +78,9 @@ export class GovernancePollDto {
   @ApiProperty({ description: 'Total number of votes (including vote and revoke_vote transactions)' })
   votes_count: number;
 
+  @ApiProperty({ description: 'Total number of revoked votes' })
+  votes_revoked_count: number;
+
   @ApiProperty({
     description: 'Vote counts per option (maps option key to vote count)',
     nullable: true,
