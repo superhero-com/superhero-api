@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import BigNumber from 'bignumber.js';
@@ -10,6 +10,7 @@ import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
+import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 
@@ -51,7 +52,12 @@ export class CoinGeckoService {
   /**
    * CoinGeckoService class responsible for pulling data at regular intervals.
    */
-  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {
+  constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    @Optional()
+    @Inject(forwardRef(() => CoinHistoricalPriceService))
+    private historicalPriceService?: CoinHistoricalPriceService,
+  ) {
     setInterval(() => this.pullData(), 1000 * 60 * 5); // 5 minutes
     this.pullData();
   }
@@ -308,7 +314,7 @@ export class CoinGeckoService {
   }
 
   /**
-   * Fetch historical price data for a coin (with caching)
+   * Fetch historical price data for a coin (with database storage and caching)
    * @param coinId - The CoinGecko coin ID (e.g., 'aeternity')
    * @param vsCurrency - The target currency (e.g., 'usd')
    * @param days - Number of days of history to fetch (1, 7, 14, 30, 90, 180, 365, max)
@@ -324,13 +330,13 @@ export class CoinGeckoService {
     // Create cache key based on coin, currency, days, and interval
     const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval || 'none'}`;
 
-    // Try to get from cache first
+    // Try to get from Redis cache first (for very recent requests, 1 hour TTL)
     try {
       const cached =
         await this.cacheManager.get<Array<[number, number]>>(cacheKey);
       if (cached) {
         this.logger.debug(
-          `Using cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval || 'none'})`,
+          `Using Redis cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval || 'none'})`,
         );
         return cached;
       }
@@ -338,90 +344,244 @@ export class CoinGeckoService {
       this.logger.warn(`Cache read error for ${cacheKey}:`, error);
     }
 
-    // If not in cache, fetch from CoinGecko
-    try {
-      const searchParams: Record<string, string> = {
-        vs_currency: vsCurrency,
-        days: String(days),
-      };
-      
-      // Only add interval parameter if provided
-      if (interval) {
-        searchParams.interval = interval;
-      }
-      
-      const response = (await this.fetchFromApi(
-        `/coins/${coinId}/market_chart`,
-        searchParams,
-      )) as {
-        prices?: [number, number][];
-        status?: { error_code: number; error_message: string };
-      };
+    // Calculate time range
+    const now = moment();
+    const endTimeMs = now.valueOf();
+    const startTimeMs = now.subtract(days, 'days').valueOf();
 
-      // Check for CoinGecko API errors (e.g., rate limiting)
-      if (response?.status?.error_code) {
-        if (response.status.error_code === 429) {
-          this.logger.warn(
-            `CoinGecko rate limit hit (429). Attempting to use cached data if available, or will fall back to JSON file.`,
+    // Check database for existing data
+    let dbData: Array<[number, number]> = [];
+    if (this.historicalPriceService) {
+      try {
+        dbData = await this.historicalPriceService.getHistoricalPriceData(
+          coinId,
+          vsCurrency,
+          startTimeMs,
+          endTimeMs,
+        );
+        this.logger.debug(
+          `Found ${dbData.length} price points in database for ${coinId} (${vsCurrency}, ${days}d)`,
+        );
+      } catch (error) {
+        this.logger.warn(`Failed to query database for historical prices:`, error);
+      }
+    }
+
+    // Determine if we need to fetch from CoinGecko
+    const isRecentData = days <= 7; // Recent data: last 7 days
+    let needsFetch = false;
+    let fetchDays = days;
+    let fetchStartTime = startTimeMs;
+
+    if (isRecentData && this.historicalPriceService) {
+      // For recent data: check for missing timestamps and fetch incrementally
+      try {
+        const latestTimestamp =
+          await this.historicalPriceService.getLatestTimestamp(
+            coinId,
+            vsCurrency,
           );
-          // Try to get from cache even if stale (it might have expired but still be useful)
-          try {
-            const staleCache =
-              await this.cacheManager.get<Array<[number, number]>>(cacheKey);
-            if (staleCache && staleCache.length > 0) {
-              this.logger.log(
-                `Using stale cached data due to rate limit: ${staleCache.length} price points`,
-              );
-              return staleCache;
-            }
-          } catch (cacheError) {
-            this.logger.warn(`Could not read stale cache:`, cacheError);
+
+        if (latestTimestamp === null) {
+          // No data in database, fetch full range
+          needsFetch = true;
+        } else if (latestTimestamp < endTimeMs - 3600000) {
+          // Latest data is more than 1 hour old, fetch new data
+          needsFetch = true;
+          // Calculate days needed: from latest timestamp to now
+          const hoursSinceLatest = (endTimeMs - latestTimestamp) / (1000 * 60 * 60);
+          fetchDays = Math.ceil(hoursSinceLatest / 24);
+          fetchStartTime = latestTimestamp + 1; // Start from after latest timestamp
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to check latest timestamp:`, error);
+        needsFetch = true; // On error, fetch full range
+      }
+    } else {
+      // For older data: check if entire range exists
+      if (this.historicalPriceService) {
+        try {
+          const missingRanges =
+            await this.historicalPriceService.getMissingDataRanges(
+              coinId,
+              vsCurrency,
+              startTimeMs,
+              endTimeMs,
+            );
+
+          if (missingRanges.length > 0) {
+            needsFetch = true;
+            // Fetch the largest missing range (usually covers everything)
+            const largestRange = missingRanges.reduce((prev, curr) => {
+              const prevSize = prev[1] - prev[0];
+              const currSize = curr[1] - curr[0];
+              return currSize > prevSize ? curr : prev;
+            });
+            fetchStartTime = largestRange[0];
+            const fetchEndTime = largestRange[1];
+            fetchDays = Math.ceil((fetchEndTime - fetchStartTime) / (1000 * 60 * 60 * 24));
           }
-          // If no stale cache available, fall back to JSON file
-          this.logger.log('No stale cache available, falling back to JSON file');
+        } catch (error) {
+          this.logger.warn(`Failed to check missing data ranges:`, error);
+          needsFetch = true; // On error, fetch full range
+        }
+      } else {
+        // No database service available, fetch from CoinGecko
+        needsFetch = true;
+      }
+    }
+
+    // If we have complete data from database, return it
+    if (!needsFetch && dbData.length > 0) {
+      this.logger.log(
+        `Using complete historical data from database: ${dbData.length} price points`,
+      );
+      // Cache in Redis for 1 hour to reduce DB queries
+      try {
+        await this.cacheManager.set(cacheKey, dbData, 3600 * 1000);
+      } catch (error) {
+        this.logger.warn(`Cache write error:`, error);
+      }
+      return dbData;
+    }
+
+    // Fetch missing data from CoinGecko
+    let newData: Array<[number, number]> = [];
+    if (needsFetch) {
+      try {
+        const searchParams: Record<string, string> = {
+          vs_currency: vsCurrency,
+          days: String(fetchDays),
+        };
+
+        // Only add interval parameter if provided
+        if (interval) {
+          searchParams.interval = interval;
+        }
+
+        this.logger.log(
+          `Fetching ${fetchDays} days of historical data from CoinGecko (${isRecentData ? 'incremental' : 'full range'})`,
+        );
+
+        const response = (await this.fetchFromApi(
+          `/coins/${coinId}/market_chart`,
+          searchParams,
+        )) as {
+          prices?: [number, number][];
+          status?: { error_code: number; error_message: string };
+        };
+
+        // Check for CoinGecko API errors (e.g., rate limiting)
+        if (response?.status?.error_code) {
+          if (response.status.error_code === 429) {
+            this.logger.warn(
+              `CoinGecko rate limit hit (429). Using database data if available, or falling back to JSON file.`,
+            );
+            // Try to use database data even if incomplete
+            if (dbData.length > 0) {
+              return dbData;
+            }
+            // Try stale cache
+            try {
+              const staleCache =
+                await this.cacheManager.get<Array<[number, number]>>(cacheKey);
+              if (staleCache && staleCache.length > 0) {
+                this.logger.log(
+                  `Using stale cached data due to rate limit: ${staleCache.length} price points`,
+                );
+                return staleCache;
+              }
+            } catch (cacheError) {
+              this.logger.warn(`Could not read stale cache:`, cacheError);
+            }
+            return this.readFallbackPriceData();
+          }
+          this.logger.error(
+            `CoinGecko API error: ${response.status.error_code} - ${response.status.error_message}. Using database data if available.`,
+          );
+          if (dbData.length > 0) {
+            return dbData;
+          }
           return this.readFallbackPriceData();
         }
-        this.logger.error(
-          `CoinGecko API error: ${response.status.error_code} - ${response.status.error_message}. Falling back to JSON file.`,
-        );
-        return this.readFallbackPriceData();
-      }
 
-      const prices = response?.prices || null;
+        const prices = response?.prices || null;
 
-      // Cache the result for 1 hour (3600 seconds)
-      // Historical data doesn't change frequently, so this reduces API calls significantly
-      if (prices && prices.length > 0) {
-        // Log first and last price points for debugging
-        const firstPrice = prices[0];
-        const lastPrice = prices[prices.length - 1];
-        this.logger.log(
-          `CoinGecko returned ${prices.length} price points. First: ${moment(firstPrice[0]).toISOString()} = ${firstPrice[1]} ${vsCurrency}, Last: ${moment(lastPrice[0]).toISOString()} = ${lastPrice[1]} ${vsCurrency}`,
-        );
-
-        try {
-          await this.cacheManager.set(cacheKey, prices, 3600 * 1000); // TTL in milliseconds
-          this.logger.debug(
-            `Cached historical price data for ${coinId} (${vsCurrency}, ${days}d, ${interval}): ${prices.length} data points`,
+        if (prices && prices.length > 0) {
+          // Filter to only include data in the requested range
+          newData = prices.filter(
+            ([timestamp]) => timestamp >= fetchStartTime && timestamp <= endTimeMs,
           );
-        } catch (error) {
-          this.logger.warn(`Cache write error for ${cacheKey}:`, error);
-        }
 
-        return prices;
-      } else {
-        this.logger.warn(
-          `CoinGecko returned empty or invalid price data for ${coinId}. Response keys: ${Object.keys(response || {})}. Falling back to JSON file.`,
-        );
+          // Log first and last price points for debugging
+          if (newData.length > 0) {
+            const firstPrice = newData[0];
+            const lastPrice = newData[newData.length - 1];
+            this.logger.log(
+              `CoinGecko returned ${newData.length} new price points. First: ${moment(firstPrice[0]).toISOString()} = ${firstPrice[1]} ${vsCurrency}, Last: ${moment(lastPrice[0]).toISOString()} = ${lastPrice[1]} ${vsCurrency}`,
+            );
+          }
+
+          // Save new data to database
+          if (this.historicalPriceService && newData.length > 0) {
+            try {
+              await this.historicalPriceService.savePriceData(
+                coinId,
+                vsCurrency,
+                newData,
+              );
+            } catch (error) {
+              this.logger.error(`Failed to save price data to database:`, error);
+              // Continue even if save fails
+            }
+          }
+        } else {
+          this.logger.warn(
+            `CoinGecko returned empty or invalid price data for ${coinId}. Using database data if available.`,
+          );
+          if (dbData.length > 0) {
+            return dbData;
+          }
+          return this.readFallbackPriceData();
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch historical price from CoinGecko:`, error);
+        // Use database data if available
+        if (dbData.length > 0) {
+          this.logger.log('Using database data due to CoinGecko fetch failure');
+          return dbData;
+        }
+        this.logger.log('Falling back to JSON file data');
         return this.readFallbackPriceData();
       }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to fetch historical price for ${coinId}:`,
-        error,
-      );
-      this.logger.log('Falling back to JSON file data');
-      return this.readFallbackPriceData();
     }
+
+    // Merge database data with newly fetched data
+    let mergedData: Array<[number, number]> = [];
+    if (this.historicalPriceService) {
+      mergedData = this.historicalPriceService.mergePriceData(dbData, newData);
+    } else {
+      // If no service, just use new data
+      mergedData = newData;
+    }
+
+    // Filter to requested time range
+    mergedData = mergedData.filter(
+      ([timestamp]) => timestamp >= startTimeMs && timestamp <= endTimeMs,
+    );
+
+    // Cache merged result in Redis for 1 hour
+    if (mergedData.length > 0) {
+      try {
+        await this.cacheManager.set(cacheKey, mergedData, 3600 * 1000);
+        this.logger.debug(
+          `Cached merged historical price data: ${mergedData.length} price points`,
+        );
+      } catch (error) {
+        this.logger.warn(`Cache write error:`, error);
+      }
+    }
+
+    return mergedData.length > 0 ? mergedData : this.readFallbackPriceData();
   }
 }
