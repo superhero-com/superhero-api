@@ -31,7 +31,59 @@ export abstract class BasePlugin implements Plugin {
     }
 
     const syncService = this.getSyncService();
-    await syncService.processBatch(txs, syncDirection);
+    const updatedTxs: Tx[] = [];
+
+    // Decode logs and data for each transaction before processing
+    for (const tx of txs) {
+      try {
+        // Step 1: Decode logs
+        const decodedLogs = await syncService.decodeLogs(tx);
+        if (decodedLogs !== null) {
+          // Merge decoded logs into tx.logs
+          const currentLogs = tx.logs || {};
+          tx.logs = {
+            ...currentLogs,
+            [this.name]: {
+              _version: this.version,
+              ...decodedLogs,
+            },
+          };
+
+          // Save transaction with updated logs
+          await this.txRepository.save(tx);
+        }
+
+        // Step 2: Decode data (after logs are saved)
+        const decodedData = await syncService.decodeData(tx);
+        if (decodedData !== null) {
+          // Merge decoded data into tx.data
+          const currentData = tx.data || {};
+          tx.data = {
+            ...currentData,
+            [this.name]: {
+              _version: this.version,
+              ...decodedData,
+            },
+          };
+
+          // Save transaction with updated data
+          await this.txRepository.save(tx);
+        }
+
+        updatedTxs.push(tx);
+      } catch (error: any) {
+        // Log error but continue processing - decoding errors don't block processing
+        this.logger.error(
+          `[${this.name}] Failed to decode logs/data for transaction ${tx.hash}`,
+          error.stack,
+        );
+        // Still add tx to updatedTxs so processTransaction can be called
+        updatedTxs.push(tx);
+      }
+    }
+
+    // Process transactions with decoded data
+    await syncService.processBatch(updatedTxs, syncDirection);
   }
 
   /**
@@ -96,6 +148,43 @@ export abstract class BasePlugin implements Plugin {
         const syncService = this.getSyncService();
         for (const tx of transactions) {
           try {
+            // Decode logs and data before processing
+            try {
+              // Step 1: Decode logs
+              const decodedLogs = await syncService.decodeLogs(tx);
+              if (decodedLogs !== null) {
+                const currentLogs = tx.logs || {};
+                tx.logs = {
+                  ...currentLogs,
+                  [this.name]: {
+                    _version: this.version,
+                    ...decodedLogs,
+                  },
+                };
+                await this.txRepository.save(tx);
+              }
+
+              // Step 2: Decode data (after logs are saved)
+              const decodedData = await syncService.decodeData(tx);
+              if (decodedData !== null) {
+                const currentData = tx.data || {};
+                tx.data = {
+                  ...currentData,
+                  [this.name]: {
+                    _version: this.version,
+                    ...decodedData,
+                  },
+                };
+                await this.txRepository.save(tx);
+              }
+            } catch (decodeError: any) {
+              // Log decode error but continue processing
+              this.logger.error(
+                `[${this.name}] Failed to decode logs/data for transaction ${tx.hash}`,
+                decodeError.stack,
+              );
+            }
+
             await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
             processedCount++;
 
