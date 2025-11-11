@@ -46,9 +46,6 @@ export class GovernancePlugin extends BasePlugin {
 
     return [
       {
-        contractIds: [contractAddress],
-      },
-      {
         predicate: (tx: Partial<Tx>) => {
           return (
             tx.type === 'ContractCallTx' &&
