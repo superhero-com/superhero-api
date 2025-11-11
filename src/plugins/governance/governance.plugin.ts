@@ -13,7 +13,7 @@ import { getContractAddress, getStartHeight } from './config/governance.config';
 export class GovernancePlugin extends BasePlugin {
   protected readonly logger = new Logger(GovernancePlugin.name);
   readonly name = 'governance';
-  readonly version = 2;
+  readonly version = 1;
 
   constructor(
     @InjectRepository(Tx)
@@ -73,19 +73,6 @@ export class GovernancePlugin extends BasePlugin {
    * @returns Array of query functions that return transactions needing updates
    */
   getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, offset: number, limit: number) => Promise<Tx[]>> {
-    const filters = this.filters();
-    const contractIds: string[] = [];
-    
-    for (const filter of filters) {
-      if (filter.contractIds) {
-        contractIds.push(...filter.contractIds);
-      }
-    }
-    
-    if (contractIds.length === 0) {
-      return [];
-    }
-
     const supportedFunctions = ['add_poll', 'vote', 'revoke_vote'];
     
     return [
