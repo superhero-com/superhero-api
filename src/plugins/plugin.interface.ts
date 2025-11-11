@@ -1,5 +1,6 @@
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirection, SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { Repository } from 'typeorm';
 
 export { Tx };
 export { SyncDirection, SyncDirectionEnum };
@@ -32,5 +33,21 @@ export interface Plugin {
    * Plugins should clean up any data related to these removed/invalid transactions.
    */
   onReorg(removedTxHashes: string[]): Promise<void>;
+  /**
+   * Get queries to retrieve transactions that need auto-updating.
+   * Each query should filter transactions where plugin data doesn't exist or version doesn't match.
+   * Uses cursor-based pagination to avoid skipping transactions when the dataset changes.
+   * @param pluginName - The plugin name
+   * @param currentVersion - The current plugin version
+   * @returns Array of query functions that return transactions needing updates
+   * @param cursor - Optional cursor with block_height and micro_time for pagination
+   */
+  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, limit: number, cursor?: { block_height: number; micro_time: string }) => Promise<Tx[]>>;
+  /**
+   * Update transactions that have version mismatches or missing plugin data.
+   * Processes transactions in batches with pagination.
+   * @param batchSize - Number of transactions to process per batch (default: 100)
+   */
+  updateTransactions(batchSize?: number): Promise<void>;
 }
 

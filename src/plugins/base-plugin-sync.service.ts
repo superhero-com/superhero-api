@@ -7,6 +7,26 @@ export abstract class BasePluginSyncService {
   protected abstract readonly logger: Logger;
 
   /**
+   * Decode transaction logs from tx.raw.log.
+   * Plugins can override this to decode logs specific to their contract.
+   * @param tx - Transaction to decode logs from
+   * @returns Decoded log data or null if not applicable
+   */
+  async decodeLogs(tx: Tx): Promise<any | null> {
+    return null;
+  }
+
+  /**
+   * Decode transaction data.
+   * Plugins can override this to extract and return plugin-specific data.
+   * @param tx - Transaction to decode data from
+   * @returns Decoded data or null if not applicable
+   */
+  async decodeData(tx: Tx): Promise<any | null> {
+    return null;
+  }
+
+  /**
    * Process a single transaction. Must be implemented by each plugin.
    * @param tx - Transaction to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing

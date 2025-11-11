@@ -131,10 +131,12 @@ type Tx {
   caller_id: String
   contract_id: String
   created_at: DateTime!
+  data: JSONObject
   encoded_tx: String
   function: String
   hash: String!
   keyBlock: KeyBlock
+  logs: JSONObject
   micro_index: String!
   micro_time: String!
   payload: String

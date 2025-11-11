@@ -135,6 +135,26 @@ export class Tx {
   @ApiProperty({ required: false })
   raw: any;
 
+  /**
+   * {
+   *  "plugin-name": {"_version": 1, ...plugin-specific-data}
+   * }
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  @Field(() => GraphQLJSONObject, { nullable: true })
+  @ApiProperty({ required: false })
+  data: any;
+
+  /**
+   * {
+   *  "plugin-name": {"_version": 1, ...plugin-specific-data}
+   * }
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  @Field(() => GraphQLJSONObject, { nullable: true })
+  @ApiProperty({ required: false })
+  logs: any;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

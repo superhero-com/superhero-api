@@ -23,6 +23,8 @@ export class PluginRegistryService implements OnModuleInit {
   async onModuleInit() {
     // Initialize plugin sync states on module init to ensure they exist before any indexing starts
     await this.initializePluginSyncStates();
+    // Auto-update plugin data for all plugins
+    void this.autoUpdatePluginData();
   }
 
   getPlugins(): Plugin[] {
@@ -189,5 +191,29 @@ export class PluginRegistryService implements OnModuleInit {
     this.logger.log(
       `Successfully initialized sync states for ${this.plugins.length} plugins`,
     );
+  }
+
+  /**
+   * Auto-update plugin data for all registered plugins.
+   * Processes plugins sequentially to avoid race conditions when updating the same transaction.
+   */
+  async autoUpdatePluginData(): Promise<void> {
+    this.logger.log('Starting auto-update for all plugins...');
+
+    for (const plugin of this.plugins) {
+      try {
+        this.logger.log(`[${plugin.name}] Starting auto-update`);
+        await plugin.updateTransactions();
+        this.logger.log(`[${plugin.name}] Auto-update completed`);
+      } catch (error: any) {
+        this.logger.error(
+          `[${plugin.name}] Auto-update failed`,
+          error.stack,
+        );
+        // Continue with other plugins even if one fails
+      }
+    }
+
+    this.logger.log('Auto-update for all plugins completed');
   }
 }
