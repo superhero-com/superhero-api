@@ -27,34 +27,10 @@ export abstract class BasePlugin implements Plugin {
    * @param pluginName - The plugin name
    * @param currentVersion - The current plugin version
    * @returns Array of query functions that return transactions needing updates
+   * @param cursor - Optional cursor with block_height and micro_time for pagination
    */
-  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, offset: number, limit: number) => Promise<Tx[]>> {
-    const filters = this.filters();
-    const contractIds: string[] = [];
-    
-    for (const filter of filters) {
-      if (filter.contractIds) {
-        contractIds.push(...filter.contractIds);
-      }
-    }
-    
-    if (contractIds.length === 0) {
-      return [];
-    }
-    
-    return [
-      async (repo, offset, limit) => repo.createQueryBuilder('tx')
-        .where('tx.contract_id IN (:...contractIds)', { contractIds })
-        .andWhere(
-          `(tx.data->>'${pluginName}' IS NULL OR (tx.data->'${pluginName}'->>'_version')::int != :version)`,
-          { version: currentVersion }
-        )
-        .orderBy('tx.block_height', 'ASC')
-        .addOrderBy('tx.micro_time', 'ASC')
-        .skip(offset)
-        .take(limit)
-        .getMany()
-    ];
+  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, limit: number, cursor?: { block_height: number; micro_time: string }) => Promise<Tx[]>> {
+    return [];
   }
 
   /**
@@ -376,7 +352,7 @@ export abstract class BasePlugin implements Plugin {
       // Process each query
       for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
         const query = queries[queryIndex];
-        let offset = 0;
+        let cursor: { block_height: number; micro_time: string } | undefined = undefined;
         let hasMore = true;
 
         this.logger.log(
@@ -385,29 +361,30 @@ export abstract class BasePlugin implements Plugin {
 
         while (hasMore) {
           try {
-            // Execute query with pagination
+            // Execute query with cursor-based pagination
             this.logger.debug(
-              `[${this.name}] Query ${queryIndex + 1}: Fetching batch at offset ${offset}, limit ${batchSize}`,
+              `[${this.name}] Query ${queryIndex + 1}: Fetching batch with cursor ${cursor ? `(height: ${cursor.block_height}, micro_time: ${cursor.micro_time})` : '(none)'}, limit ${batchSize}`,
             );
             const transactions = await query(
               this.txRepository,
-              offset,
               batchSize,
+              cursor,
             );
 
             if (transactions.length === 0) {
               this.logger.debug(
-                `[${this.name}] Query ${queryIndex + 1}: No more transactions at offset ${offset}`,
+                `[${this.name}] Query ${queryIndex + 1}: No more transactions`,
               );
               hasMore = false;
               break;
             }
 
             this.logger.debug(
-              `[${this.name}] Query ${queryIndex + 1}: Fetched ${transactions.length} transactions at offset ${offset}`,
+              `[${this.name}] Query ${queryIndex + 1}: Fetched ${transactions.length} transactions`,
             );
 
             // Process each transaction in the batch
+            let lastTx: Tx | null = null;
             for (const tx of transactions) {
               try {
                 const needsReDecode = this.needsReDecode(tx);
@@ -466,6 +443,11 @@ export abstract class BasePlugin implements Plugin {
                   totalUpdated++;
                 }
 
+                // Track the last transaction for cursor-based pagination
+                // Even if the transaction was updated, we still use it as the cursor
+                // because we've already processed it
+                lastTx = tx;
+
                 // Log progress periodically
                 if (totalProcessed % 100 === 0) {
                   this.logger.log(
@@ -478,7 +460,21 @@ export abstract class BasePlugin implements Plugin {
                   error.stack,
                 );
                 totalProcessed++;
+                // Still track last transaction even on error for cursor
+                lastTx = tx;
               }
+            }
+
+            // Update cursor for next iteration using the last transaction
+            // This ensures we don't skip transactions even if some were updated
+            if (lastTx) {
+              cursor = {
+                block_height: lastTx.block_height,
+                micro_time: lastTx.micro_time,
+              };
+              this.logger.debug(
+                `[${this.name}] Query ${queryIndex + 1}: Updated cursor to (height: ${cursor.block_height}, micro_time: ${cursor.micro_time})`,
+              );
             }
 
             // Check if we should continue pagination
@@ -487,11 +483,6 @@ export abstract class BasePlugin implements Plugin {
                 `[${this.name}] Query ${queryIndex + 1}: Last page reached (${transactions.length} < ${batchSize})`,
               );
               hasMore = false;
-            } else {
-              offset += batchSize;
-              this.logger.debug(
-                `[${this.name}] Query ${queryIndex + 1}: Moving to next page at offset ${offset}`,
-              );
             }
           } catch (error: any) {
             this.logger.error(
