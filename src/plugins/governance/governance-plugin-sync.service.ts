@@ -130,10 +130,33 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
           contract_id: pollAddress as Encoded.ContractAddress,
         },
       });
-      const contractCreateTxArgs = createTx?.raw?.args;
-      const metadataArgs = contractCreateTxArgs[0]?.value
-      const voteOptionsArgs = contractCreateTxArgs[1]?.value
-      const closeHeightArgs = contractCreateTxArgs[2]?.value
+
+      if (!createTx) {
+        this.logger.warn(
+          `ContractCreateTx not found for poll address ${pollAddress} in transaction ${tx.hash}`,
+        );
+        return null;
+      }
+
+      const contractCreateTxArgs = createTx.raw?.args;
+      if (!contractCreateTxArgs || !Array.isArray(contractCreateTxArgs)) {
+        this.logger.warn(
+          `Invalid contract create tx args for poll address ${pollAddress} in transaction ${tx.hash}`,
+        );
+        return null;
+      }
+
+      const metadataArgs = contractCreateTxArgs[0]?.value;
+      const voteOptionsArgs = contractCreateTxArgs[1]?.value;
+      const closeHeightArgs = contractCreateTxArgs[2]?.value;
+
+      if (!metadataArgs || !Array.isArray(metadataArgs)) {
+        this.logger.warn(
+          `Invalid metadata args for poll address ${pollAddress} in transaction ${tx.hash}`,
+        );
+        return null;
+      }
+
       return {
         metadata: {
           title: metadataArgs[0],
@@ -142,12 +165,12 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
           _spec_ref: metadataArgs[3],
         },
         vote_options: voteOptionsArgs,
-        author: createTx?.caller_id,
+        author: createTx.caller_id,
         poll_address: pollAddress,
         poll_seq_id: decodedLogs.args[1],
-        close_at_height: closeHeightArgs[0],
-        close_height: closeHeightArgs[1],
-        create_height: createTx?.block_height,
+        close_at_height: closeHeightArgs?.[0],
+        close_height: closeHeightArgs?.[1],
+        create_height: createTx.block_height,
       };
     }
 
