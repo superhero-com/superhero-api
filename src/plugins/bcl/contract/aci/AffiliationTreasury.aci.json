@@ -1,0 +1,460 @@
+[
+  {
+    "namespace": {
+      "name": "ListInternal",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "List",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Option",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Pair",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Set",
+      "typedefs": [
+        {
+          "name": "set",
+          "typedef": {
+            "record": [
+              {
+                "name": "to_map",
+                "type": {
+                  "map": [
+                    "'a",
+                    "unit"
+                  ]
+                }
+              }
+            ]
+          },
+          "vars": [
+            {
+              "name": "'a"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "contract": {
+      "event": {
+        "variant": [
+          {
+            "UserInvited": [
+              "address",
+              "address"
+            ]
+          },
+          {
+            "RewardAdded": [
+              "address",
+              "int"
+            ]
+          },
+          {
+            "Withdrawn": [
+              "address",
+              "int"
+            ]
+          },
+          {
+            "InvitationRegistered": [
+              "address",
+              "address",
+              "int"
+            ]
+          },
+          {
+            "InvitationRedeemed": [
+              "address",
+              "address",
+              "address"
+            ]
+          },
+          {
+            "InvitationRevoked": [
+              "address",
+              "address"
+            ]
+          },
+          {
+            "RecordSaleTransaction": [
+              "address",
+              "int"
+            ]
+          }
+        ]
+      },
+      "functions": [
+        {
+          "arguments": [],
+          "name": "init",
+          "payable": false,
+          "returns": "AffiliationTreasury.state",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "get_direct_inviter",
+          "payable": false,
+          "returns": {
+            "option": [
+              "address"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "get_affiliation_fee_percentage",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "account",
+              "type": "address"
+            }
+          ],
+          "name": "get_accumulated_rewards",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "get_affiliation_fee_precision",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "get_affiliation_fee_percentages",
+          "payable": false,
+          "returns": {
+            "list": [
+              "int"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "payout_periods",
+          "payable": false,
+          "returns": {
+            "map": [
+              "int",
+              {
+                "map": [
+                  "address",
+                  "int"
+                ]
+              }
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "unique_invitees",
+          "payable": false,
+          "returns": {
+            "map": [
+              "address",
+              "AffiliationTreasury.unique_invitees_state"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "affiliation_tree",
+          "payable": false,
+          "returns": {
+            "map": [
+              "address",
+              "address"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "invitation_codes",
+          "payable": false,
+          "returns": {
+            "map": [
+              "address",
+              {
+                "tuple": [
+                  "address",
+                  "int",
+                  "bool"
+                ]
+              }
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "get_state",
+          "payable": false,
+          "returns": "AffiliationTreasury.state",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "address",
+              "type": "address"
+            }
+          ],
+          "name": "get_affiliation_tree",
+          "payable": false,
+          "returns": "address",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "address",
+              "type": "address"
+            }
+          ],
+          "name": "get_invitation_code",
+          "payable": false,
+          "returns": {
+            "tuple": [
+              "address",
+              "int",
+              "bool"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "address",
+              "type": "address"
+            }
+          ],
+          "name": "get_unique_invitee",
+          "payable": false,
+          "returns": "AffiliationTreasury.unique_invitees_state",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "invitation_addresses",
+              "type": {
+                "list": [
+                  "address"
+                ]
+              }
+            },
+            {
+              "name": "redemption_fee_cover",
+              "type": "int"
+            },
+            {
+              "name": "invitation_amount",
+              "type": "int"
+            }
+          ],
+          "name": "register_invitation_code",
+          "payable": true,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "invitation_address",
+              "type": "address"
+            }
+          ],
+          "name": "revoke_invitation_code",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "invitee_address",
+              "type": "address"
+            }
+          ],
+          "name": "redeem_invitation_code",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "inviter_address",
+              "type": "address"
+            }
+          ],
+          "name": "register_invitation",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "buyer",
+              "type": "address"
+            },
+            {
+              "name": "transaction_value",
+              "type": "int"
+            }
+          ],
+          "name": "record_sale_transaction",
+          "payable": true,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [],
+          "name": "get_payout_period",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "withdraw",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        }
+      ],
+      "kind": "contract_main",
+      "name": "AffiliationTreasury",
+      "payable": true,
+      "state": {
+        "record": [
+          {
+            "name": "payout_periods",
+            "type": {
+              "map": [
+                "int",
+                {
+                  "map": [
+                    "address",
+                    "int"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "affiliation_tree",
+            "type": {
+              "map": [
+                "address",
+                "address"
+              ]
+            }
+          },
+          {
+            "name": "invitation_codes",
+            "type": {
+              "map": [
+                "address",
+                {
+                  "tuple": [
+                    "address",
+                    "int",
+                    "bool"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "unique_invitees",
+            "type": {
+              "map": [
+                "address",
+                "AffiliationTreasury.unique_invitees_state"
+              ]
+            }
+          }
+        ]
+      },
+      "typedefs": [
+        {
+          "name": "unique_invitees_state",
+          "typedef": {
+            "variant": [
+              {
+                "ThresholdReached": []
+              },
+              {
+                "WaitingForInvitations": [
+                  {
+                    "Set.set": [
+                      "address"
+                    ]
+                  },
+                  {
+                    "map": [
+                      "address",
+                      "int"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "vars": []
+        }
+      ]
+    }
+  }
+]

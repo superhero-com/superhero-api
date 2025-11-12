@@ -1,0 +1,327 @@
+[
+  {
+    "namespace": {
+      "name": "ListInternal",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "List",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Option",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Pair",
+      "typedefs": []
+    }
+  },
+  {
+    "namespace": {
+      "name": "Set",
+      "typedefs": [
+        {
+          "name": "set",
+          "typedef": {
+            "record": [
+              {
+                "name": "to_map",
+                "type": {
+                  "map": [
+                    "'a",
+                    "unit"
+                  ]
+                }
+              }
+            ]
+          },
+          "vars": [
+            {
+              "name": "'a"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "contract": {
+      "event": {
+        "variant": [
+          {
+            "ChangeMinimumTokenThreshold": [
+              "int"
+            ]
+          },
+          {
+            "AddModerator": [
+              "address"
+            ]
+          },
+          {
+            "DeleteModerator": [
+              "address"
+            ]
+          },
+          {
+            "MuteUserId": [
+              "string"
+            ]
+          },
+          {
+            "UnmuteUserId": [
+              "string"
+            ]
+          },
+          {
+            "SetOwner": [
+              "address"
+            ]
+          },
+          {
+            "ChangedMetaInfo": []
+          }
+        ]
+      },
+      "functions": [
+        {
+          "arguments": [
+            {
+              "name": "initial_moderator",
+              "type": "address"
+            },
+            {
+              "name": "minimum_token_threshold",
+              "type": "int"
+            },
+            {
+              "name": "is_private",
+              "type": "bool"
+            },
+            {
+              "name": "meta_info",
+              "type": "CommunityManagement.meta_info"
+            }
+          ],
+          "name": "init",
+          "payable": false,
+          "returns": "CommunityManagement.state",
+          "stateful": true
+        },
+        {
+          "arguments": [],
+          "name": "get_state",
+          "payable": false,
+          "returns": "CommunityManagement.state",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "moderator_accounts",
+          "payable": false,
+          "returns": {
+            "Set.set": [
+              "address"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "muted_user_ids",
+          "payable": false,
+          "returns": {
+            "Set.set": [
+              "string"
+            ]
+          },
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "minimum_token_threshold",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "owner",
+          "payable": false,
+          "returns": "address",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "meta_info",
+          "payable": false,
+          "returns": "CommunityManagement.meta_info",
+          "stateful": false
+        },
+        {
+          "arguments": [],
+          "name": "version",
+          "payable": false,
+          "returns": "int",
+          "stateful": false
+        },
+        {
+          "arguments": [
+            {
+              "name": "minimum_token_threshold",
+              "type": "int"
+            }
+          ],
+          "name": "change_minimum_token_threshold",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "moderator",
+              "type": "address"
+            }
+          ],
+          "name": "add_moderator",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "moderator",
+              "type": "address"
+            }
+          ],
+          "name": "delete_moderator",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "user_id",
+              "type": "string"
+            }
+          ],
+          "name": "mute_user_id",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "user_id",
+              "type": "string"
+            }
+          ],
+          "name": "unmute_user_id",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "meta_info",
+              "type": "CommunityManagement.meta_info"
+            }
+          ],
+          "name": "change_meta_info",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        },
+        {
+          "arguments": [
+            {
+              "name": "owner",
+              "type": "address"
+            }
+          ],
+          "name": "set_owner",
+          "payable": false,
+          "returns": {
+            "tuple": []
+          },
+          "stateful": true
+        }
+      ],
+      "kind": "contract_main",
+      "name": "CommunityManagement",
+      "payable": false,
+      "state": {
+        "record": [
+          {
+            "name": "owner",
+            "type": "address"
+          },
+          {
+            "name": "minimum_token_threshold",
+            "type": "int"
+          },
+          {
+            "name": "is_private",
+            "type": "bool"
+          },
+          {
+            "name": "moderator_accounts",
+            "type": {
+              "Set.set": [
+                "address"
+              ]
+            }
+          },
+          {
+            "name": "muted_user_ids",
+            "type": {
+              "Set.set": [
+                "string"
+              ]
+            }
+          },
+          {
+            "name": "meta_info",
+            "type": "CommunityManagement.meta_info"
+          }
+        ]
+      },
+      "typedefs": [
+        {
+          "name": "meta_info",
+          "typedef": {
+            "map": [
+              "string",
+              "string"
+            ]
+          },
+          "vars": []
+        }
+      ]
+    }
+  }
+]
