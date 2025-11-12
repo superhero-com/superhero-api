@@ -28,6 +28,12 @@ export class BlockValidationService {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async validateBlocksPeriodically() {
+    const disableMdwSync = this.configService.get<boolean>('mdw.disableMdwSync', false);
+    if (disableMdwSync) {
+      this.logger.debug('MDW sync is disabled, skipping block validation');
+      return;
+    }
+
     if (this.isValidating) {
       return;
     }

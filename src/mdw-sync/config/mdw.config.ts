@@ -21,4 +21,5 @@ export default registerAs('mdw', () => ({
   ),
   pluginBatchSize: parseInt(process.env.PLUGIN_BATCH_SIZE || '100', 10),
   middlewareUrl: ACTIVE_NETWORK.middlewareUrl,
+  disableMdwSync: process.env.DISABLE_MDW_SYNC === 'true',
 }));
