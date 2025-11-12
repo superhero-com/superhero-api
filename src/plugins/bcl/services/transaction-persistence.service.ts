@@ -45,9 +45,10 @@ export class TransactionPersistenceService {
   ): Promise<Transaction> {
     const transactionRepository = manager.getRepository(Transaction);
     // Use upsert to handle race conditions where transaction might be created concurrently
+    // Note: skipUpdateIfNoValuesChanged is removed because it causes PostgreSQL errors
+    // when comparing JSON columns (operator does not exist: json = json)
     await transactionRepository.upsert(txData, {
       conflictPaths: ['tx_hash'],
-      skipUpdateIfNoValuesChanged: true,
     });
     // Fetch and return the transaction entity
     const transaction = await transactionRepository.findOne({
