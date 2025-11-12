@@ -11,6 +11,10 @@ import { GovernanceVoteService } from './services/governance-vote.service';
 import { GovernanceVotesController } from './controllers/governance-votes.controller';
 import { GovernancePoll } from './entities/governance-poll.view';
 import { GovernancePollVote } from './entities/governance-poll-vote.view';
+import { GovernanceDelegation } from './entities/governance-delegation.view';
+import { GovernanceRevokedDelegation } from './entities/governance-revoked-delegation.view';
+import { GovernanceDelegationService } from './services/governance-delegation.service';
+import { GovernanceDelegationsController } from './controllers/governance-delegations.controller';
 
 @Module({
   imports: [
@@ -21,14 +25,17 @@ import { GovernancePollVote } from './entities/governance-poll-vote.view';
       PluginSyncState,
       GovernancePoll,
       GovernancePollVote,
+      GovernanceDelegation,
+      GovernanceRevokedDelegation,
     ]),
   ],
   providers: [
     GovernancePluginSyncService,
     GovernancePlugin,
     GovernanceVoteService,
+    GovernanceDelegationService,
   ],
-  controllers: [GovernanceVotesController],
+  controllers: [GovernanceVotesController, GovernanceDelegationsController],
   exports: [GovernancePlugin],
 })
 export class GovernancePluginModule {}
