@@ -12,7 +12,7 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { BclPlugin } from './bcl.plugin';
-import { BclPluginSyncService } from './services/bcl-plugin-sync.service';
+import { BclPluginSyncService } from './bcl-plugin-sync.service';
 import { TransactionsService } from './services/transactions.service';
 import { TokenService } from './services/token.service';
 import { TransactionValidationService } from './services/transaction-validation.service';

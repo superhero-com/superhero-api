@@ -1,10 +1,23 @@
-import { Logger } from '@nestjs/common';
-import { ITransaction } from '@/utils/types';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { Encoded } from '@aeternity/aepp-sdk';
+import ContractWithMethods, {
+  ContractMethodsBase,
+} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Logger } from '@nestjs/common';
 import { PluginFilter, SyncDirection } from './plugin.interface';
+import { AeSdkService } from '@/ae/ae-sdk.service';
 
 export abstract class BasePluginSyncService {
   protected abstract readonly logger: Logger;
+
+  contracts: Record<
+    Encoded.ContractAddress,
+    ContractWithMethods<ContractMethodsBase>
+  > = {};
+
+  constructor(
+    protected readonly aeSdkService: AeSdkService,
+  ) { }
 
   /**
    * Decode transaction logs from tx.raw.log.
@@ -76,6 +89,18 @@ export abstract class BasePluginSyncService {
       `${context}: Failed to process transaction ${tx.hash}`,
       error.stack,
     );
+  }
+
+  async getContract(contractAddress: Encoded.ContractAddress, aci: any): Promise<ContractWithMethods<ContractMethodsBase>> {
+    if (this.contracts[contractAddress]) {
+      return this.contracts[contractAddress];
+    }
+    const contract = await this.aeSdkService.sdk.initializeContract({
+      aci,
+      address: contractAddress as Encoded.ContractAddress,
+    });
+    this.contracts[contractAddress] = contract;
+    return contract;
   }
 }
 

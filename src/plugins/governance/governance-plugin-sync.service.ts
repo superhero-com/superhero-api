@@ -2,10 +2,7 @@ import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { serializeBigInts } from '@/utils/common';
 import { AE_AMOUNT_FORMATS, Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
@@ -15,37 +12,17 @@ import GovernancePollACI from './contract/aci/GovernancePollACI.json';
 import GovernanceRegistryACI from './contract/aci/GovernanceRegistryACI.json';
 
 @Injectable()
-export class GovernancePluginSyncService extends BasePluginSyncService implements OnModuleInit {
+export class GovernancePluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(GovernancePluginSyncService.name);
   readonly pluginName = 'governance';
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractWithMethods<ContractMethodsBase>
-  > = {};
-
   constructor(
-    private aeSdkService: AeSdkService,
+    aeSdkService: AeSdkService,
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
   ) {
-    super()
+    super(aeSdkService);
   }
 
-  async onModuleInit(): Promise<void> {
-    //
-  }
-
-  async getContract(contractAddress: Encoded.ContractAddress, aci: any = GovernanceRegistryACI): Promise<ContractWithMethods<ContractMethodsBase>> {
-    if (this.contracts[contractAddress]) {
-      return this.contracts[contractAddress];
-    }
-    const contract = await this.aeSdkService.sdk.initializeContract({
-      aci,
-      address: contractAddress as Encoded.ContractAddress,
-    });
-    this.contracts[contractAddress] = contract;
-    return contract;
-  }
 
   async processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void> {
     try {
@@ -76,7 +53,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
     ].includes(tx.function)) {
       try {
-        const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress);
+        const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress, GovernanceRegistryACI);
         const decodedLogs = contract.$decodeEvents(tx.raw.log);
 
         return serializeBigInts(decodedLogs);
@@ -182,7 +159,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
           format: AE_AMOUNT_FORMATS.AE,
         });
       } catch (error) {
-        
+
       }
       return {
         poll_address: decodedLogs.contract.address,

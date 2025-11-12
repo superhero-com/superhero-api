@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { BasePluginSyncService } from '../../base-plugin-sync.service';
-import { SyncDirection, SyncDirectionEnum } from '../../plugin.interface';
-import { TransactionProcessorService } from './transaction-processor.service';
+import { BasePluginSyncService } from '../base-plugin-sync.service';
+import { SyncDirection, SyncDirectionEnum } from '../plugin.interface';
+import { TransactionProcessorService } from './services/transaction-processor.service';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
+import { AeSdkService } from '@/ae/ae-sdk.service';
 
 @Injectable()
 export class BclPluginSyncService extends BasePluginSyncService {
@@ -12,8 +13,9 @@ export class BclPluginSyncService extends BasePluginSyncService {
   constructor(
     private readonly transactionProcessorService: TransactionProcessorService,
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
+    aeSdkService: AeSdkService,
   ) {
-    super();
+    super(aeSdkService);
   }
 
   async processTransaction(
@@ -41,6 +43,17 @@ export class BclPluginSyncService extends BasePluginSyncService {
       this.handleError(error, rawTransaction, 'processTransaction');
       throw error; // Re-throw to let BasePluginSyncService handle it
     }
+  }
+
+
+  async decodeLogs(tx: Tx): Promise<any | null> {
+    if (!tx?.raw?.log) {
+      return null;
+    }
+
+
+    return null;
+
   }
 }
 
