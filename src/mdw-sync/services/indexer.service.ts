@@ -45,13 +45,20 @@ export class IndexerService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    const disableMdwSync = this.configService.get<boolean>('mdw.disableMdwSync', false);
+    
     await this.initializeSyncState();
     // Plugin sync states are initialized by PluginRegistryService.onModuleInit()
     // which runs before this, so they should already exist. But we verify here
     // to ensure backward indexer doesn't start until plugins are ready.
     // The initializePluginSyncStates() method is idempotent, so calling it again is safe.
     await this.pluginRegistryService.initializePluginSyncStates();
-    this.startSync();
+    
+    if (!disableMdwSync) {
+      this.startSync();
+    } else {
+      this.logger.log('MDW sync is disabled, skipping sync loop start');
+    }
   }
 
   private async initializeSyncState() {
