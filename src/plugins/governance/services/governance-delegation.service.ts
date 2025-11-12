@@ -1,18 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import {
+    IPaginationOptions,
+    paginate,
+    Pagination,
+} from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import {
-  IPaginationOptions,
-  paginate,
-  Pagination,
-} from 'nestjs-typeorm-paginate';
+    GovernanceDelegationHistoryItemDto,
+    GovernanceDelegationWithRevokedDto
+} from '../dto/governance-delegation.dto';
 import { GovernanceDelegation } from '../entities/governance-delegation.view';
 import { GovernanceRevokedDelegation } from '../entities/governance-revoked-delegation.view';
-import {
-  GovernanceDelegationDto,
-  GovernanceDelegationWithRevokedDto,
-  GovernanceDelegationHistoryItemDto,
-} from '../dto/governance-delegation.dto';
 
 @Injectable()
 export class GovernanceDelegationService {

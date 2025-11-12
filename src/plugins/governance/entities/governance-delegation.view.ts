@@ -1,4 +1,4 @@
-import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
+import { PrimaryColumn, ViewColumn, ViewEntity } from 'typeorm';
 import { GOVERNANCE_CONTRACT } from '../config/governance.config';
 
 @ViewEntity({
