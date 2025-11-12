@@ -6,12 +6,11 @@ import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
-import { getContractAddress } from './config/governance.config';
+import { GOVERNANCE_CONTRACT } from './config/governance.config';
 import GovernancePollACI from './contract/aci/GovernancePollACI.json';
 import GovernanceRegistryACI from './contract/aci/GovernanceRegistryACI.json';
 
@@ -19,7 +18,6 @@ import GovernanceRegistryACI from './contract/aci/GovernanceRegistryACI.json';
 export class GovernancePluginSyncService extends BasePluginSyncService implements OnModuleInit {
   protected readonly logger = new Logger(GovernancePluginSyncService.name);
   readonly pluginName = 'governance';
-  contractAddress: Encoded.ContractAddress;
   contracts: Record<
     Encoded.ContractAddress,
     ContractWithMethods<ContractMethodsBase>
@@ -27,7 +25,6 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
 
   constructor(
     private aeSdkService: AeSdkService,
-    private readonly configService: ConfigService,
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
   ) {
@@ -35,10 +32,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
   }
 
   async onModuleInit(): Promise<void> {
-    const config = this.configService.get<{ contract: { contractAddress: string } }>(
-      'governance',
-    );
-    this.contractAddress = (config?.contract?.contractAddress ?? getContractAddress()) as Encoded.ContractAddress;
+    //
   }
 
   async getContract(contractAddress: Encoded.ContractAddress, aci: any = GovernanceRegistryACI): Promise<ContractWithMethods<ContractMethodsBase>> {
@@ -76,9 +70,9 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       return null;
     }
 
-    if (tx.function == 'add_poll') {
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.add_poll) {
       try {
-        const contract = await this.getContract(this.contractAddress);
+        const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress);
         const decodedLogs = contract.$decodeEvents(tx.raw.log);
 
         return serializeBigInts(decodedLogs);
@@ -91,7 +85,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       }
     }
 
-    if (['vote', 'revoke_vote'].includes(tx.function)) {
+    if ([GOVERNANCE_CONTRACT.FUNCTIONS.vote, GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote].includes(tx.function)) {
       try {
         const contract = await this.getContract(
           tx.contract_id as Encoded.ContractAddress,
@@ -119,7 +113,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       return null;
     }
 
-    if (tx.function == 'add_poll') {
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.add_poll) {
       const decodedLogs = pluginLogs.data[0];
 
       const pollAddress = decodedLogs.args[0];
@@ -174,7 +168,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       };
     }
 
-    if (tx.function == 'vote') {
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.vote) {
       const decodedLogs = pluginLogs.data[0];
       return {
         poll_address: decodedLogs.contract.address,
@@ -184,7 +178,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       };
     }
 
-    if (tx.function == 'revoke_vote') {
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote) {
       const decodedLogs = pluginLogs.data[0];
       return {
         poll_address: decodedLogs.contract.address,

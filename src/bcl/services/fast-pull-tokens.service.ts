@@ -47,7 +47,7 @@ export class FastPullTokensService {
   }
 
   onModuleInit() {
-    this.fastPullTokens();
+    // this.fastPullTokens();
   }
 
   isPullingLatestCreatedTokens = false;
