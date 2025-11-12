@@ -44,7 +44,19 @@ export class TransactionPersistenceService {
     manager: EntityManager,
   ): Promise<Transaction> {
     const transactionRepository = manager.getRepository(Transaction);
-    return transactionRepository.save(txData);
+    // Use upsert to handle race conditions where transaction might be created concurrently
+    await transactionRepository.upsert(txData, {
+      conflictPaths: ['tx_hash'],
+      skipUpdateIfNoValuesChanged: true,
+    });
+    // Fetch and return the transaction entity
+    const transaction = await transactionRepository.findOne({
+      where: { tx_hash: txData.tx_hash },
+    });
+    if (!transaction) {
+      throw new Error(`Failed to create or retrieve transaction ${txData.tx_hash}`);
+    }
+    return transaction;
   }
 }
 
