@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
 import { PostTransactionProcessorService } from './services/post-transaction-processor.service';
@@ -9,9 +10,10 @@ export class SocialPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(SocialPluginSyncService.name);
 
   constructor(
+    aeSdkService: AeSdkService,
     private readonly postTransactionProcessorService: PostTransactionProcessorService,
   ) {
-    super();
+    super(aeSdkService);
   }
 
   async processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void> {

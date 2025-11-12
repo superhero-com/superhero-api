@@ -1,10 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
+import { Injectable, Logger } from '@nestjs/common';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection, SyncDirectionEnum } from '../plugin.interface';
+import { BCL_CONTRACT } from './config/bcl.config';
 import { TransactionProcessorService } from './services/transaction-processor.service';
-import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
-import { AeSdkService } from '@/ae/ae-sdk.service';
+
+import { serializeBigInts } from '@/utils/common';
+import CommunityFactoryACI from './contract/aci/CommunityFactory.aci.json';
 
 @Injectable()
 export class BclPluginSyncService extends BasePluginSyncService {
@@ -51,8 +55,18 @@ export class BclPluginSyncService extends BasePluginSyncService {
       return null;
     }
 
+    try {
+      const contract = await this.getContract(BCL_CONTRACT.contractAddress, CommunityFactoryACI);
+      const decodedLogs = contract.$decodeEvents(tx.raw.log);
 
-    return null;
+      return serializeBigInts(decodedLogs);
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to decode logs for transaction ${tx.hash}`,
+        error.stack,
+      );
+      return null;
+    }
 
   }
 }

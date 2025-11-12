@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AeModule } from '@/ae/ae.module';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Post } from '@/social/entities/post.entity';
@@ -19,6 +20,7 @@ import { PostTransactionProcessorService } from './services/post-transaction-pro
   imports: [
     ConfigModule.forFeature(socialConfig),
     TypeOrmModule.forFeature([Tx, PluginSyncState, Post, Topic, Account]),
+    AeModule,
   ],
   providers: [
     PostTransactionValidationService,

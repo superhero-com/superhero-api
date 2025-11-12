@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
 import { SocialTippingTransactionProcessorService } from './services/social-tipping-transaction-processor.service';
@@ -9,9 +10,10 @@ export class SocialTippingPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(SocialTippingPluginSyncService.name);
 
   constructor(
+    aeSdkService: AeSdkService,
     private readonly socialTippingTransactionProcessorService: SocialTippingTransactionProcessorService,
   ) {
-    super();
+    super(aeSdkService);
   }
 
   async processTransaction(
