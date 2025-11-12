@@ -163,7 +163,12 @@ export class TokenService {
       await repository.update(tokenExists.sale_address, tokenData);
       token = await this.findByAddress(tokenExists.sale_address, false, manager);
     } else {
-      token = await repository.save(tokenData);
+      // Use upsert to handle race conditions where token might be created concurrently
+      await repository.upsert(tokenData, {
+        conflictPaths: ['sale_address'],
+        skipUpdateIfNoValuesChanged: true,
+      });
+      token = await this.findByAddress(saleAddress, false, manager);
       isNewToken = true;
     }
 
