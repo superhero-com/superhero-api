@@ -10,8 +10,12 @@ export const GOVERNANCE_CONTRACT = {
 
   FUNCTIONS: {
     add_poll: 'add_poll',
+
     vote: 'vote',
     revoke_vote: 'revoke_vote',
+
+    delegate: 'delegate',
+    revoke_delegation: 'revoke_delegation',
   },
 };
 

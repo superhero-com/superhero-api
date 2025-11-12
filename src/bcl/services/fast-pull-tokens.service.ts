@@ -109,7 +109,6 @@ export class FastPullTokensService {
       this.pullTokenHoldersQueue.empty(),
       this.pullTokenInfoQueue.empty(),
     ]);
-
     this.pullingTokens = true;
 
     try {

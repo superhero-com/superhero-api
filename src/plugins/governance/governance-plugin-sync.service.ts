@@ -1,7 +1,7 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { serializeBigInts } from '@/utils/common';
-import { Encoded } from '@aeternity/aepp-sdk';
+import { AE_AMOUNT_FORMATS, Encoded } from '@aeternity/aepp-sdk';
 import ContractWithMethods, {
   ContractMethodsBase,
 } from '@aeternity/aepp-sdk/es/contract/Contract';
@@ -70,7 +70,11 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
       return null;
     }
 
-    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.add_poll) {
+    if ([
+      GOVERNANCE_CONTRACT.FUNCTIONS.add_poll,
+      GOVERNANCE_CONTRACT.FUNCTIONS.delegate,
+      GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
+    ].includes(tx.function)) {
       try {
         const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress);
         const decodedLogs = contract.$decodeEvents(tx.raw.log);
@@ -170,10 +174,21 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
 
     if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.vote) {
       const decodedLogs = pluginLogs.data[0];
+      let balance = "0";
+      const voter = decodedLogs.args[1];
+      try {
+        balance = await this.aeSdkService.sdk.getBalance(voter, {
+          height: tx.block_height,
+          format: AE_AMOUNT_FORMATS.AE,
+        });
+      } catch (error) {
+        
+      }
       return {
         poll_address: decodedLogs.contract.address,
         poll: decodedLogs.args[0],
         voter: decodedLogs.args[1],
+        voter_balance: balance,
         option: Number(decodedLogs.args[2]),
       };
     }
@@ -184,6 +199,21 @@ export class GovernancePluginSyncService extends BasePluginSyncService implement
         poll_address: decodedLogs.contract.address,
         poll: decodedLogs.args[0],
         voter: decodedLogs.args[1],
+      };
+    }
+
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.delegate) {
+      const decodedLogs = pluginLogs.data[0];
+      return {
+        delegator: decodedLogs.args[0],
+        delegatee: decodedLogs.args[1],
+      };
+    }
+
+    if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation) {
+      const decodedLogs = pluginLogs.data[0];
+      return {
+        delegator: decodedLogs.args[0],
       };
     }
 

@@ -7,7 +7,7 @@ import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter } from '../plugin.interface';
 import { GovernancePluginSyncService } from './governance-plugin-sync.service';
-import { getContractAddress, getStartHeight } from './config/governance.config';
+import { getContractAddress, getStartHeight, GOVERNANCE_CONTRACT } from './config/governance.config';
 
 @Injectable()
 export class GovernancePlugin extends BasePlugin {
@@ -70,7 +70,7 @@ export class GovernancePlugin extends BasePlugin {
    * @returns Array of query functions that return transactions needing updates
    */
   getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, limit: number, cursor?: { block_height: number; micro_time: string }) => Promise<Tx[]>> {
-    const supportedFunctions = ['add_poll', 'vote', 'revoke_vote'];
+    const supportedFunctions = Object.values(GOVERNANCE_CONTRACT.FUNCTIONS);
     
     return [
       async (repo, limit, cursor) => {
