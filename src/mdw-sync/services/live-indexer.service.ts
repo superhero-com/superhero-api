@@ -144,7 +144,10 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (microBlocks.length > 0) {
-        await this.microBlockRepository.save(microBlocks);
+        await this.microBlockRepository.upsert(microBlocks, {
+          conflictPaths: ['hash'],
+          skipUpdateIfNoValuesChanged: true,
+        });
         this.logger.debug(
           `Live sync: saved ${microBlocks.length} micro-blocks for key block ${keyBlockHash}`,
         );
