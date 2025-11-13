@@ -174,14 +174,20 @@ export class PostsController {
         limit,
         offset,
       );
-      const totalItems =
+      const totalPopularItems =
         await this.popularRankingService.getTotalCached(window);
-      const totalPages = totalItems ? Math.ceil(totalItems / limit) : undefined;
+      
+      // If we're past popular posts, don't set totalPages (infinite pagination)
+      // Otherwise, calculate totalPages based on popular posts only
+      const totalPages = totalPopularItems && offset < totalPopularItems
+        ? Math.ceil(totalPopularItems / limit)
+        : undefined;
+      
       const response: any = {
         items: posts,
         meta: {
           itemCount: posts.length,
-          totalItems,
+          totalItems: totalPopularItems,
           totalPages,
           currentPage: page,
         },
