@@ -126,18 +126,79 @@ export class PostsController {
     }
 
     // Get distinct post IDs using groupBy with aggregate to prevent duplicates
-    // This ensures each post appears only once even with multiple topics
+    // Execute the subquery first with pagination to get the IDs, then use them in the main query
     const orderColumn = orderBy || 'created_at';
     // Use MIN/MAX aggregate to get one value per post.id for ordering
     const aggregateFn = orderDirection === 'DESC' ? 'MAX' : 'MIN';
-    const distinctSubQuery = baseQuery
-      .select('post.id')
+    
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+    
+    // Execute subquery to get distinct post IDs with pagination
+    const distinctPostIds = await baseQuery
+      .select('post.id', 'id')
       .addSelect(`${aggregateFn}(post.${orderColumn})`, 'order_value')
       .groupBy('post.id')
-      .orderBy('order_value', orderDirection);
+      .orderBy('order_value', orderDirection)
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+
+    // If no posts found, return empty result
+    if (distinctPostIds.length === 0) {
+      return paginate(
+        this.postRepository.createQueryBuilder('post').where('1=0'),
+        { page, limit },
+      );
+    }
+
+    const postIds = distinctPostIds.map((p) => p.id);
+
+    // Get total count for pagination metadata
+    // We need to count distinct posts matching the filters
+    const totalCountQuery = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoin('post.topics', 'topic')
+      .where('post.is_hidden = false');
+    
+    if (search) {
+      const searchTerm = `%${search}%`;
+      totalCountQuery.andWhere(
+        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
+        { searchTerm },
+      );
+    }
+    
+    if (account_address) {
+      totalCountQuery.andWhere('post.sender_address = :account_address', {
+        account_address,
+      });
+    }
+    
+    if (topics) {
+      const topicNames = topics
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      if (topicNames.length > 0) {
+        const topicConditions = topicNames
+          .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
+          .join(' OR ');
+        const topicParams = {};
+        topicNames.forEach((topicName, index) => {
+          topicParams[`topicSearch${index}`] = `%${topicName}%`;
+        });
+        totalCountQuery.andWhere(`(${topicConditions})`, topicParams);
+      }
+    }
+    
+    const totalCount = await totalCountQuery
+      .select('COUNT(DISTINCT post.id)', 'count')
+      .getRawOne<{ count: string }>();
+    const totalItems = parseInt(totalCount?.count || '0', 10);
 
     // Now build the main query that joins topics and other relations
-    // Filter by the distinct post IDs from the subquery
+    // Filter by the distinct post IDs
     const query = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
@@ -153,11 +214,22 @@ export class PostsController {
         'token_performance_view',
         'token.sale_address = token_performance_view.sale_address',
       )
-      .where(`post.id IN (${distinctSubQuery.getQuery()})`)
-      .setParameters(distinctSubQuery.getParameters())
+      .where('post.id IN (:...postIds)', { postIds })
       .orderBy(`post.${orderColumn}`, orderDirection);
 
-    return paginate(query, { page, limit });
+    // Execute the main query
+    const items = await query.getMany();
+    
+    // Return paginated result
+    return {
+      items,
+      meta: {
+        itemCount: items.length,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        currentPage: page,
+      },
+    };
   }
 
   @ApiQuery({ name: 'window', enum: ['24h', '7d', 'all'], required: false })
