@@ -139,11 +139,11 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
     const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
       await Promise.all([
-        this.aePricingService.getPriceData(_amount),
-        this.aePricingService.getPriceData(_unit_price),
-        this.aePricingService.getPriceData(_previous_buy_price),
-        this.aePricingService.getPriceData(_buy_price),
-        this.aePricingService.getPriceData(_market_cap),
+        this.aePricingService.getPriceData(_amount, tx.created_at),
+        this.aePricingService.getPriceData(_unit_price, tx.created_at),
+        this.aePricingService.getPriceData(_previous_buy_price, tx.created_at),
+        this.aePricingService.getPriceData(_buy_price, tx.created_at),
+        this.aePricingService.getPriceData(_market_cap, tx.created_at),
       ]);
 
     // those not available on create_community without initial buy
