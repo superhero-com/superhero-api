@@ -142,6 +142,9 @@ export class PopularRankingService {
         }
       }
 
+      // Calculate offset for recent posts: if we've skipped popular posts, adjust offset accordingly
+      const recentOffset = Math.max(0, offset - totalPopular);
+
       // Fetch recent posts excluding popular ones
       const recentPosts = await this.postRepository
         .createQueryBuilder('post')
@@ -154,6 +157,7 @@ export class PopularRankingService {
           allPopularIds.length > 0 ? { popularIds: allPopularIds } : {},
         )
         .orderBy('post.created_at', 'DESC')
+        .skip(recentOffset)
         .limit(remainingLimit)
         .getMany();
 
