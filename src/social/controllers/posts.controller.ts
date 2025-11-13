@@ -85,7 +85,6 @@ export class PostsController {
   ) {
     const query = this.postRepository
       .createQueryBuilder('post')
-      .distinct(true) // Prevent duplicate posts when a post has multiple topics
       .leftJoinAndSelect('post.topics', 'topic')
       .leftJoinAndMapOne(
         'topic.token',
@@ -136,6 +135,11 @@ export class PostsController {
         query.andWhere(`(${topicConditions})`, topicParams);
       }
     }
+
+    // Use distinct to prevent duplicate posts when they have multiple topics
+    // This ensures each post appears only once per page
+    // Must be called before orderBy to avoid PostgreSQL issues
+    query.distinct(true);
 
     // Add ordering
     if (orderBy) {
