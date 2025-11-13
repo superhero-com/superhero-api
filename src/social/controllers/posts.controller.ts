@@ -85,6 +85,7 @@ export class PostsController {
   ) {
     const query = this.postRepository
       .createQueryBuilder('post')
+      .distinct(true) // Prevent duplicate posts when a post has multiple topics
       .leftJoinAndSelect('post.topics', 'topic')
       .leftJoinAndMapOne(
         'topic.token',
