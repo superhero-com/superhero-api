@@ -268,7 +268,7 @@ export class PostsController {
       // If we're on or past the last page of popular posts, don't set totalPages (infinite pagination)
       // This allows pagination to continue seamlessly into recent posts
       // Otherwise, calculate totalPages based on popular posts only
-      const totalPages = totalPopularItems && offset + limit < totalPopularItems
+      const totalPages = totalPopularItems && offset < totalPopularItems
         ? Math.ceil(totalPopularItems / limit)
         : undefined;
       
