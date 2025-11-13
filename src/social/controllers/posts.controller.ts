@@ -83,6 +83,61 @@ export class PostsController {
     @Query('account_address') account_address?: string,
     @Query('topics') topics?: string,
   ) {
+    // Build base query for filtering to get distinct post IDs
+    // This prevents duplicates when posts have multiple topics
+    const baseQuery = this.postRepository
+      .createQueryBuilder('post')
+      .leftJoin('post.topics', 'topic')
+      .where('post.is_hidden = false');
+
+    // Add search functionality
+    if (search) {
+      const searchTerm = `%${search}%`;
+      baseQuery.andWhere(
+        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
+        { searchTerm },
+      );
+    }
+
+    if (account_address) {
+      baseQuery.andWhere('post.sender_address = :account_address', {
+        account_address,
+      });
+    }
+
+    // Add topic filtering
+    if (topics) {
+      const topicNames = topics
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+      if (topicNames.length > 0) {
+        const topicConditions = topicNames
+          .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
+          .join(' OR ');
+
+        const topicParams = {};
+        topicNames.forEach((topicName, index) => {
+          topicParams[`topicSearch${index}`] = `%${topicName}%`;
+        });
+
+        baseQuery.andWhere(`(${topicConditions})`, topicParams);
+      }
+    }
+
+    // Get distinct post IDs using groupBy with aggregate to prevent duplicates
+    // This ensures each post appears only once even with multiple topics
+    const orderColumn = orderBy || 'created_at';
+    // Use MIN/MAX aggregate to get one value per post.id for ordering
+    const aggregateFn = orderDirection === 'DESC' ? 'MAX' : 'MIN';
+    const distinctSubQuery = baseQuery
+      .select('post.id')
+      .addSelect(`${aggregateFn}(post.${orderColumn})`, 'order_value')
+      .groupBy('post.id')
+      .orderBy('order_value', orderDirection);
+
+    // Now build the main query that joins topics and other relations
+    // Filter by the distinct post IDs from the subquery
     const query = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
@@ -98,53 +153,9 @@ export class PostsController {
         'token_performance_view',
         'token.sale_address = token_performance_view.sale_address',
       )
-      .where('post.is_hidden = false');
-
-    // Add search functionality
-    if (search) {
-      const searchTerm = `%${search}%`;
-      query.andWhere(
-        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
-        { searchTerm },
-      );
-    }
-
-    if (account_address) {
-      query.andWhere('post.sender_address = :account_address', {
-        account_address,
-      });
-    }
-
-    // Add topic filtering (search-like)
-    if (topics) {
-      const topicNames = topics
-        .split(',')
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0);
-      if (topicNames.length > 0) {
-        // Use ILIKE for case-insensitive partial matching
-        const topicConditions = topicNames
-          .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
-          .join(' OR ');
-
-        const topicParams = {};
-        topicNames.forEach((topicName, index) => {
-          topicParams[`topicSearch${index}`] = `%${topicName}%`;
-        });
-
-        query.andWhere(`(${topicConditions})`, topicParams);
-      }
-    }
-
-    // Use distinct to prevent duplicate posts when they have multiple topics
-    // This ensures each post appears only once per page
-    // Must be called before orderBy to avoid PostgreSQL issues
-    query.distinct(true);
-
-    // Add ordering
-    if (orderBy) {
-      query.orderBy(`post.${orderBy}`, orderDirection);
-    }
+      .where(`post.id IN (${distinctSubQuery.getQuery()})`)
+      .setParameters(distinctSubQuery.getParameters())
+      .orderBy(`post.${orderColumn}`, orderDirection);
 
     return paginate(query, { page, limit });
   }
