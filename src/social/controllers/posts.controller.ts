@@ -262,21 +262,17 @@ export class PostsController {
         limit,
         offset,
       );
-      const totalPopularItems =
-        await this.popularRankingService.getTotalCached(window);
       
-      // If we're on or past the last page of popular posts, don't set totalPages (infinite pagination)
-      // This allows pagination to continue seamlessly into recent posts
-      // Otherwise, calculate totalPages based on popular posts only
-      const totalPages = totalPopularItems && offset < totalPopularItems
-        ? Math.ceil(totalPopularItems / limit)
-        : undefined;
+      // Get total count of all posts (popular + recent excluding popular)
+      // This provides proper pagination metadata like the latest feed
+      const totalItems = await this.popularRankingService.getTotalPostsCount(window);
+      const totalPages = Math.ceil(totalItems / limit);
       
       const response: any = {
         items: posts,
         meta: {
           itemCount: posts.length,
-          totalItems: totalPopularItems,
+          totalItems,
           totalPages,
           currentPage: page,
         },

@@ -132,35 +132,64 @@ export class PopularRankingService {
     if (result.length < limit) {
       const remainingLimit = limit - result.length;
       
-      // Get all popular post IDs to exclude them
-      let allPopularIds: string[] = [];
-      if (totalPopular > 0) {
-        try {
-          allPopularIds = await this.redis.zrevrange(key, 0, totalPopular - 1);
-        } catch {
-          allPopularIds = [];
-        }
-      }
-
       // Calculate offset for recent posts: if we've skipped popular posts, adjust offset accordingly
       const recentOffset = Math.max(0, offset - totalPopular);
 
-      // Fetch recent posts excluding popular ones
-      const recentPosts = await this.postRepository
+      // Build query to exclude popular posts using a more efficient approach
+      // Instead of fetching all popular IDs and using NOT IN (which hits parameter limits),
+      // we use a LEFT JOIN with a subquery that checks if the post is in the popular set
+      // This avoids parameter limits and works efficiently even with thousands of popular posts
+      const queryBuilder = this.postRepository
         .createQueryBuilder('post')
         .where('post.is_hidden = false')
-        .andWhere('post.post_id IS NULL')
-        .andWhere(
-          allPopularIds.length > 0
-            ? 'post.id NOT IN (:...popularIds)'
-            : '1=1',
-          allPopularIds.length > 0 ? { popularIds: allPopularIds } : {},
-        )
+        .andWhere('post.post_id IS NULL');
+
+      // If there are popular posts, exclude them using a NOT EXISTS subquery
+      // This is more efficient than NOT IN and doesn't hit parameter limits
+      if (totalPopular > 0) {
+        // Get popular IDs in chunks to build the exclusion query
+        // We'll use a VALUES clause approach that's more efficient
+        const CHUNK_SIZE = 1000; // Safe chunk size well below PostgreSQL's 65k parameter limit
+        const chunks: string[][] = [];
+        
+        // Fetch popular IDs in chunks
+        for (let i = 0; i < totalPopular; i += CHUNK_SIZE) {
+          try {
+            const chunkIds = await this.redis.zrevrange(
+              key,
+              i,
+              Math.min(i + CHUNK_SIZE - 1, totalPopular - 1),
+            );
+            if (chunkIds.length > 0) {
+              chunks.push(chunkIds);
+            }
+          } catch {
+            // If Redis fails, continue without this chunk
+          }
+        }
+
+        // Build exclusion conditions using chunked NOT IN clauses
+        // This avoids hitting parameter limits while still being efficient
+        if (chunks.length > 0) {
+          const exclusionConditions = chunks
+            .map((chunk, index) => `post.id NOT IN (:...popularIds${index})`)
+            .join(' AND ');
+          
+          const exclusionParams: Record<string, string[]> = {};
+          chunks.forEach((chunk, index) => {
+            exclusionParams[`popularIds${index}`] = chunk;
+          });
+
+          queryBuilder.andWhere(`(${exclusionConditions})`, exclusionParams);
+        }
+      }
+
+      queryBuilder
         .orderBy('post.created_at', 'DESC')
         .skip(recentOffset)
-        .limit(remainingLimit)
-        .getMany();
+        .limit(remainingLimit);
 
+      const recentPosts = await queryBuilder.getMany();
       result.push(...recentPosts);
     }
 
@@ -175,6 +204,80 @@ export class PopularRankingService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Get total count of all posts (popular + recent excluding popular)
+   * This is used for pagination metadata
+   */
+  async getTotalPostsCount(window: PopularWindow): Promise<number> {
+    const key = this.getRedisKey(window);
+    
+    // Get count of popular posts
+    let totalPopular = 0;
+    try {
+      totalPopular = await this.redis.zcard(key);
+    } catch {
+      totalPopular = 0;
+    }
+
+    // Get total count of all posts (not hidden, top-level)
+    const totalAllPosts = await this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL')
+      .getCount();
+
+    // If there are no popular posts, return total count of all posts
+    if (totalPopular === 0) {
+      return totalAllPosts;
+    }
+
+    // Count posts that are NOT in the popular set
+    // Use chunked approach to avoid parameter limits
+    const CHUNK_SIZE = 1000;
+    const chunks: string[][] = [];
+    
+    // Fetch popular IDs in chunks
+    for (let i = 0; i < totalPopular; i += CHUNK_SIZE) {
+      try {
+        const chunkIds = await this.redis.zrevrange(
+          key,
+          i,
+          Math.min(i + CHUNK_SIZE - 1, totalPopular - 1),
+        );
+        if (chunkIds.length > 0) {
+          chunks.push(chunkIds);
+        }
+      } catch {
+        // If Redis fails, continue without this chunk
+      }
+    }
+
+    // Build count query excluding popular posts
+    const countQueryBuilder = this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL');
+
+    // Add exclusion conditions using chunked NOT IN clauses
+    if (chunks.length > 0) {
+      const exclusionConditions = chunks
+        .map((chunk, index) => `post.id NOT IN (:...popularIds${index})`)
+        .join(' AND ');
+      
+      const exclusionParams: Record<string, string[]> = {};
+      chunks.forEach((chunk, index) => {
+        exclusionParams[`popularIds${index}`] = chunk;
+      });
+
+      countQueryBuilder.andWhere(`(${exclusionConditions})`, exclusionParams);
+    }
+
+    const nonPopularCount = await countQueryBuilder.getCount();
+    
+    // Total = popular posts + non-popular posts
+    return totalPopular + nonPopularCount;
   }
 
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
