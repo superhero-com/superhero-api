@@ -74,16 +74,23 @@ export class PopularRankingService {
   ) {
     const key = this.getRedisKey(window);
 
-    // Get total count of popular posts
-    let totalPopular = 0;
+    // Get popular post ranks from Redis (ID -> rank/score)
+    let popularRanks = new Map<string, number>();
     try {
-      totalPopular = await this.redis.zcard(key);
+      const totalPopular = await this.redis.zcard(key);
+      if (totalPopular > 0) {
+        // Fetch all popular IDs with their scores
+        const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
+        for (let i = 0; i < cached.length; i += 2) {
+          popularRanks.set(cached[i], parseFloat(cached[i + 1]));
+        }
+      }
     } catch {
-      totalPopular = 0;
+      popularRanks = new Map();
     }
 
     // If no popular posts cached, try to compute them
-    if (totalPopular === 0) {
+    if (popularRanks.size === 0) {
       const fallbackMax =
         window === 'all'
           ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
@@ -92,79 +99,57 @@ export class PopularRankingService {
             : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
       await this.recompute(window, maxCandidates ?? fallbackMax);
       try {
-        totalPopular = await this.redis.zcard(key);
-      } catch {
-        totalPopular = 0;
-      }
-    }
-
-    const result: Post[] = [];
-    let popularIds: string[] = [];
-
-    // Fetch popular posts if we haven't exhausted them
-    if (offset < totalPopular) {
-      const popularLimit = Math.min(limit, totalPopular - offset);
-      let cached: string[] = [];
-      try {
-        cached = await this.redis.zrevrange(
-          key,
-          offset,
-          offset + popularLimit - 1,
-          'WITHSCORES',
-        );
-      } catch {
-        cached = [];
-      }
-      
-      if (cached.length > 0) {
-        const ids = [] as string[];
-        for (let i = 0; i < cached.length; i += 2) ids.push(cached[i]);
-        popularIds = ids;
-        const posts = await this.postRepository.findBy({ id: In(ids) });
-        // keep the order as in ids
-        const postById = new Map(posts.map((p) => [p.id, p] as const));
-        const orderedPosts = ids.map((id) => postById.get(id)).filter(Boolean) as Post[];
-        result.push(...orderedPosts);
-      }
-    }
-
-    // If we need more posts (exhausted popular posts), fetch recent posts excluding popular ones
-    if (result.length < limit) {
-      const remainingLimit = limit - result.length;
-      
-      // Get all popular post IDs to exclude them
-      let allPopularIds: string[] = [];
-      if (totalPopular > 0) {
-        try {
-          allPopularIds = await this.redis.zrevrange(key, 0, totalPopular - 1);
-        } catch {
-          allPopularIds = [];
+        const totalPopular = await this.redis.zcard(key);
+        if (totalPopular > 0) {
+          const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
+          for (let i = 0; i < cached.length; i += 2) {
+            popularRanks.set(cached[i], parseFloat(cached[i + 1]));
+          }
         }
+      } catch {
+        // Continue with empty popular ranks
       }
-
-      // Calculate offset for recent posts: if we've skipped popular posts, adjust offset accordingly
-      const recentOffset = Math.max(0, offset - totalPopular);
-
-      // Fetch recent posts excluding popular ones
-      const recentPosts = await this.postRepository
-        .createQueryBuilder('post')
-        .where('post.is_hidden = false')
-        .andWhere('post.post_id IS NULL')
-        .andWhere(
-          allPopularIds.length > 0
-            ? 'post.id NOT IN (:...popularIds)'
-            : '1=1',
-          allPopularIds.length > 0 ? { popularIds: allPopularIds } : {},
-        )
-        .orderBy('post.created_at', 'DESC')
-        .skip(recentOffset)
-        .limit(remainingLimit)
-        .getMany();
-
-      result.push(...recentPosts);
     }
 
-    return result;
+    // Fetch latest posts ordered by created_at DESC
+    // We fetch a bit more than needed to account for reordering
+    // This ensures we have enough posts after sorting
+    const fetchLimit = limit + Math.min(popularRanks.size, limit);
+    const posts = await this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL')
+      .orderBy('post.created_at', 'DESC')
+      .skip(offset)
+      .limit(fetchLimit)
+      .getMany();
+
+    // Sort posts: popular posts first (by rank DESC), then others (by created_at DESC)
+    const sortedPosts = posts.sort((a, b) => {
+      const aRank = popularRanks.get(a.id);
+      const bRank = popularRanks.get(b.id);
+      
+      // If both are popular, sort by rank (higher rank first)
+      if (aRank !== undefined && bRank !== undefined) {
+        return bRank - aRank;
+      }
+      
+      // If only a is popular, it comes first
+      if (aRank !== undefined) {
+        return -1;
+      }
+      
+      // If only b is popular, it comes first
+      if (bRank !== undefined) {
+        return 1;
+      }
+      
+      // Neither is popular, sort by created_at DESC (newer first)
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    // Return only the requested limit
+    return sortedPosts.slice(0, limit);
   }
 
   // Public metadata helper to keep encapsulation
@@ -175,6 +160,20 @@ export class PopularRankingService {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Get total count of all posts (not hidden, top-level)
+   * This is used for pagination metadata
+   * Since we're now showing latest posts with popular at top (not excluding),
+   * we just need the total count of all posts
+   */
+  async getTotalPostsCount(window: PopularWindow): Promise<number> {
+    return await this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL')
+      .getCount();
   }
 
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
