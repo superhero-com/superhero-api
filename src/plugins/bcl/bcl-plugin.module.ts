@@ -20,10 +20,13 @@ import { TransactionDataService } from './services/transaction-data.service';
 import { TransactionPersistenceService } from './services/transaction-persistence.service';
 import { TransactionProcessorService } from './services/transaction-processor.service';
 import { TokenHolderService } from './services/token-holder.service';
+import { BclTransaction } from './entities/bcl-transaction.view';
+import { BclTransactionsService } from './services/bcl-transactions.service';
+import { BclTransactionsController } from './controllers/bcl-transactions.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token]),
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
@@ -42,7 +45,9 @@ import { TokenHolderService } from './services/token-holder.service';
     TransactionProcessorService,
     BclPluginSyncService,
     BclPlugin,
+    BclTransactionsService,
   ],
+  controllers: [BclTransactionsController],
   exports: [BclPlugin],
 })
 export class BclPluginModule {}
