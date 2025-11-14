@@ -501,12 +501,16 @@ export class PopularRankingService {
           w.invites * invitesFactor +
           w.ownedTrends * ownedNorm;
 
+        // Apply gravity based on window
+        // For "all" window, no gravity (0.0) means all posts compete equally regardless of age
+        // This allows all-time great posts to shine, not just recent popular ones
         let gravity = 0.0;
         if (window === '7d') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY_7D;
         } else if (window === '24h') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY;
         }
+        // window === 'all' uses gravity = 0.0 (no time decay)
         const score =
           numerator /
           Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
