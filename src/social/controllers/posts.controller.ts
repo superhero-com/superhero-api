@@ -256,17 +256,20 @@ export class PostsController {
     @Query('debug') debug?: number,
   ) {
     const offset = (page - 1) * limit;
+    console.error(`[PostsController] popular endpoint called: window=${window}, page=${page}, limit=${limit}, offset=${offset}`);
     try {
+      // Get total count of all posts (not filtered by window)
+      // The window only affects which posts are considered "popular" (from Redis)
+      const totalItems = await this.popularRankingService.getTotalPostsCount(window);
+      const totalPages = Math.ceil(totalItems / limit);
+      console.error(`[PostsController] totalItems=${totalItems}, totalPages=${totalPages}`);
+      
       const posts = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
-      
-      // Get total count of all posts (popular + recent excluding popular)
-      // This provides proper pagination metadata like the latest feed
-      const totalItems = await this.popularRankingService.getTotalPostsCount(window);
-      const totalPages = Math.ceil(totalItems / limit);
+      console.error(`[PostsController] getPopularPosts returned ${posts.length} posts`);
       
       const response: any = {
         items: posts,

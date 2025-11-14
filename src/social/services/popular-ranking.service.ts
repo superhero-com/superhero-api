@@ -73,19 +73,23 @@ export class PopularRankingService {
     maxCandidates?: number,
   ) {
     const key = this.getRedisKey(window);
+    console.error(`[PopularRankingService] getPopularPosts called: window=${window}, limit=${limit}, offset=${offset}`);
 
     // Get popular post ranks from Redis (ID -> rank/score)
     let popularRanks = new Map<string, number>();
     try {
       const totalPopular = await this.redis.zcard(key);
+      console.error(`[PopularRankingService] Redis key ${key} has ${totalPopular} items`);
       if (totalPopular > 0) {
         // Fetch all popular IDs with their scores
         const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
         for (let i = 0; i < cached.length; i += 2) {
           popularRanks.set(cached[i], parseFloat(cached[i + 1]));
         }
+        console.error(`[PopularRankingService] Loaded ${popularRanks.size} popular ranks from Redis`);
       }
-    } catch {
+    } catch (error) {
+      console.error(`[PopularRankingService] Error loading from Redis:`, error);
       popularRanks = new Map();
     }
 
@@ -97,35 +101,87 @@ export class PopularRankingService {
           : window === '7d'
             ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
             : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
-      await this.recompute(window, maxCandidates ?? fallbackMax);
       try {
+        console.error(`[PopularRankingService] Calling recompute for window ${window}`);
+        await this.recompute(window, maxCandidates ?? fallbackMax);
         const totalPopular = await this.redis.zcard(key);
+        console.error(`[PopularRankingService] After recompute, Redis key ${key} has ${totalPopular} items`);
         if (totalPopular > 0) {
           const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
           for (let i = 0; i < cached.length; i += 2) {
             popularRanks.set(cached[i], parseFloat(cached[i + 1]));
           }
+          this.logger.log(`Recomputed popular posts for window ${window}: ${totalPopular} posts cached`);
+        } else {
+          this.logger.warn(`Recompute completed but no posts cached for window ${window}`);
+          console.error(`[PopularRankingService] WARNING: Recompute completed but Redis is empty for ${window}`);
         }
-      } catch {
+      } catch (error) {
+        this.logger.error(`Failed to recompute popular posts for window ${window}:`, error);
+        console.error(`[PopularRankingService] ERROR in recompute for ${window}:`, error);
         // Continue with empty popular ranks
       }
     }
 
-    // Fetch latest posts ordered by created_at DESC
-    // We fetch a bit more than needed to account for reordering
-    // This ensures we have enough posts after sorting
-    const fetchLimit = limit + Math.min(popularRanks.size, limit);
-    const posts = await this.postRepository
-      .createQueryBuilder('post')
-      .where('post.is_hidden = false')
-      .andWhere('post.post_id IS NULL')
-      .orderBy('post.created_at', 'DESC')
-      .skip(offset)
-      .limit(fetchLimit)
-      .getMany();
+    // Strategy: Always show top-ranked popular posts first, then fill with recent posts
+    // Popular posts should always be at the top regardless of pagination
+    const posts: Post[] = [];
+    
+    if (popularRanks.size > 0) {
+      // Get ALL top-ranked popular post IDs from Redis (sorted by score DESC)
+      // We always fetch from the top, not paginated, to ensure popular posts are always first
+      const allPopularIds = Array.from(popularRanks.entries())
+        .sort((a, b) => b[1] - a[1]) // Sort by score DESC
+        .map(([id]) => id);
+      
+      // Fetch all popular posts (we'll paginate the final result)
+      if (allPopularIds.length > 0) {
+        const popularPosts = await this.postRepository.findBy({
+          id: In(allPopularIds),
+          is_hidden: false,
+          post_id: null,
+        });
+        
+        // Sort by rank (matching Redis order)
+        popularPosts.sort((a, b) => {
+          const aRank = popularRanks.get(a.id) || 0;
+          const bRank = popularRanks.get(b.id) || 0;
+          return bRank - aRank;
+        });
+        
+        posts.push(...popularPosts);
+      }
+    }
+    
+    // If we need more posts (or no popular posts), fetch recent posts
+    // Calculate how many we need, accounting for popular posts we already have
+    const popularCount = posts.length;
+    const remaining = limit - popularCount;
+    
+    if (remaining > 0) {
+      // Fetch recent posts, excluding ones already in popular set
+      const existingIds = new Set(posts.map(p => p.id));
+      const fetchLimit = remaining * 2; // Fetch extra to account for duplicates
+      
+      const recentPosts = await this.postRepository
+        .createQueryBuilder('post')
+        .where('post.is_hidden = false')
+        .andWhere('post.post_id IS NULL')
+        .andWhere('post.id NOT IN (:...existingIds)', { existingIds: existingIds.size > 0 ? Array.from(existingIds) : [''] })
+        .orderBy('post.created_at', 'DESC')
+        .limit(fetchLimit)
+        .getMany();
+      
+      // Add recent posts (already filtered to exclude popular ones)
+      posts.push(...recentPosts.slice(0, remaining));
+    }
+    
+    // Now paginate the combined result (popular first, then recent)
+    const paginatedPosts = posts.slice(offset, offset + limit);
 
-    // Sort posts: popular posts first (by rank DESC), then others (by created_at DESC)
-    const sortedPosts = posts.sort((a, b) => {
+    // Posts are already sorted: popular posts first (by rank DESC), then recent posts (by created_at DESC)
+    // Just ensure final order is correct
+    const sortedPosts = paginatedPosts.sort((a, b) => {
       const aRank = popularRanks.get(a.id);
       const bRank = popularRanks.get(b.id);
       
@@ -147,9 +203,13 @@ export class PopularRankingService {
       // Neither is popular, sort by created_at DESC (newer first)
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
+    
+    // Log how many popular posts are in the fetched set
+    const popularInSet = sortedPosts.filter(p => popularRanks.has(p.id)).length;
+    console.error(`[PopularRankingService] Returning ${sortedPosts.length} posts (${popularInSet} popular, ${sortedPosts.length - popularInSet} recent) for offset ${offset}, limit ${limit}`);
 
-    // Return only the requested limit
-    return sortedPosts.slice(0, limit);
+    // Return the paginated and sorted result
+    return sortedPosts;
   }
 
   // Public metadata helper to keep encapsulation
@@ -166,7 +226,8 @@ export class PopularRankingService {
    * Get total count of all posts (not hidden, top-level)
    * This is used for pagination metadata
    * Since we're now showing latest posts with popular at top (not excluding),
-   * we just need the total count of all posts
+   * we show ALL posts, just reordered with popular ones first
+   * The window parameter only affects which posts are considered "popular" (from Redis)
    */
   async getTotalPostsCount(window: PopularWindow): Promise<number> {
     return await this.postRepository
@@ -181,6 +242,19 @@ export class PopularRankingService {
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
+    console.error(`[PopularRankingService] Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
+    this.logger.log(`Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
+    
+    // Verify Redis connection
+    try {
+      const pingResult = await this.redis.ping();
+      console.error(`[PopularRankingService] Redis ping result: ${pingResult}`);
+    } catch (error) {
+      console.error(`[PopularRankingService] Redis connection error:`, error);
+      this.logger.error(`Redis connection error:`, error);
+      throw error;
+    }
+
     // Fetch candidate posts (top-level, not hidden) within window
     const candidates = await this.postRepository
       .createQueryBuilder('post')
@@ -194,9 +268,17 @@ export class PopularRankingService {
       .limit(maxCandidates)
       .getMany();
 
+    this.logger.log(`Found ${candidates.length} candidate posts for window ${window}`);
+
     if (candidates.length === 0) {
       await this.redis.del(key);
+      this.logger.warn(`No candidates found for window ${window}, deleted Redis key`);
       return;
+    }
+
+    // Log first few candidate IDs for debugging
+    if (candidates.length > 0) {
+      this.logger.log(`First 5 candidate IDs: ${candidates.slice(0, 5).map(c => c.id).join(', ')}`);
     }
 
     // Preload tips per post (sum and count and unique tippers)
@@ -441,14 +523,70 @@ export class PopularRankingService {
     }
     const eligible = scored.filter((s) => s.score >= scoreFloor);
 
-    // Cache in Redis ZSET
-    const multi = this.redis.multi();
-    multi.del(key);
-    for (const item of eligible) {
-      multi.zadd(key, item.score.toString(), item.postId);
+    this.logger.log(`Window ${window}: ${scored.length} posts scored, ${eligible.length} eligible (scoreFloor: ${scoreFloor})`);
+    
+    // Log top scores for debugging
+    if (scored.length > 0) {
+      const topScores = scored
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+        .map(s => `${s.postId}:${s.score.toFixed(4)}`)
+        .join(', ');
+      this.logger.log(`Top 5 scores: ${topScores}`);
     }
-    multi.expire(key, POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS);
-    await multi.exec();
+
+    // Cache in Redis ZSET
+    try {
+      // Delete existing key first
+      await this.redis.del(key);
+      
+      if (eligible.length === 0) {
+        this.logger.warn(`No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`);
+        console.error(`[PopularRankingService] No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`);
+        return;
+      }
+      
+      // Use pipeline instead of multi for better error handling
+      const pipeline = this.redis.pipeline();
+      for (const item of eligible) {
+        pipeline.zadd(key, item.score.toString(), item.postId);
+      }
+      pipeline.expire(key, POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS);
+      const results = await pipeline.exec();
+      
+      // Check for errors in results
+      if (results === null) {
+        const error = new Error(`Redis pipeline failed for window ${window}`);
+        this.logger.error(error.message);
+        console.error(`[PopularRankingService] ${error.message}`);
+        throw error;
+      }
+      
+      const errors = results.filter((result) => result[0] !== null).map((result) => result[0]);
+      if (errors.length > 0) {
+        const error = new Error(`Redis pipeline errors for window ${window}: ${JSON.stringify(errors)}`);
+        this.logger.error(error.message);
+        console.error(`[PopularRankingService] ${error.message}`);
+        throw error;
+      }
+      
+      this.logger.log(`Successfully cached ${eligible.length} popular posts in Redis key ${key}`);
+      console.error(`[PopularRankingService] Successfully cached ${eligible.length} popular posts in Redis key ${key}`);
+      
+      // Verify the cache was written
+      const verifyCount = await this.redis.zcard(key);
+      console.error(`[PopularRankingService] Verified Redis key ${key} has ${verifyCount} items after caching`);
+      if (verifyCount !== eligible.length) {
+        const error = new Error(`Redis key ${key} has ${verifyCount} items but expected ${eligible.length}`);
+        this.logger.error(error.message);
+        console.error(`[PopularRankingService] ERROR: ${error.message}`);
+        throw error;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to cache popular posts in Redis for window ${window}:`, error);
+      console.error(`[PopularRankingService] ERROR caching popular posts for window ${window}:`, error);
+      throw error;
+    }
   }
 
   // Debug helper: returns top-N with feature breakdowns without caching side-effects

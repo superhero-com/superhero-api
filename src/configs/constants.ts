@@ -202,7 +202,7 @@ export const POPULAR_RANKING_CONFIG = {
     popular7d: 'popular:7d',
     popularAll: 'popular:all',
   },
-  REDIS_TTL_SECONDS: 120,
+  REDIS_TTL_SECONDS: 30, // 30 seconds - very fresh popular feed
 
   // owned trends normalization
   OWNED_TRENDS_MAX_TRENDING_SCORE: 100,
