@@ -123,21 +123,22 @@ export class PopularRankingService {
       }
     }
 
-    // Strategy: Always show top-ranked popular posts first, then fill with recent posts
-    // Popular posts should always be at the top regardless of pagination
+    // Strategy: Only return popular posts (filtered by window)
+    // Fetch popular post IDs from Redis (already filtered by window in recompute)
     const posts: Post[] = [];
     
     if (popularRanks.size > 0) {
-      // Get ALL top-ranked popular post IDs from Redis (sorted by score DESC)
-      // We always fetch from the top, not paginated, to ensure popular posts are always first
+      // Get popular post IDs sorted by score DESC
       const allPopularIds = Array.from(popularRanks.entries())
         .sort((a, b) => b[1] - a[1]) // Sort by score DESC
         .map(([id]) => id);
       
-      // Fetch all popular posts (we'll paginate the final result)
-      if (allPopularIds.length > 0) {
+      // Paginate the popular IDs before fetching from DB
+      const paginatedIds = allPopularIds.slice(offset, offset + limit);
+      
+      if (paginatedIds.length > 0) {
         const popularPosts = await this.postRepository.findBy({
-          id: In(allPopularIds),
+          id: In(paginatedIds),
           is_hidden: false,
           post_id: null,
         });
@@ -153,63 +154,9 @@ export class PopularRankingService {
       }
     }
     
-    // If we need more posts (or no popular posts), fetch recent posts
-    // Calculate how many we need, accounting for popular posts we already have
-    const popularCount = posts.length;
-    const remaining = limit - popularCount;
-    
-    if (remaining > 0) {
-      // Fetch recent posts, excluding ones already in popular set
-      const existingIds = new Set(posts.map(p => p.id));
-      const fetchLimit = remaining * 2; // Fetch extra to account for duplicates
-      
-      const recentPosts = await this.postRepository
-        .createQueryBuilder('post')
-        .where('post.is_hidden = false')
-        .andWhere('post.post_id IS NULL')
-        .andWhere('post.id NOT IN (:...existingIds)', { existingIds: existingIds.size > 0 ? Array.from(existingIds) : [''] })
-        .orderBy('post.created_at', 'DESC')
-        .limit(fetchLimit)
-        .getMany();
-      
-      // Add recent posts (already filtered to exclude popular ones)
-      posts.push(...recentPosts.slice(0, remaining));
-    }
-    
-    // Now paginate the combined result (popular first, then recent)
-    const paginatedPosts = posts.slice(offset, offset + limit);
+    console.error(`[PopularRankingService] Returning ${posts.length} popular posts for offset ${offset}, limit ${limit}`);
 
-    // Posts are already sorted: popular posts first (by rank DESC), then recent posts (by created_at DESC)
-    // Just ensure final order is correct
-    const sortedPosts = paginatedPosts.sort((a, b) => {
-      const aRank = popularRanks.get(a.id);
-      const bRank = popularRanks.get(b.id);
-      
-      // If both are popular, sort by rank (higher rank first)
-      if (aRank !== undefined && bRank !== undefined) {
-        return bRank - aRank;
-      }
-      
-      // If only a is popular, it comes first
-      if (aRank !== undefined) {
-        return -1;
-      }
-      
-      // If only b is popular, it comes first
-      if (bRank !== undefined) {
-        return 1;
-      }
-      
-      // Neither is popular, sort by created_at DESC (newer first)
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-    
-    // Log how many popular posts are in the fetched set
-    const popularInSet = sortedPosts.filter(p => popularRanks.has(p.id)).length;
-    console.error(`[PopularRankingService] Returning ${sortedPosts.length} posts (${popularInSet} popular, ${sortedPosts.length - popularInSet} recent) for offset ${offset}, limit ${limit}`);
-
-    // Return the paginated and sorted result
-    return sortedPosts;
+    return posts;
   }
 
   // Public metadata helper to keep encapsulation
@@ -223,19 +170,84 @@ export class PopularRankingService {
   }
 
   /**
-   * Get total count of all posts (not hidden, top-level)
-   * This is used for pagination metadata
-   * Since we're now showing latest posts with popular at top (not excluding),
-   * we show ALL posts, just reordered with popular ones first
-   * The window parameter only affects which posts are considered "popular" (from Redis)
+   * Get total count of popular posts for a given window
+   * Uses the exact same logic as getPopularPosts to ensure consistency
    */
   async getTotalPostsCount(window: PopularWindow): Promise<number> {
-    return await this.postRepository
-      .createQueryBuilder('post')
-      .where('post.is_hidden = false')
-      .andWhere('post.post_id IS NULL')
-      .getCount();
+    const key = this.getRedisKey(window);
+    try {
+      // Use the same logic as getPopularPosts to get popular ranks
+      let popularRanks = new Map<string, number>();
+      const totalPopular = await this.redis.zcard(key);
+      console.error(`[PopularRankingService] getTotalPostsCount for window ${window}, key ${key}: Redis count=${totalPopular}`);
+      
+      if (totalPopular > 0) {
+        // Fetch all popular IDs with their scores (same as getPopularPosts)
+        const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
+        for (let i = 0; i < cached.length; i += 2) {
+          popularRanks.set(cached[i], parseFloat(cached[i + 1]));
+        }
+        console.error(`[PopularRankingService] Loaded ${popularRanks.size} popular ranks from Redis`);
+      }
+      
+      // If no popular posts cached, try to compute them (same as getPopularPosts)
+      if (popularRanks.size === 0) {
+        const fallbackMax =
+          window === 'all'
+            ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
+            : window === '7d'
+              ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+              : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+        try {
+          console.error(`[PopularRankingService] getTotalPostsCount: Calling recompute for window ${window}`);
+          await this.recompute(window, fallbackMax);
+          const totalPopularAfterRecompute = await this.redis.zcard(key);
+          console.error(`[PopularRankingService] getTotalPostsCount: After recompute, Redis key ${key} has ${totalPopularAfterRecompute} items`);
+          if (totalPopularAfterRecompute > 0) {
+            const cached = await this.redis.zrevrange(key, 0, totalPopularAfterRecompute - 1, 'WITHSCORES');
+            for (let i = 0; i < cached.length; i += 2) {
+              popularRanks.set(cached[i], parseFloat(cached[i + 1]));
+            }
+            console.error(`[PopularRankingService] getTotalPostsCount: Loaded ${popularRanks.size} popular ranks after recompute`);
+          }
+        } catch (error) {
+          console.error(`[PopularRankingService] getTotalPostsCount: Error in recompute for ${window}:`, error);
+          // Continue with empty popular ranks
+        }
+      }
+      
+      if (popularRanks.size === 0) {
+        return 0;
+      }
+      
+      // Get popular post IDs sorted by score DESC (same as getPopularPosts)
+      const allPopularIds = Array.from(popularRanks.entries())
+        .sort((a, b) => b[1] - a[1]) // Sort by score DESC
+        .map(([id]) => id);
+      
+      // Verify how many actually exist in DB (same filtering as getPopularPosts)
+      // Use chunked query to avoid parameter limits
+      const CHUNK_SIZE = 1000;
+      let actualCount = 0;
+      
+      for (let i = 0; i < allPopularIds.length; i += CHUNK_SIZE) {
+        const chunk = allPopularIds.slice(i, i + CHUNK_SIZE);
+        const existingPosts = await this.postRepository.findBy({
+          id: In(chunk),
+          is_hidden: false,
+          post_id: null,
+        });
+        actualCount += existingPosts.length;
+      }
+      
+      console.error(`[PopularRankingService] Verified: Redis has ${popularRanks.size} items, DB has ${actualCount} matching posts`);
+      return actualCount;
+    } catch (error) {
+      console.error(`[PopularRankingService] Error in getTotalPostsCount for window ${window}:`, error);
+      return 0;
+    }
   }
+
 
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
     const key = this.getRedisKey(window);

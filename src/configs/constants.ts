@@ -182,7 +182,7 @@ export const POPULAR_RANKING_CONFIG = {
 
   // time decay
   GRAVITY: 1.6, // 24h
-  GRAVITY_7D: 1.0,
+  GRAVITY_7D: 0.5, // Reduced from 1.0 to reduce time decay for weekly window
   T_BIAS: 1.0,
 
   // content quality params
