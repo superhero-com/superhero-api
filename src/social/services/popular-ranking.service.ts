@@ -66,12 +66,11 @@ export class PopularRankingService {
     return POPULAR_RANKING_CONFIG.REDIS_KEYS.popularAll;
   }
 
-  async getPopularPosts(
-    window: PopularWindow,
-    limit = 50,
-    offset = 0,
-    maxCandidates?: number,
-  ) {
+  /**
+   * Get verified popular post IDs from Redis, ensuring they exist in DB
+   * This shared method ensures consistency between getPopularPosts and getTotalPostsCount
+   */
+  private async getVerifiedPopularIds(window: PopularWindow, maxCandidates?: number): Promise<string[]> {
     const key = this.getRedisKey(window);
 
     // Get popular post ranks from Redis (ID -> rank/score)
@@ -116,36 +115,67 @@ export class PopularRankingService {
       }
     }
 
-    // Strategy: Only return popular posts (filtered by window)
-    // Fetch popular post IDs from Redis (already filtered by window in recompute)
-    const posts: Post[] = [];
-    
-    if (popularRanks.size > 0) {
-      // Get popular post IDs sorted by score DESC
-      const allPopularIds = Array.from(popularRanks.entries())
-        .sort((a, b) => b[1] - a[1]) // Sort by score DESC
-        .map(([id]) => id);
-      
-      // Paginate the popular IDs before fetching from DB
-      const paginatedIds = allPopularIds.slice(offset, offset + limit);
-      
-      if (paginatedIds.length > 0) {
-        const popularPosts = await this.postRepository.findBy({
-          id: In(paginatedIds),
-          is_hidden: false,
-          post_id: null,
-        });
-        
-        // Sort by rank (matching Redis order)
-        popularPosts.sort((a, b) => {
-          const aRank = popularRanks.get(a.id) || 0;
-          const bRank = popularRanks.get(b.id) || 0;
-          return bRank - aRank;
-        });
-        
-        posts.push(...popularPosts);
-      }
+    if (popularRanks.size === 0) {
+      return [];
     }
+
+    // Get popular post IDs sorted by score DESC
+    const allPopularIds = Array.from(popularRanks.entries())
+      .sort((a, b) => b[1] - a[1]) // Sort by score DESC
+      .map(([id]) => id);
+
+    // Verify which IDs actually exist in DB (same query conditions as getPopularPosts)
+    // Use chunked query to avoid parameter limits
+    const CHUNK_SIZE = 1000;
+    const verifiedIds: string[] = [];
+
+    for (let i = 0; i < allPopularIds.length; i += CHUNK_SIZE) {
+      const chunk = allPopularIds.slice(i, i + CHUNK_SIZE);
+      const existingPosts = await this.postRepository.findBy({
+        id: In(chunk),
+        is_hidden: false,
+        post_id: null,
+      });
+      verifiedIds.push(...existingPosts.map(p => p.id));
+    }
+
+    return verifiedIds;
+  }
+
+  async getPopularPosts(
+    window: PopularWindow,
+    limit = 50,
+    offset = 0,
+    maxCandidates?: number,
+  ): Promise<Post[]> {
+    // Get verified popular IDs (ensures consistency with getTotalPostsCount)
+    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
+    
+    if (verifiedIds.length === 0) {
+      return [];
+    }
+
+    // Paginate the verified IDs
+    const paginatedIds = verifiedIds.slice(offset, offset + limit);
+    
+    if (paginatedIds.length === 0) {
+      return [];
+    }
+
+    // Fetch the posts for the paginated IDs
+    const posts = await this.postRepository.findBy({
+      id: In(paginatedIds),
+      is_hidden: false,
+      post_id: null,
+    });
+
+    // Sort by the order in verifiedIds (which is already sorted by score DESC)
+    const idOrder = new Map(paginatedIds.map((id, index) => [id, index]));
+    posts.sort((a, b) => {
+      const aIndex = idOrder.get(a.id) ?? Infinity;
+      const bIndex = idOrder.get(b.id) ?? Infinity;
+      return aIndex - bIndex;
+    });
 
     return posts;
   }
@@ -162,71 +192,15 @@ export class PopularRankingService {
 
   /**
    * Get total count of popular posts for a given window
-   * Uses the exact same logic as getPopularPosts to ensure consistency
+   * Uses the exact same verification logic as getPopularPosts to ensure consistency
+   * This ensures pagination metadata matches actual returned posts even if posts are deleted/hidden
    */
   async getTotalPostsCount(window: PopularWindow): Promise<number> {
-    const key = this.getRedisKey(window);
     try {
-      // Use the same logic as getPopularPosts to get popular ranks
-      let popularRanks = new Map<string, number>();
-      const totalPopular = await this.redis.zcard(key);
-      
-      if (totalPopular > 0) {
-        // Fetch all popular IDs with their scores (same as getPopularPosts)
-        const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
-        for (let i = 0; i < cached.length; i += 2) {
-          popularRanks.set(cached[i], parseFloat(cached[i + 1]));
-        }
-      }
-      
-      // If no popular posts cached, try to compute them (same as getPopularPosts)
-      if (popularRanks.size === 0) {
-        const fallbackMax =
-          window === 'all'
-            ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
-            : window === '7d'
-              ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
-              : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
-        try {
-          await this.recompute(window, fallbackMax);
-          const totalPopularAfterRecompute = await this.redis.zcard(key);
-          if (totalPopularAfterRecompute > 0) {
-            const cached = await this.redis.zrevrange(key, 0, totalPopularAfterRecompute - 1, 'WITHSCORES');
-            for (let i = 0; i < cached.length; i += 2) {
-              popularRanks.set(cached[i], parseFloat(cached[i + 1]));
-            }
-          }
-        } catch (error) {
-          this.logger.error(`Error in recompute for getTotalPostsCount (window ${window}):`, error);
-          // Continue with empty popular ranks
-        }
-      }
-      
-      if (popularRanks.size === 0) {
-        return 0;
-      }
-      
-      // Get popular post IDs sorted by score DESC (same as getPopularPosts)
-      const allPopularIds = Array.from(popularRanks.entries())
-        .sort((a, b) => b[1] - a[1]) // Sort by score DESC
-        .map(([id]) => id);
-      
-      // Verify how many actually exist in DB (same filtering as getPopularPosts)
-      // Use chunked query to avoid parameter limits
-      const CHUNK_SIZE = 1000;
-      let actualCount = 0;
-      
-      for (let i = 0; i < allPopularIds.length; i += CHUNK_SIZE) {
-        const chunk = allPopularIds.slice(i, i + CHUNK_SIZE);
-        const existingPosts = await this.postRepository.findBy({
-          id: In(chunk),
-          is_hidden: false,
-          post_id: null,
-        });
-        actualCount += existingPosts.length;
-      }
-      
-      return actualCount;
+      // Use the same shared method as getPopularPosts to get verified IDs
+      // This ensures both methods use the exact same verification logic at the same point in time
+      const verifiedIds = await this.getVerifiedPopularIds(window);
+      return verifiedIds.length;
     } catch (error) {
       this.logger.error(`Error in getTotalPostsCount for window ${window}:`, error);
       return 0;
