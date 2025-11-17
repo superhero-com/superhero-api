@@ -126,8 +126,10 @@ export class PopularRankingService {
 
     // Verify which IDs actually exist in DB (same query conditions as getPopularPosts)
     // Use chunked query to avoid parameter limits
+    // IMPORTANT: We must preserve the order from allPopularIds (sorted by score DESC)
+    // findBy() doesn't preserve order, so we filter allPopularIds instead of pushing from DB results
     const CHUNK_SIZE = 1000;
-    const verifiedIds: string[] = [];
+    const existingIdsSet = new Set<string>();
 
     for (let i = 0; i < allPopularIds.length; i += CHUNK_SIZE) {
       const chunk = allPopularIds.slice(i, i + CHUNK_SIZE);
@@ -136,8 +138,12 @@ export class PopularRankingService {
         is_hidden: false,
         post_id: null,
       });
-      verifiedIds.push(...existingPosts.map(p => p.id));
+      // Collect existing IDs in a Set for fast lookup
+      existingPosts.forEach(p => existingIdsSet.add(p.id));
     }
+
+    // Filter allPopularIds to only include verified IDs, preserving the score DESC order
+    const verifiedIds = allPopularIds.filter(id => existingIdsSet.has(id));
 
     return verifiedIds;
   }
