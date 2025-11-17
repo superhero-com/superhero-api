@@ -73,23 +73,20 @@ export class PopularRankingService {
     maxCandidates?: number,
   ) {
     const key = this.getRedisKey(window);
-    console.error(`[PopularRankingService] getPopularPosts called: window=${window}, limit=${limit}, offset=${offset}`);
 
     // Get popular post ranks from Redis (ID -> rank/score)
     let popularRanks = new Map<string, number>();
     try {
       const totalPopular = await this.redis.zcard(key);
-      console.error(`[PopularRankingService] Redis key ${key} has ${totalPopular} items`);
       if (totalPopular > 0) {
         // Fetch all popular IDs with their scores
         const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
         for (let i = 0; i < cached.length; i += 2) {
           popularRanks.set(cached[i], parseFloat(cached[i + 1]));
         }
-        console.error(`[PopularRankingService] Loaded ${popularRanks.size} popular ranks from Redis`);
       }
     } catch (error) {
-      console.error(`[PopularRankingService] Error loading from Redis:`, error);
+      this.logger.error(`Error loading from Redis:`, error);
       popularRanks = new Map();
     }
 
@@ -102,10 +99,8 @@ export class PopularRankingService {
             ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
             : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
       try {
-        console.error(`[PopularRankingService] Calling recompute for window ${window}`);
         await this.recompute(window, maxCandidates ?? fallbackMax);
         const totalPopular = await this.redis.zcard(key);
-        console.error(`[PopularRankingService] After recompute, Redis key ${key} has ${totalPopular} items`);
         if (totalPopular > 0) {
           const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
           for (let i = 0; i < cached.length; i += 2) {
@@ -114,11 +109,9 @@ export class PopularRankingService {
           this.logger.log(`Recomputed popular posts for window ${window}: ${totalPopular} posts cached`);
         } else {
           this.logger.warn(`Recompute completed but no posts cached for window ${window}`);
-          console.error(`[PopularRankingService] WARNING: Recompute completed but Redis is empty for ${window}`);
         }
       } catch (error) {
         this.logger.error(`Failed to recompute popular posts for window ${window}:`, error);
-        console.error(`[PopularRankingService] ERROR in recompute for ${window}:`, error);
         // Continue with empty popular ranks
       }
     }
@@ -153,8 +146,6 @@ export class PopularRankingService {
         posts.push(...popularPosts);
       }
     }
-    
-    console.error(`[PopularRankingService] Returning ${posts.length} popular posts for offset ${offset}, limit ${limit}`);
 
     return posts;
   }
@@ -179,7 +170,6 @@ export class PopularRankingService {
       // Use the same logic as getPopularPosts to get popular ranks
       let popularRanks = new Map<string, number>();
       const totalPopular = await this.redis.zcard(key);
-      console.error(`[PopularRankingService] getTotalPostsCount for window ${window}, key ${key}: Redis count=${totalPopular}`);
       
       if (totalPopular > 0) {
         // Fetch all popular IDs with their scores (same as getPopularPosts)
@@ -187,7 +177,6 @@ export class PopularRankingService {
         for (let i = 0; i < cached.length; i += 2) {
           popularRanks.set(cached[i], parseFloat(cached[i + 1]));
         }
-        console.error(`[PopularRankingService] Loaded ${popularRanks.size} popular ranks from Redis`);
       }
       
       // If no popular posts cached, try to compute them (same as getPopularPosts)
@@ -199,19 +188,16 @@ export class PopularRankingService {
               ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
               : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
         try {
-          console.error(`[PopularRankingService] getTotalPostsCount: Calling recompute for window ${window}`);
           await this.recompute(window, fallbackMax);
           const totalPopularAfterRecompute = await this.redis.zcard(key);
-          console.error(`[PopularRankingService] getTotalPostsCount: After recompute, Redis key ${key} has ${totalPopularAfterRecompute} items`);
           if (totalPopularAfterRecompute > 0) {
             const cached = await this.redis.zrevrange(key, 0, totalPopularAfterRecompute - 1, 'WITHSCORES');
             for (let i = 0; i < cached.length; i += 2) {
               popularRanks.set(cached[i], parseFloat(cached[i + 1]));
             }
-            console.error(`[PopularRankingService] getTotalPostsCount: Loaded ${popularRanks.size} popular ranks after recompute`);
           }
         } catch (error) {
-          console.error(`[PopularRankingService] getTotalPostsCount: Error in recompute for ${window}:`, error);
+          this.logger.error(`Error in recompute for getTotalPostsCount (window ${window}):`, error);
           // Continue with empty popular ranks
         }
       }
@@ -240,10 +226,9 @@ export class PopularRankingService {
         actualCount += existingPosts.length;
       }
       
-      console.error(`[PopularRankingService] Verified: Redis has ${popularRanks.size} items, DB has ${actualCount} matching posts`);
       return actualCount;
     } catch (error) {
-      console.error(`[PopularRankingService] Error in getTotalPostsCount for window ${window}:`, error);
+      this.logger.error(`Error in getTotalPostsCount for window ${window}:`, error);
       return 0;
     }
   }
@@ -254,15 +239,12 @@ export class PopularRankingService {
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    console.error(`[PopularRankingService] Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
     this.logger.log(`Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
     
     // Verify Redis connection
     try {
-      const pingResult = await this.redis.ping();
-      console.error(`[PopularRankingService] Redis ping result: ${pingResult}`);
+      await this.redis.ping();
     } catch (error) {
-      console.error(`[PopularRankingService] Redis connection error:`, error);
       this.logger.error(`Redis connection error:`, error);
       throw error;
     }
@@ -558,7 +540,6 @@ export class PopularRankingService {
       
       if (eligible.length === 0) {
         this.logger.warn(`No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`);
-        console.error(`[PopularRankingService] No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`);
         return;
       }
       
@@ -574,7 +555,6 @@ export class PopularRankingService {
       if (results === null) {
         const error = new Error(`Redis pipeline failed for window ${window}`);
         this.logger.error(error.message);
-        console.error(`[PopularRankingService] ${error.message}`);
         throw error;
       }
       
@@ -582,25 +562,20 @@ export class PopularRankingService {
       if (errors.length > 0) {
         const error = new Error(`Redis pipeline errors for window ${window}: ${JSON.stringify(errors)}`);
         this.logger.error(error.message);
-        console.error(`[PopularRankingService] ${error.message}`);
         throw error;
       }
       
       this.logger.log(`Successfully cached ${eligible.length} popular posts in Redis key ${key}`);
-      console.error(`[PopularRankingService] Successfully cached ${eligible.length} popular posts in Redis key ${key}`);
       
       // Verify the cache was written
       const verifyCount = await this.redis.zcard(key);
-      console.error(`[PopularRankingService] Verified Redis key ${key} has ${verifyCount} items after caching`);
       if (verifyCount !== eligible.length) {
         const error = new Error(`Redis key ${key} has ${verifyCount} items but expected ${eligible.length}`);
         this.logger.error(error.message);
-        console.error(`[PopularRankingService] ERROR: ${error.message}`);
         throw error;
       }
     } catch (error) {
       this.logger.error(`Failed to cache popular posts in Redis for window ${window}:`, error);
-      console.error(`[PopularRankingService] ERROR caching popular posts for window ${window}:`, error);
       throw error;
     }
   }

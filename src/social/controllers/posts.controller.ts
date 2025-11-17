@@ -256,20 +256,16 @@ export class PostsController {
     @Query('debug') debug?: number,
   ) {
     const offset = (page - 1) * limit;
-    console.error(`[PostsController] popular endpoint called: window=${window}, page=${page}, limit=${limit}, offset=${offset}`);
     try {
-      // Get total count of all posts (not filtered by window)
-      // The window only affects which posts are considered "popular" (from Redis)
+      // Get total count of popular posts for the given window
       const totalItems = await this.popularRankingService.getTotalPostsCount(window);
       const totalPages = Math.ceil(totalItems / limit);
-      console.error(`[PostsController] totalItems=${totalItems}, totalPages=${totalPages}`);
       
       const posts = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
-      console.error(`[PostsController] getPopularPosts returned ${posts.length} posts`);
       
       const response: any = {
         items: posts,
