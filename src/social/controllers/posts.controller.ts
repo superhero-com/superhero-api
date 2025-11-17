@@ -142,7 +142,7 @@ export class PostsController {
       .orderBy('order_value', orderDirection)
       .offset(offset)
       .limit(limit)
-      .getRawMany<{ id: string }>();
+      .getRawMany<{ id: string; order_value: any }>();
 
     // If no posts found, return empty result
     if (distinctPostIds.length === 0) {
@@ -152,7 +152,13 @@ export class PostsController {
       );
     }
 
+    // Preserve the order from the pagination query
+    // Create a map of postId -> index to maintain pagination order
     const postIds = distinctPostIds.map((p) => p.id);
+    const postIdOrder = new Map<string, number>();
+    distinctPostIds.forEach((p, index) => {
+      postIdOrder.set(p.id, index);
+    });
 
     // Get total count for pagination metadata
     // We need to count distinct posts matching the filters
@@ -214,11 +220,20 @@ export class PostsController {
         'token_performance_view',
         'token.sale_address = token_performance_view.sale_address',
       )
-      .where('post.id IN (:...postIds)', { postIds })
-      .orderBy(`post.${orderColumn}`, orderDirection);
+      .where('post.id IN (:...postIds)', { postIds });
+      // Note: We don't use orderBy here because SQL IN clauses don't preserve order
+      // Instead, we'll sort in memory to preserve the pagination order
 
     // Execute the main query
     const items = await query.getMany();
+    
+    // Sort items to match the order from the pagination query
+    // This preserves the pagination integrity and prevents duplicates/skips across pages
+    items.sort((a, b) => {
+      const aIndex = postIdOrder.get(a.id) ?? Infinity;
+      const bIndex = postIdOrder.get(b.id) ?? Infinity;
+      return aIndex - bIndex;
+    });
     
     // Return paginated result
     return {
