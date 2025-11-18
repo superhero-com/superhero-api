@@ -75,3 +75,37 @@ export function serializeBigInts(obj: any): any {
 
   return obj;
 }
+
+/**
+ * Recursively sanitizes strings in an object/array by removing null bytes (\u0000)
+ * and other problematic Unicode characters that PostgreSQL cannot handle.
+ * This is necessary because PostgreSQL JSONB columns cannot contain null bytes.
+ *
+ * @param obj - The object, array, or primitive to sanitize
+ * @returns The sanitized object with null bytes removed from all strings
+ */
+export function sanitizeJsonForPostgres(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (typeof obj === 'string') {
+    // Remove null bytes and other control characters that PostgreSQL cannot handle
+    // Keep only printable characters and common whitespace (space, tab, newline, carriage return)
+    return obj.replace(/\u0000/g, '').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeJsonForPostgres(item));
+  }
+
+  if (typeof obj === 'object') {
+    const sanitized: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeJsonForPostgres(value);
+    }
+    return sanitized;
+  }
+
+  return obj;
+}

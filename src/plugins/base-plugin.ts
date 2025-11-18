@@ -4,6 +4,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Plugin, PluginFilter, SyncDirection, SyncDirectionEnum } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
+import { sanitizeJsonForPostgres } from '@/utils/common';
 
 export abstract class BasePlugin implements Plugin {
   protected abstract readonly logger: Logger;
@@ -396,13 +397,15 @@ export abstract class BasePlugin implements Plugin {
                     const decodedLogs = await syncService.decodeLogs(tx);
                     if (decodedLogs !== null) {
                       const currentLogs = tx.logs || {};
-                      tx.logs = {
+                      // Sanitize decoded logs to remove null bytes before saving
+                      const sanitizedLogs = sanitizeJsonForPostgres({
                         ...currentLogs,
                         [this.name]: {
                           _version: this.version,
                           data: decodedLogs,
                         },
-                      };
+                      });
+                      tx.logs = sanitizedLogs;
                       await this.txRepository.save(tx);
                       wasUpdated = true;
                     }
@@ -420,13 +423,15 @@ export abstract class BasePlugin implements Plugin {
                     const decodedData = await syncService.decodeData(tx);
                     if (decodedData !== null) {
                       const currentData = tx.data || {};
-                      tx.data = {
+                      // Sanitize decoded data to remove null bytes before saving
+                      const sanitizedData = sanitizeJsonForPostgres({
                         ...currentData,
                         [this.name]: {
                           _version: this.version,
                           data: decodedData,
                         },
-                      };
+                      });
+                      tx.data = sanitizedData;
                       await this.txRepository.save(tx);
                       wasUpdated = true;
                     }
