@@ -175,6 +175,18 @@ export class PortfolioService {
       previousHeight = blockHeight;
     }
 
+    // Store the actual startDate for range-based PNL calculations
+    const actualStartDate = start;
+    
+    // Calculate block height for startDate once (for range-based PNL last snapshot)
+    const startBlockHeight = useRangeBasedPnl && includePnl
+      ? await timestampToAeHeight(
+          actualStartDate.valueOf(),
+          undefined,
+          this.dataSource,
+        )
+      : undefined;
+    
     const data = await Promise.all(
       timestamps.map(async (timestamp, index) => {
         // the aePriceHistory is an array of [timestamp_ms, price] pairs
@@ -261,9 +273,19 @@ export class PortfolioService {
         // Add PNL calculation promise only if requested
         if (includePnl) {
           // For range-based PNL, pass the fromBlockHeight parameter
-          // For the first snapshot, use undefined (all transactions from start)
-          // For subsequent snapshots, use previousBlockHeight to only include transactions in the range
-          const pnlFromBlockHeight = useRangeBasedPnl && index > 0 ? previousBlockHeight : undefined;
+          // For range-based PNL with hover support: each snapshot should include PNL from startDate to that timestamp
+          // This allows frontend to use PNL data directly from each snapshot when hovering
+          let pnlFromBlockHeight: number | undefined = undefined;
+          if (useRangeBasedPnl) {
+            if (index === 0) {
+              // First snapshot: cumulative from start (for backward compatibility)
+              pnlFromBlockHeight = undefined;
+            } else {
+              // All other snapshots: PNL from startDate to this timestamp
+              // This allows hover to use PNL data directly from the snapshot
+              pnlFromBlockHeight = startBlockHeight;
+            }
+          }
           promises.push(
             this.bclPnlService.calculateTokenPnls(address, blockHeight, pnlFromBlockHeight),
           );
@@ -319,9 +341,12 @@ export class PortfolioService {
           // Only include range information when using range-based PnL
           if (useRangeBasedPnl) {
             // Determine the range for this PnL calculation
-            // For the first item, range is from beginning (null) to current timestamp
-            // For subsequent items, range is from previous timestamp to current timestamp
-            const rangeFrom = index === 0 ? null : timestamps[index - 1];
+            // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
+            // First snapshot: cumulative from start (null) to current timestamp
+            // All other snapshots: from startDate to current timestamp
+            const rangeFrom = index === 0 
+              ? null 
+              : actualStartDate;
             const rangeTo = timestamp;
             result.total_pnl.range = {
               from: rangeFrom,
