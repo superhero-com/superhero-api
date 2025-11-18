@@ -260,8 +260,12 @@ export class PortfolioService {
 
         // Add PNL calculation promise only if requested
         if (includePnl) {
+          // For range-based PNL, pass the fromBlockHeight parameter
+          // For the first snapshot, use undefined (all transactions from start)
+          // For subsequent snapshots, use previousBlockHeight to only include transactions in the range
+          const pnlFromBlockHeight = useRangeBasedPnl && index > 0 ? previousBlockHeight : undefined;
           promises.push(
-            this.bclPnlService.calculateTokenPnls(address, blockHeight),
+            this.bclPnlService.calculateTokenPnls(address, blockHeight, pnlFromBlockHeight),
           );
         }
 

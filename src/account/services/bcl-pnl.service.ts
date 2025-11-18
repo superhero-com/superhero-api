@@ -33,12 +33,16 @@ export class BclPnlService {
   /**
    * Calculate PNL for each token at a specific block height
    * Returns PNL data and cost basis for each token
+   * @param address - Account address
+   * @param blockHeight - Block height to calculate PNL at
+   * @param fromBlockHeight - Optional: If provided, only include transactions from this block height onwards (for range-based PNL)
    */
   async calculateTokenPnls(
     address: string,
     blockHeight: number,
+    fromBlockHeight?: number,
   ): Promise<TokenPnlResult> {
-    const tokenPnls = await this.transactionRepository
+    const tokenPnlsQuery = this.transactionRepository
       .createQueryBuilder('tx')
       .select('tx.sale_address', 'sale_address')
       .addSelect(
@@ -104,37 +108,72 @@ export class BclPnlService {
         'total_amount_spent_usd',
       )
       .addSelect(
-        `(
-          SELECT CAST(NULLIF(tx2.buy_price->>'ae', 'NaN') AS DECIMAL)
-          FROM transactions tx2
-          WHERE tx2.sale_address = tx.sale_address
-            AND tx2.block_height <= :blockHeight
-            AND tx2.buy_price->>'ae' IS NOT NULL
-            AND tx2.buy_price->>'ae' != 'NaN'
-            AND tx2.buy_price->>'ae' != 'null'
-            AND tx2.buy_price->>'ae' != ''
-          ORDER BY tx2.block_height DESC, tx2.created_at DESC
-          LIMIT 1
-        )`,
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? `(
+              SELECT CAST(NULLIF(tx2.buy_price->>'ae', 'NaN') AS DECIMAL)
+              FROM transactions tx2
+              WHERE tx2.sale_address = tx.sale_address
+                AND tx2.block_height <= :blockHeight
+                AND tx2.block_height >= :fromBlockHeight
+                AND tx2.buy_price->>'ae' IS NOT NULL
+                AND tx2.buy_price->>'ae' != 'NaN'
+                AND tx2.buy_price->>'ae' != 'null'
+                AND tx2.buy_price->>'ae' != ''
+              ORDER BY tx2.block_height DESC, tx2.created_at DESC
+              LIMIT 1
+            )`
+          : `(
+              SELECT CAST(NULLIF(tx2.buy_price->>'ae', 'NaN') AS DECIMAL)
+              FROM transactions tx2
+              WHERE tx2.sale_address = tx.sale_address
+                AND tx2.block_height <= :blockHeight
+                AND tx2.buy_price->>'ae' IS NOT NULL
+                AND tx2.buy_price->>'ae' != 'NaN'
+                AND tx2.buy_price->>'ae' != 'null'
+                AND tx2.buy_price->>'ae' != ''
+              ORDER BY tx2.block_height DESC, tx2.created_at DESC
+              LIMIT 1
+            )`,
         'current_unit_price_ae',
       )
       .addSelect(
-        `(
-          SELECT CAST(NULLIF(tx2.buy_price->>'usd', 'NaN') AS DECIMAL)
-          FROM transactions tx2
-          WHERE tx2.sale_address = tx.sale_address
-            AND tx2.block_height <= :blockHeight
-            AND tx2.buy_price->>'usd' IS NOT NULL
-            AND tx2.buy_price->>'usd' != 'NaN'
-            AND tx2.buy_price->>'usd' != 'null'
-            AND tx2.buy_price->>'usd' != ''
-          ORDER BY tx2.block_height DESC, tx2.created_at DESC
-          LIMIT 1
-        )`,
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? `(
+              SELECT CAST(NULLIF(tx2.buy_price->>'usd', 'NaN') AS DECIMAL)
+              FROM transactions tx2
+              WHERE tx2.sale_address = tx.sale_address
+                AND tx2.block_height <= :blockHeight
+                AND tx2.block_height >= :fromBlockHeight
+                AND tx2.buy_price->>'usd' IS NOT NULL
+                AND tx2.buy_price->>'usd' != 'NaN'
+                AND tx2.buy_price->>'usd' != 'null'
+                AND tx2.buy_price->>'usd' != ''
+              ORDER BY tx2.block_height DESC, tx2.created_at DESC
+              LIMIT 1
+            )`
+          : `(
+              SELECT CAST(NULLIF(tx2.buy_price->>'usd', 'NaN') AS DECIMAL)
+              FROM transactions tx2
+              WHERE tx2.sale_address = tx.sale_address
+                AND tx2.block_height <= :blockHeight
+                AND tx2.buy_price->>'usd' IS NOT NULL
+                AND tx2.buy_price->>'usd' != 'NaN'
+                AND tx2.buy_price->>'usd' != 'null'
+                AND tx2.buy_price->>'usd' != ''
+              ORDER BY tx2.block_height DESC, tx2.created_at DESC
+              LIMIT 1
+            )`,
         'current_unit_price_usd',
       )
       .where('tx.address = :address', { address })
-      .andWhere('tx.block_height < :blockHeight', { blockHeight })
+      .andWhere('tx.block_height < :blockHeight', { blockHeight });
+    
+    // If fromBlockHeight is provided, filter transactions to only include those from that block height onwards
+    if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
+      tokenPnlsQuery.andWhere('tx.block_height >= :fromBlockHeight', { fromBlockHeight });
+    }
+    
+    const tokenPnls = await tokenPnlsQuery
       .groupBy('tx.sale_address')
       .having(
         `COALESCE(
@@ -158,8 +197,13 @@ export class BclPnlService {
           0
         ) > 0`,
       )
-      .setParameter('blockHeight', blockHeight)
-      .getRawMany();
+      .setParameter('blockHeight', blockHeight);
+    
+    if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
+      tokenPnlsQuery.setParameter('fromBlockHeight', fromBlockHeight);
+    }
+    
+    const tokenPnls = await tokenPnlsQuery.getRawMany();
 
     const result: Record<
       string,
