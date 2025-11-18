@@ -32,7 +32,7 @@ import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
-  syncVersion = 6;
+  syncVersion = 7;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
