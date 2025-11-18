@@ -1,0 +1,11 @@
+{
+  "AffiliationTreasury.aes": "hRPOYcgyS3Q8u4NKO+SFqL80nMbd6hbD1Id6KowDDN4=",
+  "DAO.aes": "0C32YkPv/2WZjIhMuC2I+YX62VnZTBhGbPkhnnQeJm8=",
+  "CommunityFactory.aes": "69Asv9y6BSB1BOgG8W3vML9wpkRVfBcYggWk8rtTKPg=",
+  "CommunityManagement.aes": "CsxQG0PMThvFa98cMZgwmSTEkxRtkNFdLxW3ZIp4LNg=",
+  "DAOVote.aes": "EO9nqbmVzhMpEhSrXLu1vpauCv7FIVh/8NVfsL1xLPI=",
+  "BondingCurveExponential.aes": "Vw8C4KG7ouMzoWA3gcsfe68sWTSe1ZC5BcvFY00TaZA=",
+  "AffiliationBondingCurveTokenSale.aes": "/nFvNKkmjsTYwsMRBc8JVBTMBLrqJ7IDaUgiA8uewEU=",
+  "interfaces/TokenSale.aes": "8v6nzCGYPeHDDwsm65L3JNYl1UFR9gsdJnSiaSXhHao=",
+  "interfaces/BondingCurve.aes": "rIesN4WZvy9QaYG1AgX45oxS6DvjFV8r5Bnm/lsRNgk="
+}

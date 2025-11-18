@@ -1,13 +1,13 @@
 import { Account } from '@/account/entities/account.entity';
+import { Post } from '@/social/entities/post.entity';
 import {
   Column,
   CreateDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
-  PrimaryColumn,
+  PrimaryColumn
 } from 'typeorm';
-import { Post } from '@/social/entities/post.entity';
 
 @Entity({
   name: 'tips',
@@ -44,8 +44,6 @@ export class Tip {
     default: '0',
   })
   amount: string;
-
-  //
 
   @CreateDateColumn({
     type: 'timestamp',

@@ -21,6 +21,16 @@ export class Token {
   unlisted: boolean;
 
   @Column({
+    nullable: true,
+  })
+  last_tx_hash: string;
+
+  @Column({
+    nullable: true,
+  })
+  last_sync_block_height: number;
+
+  @Column({
     default: 0,
   })
   last_sync_tx_count: number;

@@ -1,0 +1,149 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+"""
+The `JSONObject` scalar type represents JSON objects as specified by [ECMA-404](http://www.ecma-international.org/publications/files/ECMA-ST/ECMA-404.pdf).
+"""
+scalar JSONObject
+
+type KeyBlock {
+  beneficiary: String!
+  beneficiary_reward: String!
+  created_at: DateTime!
+  flags: String!
+  hash: String!
+  height: Int!
+  info: String!
+  microBlocks(gas: String, limit: Int = 100, micro_block_index: String, offset: Int = 0, orderBy: String, orderDirection: String, transactions_count: String, version: String): [MicroBlock!]!
+  micro_blocks_count: Int!
+  miner: String!
+  nonce: String!
+  pow: [Int!]!
+  prev_hash: String!
+  prev_key_hash: String!
+  state_hash: String!
+  target: String!
+  time: String!
+  transactions_count: Int!
+  txs(function: String, limit: Int = 100, offset: Int = 0, orderBy: String, orderDirection: String, sender_id: String, type: String): [Tx!]!
+  version: Int!
+}
+
+type MicroBlock {
+  created_at: DateTime!
+  flags: String!
+  gas: Int!
+  hash: String!
+  height: Int!
+  keyBlock: KeyBlock
+  micro_block_index: Int!
+  pof_hash: String!
+  prev_hash: String!
+  prev_key_hash: String!
+  signature: String!
+  state_hash: String!
+  time: String!
+  transactions_count: Int!
+  txs(caller_id: String, contract_id: String, function: String, limit: Int = 100, offset: Int = 0, orderBy: String, orderDirection: String, recipient_id: String, sender_id: String, type: String): [Tx!]!
+  txs_hash: String!
+  version: Int!
+}
+
+type PaginatedKeyBlockResponse {
+  items: [KeyBlock!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedMicroBlockResponse {
+  items: [MicroBlock!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedPluginSyncStateResponse {
+  items: [PluginSyncState!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedSyncStateResponse {
+  items: [SyncState!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginatedTxResponse {
+  items: [Tx!]!
+  metaInfo: PaginationMeta!
+}
+
+type PaginationMeta {
+  currentPage: Int!
+  itemCount: Int!
+  itemsPerPage: Int!
+  totalItems: Int!
+  totalPages: Int!
+}
+
+type PluginSyncState {
+  backward_synced_height: Int
+  created_at: DateTime!
+  last_synced_height: Int!
+  live_synced_height: Int
+  plugin_name: String!
+  start_from_height: Int!
+  updated_at: DateTime!
+  version: Int!
+}
+
+type Query {
+  keyBlock(hash: String!): KeyBlock
+  keyBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedKeyBlockResponse!
+  microBlock(hash: String!): MicroBlock
+  microBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedMicroBlockResponse!
+  pluginSyncState(plugin_name: String!): PluginSyncState
+  pluginSyncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedPluginSyncStateResponse!
+  syncState(id: String!): SyncState
+  syncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedSyncStateResponse!
+  tx(hash: String!): Tx
+  txs(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedTxResponse!
+}
+
+type SyncState {
+  backward_synced_height: Int
+  created_at: DateTime!
+  id: String!
+  is_bulk_mode: Boolean!
+  last_synced_hash: String!
+  last_synced_height: Int!
+  live_synced_height: Int
+  tip_height: Int!
+  updated_at: DateTime!
+}
+
+type Tx {
+  block: MicroBlock
+  block_hash: String!
+  block_height: Int!
+  caller_id: String
+  contract_id: String
+  created_at: DateTime!
+  data: JSONObject
+  encoded_tx: String
+  function: String
+  hash: String!
+  keyBlock: KeyBlock
+  logs: JSONObject
+  micro_index: String!
+  micro_time: String!
+  payload: String
+  raw: JSONObject
+  recipient_id: String
+  sender_id: String
+  signatures: [String!]!
+  type: String!
+  version: Int!
+}

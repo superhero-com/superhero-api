@@ -18,16 +18,14 @@ import { FastPullTokensService } from './services/fast-pull-tokens.service';
 import { FixFailedTransactionsService } from './services/fix-failed-transactions.service';
 import { FixHoldersService } from './services/fix-holders.service';
 import { FixTokensService } from './services/fix-tokens.service';
-import { SyncBlocksService } from './services/sync-blocks.service';
-import { SyncTransactionsService } from './services/sync-transactions.service';
-import { VerifyTransactionsService } from './services/verify-transactions.service';
+import { SyncState } from '@/mdw-sync/entities/sync-state.entity';
 
 @Module({
   imports: [
     AeModule,
     TokensModule,
     TransactionsModule,
-    TypeOrmModule.forFeature([SyncedBlock, FailedTransaction]),
+    TypeOrmModule.forFeature([SyncedBlock, FailedTransaction, SyncState]),
     BullModule.registerQueue(
       {
         name: SYNC_TOKEN_HOLDERS_QUEUE,
@@ -41,15 +39,12 @@ import { VerifyTransactionsService } from './services/verify-transactions.servic
     TipModule,
   ],
   providers: [
-    SyncTransactionsService,
-    SyncBlocksService,
     FixFailedTransactionsService,
     FixTokensService,
     FastPullTokensService,
     FixHoldersService,
-    VerifyTransactionsService,
   ],
-  exports: [SyncBlocksService, SyncTransactionsService],
+  exports: [],
   controllers: [DebugFailedTransactionsController],
 })
 export class BclModule {

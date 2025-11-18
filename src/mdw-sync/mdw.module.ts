@@ -1,0 +1,78 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import mdwConfig from './config/mdw.config';
+import { KeyBlock } from './entities/key-block.entity';
+import { MicroBlock } from './entities/micro-block.entity';
+import { PluginSyncState } from './entities/plugin-sync-state.entity';
+import { PluginFailedTransaction } from './entities/plugin-failed-transaction.entity';
+import { SyncState } from './entities/sync-state.entity';
+import { Tx } from './entities/tx.entity';
+import { MdwController } from './mdw.controller';
+import { IndexerService } from './services/indexer.service';
+import { LiveIndexerService } from './services/live-indexer.service';
+import { PluginRegistryService } from './services/plugin-registry.service';
+import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
+import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
+import { MicroBlockService } from './services/micro-block.service';
+import { BlockValidationService } from './services/block-validation.service';
+import { BlockSyncService } from './services/block-sync.service';
+import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
+import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
+import { AeModule } from '@/ae/ae.module';
+import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
+import { ENTITY_CONFIGS } from './config/entity-configs';
+
+// Generate controllers for all entities
+const generatedControllers = createEntityControllers(ENTITY_CONFIGS);
+
+// Generate resolvers for all entities (now supports automatic relation resolution)
+const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
+
+@Module({
+  imports: [
+    ConfigModule.forFeature(mdwConfig),
+    EventEmitterModule.forRoot(),
+    TypeOrmModule.forFeature([
+      Tx,
+      KeyBlock,
+      MicroBlock,
+      SyncState,
+      PluginSyncState,
+      PluginFailedTransaction,
+    ]),
+    AeModule, // Required for WebSocketService used by LiveIndexerService
+    // Import plugin modules
+    ...PLUGIN_MODULES,
+  ],
+  controllers: [
+    MdwController,
+    ...generatedControllers,
+  ],
+  providers: [
+    PluginRegistryService,
+    PluginBatchProcessorService,
+    PluginFailedTransactionService,
+    MicroBlockService,
+    BlockSyncService,
+    IndexerService,
+    LiveIndexerService,
+    BlockValidationService,
+    // GraphQL Resolvers - all generated with automatic relation resolution
+    ...generatedResolvers,
+    // Aggregate all plugin classes into a single MDW_PLUGIN token (array)
+    getPluginProvider(),
+  ],
+  exports: [
+    IndexerService,
+    LiveIndexerService,
+    BlockValidationService,
+    PluginRegistryService,
+    PluginBatchProcessorService,
+  ],
+})
+export class MdwModule { }
+
+// Re-export types for convenience
+export { SyncDirection, SyncDirectionEnum } from './types/sync-direction';

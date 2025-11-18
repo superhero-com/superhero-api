@@ -279,7 +279,15 @@ export class TokensService {
       });
     }
 
-    const newToken = await this.tokensRepository.save(tokenData);
+    // Use upsert to handle race conditions where token might be created concurrently
+    await this.tokensRepository.upsert(tokenData, {
+      conflictPaths: ['sale_address'],
+      skipUpdateIfNoValuesChanged: true,
+    });
+    const newToken = await this.findByAddress(saleAddress);
+    if (!newToken) {
+      throw new Error(`Failed to create or retrieve token for sale address: ${saleAddress}`);
+    }
     const factoryAddress = await this.updateTokenFactoryAddress(newToken);
 
     if (!factoryAddress) {

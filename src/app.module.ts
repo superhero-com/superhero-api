@@ -5,6 +5,9 @@ import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { GraphQLModule } from '@nestjs/graphql';
+import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
+import { join } from 'path';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
@@ -26,6 +29,8 @@ import { TrendingTagsModule } from './trending-tags/trending-tags.module';
 import { PostModule } from './social/post.module';
 import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
+import { MdwModule } from './mdw-sync/mdw.module';
+import { SyncState } from './mdw-sync/entities/sync-state.entity';
 
 @Module({
   imports: [
@@ -52,6 +57,17 @@ import { TipModule } from './tipping/tip.module';
       ...DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
     }),
+    TypeOrmModule.forFeature([SyncState]),
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      sortSchema: true,
+      playground: false,
+      graphiql: true, // enables GraphiQL instead
+      introspection: true,
+      hideSchemaDetailsFromClientErrors: true,
+    }),
+    MdwModule,
     AeModule,
     TokensModule,
     TransactionsModule,

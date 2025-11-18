@@ -1,9 +1,6 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { SyncBlocksService } from '@/bcl/services/sync-blocks.service';
 import {
   MAX_RETRIES_WHEN_REQUEST_FAILED,
-  PERIODIC_SYNCING_ENABLED,
-  SYNCING_ENABLED,
   TOTAL_BLOCKS_TO_HAVE_STABLE_DATA,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs/constants';
@@ -15,11 +12,14 @@ import {
 } from '@/tokens/queues/constants';
 import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
+import { SyncState } from '@/mdw-sync/entities/sync-state.entity';
 import { fetchJson } from '@/utils/common';
 import { ICommunityFactorySchema } from '@/utils/types';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CommunityFactory } from 'bctsl-sdk';
 import { Queue } from 'bull';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
@@ -33,9 +33,9 @@ export class FastPullTokensService {
   constructor(
     private readonly tokensService: TokensService,
     private communityFactoryService: CommunityFactoryService,
-
-    private syncBlocksService: SyncBlocksService,
     private readonly transactionService: TransactionService,
+    @InjectRepository(SyncState)
+    private syncStateRepository: Repository<SyncState>,
 
     @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
     private readonly pullTokenHoldersQueue: Queue,
@@ -47,50 +47,60 @@ export class FastPullTokensService {
   }
 
   onModuleInit() {
-    this.fastPullTokens();
+    // this.fastPullTokens();
   }
 
   isPullingLatestCreatedTokens = false;
   @Cron(CronExpression.EVERY_10_MINUTES)
   async pullLatestCreatedTokens() {
-    if (!PERIODIC_SYNCING_ENABLED) {
+    // Note: Token creation is now handled by BclPlugin via MDW sync system
+    // This method is kept for backward compatibility but may be removed in future
+    if (this.isPullingLatestCreatedTokens) {
       return;
     }
-    if (
-      this.isPullingLatestCreatedTokens ||
-      !this.syncBlocksService.latestBlockNumber
-    ) {
-      return;
-    }
-    this.isPullingLatestCreatedTokens = true;
-    // delete all tokens where dao_address is null
-    await this.tokensService.deleteTokensWhereDaoAddressIsNull();
-    const factory = await this.communityFactoryService.getCurrentFactory();
+    try {
+      this.isPullingLatestCreatedTokens = true;
+      // delete all tokens where dao_address is null
+      await this.tokensService.deleteTokensWhereDaoAddressIsNull();
+      const factory = await this.communityFactoryService.getCurrentFactory();
 
-    const from =
-      this.syncBlocksService.latestBlockNumber -
-      TOTAL_BLOCKS_TO_HAVE_STABLE_DATA;
-    if (from < 0) {
-      this.logger.error(
-        `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
-      );
-      return;
-    }
-    const queryString = new URLSearchParams({
-      direction: 'backward',
-      limit: '100',
-      scope: `gen:${from}-${this.syncBlocksService.latestBlockNumber}`,
-      type: 'contract_call',
-      contract: factory.address,
-    }).toString();
+      // Get tip height from MDW sync state
+      const syncState = await this.syncStateRepository.findOne({
+        where: { id: 'global' },
+      });
+      const latestBlockNumber = syncState?.tip_height || 0;
 
-    const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-    await this.loadCreatedCommunityFromMdw(url, factory);
-    this.isPullingLatestCreatedTokens = false;
+      if (!latestBlockNumber) {
+        return;
+      }
+
+      const from = latestBlockNumber - TOTAL_BLOCKS_TO_HAVE_STABLE_DATA;
+      if (from < 0) {
+        this.logger.error(
+          `FastPullTokensService->pullLatestCreatedTokens: from is less than 0`,
+        );
+        this.isPullingLatestCreatedTokens = false;
+        return;
+      }
+      const queryString = new URLSearchParams({
+        direction: 'backward',
+        limit: '100',
+        scope: `gen:${from}-${latestBlockNumber}`,
+        type: 'contract_call',
+        contract: factory.address,
+      }).toString();
+
+      const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
+      await this.loadCreatedCommunityFromMdw(url, factory);
+    } finally {
+      this.isPullingLatestCreatedTokens = false;
+    }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_10AM)
   async fastPullTokens() {
+    // Note: Token creation is now handled by BclPlugin via MDW sync system
+    // This method is kept for backward compatibility but may be removed in future
     if (this.pullingTokens) {
       return;
     }
@@ -99,11 +109,6 @@ export class FastPullTokensService {
       this.pullTokenHoldersQueue.empty(),
       this.pullTokenInfoQueue.empty(),
     ]);
-
-    if (!SYNCING_ENABLED) {
-      return;
-    }
-
     this.pullingTokens = true;
 
     try {
