@@ -121,12 +121,16 @@ export class AccountsController {
     // Use the larger of requested interval or minimum allowed interval
     const finalInterval = Math.max(requestedInterval, minimumInterval);
 
+    const includePnl = includeFields.includes('pnl') || includeFields.includes('pnl-range');
+    const useRangeBasedPnl = includeFields.includes('pnl-range');
+
     return await this.portfolioService.getPortfolioHistory(address, {
       startDate: start,
       endDate: end,
       interval: finalInterval,
       convertTo: query.convertTo || 'ae',
-      includePnl: includeFields.includes('pnl'),
+      includePnl,
+      useRangeBasedPnl,
     });
   }
 

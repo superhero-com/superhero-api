@@ -38,6 +38,10 @@ export interface PortfolioHistorySnapshot {
       ae: number;
       usd: number;
     };
+    range?: {
+      from: Moment | Date | null;
+      to: Moment | Date;
+    };
   };
   tokens_pnl?: Record<string, {
     current_unit_price: {
@@ -75,6 +79,7 @@ export interface GetPortfolioHistoryOptions {
   | 'gbp'
   | 'xau';
   includePnl?: boolean; // Whether to include PNL data
+  useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
 }
 
 @Injectable()
@@ -105,6 +110,7 @@ export class PortfolioService {
       interval = 86400, // Default daily (24 hours)
       convertTo = 'ae',
       includePnl = false,
+      useRangeBasedPnl = false,
     } = options;
 
     // Calculate date range
@@ -157,68 +163,93 @@ export class PortfolioService {
     )).sort((a, b) => b[0] - a[0]);
     const currentAePrice = await this.coinGeckoService.getPriceData(new BigNumber(1));
 
+    // First, calculate all block heights sequentially (since previousHeight is used as a hint)
+    const blockHeights: number[] = [];
+    for (const timestamp of timestamps) {
+      const blockHeight = await timestampToAeHeight(
+        timestamp.valueOf(),
+        previousHeight,
+        this.dataSource,
+      );
+      blockHeights.push(blockHeight);
+      previousHeight = blockHeight;
+    }
+
     const data = await Promise.all(
-      timestamps.map(async (timestamp) => {
+      timestamps.map(async (timestamp, index) => {
         // the aePriceHistory is an array of [timestamp_ms, price] pairs
         // we need to find the closest price to the timestamp
         const closestPrice = aePriceHistory.find(([priceTimeMs]) => {
           return priceTimeMs <= timestamp.valueOf();
         });
         const price = closestPrice ? closestPrice[1] : currentAePrice?.usd || 0;
-        const blockHeight = await timestampToAeHeight(
-          timestamp.valueOf(),
-          previousHeight,
-          this.dataSource,
-        );
-        previousHeight = blockHeight;
+        const blockHeight = blockHeights[index];
+        const previousBlockHeight = index > 0 ? blockHeights[index - 1] : undefined;
+        
+        // Build query builder for transactions
+        const transactionQuery = this.transactionRepository
+          .createQueryBuilder('tx')
+          .select(
+            `COALESCE(
+            SUM(
+              CASE 
+                WHEN tx.tx_type IN ('buy', 'create_community') 
+                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ) - 
+            SUM(
+              CASE 
+                WHEN tx.tx_type = 'sell' 
+                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          )`,
+            'net_ae',
+          )
+          .addSelect(
+            `COALESCE(
+            SUM(
+              CASE 
+                WHEN tx.tx_type IN ('buy', 'create_community') 
+                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ) - 
+            SUM(
+              CASE 
+                WHEN tx.tx_type = 'sell' 
+                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          )`,
+            'net_usd',
+          )
+          .where('tx.address = :address', { address });
+        
+        // Apply filtering based on useRangeBasedPnl option
+        if (useRangeBasedPnl) {
+          // Range-based PnL: For the first item, include all previous transactions
+          // For subsequent items, only include transactions between previous and current timestamp
+          if (index === 0) {
+            transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
+          } else {
+            transactionQuery
+              .andWhere('tx.block_height >= :previousBlockHeight', { previousBlockHeight })
+              .andWhere('tx.block_height < :blockHeight', { blockHeight });
+          }
+        } else {
+          // Old logic: Always include all previous transactions
+          transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
+        }
         
         // Prepare promises for parallel execution
         const promises = [
-          this.transactionRepository
-            .createQueryBuilder('tx')
-            .select(
-              `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ) - 
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-              'net_ae',
-            )
-            .addSelect(
-              `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ) - 
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-              'net_usd',
-            )
-            .where('tx.address = :address', { address })
-            .andWhere('tx.block_height < :blockHeight', { blockHeight })
-            .getRawOne(),
+          transactionQuery.getRawOne(),
           this.aeSdkService.sdk.getBalance(
             address as any,
             {
@@ -280,6 +311,19 @@ export class PortfolioService {
               usd: tokensPnl.totalGainUsd,
             },
           };
+
+          // Only include range information when using range-based PnL
+          if (useRangeBasedPnl) {
+            // Determine the range for this PnL calculation
+            // For the first item, range is from beginning (null) to current timestamp
+            // For subsequent items, range is from previous timestamp to current timestamp
+            const rangeFrom = index === 0 ? null : timestamps[index - 1];
+            const rangeTo = timestamp;
+            result.total_pnl.range = {
+              from: rangeFrom,
+              to: rangeTo,
+            };
+          }
           result.tokens_pnl = tokensPnl.pnls;
         }
 

@@ -74,47 +74,97 @@ export class PopularRankingService {
   ) {
     const key = this.getRedisKey(window);
 
-    // Try Redis cache first
-    let cached: string[] = [];
+    // Get total count of popular posts
+    let totalPopular = 0;
     try {
-      cached = await this.redis.zrevrange(
-        key,
-        offset,
-        offset + limit - 1,
-        'WITHSCORES',
-      );
+      totalPopular = await this.redis.zcard(key);
     } catch {
-      cached = [];
-    }
-    if (cached.length > 0) {
-      const ids = [] as string[];
-      for (let i = 0; i < cached.length; i += 2) ids.push(cached[i]);
-      const posts = await this.postRepository.findBy({ id: In(ids) });
-      // keep the order as in ids
-      const postById = new Map(posts.map((p) => [p.id, p] as const));
-      return ids.map((id) => postById.get(id)).filter(Boolean);
+      totalPopular = 0;
     }
 
-    // If not cached, compute and cache
-    const fallbackMax =
-      window === 'all'
-        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
-        : window === '7d'
-          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
-          : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
-    await this.recompute(window, maxCandidates ?? fallbackMax); // compute more than requested
-    let cachedAfter: string[] = [];
-    try {
-      cachedAfter = await this.redis.zrevrange(key, offset, offset + limit - 1);
-    } catch {
-      cachedAfter = [];
+    // If no popular posts cached, try to compute them
+    if (totalPopular === 0) {
+      const fallbackMax =
+        window === 'all'
+          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
+          : window === '7d'
+            ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+            : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+      await this.recompute(window, maxCandidates ?? fallbackMax);
+      try {
+        totalPopular = await this.redis.zcard(key);
+      } catch {
+        totalPopular = 0;
+      }
     }
-    if (cachedAfter.length === 0) return [];
-    const posts = await this.postRepository.findBy({ id: In(cachedAfter) });
-    const order = new Map(cachedAfter.map((id, idx) => [id, idx] as const));
-    return posts.sort(
-      (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
-    );
+
+    const result: Post[] = [];
+    let popularIds: string[] = [];
+
+    // Fetch popular posts if we haven't exhausted them
+    if (offset < totalPopular) {
+      const popularLimit = Math.min(limit, totalPopular - offset);
+      let cached: string[] = [];
+      try {
+        cached = await this.redis.zrevrange(
+          key,
+          offset,
+          offset + popularLimit - 1,
+          'WITHSCORES',
+        );
+      } catch {
+        cached = [];
+      }
+      
+      if (cached.length > 0) {
+        const ids = [] as string[];
+        for (let i = 0; i < cached.length; i += 2) ids.push(cached[i]);
+        popularIds = ids;
+        const posts = await this.postRepository.findBy({ id: In(ids) });
+        // keep the order as in ids
+        const postById = new Map(posts.map((p) => [p.id, p] as const));
+        const orderedPosts = ids.map((id) => postById.get(id)).filter(Boolean) as Post[];
+        result.push(...orderedPosts);
+      }
+    }
+
+    // If we need more posts (exhausted popular posts), fetch recent posts excluding popular ones
+    if (result.length < limit) {
+      const remainingLimit = limit - result.length;
+      
+      // Get all popular post IDs to exclude them
+      let allPopularIds: string[] = [];
+      if (totalPopular > 0) {
+        try {
+          allPopularIds = await this.redis.zrevrange(key, 0, totalPopular - 1);
+        } catch {
+          allPopularIds = [];
+        }
+      }
+
+      // Calculate offset for recent posts: if we've skipped popular posts, adjust offset accordingly
+      const recentOffset = Math.max(0, offset - totalPopular);
+
+      // Fetch recent posts excluding popular ones
+      const recentPosts = await this.postRepository
+        .createQueryBuilder('post')
+        .where('post.is_hidden = false')
+        .andWhere('post.post_id IS NULL')
+        .andWhere(
+          allPopularIds.length > 0
+            ? 'post.id NOT IN (:...popularIds)'
+            : '1=1',
+          allPopularIds.length > 0 ? { popularIds: allPopularIds } : {},
+        )
+        .orderBy('post.created_at', 'DESC')
+        .skip(recentOffset)
+        .limit(remainingLimit)
+        .getMany();
+
+      result.push(...recentPosts);
+    }
+
+    return result;
   }
 
   // Public metadata helper to keep encapsulation

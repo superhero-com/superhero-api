@@ -137,19 +137,24 @@ export class DexTokenSummaryService {
           const tokenPrice = await this.getAex9TokenPrice(tokenAddress);
 
           if (tokenPrice) {
+            // Join with pairs and tokens to get decimals for proper volume conversion
+            // Convert volumes from raw units to human-readable before multiplying by token price
             volumeResult = await queryRunner.query(
               `
                 SELECT 
                   COALESCE(SUM(
                     CASE 
-                      WHEN $2 = '0' THEN volume0 * $3
-                      WHEN $2 = '1' THEN volume1 * $3
+                      WHEN $2 = '0' THEN (pt.volume0 / POW(10, token0.decimals)) * $3
+                      WHEN $2 = '1' THEN (pt.volume1 / POW(10, token1.decimals)) * $3
                       ELSE 0
                     END
                   ), 0) as total_volume
-                FROM pair_transactions 
-                WHERE pair_address = $1 
-                  AND tx_type IN (
+                FROM pair_transactions pt
+                INNER JOIN pairs p ON pt.pair_address = p.address
+                INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
+                INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
+                WHERE pt.pair_address = $1 
+                  AND pt.tx_type IN (
                     'swap_exact_tokens_for_tokens',
                     'swap_tokens_for_exact_tokens', 
                     'swap_exact_tokens_for_ae',
@@ -166,19 +171,30 @@ export class DexTokenSummaryService {
           }
         } else {
           // Original logic for pairs with WAE
+          // Join with pairs and tokens to get decimals for proper volume conversion
+          // Need to check which token is WAE to convert correctly
           volumeResult = await queryRunner.query(
             `
               SELECT 
                 COALESCE(SUM(
                   CASE 
-                    WHEN $2 = '0' THEN volume0 * ratio1
-                    WHEN $2 = '1' THEN volume1 * ratio0
+                    WHEN $2 = '0' AND token0.address = $3 THEN pt.volume0 / POW(10, token0.decimals)
+                    WHEN $2 = '0' AND token1.address = $3 THEN 
+                      (pt.volume0 / POW(10, token0.decimals)) * 
+                      ((pt.reserve1 / POW(10, token1.decimals)) / (pt.reserve0 / POW(10, token0.decimals)))
+                    WHEN $2 = '1' AND token0.address = $3 THEN 
+                      (pt.volume1 / POW(10, token1.decimals)) * 
+                      ((pt.reserve0 / POW(10, token0.decimals)) / (pt.reserve1 / POW(10, token1.decimals)))
+                    WHEN $2 = '1' AND token1.address = $3 THEN pt.volume1 / POW(10, token1.decimals)
                     ELSE 0
                   END
                 ), 0) as total_volume
-              FROM pair_transactions 
-              WHERE pair_address = $1 
-                AND tx_type IN (
+              FROM pair_transactions pt
+              INNER JOIN pairs p ON pt.pair_address = p.address
+              INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
+              INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
+              WHERE pt.pair_address = $1 
+                AND pt.tx_type IN (
                   'swap_exact_tokens_for_tokens',
                   'swap_tokens_for_exact_tokens', 
                   'swap_exact_tokens_for_ae',
@@ -187,7 +203,7 @@ export class DexTokenSummaryService {
                   'swap_ae_for_exact_tokens'
                 )
             `,
-            [pair.address, pos],
+            [pair.address, pos, DEX_CONTRACTS.wae],
           );
         }
 
@@ -231,20 +247,25 @@ export class DexTokenSummaryService {
             const tokenPrice = await this.getAex9TokenPrice(tokenAddress);
 
             if (tokenPrice) {
+              // Join with pairs and tokens to get decimals for proper volume conversion
+              // Convert volumes from raw units to human-readable before multiplying by token price
               periodVolumeResult = await queryRunner.query(
                 `
                   SELECT 
                     COALESCE(SUM(
                       CASE 
-                        WHEN $3 = '0' THEN volume0 * $4
-                        WHEN $3 = '1' THEN volume1 * $4
+                        WHEN $3 = '0' THEN (pt.volume0 / POW(10, token0.decimals)) * $4
+                        WHEN $3 = '1' THEN (pt.volume1 / POW(10, token1.decimals)) * $4
                         ELSE 0
                       END
                     ), 0) as total_volume
-                  FROM pair_transactions 
-                  WHERE pair_address = $1 
-                    AND created_at >= $2
-                    AND tx_type IN (
+                  FROM pair_transactions pt
+                  INNER JOIN pairs p ON pt.pair_address = p.address
+                  INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
+                  INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
+                  WHERE pt.pair_address = $1 
+                    AND pt.created_at >= $2
+                    AND pt.tx_type IN (
                       'swap_exact_tokens_for_tokens',
                       'swap_tokens_for_exact_tokens', 
                       'swap_exact_tokens_for_ae',
@@ -261,20 +282,31 @@ export class DexTokenSummaryService {
             }
           } else {
             // Original logic for pairs with WAE
+            // Join with pairs and tokens to get decimals for proper volume conversion
+            // Need to check which token is WAE to convert correctly
             periodVolumeResult = await queryRunner.query(
               `
                 SELECT 
                   COALESCE(SUM(
                     CASE 
-                      WHEN $3 = '0' THEN volume0 * ratio1
-                      WHEN $3 = '1' THEN volume1 * ratio0
+                      WHEN $3 = '0' AND token0.address = $4 THEN pt.volume0 / POW(10, token0.decimals)
+                      WHEN $3 = '0' AND token1.address = $4 THEN 
+                        (pt.volume0 / POW(10, token0.decimals)) * 
+                        ((pt.reserve1 / POW(10, token1.decimals)) / (pt.reserve0 / POW(10, token0.decimals)))
+                      WHEN $3 = '1' AND token0.address = $4 THEN 
+                        (pt.volume1 / POW(10, token1.decimals)) * 
+                        ((pt.reserve0 / POW(10, token0.decimals)) / (pt.reserve1 / POW(10, token1.decimals)))
+                      WHEN $3 = '1' AND token1.address = $4 THEN pt.volume1 / POW(10, token1.decimals)
                       ELSE 0
                     END
                   ), 0) as total_volume
-                FROM pair_transactions 
-                WHERE pair_address = $1 
-                  AND created_at >= $2
-                  AND tx_type IN (
+                FROM pair_transactions pt
+                INNER JOIN pairs p ON pt.pair_address = p.address
+                INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
+                INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
+                WHERE pt.pair_address = $1 
+                  AND pt.created_at >= $2
+                  AND pt.tx_type IN (
                     'swap_exact_tokens_for_tokens',
                     'swap_tokens_for_exact_tokens', 
                     'swap_exact_tokens_for_ae',
@@ -283,7 +315,7 @@ export class DexTokenSummaryService {
                     'swap_ae_for_exact_tokens'
                   )
               `,
-              [pair.address, startDate.toDate(), pos],
+              [pair.address, startDate.toDate(), pos, DEX_CONTRACTS.wae],
             );
           }
 
