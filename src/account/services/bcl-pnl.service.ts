@@ -349,22 +349,11 @@ export class BclPnlService {
       totalCostBasisAe += costBasisAe;
       totalCostBasisUsd += costBasisUsd;
 
-      // Calculate current value for range-based PNL
-      // If fromBlockHeight is provided, current value should only include tokens bought in range that are still held
-      // Remaining tokens = tokens bought in range - tokens sold in range
-      // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
-      let holdingsForCurrentValue: number;
-      if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
-        // For range-based PNL: calculate remaining tokens bought in range
-        // Remaining = max(0, totalVolumeBought - totalVolumeSold)
-        // But we also need to account for tokens bought before range that might still be held
-        // So we use: min(currentHoldings, max(0, totalVolumeBought - totalVolumeSold))
-        const remainingFromRange = Math.max(0, totalVolumeBought - totalVolumeSold);
-        holdingsForCurrentValue = Math.min(currentHoldings, remainingFromRange);
-      } else {
-        // All holdings for cumulative PNL
-        holdingsForCurrentValue = currentHoldings;
-      }
+      // Calculate current value - ALWAYS use cumulative holdings
+      // Current value represents the actual value of tokens owned at blockHeight, regardless of when they were bought
+      // The range filter (fromBlockHeight) should only affect cost basis and sale proceeds, not current value
+      // This ensures accurate portfolio value even when tokens were bought before range and sold within range
+      const holdingsForCurrentValue = currentHoldings; // Always use cumulative holdings for current value
       
       const currentValueAe = holdingsForCurrentValue * currentUnitPriceAe;
       const currentValueUsd = holdingsForCurrentValue * currentUnitPriceUsd;
@@ -372,15 +361,23 @@ export class BclPnlService {
       totalCurrentValueUsd += currentValueUsd;
 
       // Calculate gain for range-based PNL
-      // Gain = (sale proceeds + current value of remaining tokens) - cost basis
-      // This accounts for both tokens sold and tokens still held
+      // For range-based PNL: Gain = (sale proceeds + current value of tokens bought in range) - cost basis
+      // This accounts for both tokens sold and tokens still held from range purchases
+      // Note: Current value uses all holdings (for accurate portfolio value), but gain calculation
+      // only attributes value to tokens bought in range to avoid including tokens bought before range
       let gainAe: number;
       let gainUsd: number;
       if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
-        // Range-based PNL: include sale proceeds
-        // Gain = (proceeds from sales + current value of remaining tokens) - cost of purchases
-        gainAe = (totalAmountReceivedAe + currentValueAe) - costBasisAe;
-        gainUsd = (totalAmountReceivedUsd + currentValueUsd) - costBasisUsd;
+        // Range-based PNL: calculate value of tokens bought in range that are still held
+        // Remaining tokens from range = max(0, totalVolumeBought - totalVolumeSold)
+        // But cap at currentHoldings to handle edge cases
+        const remainingFromRange = Math.max(0, Math.min(currentHoldings, totalVolumeBought - totalVolumeSold));
+        const currentValueFromRangeAe = remainingFromRange * currentUnitPriceAe;
+        const currentValueFromRangeUsd = remainingFromRange * currentUnitPriceUsd;
+        
+        // Gain = (proceeds from sales + current value of tokens bought in range) - cost of purchases
+        gainAe = (totalAmountReceivedAe + currentValueFromRangeAe) - costBasisAe;
+        gainUsd = (totalAmountReceivedUsd + currentValueFromRangeUsd) - costBasisUsd;
       } else {
         // Cumulative PNL: current value - cost basis
         gainAe = currentValueAe - costBasisAe;
