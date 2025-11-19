@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import moment from 'moment';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Account } from '../entities/account.entity';
@@ -10,6 +10,7 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { LeaderboardItem, LeaderboardWindow } from './leaderboard.service';
 import { AccountLeaderboardSnapshot } from '../entities/account-leaderboard-snapshot.entity';
 import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
+import { timestampToAeHeight } from '@/utils/getBlochHeight';
 
 @Injectable()
 export class LeaderboardSnapshotService {
@@ -28,6 +29,7 @@ export class LeaderboardSnapshotService {
     @InjectRepository(AccountLeaderboardSnapshot)
     private readonly snapshotRepository: Repository<AccountLeaderboardSnapshot>,
     private readonly bclPnlService: BclPnlService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   @Cron(CronExpression.EVERY_10_MINUTES)
@@ -86,7 +88,9 @@ export class LeaderboardSnapshotService {
   } {
     const end = new Date();
     if (window === 'all') {
-      return { end };
+      // Treat "all" as last 365 days for window-based metrics
+      const start = new Date(end.getTime() - 365 * 24 * 3600 * 1000);
+      return { start, end };
     }
     const start =
       window === '7d'
@@ -173,12 +177,21 @@ export class LeaderboardSnapshotService {
       .getRawMany<{ address: string; owned_count: string }>();
     const ownedByAddress = new Map(ownedRaw.map((r) => [r.address, r]));
 
-    // Get a single reference block height (latest) for PNL/AUM snapshot
+    // Get reference block heights for window start and "now"
     const { max_block_height } = await this.transactionsRepository
       .createQueryBuilder('tx')
       .select('MAX(tx.block_height)', 'max_block_height')
       .getRawOne<{ max_block_height: string | null }>();
-    const blockHeight = Number(max_block_height || 0);
+    const endBlockHeight = Number(max_block_height || 0);
+
+    let startBlockHeight = 0;
+    if (start) {
+      startBlockHeight = await timestampToAeHeight(
+        start.getTime(),
+        undefined,
+        this.dataSource,
+      );
+    }
 
     const concurrency = 8;
     const seriesByAddress = new Map<string, Array<[number, number]>>();
@@ -192,41 +205,68 @@ export class LeaderboardSnapshotService {
 
     const tasks = candidateAddresses.map((address) => async () => {
       try {
-        const pnl: TokenPnlResult = await this.bclPnlService.calculateTokenPnls(
-          address,
-          blockHeight,
-        );
-        const aumUsd = pnl.totalCurrentValueUsd;
-        const pnlUsd = pnl.totalGainUsd;
-        const roi =
-          pnl.totalCostBasisUsd > 0
-            ? (pnl.totalGainUsd / pnl.totalCostBasisUsd) * 100
-            : 0;
+        // Portfolio at window end (always needed)
+        const pnlEnd: TokenPnlResult =
+          await this.bclPnlService.calculateTokenPnls(address, endBlockHeight);
+        const aumEndUsd = pnlEnd.totalCurrentValueUsd;
 
-        const now = Date.now();
-        const windowMs =
-          window === '7d'
-            ? 7 * 24 * 3600 * 1000
-            : window === '30d'
-              ? 30 * 24 * 3600 * 1000
-              : 90 * 24 * 3600 * 1000;
-        const startValue = Math.max(aumUsd - pnlUsd, 0);
+        const endMs = end.getTime();
+        const startMs = start ? start.getTime() : endMs;
+
+        let aumStartUsd = 0;
+        let pnlWindowUsd = 0;
+        let roiWindowPct = 0;
+
+        if (window === 'all') {
+          // For "all", use true all-time PNL.
+          // Prefer USD basis; if it's zero (e.g. costs stored only in AE), fall back to AE basis.
+          aumStartUsd = Math.max(aumEndUsd - pnlEnd.totalGainUsd, 0);
+          pnlWindowUsd = pnlEnd.totalGainUsd;
+
+          if (pnlEnd.totalCostBasisUsd > 0) {
+            roiWindowPct =
+              (pnlEnd.totalGainUsd / pnlEnd.totalCostBasisUsd) * 100;
+          } else if (pnlEnd.totalCostBasisAe > 0) {
+            roiWindowPct =
+              (pnlEnd.totalGainAe / pnlEnd.totalCostBasisAe) * 100;
+          } else {
+            roiWindowPct = 0;
+          }
+        } else {
+          // For 7d / 30d, compute window-based PNL by comparing start vs end
+          if (startBlockHeight > 0) {
+            const pnlStart: TokenPnlResult =
+              await this.bclPnlService.calculateTokenPnls(
+                address,
+                startBlockHeight,
+              );
+            aumStartUsd = pnlStart.totalCurrentValueUsd;
+          }
+          pnlWindowUsd = aumEndUsd - aumStartUsd;
+          roiWindowPct =
+            aumStartUsd > 0 ? (pnlWindowUsd / aumStartUsd) * 100 : 0;
+        }
+
         const spark: Array<[number, number]> = [
-          [now - windowMs, startValue],
-          [now, aumUsd],
+          [startMs, Math.max(aumStartUsd, 0)],
+          [endMs, Math.max(aumEndUsd, 0)],
         ];
+
+        const peak = Math.max(aumStartUsd, aumEndUsd);
+        const trough = Math.min(aumStartUsd, aumEndUsd);
+        const mddPct = peak > 0 ? ((peak - trough) / peak) * 100 : 0;
 
         seriesByAddress.set(address, spark);
         metricsIntermediate.push({
           address,
-          aum_usd: aumUsd,
-          pnl_usd: pnlUsd,
-          roi_pct: roi,
-          mdd_pct: startValue > 0 ? ((startValue - aumUsd) / startValue) * -100 : 0,
+          aum_usd: aumEndUsd,
+          pnl_usd: pnlWindowUsd,
+          roi_pct: roiWindowPct,
+          mdd_pct: mddPct,
         });
       } catch (e) {
         this.logger.warn(
-          `Failed to compute PNL for ${address}: ${(e as Error).message}`,
+          `Failed to compute window PNL for ${address}: ${(e as Error).message}`,
         );
       }
     });
