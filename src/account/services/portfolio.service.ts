@@ -214,23 +214,20 @@ export class PortfolioService {
         const previousBlockHeight = index > 0 ? blockHeights[index - 1] : undefined;
         
         // Prepare promises for parallel execution
-        const promises = [
+        const promises: [
+          Promise<string>,
+          Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>,
+          ...Array<Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>>
+        ] = [
           this.aeSdkService.sdk.getBalance(
             address as any,
             {
               height: blockHeight,
             } as any,
           ),
-        ];
-
-        // Always calculate token PNL to get current value of tokens owned
-        // This is needed for accurate total_value_ae calculation (AE balance + current token value)
-        // IMPORTANT: Token values must always be cumulative (all tokens owned at this block height)
-        // Only PNL fields should respect the range filter when useRangeBasedPnl is true
-        promises.push(
           // Always call without fromBlockHeight to get cumulative token values (all tokens owned)
           this.bclPnlService.calculateTokenPnls(address, blockHeight, undefined),
-        );
+        ];
 
         // If range-based PNL is requested, calculate it separately for PNL fields only
         // Note: For index === 0, we use cumulative PNL (same as tokensPnl), so no need to call again
