@@ -276,33 +276,38 @@ export class PortfolioService {
 
         // Always calculate token PNL to get current value of tokens owned
         // This is needed for accurate total_value_ae calculation (AE balance + current token value)
-        // For range-based PNL, pass the fromBlockHeight parameter
-        // For range-based PNL with hover support: each snapshot should include PNL from startDate to that timestamp
-        // This allows frontend to use PNL data directly from each snapshot when hovering
-        let pnlFromBlockHeight: number | undefined = undefined;
-        if (useRangeBasedPnl && includePnl) {
-          if (index === 0) {
-            // First snapshot: cumulative from start (for backward compatibility)
-            pnlFromBlockHeight = undefined;
-          } else {
-            // All other snapshots: PNL from startDate to this timestamp
-            // This allows hover to use PNL data directly from the snapshot
-            pnlFromBlockHeight = startBlockHeight;
-          }
-        }
+        // IMPORTANT: Token values must always be cumulative (all tokens owned at this block height)
+        // Only PNL fields should respect the range filter when useRangeBasedPnl is true
         promises.push(
-          this.bclPnlService.calculateTokenPnls(address, blockHeight, pnlFromBlockHeight),
+          // Always call without fromBlockHeight to get cumulative token values (all tokens owned)
+          this.bclPnlService.calculateTokenPnls(address, blockHeight, undefined),
         );
+
+        // If range-based PNL is requested, calculate it separately for PNL fields only
+        // Note: For index === 0, we use cumulative PNL (same as tokensPnl), so no need to call again
+        let rangeBasedPnl: Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>> | undefined = undefined;
+        if (useRangeBasedPnl && includePnl && index > 0) {
+          // For snapshots after the first: PNL from startDate to this timestamp
+          // This allows hover to use PNL data directly from the snapshot
+          // Calculate range-based PNL separately (will be used only for PNL fields)
+          promises.push(
+            this.bclPnlService.calculateTokenPnls(address, blockHeight, startBlockHeight),
+          );
+        }
 
         const results = await Promise.all(promises);
         const totalBclTokensValue = results[0];
         const aeBalance = results[1];
-        const tokensPnl = results[2];
+        const tokensPnl = results[2]; // Cumulative token values (all tokens owned)
+        if (useRangeBasedPnl && includePnl && results.length > 3) {
+          rangeBasedPnl = results[3]; // Range-based PNL (only for PNL fields)
+        }
 
         const balance = Number(toAe(aeBalance));
 
-        // Use current value of tokens owned (from PNL service) instead of net AE spent
+        // Use current value of tokens owned (from cumulative PNL service call)
         // This gives the actual current value: current holdings * current unit price
+        // Token values must always be cumulative - all tokens owned at this block height
         const tokensValue = tokensPnl.totalCurrentValueAe;
         const tokensValueUsd = tokensPnl.totalCurrentValueUsd;
 
@@ -320,31 +325,36 @@ export class PortfolioService {
         };
 
         // Include PNL data only if requested
-        if (includePnl && tokensPnl) {
+        if (includePnl) {
+          // Use range-based PNL if available, otherwise use cumulative PNL
+          // Token values (tokens_value_ae, tokens_value_usd) always use cumulative tokensPnl
+          // PNL fields (invested, gain, percentage) use rangeBasedPnl when range-based PNL is enabled
+          const pnlData = rangeBasedPnl || tokensPnl;
+          
           // Calculate total PNL percentage
           const totalPnlPercentage =
-            tokensPnl.totalCostBasisAe > 0
-              ? (tokensPnl.totalGainAe / tokensPnl.totalCostBasisAe) * 100
+            pnlData.totalCostBasisAe > 0
+              ? (pnlData.totalGainAe / pnlData.totalCostBasisAe) * 100
               : 0;
 
           result.total_pnl = {
             percentage: totalPnlPercentage,
             invested: {
-              ae: tokensPnl.totalCostBasisAe,
-              usd: tokensPnl.totalCostBasisUsd,
+              ae: pnlData.totalCostBasisAe,
+              usd: pnlData.totalCostBasisUsd,
             },
             current_value: {
-              ae: tokensPnl.totalCurrentValueAe,
-              usd: tokensPnl.totalCurrentValueUsd,
+              ae: pnlData.totalCurrentValueAe,
+              usd: pnlData.totalCurrentValueUsd,
             },
             gain: {
-              ae: tokensPnl.totalGainAe,
-              usd: tokensPnl.totalGainUsd,
+              ae: pnlData.totalGainAe,
+              usd: pnlData.totalGainUsd,
             },
           };
 
           // Only include range information when using range-based PnL
-          if (useRangeBasedPnl) {
+          if (useRangeBasedPnl && rangeBasedPnl) {
             // Determine the range for this PnL calculation
             // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
             // First snapshot: cumulative from start (null) to current timestamp
@@ -358,7 +368,9 @@ export class PortfolioService {
               to: rangeTo,
             };
           }
-          result.tokens_pnl = tokensPnl.pnls;
+
+          // Include individual token PNL data (use range-based if available, otherwise cumulative)
+          result.tokens_pnl = pnlData.pnls;
         }
 
         return result;
