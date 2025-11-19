@@ -46,49 +46,29 @@ export class BclPnlService {
       .createQueryBuilder('tx')
       .select('tx.sale_address', 'sale_address')
       .addSelect(
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ) - 
-              COALESCE(
-                SUM(
-                  CASE 
-                    WHEN tx.tx_type = 'sell' 
-                      AND tx.block_height >= :fromBlockHeight
-                    THEN CAST(tx.volume AS DECIMAL)
-                    ELSE 0
-                  END
-                ),
-                0
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ) - 
-              COALESCE(
-                SUM(
-                  CASE 
-                    WHEN tx.tx_type = 'sell' 
-                    THEN CAST(tx.volume AS DECIMAL)
-                    ELSE 0
-                  END
-                ),
-                0
-              ),
-              0
-            )`,
+        // IMPORTANT: current_holdings must always be cumulative (all transactions up to blockHeight)
+        // Holdings represent actual token balance at blockHeight, not net change within range
+        // Only cost basis fields (total_volume_bought, total_amount_spent_*) should be filtered by fromBlockHeight
+        `COALESCE(
+          SUM(
+            CASE 
+              WHEN tx.tx_type IN ('buy', 'create_community') 
+              THEN CAST(tx.volume AS DECIMAL)
+              ELSE 0
+            END
+          ) - 
+          COALESCE(
+            SUM(
+              CASE 
+                WHEN tx.tx_type = 'sell' 
+                THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ),
+          0
+        )`,
         'current_holdings',
       )
       .addSelect(
@@ -200,44 +180,37 @@ export class BclPnlService {
       .andWhere('tx.block_height < :blockHeight', { blockHeight });
     
     // If fromBlockHeight is provided, we need to calculate range-based PNL:
-    // - Calculate holdings from transactions in the range (>= fromBlockHeight)
-    // - Calculate cost basis only for holdings from transactions in the range (>= fromBlockHeight)
+    // - Calculate holdings cumulatively (all transactions up to blockHeight) - represents actual token balance
+    // - Calculate cost basis only for tokens bought in the range (>= fromBlockHeight)
+    // - This ensures holdings reflect actual balance while PNL reflects range performance
     
     tokenPnlsQuery
       .groupBy('tx.sale_address')
       .having(
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            ) > 0`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ) - 
-              COALESCE(
-                SUM(
-                  CASE 
-                    WHEN tx.tx_type = 'sell' 
-                    THEN CAST(tx.volume AS DECIMAL)
-                    ELSE 0
-                  END
-                ),
-                0
-              ),
-              0
-            ) > 0`,
+        // HAVING clause should check for actual holdings (cumulative) at blockHeight
+        // This ensures tokens with holdings are included even if bought before the range
+        // For range-based PNL, cost basis will be calculated only from range transactions,
+        // but holdings must reflect actual balance at blockHeight
+        `COALESCE(
+          SUM(
+            CASE 
+              WHEN tx.tx_type IN ('buy', 'create_community') 
+              THEN CAST(tx.volume AS DECIMAL)
+              ELSE 0
+            END
+          ) - 
+          COALESCE(
+            SUM(
+              CASE 
+                WHEN tx.tx_type = 'sell' 
+                THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ),
+          0
+        ) > 0`,
       )
       .setParameter('blockHeight', blockHeight);
     
@@ -274,15 +247,22 @@ export class BclPnlService {
       const currentUnitPriceAe = Number(tokenPnl.current_unit_price_ae || 0);
       const currentUnitPriceUsd = Number(tokenPnl.current_unit_price_usd || 0);
 
-      // Calculate average cost per token
+      // Calculate average cost per token (only for tokens bought in range if fromBlockHeight is provided)
       const averageCostPerTokenAe =
         totalVolumeBought > 0 ? totalAmountSpentAe / totalVolumeBought : 0;
       const averageCostPerTokenUsd =
         totalVolumeBought > 0 ? totalAmountSpentUsd / totalVolumeBought : 0;
 
-      // Calculate cost basis for current holdings (based on average cost)
-      const costBasisAe = currentHoldings * averageCostPerTokenAe;
-      const costBasisUsd = currentHoldings * averageCostPerTokenUsd;
+      // Calculate cost basis for range-based PNL
+      // If fromBlockHeight is provided, cost basis should only include tokens bought in the range
+      // Use min(currentHoldings, totalVolumeBought) to avoid attributing cost basis to tokens bought before range
+      // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
+      const holdingsForCostBasis = fromBlockHeight !== undefined && fromBlockHeight !== null
+        ? Math.min(currentHoldings, totalVolumeBought) // Only tokens bought in range
+        : currentHoldings; // All holdings for cumulative PNL
+      
+      const costBasisAe = holdingsForCostBasis * averageCostPerTokenAe;
+      const costBasisUsd = holdingsForCostBasis * averageCostPerTokenUsd;
       totalCostBasisAe += costBasisAe;
       totalCostBasisUsd += costBasisUsd;
 
