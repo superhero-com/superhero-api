@@ -177,20 +177,25 @@ export class LeaderboardSnapshotService {
       .getRawMany<{ address: string; owned_count: string }>();
     const ownedByAddress = new Map(ownedRaw.map((r) => [r.address, r]));
 
-    // Get reference block heights for window start and "now"
-    const { max_block_height } = await this.transactionsRepository
-      .createQueryBuilder('tx')
-      .select('MAX(tx.block_height)', 'max_block_height')
-      .getRawOne<{ max_block_height: string | null }>();
-    const endBlockHeight = Number(max_block_height || 0);
+    // Precompute sample timestamps and corresponding block heights for this window
+    const endMs = end.getTime();
+    const startMs = start ? start.getTime() : endMs;
+    const durationMs = Math.max(endMs - startMs, 1);
+    const pointCount =
+      window === '7d' ? 8 : window === '30d' ? 12 : 24;
+    const sampleTimestamps: number[] = [];
+    for (let i = 0; i < pointCount; i++) {
+      const ratio = i / (pointCount - 1);
+      const t = startMs + durationMs * ratio;
+      sampleTimestamps.push(Math.floor(t));
+    }
 
-    let startBlockHeight = 0;
-    if (start) {
-      startBlockHeight = await timestampToAeHeight(
-        start.getTime(),
-        undefined,
-        this.dataSource,
-      );
+    const sampleHeights: number[] = [];
+    let previousHeight: number | undefined = undefined;
+    for (const ts of sampleTimestamps) {
+      const h = await timestampToAeHeight(ts, previousHeight, this.dataSource);
+      sampleHeights.push(h);
+      previousHeight = h;
     }
 
     const concurrency = 8;
@@ -205,56 +210,41 @@ export class LeaderboardSnapshotService {
 
     const tasks = candidateAddresses.map((address) => async () => {
       try {
-        // Portfolio at window end (always needed)
-        const pnlEnd: TokenPnlResult =
-          await this.bclPnlService.calculateTokenPnls(address, endBlockHeight);
-        const aumEndUsd = pnlEnd.totalCurrentValueUsd;
-
-        const endMs = end.getTime();
-        const startMs = start ? start.getTime() : endMs;
-
-        let aumStartUsd = 0;
-        let pnlWindowUsd = 0;
-        let roiWindowPct = 0;
-
-        if (window === 'all') {
-          // For "all", use true all-time PNL.
-          // Prefer USD basis; if it's zero (e.g. costs stored only in AE), fall back to AE basis.
-          aumStartUsd = Math.max(aumEndUsd - pnlEnd.totalGainUsd, 0);
-          pnlWindowUsd = pnlEnd.totalGainUsd;
-
-          if (pnlEnd.totalCostBasisUsd > 0) {
-            roiWindowPct =
-              (pnlEnd.totalGainUsd / pnlEnd.totalCostBasisUsd) * 100;
-          } else if (pnlEnd.totalCostBasisAe > 0) {
-            roiWindowPct =
-              (pnlEnd.totalGainAe / pnlEnd.totalCostBasisAe) * 100;
-          } else {
-            roiWindowPct = 0;
-          }
-        } else {
-          // For 7d / 30d, compute window-based PNL by comparing start vs end
-          if (startBlockHeight > 0) {
-            const pnlStart: TokenPnlResult =
-              await this.bclPnlService.calculateTokenPnls(
-                address,
-                startBlockHeight,
-              );
-            aumStartUsd = pnlStart.totalCurrentValueUsd;
-          }
-          pnlWindowUsd = aumEndUsd - aumStartUsd;
-          roiWindowPct =
-            aumStartUsd > 0 ? (pnlWindowUsd / aumStartUsd) * 100 : 0;
+        // Sample AUM at each precomputed block height
+        const spark: Array<[number, number]> = [];
+        for (let i = 0; i < sampleHeights.length; i++) {
+          const h = sampleHeights[i];
+          const ts = sampleTimestamps[i];
+          const pnl: TokenPnlResult =
+            await this.bclPnlService.calculateTokenPnls(address, h);
+          const aumUsd = pnl.totalCurrentValueUsd;
+          spark.push([ts, Math.max(aumUsd, 0)]);
         }
 
-        const spark: Array<[number, number]> = [
-          [startMs, Math.max(aumStartUsd, 0)],
-          [endMs, Math.max(aumEndUsd, 0)],
-        ];
+        if (!spark.length) {
+          return;
+        }
 
-        const peak = Math.max(aumStartUsd, aumEndUsd);
-        const trough = Math.min(aumStartUsd, aumEndUsd);
-        const mddPct = peak > 0 ? ((peak - trough) / peak) * 100 : 0;
+        // Ensure chronological
+        spark.sort((a, b) => a[0] - b[0]);
+
+        const aumStartUsd = spark[0][1];
+        const aumEndUsd = spark[spark.length - 1][1];
+        const pnlWindowUsd = aumEndUsd - aumStartUsd;
+        const roiWindowPct =
+          aumStartUsd > 0 ? (pnlWindowUsd / aumStartUsd) * 100 : 0;
+
+        // MDD over sampled series
+        let peak = Number.NEGATIVE_INFINITY;
+        let maxDrawdown = 0;
+        for (const [, v] of spark) {
+          if (v > peak) peak = v;
+          if (peak > 0) {
+            const dd = (peak - v) / peak;
+            if (dd > maxDrawdown) maxDrawdown = dd;
+          }
+        }
+        const mddPct = maxDrawdown * 100;
 
         seriesByAddress.set(address, spark);
         metricsIntermediate.push({
