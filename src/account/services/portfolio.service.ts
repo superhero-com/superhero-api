@@ -213,59 +213,8 @@ export class PortfolioService {
         const blockHeight = blockHeights[index];
         const previousBlockHeight = index > 0 ? blockHeights[index - 1] : undefined;
         
-        // Build query builder for transactions
-        const transactionQuery = this.transactionRepository
-          .createQueryBuilder('tx')
-          .select(
-            `COALESCE(
-            SUM(
-              CASE 
-                WHEN tx.tx_type IN ('buy', 'create_community') 
-                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ) - 
-            SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          )`,
-            'net_ae',
-          )
-          .addSelect(
-            `COALESCE(
-            SUM(
-              CASE 
-                WHEN tx.tx_type IN ('buy', 'create_community') 
-                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ) - 
-            SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          )`,
-            'net_usd',
-          )
-          .where('tx.address = :address', { address })
-          // ALWAYS use cumulative transactions for token value calculation
-          // Token values represent the total value at a point in time, not incremental changes
-          // The useRangeBasedPnl flag should NOT affect token values, only PNL calculations
-          // (PNL calculations are handled separately in bclPnlService with fromBlockHeight parameter)
-          .andWhere('tx.block_height < :blockHeight', { blockHeight });
-        
         // Prepare promises for parallel execution
         const promises = [
-          transactionQuery.getRawOne(),
           this.aeSdkService.sdk.getBalance(
             address as any,
             {
@@ -296,11 +245,10 @@ export class PortfolioService {
         }
 
         const results = await Promise.all(promises);
-        const totalBclTokensValue = results[0];
-        const aeBalance = results[1];
-        const tokensPnl = results[2]; // Cumulative token values (all tokens owned)
-        if (useRangeBasedPnl && includePnl && results.length > 3) {
-          rangeBasedPnl = results[3]; // Range-based PNL (only for PNL fields)
+        const aeBalance = results[0];
+        const tokensPnl = results[1]; // Cumulative token values (all tokens owned)
+        if (useRangeBasedPnl && includePnl && results.length > 2) {
+          rangeBasedPnl = results[2]; // Range-based PNL (only for PNL fields)
         }
 
         const balance = Number(toAe(aeBalance));
