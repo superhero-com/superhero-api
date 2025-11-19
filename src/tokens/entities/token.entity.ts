@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 
-@Entity()
+@Entity({ name: 'token' })
 export class Token {
   @PrimaryColumn()
   sale_address: string;
