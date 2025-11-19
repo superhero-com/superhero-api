@@ -114,8 +114,17 @@ export class PortfolioService {
     } = options;
 
     // Calculate date range
-    const end = moment(endDate || moment()).add(1, 'day');
+    // Don't add extra day if endDate is explicitly provided - use it as-is
+    // Only add 1 day if no endDate is provided (for default 90-day range)
+    const now = moment();
+    const requestedEnd = endDate || now;
+    const end = endDate 
+      ? moment(requestedEnd) // Use exact end date if provided
+      : moment(requestedEnd).add(1, 'day'); // Add 1 day only for default range
     const start = startDate || moment().subtract(90, 'days'); // Default to last 90 days
+
+    // Cap end date to current time to avoid generating future timestamps
+    const cappedEnd = moment.min(end, now);
 
     const defaultInterval = 86400; // Default daily (24 hours)
     const safeInterval = interval > 0 ? interval : defaultInterval;
@@ -125,7 +134,7 @@ export class PortfolioService {
     const current = moment(start);
     const maxIterations = 100000; // Safety limit to prevent infinite loops
     let iterations = 0;
-    const endTimestamp = end.valueOf();
+    const endTimestamp = cappedEnd.valueOf();
 
     while (current.valueOf() <= endTimestamp) {
       if (iterations >= maxIterations) {
@@ -134,6 +143,12 @@ export class PortfolioService {
         );
         break;
       }
+      
+      // Don't generate timestamps in the future
+      if (current.valueOf() > now.valueOf()) {
+        break;
+      }
+      
       timestamps.push(moment(current));
       const previousTimestamp = current.valueOf();
       current.add(safeInterval, 'seconds');
@@ -175,6 +190,18 @@ export class PortfolioService {
       previousHeight = blockHeight;
     }
 
+    // Store the actual startDate for range-based PNL calculations
+    const actualStartDate = start;
+    
+    // Calculate block height for startDate once (for range-based PNL last snapshot)
+    const startBlockHeight = useRangeBasedPnl && includePnl
+      ? await timestampToAeHeight(
+          actualStartDate.valueOf(),
+          undefined,
+          this.dataSource,
+        )
+      : undefined;
+    
     const data = await Promise.all(
       timestamps.map(async (timestamp, index) => {
         // the aePriceHistory is an array of [timestamp_ms, price] pairs
@@ -186,94 +213,48 @@ export class PortfolioService {
         const blockHeight = blockHeights[index];
         const previousBlockHeight = index > 0 ? blockHeights[index - 1] : undefined;
         
-        // Build query builder for transactions
-        const transactionQuery = this.transactionRepository
-          .createQueryBuilder('tx')
-          .select(
-            `COALESCE(
-            SUM(
-              CASE 
-                WHEN tx.tx_type IN ('buy', 'create_community') 
-                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ) - 
-            SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          )`,
-            'net_ae',
-          )
-          .addSelect(
-            `COALESCE(
-            SUM(
-              CASE 
-                WHEN tx.tx_type IN ('buy', 'create_community') 
-                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ) - 
-            SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          )`,
-            'net_usd',
-          )
-          .where('tx.address = :address', { address });
-        
-        // Apply filtering based on useRangeBasedPnl option
-        if (useRangeBasedPnl) {
-          // Range-based PnL: For the first item, include all previous transactions
-          // For subsequent items, only include transactions between previous and current timestamp
-          if (index === 0) {
-            transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
-          } else {
-            transactionQuery
-              .andWhere('tx.block_height >= :previousBlockHeight', { previousBlockHeight })
-              .andWhere('tx.block_height < :blockHeight', { blockHeight });
-          }
-        } else {
-          // Old logic: Always include all previous transactions
-          transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
-        }
-        
         // Prepare promises for parallel execution
-        const promises = [
-          transactionQuery.getRawOne(),
+        const promises: [
+          Promise<string>,
+          Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>,
+          ...Array<Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>>
+        ] = [
           this.aeSdkService.sdk.getBalance(
             address as any,
             {
               height: blockHeight,
             } as any,
           ),
+          // Always call without fromBlockHeight to get cumulative token values (all tokens owned)
+          this.bclPnlService.calculateTokenPnls(address, blockHeight, undefined),
         ];
 
-        // Add PNL calculation promise only if requested
-        if (includePnl) {
+        // If range-based PNL is requested, calculate it separately for PNL fields only
+        // Note: For index === 0, we use cumulative PNL (same as tokensPnl), so no need to call again
+        let rangeBasedPnl: Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>> | undefined = undefined;
+        if (useRangeBasedPnl && includePnl && index > 0) {
+          // For snapshots after the first: PNL from startDate to this timestamp
+          // This allows hover to use PNL data directly from the snapshot
+          // Calculate range-based PNL separately (will be used only for PNL fields)
           promises.push(
-            this.bclPnlService.calculateTokenPnls(address, blockHeight),
+            this.bclPnlService.calculateTokenPnls(address, blockHeight, startBlockHeight),
           );
         }
 
         const results = await Promise.all(promises);
-        const totalBclTokensValue = results[0];
-        const aeBalance = results[1];
-        const tokensPnl = includePnl ? results[2] : null;
+        const aeBalance = results[0];
+        const tokensPnl = results[1]; // Cumulative token values (all tokens owned)
+        if (useRangeBasedPnl && includePnl && results.length > 2) {
+          rangeBasedPnl = results[2]; // Range-based PNL (only for PNL fields)
+        }
 
         const balance = Number(toAe(aeBalance));
 
-        const tokensValue = Number(totalBclTokensValue.net_ae);
-        const tokensValueUsd = Number(totalBclTokensValue.net_usd || 0);
+        // Use current value of tokens owned (from cumulative PNL service call)
+        // This gives the actual current value: current holdings * current unit price
+        // Token values must always be cumulative - all tokens owned at this block height
+        const tokensValue = tokensPnl.totalCurrentValueAe;
+        const tokensValueUsd = tokensPnl.totalCurrentValueUsd;
 
         const result: PortfolioHistorySnapshot = {
           timestamp,
@@ -289,42 +270,52 @@ export class PortfolioService {
         };
 
         // Include PNL data only if requested
-        if (includePnl && tokensPnl) {
+        if (includePnl) {
+          // Use range-based PNL if available, otherwise use cumulative PNL
+          // Token values (tokens_value_ae, tokens_value_usd) always use cumulative tokensPnl
+          // PNL fields (invested, gain, percentage) use rangeBasedPnl when range-based PNL is enabled
+          const pnlData = rangeBasedPnl || tokensPnl;
+          
           // Calculate total PNL percentage
           const totalPnlPercentage =
-            tokensPnl.totalCostBasisAe > 0
-              ? (tokensPnl.totalGainAe / tokensPnl.totalCostBasisAe) * 100
+            pnlData.totalCostBasisAe > 0
+              ? (pnlData.totalGainAe / pnlData.totalCostBasisAe) * 100
               : 0;
 
           result.total_pnl = {
             percentage: totalPnlPercentage,
             invested: {
-              ae: tokensPnl.totalCostBasisAe,
-              usd: tokensPnl.totalCostBasisUsd,
+              ae: pnlData.totalCostBasisAe,
+              usd: pnlData.totalCostBasisUsd,
             },
             current_value: {
-              ae: tokensPnl.totalCurrentValueAe,
-              usd: tokensPnl.totalCurrentValueUsd,
+              ae: pnlData.totalCurrentValueAe,
+              usd: pnlData.totalCurrentValueUsd,
             },
             gain: {
-              ae: tokensPnl.totalGainAe,
-              usd: tokensPnl.totalGainUsd,
+              ae: pnlData.totalGainAe,
+              usd: pnlData.totalGainUsd,
             },
           };
 
           // Only include range information when using range-based PnL
           if (useRangeBasedPnl) {
             // Determine the range for this PnL calculation
-            // For the first item, range is from beginning (null) to current timestamp
-            // For subsequent items, range is from previous timestamp to current timestamp
-            const rangeFrom = index === 0 ? null : timestamps[index - 1];
+            // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
+            // First snapshot: cumulative from start (null) to current timestamp
+            // All other snapshots: from startDate to current timestamp
+            const rangeFrom = index === 0 
+              ? null 
+              : actualStartDate;
             const rangeTo = timestamp;
             result.total_pnl.range = {
               from: rangeFrom,
               to: rangeTo,
             };
           }
-          result.tokens_pnl = tokensPnl.pnls;
+
+          // Include individual token PNL data (use range-based if available, otherwise cumulative)
+          result.tokens_pnl = pnlData.pnls;
         }
 
         return result;

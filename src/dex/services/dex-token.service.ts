@@ -42,6 +42,8 @@ export class DexTokenService {
       '24hvolume',
       '7dchange',
       '7dvolume',
+      '30dchange',
+      '30dvolume',
     ];
 
     if (!allowedOrderFields.includes(orderBy)) {
@@ -86,6 +88,18 @@ export class DexTokenService {
         case '7dvolume':
           query.orderBy(
             "(\"summary\".change->'7d'->'volume'->>'ae')::numeric",
+            orderDirection,
+          );
+          break;
+        case '30dchange':
+          query.orderBy(
+            "(\"summary\".change->'30d'->>'percentage')::numeric",
+            orderDirection,
+          );
+          break;
+        case '30dvolume':
+          query.orderBy(
+            "(\"summary\".change->'30d'->'volume'->>'ae')::numeric",
             orderDirection,
           );
           break;

@@ -50,6 +50,8 @@ export class DexTokensController {
       '24hvolume',
       '7dchange',
       '7dvolume',
+      '30dchange',
+      '30dvolume',
     ],
     required: false,
   })
