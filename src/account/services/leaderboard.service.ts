@@ -44,7 +44,12 @@ export class LeaderboardService {
 
   async getLeaders(
     params: GetLeadersParams,
-  ): Promise<{ items: LeaderboardItem[]; totalCandidates: number }> {
+  ): Promise<{
+    items: LeaderboardItem[];
+    totalCandidates: number;
+    page: number;
+    limit: number;
+  }> {
     const window = params.window ?? '7d';
     const sortBy = params.sortBy ?? 'pnl';
     const sortDir = params.sortDir ?? (sortBy === 'mdd' ? 'ASC' : 'DESC');
@@ -89,6 +94,8 @@ export class LeaderboardService {
     return {
       items,
       totalCandidates: total,
+      page,
+      limit,
     };
   }
 }

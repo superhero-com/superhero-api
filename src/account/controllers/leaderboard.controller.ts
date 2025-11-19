@@ -67,10 +67,10 @@ export class LeaderboardController {
 		return {
 			items: result.items,
 			meta: {
-				page,
-				limit,
+				page: result.page,
+				limit: result.limit,
 				totalItems: result.totalCandidates,
-				totalPages: Math.max(1, Math.ceil(result.totalCandidates / limit)),
+				totalPages: Math.max(1, Math.ceil(result.totalCandidates / result.limit)),
 				window,
 				sortBy,
 				sortDir,
