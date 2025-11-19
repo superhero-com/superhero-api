@@ -147,6 +147,85 @@ export class BclPnlService {
         'total_amount_spent_usd',
       )
       .addSelect(
+        // Track sale proceeds for range-based PNL
+        // This is needed to calculate accurate PNL when tokens are bought and sold within the range
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                    AND tx.block_height >= :fromBlockHeight
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`
+          : `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`,
+        'total_amount_received_ae',
+      )
+      .addSelect(
+        // Track sale proceeds in USD for range-based PNL
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                    AND tx.block_height >= :fromBlockHeight
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`
+          : `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`,
+        'total_amount_received_usd',
+      )
+      .addSelect(
+        // Track volume sold for range-based PNL
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                    AND tx.block_height >= :fromBlockHeight
+                  THEN CAST(tx.volume AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`
+          : `COALESCE(
+              SUM(
+                CASE 
+                  WHEN tx.tx_type = 'sell' 
+                  THEN CAST(tx.volume AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            )`,
+        'total_volume_sold',
+      )
+      .addSelect(
         `(
           SELECT CAST(NULLIF(tx2.buy_price->>'ae', 'NaN') AS DECIMAL)
           FROM transactions tx2
@@ -242,8 +321,11 @@ export class BclPnlService {
       const saleAddress = tokenPnl.sale_address;
       const currentHoldings = Number(tokenPnl.current_holdings || 0);
       const totalVolumeBought = Number(tokenPnl.total_volume_bought || 0);
+      const totalVolumeSold = Number(tokenPnl.total_volume_sold || 0);
       const totalAmountSpentAe = Number(tokenPnl.total_amount_spent_ae || 0);
       const totalAmountSpentUsd = Number(tokenPnl.total_amount_spent_usd || 0);
+      const totalAmountReceivedAe = Number(tokenPnl.total_amount_received_ae || 0);
+      const totalAmountReceivedUsd = Number(tokenPnl.total_amount_received_usd || 0);
       const currentUnitPriceAe = Number(tokenPnl.current_unit_price_ae || 0);
       const currentUnitPriceUsd = Number(tokenPnl.current_unit_price_usd || 0);
 
@@ -255,33 +337,56 @@ export class BclPnlService {
 
       // Calculate cost basis for range-based PNL
       // If fromBlockHeight is provided, cost basis should only include tokens bought in the range
-      // Use min(currentHoldings, totalVolumeBought) to avoid attributing cost basis to tokens bought before range
+      // Cost basis = total amount spent on purchases in range
       // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
-      const holdingsForCostBasis = fromBlockHeight !== undefined && fromBlockHeight !== null
-        ? Math.min(currentHoldings, totalVolumeBought) // Only tokens bought in range
-        : currentHoldings; // All holdings for cumulative PNL
+      const costBasisAe = fromBlockHeight !== undefined && fromBlockHeight !== null
+        ? totalAmountSpentAe // Only purchases in range
+        : currentHoldings * averageCostPerTokenAe; // All holdings for cumulative PNL
+      const costBasisUsd = fromBlockHeight !== undefined && fromBlockHeight !== null
+        ? totalAmountSpentUsd // Only purchases in range
+        : currentHoldings * averageCostPerTokenUsd; // All holdings for cumulative PNL
       
-      const costBasisAe = holdingsForCostBasis * averageCostPerTokenAe;
-      const costBasisUsd = holdingsForCostBasis * averageCostPerTokenUsd;
       totalCostBasisAe += costBasisAe;
       totalCostBasisUsd += costBasisUsd;
 
       // Calculate current value for range-based PNL
-      // If fromBlockHeight is provided, current value should only include tokens bought in range
-      // This ensures gain = (value of range tokens) - (cost of range tokens)
+      // If fromBlockHeight is provided, current value should only include tokens bought in range that are still held
+      // Remaining tokens = tokens bought in range - tokens sold in range
       // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
-      const holdingsForCurrentValue = fromBlockHeight !== undefined && fromBlockHeight !== null
-        ? holdingsForCostBasis // Only tokens bought in range
-        : currentHoldings; // All holdings for cumulative PNL
+      let holdingsForCurrentValue: number;
+      if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
+        // For range-based PNL: calculate remaining tokens bought in range
+        // Remaining = max(0, totalVolumeBought - totalVolumeSold)
+        // But we also need to account for tokens bought before range that might still be held
+        // So we use: min(currentHoldings, max(0, totalVolumeBought - totalVolumeSold))
+        const remainingFromRange = Math.max(0, totalVolumeBought - totalVolumeSold);
+        holdingsForCurrentValue = Math.min(currentHoldings, remainingFromRange);
+      } else {
+        // All holdings for cumulative PNL
+        holdingsForCurrentValue = currentHoldings;
+      }
       
       const currentValueAe = holdingsForCurrentValue * currentUnitPriceAe;
       const currentValueUsd = holdingsForCurrentValue * currentUnitPriceUsd;
       totalCurrentValueAe += currentValueAe;
       totalCurrentValueUsd += currentValueUsd;
 
-      // Calculate gain (current value - invested)
-      const gainAe = currentValueAe - costBasisAe;
-      const gainUsd = currentValueUsd - costBasisUsd;
+      // Calculate gain for range-based PNL
+      // Gain = (sale proceeds + current value of remaining tokens) - cost basis
+      // This accounts for both tokens sold and tokens still held
+      let gainAe: number;
+      let gainUsd: number;
+      if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
+        // Range-based PNL: include sale proceeds
+        // Gain = (proceeds from sales + current value of remaining tokens) - cost of purchases
+        gainAe = (totalAmountReceivedAe + currentValueAe) - costBasisAe;
+        gainUsd = (totalAmountReceivedUsd + currentValueUsd) - costBasisUsd;
+      } else {
+        // Cumulative PNL: current value - cost basis
+        gainAe = currentValueAe - costBasisAe;
+        gainUsd = currentValueUsd - costBasisUsd;
+      }
+      
       totalGainAe += gainAe;
       totalGainUsd += gainUsd;
 
