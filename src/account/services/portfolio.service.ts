@@ -274,36 +274,37 @@ export class PortfolioService {
           ),
         ];
 
-        // Add PNL calculation promise only if requested
-        if (includePnl) {
-          // For range-based PNL, pass the fromBlockHeight parameter
-          // For range-based PNL with hover support: each snapshot should include PNL from startDate to that timestamp
-          // This allows frontend to use PNL data directly from each snapshot when hovering
-          let pnlFromBlockHeight: number | undefined = undefined;
-          if (useRangeBasedPnl) {
-            if (index === 0) {
-              // First snapshot: cumulative from start (for backward compatibility)
-              pnlFromBlockHeight = undefined;
-            } else {
-              // All other snapshots: PNL from startDate to this timestamp
-              // This allows hover to use PNL data directly from the snapshot
-              pnlFromBlockHeight = startBlockHeight;
-            }
+        // Always calculate token PNL to get current value of tokens owned
+        // This is needed for accurate total_value_ae calculation (AE balance + current token value)
+        // For range-based PNL, pass the fromBlockHeight parameter
+        // For range-based PNL with hover support: each snapshot should include PNL from startDate to that timestamp
+        // This allows frontend to use PNL data directly from each snapshot when hovering
+        let pnlFromBlockHeight: number | undefined = undefined;
+        if (useRangeBasedPnl && includePnl) {
+          if (index === 0) {
+            // First snapshot: cumulative from start (for backward compatibility)
+            pnlFromBlockHeight = undefined;
+          } else {
+            // All other snapshots: PNL from startDate to this timestamp
+            // This allows hover to use PNL data directly from the snapshot
+            pnlFromBlockHeight = startBlockHeight;
           }
-          promises.push(
-            this.bclPnlService.calculateTokenPnls(address, blockHeight, pnlFromBlockHeight),
-          );
         }
+        promises.push(
+          this.bclPnlService.calculateTokenPnls(address, blockHeight, pnlFromBlockHeight),
+        );
 
         const results = await Promise.all(promises);
         const totalBclTokensValue = results[0];
         const aeBalance = results[1];
-        const tokensPnl = includePnl ? results[2] : null;
+        const tokensPnl = results[2];
 
         const balance = Number(toAe(aeBalance));
 
-        const tokensValue = Number(totalBclTokensValue.net_ae);
-        const tokensValueUsd = Number(totalBclTokensValue.net_usd || 0);
+        // Use current value of tokens owned (from PNL service) instead of net AE spent
+        // This gives the actual current value: current holdings * current unit price
+        const tokensValue = tokensPnl.totalCurrentValueAe;
+        const tokensValueUsd = tokensPnl.totalCurrentValueUsd;
 
         const result: PortfolioHistorySnapshot = {
           timestamp,
