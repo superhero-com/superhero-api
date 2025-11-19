@@ -114,8 +114,17 @@ export class PortfolioService {
     } = options;
 
     // Calculate date range
-    const end = moment(endDate || moment()).add(1, 'day');
+    // Don't add extra day if endDate is explicitly provided - use it as-is
+    // Only add 1 day if no endDate is provided (for default 90-day range)
+    const now = moment();
+    const requestedEnd = endDate || now;
+    const end = endDate 
+      ? moment(requestedEnd) // Use exact end date if provided
+      : moment(requestedEnd).add(1, 'day'); // Add 1 day only for default range
     const start = startDate || moment().subtract(90, 'days'); // Default to last 90 days
+
+    // Cap end date to current time to avoid generating future timestamps
+    const cappedEnd = moment.min(end, now);
 
     const defaultInterval = 86400; // Default daily (24 hours)
     const safeInterval = interval > 0 ? interval : defaultInterval;
@@ -125,7 +134,7 @@ export class PortfolioService {
     const current = moment(start);
     const maxIterations = 100000; // Safety limit to prevent infinite loops
     let iterations = 0;
-    const endTimestamp = end.valueOf();
+    const endTimestamp = cappedEnd.valueOf();
 
     while (current.valueOf() <= endTimestamp) {
       if (iterations >= maxIterations) {
@@ -134,6 +143,12 @@ export class PortfolioService {
         );
         break;
       }
+      
+      // Don't generate timestamps in the future
+      if (current.valueOf() > now.valueOf()) {
+        break;
+      }
+      
       timestamps.push(moment(current));
       const previousTimestamp = current.valueOf();
       current.add(safeInterval, 'seconds');
