@@ -266,9 +266,16 @@ export class BclPnlService {
       totalCostBasisAe += costBasisAe;
       totalCostBasisUsd += costBasisUsd;
 
-      // Calculate current value (current holdings * current unit price)
-      const currentValueAe = currentHoldings * currentUnitPriceAe;
-      const currentValueUsd = currentHoldings * currentUnitPriceUsd;
+      // Calculate current value for range-based PNL
+      // If fromBlockHeight is provided, current value should only include tokens bought in range
+      // This ensures gain = (value of range tokens) - (cost of range tokens)
+      // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
+      const holdingsForCurrentValue = fromBlockHeight !== undefined && fromBlockHeight !== null
+        ? holdingsForCostBasis // Only tokens bought in range
+        : currentHoldings; // All holdings for cumulative PNL
+      
+      const currentValueAe = holdingsForCurrentValue * currentUnitPriceAe;
+      const currentValueUsd = holdingsForCurrentValue * currentUnitPriceUsd;
       totalCurrentValueAe += currentValueAe;
       totalCurrentValueUsd += currentValueUsd;
 
