@@ -354,7 +354,7 @@ export class PortfolioService {
           };
 
           // Only include range information when using range-based PnL
-          if (useRangeBasedPnl && rangeBasedPnl) {
+          if (useRangeBasedPnl) {
             // Determine the range for this PnL calculation
             // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
             // First snapshot: cumulative from start (null) to current timestamp
