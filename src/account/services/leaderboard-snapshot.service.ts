@@ -212,27 +212,51 @@ export class LeaderboardSnapshotService {
       try {
         // Sample AUM at each precomputed block height
         const spark: Array<[number, number]> = [];
+        let lastPnl: TokenPnlResult | null = null;
+
         for (let i = 0; i < sampleHeights.length; i++) {
           const h = sampleHeights[i];
           const ts = sampleTimestamps[i];
           const pnl: TokenPnlResult =
             await this.bclPnlService.calculateTokenPnls(address, h);
+          lastPnl = pnl;
           const aumUsd = pnl.totalCurrentValueUsd;
           spark.push([ts, Math.max(aumUsd, 0)]);
         }
 
-        if (!spark.length) {
+        if (!spark.length || !lastPnl) {
           return;
         }
 
         // Ensure chronological
         spark.sort((a, b) => a[0] - b[0]);
 
-        const aumStartUsd = spark[0][1];
+        const aumStartSpark = spark[0][1];
         const aumEndUsd = spark[spark.length - 1][1];
-        const pnlWindowUsd = aumEndUsd - aumStartUsd;
-        const roiWindowPct =
-          aumStartUsd > 0 ? (pnlWindowUsd / aumStartUsd) * 100 : 0;
+
+        let aumStartUsd = aumStartSpark;
+        let pnlWindowUsd = aumEndUsd - aumStartSpark;
+        let roiWindowPct =
+          aumStartSpark > 0 ? (pnlWindowUsd / aumStartSpark) * 100 : 0;
+
+        // For "all" window, use true all-time ROI from PNL data
+        if (window === 'all') {
+          const totalGainUsd = lastPnl.totalGainUsd;
+          const totalCostBasisUsd = lastPnl.totalCostBasisUsd;
+          const totalGainAe = lastPnl.totalGainAe;
+          const totalCostBasisAe = lastPnl.totalCostBasisAe;
+
+          pnlWindowUsd = totalGainUsd;
+          aumStartUsd = Math.max(aumEndUsd - totalGainUsd, 0);
+
+          if (totalCostBasisUsd > 0) {
+            roiWindowPct = (totalGainUsd / totalCostBasisUsd) * 100;
+          } else if (totalCostBasisAe > 0) {
+            roiWindowPct = (totalGainAe / totalCostBasisAe) * 100;
+          } else {
+            roiWindowPct = 0;
+          }
+        }
 
         // MDD over sampled series
         let peak = Number.NEGATIVE_INFINITY;
