@@ -256,23 +256,12 @@ export class PortfolioService {
           )`,
             'net_usd',
           )
-          .where('tx.address = :address', { address });
-        
-        // Apply filtering based on useRangeBasedPnl option
-        if (useRangeBasedPnl) {
-          // Range-based PnL: For the first item, include all previous transactions
-          // For subsequent items, only include transactions between previous and current timestamp
-          if (index === 0) {
-            transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
-          } else {
-            transactionQuery
-              .andWhere('tx.block_height >= :previousBlockHeight', { previousBlockHeight })
-              .andWhere('tx.block_height < :blockHeight', { blockHeight });
-          }
-        } else {
-          // Old logic: Always include all previous transactions
-          transactionQuery.andWhere('tx.block_height < :blockHeight', { blockHeight });
-        }
+          .where('tx.address = :address', { address })
+          // ALWAYS use cumulative transactions for token value calculation
+          // Token values represent the total value at a point in time, not incremental changes
+          // The useRangeBasedPnl flag should NOT affect token values, only PNL calculations
+          // (PNL calculations are handled separately in bclPnlService with fromBlockHeight parameter)
+          .andWhere('tx.block_height < :blockHeight', { blockHeight });
         
         // Prepare promises for parallel execution
         const promises = [
