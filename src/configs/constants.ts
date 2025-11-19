@@ -185,7 +185,7 @@ export const POPULAR_RANKING_CONFIG = {
 
   // time decay
   GRAVITY: 1.6, // 24h
-  GRAVITY_7D: 1.0,
+  GRAVITY_7D: 0.5, // Reduced from 1.0 to reduce time decay for weekly window
   T_BIAS: 1.0,
 
   // content quality params
@@ -205,7 +205,7 @@ export const POPULAR_RANKING_CONFIG = {
     popular7d: 'popular:7d',
     popularAll: 'popular:all',
   },
-  REDIS_TTL_SECONDS: 120,
+  REDIS_TTL_SECONDS: 30, // 30 seconds - very fresh popular feed
 
   // owned trends normalization
   OWNED_TRENDS_MAX_TRENDING_SCORE: 100,
