@@ -221,7 +221,6 @@ export class CoinGeckoService {
   fetchFromApi(path: string, searchParams: Record<string, string>) {
     const query = new URLSearchParams(searchParams).toString();
     const url = `${COIN_GECKO_API_URL}${path}?${query}`;
-    console.log('[CoinGeckoService] fetchFromApi', url);
     return fetchJson(url);
   }
 

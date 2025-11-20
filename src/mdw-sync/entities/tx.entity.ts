@@ -3,14 +3,11 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  JoinColumn,
-  ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
 import { ObjectType, Field, Int } from '@nestjs/graphql';
 import { GraphQLJSONObject } from 'graphql-type-json';
 import { ApiProperty } from '@nestjs/swagger';
-import { MicroBlock } from './micro-block.entity';
 import { Sortable } from '@/api-core/decorators/sortable.decorator';
 import { Searchable } from '@/api-core/decorators/searchable.decorator';
 
@@ -35,13 +32,6 @@ export class Tx {
   @ApiProperty()
   @Sortable()
   block_hash: string;
-
-  @ManyToOne(() => MicroBlock, (block) => block.hash, {
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'block_hash', referencedColumnName: 'hash' })
-  @Field(() => MicroBlock, { nullable: true })
-  block: MicroBlock;
 
   @Column()
   @Field(() => Int)

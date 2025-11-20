@@ -72,14 +72,6 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
 
-      // Ensure micro-block exists before saving transaction (foreign key constraint)
-      if (mdwTx.block_hash) {
-        await this.microBlockService.ensureMicroBlockExists(
-          mdwTx.block_hash,
-          transaction.blockHeight,
-        );
-      }
-
       // Save transaction
       const savedTx = await this.txRepository.save(mdwTx);
 
