@@ -40,7 +40,7 @@ export class AePricingService {
    * @param price - The amount of AE tokens.
    * @returns An object containing the price data for AE and other currencies.
    */
-  async getPriceData(price: BigNumber, date?: Date): Promise<IPriceDto> {
+  async getPriceData(price: BigNumber, date?: Date, asBigNumber = true): Promise<IPriceDto> {
     let latestRates = null;
 
 
@@ -69,7 +69,7 @@ export class AePricingService {
     }
 
     const prices = {
-      ae: price,
+      ae: asBigNumber ? price : price.toNumber(),
     };
 
     if (!this.latestRates) {
@@ -78,7 +78,8 @@ export class AePricingService {
 
     CURRENCIES.forEach(({ code }) => {
       try {
-        prices[code] = price.multipliedBy(this.latestRates.rates![code]) as any;
+        const rate = price.multipliedBy(this.latestRates.rates![code])
+        prices[code] = asBigNumber ? rate : rate.toNumber() as any;
       } catch (error) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;
