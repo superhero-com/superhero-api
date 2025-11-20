@@ -4,7 +4,7 @@ import { BCL_CONTRACT } from '../config/bcl.config';
 @ViewEntity({
   name: 'bcl_transactions_view',
   materialized: true,
-  synchronize: true,
+  synchronize: false,
   expression: `
     SELECT 
       hash,
@@ -13,6 +13,7 @@ import { BCL_CONTRACT } from '../config/bcl.config';
       caller_id,
       function,
       created_at,
+      micro_time,
       data->'bcl'->'data'->'amount' as amount,
       data->'bcl'->'data'->>'volume' as volume,
       data->'bcl'->'data'->>'tx_type' as tx_type,
@@ -56,6 +57,9 @@ export class BclTransaction {
   @ViewColumn()
   @Index()
   block_hash: string;
+
+  @ViewColumn()
+  micro_time: number;
 
   @ViewColumn()
   block_height: number;

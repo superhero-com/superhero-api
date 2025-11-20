@@ -68,6 +68,7 @@ export class BclTransactionsService {
       sale_address: transaction.sale_address || '',
       tx_type: transaction.tx_type || transaction.function,
       block_height: transaction.block_height,
+      micro_time: transaction.micro_time,
       verified: transaction.verified,
       address: transaction.caller_id || '',
       volume: transaction.volume || '0',

@@ -14,6 +14,9 @@ export class BclTransactionDto {
   @ApiProperty({ description: 'Block height' })
   block_height: number;
 
+  @ApiProperty({ description: 'Micro time' })
+  micro_time: number;
+
   @ApiProperty({ description: 'Whether the transaction is verified (at least 5 hours old)' })
   verified: boolean;
 

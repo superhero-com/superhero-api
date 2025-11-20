@@ -4,7 +4,8 @@ import { BCL_CONTRACT } from '../config/bcl.config';
 @ViewEntity({
   name: 'bcl_token_view',
   materialized: true,
-  synchronize: true,
+  synchronize: false,
+  dependsOn: ['bcl_transactions_view'],
   expression: `
     WITH token_metadata AS (
       SELECT 

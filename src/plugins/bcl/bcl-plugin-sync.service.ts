@@ -39,11 +39,9 @@ export class BclPluginSyncService extends BasePluginSyncService {
         await this.dataSource.query(
           `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
         );
-        if (rawTransaction.function === BCL_CONTRACT.FUNCTIONS.create_community) {
-          await this.dataSource.query(
-            `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
-          );
-        }
+        await this.dataSource.query(
+          `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
+        );
       } catch (error: any) {
         this.logger.error(`error refreshing BCL materialized views at tx:${rawTransaction.hash}`, error.stack)
       }
@@ -139,6 +137,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
     let _amount = new BigNumber(0);
     let total_supply = new BigNumber(0);
     let protocol_reward = new BigNumber(0);
+    let dao_balance = '0';
 
     if (tx.function === BCL_CONTRACT.FUNCTIONS.buy) {
       const mints = pluginLogs.data.filter((data) => data.name === 'Mint');
@@ -150,6 +149,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
       total_supply = new BigNumber(
         toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[2]),
       ).plus(volume);
+      dao_balance = pluginLogs.data.find((data) => data.name === 'Buy').args[1];
     }
     if (tx.function === BCL_CONTRACT.FUNCTIONS.create_community) {
       if (pluginLogs.data.find((data) => data.name === 'PriceChange')) {
@@ -162,6 +162,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
         total_supply = new BigNumber(
           toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[2]),
         ).plus(volume);
+        dao_balance = pluginLogs.data.find((data) => data.name === 'Buy').args[1];
       }
     }
     if (tx.function === BCL_CONTRACT.FUNCTIONS.sell) {
@@ -219,6 +220,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
       buy_price,
       sell_price,
       protocol_reward: protocol_reward.toNumber(),
+      dao_balance,
     }
 
     if (tx.function == BCL_CONTRACT.FUNCTIONS.create_community) {

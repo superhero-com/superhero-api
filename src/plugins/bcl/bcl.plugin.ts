@@ -16,7 +16,7 @@ import { BCL_CONTRACT } from './config/bcl.config';
 export class BclPlugin extends BasePlugin {
   protected readonly logger = new Logger(BclPlugin.name);
   readonly name = 'bcl';
-  readonly version = 1;
+  readonly version = 2;
 
   constructor(
     @InjectRepository(Tx)
