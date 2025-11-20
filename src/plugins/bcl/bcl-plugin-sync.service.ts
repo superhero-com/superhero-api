@@ -104,6 +104,26 @@ export class BclPluginSyncService extends BasePluginSyncService {
       );
     } catch (error: any) {
       this.logger.error('error refreshing BCL materialized views', error.stack)
+      // Try to identify the duplicate
+      // try {
+      //   const duplicates = await this.dataSource.query(`
+      //   SELECT 
+      //     data->'bcl'->'data'->>'sale_address' as sale_address,
+      //     COUNT(*) as count,
+      //     array_agg(hash ORDER BY micro_time DESC) as tx_hashes
+      //   FROM txs
+      //   WHERE function = 'create_community'
+      //     AND data->'bcl' IS NOT NULL
+      //     AND data->'bcl'->'data' IS NOT NULL
+      //     AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}'
+      //     AND data->'bcl'->'data'->>'sale_address' IS NOT NULL
+      //   GROUP BY data->'bcl'->'data'->>'sale_address'
+      //   HAVING COUNT(*) > 1
+      // `);
+      //   this.logger.error('Duplicate sale_addresses found:', JSON.stringify(duplicates, null, 2));
+      // } catch (innerError: any) {
+      //   this.logger.error('Failed to query duplicates:', innerError.stack);
+      // }
     }
   }
 
@@ -113,7 +133,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
       return null;
     }
     const createCommunityLogs = pluginLogs.data.find((log: any) => log.name === 'CreateCommunity');
-    const setOwnerLogs = pluginLogs.data.find((log: any) => log.name === 'Sell');
+    const setOwnerLogs = pluginLogs.data.find((log: any) => log.name === 'SetOwner');
 
     let volume = new BigNumber(0);
     let _amount = new BigNumber(0);
@@ -168,12 +188,17 @@ export class BclPluginSyncService extends BasePluginSyncService {
       : _unit_price;
     const _market_cap = _buy_price.times(total_supply);
 
-    const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
+    const _sell_price = _buy_price
+      .times(9950) // 9950 is the representation for 99.50% percent
+      .dividedBy(10000); // sell_return_percentage 10000 is matching buy price, 5000 is considered half of buy price
+
+    const [amount, unit_price, previous_buy_price, buy_price, sell_price, market_cap] =
       await Promise.all([
         this.aePricingService.getPriceData(_amount, tx.created_at, false),
         this.aePricingService.getPriceData(_unit_price, tx.created_at, false),
         this.aePricingService.getPriceData(_previous_buy_price, tx.created_at, false),
         this.aePricingService.getPriceData(_buy_price, tx.created_at, false),
+        this.aePricingService.getPriceData(_sell_price, tx.created_at, false),
         this.aePricingService.getPriceData(_market_cap, tx.created_at, false),
       ]);
 
@@ -192,12 +217,14 @@ export class BclPluginSyncService extends BasePluginSyncService {
       unit_price,
       previous_buy_price,
       buy_price,
+      sell_price,
       protocol_reward: protocol_reward.toNumber(),
     }
 
     if (tx.function == BCL_CONTRACT.FUNCTIONS.create_community) {
 
       const communityName = createCommunityLogs.args[0];
+      const collection = tx?.raw?.arguments?.[0]?.value;
       return {
         address: transferLogs?.contract?.address,
         factory_address: createCommunityLogs?.contract?.address,
@@ -211,7 +238,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
         name: communityName,
         symbol: communityName,
         decimals: 18,
-        collection: null,
+        collection: collection,
         ...txData
       };
     }
