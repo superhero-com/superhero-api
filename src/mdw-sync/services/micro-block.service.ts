@@ -64,28 +64,31 @@ export class MicroBlockService {
         `${middlewareUrl}/v3/micro-blocks/${microBlockHash}`,
       );
 
-      if (microBlock) {
-        // Convert and upsert micro-block (handles race conditions where multiple
-        // transactions from the same micro-block arrive simultaneously)
-        const microBlockToSave = this.convertToMicroBlockEntity(
-          microBlock,
-          fallbackHeight,
+      if (!microBlock) {
+        this.logger.error(
+          `Micro-block not found in MDW: ${microBlockHash}. This may indicate a synchronization issue.`,
         );
-        await this.microBlockRepository.upsert(microBlockToSave, {
-          conflictPaths: ['hash'],
-          skipUpdateIfNoValuesChanged: true,
-        });
-        this.logger.debug(
-          `Saved micro-block ${microBlockHash} before transaction`,
-        );
-        return true;
+        return false;
       }
 
-      return false;
+      // Convert and upsert micro-block (handles race conditions where multiple
+      // transactions from the same micro-block arrive simultaneously)
+      const microBlockToSave = this.convertToMicroBlockEntity(
+        microBlock,
+        fallbackHeight,
+      );
+      await this.microBlockRepository.upsert(microBlockToSave, {
+        conflictPaths: ['hash'],
+        skipUpdateIfNoValuesChanged: true,
+      });
+      this.logger.debug(
+        `Saved micro-block ${microBlockHash} before transaction`,
+      );
+      return true;
     } catch (error: any) {
-      this.logger.warn(
-        `Failed to ensure micro-block exists ${microBlockHash}`,
-        error.message,
+      this.logger.error(
+        `Failed to ensure micro-block exists ${microBlockHash}: ${error.message}`,
+        error.stack,
       );
       return false;
     }

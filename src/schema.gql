@@ -125,7 +125,6 @@ type SyncState {
 }
 
 type Tx {
-  block: MicroBlock
   block_hash: String!
   block_height: Int!
   caller_id: String

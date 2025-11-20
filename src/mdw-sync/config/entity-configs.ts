@@ -35,17 +35,6 @@ export const TX_CONFIG: EntityConfig<Tx> = {
   ],
   relations: [
     {
-      field: 'block',
-      relatedEntity: MicroBlock,
-      returnType: () => MicroBlock,
-      joinCondition: {
-        localField: 'hash',
-        parentField: 'block_hash',
-      },
-      isArray: false,
-      nullable: true,
-    },
-    {
       field: 'keyBlock',
       relatedEntity: KeyBlock,
       returnType: () => KeyBlock,
