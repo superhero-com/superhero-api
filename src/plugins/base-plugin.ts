@@ -62,9 +62,6 @@ export abstract class BasePlugin implements Plugin {
               data: decodedLogs,
             },
           };
-
-          // Save transaction with updated logs
-          await this.txRepository.save(tx);
         }
 
         // Step 2: Decode data (after logs are saved)
@@ -79,10 +76,11 @@ export abstract class BasePlugin implements Plugin {
               data: decodedData,
             },
           };
-
-          // Save transaction with updated data
-          await this.txRepository.save(tx);
         }
+        await this.txRepository.upsert(tx, {
+          conflictPaths: ['hash'],
+          upsertType: 'on-conflict-do-update',
+        });
 
         updatedTxs.push(tx);
       } catch (error: any) {
