@@ -500,6 +500,8 @@ export abstract class BasePlugin implements Plugin {
       this.logger.log(
         `[${this.name}] Update completed. Processed ${totalProcessed} transactions, updated ${totalUpdated}`,
       );
+      // notify the plugin that the update is complete
+      await syncService.onUpdateComplete();
     } catch (error: any) {
       this.logger.error(
         `[${this.name}] Update transactions failed`,

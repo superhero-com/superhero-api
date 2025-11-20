@@ -13,6 +13,7 @@ import { serializeBigInts } from '@/utils/common';
 import CommunityFactoryACI from './contract/aci/CommunityFactory.aci.json';
 import { toAe } from '@aeternity/aepp-sdk';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class BclPluginSyncService extends BasePluginSyncService {
@@ -24,6 +25,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
     private readonly aePricingService: AePricingService,
     aeSdkService: AeSdkService,
+    private readonly dataSource: DataSource,
   ) {
     super(aeSdkService);
   }
@@ -32,6 +34,17 @@ export class BclPluginSyncService extends BasePluginSyncService {
     rawTransaction: Tx,
     syncDirection: SyncDirection,
   ): Promise<void> {
+    if (syncDirection === SyncDirectionEnum.Live) {
+      try {
+        await this.dataSource.query(
+          `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
+        );
+      } catch (error: any) {
+        this.logger.error(`error refreshing BclTransaction materialized view at tx:${rawTransaction.hash}`, error.stack)
+      }
+    }
+
+    // TODO: remove this logic, only broadcast transaction to websocket if it's live
     try {
       // Delegate transaction processing to processor service
       const result =
@@ -74,6 +87,16 @@ export class BclPluginSyncService extends BasePluginSyncService {
       return null;
     }
 
+  }
+
+  async onUpdateComplete(): Promise<void> {
+    try {
+      await this.dataSource.query(
+        `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
+      );
+    } catch (error: any) {
+      this.logger.error('error refreshing BclTransaction materialized view', error.stack)
+    }
   }
 
   async decodeData(tx: Tx): Promise<any | null> {
@@ -139,11 +162,11 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
     const [amount, unit_price, previous_buy_price, buy_price, market_cap] =
       await Promise.all([
-        this.aePricingService.getPriceData(_amount, tx.created_at),
-        this.aePricingService.getPriceData(_unit_price, tx.created_at),
-        this.aePricingService.getPriceData(_previous_buy_price, tx.created_at),
-        this.aePricingService.getPriceData(_buy_price, tx.created_at),
-        this.aePricingService.getPriceData(_market_cap, tx.created_at),
+        this.aePricingService.getPriceData(_amount, tx.created_at, false),
+        this.aePricingService.getPriceData(_unit_price, tx.created_at, false),
+        this.aePricingService.getPriceData(_previous_buy_price, tx.created_at, false),
+        this.aePricingService.getPriceData(_buy_price, tx.created_at, false),
+        this.aePricingService.getPriceData(_market_cap, tx.created_at, false),
       ]);
 
     // those not available on create_community without initial buy
@@ -154,14 +177,14 @@ export class BclPluginSyncService extends BasePluginSyncService {
     const txData = {
       sale_address: priceChangeLogs?.contract?.address,
       tx_type: tx.function,
-      volume,
+      volume: volume.toNumber(),
       amount,
       market_cap,
-      total_supply,
+      total_supply: total_supply.toNumber(),
       unit_price,
       previous_buy_price,
       buy_price,
-      protocol_reward,
+      protocol_reward: protocol_reward.toNumber(),
     }
 
     if (tx.function == BCL_CONTRACT.FUNCTIONS.create_community) {
@@ -181,7 +204,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
         symbol: communityName,
         decimals: 18,
         collection: null,
-        tx: txData
+        ...txData
       };
     }
 

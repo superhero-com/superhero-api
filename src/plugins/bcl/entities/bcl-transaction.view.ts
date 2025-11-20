@@ -1,8 +1,9 @@
-import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
+import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
+import { BCL_CONTRACT } from '../config/bcl.config';
 
 @ViewEntity({
-  name: 'bcl_transaction_view',
-  materialized: false,
+  name: 'bcl_transactions_view',
+  materialized: true,
   synchronize: true,
   expression: `
     SELECT 
@@ -26,26 +27,45 @@ import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
       (data->'bcl'->>'_version')::int as _version,
       (EXTRACT(EPOCH FROM (NOW() - to_timestamp(micro_time::bigint / 1000))) / 3600 >= 5) as verified
     FROM txs
-    WHERE function IN ('buy', 'sell')
+    WHERE function IN ('buy', 'sell', 'create_community')
       AND data->'bcl' IS NOT NULL
       AND data->'bcl'->'data' IS NOT NULL
+      AND (
+        -- For create_community: only include if factory_address matches BCL contract
+        (function = 'create_community' AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}')
+        OR
+        -- For buy/sell: only include if sale_address exists in create_community transactions from BCL factory
+        (function IN ('buy', 'sell') AND data->'bcl'->'data'->>'sale_address' IN (
+          SELECT data->'bcl'->'data'->>'sale_address'
+          FROM txs
+          WHERE function = 'create_community'
+            AND data->'bcl' IS NOT NULL
+            AND data->'bcl'->'data' IS NOT NULL
+            AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}'
+            AND data->'bcl'->'data'->>'sale_address' IS NOT NULL
+        ))
+      )
   `,
 })
 export class BclTransaction {
   @PrimaryColumn()
   @ViewColumn()
+  @Index({ unique: true })
   hash: string;
 
   @ViewColumn()
+  @Index()
   block_hash: string;
 
   @ViewColumn()
   block_height: number;
 
   @ViewColumn()
+  @Index()
   caller_id?: string;
 
   @ViewColumn()
+  @Index()
   function: string;
 
   @ViewColumn()
