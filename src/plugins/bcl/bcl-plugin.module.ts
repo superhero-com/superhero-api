@@ -23,10 +23,13 @@ import { TokenHolderService } from './services/token-holder.service';
 import { BclTransaction } from './entities/bcl-transaction.view';
 import { BclTransactionsService } from './services/bcl-transactions.service';
 import { BclTransactionsController } from './controllers/bcl-transactions.controller';
+import { BclToken } from './entities/bcl-token.view';
+import { BclTokensService } from './services/bcl-tokens.service';
+import { BclTokensController } from './controllers/bcl-tokens.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction]),
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction, BclToken]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
@@ -46,8 +49,9 @@ import { BclTransactionsController } from './controllers/bcl-transactions.contro
     BclPluginSyncService,
     BclPlugin,
     BclTransactionsService,
+    BclTokensService,
   ],
-  controllers: [BclTransactionsController],
+  controllers: [BclTransactionsController, BclTokensController],
   exports: [BclPlugin],
 })
 export class BclPluginModule {}

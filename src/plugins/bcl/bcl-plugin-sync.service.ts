@@ -39,8 +39,13 @@ export class BclPluginSyncService extends BasePluginSyncService {
         await this.dataSource.query(
           `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
         );
+        if (rawTransaction.function === BCL_CONTRACT.FUNCTIONS.create_community) {
+          await this.dataSource.query(
+            `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
+          );
+        }
       } catch (error: any) {
-        this.logger.error(`error refreshing BclTransaction materialized view at tx:${rawTransaction.hash}`, error.stack)
+        this.logger.error(`error refreshing BCL materialized views at tx:${rawTransaction.hash}`, error.stack)
       }
     }
 
@@ -94,8 +99,11 @@ export class BclPluginSyncService extends BasePluginSyncService {
       await this.dataSource.query(
         `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
       );
+      await this.dataSource.query(
+        `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
+      );
     } catch (error: any) {
-      this.logger.error('error refreshing BclTransaction materialized view', error.stack)
+      this.logger.error('error refreshing BCL materialized views', error.stack)
     }
   }
 
