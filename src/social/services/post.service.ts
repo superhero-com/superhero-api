@@ -1033,7 +1033,19 @@ export class PostService {
           [this.syncVersion],
         );
 
-        // Then clear topics with different syncVersion (no foreign key references)
+        // Also clear junction table entries that reference topics with different syncVersion
+        // (topics can be shared across posts, so we need to remove all references to incompatible topics)
+        await manager.query(
+          `
+          DELETE FROM post_topics 
+          WHERE topic_id IN (
+            SELECT id FROM topics WHERE version != $1
+          )
+        `,
+          [this.syncVersion],
+        );
+
+        // Then clear topics with different syncVersion (no foreign key references remaining)
         await manager.query('DELETE FROM topics WHERE version != $1', [
           this.syncVersion,
         ]);
