@@ -65,12 +65,16 @@ export class MicroBlockService {
       );
 
       if (microBlock) {
-        // Convert and save micro-block
+        // Convert and upsert micro-block (handles race conditions where multiple
+        // transactions from the same micro-block arrive simultaneously)
         const microBlockToSave = this.convertToMicroBlockEntity(
           microBlock,
           fallbackHeight,
         );
-        await this.microBlockRepository.save(microBlockToSave);
+        await this.microBlockRepository.upsert(microBlockToSave, {
+          conflictPaths: ['hash'],
+          skipUpdateIfNoValuesChanged: true,
+        });
         this.logger.debug(
           `Saved micro-block ${microBlockHash} before transaction`,
         );
