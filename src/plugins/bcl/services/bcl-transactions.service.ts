@@ -22,7 +22,7 @@ export class BclTransactionsService {
       token_address?: string;
       account_address?: string;
     },
-  ): Promise<Pagination<BclTransactionDto>> {
+  ): Promise<Pagination<BclTransactionDto> & { queryMs: number }> {
     const queryBuilder = this.bclTransactionRepository
       .createQueryBuilder('bcl_transaction')
       .orderBy('bcl_transaction.created_at', 'DESC');
@@ -45,10 +45,12 @@ export class BclTransactionsService {
       }
     }
 
+    const startTime = Date.now();
     const paginationResult = await paginate<BclTransaction>(
       queryBuilder,
       options,
     );
+    const queryMs = Date.now() - startTime;
 
     // Transform to DTO format
     const items = paginationResult.items.map((item) => this.toDto(item));
@@ -56,6 +58,7 @@ export class BclTransactionsService {
     return {
       ...paginationResult,
       items,
+      queryMs, 
     };
   }
 

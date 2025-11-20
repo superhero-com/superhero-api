@@ -49,7 +49,7 @@ export class BclTransactionsController {
     @Query('account_address') account_address?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-  ): Promise<Pagination<BclTransactionDto>> {
+  ): Promise<Pagination<BclTransactionDto> & { queryMs: number }> {
     return this.bclTransactionsService.findAll(
       { page, limit },
       {
