@@ -5,6 +5,27 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { DEBUG_ENABLED } from './configs';
 
+// Global process-level guards to surface and prevent silent killers
+// NOTE: After logging we explicitly exit with code 1 so that the process
+// manager (Docker, PM2, systemd, etc.) can restart the service. Continuing
+// after these events is unsafe.
+process.on('uncaughtException', (error: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error('UNCAUGHT EXCEPTION, process will exit:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error('UNHANDLED REJECTION, process will exit:', reason);
+  process.exit(1);
+});
+
+process.on('exit', (code: number) => {
+  // eslint-disable-next-line no-console
+  console.error('Process exiting with code', code);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: DEBUG_ENABLED

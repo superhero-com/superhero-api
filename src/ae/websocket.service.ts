@@ -83,22 +83,58 @@ export class WebSocketService {
 
   private setupReconnectionCheck() {
     this.reconnectInterval = setInterval(() => {
-      if (this.pings.length) {
+      try {
+        if (this.pings.length) {
+          this.isWsConnected = false;
+          this.reconnect();
+          return;
+        }
+
+        // Handle missing or non-open websocket states explicitly to avoid
+        // getting stuck in a warn-only loop without reconnecting.
+        if (!this.wsClient) {
+          this.logger.warn(
+            'WebSocket client not initialized, forcing reconnect',
+          );
+          this.isWsConnected = false;
+          this.reconnect();
+          return;
+        }
+
+        if (this.wsClient.readyState === WebSocket.CONNECTING) {
+          // Still connecting, skip ping for this cycle
+          this.logger.debug('WebSocket connecting, skipping ping');
+          return;
+        }
+
+        if (
+          this.wsClient.readyState === WebSocket.CLOSING ||
+          this.wsClient.readyState === WebSocket.CLOSED
+        ) {
+          this.logger.warn(
+            `WebSocket not open (state=${this.wsClient.readyState}), forcing reconnect`,
+          );
+          this.isWsConnected = false;
+          this.reconnect();
+          return;
+        }
+
+        const pingData: PingI = {
+          id: genUuid(),
+          timestamp: Date.now(),
+        };
+        this.pings.push(pingData);
+        this.wsClient.ping(
+          JSON.stringify({
+            op: 'Ping',
+            payload: pingData,
+          }),
+        );
+      } catch (error) {
+        this.logger.error('Reconnection ping failed, forcing reconnect', error);
         this.isWsConnected = false;
         this.reconnect();
-        return;
       }
-      const pingData: PingI = {
-        id: genUuid(),
-        timestamp: Date.now(),
-      };
-      this.pings.push(pingData);
-      this.wsClient.ping(
-        JSON.stringify({
-          op: 'Ping',
-          payload: pingData,
-        }),
-      );
     }, WEB_SOCKET_RECONNECT_TIMEOUT);
   }
 
@@ -219,7 +255,6 @@ export class WebSocketService {
       this.wsClient.removeEventListener('open', this.handleWebsocketOpen);
       this.wsClient.removeEventListener('close', this.handleWebsocketClose);
       this.wsClient.removeEventListener('message', this.handleWebsocketClose);
-      clearInterval(this.reconnectInterval);
     } catch (error) {
       //
     }

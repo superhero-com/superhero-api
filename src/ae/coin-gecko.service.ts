@@ -58,8 +58,17 @@ export class CoinGeckoService {
     @Inject(forwardRef(() => CoinHistoricalPriceService))
     private historicalPriceService?: CoinHistoricalPriceService,
   ) {
-    setInterval(() => this.pullData(), 1000 * 60 * 5); // 5 minutes
-    this.pullData();
+    // Periodic pull with error handling to avoid unhandled promise rejections
+    setInterval(() => {
+      this.pullData().catch((error: unknown) => {
+        this.logger.error('Failed to pull CoinGecko data on interval', error);
+      });
+    }, 1000 * 60 * 5); // 5 minutes
+
+    // Initial pull with guarded error logging
+    this.pullData().catch((error: unknown) => {
+      this.logger.error('Failed to pull initial CoinGecko data', error);
+    });
   }
 
   /**
