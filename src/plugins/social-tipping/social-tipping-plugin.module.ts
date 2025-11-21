@@ -4,7 +4,6 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { AeModule } from '@/ae/ae.module';
 import { AccountModule } from '@/account/account.module';
-import { PostModule } from '@/social/post.module';
 import { Tip } from '@/tipping/entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { Post } from '@/social/entities/post.entity';
@@ -17,7 +16,6 @@ import { SocialTippingTransactionProcessorService } from './services/social-tipp
     TypeOrmModule.forFeature([Tx, PluginSyncState, Tip, Account, Post]),
     AeModule,
     AccountModule,
-    PostModule,
   ],
   providers: [
     SocialTippingTransactionProcessorService,
