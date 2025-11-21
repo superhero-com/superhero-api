@@ -1,3 +1,5 @@
+import { InjectQueue } from '@nestjs/bull';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   Controller,
   DefaultValuePipe,
@@ -11,32 +13,23 @@ import {
   ApiOperation,
   ApiParam,
   ApiQuery,
-  ApiResponse,
-  ApiTags,
+  ApiTags
 } from '@nestjs/swagger';
-import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Pagination, paginate } from 'nestjs-typeorm-paginate';
-import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { Repository } from 'typeorm';
-import { TokenHolderDto } from './dto/token-holder.dto';
-import { TokenDto } from './dto/token.dto';
-import { TokenHolder } from './entities/token-holders.entity';
-import { Token } from './entities/token.entity';
-import { ApiOkResponsePaginated } from '../utils/api-type';
-import { TokensService } from './tokens.service';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { Queue } from 'bull';
+import { Pagination, paginate } from 'nestjs-typeorm-paginate';
+import { Repository } from 'typeorm';
+import { ApiOkResponsePaginated } from '../utils/api-type';
+import { TokenHolderDto } from './dto/token-holder.dto';
+import { TokenHolder } from './entities/token-holders.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import { TokensService } from './tokens.service';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokensController {
   constructor(
-    @InjectRepository(Token)
-    private readonly tokensRepository: Repository<Token>,
-
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
 
@@ -44,7 +37,6 @@ export class TokensController {
     private readonly syncTokenHoldersQueue: Queue,
 
     private readonly tokensService: TokensService,
-    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -103,18 +95,4 @@ export class TokensController {
     return paginate<TokenHolder>(queryBuilder, { page, limit });
   }
 
-
-  @ApiParam({
-    name: 'address',
-    type: 'string',
-    description: 'Token address or name',
-  })
-  @ApiOperation({ operationId: 'getTokenScore' })
-  @CacheTTL(1)
-  @Get(':address/score')
-  async getTokenScore(@Param('address') address: string): Promise<any> {
-    const token = await this.tokensService.findByAddress(address);
-
-    return this.tokensService.updateTokenTrendingScore(token);
-  }
 }
