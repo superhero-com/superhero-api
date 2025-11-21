@@ -53,11 +53,16 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
         lt.sell_price,
         lt.market_cap,
         lt.total_supply,
-        COALESCE(tc.tx_count, 0) as tx_count
+        COALESCE(tc.tx_count, 0) as tx_count,
+        tp.past_24h,
+        tp.past_7d,
+        tp.past_30d,
+        tp.all_time
       FROM bcl_tokens bt
       LEFT JOIN latest_transactions lt ON bt.sale_address = lt.sale_address
       LEFT JOIN transaction_counts tc ON bt.sale_address = tc.sale_address
       LEFT JOIN bcl_token_stats ts ON bt.sale_address = ts.sale_address
+      LEFT JOIN bcl_token_performance_view tp ON bt.sale_address = tp.sale_address
     )
     SELECT 
       sale_address,
@@ -85,6 +90,12 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
       market_cap,
       total_supply,
       tx_count,
+      json_build_object(
+        'past_24h', past_24h,
+        'past_7d', past_7d,
+        'past_30d', past_30d,
+        'all_time', all_time
+      ) as performance,
       CAST(RANK() OVER (
         ORDER BY 
           CASE WHEN market_cap IS NULL OR (market_cap->>'ae')::numeric = 0 THEN 1 ELSE 0 END,
@@ -177,6 +188,54 @@ export class BclTokenView {
 
   @ViewColumn()
   tx_count: number;
+
+  @ViewColumn()
+  performance: {
+    past_24h: {
+      current: any;
+      current_date: Date;
+      current_change: number | null;
+      current_change_percent: number | null;
+      current_change_direction: 'up' | 'down' | 'neutral' | null;
+      high: any;
+      high_date: Date;
+      low: any;
+      low_date: Date;
+      last_updated: Date;
+    } | null;
+    past_7d: {
+      current: any;
+      current_date: Date;
+      current_change: number | null;
+      current_change_percent: number | null;
+      current_change_direction: 'up' | 'down' | 'neutral' | null;
+      high: any;
+      high_date: Date;
+      low: any;
+      low_date: Date;
+      last_updated: Date;
+    } | null;
+    past_30d: {
+      current: any;
+      current_date: Date;
+      current_change: number | null;
+      current_change_percent: number | null;
+      current_change_direction: 'up' | 'down' | 'neutral' | null;
+      high: any;
+      high_date: Date;
+      low: any;
+      low_date: Date;
+      last_updated: Date;
+    } | null;
+    all_time: {
+      current: any;
+      current_date: Date;
+      high: any;
+      high_date: Date;
+      low: any;
+      low_date: Date;
+    } | null;
+  } | null;
 
   @ViewColumn()
   @Index()

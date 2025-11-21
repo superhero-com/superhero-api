@@ -59,6 +59,7 @@ export class BclTransaction {
   previous_buy_price?: any;
 
   @Column({ type: 'varchar', nullable: true })
+  @Index('IDX_BCL_TX_SALE_ADDRESS_CREATED_AT', ['sale_address', 'created_at'])
   sale_address?: string;
 
   @Column({ type: 'varchar', nullable: true })

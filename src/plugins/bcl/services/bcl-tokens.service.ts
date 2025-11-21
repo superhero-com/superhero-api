@@ -213,6 +213,7 @@ export class BclTokensService {
       trending_score_update_at: token.trending_score_update_at,
       created_at: token.created_at,
       rank: token.rank,
+      performance: token.performance || null,
     };
   }
 

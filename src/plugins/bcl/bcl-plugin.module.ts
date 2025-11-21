@@ -27,16 +27,19 @@ import { BclTransactionPersistenceService } from './services/bcl-transaction-per
 import { BclToken } from './entities/bcl-token.entity';
 import { BclTokenView } from './entities/bcl-token.view';
 import { BclTokenStats } from './entities/bcl-token-stats.view';
+import { BclTokenPerformanceView } from './entities/bcl-token-performance.view';
 import { BclTokenPersistenceService } from './services/bcl-token-persistence.service';
 import { BclTokensService } from './services/bcl-tokens.service';
 import { BclTokensController } from './controllers/bcl-tokens.controller';
 import { BclTokenStatsService } from './services/bcl-token-stats.service';
 import { BclTokenStatsRefreshService } from './services/bcl-token-stats-refresh.service';
 import { BclTokenStatsController } from './controllers/bcl-token-stats.controller';
+import { BclTokenPerformanceRefreshService } from './services/bcl-token-performance-refresh.service';
+import { BclTokenPerformanceController } from './controllers/bcl-token-performance.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction, BclToken, BclTokenView, BclTokenStats]),
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction, BclToken, BclTokenView, BclTokenStats, BclTokenPerformanceView]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
@@ -61,8 +64,9 @@ import { BclTokenStatsController } from './controllers/bcl-token-stats.controlle
     BclTokensService,
     BclTokenStatsService,
     BclTokenStatsRefreshService,
+    BclTokenPerformanceRefreshService,
   ],
-  controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController],
+  controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController],
   exports: [BclPlugin],
 })
 export class BclPluginModule {}

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PriceDto } from '@/tokens/dto/price.dto';
+import { BclTokenPerformanceDto } from './bcl-token-performance.dto';
 
 export class BclTokenDto {
   @ApiProperty({ description: 'Token sale address' })
@@ -94,5 +95,12 @@ export class BclTokenDto {
 
   @ApiProperty({ description: 'Token rank based on market cap' })
   rank: number;
+
+  @ApiProperty({ 
+    description: 'Token performance metrics across different time periods',
+    type: () => BclTokenPerformanceDto,
+    nullable: true 
+  })
+  performance: BclTokenPerformanceDto | null;
 }
 
