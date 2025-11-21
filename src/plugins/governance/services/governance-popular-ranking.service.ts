@@ -34,7 +34,7 @@ export class GovernancePopularRankingService implements PopularRankingContributo
       const polls = await queryBuilder.getMany();
 
       return polls.map((poll) => {
-        const metadata = poll.metadata || {};
+        const metadata = poll.metadata || ({} as { title?: string; description?: string });
         const title = metadata.title || 'Untitled poll';
         const description = metadata.description || '';
         const content = `${title}${description ? ` - ${description}` : ''}`;
