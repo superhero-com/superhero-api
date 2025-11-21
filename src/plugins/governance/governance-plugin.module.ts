@@ -15,6 +15,7 @@ import { GovernanceDelegation } from './entities/governance-delegation.view';
 import { GovernanceRevokedDelegation } from './entities/governance-revoked-delegation.view';
 import { GovernanceDelegationService } from './services/governance-delegation.service';
 import { GovernanceDelegationsController } from './controllers/governance-delegations.controller';
+import { GovernancePopularRankingService } from './services/governance-popular-ranking.service';
 
 @Module({
   imports: [
@@ -34,9 +35,10 @@ import { GovernanceDelegationsController } from './controllers/governance-delega
     GovernancePlugin,
     GovernanceVoteService,
     GovernanceDelegationService,
+    GovernancePopularRankingService,
   ],
   controllers: [GovernanceVotesController, GovernanceDelegationsController],
-  exports: [GovernancePlugin],
+  exports: [GovernancePlugin, GovernancePopularRankingService],
 })
 export class GovernancePluginModule {}
 
