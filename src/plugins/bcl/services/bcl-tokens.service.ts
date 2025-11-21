@@ -133,14 +133,24 @@ export class BclTokensService {
       'holders_count',
     ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'rank';
+    const orderDirection = order.toUpperCase() as 'ASC' | 'DESC';
     
     // Handle sorting for fields that come from JSONB
+    // Need to handle NULL values properly - use addOrderBy for raw SQL expressions
     if (sortField === 'market_cap') {
-      queryBuilder.orderBy(`(bcl_tokens_view.market_cap->>'ae')::numeric`, order);
+      queryBuilder.addOrderBy(
+        `(bcl_tokens_view.market_cap->>'ae')::numeric`,
+        orderDirection,
+        'NULLS LAST',
+      );
     } else if (sortField === 'price') {
-      queryBuilder.orderBy(`(bcl_tokens_view.buy_price->>'ae')::numeric`, order);
+      queryBuilder.addOrderBy(
+        `(bcl_tokens_view.buy_price->>'ae')::numeric`,
+        orderDirection,
+        'NULLS LAST',
+      );
     } else {
-      queryBuilder.orderBy(`bcl_tokens_view.${sortField}`, order);
+      queryBuilder.addOrderBy(`bcl_tokens_view.${sortField}`, orderDirection);
     }
 
     const startTime = Date.now();
