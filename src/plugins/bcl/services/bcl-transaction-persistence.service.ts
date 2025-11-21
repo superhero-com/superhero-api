@@ -13,7 +13,7 @@ export class BclTransactionPersistenceService {
   constructor(
     @InjectRepository(BclTransaction)
     private readonly bclTransactionRepository: Repository<BclTransaction>,
-  ) {}
+  ) { }
 
   /**
    * Calculate verified field based on micro_time
@@ -58,7 +58,7 @@ export class BclTransactionPersistenceService {
     tx: Tx,
     txData: TransactionData,
     manager?: EntityManager,
-  ): Promise<BclTransaction> {
+  ): Promise<void> {
     const repository = manager
       ? manager.getRepository(BclTransaction)
       : this.bclTransactionRepository;
@@ -73,8 +73,8 @@ export class BclTransactionPersistenceService {
     const sell_price = this.calculateSellPrice(txData.buy_price);
 
     // Convert micro_time to number
-    const micro_time = typeof tx.micro_time === 'string' 
-      ? parseInt(tx.micro_time, 10) 
+    const micro_time = typeof tx.micro_time === 'string'
+      ? parseInt(tx.micro_time, 10)
       : tx.micro_time;
 
     // Prepare BCL transaction data
@@ -102,29 +102,9 @@ export class BclTransactionPersistenceService {
       verified,
     };
 
-    try {
-      // Use upsert to handle race conditions
-      await repository.upsert(bclTransactionData, {
-        conflictPaths: ['hash'],
-      });
-
-      // Fetch and return the saved entity
-      const savedTransaction = await repository.findOne({
-        where: { hash: tx.hash },
-      });
-
-      if (!savedTransaction) {
-        throw new Error(`Failed to create or retrieve BCL transaction ${tx.hash}`);
-      }
-
-      return savedTransaction;
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to save BCL transaction ${tx.hash}`,
-        error.stack,
-      );
-      throw error;
-    }
+    await repository.upsert(bclTransactionData, {
+      conflictPaths: ['hash'],
+    });
   }
 }
 

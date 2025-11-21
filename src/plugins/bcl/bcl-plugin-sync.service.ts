@@ -9,6 +9,7 @@ import { SyncDirection, SyncDirectionEnum } from '../plugin.interface';
 import { BCL_CONTRACT } from './config/bcl.config';
 import { TransactionProcessorService } from './services/transaction-processor.service';
 import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
+import { BclTokenPersistenceService } from './services/bcl-token-persistence.service';
 
 import { serializeBigInts } from '@/utils/common';
 import CommunityFactoryACI from './contract/aci/CommunityFactory.aci.json';
@@ -26,6 +27,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
     private readonly aePricingService: AePricingService,
     private readonly bclTransactionPersistenceService: BclTransactionPersistenceService,
+    private readonly bclTokenPersistenceService: BclTokenPersistenceService,
     aeSdkService: AeSdkService,
     private readonly dataSource: DataSource,
   ) {
@@ -56,8 +58,20 @@ export class BclPluginSyncService extends BasePluginSyncService {
         txData,
       );
 
+      // Save BCL token record if this is a create_community transaction
       if (rawTransaction.function === BCL_CONTRACT.FUNCTIONS.create_community) {
-        // create token
+        try {
+          await this.bclTokenPersistenceService.saveBclToken(
+            rawTransaction,
+            txData,
+          );
+        } catch (error: any) {
+          this.logger.error(
+            `Failed to save BCL token for transaction ${rawTransaction.hash}`,
+            error.stack,
+          );
+          // Don't throw - token save failure shouldn't block the main flow
+        }
       }
 
       // Background operations outside transaction
@@ -97,15 +111,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
   }
 
   async onUpdateComplete(): Promise<void> {
-    // Materialized view refresh removed - BCL transactions are now saved directly to table
-    // Only refresh bcl_token_view if it still depends on the materialized view
-    try {
-      await this.dataSource.query(
-        `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
-      );
-    } catch (error: any) {
-      this.logger.error('error refreshing BCL token view', error.stack);
-    }
+    // Materialized view refresh removed - BCL transactions and tokens are now saved directly to tables
   }
 
   async decodeData(tx: Tx): Promise<any | null> {
@@ -211,6 +217,8 @@ export class BclPluginSyncService extends BasePluginSyncService {
       const communityName = createCommunityLogs.args[0];
       const collection = tx?.raw?.arguments?.[0]?.value;
       return {
+        ...txData,
+
         address: transferLogs?.contract?.address,
         factory_address: createCommunityLogs?.contract?.address,
         dao_address: createCommunityLogs.args[1],
@@ -224,7 +232,6 @@ export class BclPluginSyncService extends BasePluginSyncService {
         symbol: communityName,
         decimals: 18,
         collection: collection,
-        ...txData
       };
     }
 

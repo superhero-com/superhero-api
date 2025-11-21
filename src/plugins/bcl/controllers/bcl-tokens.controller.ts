@@ -87,14 +87,14 @@ export class BclTokensController {
     required: false,
   })
   @ApiOperation({
-    operationId: 'listBclTokens',
+    operationId: 'findAllTokens',
     summary: 'Get all BCL tokens',
     description:
       'Retrieve a paginated list of BCL tokens with latest pricing and statistics',
   })
   @ApiOkResponsePaginated(BclTokenDto)
   @Get()
-  async findAll(
+  async findAllTokens(
     @Query('search') search?: string,
     @Query('factory_address') factory_address?: string,
     @Query('creator_address') creator_address?: string,
@@ -123,7 +123,7 @@ export class BclTokensController {
     );
   }
 
-  @ApiOperation({ operationId: 'findBclTokenByAddress' })
+  @ApiOperation({ operationId: 'findTokenByAddress' })
   @ApiParam({
     name: 'address',
     type: 'string',
@@ -138,7 +138,7 @@ export class BclTokensController {
     description: 'Token not found',
   })
   @Get(':address')
-  async findByAddress(@Param('address') address: string): Promise<BclTokenDto> {
+  async findTokenByAddress(@Param('address') address: string): Promise<BclTokenDto> {
     const token = await this.bclTokensService.findByAddress(address);
     if (!token) {
       throw new NotFoundException(`Token with address ${address} not found`);

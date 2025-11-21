@@ -6,7 +6,9 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
-import { BclToken } from '../entities/bcl-token.view';
+import { BclToken } from '../entities/bcl-token.entity';
+import { BclTokenView } from '../entities/bcl-token.view';
+import { BclTransaction } from '../entities/bcl-transaction.entity';
 import { BclTokenDto } from '../dto/bcl-token.dto';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 
@@ -15,8 +17,12 @@ export class BclTokensService {
   private readonly logger = new Logger(BclTokensService.name);
 
   constructor(
+    @InjectRepository(BclTokenView)
+    private readonly bclTokenViewRepository: Repository<BclTokenView>,
     @InjectRepository(BclToken)
     private readonly bclTokenRepository: Repository<BclToken>,
+    @InjectRepository(BclTransaction)
+    private readonly bclTransactionRepository: Repository<BclTransaction>,
     @InjectRepository(TokenHolder)
     private readonly tokenHolderRepository: Repository<TokenHolder>,
   ) {}
@@ -34,45 +40,10 @@ export class BclTokensService {
     sortBy: string = 'rank',
     order: 'ASC' | 'DESC' = 'ASC',
   ): Promise<Pagination<BclTokenDto> & { queryMs: number }> {
-    const queryBuilder = this.bclTokenRepository.createQueryBuilder('bcl_token');
-
-    // Default filter: unlisted = false (unless explicitly set)
-    if (filters?.unlisted !== undefined) {
-      queryBuilder.where('bcl_token.unlisted = :unlisted', {
-        unlisted: filters.unlisted,
-      });
-    } else {
-      queryBuilder.where('bcl_token.unlisted = false');
-    }
-
-    // Apply filters
-    if (filters?.search) {
-      queryBuilder.andWhere('bcl_token.name ILIKE :search', {
-        search: `%${filters.search}%`,
-      });
-    }
-
-    if (filters?.factory_address) {
-      queryBuilder.andWhere('bcl_token.factory_address = :factory_address', {
-        factory_address: filters.factory_address,
-      });
-    }
-
-    if (filters?.creator_address) {
-      queryBuilder.andWhere('bcl_token.creator_address = :creator_address', {
-        creator_address: filters.creator_address,
-      });
-    }
-
-    if (filters?.collection && filters.collection !== 'all') {
-      queryBuilder.andWhere('bcl_token.collection = :collection', {
-        collection: filters.collection,
-      });
-    }
-
+    // Handle owner_address filter separately as it requires a subquery
+    let ownedTokens: string[] = [];
     if (filters?.owner_address) {
-      // Query token_holders to find tokens owned by this address
-      const ownedTokens = await this.tokenHolderRepository
+      ownedTokens = await this.tokenHolderRepository
         .createQueryBuilder('token_holder')
         .where('token_holder.address = :owner_address', {
           owner_address: filters.owner_address,
@@ -83,14 +54,71 @@ export class BclTokensService {
         .getRawMany()
         .then((res) => res.map((r) => r.aex9_address));
 
-      if (ownedTokens.length > 0) {
-        queryBuilder.andWhere('bcl_token.address IN (:...aex9_addresses)', {
-          aex9_addresses: ownedTokens,
-        });
-      } else {
-        // If no tokens found, return empty result
-        queryBuilder.andWhere('1 = 0');
+      if (ownedTokens.length === 0) {
+        // Return empty result if no tokens found
+        const page = typeof options.page === 'string' ? parseInt(options.page, 10) : (options.page || 1);
+        const limit = typeof options.limit === 'string' ? parseInt(options.limit, 10) : (options.limit || 10);
+        return {
+          items: [],
+          meta: {
+            currentPage: page,
+            itemCount: 0,
+            itemsPerPage: limit,
+            totalItems: 0,
+            totalPages: 0,
+          },
+          links: {
+            first: '',
+            last: '',
+            next: '',
+            previous: '',
+          },
+          queryMs: 0,
+        };
       }
+    }
+
+    // Use the view which already has latest transaction data and rank
+    const queryBuilder = this.bclTokenViewRepository.createQueryBuilder('bcl_tokens_view');
+
+    // Default filter: unlisted = false (unless explicitly set)
+    if (filters?.unlisted !== undefined) {
+      queryBuilder.where('bcl_tokens_view.unlisted = :unlisted', {
+        unlisted: filters.unlisted,
+      });
+    } else {
+      queryBuilder.where('bcl_tokens_view.unlisted = false');
+    }
+
+    // Apply filters
+    if (filters?.search) {
+      queryBuilder.andWhere('bcl_tokens_view.name ILIKE :search', {
+        search: `%${filters.search}%`,
+      });
+    }
+
+    if (filters?.factory_address) {
+      queryBuilder.andWhere('bcl_tokens_view.factory_address = :factory_address', {
+        factory_address: filters.factory_address,
+      });
+    }
+
+    if (filters?.creator_address) {
+      queryBuilder.andWhere('bcl_tokens_view.creator_address = :creator_address', {
+        creator_address: filters.creator_address,
+      });
+    }
+
+    if (filters?.collection && filters.collection !== 'all') {
+      queryBuilder.andWhere('bcl_tokens_view.collection = :collection', {
+        collection: filters.collection,
+      });
+    }
+
+    if (ownedTokens.length > 0) {
+      queryBuilder.andWhere('bcl_tokens_view.address IN (:...aex9_addresses)', {
+        aex9_addresses: ownedTokens,
+      });
     }
 
     // Apply sorting
@@ -105,17 +133,25 @@ export class BclTokensService {
       'holders_count',
     ];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'rank';
-    queryBuilder.orderBy(`bcl_token.${sortField}`, order);
+    
+    // Handle sorting for fields that come from JSONB
+    if (sortField === 'market_cap') {
+      queryBuilder.orderBy(`(bcl_tokens_view.market_cap->>'ae')::numeric`, order);
+    } else if (sortField === 'price') {
+      queryBuilder.orderBy(`(bcl_tokens_view.buy_price->>'ae')::numeric`, order);
+    } else {
+      queryBuilder.orderBy(`bcl_tokens_view.${sortField}`, order);
+    }
 
     const startTime = Date.now();
-    const paginationResult = await paginate<BclToken>(
+    const paginationResult = await paginate<BclTokenView>(
       queryBuilder,
       options,
     );
     const queryMs = Date.now() - startTime;
 
     // Transform to DTO format
-    const items = paginationResult.items.map((item) => this.toDto(item));
+    const items = paginationResult.items.map((item) => this.toDtoFromView(item));
 
     return {
       ...paginationResult,
@@ -124,50 +160,71 @@ export class BclTokensService {
     };
   }
 
-  private toDto(token: BclToken): BclTokenDto {
+  /**
+   * Transform token view entity to DTO
+   */
+  private toDtoFromView(token: BclTokenView): BclTokenDto {
+    const buyPrice = token.buy_price || null;
+    const sellPrice = token.sell_price || null;
+    const marketCap = token.market_cap || null;
+    const totalSupply = token.total_supply || '0';
+
+    // Calculate price from buy_price
+    const price = buyPrice?.ae ? buyPrice.ae.toString() : '0';
+    const priceData = buyPrice || {};
+
+    // Calculate sell_price
+    const sellPriceValue = sellPrice?.ae ? sellPrice.ae.toString() : '0';
+    const sellPriceData = sellPrice || {};
+
+    // Calculate market_cap
+    const marketCapValue = marketCap?.ae ? marketCap.ae.toString() : '0';
+    const marketCapData = marketCap || {};
+
     return {
       sale_address: token.sale_address,
       unlisted: token.unlisted,
-      last_sync_tx_count: token.last_sync_tx_count,
+      last_tx_hash: token.last_tx_hash || '',
+      last_sync_block_height: token.last_sync_block_height || 0,
+      last_sync_tx_count: 0,
       tx_count: token.tx_count,
-      holders_count: token.holders_count,
+      holders_count: 0,
       factory_address: token.factory_address,
       create_tx_hash: token.create_tx_hash,
       dao_address: token.dao_address,
       creator_address: token.creator_address,
       beneficiary_address: token.beneficiary_address,
       bonding_curve_address: token.bonding_curve_address,
-      dao_balance: token.dao_balance?.toString() || '0',
+      dao_balance: token.dao_balance?.ae?.toString() || '0',
       owner_address: token.owner_address,
       address: token.address,
       name: token.name,
       symbol: token.symbol,
       decimals: token.decimals?.toString() || '18',
       collection: token.collection,
-      price: token.price?.toString() || '0',
-      price_data: token.price_data || {},
-      sell_price: token.sell_price?.toString() || '0',
-      sell_price_data: token.sell_price_data || {},
-      market_cap: token.market_cap?.toString() || '0',
-      market_cap_data: token.market_cap_data || {},
-      total_supply: token.total_supply || '0',
+      price,
+      price_data: priceData,
+      sell_price: sellPriceValue,
+      sell_price_data: sellPriceData,
+      market_cap: marketCapValue,
+      market_cap_data: marketCapData,
+      total_supply: totalSupply,
       trending_score: token.trending_score?.toString() || '0',
       trending_score_update_at: token.trending_score_update_at,
       created_at: token.created_at,
-      last_tx_hash: token.last_tx_hash || '',
-      last_sync_block_height: token.last_sync_block_height || 0,
       rank: token.rank,
     };
   }
 
+
   async findByAddress(address: string): Promise<BclTokenDto | null> {
     try {
-      const token = await this.bclTokenRepository
-        .createQueryBuilder('bcl_token')
-        .where('bcl_token.sale_address = :address', { address })
-        .orWhere('bcl_token.address = :address', { address })
-        .orWhere('bcl_token.name = :address', { address })
-        .orWhere('bcl_token.symbol = :address', { address })
+      const token = await this.bclTokenViewRepository
+        .createQueryBuilder('bcl_tokens_view')
+        .where('bcl_tokens_view.sale_address = :address', { address })
+        .orWhere('bcl_tokens_view.address = :address', { address })
+        .orWhere('bcl_tokens_view.name = :address', { address })
+        .orWhere('bcl_tokens_view.symbol = :address', { address })
         .getOne();
 
       if (!token) {
@@ -175,7 +232,7 @@ export class BclTokensService {
         return null;
       }
 
-      return this.toDto(token);
+      return this.toDtoFromView(token);
     } catch (error: any) {
       this.logger.error(`Error finding token by address ${address}:`, error.stack);
       throw error;
