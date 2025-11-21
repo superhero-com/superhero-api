@@ -31,6 +31,7 @@ import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
 import { MdwModule } from './mdw-sync/mdw.module';
 import { SyncState } from './mdw-sync/entities/sync-state.entity';
+import { DeprecatedApisModule } from './@deprecated-apis/deprecated-apis.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { SyncState } from './mdw-sync/entities/sync-state.entity';
     PostModule,
     DexModule,
     TipModule,
+    DeprecatedApisModule,
   ],
   controllers: [AppController],
   providers: [AppService],

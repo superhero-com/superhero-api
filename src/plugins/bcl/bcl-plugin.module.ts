@@ -67,7 +67,7 @@ import { BclTokenPerformanceController } from './controllers/bcl-token-performan
     BclTokenPerformanceRefreshService,
   ],
   controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController],
-  exports: [BclPlugin],
+  exports: [BclPlugin, BclTokensService],
 })
 export class BclPluginModule {}
 

@@ -20,8 +20,6 @@ import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
-import { TokenPerformanceController } from './controllers/token-performance.controller';
-import { TokenPerformanceView } from './entities/tokens-performance.view';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 
 @Module({
@@ -29,7 +27,6 @@ import { RefreshPerformanceViewService } from './services/refresh-performance-vi
     TypeOrmModule.forFeature([
       Token,
       TokenHolder,
-      TokenPerformanceView,
       Transaction,
     ]),
     AeModule,
@@ -50,7 +47,6 @@ import { RefreshPerformanceViewService } from './services/refresh-performance-vi
     TokensController,
     AccountTokensController,
     AnalyticTokensController,
-    TokenPerformanceController,
   ],
   providers: [
     TokensService,

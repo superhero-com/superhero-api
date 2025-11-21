@@ -1,4 +1,4 @@
-import { TokensService } from '@/tokens/tokens.service';
+import { BclTokensService } from '@/plugins/bcl/services/bcl-tokens.service';
 import { TokenPriceMovementDto } from '@/transactions/dto/token-stats.dto';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
@@ -11,21 +11,25 @@ import {
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TokenPerformanceView } from '../entities/tokens-performance.view';
+import { BclTokenPerformanceView } from '@/plugins/bcl/entities/bcl-token-performance.view';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
-    @InjectRepository(TokenPerformanceView)
-    private readonly tokenPerformanceViewRepository: Repository<TokenPerformanceView>,
-    private readonly tokensService: TokensService,
+    @InjectRepository(BclTokenPerformanceView)
+    private readonly bclTokenPerformanceViewRepository: Repository<BclTokenPerformanceView>,
+    private readonly bclTokensService: BclTokensService,
   ) {
     //
   }
 
-  @ApiOperation({ operationId: 'performance' })
+  @ApiOperation({
+    operationId: 'performance',
+    deprecated: true,
+    description: 'This endpoint is deprecated. Use /bcl/tokens/:address/performance instead.',
+  })
   @ApiParam({
     name: 'address',
     type: 'string',
@@ -37,14 +41,14 @@ export class TokenPerformanceController {
     type: TokenPriceMovementDto,
   })
   async performance(@Param('address') address: string) {
-    const token = await this.tokensService.getToken(address);
+    const token = await this.bclTokensService.findByAddress(address);
 
     if (!token) {
       throw new NotFoundException('Token not found');
     }
 
-    // Query the view directly for this token
-    const performanceData = await this.tokenPerformanceViewRepository.findOne({
+    // Query the BCL performance view directly for this token
+    const performanceData = await this.bclTokenPerformanceViewRepository.findOne({
       where: { sale_address: token.sale_address },
     });
 
@@ -61,8 +65,8 @@ export class TokenPerformanceController {
   @ApiOperation({
     operationId: 'performanceRaw',
     summary: 'Get token performance (alias for /performance)',
-    description:
-      'Returns performance data using database view. This endpoint is kept for backward compatibility.',
+    deprecated: true,
+    description: 'This endpoint is deprecated. Use /bcl/tokens/:address/performance instead.',
   })
   @ApiParam({
     name: 'address',
@@ -79,3 +83,4 @@ export class TokenPerformanceController {
     return this.performance(address);
   }
 }
+
