@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BclPluginModule } from '@/plugins/bcl/bcl-plugin.module';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { DeprecatedTokensController } from './controllers/tokens.controller';
 import { BclTokenPerformanceView } from '@/plugins/bcl/entities/bcl-token-performance.view';
 
 @Module({
@@ -9,7 +10,7 @@ import { BclTokenPerformanceView } from '@/plugins/bcl/entities/bcl-token-perfor
     TypeOrmModule.forFeature([BclTokenPerformanceView]),
     BclPluginModule,
   ],
-  controllers: [TokenPerformanceController],
+  controllers: [TokenPerformanceController, DeprecatedTokensController],
   providers: [],
   exports: [],
 })
