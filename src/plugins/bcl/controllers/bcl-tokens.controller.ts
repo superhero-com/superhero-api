@@ -76,16 +76,10 @@ export class BclTokensController {
   })
   @ApiQuery({
     name: 'order_by',
-    type: 'string',
-    description: 'Sort field: rank, market_cap, name, price, created_at, trending_score, tx_count, holders_count',
+    enum: ['rank', 'market_cap', 'name', 'price', 'created_at', 'trending_score', 'tx_count', 'holders_count'],
     required: false,
   })
-  @ApiQuery({
-    name: 'order_direction',
-    enum: ['ASC', 'DESC'],
-    description: 'Sort order',
-    required: false,
-  })
+  @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiOperation({
     operationId: 'findAllTokens',
     summary: 'Get all BCL tokens',
@@ -103,10 +97,29 @@ export class BclTokensController {
     @Query('unlisted') unlisted?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-    @Query('order_by', new DefaultValuePipe('market_cap')) order_by: string = 'market_cap',
-    @Query('order_direction', new DefaultValuePipe('DESC'), new ParseEnumPipe(['ASC', 'DESC'])) order_direction: 'ASC' | 'DESC' = 'DESC',
+    @Query('order_by') orderBy: string = 'market_cap',
+    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<BclTokenDto> & { queryMs: number }> {
     const unlistedBool = unlisted !== undefined ? unlisted === 'true' : undefined;
+    
+    // Validate sort fields to avoid SQL Injection
+    const allowedSortFields = [
+      'rank',
+      'market_cap',
+      'name',
+      'price',
+      'created_at',
+      'trending_score',
+      'tx_count',
+      'holders_count',
+    ];
+    if (!allowedSortFields.includes(orderBy)) {
+      orderBy = 'market_cap';
+    }
+    const allowedOrderDirections = ['ASC', 'DESC'];
+    if (!allowedOrderDirections.includes(orderDirection)) {
+      orderDirection = 'DESC';
+    }
     
     return this.bclTokensService.findAll(
       { page, limit },
@@ -118,8 +131,8 @@ export class BclTokensController {
         collection,
         unlisted: unlistedBool,
       },
-      order_by,
-      order_direction,
+      orderBy,
+      orderDirection,
     );
   }
 

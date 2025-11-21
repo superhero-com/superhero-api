@@ -44,8 +44,8 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
         bt.symbol,
         bt.decimals,
         bt.collection,
-        bt.trending_score,
-        bt.trending_score_update_at,
+        COALESCE(ts.trending_score, 0) as trending_score,
+        ts.calculated_at as trending_score_update_at,
         bt.created_at,
         lt.last_tx_hash,
         lt.last_sync_block_height,
@@ -57,6 +57,7 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
       FROM bcl_tokens bt
       LEFT JOIN latest_transactions lt ON bt.sale_address = lt.sale_address
       LEFT JOIN transaction_counts tc ON bt.sale_address = tc.sale_address
+      LEFT JOIN bcl_token_stats ts ON bt.sale_address = ts.sale_address
     )
     SELECT 
       sale_address,
