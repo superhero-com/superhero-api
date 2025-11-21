@@ -423,12 +423,6 @@ export class TokensService {
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
         .catch((error) => {
-          this.logger.error(
-            `getTokeLivePrice->error:: price`,
-            token.sale_address,
-            error,
-            error.stack,
-          );
           return new BigNumber(0);
         }),
       instance
@@ -437,12 +431,6 @@ export class TokensService {
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
         .catch((error) => {
-          this.logger.error(
-            `getTokeLivePrice->error:: sell_price`,
-            token.sale_address,
-            error,
-            error.stack,
-          );
           return new BigNumber(0);
         }),
       instance.metaInfo().catch((error) => {
