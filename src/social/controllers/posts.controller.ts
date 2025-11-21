@@ -24,8 +24,7 @@ import { PostDto } from '../dto';
 import type { Request } from 'express';
 import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { Token } from '@/tokens/entities/token.entity';
-import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
+import { BclTokenView } from '@/plugins/bcl/entities/bcl-token.view';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 
 @Controller('posts')
@@ -211,15 +210,9 @@ export class PostsController {
       .leftJoinAndSelect('post.topics', 'topic')
       .leftJoinAndMapOne(
         'topic.token',
-        Token,
+        BclTokenView,
         'token',
         'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
-      )
-      .leftJoinAndMapOne(
-        'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
       )
       .where('post.id IN (:...postIds)', { postIds });
       // Note: We don't use orderBy here because SQL IN clauses don't preserve order
@@ -365,15 +358,9 @@ export class PostsController {
       .leftJoinAndSelect('post.topics', 'topic')
       .leftJoinAndMapOne(
         'topic.token',
-        Token,
+        BclTokenView,
         'token',
         'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
-      )
-      .leftJoinAndMapOne(
-        'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
       )
       .where('(post.id = :id OR post.slug = :id)', { id })
       .getOne();
