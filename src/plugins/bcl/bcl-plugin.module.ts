@@ -23,6 +23,7 @@ import { TokenHolderService } from './services/token-holder.service';
 import { BclTransaction } from './entities/bcl-transaction.view';
 import { BclTransactionsService } from './services/bcl-transactions.service';
 import { BclTransactionsController } from './controllers/bcl-transactions.controller';
+import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
 import { BclToken } from './entities/bcl-token.view';
 import { BclTokensService } from './services/bcl-tokens.service';
 import { BclTokensController } from './controllers/bcl-tokens.controller';
@@ -46,6 +47,7 @@ import { BclTokensController } from './controllers/bcl-tokens.controller';
     TokenService,
     TokenHolderService,
     TransactionProcessorService,
+    BclTransactionPersistenceService,
     BclPluginSyncService,
     BclPlugin,
     BclTransactionsService,

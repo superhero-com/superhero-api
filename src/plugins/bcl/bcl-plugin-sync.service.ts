@@ -8,6 +8,7 @@ import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection, SyncDirectionEnum } from '../plugin.interface';
 import { BCL_CONTRACT } from './config/bcl.config';
 import { TransactionProcessorService } from './services/transaction-processor.service';
+import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
 
 import { serializeBigInts } from '@/utils/common';
 import CommunityFactoryACI from './contract/aci/CommunityFactory.aci.json';
@@ -24,6 +25,7 @@ export class BclPluginSyncService extends BasePluginSyncService {
     private readonly transactionProcessorService: TransactionProcessorService,
     private readonly tokenWebsocketGateway: TokenWebsocketGateway,
     private readonly aePricingService: AePricingService,
+    private readonly bclTransactionPersistenceService: BclTransactionPersistenceService,
     aeSdkService: AeSdkService,
     private readonly dataSource: DataSource,
   ) {
@@ -34,37 +36,35 @@ export class BclPluginSyncService extends BasePluginSyncService {
     rawTransaction: Tx,
     syncDirection: SyncDirection,
   ): Promise<void> {
-    if (syncDirection === SyncDirectionEnum.Live) {
-      try {
-        await this.dataSource.query(
-          `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
-        );
-        await this.dataSource.query(
-          `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
-        );
-      } catch (error: any) {
-        this.logger.error(`error refreshing BCL materialized views at tx:${rawTransaction.hash}`, error.stack)
-      }
-    }
-
     // TODO: remove this logic, only broadcast transaction to websocket if it's live
     try {
       // Delegate transaction processing to processor service
-      const result =
-        await this.transactionProcessorService.processTransaction(
-          rawTransaction,
-          syncDirection,
-        );
+      // const result =
+      //   await this.transactionProcessorService.processTransaction(
+      //     rawTransaction,
+      //     syncDirection,
+      //   );
+
+      // Save BCL transaction record if processing was successful
+      const txData = rawTransaction.data?.bcl?.data;
+      if (!txData) {
+        this.logger.warn(`No BCL transaction data found for transaction ${rawTransaction.hash}`);
+        return;
+      }
+      await this.bclTransactionPersistenceService.saveBclTransaction(
+        rawTransaction,
+        txData,
+      );
 
       // Background operations outside transaction
-      if (result && result.isSupported && syncDirection === SyncDirectionEnum.Live) {
-        // Broadcast transaction via WebSocket
-        this.tokenWebsocketGateway?.handleTokenHistory({
-          sale_address: result.txData.sale_address,
-          data: result.txData,
-          token: result.transactionToken,
-        });
-      }
+      // if (result && result.isSupported && syncDirection === SyncDirectionEnum.Live) {
+      //   // Broadcast transaction via WebSocket
+      //   this.tokenWebsocketGateway?.handleTokenHistory({
+      //     sale_address: result.txData.sale_address,
+      //     data: result.txData,
+      //     token: result.transactionToken,
+      //   });
+      // }
     } catch (error: any) {
       this.handleError(error, rawTransaction, 'processTransaction');
       throw error; // Re-throw to let BasePluginSyncService handle it
@@ -93,35 +93,14 @@ export class BclPluginSyncService extends BasePluginSyncService {
   }
 
   async onUpdateComplete(): Promise<void> {
+    // Materialized view refresh removed - BCL transactions are now saved directly to table
+    // Only refresh bcl_token_view if it still depends on the materialized view
     try {
-      await this.dataSource.query(
-        `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_transactions_view`,
-      );
       await this.dataSource.query(
         `REFRESH MATERIALIZED VIEW CONCURRENTLY bcl_token_view`,
       );
     } catch (error: any) {
-      this.logger.error('error refreshing BCL materialized views', error.stack)
-      // Try to identify the duplicate
-      // try {
-      //   const duplicates = await this.dataSource.query(`
-      //   SELECT 
-      //     data->'bcl'->'data'->>'sale_address' as sale_address,
-      //     COUNT(*) as count,
-      //     array_agg(hash ORDER BY micro_time DESC) as tx_hashes
-      //   FROM txs
-      //   WHERE function = 'create_community'
-      //     AND data->'bcl' IS NOT NULL
-      //     AND data->'bcl'->'data' IS NOT NULL
-      //     AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}'
-      //     AND data->'bcl'->'data'->>'sale_address' IS NOT NULL
-      //   GROUP BY data->'bcl'->'data'->>'sale_address'
-      //   HAVING COUNT(*) > 1
-      // `);
-      //   this.logger.error('Duplicate sale_addresses found:', JSON.stringify(duplicates, null, 2));
-      // } catch (innerError: any) {
-      //   this.logger.error('Failed to query duplicates:', innerError.stack);
-      // }
+      this.logger.error('error refreshing BCL token view', error.stack);
     }
   }
 

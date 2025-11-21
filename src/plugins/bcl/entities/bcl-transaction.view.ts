@@ -1,117 +1,76 @@
-import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
-import { BCL_CONTRACT } from '../config/bcl.config';
+import { Column, Entity, PrimaryColumn, Index, ManyToOne, JoinColumn } from 'typeorm';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
 
-@ViewEntity({
-  name: 'bcl_transactions_view',
-  materialized: true,
-  synchronize: false,
-  expression: `
-    SELECT 
-      hash,
-      block_hash,
-      block_height,
-      caller_id,
-      function,
-      created_at,
-      micro_time,
-      data->'bcl'->'data'->'amount' as amount,
-      data->'bcl'->'data'->>'volume' as volume,
-      data->'bcl'->'data'->>'tx_type' as tx_type,
-      data->'bcl'->'data'->'buy_price' as buy_price,
-      data->'bcl'->'data'->'sell_price' as sell_price,
-      data->'bcl'->'data'->'market_cap' as market_cap,
-      data->'bcl'->'data'->'unit_price' as unit_price,
-      data->'bcl'->'data'->'previous_buy_price' as previous_buy_price,
-      data->'bcl'->'data'->>'sale_address' as sale_address,
-      data->'bcl'->'data'->>'total_supply' as total_supply,
-      data->'bcl'->'data'->>'protocol_reward' as protocol_reward,
-      (data->'bcl'->>'_version')::int as _version,
-      (EXTRACT(EPOCH FROM (NOW() - to_timestamp(micro_time::bigint / 1000))) / 3600 >= 5) as verified
-    FROM txs
-    WHERE function IN ('buy', 'sell', 'create_community')
-      AND data->'bcl' IS NOT NULL
-      AND data->'bcl'->'data' IS NOT NULL
-      AND (
-        -- For create_community: only include if factory_address matches BCL contract
-        (function = 'create_community' AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}')
-        OR
-        -- For buy/sell: only include if sale_address exists in create_community transactions from BCL factory
-        (function IN ('buy', 'sell') AND data->'bcl'->'data'->>'sale_address' IN (
-          SELECT data->'bcl'->'data'->>'sale_address'
-          FROM txs
-          WHERE function = 'create_community'
-            AND data->'bcl' IS NOT NULL
-            AND data->'bcl'->'data' IS NOT NULL
-            AND data->'bcl'->'data'->>'factory_address' = '${BCL_CONTRACT.contractAddress}'
-            AND data->'bcl'->'data'->>'sale_address' IS NOT NULL
-        ))
-      )
-  `,
+@Entity({
+  name: 'bcl_transactions',
 })
 export class BclTransaction {
   @PrimaryColumn()
-  @ViewColumn()
   @Index({ unique: true })
   hash: string;
 
-  @ViewColumn()
+  @ManyToOne(() => Tx, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'hash', referencedColumnName: 'hash' })
+  tx: Tx;
+
+  @Column()
   @Index()
   block_hash: string;
 
-  @ViewColumn()
+  @Column({ type: 'bigint' })
   micro_time: number;
 
-  @ViewColumn()
+  @Column()
   block_height: number;
 
-  @ViewColumn()
+  @Column({ nullable: true })
   @Index()
   caller_id?: string;
 
-  @ViewColumn()
+  @Column()
   @Index()
   function: string;
 
-  @ViewColumn()
+  @Column({ type: 'timestamp' })
   created_at: Date;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   amount: any;
 
-  @ViewColumn()
+  @Column({ type: 'varchar', nullable: true })
   volume?: string;
 
-  @ViewColumn()
+  @Column({ type: 'varchar', nullable: true })
   tx_type?: string;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   buy_price: any;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   sell_price?: any;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   market_cap?: any;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   unit_price?: any;
 
-  @ViewColumn()
+  @Column({ type: 'jsonb', nullable: true })
   previous_buy_price?: any;
 
-  @ViewColumn()
+  @Column({ type: 'varchar', nullable: true })
   sale_address?: string;
 
-  @ViewColumn()
+  @Column({ type: 'varchar', nullable: true })
   total_supply?: string;
 
-  @ViewColumn()
+  @Column({ type: 'varchar', nullable: true })
   protocol_reward?: string;
 
-  @ViewColumn()
+  @Column({ type: 'int', default: 1 })
   _version: number;
 
-  @ViewColumn()
+  @Column({ type: 'boolean', default: false })
   verified: boolean;
 }
 

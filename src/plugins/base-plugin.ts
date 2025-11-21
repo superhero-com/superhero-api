@@ -197,7 +197,7 @@ export abstract class BasePlugin implements Plugin {
               );
             }
 
-            await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
+            await syncService.processTransaction(tx, SyncDirectionEnum.Upgrade);
             processedCount++;
 
             // Update sync state periodically
@@ -388,6 +388,7 @@ export abstract class BasePlugin implements Plugin {
               try {
                 const needsReDecode = this.needsReDecode(tx);
                 let wasUpdated = false;
+                //
 
                 // Update logs if needed
                 if (needsReDecode.logs) {
@@ -443,6 +444,7 @@ export abstract class BasePlugin implements Plugin {
 
                 totalProcessed++;
                 if (wasUpdated) {
+                  await syncService.processTransaction(tx, SyncDirectionEnum.Upgrade);
                   totalUpdated++;
                 }
 
