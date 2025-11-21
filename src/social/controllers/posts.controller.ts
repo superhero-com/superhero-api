@@ -276,16 +276,39 @@ export class PostsController {
       const totalItems = await this.popularRankingService.getTotalPostsCount(window);
       const totalPages = Math.ceil(totalItems / limit);
       
-      const posts = await this.popularRankingService.getPopularPosts(
+      const items = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
       
+      // Transform items to include type discriminator
+      const transformedItems = items.map((item) => {
+        if ('type' in item && item.type !== 'post') {
+          // Plugin content item (e.g., poll)
+          return {
+            ...item,
+            type: item.type,
+            // Ensure it has all required PostDto fields for compatibility
+            id: item.id,
+            created_at: item.created_at,
+            sender_address: item.sender_address,
+            content: item.content,
+            total_comments: item.total_comments,
+            metadata: item.metadata,
+          };
+        }
+        // Regular post
+        return {
+          ...item,
+          type: 'post',
+        };
+      });
+      
       const response: any = {
-        items: posts,
+        items: transformedItems,
         meta: {
-          itemCount: posts.length,
+          itemCount: transformedItems.length,
           totalItems,
           totalPages,
           currentPage: page,
