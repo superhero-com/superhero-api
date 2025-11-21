@@ -16,12 +16,16 @@ import { TransactionsModule } from '@/transactions/transactions.module';
 import { PostsController } from './controllers/posts.controller';
 import { TopicsController } from './controllers/topics.controller';
 import { AccountModule } from '@/account/account.module';
+import { GovernancePluginModule } from '@/plugins/governance/governance-plugin.module';
+import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
+import { getPopularRankingContributorProvider } from '@/plugins';
 
 @Module({
   imports: [
     AeModule,
     AccountModule,
     TransactionsModule,
+    GovernancePluginModule, // Import to access GovernancePopularRankingService
     TypeOrmModule.forFeature([
       Post,
       Topic,
@@ -33,7 +37,12 @@ import { AccountModule } from '@/account/account.module';
       PostReadsDaily,
     ]),
   ],
-  providers: [PostService, PopularRankingService, ReadsService],
+  providers: [
+    PostService,
+    PopularRankingService,
+    ReadsService,
+    getPopularRankingContributorProvider(),
+  ],
   exports: [PostService, PopularRankingService, ReadsService, TypeOrmModule],
   controllers: [PostsController, TopicsController],
 })

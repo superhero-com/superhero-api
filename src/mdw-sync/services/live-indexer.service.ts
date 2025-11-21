@@ -100,8 +100,11 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
         created_at: new Date(fullBlock.time),
       };
 
-      // Save the key block
-      await this.blockRepository.save(blockToSave);
+      // Upsert the key block to handle duplicate key violations gracefully
+      await this.blockRepository.upsert(blockToSave, {
+        conflictPaths: ['height'],
+        skipUpdateIfNoValuesChanged: true,
+      });
 
       // Update live_synced_height
       await this.syncStateRepository.update(

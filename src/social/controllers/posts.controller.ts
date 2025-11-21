@@ -26,6 +26,7 @@ import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
+import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -276,16 +277,40 @@ export class PostsController {
       const totalItems = await this.popularRankingService.getTotalPostsCount(window);
       const totalPages = Math.ceil(totalItems / limit);
       
-      const posts = await this.popularRankingService.getPopularPosts(
+      const items = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
       
+      // Transform items to include type discriminator
+      const transformedItems = items.map((item) => {
+        if ('type' in item && item.type !== 'post' && 'metadata' in item) {
+          // Plugin content item (e.g., poll)
+          const pluginItem = item as PopularRankingContentItem;
+          return {
+            ...pluginItem,
+            type: pluginItem.type,
+            // Ensure it has all required PostDto fields for compatibility
+            id: pluginItem.id,
+            created_at: pluginItem.created_at,
+            sender_address: pluginItem.sender_address,
+            content: pluginItem.content,
+            total_comments: pluginItem.total_comments,
+            ...(pluginItem.metadata !== undefined && { metadata: pluginItem.metadata }),
+          };
+        }
+        // Regular post
+        return {
+          ...item,
+          type: 'post',
+        };
+      });
+      
       const response: any = {
-        items: posts,
+        items: transformedItems,
         meta: {
-          itemCount: posts.length,
+          itemCount: transformedItems.length,
           totalItems,
           totalPages,
           currentPage: page,

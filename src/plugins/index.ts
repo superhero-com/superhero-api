@@ -1,5 +1,5 @@
 import { Provider, Type } from '@nestjs/common';
-import { MDW_PLUGIN } from './plugin.tokens';
+import { MDW_PLUGIN, POPULAR_RANKING_CONTRIBUTOR } from './plugin.tokens';
 import { BclPlugin } from './bcl/bcl.plugin';
 import { BclPluginModule } from './bcl/bcl-plugin.module';
 import { SocialPlugin } from './social/social.plugin';
@@ -12,6 +12,8 @@ import { BclAffiliationPlugin } from './bcl-affiliation/bcl-affiliation.plugin';
 import { BclAffiliationPluginModule } from './bcl-affiliation/bcl-affiliation-plugin.module';
 import { GovernancePlugin } from './governance/governance.plugin';
 import { GovernancePluginModule } from './governance/governance-plugin.module';
+import { GovernancePopularRankingService } from './governance/services/governance-popular-ranking.service';
+import { PopularRankingContributor } from './popular-ranking.interface';
 
 /**
  * Export all plugin modules
@@ -37,5 +39,17 @@ export const getPluginProvider = (): Provider => ({
     return [bclPlugin, socialPlugin, dexPlugin, socialTippingPlugin, bclAffiliationPlugin, governancePlugin];
   },
   inject: [BclPlugin, SocialPlugin, DexPlugin, SocialTippingPlugin, BclAffiliationPlugin, GovernancePlugin],
+});
+
+/**
+ * Provider factory for popular ranking contributors
+ * Collects all plugins that implement PopularRankingContributor
+ */
+export const getPopularRankingContributorProvider = (): Provider => ({
+  provide: POPULAR_RANKING_CONTRIBUTOR,
+  useFactory: (governanceRankingService: GovernancePopularRankingService): PopularRankingContributor[] => {
+    return [governanceRankingService];
+  },
+  inject: [GovernancePopularRankingService],
 });
 

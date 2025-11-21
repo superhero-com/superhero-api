@@ -58,12 +58,13 @@ export class BlockSyncService {
 
     // Batch upsert all blocks (split into smaller batches to avoid PostgreSQL parameter limits)
     // Using upsert to handle duplicate key violations gracefully during parallel processing
+    // Using 'height' as conflict path since it has a unique constraint and each height should map to one block
     if (blocksToSave.length > 0) {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < blocksToSave.length; i += saveBatchSize) {
         const batch = blocksToSave.slice(i, i + saveBatchSize);
         await this.blockRepository.upsert(batch, {
-          conflictPaths: ['hash'],
+          conflictPaths: ['height'],
           skipUpdateIfNoValuesChanged: true,
         });
       }

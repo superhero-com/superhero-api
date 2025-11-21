@@ -13,12 +13,17 @@ import { Token } from '@/tokens/entities/token.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { PostReadsDaily } from '../entities/post-reads.entity';
+import { PopularRankingContributor, PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
+import { Inject, Optional } from '@nestjs/common';
+import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
 
-type PopularWindow = '24h' | '7d' | 'all';
+export type PopularWindow = '24h' | '7d' | 'all';
 
 interface PopularScoreItem {
   postId: string;
   score: number;
+  type?: string; // 'post' or plugin content type (e.g., 'poll')
+  metadata?: Record<string, any>; // Store plugin-specific metadata
 }
 
 @Injectable()
@@ -44,6 +49,9 @@ export class PopularRankingService {
     private readonly invitationRepository: Repository<Invitation>,
     @InjectRepository(PostReadsDaily)
     private readonly postReadsRepository: Repository<PostReadsDaily>,
+    @Optional()
+    @Inject(POPULAR_RANKING_CONTRIBUTOR)
+    private readonly rankingContributors: PopularRankingContributor[] = [],
   ) {}
 
   private getWindowHours(window: PopularWindow): number {
@@ -124,22 +132,43 @@ export class PopularRankingService {
       .sort((a, b) => b[1] - a[1]) // Sort by score DESC
       .map(([id]) => id);
 
-    // Verify which IDs actually exist in DB (same query conditions as getPopularPosts)
-    // Use chunked query to avoid parameter limits
-    // IMPORTANT: We must preserve the order from allPopularIds (sorted by score DESC)
-    // findBy() doesn't preserve order, so we filter allPopularIds instead of pushing from DB results
+    // Separate post IDs from plugin content IDs
+    const postIds: string[] = [];
+    const pluginContentIds: string[] = [];
+    for (const id of allPopularIds) {
+      if (id.includes(':')) {
+        // Plugin content IDs have format "type:id"
+        pluginContentIds.push(id);
+      } else {
+        postIds.push(id);
+      }
+    }
+
+    // Verify which post IDs exist in DB
     const CHUNK_SIZE = 1000;
     const existingIdsSet = new Set<string>();
 
-    for (let i = 0; i < allPopularIds.length; i += CHUNK_SIZE) {
-      const chunk = allPopularIds.slice(i, i + CHUNK_SIZE);
+    // Verify posts
+    for (let i = 0; i < postIds.length; i += CHUNK_SIZE) {
+      const chunk = postIds.slice(i, i + CHUNK_SIZE);
       const existingPosts = await this.postRepository.findBy({
         id: In(chunk),
         is_hidden: false,
         post_id: null,
       });
-      // Collect existing IDs in a Set for fast lookup
       existingPosts.forEach(p => existingIdsSet.add(p.id));
+    }
+
+    // Verify plugin content IDs by checking with contributors
+    // For now, we'll trust plugin IDs from Redis (they should be valid)
+    // In the future, we could add validation here
+    for (const id of pluginContentIds) {
+      // Check if any contributor can provide this ID
+      const [type] = id.split(':');
+      const hasContributor = this.rankingContributors.some(c => c.name === type);
+      if (hasContributor) {
+        existingIdsSet.add(id);
+      }
     }
 
     // Filter allPopularIds to only include verified IDs, preserving the score DESC order
@@ -153,7 +182,7 @@ export class PopularRankingService {
     limit = 50,
     offset = 0,
     maxCandidates?: number,
-  ): Promise<Post[]> {
+  ): Promise<(Post | PopularRankingContentItem)[]> {
     // Get verified popular IDs (ensures consistency with getTotalPostsCount)
     const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
     
@@ -168,22 +197,81 @@ export class PopularRankingService {
       return [];
     }
 
-    // Fetch the posts for the paginated IDs
-    const posts = await this.postRepository.findBy({
-      id: In(paginatedIds),
-      is_hidden: false,
-      post_id: null,
-    });
+    // Separate post IDs from plugin content IDs
+    const postIds: string[] = [];
+    const pluginContentIds: string[] = [];
+    for (const id of paginatedIds) {
+      if (id.includes(':')) {
+        // Plugin content IDs have format "type:id"
+        pluginContentIds.push(id);
+      } else {
+        postIds.push(id);
+      }
+    }
 
-    // Sort by the order in verifiedIds (which is already sorted by score DESC)
+    // Fetch posts
+    const posts = postIds.length > 0
+      ? await this.postRepository.findBy({
+          id: In(postIds),
+          is_hidden: false,
+          post_id: null,
+        })
+      : [];
+
+    // Fetch plugin content items
+    const pluginItems: PopularRankingContentItem[] = [];
+    if (pluginContentIds.length > 0) {
+      // Get the content type from the ID prefix (e.g., "poll:123" -> "poll")
+      const itemsByType = new Map<string, string[]>();
+      for (const id of pluginContentIds) {
+        const [type] = id.split(':');
+        if (!itemsByType.has(type)) {
+          itemsByType.set(type, []);
+        }
+        itemsByType.get(type)!.push(id);
+      }
+
+      // Fetch from each contributor
+      for (const contributor of this.rankingContributors) {
+        const typeIds = itemsByType.get(contributor.name);
+        if (typeIds && typeIds.length > 0) {
+          try {
+            // Fetch all candidates and filter to requested IDs
+            const allItems = await contributor.getRankingCandidates(
+              window,
+              window === 'all' ? null : new Date(Date.now() - this.getWindowHours(window) * 60 * 60 * 1000),
+              10000, // Large limit to get all items
+            );
+            const requestedItems = allItems.filter(item =>
+              typeIds.includes(item.id)
+            );
+            pluginItems.push(...requestedItems);
+          } catch (error) {
+            this.logger.error(`Failed to fetch plugin content from ${contributor.name}:`, error);
+          }
+        }
+      }
+    }
+
+    // Merge posts and plugin items, preserving order from paginatedIds
     const idOrder = new Map(paginatedIds.map((id, index) => [id, index]));
-    posts.sort((a, b) => {
-      const aIndex = idOrder.get(a.id) ?? Infinity;
-      const bIndex = idOrder.get(b.id) ?? Infinity;
-      return aIndex - bIndex;
-    });
+    const postsMap = new Map(posts.map(p => [p.id, p]));
+    const pluginItemsMap = new Map(pluginItems.map(item => [item.id, item]));
 
-    return posts;
+    const result: (Post | PopularRankingContentItem)[] = [];
+    for (const id of paginatedIds) {
+      const post = postsMap.get(id);
+      if (post) {
+        result.push(post);
+      } else {
+        const item = pluginItemsMap.get(id);
+        if (item) {
+          result.push(item);
+        }
+      }
+    }
+
+    return result;
   }
 
   // Public metadata helper to keep encapsulation
@@ -244,7 +332,25 @@ export class PopularRankingService {
 
     this.logger.log(`Found ${candidates.length} candidate posts for window ${window}`);
 
-    if (candidates.length === 0) {
+    // Fetch plugin content items
+    const pluginContentItems: PopularRankingContentItem[] = [];
+    const pluginLimit = Math.floor(maxCandidates / Math.max(1, this.rankingContributors.length + 1));
+    for (const contributor of this.rankingContributors) {
+      try {
+        const items = await contributor.getRankingCandidates(
+          window,
+          window === 'all' ? null : since,
+          pluginLimit,
+        );
+        pluginContentItems.push(...items);
+        this.logger.log(`Plugin ${contributor.name} contributed ${items.length} items for window ${window}`);
+      } catch (error) {
+        this.logger.error(`Failed to fetch content from plugin ${contributor.name}:`, error);
+      }
+    }
+    this.logger.log(`Found ${pluginContentItems.length} plugin content items for window ${window}`);
+
+    if (candidates.length === 0 && pluginContentItems.length === 0) {
       await this.redis.del(key);
       this.logger.warn(`No candidates found for window ${window}, deleted Redis key`);
       return;
@@ -363,7 +469,8 @@ export class PopularRankingService {
       readsRows.map((r) => [r.post_id, parseInt(r.reads || '0', 10)] as const),
     );
 
-    const scored: PopularScoreItem[] = await Promise.all(
+    // Score posts
+    const scoredPosts: PopularScoreItem[] = await Promise.all(
       candidates.map(async (post) => {
         const comments = post.total_comments || 0;
         const tipsAgg = tipsByPost.get(post.id);
@@ -488,9 +595,138 @@ export class PopularRankingService {
         const score =
           numerator /
           Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
-        return { postId: post.id, score };
+        return { postId: post.id, score, type: 'post' };
       }),
     );
+
+    // Score plugin content items
+    const scoredPluginItems: PopularScoreItem[] = await Promise.all(
+      pluginContentItems.map(async (item) => {
+        // Use votes_count as comments equivalent for polls
+        const comments = item.total_comments || 0;
+        // Plugin items don't have tips (for now)
+        const tipsAmountAE = 0;
+        const tipsCount = 0;
+        const uniqueTippers = 0;
+
+        const ageHours = Math.max(
+          1,
+          (Date.now() - new Date(item.created_at).getTime()) / 3_600_000,
+        );
+        const interactionsPerHour = (comments + uniqueTippers) / ageHours;
+
+        // Trending boost (max topic score)
+        let trendingBoost = 0;
+        if (item.topics?.length) {
+          let maxScore = 0;
+          for (const topic of item.topics) {
+            const s = trendingByTag.get((topic.name || '').toLowerCase());
+            if (s && s > maxScore) maxScore = s;
+          }
+          trendingBoost = Math.min(
+            1,
+            maxScore / POPULAR_RANKING_CONFIG.TRENDING_MAX_SCORE,
+          );
+        }
+
+        const contentQuality = this.computeContentQuality(item.content || '');
+
+        // Account signals
+        const account = accountByAddress.get(item.sender_address);
+        let accountBalanceFactor = 0;
+        let accountAgeFactor = 0;
+        let invitesFactor = 0;
+        if (account) {
+          const cacheKey = `accbal:${account.address}`;
+          let aeBalance = 0;
+          const cached = await this.redis.get(cacheKey);
+          if (cached) {
+            aeBalance = parseFloat(cached) || 0;
+          } else {
+            try {
+              const raw = await this.aeSdkService.sdk.getBalance(
+                account.address as `ak_${string}`,
+              );
+              aeBalance = Number(raw) / 1e18;
+              await this.redis.setex(
+                cacheKey,
+                POPULAR_RANKING_CONFIG.BALANCE_CACHE_TTL_SECONDS,
+                aeBalance.toString(),
+              );
+            } catch {
+              aeBalance = 0;
+            }
+          }
+          accountBalanceFactor = Math.max(
+            0,
+            Math.min(
+              1,
+              aeBalance / POPULAR_RANKING_CONFIG.BALANCE_NORMALIZER_AE,
+            ),
+          );
+
+          const days =
+            (Date.now() - new Date(account.created_at).getTime()) / 86_400_000;
+          accountAgeFactor = Math.max(
+            0,
+            Math.min(1, 1 / (1 + Math.exp(-(days - 14) / 14))),
+          );
+
+          const sentInvites =
+            invitesByAddress.get(account.address) ??
+            account.total_invitation_count ??
+            0;
+          invitesFactor = Math.min(
+            1,
+            Math.log(1 + sentInvites) / Math.log(1 + 100),
+          );
+        }
+
+        const w = POPULAR_RANKING_CONFIG.WEIGHTS;
+        const reads = 0; // Plugin items don't have reads tracking (for now)
+        const readsPerHour = reads / ageHours;
+        const ownedRaw = ownedValueByAddress.get(item.sender_address) || 0;
+        const normalizer =
+          POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
+            ? POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_USD
+            : POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_AE;
+        const ownedNorm = Math.max(
+          0,
+          Math.min(1, ownedRaw / Math.max(1, normalizer)),
+        );
+        const numerator =
+          w.comments * Math.log(1 + comments) +
+          w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
+          w.tipsCount * Math.log(1 + tipsCount) +
+          w.interactionsPerHour * Math.log(1 + interactionsPerHour) +
+          w.reads * Math.log(1 + readsPerHour) +
+          w.trendingBoost * trendingBoost +
+          w.contentQuality * contentQuality +
+          w.accountBalance * accountBalanceFactor +
+          w.accountAge * accountAgeFactor +
+          w.invites * invitesFactor +
+          w.ownedTrends * ownedNorm;
+
+        let gravity = 0.0;
+        if (window === '7d') {
+          gravity = POPULAR_RANKING_CONFIG.GRAVITY_7D;
+        } else if (window === '24h') {
+          gravity = POPULAR_RANKING_CONFIG.GRAVITY;
+        }
+        const score =
+          numerator /
+          Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
+        return {
+          postId: item.id,
+          score,
+          type: item.type,
+          metadata: item.metadata,
+        };
+      }),
+    );
+
+    // Merge all scored items
+    const scored = [...scoredPosts, ...scoredPluginItems];
 
     // Apply score floor (hide zero-signal posts)
     let scoreFloor: number = POPULAR_RANKING_CONFIG.SCORE_FLOOR_DEFAULT;
