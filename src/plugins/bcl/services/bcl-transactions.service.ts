@@ -6,7 +6,7 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
-import { BclTransaction } from '../entities/bcl-transaction.view';
+import { BclTransaction } from '../entities/bcl-transaction.entity';
 import { BclTransactionDto } from '../dto/bcl-transaction.dto';
 
 @Injectable()

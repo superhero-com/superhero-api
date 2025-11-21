@@ -56,6 +56,10 @@ export class BclPluginSyncService extends BasePluginSyncService {
         txData,
       );
 
+      if (rawTransaction.function === BCL_CONTRACT.FUNCTIONS.create_community) {
+        // create token
+      }
+
       // Background operations outside transaction
       // if (result && result.isSupported && syncDirection === SyncDirectionEnum.Live) {
       //   // Broadcast transaction via WebSocket

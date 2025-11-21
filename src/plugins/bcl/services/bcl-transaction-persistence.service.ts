@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { BclTransaction } from '../entities/bcl-transaction.view';
+import { BclTransaction } from '../entities/bcl-transaction.entity';
 import { TransactionData } from './transaction-data.service';
 import moment from 'moment';
 
@@ -78,7 +78,7 @@ export class BclTransactionPersistenceService {
       : tx.micro_time;
 
     // Prepare BCL transaction data
-    
+
     const bclTransactionData: Partial<BclTransaction> = {
       hash: tx.hash,
       block_hash: tx.block_hash,

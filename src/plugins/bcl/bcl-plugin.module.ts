@@ -20,7 +20,7 @@ import { TransactionDataService } from './services/transaction-data.service';
 import { TransactionPersistenceService } from './services/transaction-persistence.service';
 import { TransactionProcessorService } from './services/transaction-processor.service';
 import { TokenHolderService } from './services/token-holder.service';
-import { BclTransaction } from './entities/bcl-transaction.view';
+import { BclTransaction } from './entities/bcl-transaction.entity';
 import { BclTransactionsService } from './services/bcl-transactions.service';
 import { BclTransactionsController } from './controllers/bcl-transactions.controller';
 import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
