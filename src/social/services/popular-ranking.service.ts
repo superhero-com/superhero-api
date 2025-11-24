@@ -305,7 +305,8 @@ export class PopularRankingService {
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
     const key = this.getRedisKey(window);
     const hours = this.getWindowHours(window);
-    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    // For 'all' window, don't calculate since date (would be invalid with Number.MAX_SAFE_INTEGER)
+    const since = window === 'all' ? null : new Date(Date.now() - hours * 60 * 60 * 1000);
 
     this.logger.log(`Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
     
@@ -318,15 +319,29 @@ export class PopularRankingService {
     }
 
     // Fetch candidate posts (top-level, not hidden) within window
-    const candidates = await this.postRepository
+    const queryBuilder = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
       .where('post.is_hidden = false')
-      .andWhere('post.post_id IS NULL')
-      .andWhere(window === 'all' ? '1=1' : 'post.created_at >= :since', {
-        since,
-      })
-      .orderBy('post.created_at', 'DESC')
+      .andWhere('post.post_id IS NULL');
+    
+    if (window !== 'all' && since) {
+      queryBuilder.andWhere('post.created_at >= :since', { since });
+    }
+    
+    // For 'all' window, order by total engagement signals to get truly popular posts
+    // For time-limited windows, order by recency to get recent popular posts
+    if (window === 'all') {
+      // Order by total comments + tips count to prioritize highly engaged posts
+      // This ensures we consider all-time great posts, not just recent ones
+      queryBuilder
+        .orderBy('COALESCE(post.total_comments, 0)', 'DESC')
+        .addOrderBy('post.created_at', 'DESC'); // Secondary sort by recency
+    } else {
+      queryBuilder.orderBy('post.created_at', 'DESC');
+    }
+    
+    const candidates = await queryBuilder
       .limit(maxCandidates)
       .getMany();
 
@@ -450,16 +465,18 @@ export class PopularRankingService {
     );
 
     // Preload reads over window per post
-    const fromDate = new Date(Date.now() - hours * 3600 * 1000);
-    const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
-      fromDate.getUTCMonth() + 1,
-    ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
+    // For 'all' window, get all reads (no date filter)
+    // For time-limited windows, filter reads by date
     const readsQB = this.postReadsRepository
       .createQueryBuilder('r')
       .select('r.post_id', 'post_id')
       .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
       .where('r.post_id IN (:...ids)', { ids });
     if (window !== 'all') {
+      const fromDate = new Date(Date.now() - hours * 3600 * 1000);
+      const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
+        fromDate.getUTCMonth() + 1,
+      ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
       readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
     }
     const readsRows = await readsQB
@@ -727,6 +744,9 @@ export class PopularRankingService {
 
     // Merge all scored items
     const scored = [...scoredPosts, ...scoredPluginItems];
+
+    // Sort by score DESC to ensure consistent ordering
+    scored.sort((a, b) => b.score - a.score);
 
     // Apply score floor (hide zero-signal posts)
     let scoreFloor: number = POPULAR_RANKING_CONFIG.SCORE_FLOOR_DEFAULT;
