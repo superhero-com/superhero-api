@@ -497,10 +497,12 @@ export class PopularRankingService {
           ? parseInt(tipsAgg.unique_tippers || '0', 10)
           : 0;
 
-        const ageHours = Math.max(
-          1,
-          (Date.now() - new Date(post.created_at).getTime()) / 3_600_000,
-        );
+        // For 'all' window, skip age calculation entirely - no recency bias
+        // For time-limited windows, calculate age for per-hour metrics
+        const ageHours = window === 'all' 
+          ? 1 // Dummy value, not used for 'all' window
+          : Math.max(1, (Date.now() - new Date(post.created_at).getTime()) / 3_600_000);
+        
         // For 'all' window, use total interactions (not per-hour) to avoid favoring newer posts
         // For time-limited windows, use per-hour rate to favor recent engagement
         const interactionsPerHour = window === 'all' 
@@ -614,10 +616,11 @@ export class PopularRankingService {
         } else if (window === '24h') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY;
         }
-        // window === 'all' uses gravity = 0.0 (no time decay)
-        const score =
-          numerator /
-          Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
+        // For 'all' window, score = numerator (no age-based decay)
+        // For time-limited windows, apply gravity-based time decay
+        const score = window === 'all'
+          ? numerator // No time decay for all-time ranking
+          : numerator / Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
         return { postId: post.id, score, type: 'post' };
       }),
     );
@@ -632,10 +635,12 @@ export class PopularRankingService {
         const tipsCount = 0;
         const uniqueTippers = 0;
 
-        const ageHours = Math.max(
-          1,
-          (Date.now() - new Date(item.created_at).getTime()) / 3_600_000,
-        );
+        // For 'all' window, skip age calculation entirely - no recency bias
+        // For time-limited windows, calculate age for per-hour metrics
+        const ageHours = window === 'all' 
+          ? 1 // Dummy value, not used for 'all' window
+          : Math.max(1, (Date.now() - new Date(item.created_at).getTime()) / 3_600_000);
+        
         // For 'all' window, use total interactions (not per-hour) to avoid favoring newer items
         // For time-limited windows, use per-hour rate to favor recent engagement
         const interactionsPerHour = window === 'all' 
@@ -738,15 +743,19 @@ export class PopularRankingService {
           w.invites * invitesFactor +
           w.ownedTrends * ownedNorm;
 
+        // Apply gravity based on window
+        // For "all" window, no gravity (0.0) means all items compete equally regardless of age
         let gravity = 0.0;
         if (window === '7d') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY_7D;
         } else if (window === '24h') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY;
         }
-        const score =
-          numerator /
-          Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
+        // For 'all' window, score = numerator (no age-based decay)
+        // For time-limited windows, apply gravity-based time decay
+        const score = window === 'all'
+          ? numerator // No time decay for all-time ranking
+          : numerator / Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
         return {
           postId: item.id,
           score,
