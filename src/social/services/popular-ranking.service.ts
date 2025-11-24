@@ -332,11 +332,9 @@ export class PopularRankingService {
     // For 'all' window, order by total engagement signals to get truly popular posts
     // For time-limited windows, order by recency to get recent popular posts
     if (window === 'all') {
-      // Order by total comments + tips count to prioritize highly engaged posts
-      // This ensures we consider all-time great posts, not just recent ones
-      queryBuilder
-        .orderBy('COALESCE(post.total_comments, 0)', 'DESC')
-        .addOrderBy('post.created_at', 'DESC'); // Secondary sort by recency
+      // Order by total comments to prioritize highly engaged posts
+      // No secondary sort by recency - we want all-time great posts regardless of age
+      queryBuilder.orderBy('COALESCE(post.total_comments, 0)', 'DESC');
     } else {
       queryBuilder.orderBy('post.created_at', 'DESC');
     }
@@ -503,7 +501,11 @@ export class PopularRankingService {
           1,
           (Date.now() - new Date(post.created_at).getTime()) / 3_600_000,
         );
-        const interactionsPerHour = (comments + uniqueTippers) / ageHours;
+        // For 'all' window, use total interactions (not per-hour) to avoid favoring newer posts
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const interactionsPerHour = window === 'all' 
+          ? (comments + uniqueTippers) // Total interactions for all-time
+          : (comments + uniqueTippers) / ageHours; // Per-hour rate for time-limited windows
 
         // trending boost (max topic score)
         let trendingBoost = 0;
@@ -575,7 +577,11 @@ export class PopularRankingService {
 
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = readsByPost.get(post.id) || 0;
-        const readsPerHour = reads / ageHours;
+        // For 'all' window, use total reads (not per-hour) to avoid favoring newer posts
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const readsPerHour = window === 'all' 
+          ? reads // Total reads for all-time
+          : reads / ageHours; // Per-hour rate for time-limited windows
         // owned trends factor: normalize value portfolio into [0..1]
         const ownedRaw = ownedValueByAddress.get(post.sender_address) || 0;
         const normalizer =
@@ -630,7 +636,11 @@ export class PopularRankingService {
           1,
           (Date.now() - new Date(item.created_at).getTime()) / 3_600_000,
         );
-        const interactionsPerHour = (comments + uniqueTippers) / ageHours;
+        // For 'all' window, use total interactions (not per-hour) to avoid favoring newer items
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const interactionsPerHour = window === 'all' 
+          ? (comments + uniqueTippers) // Total interactions for all-time
+          : (comments + uniqueTippers) / ageHours; // Per-hour rate for time-limited windows
 
         // Trending boost (max topic score)
         let trendingBoost = 0;
@@ -701,7 +711,11 @@ export class PopularRankingService {
 
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = 0; // Plugin items don't have reads tracking (for now)
-        const readsPerHour = reads / ageHours;
+        // For 'all' window, use total reads (not per-hour) to avoid favoring newer items
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const readsPerHour = window === 'all' 
+          ? reads // Total reads for all-time
+          : reads / ageHours; // Per-hour rate for time-limited windows
         const ownedRaw = ownedValueByAddress.get(item.sender_address) || 0;
         const normalizer =
           POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
