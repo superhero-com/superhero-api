@@ -3,6 +3,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Logger,
   NotFoundException,
   Param,
   ParseIntPipe,
@@ -24,6 +25,8 @@ import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.d
 @Controller('accounts')
 @ApiTags('Accounts')
 export class AccountsController {
+  private readonly logger = new Logger(AccountsController.name);
+
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
@@ -150,18 +153,26 @@ export class AccountsController {
       throw new NotFoundException('Account not found');
     }
 
-    // Fetch chain name from middleware if not already stored
+    // Fetch chain name from middleware if not stored or stale (older than 24 hours)
     // This ensures we always return the current chain name
+    const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const now = new Date();
+    const isStale = account.chain_name_updated_at 
+      ? (now.getTime() - account.chain_name_updated_at.getTime()) > CHAIN_NAME_STALE_THRESHOLD_MS
+      : true; // If never updated, consider it stale
+    
     let chainName = account.chain_name;
-    if (!chainName) {
+    if (!chainName || isStale) {
       chainName = await this.accountService.getChainNameForAccount(address);
-      // Optionally update the database (but don't block the response)
-      if (chainName) {
-        this.accountRepository.update(address, { chain_name: chainName }).catch((err) => {
-          // Log but don't throw - this is a background update
-          console.warn(`Failed to update chain_name for ${address}`, err);
-        });
-      }
+      // Update the database (but don't block the response)
+      const updateData: Partial<Account> = {
+        chain_name: chainName,
+        chain_name_updated_at: now,
+      };
+      this.accountRepository.update(address, updateData).catch((err) => {
+        // Log but don't throw - this is a background update
+        this.logger.warn(`Failed to update chain_name for ${address}`, err);
+      });
     }
 
     return {

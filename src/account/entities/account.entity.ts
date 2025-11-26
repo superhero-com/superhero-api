@@ -19,6 +19,12 @@ export class Account {
   })
   chain_name: string;
 
+  @Column({
+    nullable: true,
+    type: 'timestamp',
+  })
+  chain_name_updated_at: Date;
+
   /**
    * Total volume of the account
    */

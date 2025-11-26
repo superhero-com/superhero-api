@@ -2,9 +2,10 @@ import { TX_FUNCTIONS, ACTIVE_NETWORK } from '@/configs';
 import { PULL_ACCOUNTS_ENABLED } from '@/configs/constants';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { Repository } from 'typeorm';
+import { IsNull, LessThan, Not, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { fetchJson } from '@/utils/common';
 
@@ -216,6 +217,62 @@ export class AccountService {
     } catch (error) {
       this.logger.warn(`Failed to fetch chain name for ${accountAddress}`, error);
       return null;
+    }
+  }
+
+  /**
+   * Periodically refresh chain names for accounts that have them
+   * Runs every hour to keep chain names up to date
+   */
+  private isRefreshingChainNames = false;
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async refreshChainNamesPeriodically(): Promise<void> {
+    if (this.isRefreshingChainNames) {
+      return;
+    }
+
+    this.isRefreshingChainNames = true;
+    try {
+      // Find accounts with chain names that haven't been updated in the last 23 hours
+      // This ensures we refresh them before they become stale (24h threshold)
+      const staleThreshold = new Date(Date.now() - 23 * 60 * 60 * 1000);
+      
+      const accountsToRefresh = await this.accountRepository.find({
+        where: [
+          { chain_name: Not(IsNull()), chain_name_updated_at: LessThan(staleThreshold) },
+          { chain_name: Not(IsNull()), chain_name_updated_at: IsNull() },
+        ],
+        take: 100, // Process in batches to avoid overwhelming middleware
+      });
+
+      this.logger.log(`Refreshing chain names for ${accountsToRefresh.length} accounts`);
+
+      // Refresh chain names in parallel (but limit concurrency)
+      const batchSize = 10;
+      for (let i = 0; i < accountsToRefresh.length; i += batchSize) {
+        const batch = accountsToRefresh.slice(i, i + batchSize);
+        await Promise.allSettled(
+          batch.map(async (account) => {
+            try {
+              const chainName = await this.getChainNameForAccount(account.address);
+              const updateData: Partial<Account> = {
+                chain_name: chainName,
+                chain_name_updated_at: new Date(),
+              };
+              await this.accountRepository.update(account.address, updateData);
+            } catch (error) {
+              this.logger.warn(`Failed to refresh chain name for ${account.address}`, error);
+            }
+          })
+        );
+      }
+
+      this.logger.log(`Finished refreshing chain names`);
+    } catch (error) {
+      this.logger.error('Error refreshing chain names', error);
+    } finally {
+      this.isRefreshingChainNames = false;
     }
   }
 }
