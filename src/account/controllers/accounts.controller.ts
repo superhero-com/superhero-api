@@ -153,8 +153,8 @@ export class AccountsController {
       throw new NotFoundException('Account not found');
     }
 
-    // Fetch chain name from middleware if not stored or stale (older than 24 hours)
-    // This ensures we always return the current chain name
+    // Fetch chain name from middleware if stale (older than 24 hours) or never checked
+    // This ensures we respect the timestamp even when chain_name is null (no name found)
     const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
     const now = new Date();
     const isStale = account.chain_name_updated_at 
@@ -162,7 +162,9 @@ export class AccountsController {
       : true; // If never updated, consider it stale
     
     let chainName = account.chain_name;
-    if (!chainName || isStale) {
+    // Only fetch if stale - respect the timestamp even when chainName is null
+    // This prevents repeated middleware calls for accounts with no chain name
+    if (isStale) {
       chainName = await this.accountService.getChainNameForAccount(address);
       // Update the database (but don't block the response)
       const updateData: Partial<Account> = {
