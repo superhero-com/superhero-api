@@ -159,10 +159,11 @@ export class AccountService {
 
           if (!nameResponse?.pointers || !Array.isArray(nameResponse.pointers)) {
             // If name query fails, fall back to using the pointees data
+            // But only if the name was active in the pointees response
             const hasMatchingPointer = name.tx.pointers.some(
               pointer => pointer && pointer.id === accountAddress
             );
-            if (hasMatchingPointer) {
+            if (hasMatchingPointer && name.active) {
               verifiedNames.push({
                 name: name.name,
                 blockHeight: name.block_height ?? 0,
@@ -172,12 +173,14 @@ export class AccountService {
             continue;
           }
 
-          // Check if the CURRENT pointer points to this account address
+          // Check if the name is active AND the CURRENT pointer points to this account address
+          // An inactive name shouldn't be considered as "currently pointing" to the account
+          const isActive = nameResponse.active === true;
           const hasMatchingPointer = nameResponse.pointers.some(
             (pointer: any) => pointer && pointer.id === accountAddress
           );
 
-          if (hasMatchingPointer) {
+          if (isActive && hasMatchingPointer) {
             verifiedNames.push({
               name: name.name,
               blockHeight: name.block_height ?? 0,
@@ -186,10 +189,11 @@ export class AccountService {
           }
         } catch (e) {
           // If verification fails, fall back to pointees data
+          // But only if the name was active in the pointees response
           const hasMatchingPointer = name.tx.pointers.some(
             pointer => pointer && pointer.id === accountAddress
           );
-          if (hasMatchingPointer) {
+          if (hasMatchingPointer && name.active) {
             verifiedNames.push({
               name: name.name,
               blockHeight: name.block_height ?? 0,
