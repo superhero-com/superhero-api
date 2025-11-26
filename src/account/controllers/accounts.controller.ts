@@ -16,6 +16,7 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
+import { AccountService } from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 
@@ -27,6 +28,7 @@ export class AccountsController {
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
     private readonly portfolioService: PortfolioService,
+    private readonly accountService: AccountService,
   ) {
     //
   }
@@ -137,6 +139,7 @@ export class AccountsController {
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
+  @CacheTTL(60 * 10) // 10 minutes cache
   @Get(':address')
   async getAccount(@Param('address') address: string) {
     const account = await this.accountRepository.findOne({
@@ -147,6 +150,23 @@ export class AccountsController {
       throw new NotFoundException('Account not found');
     }
 
-    return account;
+    // Fetch chain name from middleware if not already stored
+    // This ensures we always return the current chain name
+    let chainName = account.chain_name;
+    if (!chainName) {
+      chainName = await this.accountService.getChainNameForAccount(address);
+      // Optionally update the database (but don't block the response)
+      if (chainName) {
+        this.accountRepository.update(address, { chain_name: chainName }).catch((err) => {
+          // Log but don't throw - this is a background update
+          console.warn(`Failed to update chain_name for ${address}`, err);
+        });
+      }
+    }
+
+    return {
+      ...account,
+      chain_name: chainName,
+    };
   }
 }
