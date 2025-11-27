@@ -3,6 +3,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Logger,
   NotFoundException,
   Param,
   ParseIntPipe,
@@ -16,6 +17,7 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
+import { AccountService } from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 
@@ -23,10 +25,13 @@ import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.d
 @Controller('accounts')
 @ApiTags('Accounts')
 export class AccountsController {
+  private readonly logger = new Logger(AccountsController.name);
+
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
     private readonly portfolioService: PortfolioService,
+    private readonly accountService: AccountService,
   ) {
     //
   }
@@ -137,6 +142,7 @@ export class AccountsController {
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
+  @CacheTTL(60 * 10) // 10 minutes cache
   @Get(':address')
   async getAccount(@Param('address') address: string) {
     const account = await this.accountRepository.findOne({
@@ -147,6 +153,45 @@ export class AccountsController {
       throw new NotFoundException('Account not found');
     }
 
-    return account;
+    // Fetch chain name from middleware if stale (older than 24 hours) or never checked
+    // This ensures we respect the timestamp even when chain_name is null (no name found)
+    const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const now = new Date();
+    const isStale = account.chain_name_updated_at 
+      ? (now.getTime() - account.chain_name_updated_at.getTime()) > CHAIN_NAME_STALE_THRESHOLD_MS
+      : true; // If never updated, consider it stale
+    
+    let chainName = account.chain_name;
+    let chainNameUpdatedAt = account.chain_name_updated_at;
+    
+    // Only fetch if stale - respect the timestamp even when chainName is null
+    // This prevents repeated middleware calls for accounts with no chain name
+    if (isStale) {
+      const fetchedChainName = await this.accountService.getChainNameForAccount(address);
+      
+      // Only update if fetch succeeded (not undefined)
+      // undefined means fetch failed - preserve existing chain_name to avoid data loss
+      if (fetchedChainName !== undefined) {
+        chainName = fetchedChainName;
+        chainNameUpdatedAt = now; // Update timestamp for response consistency
+        // Update the database (but don't block the response)
+        const updateData: Partial<Account> = {
+          chain_name: chainName,
+          chain_name_updated_at: now,
+        };
+        this.accountRepository.update(address, updateData).catch((err) => {
+          // Log but don't throw - this is a background update
+          this.logger.warn(`Failed to update chain_name for ${address}`, err);
+        });
+      }
+      // If fetchedChainName is undefined, keep existing chainName and chainNameUpdatedAt
+      // This prevents middleware errors from overwriting valid chain names with null
+    }
+
+    return {
+      ...account,
+      chain_name: chainName,
+      chain_name_updated_at: chainNameUpdatedAt,
+    };
   }
 }
