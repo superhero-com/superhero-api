@@ -158,19 +158,9 @@ export class AccountService {
             pointers: Array<{ id: string }>;
           }>(nameUrl);
 
+          // If response doesn't have pointers array, the name doesn't exist (e.g., 404)
+          // Skip it - don't fall back to historical data as it would be stale
           if (!nameResponse?.pointers || !Array.isArray(nameResponse.pointers)) {
-            // If name query fails, fall back to using the pointees data
-            // But only if the name was active in the pointees response
-            const hasMatchingPointer = name.tx.pointers.some(
-              pointer => pointer && pointer.id === accountAddress
-            );
-            if (hasMatchingPointer && name.active) {
-              verifiedNames.push({
-                name: name.name,
-                blockHeight: name.block_height ?? 0,
-                time: name.block_time ?? 0,
-              });
-            }
             continue;
           }
 
@@ -189,8 +179,9 @@ export class AccountService {
             });
           }
         } catch (e) {
-          // If verification fails, fall back to pointees data
-          // But only if the name was active in the pointees response
+          // Only fall back to historical data on true network errors (caught exceptions)
+          // This handles cases like network timeouts, connection failures, etc.
+          // HTTP errors (like 404) are not caught here - they return parsed JSON without pointers
           const hasMatchingPointer = name.tx.pointers.some(
             pointer => pointer && pointer.id === accountAddress
           );
