@@ -167,17 +167,25 @@ export class AccountsController {
     // Only fetch if stale - respect the timestamp even when chainName is null
     // This prevents repeated middleware calls for accounts with no chain name
     if (isStale) {
-      chainName = await this.accountService.getChainNameForAccount(address);
-      chainNameUpdatedAt = now; // Update timestamp for response consistency
-      // Update the database (but don't block the response)
-      const updateData: Partial<Account> = {
-        chain_name: chainName,
-        chain_name_updated_at: now,
-      };
-      this.accountRepository.update(address, updateData).catch((err) => {
-        // Log but don't throw - this is a background update
-        this.logger.warn(`Failed to update chain_name for ${address}`, err);
-      });
+      const fetchedChainName = await this.accountService.getChainNameForAccount(address);
+      
+      // Only update if fetch succeeded (not undefined)
+      // undefined means fetch failed - preserve existing chain_name to avoid data loss
+      if (fetchedChainName !== undefined) {
+        chainName = fetchedChainName;
+        chainNameUpdatedAt = now; // Update timestamp for response consistency
+        // Update the database (but don't block the response)
+        const updateData: Partial<Account> = {
+          chain_name: chainName,
+          chain_name_updated_at: now,
+        };
+        this.accountRepository.update(address, updateData).catch((err) => {
+          // Log but don't throw - this is a background update
+          this.logger.warn(`Failed to update chain_name for ${address}`, err);
+        });
+      }
+      // If fetchedChainName is undefined, keep existing chainName and chainNameUpdatedAt
+      // This prevents middleware errors from overwriting valid chain names with null
     }
 
     return {

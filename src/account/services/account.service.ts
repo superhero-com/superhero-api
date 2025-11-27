@@ -101,8 +101,9 @@ export class AccountService {
   /**
    * Fetches the chain name for an account from middleware
    * Returns the newest chain name that currently points to the account
+   * @returns string if chain name found, null if no chain name exists, undefined if fetch failed
    */
-  async getChainNameForAccount(accountAddress: string): Promise<string | null> {
+  async getChainNameForAccount(accountAddress: string): Promise<string | null | undefined> {
     try {
       const middlewareUrl = ACTIVE_NETWORK.middlewareUrl;
       const pointeesUrl = `${middlewareUrl}/v3/accounts/${encodeURIComponent(accountAddress)}/names/pointees`;
@@ -219,8 +220,10 @@ export class AccountService {
       // Return the name with the newest pointer
       return verifiedNames[0].name;
     } catch (error) {
+      // Return undefined to indicate fetch failure (not "no chain name")
+      // This allows the caller to preserve existing chain_name instead of overwriting with null
       this.logger.warn(`Failed to fetch chain name for ${accountAddress}`, error);
-      return null;
+      return undefined;
     }
   }
 
@@ -260,11 +263,17 @@ export class AccountService {
           batch.map(async (account) => {
             try {
               const chainName = await this.getChainNameForAccount(account.address);
-              const updateData: Partial<Account> = {
-                chain_name: chainName,
-                chain_name_updated_at: new Date(),
-              };
-              await this.accountRepository.update(account.address, updateData);
+              
+              // Only update if fetch succeeded (not undefined)
+              // undefined means fetch failed - preserve existing chain_name to avoid data loss
+              if (chainName !== undefined) {
+                const updateData: Partial<Account> = {
+                  chain_name: chainName,
+                  chain_name_updated_at: new Date(),
+                };
+                await this.accountRepository.update(account.address, updateData);
+              }
+              // If chainName is undefined, skip update to preserve existing chain_name
             } catch (error) {
               this.logger.warn(`Failed to refresh chain name for ${account.address}`, error);
             }
