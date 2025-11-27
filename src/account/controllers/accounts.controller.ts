@@ -162,10 +162,13 @@ export class AccountsController {
       : true; // If never updated, consider it stale
     
     let chainName = account.chain_name;
+    let chainNameUpdatedAt = account.chain_name_updated_at;
+    
     // Only fetch if stale - respect the timestamp even when chainName is null
     // This prevents repeated middleware calls for accounts with no chain name
     if (isStale) {
       chainName = await this.accountService.getChainNameForAccount(address);
+      chainNameUpdatedAt = now; // Update timestamp for response consistency
       // Update the database (but don't block the response)
       const updateData: Partial<Account> = {
         chain_name: chainName,
@@ -180,6 +183,7 @@ export class AccountsController {
     return {
       ...account,
       chain_name: chainName,
+      chain_name_updated_at: chainNameUpdatedAt,
     };
   }
 }
