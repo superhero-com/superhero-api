@@ -5,8 +5,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
   name: 'bcl_tokens',
 })
 export class BclToken {
-  @PrimaryColumn()
-  @Index({ unique: true })
+  @PrimaryColumn({ name: 'sale_address' })
   sale_address: string;
 
   @Column({ default: false })

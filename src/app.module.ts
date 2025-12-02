@@ -3,18 +3,19 @@ import { BullBoardModule } from './bull-board/bull-board.module';
 
 import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { join } from 'path';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
-import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
+import { DATABASE_CONFIG, REDIS_CONFIG, synchronizeWithErrorHandling } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -87,4 +88,11 @@ import { DeprecatedApisModule } from './@deprecated-apis/deprecated-apis.module'
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule implements OnModuleInit {
+  constructor(private readonly dataSource: DataSource) {}
+
+  async onModuleInit() {
+    // Run synchronization with error handling for constraint conflicts
+    await synchronizeWithErrorHandling(this.dataSource);
+  }
+}

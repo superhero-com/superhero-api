@@ -5,8 +5,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
   name: 'bcl_transactions',
 })
 export class BclTransaction {
-  @PrimaryColumn()
-  @Index({ unique: true })
+  @PrimaryColumn({ name: 'hash' })
   hash: string;
 
   @ManyToOne(() => Tx, { onDelete: 'CASCADE' })

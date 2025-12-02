@@ -2,7 +2,7 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
 
 @ViewEntity({
   name: 'bcl_token_stats',
-  materialized: true,
+  materialized: false,
   synchronize: true,
   dependsOn: ['bcl_tokens', 'bcl_transactions'],
   expression: `

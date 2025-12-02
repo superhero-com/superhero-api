@@ -4,6 +4,7 @@ import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
   name: 'bcl_tokens_view',
   materialized: false,
   synchronize: true,
+  dependsOn: ['bcl_tokens', 'bcl_transactions', 'bcl_token_stats', 'bcl_token_performance_view'],
   expression: `
     WITH latest_transactions AS (
       SELECT DISTINCT ON (sale_address)
