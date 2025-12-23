@@ -1,4 +1,11 @@
-import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+  forwardRef,
+} from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import BigNumber from 'bignumber.js';
@@ -48,6 +55,9 @@ export class CoinGeckoService {
   private readonly logger = new Logger(CoinGeckoService.name);
   rates: CurrencyRates | null = null;
   last_pull_time: Moment;
+  private ratesPullInFlight: Promise<void> | null = null;
+  private marketDataInFlight = new Map<string, Promise<CoinGeckoMarketResponse>>();
+  private readonly marketCacheKeyPrefix = 'coingecko:market:v1';
 
   /**
    * CoinGeckoService class responsible for pulling data at regular intervals.
@@ -119,8 +129,59 @@ export class CoinGeckoService {
   }
 
   isPullTimeExpired() {
-    return (
-      this.last_pull_time && moment().diff(this.last_pull_time, 'minutes') > 2
+    if (!this.last_pull_time) return true;
+    return moment().diff(this.last_pull_time, 'minutes') > 2;
+  }
+
+  /**
+   * Returns the best-available currency rates (prefers fresh in-memory, then refresh,
+   * then cached, then JSON fallback). Never returns an empty object.
+   */
+  async getAeternityRates(): Promise<CurrencyRates> {
+    if (this.rates && !this.isPullTimeExpired()) {
+      return this.rates;
+    }
+
+    // Deduplicate concurrent refresh attempts
+    if (!this.ratesPullInFlight) {
+      this.ratesPullInFlight = this.pullData()
+        .catch((err: unknown) => {
+          // pullData already tries cache + fallback internally; this catch prevents unhandled rejections
+          this.logger.warn('Rates refresh failed (will try cached/fallback)', err);
+        })
+        .finally(() => {
+          this.ratesPullInFlight = null;
+        });
+    }
+
+    await this.ratesPullInFlight;
+
+    if (this.rates) {
+      return this.rates;
+    }
+
+    // As a last resort, try cache directly, then JSON fallback
+    try {
+      const cachedRates =
+        await this.cacheManager.get<CurrencyRates>('coingecko:rates');
+      if (cachedRates) {
+        this.rates = cachedRates;
+        this.last_pull_time = moment();
+        return cachedRates;
+      }
+    } catch (error) {
+      this.logger.warn('Failed to read cached rates in getAeternityRates:', error);
+    }
+
+    const fallbackRates = this.getFallbackRates();
+    if (fallbackRates) {
+      this.rates = fallbackRates;
+      this.last_pull_time = moment();
+      return fallbackRates;
+    }
+
+    throw new ServiceUnavailableException(
+      'Aeternity rates are temporarily unavailable',
     );
   }
 
@@ -243,7 +304,14 @@ export class CoinGeckoService {
         vs_currencies: CURRENCIES.map(({ code }) => code).join(','),
       })) as any;
 
-      const rates = response[coinId];
+      if (!response || typeof response !== 'object') {
+        this.logger.warn(
+          `Invalid CoinGecko rates response for ${coinId} (non-object)`,
+        );
+        return null;
+      }
+
+      const rates = response?.[coinId];
       if (rates) {
         this.logger.debug(
           `Fetched CoinGecko rates for ${coinId}:`,
@@ -278,7 +346,14 @@ export class CoinGeckoService {
         vs_currency: currencyCode,
       })) as any[];
 
-      if (marketData && marketData.length > 0) {
+      if (!Array.isArray(marketData)) {
+        this.logger.warn(
+          `Invalid CoinGecko market data response for ${coinId} in ${currencyCode} (non-array)`,
+        );
+        return null;
+      }
+
+      if (marketData.length > 0) {
         const result = camelcaseKeysDeep(marketData[0]) as CoinGeckoMarketResponse;
         this.logger.debug(
           `Fetched CoinGecko market data for ${coinId} in ${currencyCode}`,
@@ -293,6 +368,79 @@ export class CoinGeckoService {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Returns market data with a "soft TTL" cache:
+   * - returns cached data immediately if it's fresh enough
+   * - otherwise tries to refresh; on refresh failure, returns last cached data
+   * - if nothing cached and refresh fails, throws 503
+   */
+  async getCoinMarketData(
+    coinId: string,
+    currencyCode: string,
+    maxAgeMs: number = 60_000,
+  ): Promise<CoinGeckoMarketResponse> {
+    const cacheKey = `${this.marketCacheKeyPrefix}:${coinId}:${currencyCode}`;
+
+    type CachedMarket = { data: CoinGeckoMarketResponse; fetchedAt: number };
+
+    let cached: CachedMarket | null = null;
+    try {
+      cached = (await this.cacheManager.get<CachedMarket>(cacheKey)) ?? null;
+      const fetchedAtOk =
+        cached && typeof cached.fetchedAt === 'number' && Number.isFinite(cached.fetchedAt);
+      if (cached?.data && fetchedAtOk && Date.now() - cached.fetchedAt <= maxAgeMs) {
+        return cached.data;
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to read market cache (${cacheKey}):`, error);
+    }
+
+    // Deduplicate concurrent market fetches per key (prevents request stampede / rate limits)
+    const inflightKey = cacheKey;
+    const existing = this.marketDataInFlight.get(inflightKey);
+    if (existing) {
+      try {
+        return await existing;
+      } catch (err) {
+        // Fall through to cached fallback below
+      }
+    }
+
+    const fetchPromise = (async () => {
+      const fresh = await this.fetchCoinMarketData(coinId, currencyCode);
+      if (!fresh) {
+        throw new Error('CoinGecko market data fetch returned null');
+      }
+      try {
+        const payload: CachedMarket = { data: fresh, fetchedAt: Date.now() };
+        // Keep long TTL so we can fall back to last-known-good even during outages/rate limits
+        await this.cacheManager.set(cacheKey, payload, 24 * 60 * 60 * 1000);
+      } catch (error) {
+        this.logger.warn(`Failed to write market cache (${cacheKey}):`, error);
+      }
+      return fresh;
+    })();
+
+    this.marketDataInFlight.set(inflightKey, fetchPromise);
+
+    try {
+      return await fetchPromise;
+    } catch (error) {
+      if (cached?.data) {
+        this.logger.warn(
+          `Using cached market data due to refresh failure (${coinId}/${currencyCode})`,
+          error,
+        );
+        return cached.data;
+      }
+      throw new ServiceUnavailableException(
+        'Aeternity market data is temporarily unavailable',
+      );
+    } finally {
+      this.marketDataInFlight.delete(inflightKey);
     }
   }
 

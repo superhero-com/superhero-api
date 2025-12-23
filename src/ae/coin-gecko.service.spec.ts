@@ -1,9 +1,11 @@
 import { AETERNITY_COIN_ID } from '@/configs';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
 import { Test, TestingModule } from '@nestjs/testing';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
+import type { Cache } from 'cache-manager';
 import { CoinGeckoService } from './coin-gecko.service';
 
 jest.mock('@/utils/common', () => ({
@@ -12,16 +14,29 @@ jest.mock('@/utils/common', () => ({
 
 describe('CoinGeckoService', () => {
   let service: CoinGeckoService;
+  let cacheManager: Pick<Cache, 'get' | 'set'>;
 
   beforeEach(async () => {
+    jest.useFakeTimers();
+    cacheManager = {
+      get: jest.fn(),
+      set: jest.fn(),
+    };
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CoinGeckoService],
+      providers: [
+        CoinGeckoService,
+        {
+          provide: CACHE_MANAGER,
+          useValue: cacheManager,
+        },
+      ],
     }).compile();
 
     service = module.get<CoinGeckoService>(CoinGeckoService);
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     jest.clearAllMocks();
   });
 
@@ -30,8 +45,11 @@ describe('CoinGeckoService', () => {
   });
 
   it('should initialize and pull data on instantiation', async () => {
-    const pullDataSpy = jest.spyOn(CoinGeckoService.prototype, 'pullData');
-    new CoinGeckoService();
+    const pullDataSpy = jest
+      .spyOn(CoinGeckoService.prototype, 'pullData')
+      .mockResolvedValue(undefined as any);
+
+    new CoinGeckoService(cacheManager as any);
 
     expect(pullDataSpy).toHaveBeenCalled();
   });
