@@ -33,10 +33,9 @@ export class PriceFeedController {
     },
   })
   @Get('aeternity/rates')
-  async getCurrencyRates(): Promise<CurrencyRates | Record<string, never>> {
-    const rates = await this.coinGeckoService.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
-    // Return empty object instead of null to avoid empty response body
-    return rates || {};
+  async getCurrencyRates(): Promise<CurrencyRates> {
+    // Serve best-available (cached/last-known-good) rates to avoid intermittent {}
+    return this.coinGeckoService.getAeternityRates();
   }
 
   @ApiOperation({
@@ -111,13 +110,12 @@ export class PriceFeedController {
   @Get('aeternity/market-data')
   async getMarketData(
     @Query('currency') currency: string = 'usd',
-  ): Promise<Omit<CoinGeckoMarketResponse, 'image' | 'marketCapRank'> | Record<string, never>> {
-    const data = await this.coinGeckoService.fetchCoinMarketData(AETERNITY_COIN_ID, currency);
-    
-    if (!data) {
-      // Return empty object instead of null to avoid empty response body
-      return {};
-    }
+  ): Promise<Omit<CoinGeckoMarketResponse, 'image' | 'marketCapRank'>> {
+    // Serve best-available (cached/last-known-good) market data to avoid intermittent {}
+    const data = await this.coinGeckoService.getCoinMarketData(
+      AETERNITY_COIN_ID,
+      currency,
+    );
     
     // Remove 'image' and 'marketCapRank' from response
     const { image, marketCapRank, ...filteredData } = data;
