@@ -1,10 +1,14 @@
 import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
+import { BclToken } from './bcl-token.entity';
+import { BclTransaction } from './bcl-transaction.entity';
 
 @ViewEntity({
   name: 'bcl_token_stats',
+  // This view is refreshed periodically via `REFRESH MATERIALIZED VIEW ...`
   materialized: false,
   synchronize: true,
-  dependsOn: ['bcl_tokens', 'bcl_transactions'],
+  // Use class references (not strings) so TypeORM can order view creation correctly.
+  dependsOn: [BclToken, BclTransaction],
   expression: `
     WITH time_window AS (
       SELECT NOW() - INTERVAL '24 hours' as start_time

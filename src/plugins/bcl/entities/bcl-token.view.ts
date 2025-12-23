@@ -1,10 +1,15 @@
 import { ViewColumn, ViewEntity, PrimaryColumn, Index } from 'typeorm';
+import { BclToken } from './bcl-token.entity';
+import { BclTransaction } from './bcl-transaction.entity';
+import { BclTokenPerformanceView } from './bcl-token-performance.view';
+import { BclTokenStats } from './bcl-token-stats.view';
 
 @ViewEntity({
   name: 'bcl_tokens_view',
   materialized: false,
   synchronize: true,
-  dependsOn: ['bcl_tokens', 'bcl_transactions', 'bcl_token_stats', 'bcl_token_performance_view'],
+  // Use class references (not strings) so TypeORM can order view creation correctly.
+  dependsOn: [BclToken, BclTransaction, BclTokenStats, BclTokenPerformanceView],
   expression: `
     WITH latest_transactions AS (
       SELECT DISTINCT ON (sale_address)

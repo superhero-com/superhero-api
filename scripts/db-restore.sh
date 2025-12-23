@@ -6,7 +6,7 @@ DB_USER="pguser"
 DB_PASSWORD="postgres"
 DB_PORT="5436"
 DB_HOST="localhost"
-BACKUP_FILE="scripts/api-mainnet-2025-11-21_10-11.sql.gz"
+BACKUP_FILE="scripts/latest.sql.gz"
 CONTAINER_NAME=$(docker-compose -f docker-compose-dev.yml ps -q postgres)
 
 # === CHECK BACKUP ===

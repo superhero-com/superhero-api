@@ -1,4 +1,6 @@
 import { Index, ViewColumn, ViewEntity } from 'typeorm';
+import { BclToken } from './bcl-token.entity';
+import { BclTransaction } from './bcl-transaction.entity';
 
 /**
  * BclTokenPerformanceView - A database view for efficient batch queries and JOINs
@@ -18,9 +20,11 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
  */
 @ViewEntity({
   name: 'bcl_token_performance_view',
+  // This view is refreshed periodically via `REFRESH MATERIALIZED VIEW ...`
   materialized: false,
   synchronize: true,
-  dependsOn: ['bcl_tokens', 'bcl_transactions'],
+  // Use class references (not strings) so TypeORM can order view creation correctly.
+  dependsOn: [BclToken, BclTransaction],
   expression: `
     WITH valid_transactions AS (
       -- Pre-filter and extract numeric price once to avoid repeated JSON parsing
