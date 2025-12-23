@@ -14,6 +14,7 @@ import { WebSocketService } from '@/ae/websocket.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
+import { isSelfTransferTx } from '../utils/common';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -35,7 +36,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     private websocketService: WebSocketService,
     private pluginBatchProcessor: PluginBatchProcessorService,
     private microBlockService: MicroBlockService,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     this.setupWebsocketSubscriptions();
@@ -45,6 +46,10 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     // Subscribe to transaction updates
     this.unsubscribeTransactions = this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
+        // ignore self transfer transactions
+        if (isSelfTransferTx(transaction)) {
+          return;
+        }
         // Prevent duplicate transactions
         if (!this.syncedTransactions.includes(transaction.hash)) {
           this.handleLiveTransaction(transaction);
@@ -77,7 +82,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
 
       // Process batch for plugins (single tx in array) - live sync
       await this.pluginBatchProcessor.processBatch([savedTx], SyncDirectionEnum.Live);
-      
+
       this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
@@ -88,7 +93,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
   async handleKeyBlock(keyBlockHeader: ITopHeader) {
     try {
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-      
+
       // Fetch full key block details from MDW
       const fullBlock = await fetchJson(
         `${middlewareUrl}/v3/key-blocks/${keyBlockHeader.hash}`,
@@ -161,12 +166,12 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
       payload = decode(tx?.tx?.payload).toString();
     }
-    
+
     // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
     // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
     const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
     const sanitizedSignatures = tx.signatures ? sanitizeJsonForPostgres(tx.signatures) : [];
-    
+
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,
