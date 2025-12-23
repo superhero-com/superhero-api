@@ -235,6 +235,21 @@
 
       <div class="stats-grid">
         <div class="stat-card">
+          <h2>Total AE (Registered)</h2>
+          <div class="subtitle">Sum of invitation AE amounts allocated in range.</div>
+          <div class="value" id="totalAeRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Avg AE / Registered</h2>
+          <div class="subtitle">Average AE per registered invitation.</div>
+          <div class="value" id="avgAePerRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Avg AE / Inviter</h2>
+          <div class="subtitle">Total AE registered divided by unique inviters.</div>
+          <div class="value" id="avgAePerInviter">-</div>
+        </div>
+        <div class="stat-card">
           <h2>Unique Inviters</h2>
           <div class="subtitle">Distinct inviter addresses (registered).</div>
           <div class="value" id="uniqueInviters">-</div>
@@ -274,6 +289,13 @@
           </div>
         </div>
 
+        <div class="chart-container large">
+          <h2>Daily volume (AE)</h2>
+          <div class="chart-wrapper">
+            <canvas id="aeLineChart"></canvas>
+          </div>
+        </div>
+
         <div class="chart-container">
           <h2>Daily registered distribution</h2>
           <div class="chart-wrapper">
@@ -310,6 +332,7 @@
     <script>
       const API_URL = "/api";
       let invitesLineChart = null;
+      let aeLineChart = null;
       let registeredBarChart = null;
       let redeemedBarChart = null;
 
@@ -323,6 +346,10 @@
 
       function formatPercent(rate) {
         return `${(rate * 100).toFixed(2)}%`;
+      }
+
+      function formatAe(num) {
+        return `${Number(num ?? 0).toFixed(2)} AE`;
       }
 
       function shortAddr(addr) {
@@ -381,6 +408,9 @@
         document.getElementById("totalOutstanding").textContent = formatNumber(summary.total_outstanding);
         document.getElementById("redeemedRate").textContent = formatPercent(summary.redeemed_rate);
         document.getElementById("revokedRate").textContent = formatPercent(summary.revoked_rate);
+        document.getElementById("totalAeRegistered").textContent = formatAe(summary.total_amount_ae_registered);
+        document.getElementById("avgAePerRegistered").textContent = formatAe(summary.avg_amount_ae_per_registered);
+        document.getElementById("avgAePerInviter").textContent = formatAe(summary.avg_amount_ae_per_inviter);
         document.getElementById("uniqueInviters").textContent = formatNumber(summary.unique_inviters);
         document.getElementById("uniqueInvitees").textContent = formatNumber(summary.unique_invitees);
         document.getElementById("uniqueRedeemers").textContent = formatNumber(summary.unique_redeemers);
@@ -418,6 +448,7 @@
         const registered = series.map(p => p.registered);
         const redeemed = series.map(p => p.redeemed);
         const revoked = series.map(p => p.revoked);
+        const amountAeRegistered = series.map(p => p.amount_ae_registered ?? 0);
 
         destroyChart(invitesLineChart);
         invitesLineChart = new Chart(document.getElementById("invitesLineChart"), {
@@ -455,6 +486,31 @@
             responsive: true,
             maintainAspectRatio: false,
             plugins: { legend: { position: "top" } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        destroyChart(aeLineChart);
+        aeLineChart = new Chart(document.getElementById("aeLineChart"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Daily volume (AE)",
+                data: amountAeRegistered,
+                backgroundColor: "#0ea5e9",
+                borderRadius: 4,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
             scales: {
               y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
               x: { grid: { display: false } },

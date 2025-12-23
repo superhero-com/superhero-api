@@ -11,6 +11,7 @@ export type BclAffiliationDailyPoint = {
   registered: number;
   redeemed: number;
   revoked: number;
+  amount_ae_registered: number;
 };
 
 export type BclAffiliationSummary = {
@@ -21,6 +22,9 @@ export type BclAffiliationSummary = {
   unique_inviters: number;
   unique_invitees: number;
   unique_redeemers: number;
+  total_amount_ae_registered: number;
+  avg_amount_ae_per_registered: number;
+  avg_amount_ae_per_inviter: number;
   redeemed_rate: number; // redeemed / registered
   revoked_rate: number; // revoked / registered
 };
@@ -56,25 +60,37 @@ export class BclAffiliationAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(params);
 
     const start = Date.now();
-    const [registeredByDay, redeemedByDay, revokedByDay] = await Promise.all([
+    const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] = await Promise.all([
       this.getDailyCounts(this.registeredRepo, startDate, endDate),
       this.getDailyCounts(this.redeemedRepo, startDate, endDate),
       this.getDailyCounts(this.revokedRepo, startDate, endDate),
+      this.getDailyRegisteredAmount(startDate, endDate),
     ]);
 
-    const [totals, uniques] = await Promise.all([
+    const [totals, uniques, amountTotals] = await Promise.all([
       this.getTotals(startDate, endDate),
       this.getUniques(startDate, endDate),
+      this.getAmountTotals(startDate, endDate),
     ]);
 
     const series = this.fillDailySeries(startDate, endDate, {
       registered: registeredByDay,
       redeemed: redeemedByDay,
       revoked: revokedByDay,
+      amount_ae_registered: amountByDay,
     });
 
     const total_outstanding =
       totals.total_registered - totals.total_redeemed - totals.total_revoked;
+
+    const avg_amount_ae_per_registered =
+      totals.total_registered > 0
+        ? amountTotals.total_amount_ae_registered / totals.total_registered
+        : 0;
+    const avg_amount_ae_per_inviter =
+      uniques.unique_inviters > 0
+        ? amountTotals.total_amount_ae_registered / uniques.unique_inviters
+        : 0;
 
     const redeemed_rate =
       totals.total_registered > 0
@@ -93,6 +109,9 @@ export class BclAffiliationAnalyticsService {
         ...totals,
         total_outstanding,
         ...uniques,
+        ...amountTotals,
+        avg_amount_ae_per_registered,
+        avg_amount_ae_per_inviter,
         redeemed_rate,
         revoked_rate,
       },
@@ -266,6 +285,7 @@ export class BclAffiliationAnalyticsService {
       registered: Record<string, number>;
       redeemed: Record<string, number>;
       revoked: Record<string, number>;
+      amount_ae_registered: Record<string, number>;
     },
   ): BclAffiliationDailyPoint[] {
     const start = moment(startDate).startOf('day');
@@ -281,10 +301,40 @@ export class BclAffiliationAnalyticsService {
         registered: counts.registered[d] ?? 0,
         redeemed: counts.redeemed[d] ?? 0,
         revoked: counts.revoked[d] ?? 0,
+        amount_ae_registered: counts.amount_ae_registered[d] ?? 0,
       });
       cursor.add(1, 'day');
     }
     return out;
+  }
+
+  private async getDailyRegisteredAmount(startDate: Date, endDate: Date) {
+    const rows = await this.registeredRepo
+      .createQueryBuilder('r')
+      .select(`to_char(date_trunc('day', r.created_at), 'YYYY-MM-DD')`, 'date')
+      .addSelect(`COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`, 'amount')
+      .where('r.created_at >= :startDate', { startDate })
+      .andWhere('r.created_at < :endDate', { endDate })
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; amount: number }>();
+
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.date] = Number(r.amount || 0);
+    return out;
+  }
+
+  private async getAmountTotals(startDate: Date, endDate: Date) {
+    const row = await this.registeredRepo
+      .createQueryBuilder('r')
+      .select(`COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`, 'amount')
+      .where('r.created_at >= :startDate', { startDate })
+      .andWhere('r.created_at < :endDate', { endDate })
+      .getRawOne<{ amount: number }>();
+
+    return {
+      total_amount_ae_registered: Number(row?.amount || 0),
+    };
   }
 
   private parseDateRange(params: { start_date?: string; end_date?: string }) {
