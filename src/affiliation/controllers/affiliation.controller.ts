@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Param, Get, Render } from '@nestjs/common';
+import { Controller, Post, Body, Param, Get } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -158,11 +158,5 @@ export class AffiliationController {
     return {
       code: savedAffiliation.code,
     };
-  }
-
-  @Get('preview')
-  @Render('affiliation')
-  root() {
-    return { message: 'Hello world!' };
   }
 }
