@@ -14,6 +14,8 @@ import { BclAffiliationInvitationsService } from './services/bcl-affiliation-inv
 import { BclAffiliationInvitationsController } from './controllers/bcl-affiliation-invitations.controller';
 import { BclAffiliationAnalyticsService } from './services/bcl-affiliation-analytics.service';
 import { BclAffiliationAnalyticsController } from './controllers/bcl-affiliation-analytics.controller';
+import { BclAffiliationTreeService } from './services/bcl-affiliation-tree.service';
+import { BclAffiliationTreeController } from './controllers/bcl-affiliation-tree.controller';
 
 @Module({
   imports: [
@@ -31,10 +33,15 @@ import { BclAffiliationAnalyticsController } from './controllers/bcl-affiliation
     BclAffiliationTransactionProcessorService,
     BclAffiliationInvitationsService,
     BclAffiliationAnalyticsService,
+    BclAffiliationTreeService,
     BclAffiliationPluginSyncService,
     BclAffiliationPlugin,
   ],
-  controllers: [BclAffiliationInvitationsController, BclAffiliationAnalyticsController],
+  controllers: [
+    BclAffiliationInvitationsController,
+    BclAffiliationAnalyticsController,
+    BclAffiliationTreeController,
+  ],
   exports: [BclAffiliationPlugin],
 })
 export class BclAffiliationPluginModule {}

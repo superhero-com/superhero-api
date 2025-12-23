@@ -1,0 +1,254 @@
+{{#> main-layout title="BCL Affiliation Tree" active="bcl-affiliation-tree"}}
+<style>
+  #chart-container {
+    height: calc(100vh - 84px);
+    width: 100%;
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f0f2f5;
+  }
+</style>
+
+<div id="chart-container"></div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-org-chart@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-flextree@2.1.2/build/d3-flextree.js"></script>
+
+<script>
+  const CHART_CONFIG = {
+    node: {
+      width: 342,
+      height: 380,
+    },
+    chart: {
+      initialZoom: 0.65,
+      renderDelay: 250,
+    },
+    api: {
+      treePath: "/api/bcl-affiliation/tree",
+      accountsBaseUrl: "https://wordcraft.fun/accounts/",
+      avatarBaseUrl: "https://avatars.superherowallet.com/",
+    },
+  };
+
+  const Utils = {
+    formatAddress(address) {
+      if (!address) return "";
+      return `${address.slice(0, 7)}...${address.slice(-4)}`;
+    },
+    safeGet(obj, path, defaultValue = 0, formatter = (value) => value) {
+      return formatter(
+        path.split(".").reduce((current, key) => current?.[key], obj) ??
+          defaultValue
+      );
+    },
+    formatNumber(num) {
+      return (num ?? 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    },
+    formatAe(num) {
+      return Number(num ?? 0).toFixed(2);
+    },
+  };
+
+  const NodeFactory = {
+    createBaseNode(nodeId, parentNodeId = null) {
+      return {
+        nodeId,
+        parentNodeId,
+        width: CHART_CONFIG.node.width,
+        height: CHART_CONFIG.node.height,
+        expanded: false,
+        directSubordinates: 0,
+        totalSubordinates: 0,
+      };
+    },
+    createRootNode(meta) {
+      const node = this.createBaseNode("root", null);
+      return {
+        ...node,
+        template: `
+          <div style="
+            position: absolute;
+            width: ${CHART_CONFIG.node.width}px;
+            height: ${CHART_CONFIG.node.height}px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3730a3 55%, #581c87 100%);
+            color: white;
+            padding: 18px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.18);
+            overflow: hidden;
+          ">
+            <div style="font-size: 18px; font-weight: 800; margin-bottom: 6px;">BCL Affiliation Tree</div>
+            <div style="opacity: 0.85; font-size: 12px; margin-bottom: 14px;">On-chain invitations graph (registered edges)</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div style="background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px;">
+                <div style="font-size: 11px; opacity: 0.85;">Unique inviters</div>
+                <div style="font-size: 18px; font-weight: 800;">${Utils.formatNumber(meta.unique_inviters)}</div>
+              </div>
+              <div style="background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px;">
+                <div style="font-size: 11px; opacity: 0.85;">Unique invitees</div>
+                <div style="font-size: 18px; font-weight: 800;">${Utils.formatNumber(meta.unique_invitees)}</div>
+              </div>
+              <div style="background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px;">
+                <div style="font-size: 11px; opacity: 0.85;">Total registered</div>
+                <div style="font-size: 18px; font-weight: 800;">${Utils.formatNumber(meta.total_registered)}</div>
+              </div>
+              <div style="background: rgba(255,255,255,0.12); border-radius: 10px; padding: 10px;">
+                <div style="font-size: 11px; opacity: 0.85;">Total AE amount</div>
+                <div style="font-size: 18px; font-weight: 800;">${Utils.formatAe(meta.total_amount_ae)} AE</div>
+              </div>
+            </div>
+          </div>
+        `,
+        expanded: true,
+        directSubordinates: meta.unique_inviters,
+        totalSubordinates: meta.unique_inviters,
+      };
+    },
+  };
+
+  const TemplateGenerator = {
+    generateNodeContent(nodeData) {
+      const address = nodeData.nodeId;
+      const data = addressData[address] || {};
+      if (address === "root") return nodeData.template;
+
+      const stats = [
+        { icon: "📧", label: "Registered", value: Utils.safeGet(data, "total_invitation_count") },
+        { icon: "✅", label: "Redeemed", value: Utils.safeGet(data, "total_claimed_invitation_count") },
+        { icon: "❌", label: "Revoked", value: Utils.safeGet(data, "total_revoked_invitation_count") },
+        { icon: "⏳", label: "Pending", value: Utils.safeGet(data, "total_pending_invitation_count") },
+        { icon: "💰", label: "AE amount", value: Utils.formatAe(Utils.safeGet(data, "total_amount_ae")), unit: "AE" },
+        { icon: "📥", label: "Received", value: Utils.safeGet(data, "total_received_invitation_count") },
+      ];
+
+      const statHtml = stats
+        .map(
+          (s) => `
+          <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#F8FAFC; border-radius:8px;">
+            <div style="font-size:16px;">${s.icon}</div>
+            <div style="flex:1;">
+              <div style="font-size:11px; color:#64748B; font-weight:600;">${s.label}</div>
+              <div style="font-size:14px; color:#0f172a; font-weight:800;">${Utils.formatNumber(s.value)}${s.unit ? " " + s.unit : ""}</div>
+            </div>
+          </div>`
+        )
+        .join("");
+
+      return `
+        <div style="
+          position: absolute;
+          width: ${CHART_CONFIG.node.width}px;
+          height: ${CHART_CONFIG.node.height}px;
+          border-radius: 16px;
+          background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
+          border: 2px solid #E2E8F0;
+          box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+          overflow: hidden;
+        ">
+          <div style="background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%); padding: 14px; position: relative;">
+            <div style="position:absolute; top:10px; left:14px; width:40px; height:40px; border-radius:50%; border:4px solid white; overflow:hidden; background:white;">
+              <a href="${CHART_CONFIG.api.accountsBaseUrl}${address}" target="_blank">
+                <img src="${CHART_CONFIG.api.avatarBaseUrl}${address}" style="width:100%; height:100%; object-fit:cover;" />
+              </a>
+            </div>
+            <div style="margin-left: 70px; color:white;">
+              <div style="font-size:16px; font-weight:900;">${Utils.formatAddress(address)}</div>
+              <div style="opacity:0.9; font-size:12px;">${address}</div>
+            </div>
+          </div>
+          <div style="padding: 14px;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              ${statHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    },
+  };
+
+  const DataProcessor = {
+    addressData: {},
+    collectAddressData(inviterItems) {
+      const allAddresses = new Set();
+      inviterItems.forEach((inviter) => {
+        allAddresses.add(inviter.sender_address);
+        this.addressData[inviter.sender_address] = inviter.sender;
+        (inviter.invitees || []).forEach((invitee) => {
+          if (invitee?.address) {
+            allAddresses.add(invitee.address);
+            this.addressData[invitee.address] = invitee;
+          }
+        });
+      });
+      return allAddresses;
+    },
+    createNodes(inviterItems, allAddresses, meta) {
+      const nodes = {};
+      nodes["root"] = NodeFactory.createRootNode(meta);
+      allAddresses.forEach((address) => {
+        nodes[address] = NodeFactory.createBaseNode(address, null);
+      });
+
+      // Establish parent relationships
+      inviterItems.forEach((inv) => {
+        const invitees = inv.invitees || [];
+        nodes[inv.sender_address].directSubordinates = invitees.length;
+        nodes[inv.sender_address].totalSubordinates = invitees.length;
+
+        invitees.forEach((invitee) => {
+          if (!invitee?.address) return;
+          if (nodes[invitee.address]) {
+            nodes[invitee.address].parentNodeId = inv.sender_address;
+          }
+        });
+      });
+
+      // Connect any orphans to root
+      Object.values(nodes).forEach((n) => {
+        if (n.nodeId !== "root" && n.parentNodeId == null) n.parentNodeId = "root";
+      });
+
+      return Object.values(nodes);
+    },
+  };
+
+  const addressData = DataProcessor.addressData;
+
+  async function fetchTreeData() {
+    const res = await fetch(CHART_CONFIG.api.treePath);
+    return await res.json();
+  }
+
+  function renderChart(treePayload) {
+    const inviterItems = treePayload.items || [];
+    const meta = treePayload.meta || {};
+    const allAddresses = DataProcessor.collectAddressData(inviterItems);
+    const chartData = DataProcessor.createNodes(inviterItems, allAddresses, meta);
+
+    new d3.OrgChart()
+      .container("#chart-container")
+      .data(chartData)
+      .svgWidth(document.getElementById("chart-container").clientWidth)
+      .svgHeight(document.getElementById("chart-container").clientHeight)
+      .nodeHeight((d) => CHART_CONFIG.node.height)
+      .nodeWidth((d) => CHART_CONFIG.node.width)
+      .initialZoom(CHART_CONFIG.chart.initialZoom)
+      .nodeContent((d) => TemplateGenerator.generateNodeContent(d.data))
+      .render();
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    try {
+      const data = await fetchTreeData();
+      setTimeout(() => renderChart(data), CHART_CONFIG.chart.renderDelay);
+    } catch (e) {
+      console.error("Failed to load tree data", e);
+    }
+  });
+</script>
+{{/main-layout}}
+
+

@@ -144,6 +144,14 @@
           <div class="hint">Invites registered/redeemed/revoked trends.</div>
 
           <a
+            href="/api/bcl-affiliation/tree/preview"
+            class="{{#if (eq active 'bcl-affiliation-tree')}}active{{/if}}"
+          >
+            BCL Affiliation Tree
+          </a>
+          <div class="hint">On-chain invitation graph.</div>
+
+          <a
             href="/api/analytics/preview"
             class="{{#if (eq active 'bcl')}}active{{/if}}"
           >
@@ -155,7 +163,7 @@
             href="/api/affiliations/preview"
             class="{{#if (eq active 'affiliation-tree')}}active{{/if}}"
           >
-            Affiliation Tree
+            Affiliation Tree (legacy)
           </a>
           <div class="hint">Relationship visualization.</div>
         </div>
