@@ -28,7 +28,9 @@ export type BclAffiliationSummary = {
 export type BclAffiliationTopInviter = {
   inviter: string;
   registered_count: number;
-  unique_invitees: number;
+  redeemed_count: number;
+  revoked_count: number;
+  pending_count: number;
   total_amount_ae: number;
 };
 
@@ -111,7 +113,6 @@ export class BclAffiliationAnalyticsService {
       .createQueryBuilder('r')
       .select('r.inviter', 'inviter')
       .addSelect('COUNT(*)::int', 'registered_count')
-      .addSelect('COUNT(DISTINCT r.invitee)::int', 'unique_invitees')
       .addSelect(
         `COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`,
         'total_amount_ae',
@@ -123,10 +124,58 @@ export class BclAffiliationAnalyticsService {
       .orderBy('registered_count', 'DESC')
       .addOrderBy('total_amount_ae', 'DESC')
       .limit(limit)
-      .getRawMany<BclAffiliationTopInviter>();
+      .getRawMany<Pick<
+        BclAffiliationTopInviter,
+        'inviter' | 'registered_count' | 'total_amount_ae'
+      >>();
+
+    const inviters = rows.map((r) => r.inviter).filter(Boolean);
+
+    const [redeemedCounts, revokedCounts] = await Promise.all([
+      inviters.length
+        ? this.redeemedRepo
+            .createQueryBuilder('x')
+            .select('x.inviter', 'inviter')
+            .addSelect('COUNT(*)::int', 'redeemed_count')
+            .where('x.created_at >= :startDate', { startDate })
+            .andWhere('x.created_at < :endDate', { endDate })
+            .andWhere('x.inviter IN (:...inviters)', { inviters })
+            .groupBy('x.inviter')
+            .getRawMany<{ inviter: string; redeemed_count: number }>()
+        : Promise.resolve([]),
+      inviters.length
+        ? this.revokedRepo
+            .createQueryBuilder('x')
+            .select('x.inviter', 'inviter')
+            .addSelect('COUNT(*)::int', 'revoked_count')
+            .where('x.created_at >= :startDate', { startDate })
+            .andWhere('x.created_at < :endDate', { endDate })
+            .andWhere('x.inviter IN (:...inviters)', { inviters })
+            .groupBy('x.inviter')
+            .getRawMany<{ inviter: string; revoked_count: number }>()
+        : Promise.resolve([]),
+    ]);
+
+    const redeemedByInviter = new Map(
+      redeemedCounts.map((r) => [r.inviter, Number(r.redeemed_count || 0)]),
+    );
+    const revokedByInviter = new Map(
+      revokedCounts.map((r) => [r.inviter, Number(r.revoked_count || 0)]),
+    );
 
     const queryMs = Date.now() - start;
-    return { items: rows, queryMs };
+    return {
+      items: rows.map((r) => ({
+        ...r,
+        redeemed_count: redeemedByInviter.get(r.inviter) ?? 0,
+        revoked_count: revokedByInviter.get(r.inviter) ?? 0,
+        pending_count:
+          Number(r.registered_count || 0) -
+          (redeemedByInviter.get(r.inviter) ?? 0) -
+          (revokedByInviter.get(r.inviter) ?? 0),
+      })),
+      queryMs,
+    };
   }
 
   private async getDailyCounts<T>(

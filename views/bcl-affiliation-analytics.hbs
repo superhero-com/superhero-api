@@ -329,7 +329,9 @@
               <tr>
                 <th>Inviter</th>
                 <th>Registered</th>
-                <th>Unique invitees</th>
+                <th>Redeemed</th>
+                <th>Revoked</th>
+                <th>Pending</th>
                 <th>Total AE</th>
               </tr>
             </thead>
@@ -364,8 +366,17 @@
       }
 
       function setDefaultDateRange() {
-        const endDate = moment();
-        const startDate = moment().subtract(14, "days");
+        const qs = new URLSearchParams(window.location.search);
+        const qsStart = qs.get("start_date");
+        const qsEnd = qs.get("end_date");
+
+        const endDate = qsEnd && moment(qsEnd, "YYYY-MM-DD", true).isValid()
+          ? moment(qsEnd, "YYYY-MM-DD")
+          : moment();
+        const startDate = qsStart && moment(qsStart, "YYYY-MM-DD", true).isValid()
+          ? moment(qsStart, "YYYY-MM-DD")
+          : moment().subtract(14, "days");
+
         document.getElementById("startDate").value = startDate.format("YYYY-MM-DD");
         document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
       }
@@ -377,6 +388,13 @@
           start_date: moment(startDate).format("YYYY-MM-DD"),
           end_date: moment(endDate).format("YYYY-MM-DD"),
         };
+      }
+
+      function persistDateRangeToUrl(start_date, end_date) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("start_date", start_date);
+        url.searchParams.set("end_date", end_date);
+        window.history.replaceState({}, "", url.toString());
       }
 
       async function fetchDashboardData(start_date, end_date) {
@@ -420,7 +438,9 @@
           tr.innerHTML = `
             <td class="mono" title="${row.inviter}">${shortAddr(row.inviter)}</td>
             <td>${formatNumber(row.registered_count)}</td>
-            <td>${formatNumber(row.unique_invitees)}</td>
+            <td>${formatNumber(row.redeemed_count)}</td>
+            <td>${formatNumber(row.revoked_count)}</td>
+            <td>${formatNumber(row.pending_count)}</td>
             <td>${Number(row.total_amount_ae || 0).toFixed(2)}</td>
           `;
           body.appendChild(tr);
@@ -515,6 +535,7 @@
 
       async function updateDashboard() {
         const { start_date, end_date } = getDateRange();
+        persistDateRangeToUrl(start_date, end_date);
         const [dashboard, topInviters] = await Promise.all([
           fetchDashboardData(start_date, end_date),
           fetchTopInviters(start_date, end_date),
