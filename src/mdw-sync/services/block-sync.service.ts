@@ -12,6 +12,7 @@ import { Tx } from '../entities/tx.entity';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
+import { isSelfTransferTx } from '../utils/common';
 
 @Injectable()
 export class BlockSyncService {
@@ -173,6 +174,10 @@ export class BlockSyncService {
     for (const tx of transactions) {
       const camelTx = camelcaseKeysDeep(tx) as ITransaction;
       const mdwTx = this.convertToMdwTx(camelTx);
+      // ignore self transfer transactions
+      if (isSelfTransferTx(camelTx)) {
+        continue;
+      }
       mdwTxs.push(mdwTx);
     }
 

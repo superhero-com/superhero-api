@@ -1,5 +1,6 @@
 import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 import { AeModule } from '@/ae/ae.module';
+import { Transaction } from '@/transactions/entities/transaction.entity';
 import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -15,21 +16,16 @@ import {
 import { PullTokenInfoQueue } from './queues/pull-token-info.queue';
 import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
+import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
-import { Transaction } from '@/transactions/entities/transaction.entity';
-import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
-import { TokenPerformanceController } from './controllers/token-performance.controller';
-import { TokenPerformanceView } from './entities/tokens-performance.view';
-import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Token,
       TokenHolder,
-      TokenPerformanceView,
       Transaction,
     ]),
     AeModule,
@@ -50,7 +46,6 @@ import { RefreshPerformanceViewService } from './services/refresh-performance-vi
     TokensController,
     AccountTokensController,
     AnalyticTokensController,
-    TokenPerformanceController,
   ],
   providers: [
     TokensService,
@@ -59,7 +54,6 @@ import { RefreshPerformanceViewService } from './services/refresh-performance-vi
     SyncTokenHoldersQueue,
     RemoveOldTokensQueue,
     UpdateTrendingTokensService,
-    RefreshPerformanceViewService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })
