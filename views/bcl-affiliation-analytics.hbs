@@ -1,236 +1,190 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BCL Affiliation Analytics Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-        font-family: "Inter", sans-serif;
-      }
+{{#> main-layout title="BCL Affiliation Analytics" active="bcl-affiliation"}}
+<style>
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
 
-      body {
-        background-color: #f8fafc;
-        color: #1e293b;
-        padding: 1rem;
-        min-height: 100vh;
-      }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
 
-      .container {
-        max-width: 1400px;
-        margin: 0 auto;
-      }
+  .stat-card {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+  }
 
-      .header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1.5rem;
-      }
+  .stat-card h2 {
+    font-size: 0.75rem;
+    margin-bottom: 0.15rem;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-      h1 {
-        font-size: 1.75rem;
-        color: #0f172a;
-      }
+  .stat-card .subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.2;
+    min-height: 1.1rem;
+  }
 
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
-      }
+  .stat-card .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.35rem;
+  }
 
-      .stat-card {
-        background: white;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        min-width: 0;
-      }
+  .date-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
 
-      .stat-card h2 {
-        font-size: 0.75rem;
-        margin-bottom: 0.25rem;
-        color: #475569;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+  .date-range > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 150px;
+  }
 
-      .stat-card .value {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #0f172a;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
+  .date-range label {
+    font-size: 0.875rem;
+    color: #475569;
+  }
 
-      .date-range {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-        align-items: center;
-        margin-bottom: 1.5rem;
-        background: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
+  .date-range input {
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+    width: 100%;
+  }
 
-      .date-range > div {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        min-width: 150px;
-      }
+  .date-range button {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
 
-      .date-range label {
-        font-size: 0.875rem;
-        color: #475569;
-      }
+  .date-range button:hover {
+    background-color: #2563eb;
+  }
 
-      .date-range input {
-        padding: 0.5rem;
-        border: 1px solid #e2e8f0;
-        border-radius: 0.25rem;
-        font-size: 0.875rem;
-        color: #1e293b;
-        width: 100%;
-      }
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
 
-      .date-range button {
-        padding: 0.5rem 1rem;
-        background-color: #3b82f6;
-        color: white;
-        border: none;
-        border-radius: 0.25rem;
-        font-size: 0.875rem;
-        cursor: pointer;
-        transition: background-color 0.2s;
-        align-self: flex-end;
-        white-space: nowrap;
-      }
+  .chart-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 340px;
+  }
 
-      .date-range button:hover {
-        background-color: #2563eb;
-      }
+  .chart-container.large {
+    grid-column: span 2;
+    height: 420px;
+  }
 
-      .charts-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1rem;
-      }
+  .chart-container h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #475569;
+  }
 
-      .chart-container {
-        background: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        height: 340px;
-      }
+  .chart-wrapper {
+    height: calc(100% - 2rem);
+    position: relative;
+  }
 
-      .chart-container.large {
-        grid-column: span 2;
-        height: 420px;
-      }
+  .table-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
 
-      .chart-container h2 {
-        font-size: 1rem;
-        margin-bottom: 0.5rem;
-        color: #475569;
-      }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
 
-      .chart-wrapper {
-        height: calc(100% - 2rem);
-        position: relative;
-      }
+  thead th {
+    text-align: left;
+    padding: 0.5rem;
+    color: #475569;
+    border-bottom: 1px solid #e2e8f0;
+    font-weight: 600;
+  }
 
-      .table-container {
-        background: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
+  tbody td {
+    padding: 0.5rem;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+  }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.875rem;
-      }
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+    .chart-container.large {
+      grid-column: span 1;
+    }
+    .date-range {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .date-range button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
 
-      thead th {
-        text-align: left;
-        padding: 0.5rem;
-        color: #475569;
-        border-bottom: 1px solid #e2e8f0;
-        font-weight: 600;
-      }
+  @media (max-width: 480px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>
 
-      tbody td {
-        padding: 0.5rem;
-        border-bottom: 1px solid #f1f5f9;
-        vertical-align: top;
-      }
-
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-          "Liberation Mono", "Courier New", monospace;
-        font-size: 0.8rem;
-      }
-
-      .pill {
-        display: inline-block;
-        padding: 0.1rem 0.4rem;
-        border-radius: 999px;
-        font-size: 0.75rem;
-        background: #f1f5f9;
-        color: #334155;
-      }
-
-      @media (max-width: 768px) {
-        .stats-grid {
-          grid-template-columns: repeat(3, 1fr);
-        }
-        .charts-grid {
-          grid-template-columns: 1fr;
-        }
-        .chart-container.large {
-          grid-column: span 1;
-        }
-        .date-range {
-          flex-direction: column;
-          align-items: stretch;
-        }
-        .date-range button {
-          width: 100%;
-          margin-top: 0.5rem;
-        }
-      }
-
-      @media (max-width: 480px) {
-        .stats-grid {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="header">
-        <h1>BCL Affiliation Analytics Dashboard</h1>
+<div class="container">
+      <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
         <span class="pill mono" id="queryMs">queryMs: -</span>
       </div>
 
@@ -249,26 +203,32 @@
       <div class="stats-grid">
         <div class="stat-card">
           <h2>Total Registered</h2>
+          <div class="subtitle">Invitations created (rows) in selected range.</div>
           <div class="value" id="totalRegistered">-</div>
         </div>
         <div class="stat-card">
           <h2>Total Redeemed</h2>
+          <div class="subtitle">Invitations successfully claimed in range.</div>
           <div class="value" id="totalRedeemed">-</div>
         </div>
         <div class="stat-card">
           <h2>Total Revoked</h2>
+          <div class="subtitle">Invitations invalidated by inviter in range.</div>
           <div class="value" id="totalRevoked">-</div>
         </div>
         <div class="stat-card">
           <h2>Outstanding</h2>
+          <div class="subtitle">Registered − redeemed − revoked (range).</div>
           <div class="value" id="totalOutstanding">-</div>
         </div>
         <div class="stat-card">
           <h2>Redeemed / Registered</h2>
+          <div class="subtitle">Redemption rate within the range.</div>
           <div class="value" id="redeemedRate">-</div>
         </div>
         <div class="stat-card">
           <h2>Revoked / Registered</h2>
+          <div class="subtitle">Revocation rate within the range.</div>
           <div class="value" id="revokedRate">-</div>
         </div>
       </div>
@@ -276,26 +236,32 @@
       <div class="stats-grid">
         <div class="stat-card">
           <h2>Unique Inviters</h2>
+          <div class="subtitle">Distinct inviter addresses (registered).</div>
           <div class="value" id="uniqueInviters">-</div>
         </div>
         <div class="stat-card">
           <h2>Unique Invitees</h2>
+          <div class="subtitle">Distinct invitee addresses (registered).</div>
           <div class="value" id="uniqueInvitees">-</div>
         </div>
         <div class="stat-card">
           <h2>Unique Redeemers</h2>
+          <div class="subtitle">Distinct redeemer addresses (redeemed).</div>
           <div class="value" id="uniqueRedeemers">-</div>
         </div>
         <div class="stat-card">
           <h2>Net Conversion</h2>
+          <div class="subtitle">(Redeemed − revoked) / registered.</div>
           <div class="value" id="netConversion">-</div>
         </div>
         <div class="stat-card">
           <h2>Peak Daily Registered</h2>
+          <div class="subtitle">Highest daily registered count.</div>
           <div class="value" id="peakRegistered">-</div>
         </div>
         <div class="stat-card">
           <h2>Peak Daily Redeemed</h2>
+          <div class="subtitle">Highest daily redeemed count.</div>
           <div class="value" id="peakRedeemed">-</div>
         </div>
       </div>
@@ -551,7 +517,7 @@
         await updateDashboard();
       })();
     </script>
-  </body>
-</html>
+</div>
+{{/main-layout}}
 
 
