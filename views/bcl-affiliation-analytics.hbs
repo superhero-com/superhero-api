@@ -1,0 +1,579 @@
+{{#> main-layout title="BCL Affiliation Analytics" active="bcl-affiliation"}}
+<style>
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .stat-card h2 {
+    font-size: 0.75rem;
+    margin-bottom: 0.15rem;
+    color: #475569;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stat-card .subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.2;
+    min-height: 1.1rem;
+  }
+
+  .stat-card .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.35rem;
+  }
+
+  .date-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .date-range > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 150px;
+  }
+
+  .date-range label {
+    font-size: 0.875rem;
+    color: #475569;
+  }
+
+  .date-range input {
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+    width: 100%;
+  }
+
+  .date-range button {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .date-range button:hover {
+    background-color: #2563eb;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .chart-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 340px;
+  }
+
+  .chart-container.large {
+    grid-column: span 2;
+    height: 420px;
+  }
+
+  .chart-container h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #475569;
+  }
+
+  .chart-wrapper {
+    height: calc(100% - 2rem);
+    position: relative;
+  }
+
+  .table-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  thead th {
+    text-align: left;
+    padding: 0.5rem;
+    color: #475569;
+    border-bottom: 1px solid #e2e8f0;
+    font-weight: 600;
+  }
+
+  tbody td {
+    padding: 0.5rem;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+    .chart-container.large {
+      grid-column: span 1;
+    }
+    .date-range {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .date-range button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>
+
+<div class="container">
+      <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
+        <span class="pill mono" id="queryMs">queryMs: -</span>
+      </div>
+
+      <div class="date-range">
+        <div>
+          <label for="startDate">Start Date:</label>
+          <input type="date" id="startDate" />
+        </div>
+        <div>
+          <label for="endDate">End Date:</label>
+          <input type="date" id="endDate" />
+        </div>
+        <button onclick="updateDashboard()">Apply</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h2>Total Registered</h2>
+          <div class="subtitle">Invitations created (rows) in selected range.</div>
+          <div class="value" id="totalRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Total Redeemed</h2>
+          <div class="subtitle">Invitations successfully claimed in range.</div>
+          <div class="value" id="totalRedeemed">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Total Revoked</h2>
+          <div class="subtitle">Invitations invalidated by inviter in range.</div>
+          <div class="value" id="totalRevoked">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Outstanding</h2>
+          <div class="subtitle">Registered − redeemed − revoked (range).</div>
+          <div class="value" id="totalOutstanding">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Redeemed / Registered</h2>
+          <div class="subtitle">Redemption rate within the range.</div>
+          <div class="value" id="redeemedRate">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Revoked / Registered</h2>
+          <div class="subtitle">Revocation rate within the range.</div>
+          <div class="value" id="revokedRate">-</div>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h2>Total AE (Registered)</h2>
+          <div class="subtitle">Sum of invitation AE amounts allocated in range.</div>
+          <div class="value" id="totalAeRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Avg AE / Registered</h2>
+          <div class="subtitle">Average AE per registered invitation.</div>
+          <div class="value" id="avgAePerRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Avg AE / Inviter</h2>
+          <div class="subtitle">Total AE registered divided by unique inviters.</div>
+          <div class="value" id="avgAePerInviter">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Unique Inviters</h2>
+          <div class="subtitle">Distinct inviter addresses (registered).</div>
+          <div class="value" id="uniqueInviters">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Unique Invitees</h2>
+          <div class="subtitle">Distinct invitee addresses (registered).</div>
+          <div class="value" id="uniqueInvitees">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Unique Redeemers</h2>
+          <div class="subtitle">Distinct redeemer addresses (redeemed).</div>
+          <div class="value" id="uniqueRedeemers">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Net Conversion</h2>
+          <div class="subtitle">(Redeemed − revoked) / registered.</div>
+          <div class="value" id="netConversion">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Peak Daily Registered</h2>
+          <div class="subtitle">Highest daily registered count.</div>
+          <div class="value" id="peakRegistered">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Peak Daily Redeemed</h2>
+          <div class="subtitle">Highest daily redeemed count.</div>
+          <div class="value" id="peakRedeemed">-</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container large">
+          <h2>Invitations per day</h2>
+          <div class="chart-wrapper">
+            <canvas id="invitesLineChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container large">
+          <h2>Daily volume (AE)</h2>
+          <div class="chart-wrapper">
+            <canvas id="aeLineChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily registered distribution</h2>
+          <div class="chart-wrapper">
+            <canvas id="registeredBarChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily redeemed distribution</h2>
+          <div class="chart-wrapper">
+            <canvas id="redeemedBarChart"></canvas>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <h2 style="margin-bottom: 0.5rem; color: #475569;">Top inviters</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Inviter</th>
+                <th>Registered</th>
+                <th>Redeemed</th>
+                <th>Revoked</th>
+                <th>Pending</th>
+                <th>Total AE</th>
+              </tr>
+            </thead>
+            <tbody id="topInvitersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "/api";
+      let invitesLineChart = null;
+      let aeLineChart = null;
+      let registeredBarChart = null;
+      let redeemedBarChart = null;
+
+      function destroyChart(chart) {
+        if (chart) chart.destroy();
+      }
+
+      function formatNumber(num) {
+        return (num ?? 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      }
+
+      function formatPercent(rate) {
+        return `${(rate * 100).toFixed(2)}%`;
+      }
+
+      function formatAe(num) {
+        return `${Number(num ?? 0).toFixed(2)} AE`;
+      }
+
+      function shortAddr(addr) {
+        if (!addr) return "-";
+        if (addr.length <= 14) return addr;
+        return `${addr.slice(0, 7)}...${addr.slice(-4)}`;
+      }
+
+      function setDefaultDateRange() {
+        const qs = new URLSearchParams(window.location.search);
+        const qsStart = qs.get("start_date");
+        const qsEnd = qs.get("end_date");
+
+        const endDate = qsEnd && moment(qsEnd, "YYYY-MM-DD", true).isValid()
+          ? moment(qsEnd, "YYYY-MM-DD")
+          : moment();
+        const startDate = qsStart && moment(qsStart, "YYYY-MM-DD", true).isValid()
+          ? moment(qsStart, "YYYY-MM-DD")
+          : moment().subtract(14, "days");
+
+        document.getElementById("startDate").value = startDate.format("YYYY-MM-DD");
+        document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+      }
+
+      function getDateRange() {
+        const startDate = document.getElementById("startDate").value;
+        const endDate = document.getElementById("endDate").value;
+        return {
+          start_date: moment(startDate).format("YYYY-MM-DD"),
+          end_date: moment(endDate).format("YYYY-MM-DD"),
+        };
+      }
+
+      function persistDateRangeToUrl(start_date, end_date) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("start_date", start_date);
+        url.searchParams.set("end_date", end_date);
+        window.history.replaceState({}, "", url.toString());
+      }
+
+      async function fetchDashboardData(start_date, end_date) {
+        const res = await fetch(`${API_URL}/bcl-affiliation/analytics?start_date=${start_date}&end_date=${end_date}`);
+        return await res.json();
+      }
+
+      async function fetchTopInviters(start_date, end_date) {
+        const res = await fetch(`${API_URL}/bcl-affiliation/analytics/top-inviters?start_date=${start_date}&end_date=${end_date}&limit=10`);
+        return await res.json();
+      }
+
+      function renderStats(summary, series, queryMs) {
+        document.getElementById("queryMs").textContent = `queryMs: ${queryMs ?? "-"}`
+        document.getElementById("totalRegistered").textContent = formatNumber(summary.total_registered);
+        document.getElementById("totalRedeemed").textContent = formatNumber(summary.total_redeemed);
+        document.getElementById("totalRevoked").textContent = formatNumber(summary.total_revoked);
+        document.getElementById("totalOutstanding").textContent = formatNumber(summary.total_outstanding);
+        document.getElementById("redeemedRate").textContent = formatPercent(summary.redeemed_rate);
+        document.getElementById("revokedRate").textContent = formatPercent(summary.revoked_rate);
+        document.getElementById("totalAeRegistered").textContent = formatAe(summary.total_amount_ae_registered);
+        document.getElementById("avgAePerRegistered").textContent = formatAe(summary.avg_amount_ae_per_registered);
+        document.getElementById("avgAePerInviter").textContent = formatAe(summary.avg_amount_ae_per_inviter);
+        document.getElementById("uniqueInviters").textContent = formatNumber(summary.unique_inviters);
+        document.getElementById("uniqueInvitees").textContent = formatNumber(summary.unique_invitees);
+        document.getElementById("uniqueRedeemers").textContent = formatNumber(summary.unique_redeemers);
+
+        const netConv = summary.total_registered > 0
+          ? (summary.total_redeemed - summary.total_revoked) / summary.total_registered
+          : 0;
+        document.getElementById("netConversion").textContent = formatPercent(netConv);
+
+        const peakRegistered = Math.max(...series.map(p => p.registered ?? 0), 0);
+        const peakRedeemed = Math.max(...series.map(p => p.redeemed ?? 0), 0);
+        document.getElementById("peakRegistered").textContent = formatNumber(peakRegistered);
+        document.getElementById("peakRedeemed").textContent = formatNumber(peakRedeemed);
+      }
+
+      function renderTopInviters(items) {
+        const body = document.getElementById("topInvitersBody");
+        body.innerHTML = "";
+        for (const row of (items || [])) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="mono" title="${row.inviter}">${shortAddr(row.inviter)}</td>
+            <td>${formatNumber(row.registered_count)}</td>
+            <td>${formatNumber(row.redeemed_count)}</td>
+            <td>${formatNumber(row.revoked_count)}</td>
+            <td>${formatNumber(row.pending_count)}</td>
+            <td>${Number(row.total_amount_ae || 0).toFixed(2)}</td>
+          `;
+          body.appendChild(tr);
+        }
+      }
+
+      function renderCharts(series) {
+        const labels = series.map(p => moment(p.date).format("MMM D"));
+        const registered = series.map(p => p.registered);
+        const redeemed = series.map(p => p.redeemed);
+        const revoked = series.map(p => p.revoked);
+        const amountAeRegistered = series.map(p => p.amount_ae_registered ?? 0);
+
+        destroyChart(invitesLineChart);
+        invitesLineChart = new Chart(document.getElementById("invitesLineChart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Registered",
+                data: registered,
+                borderColor: "#3b82f6",
+                backgroundColor: "rgba(59, 130, 246, 0.1)",
+                tension: 0.35,
+                fill: true,
+              },
+              {
+                label: "Redeemed",
+                data: redeemed,
+                borderColor: "#10b981",
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                tension: 0.35,
+                fill: true,
+              },
+              {
+                label: "Revoked",
+                data: revoked,
+                borderColor: "#ef4444",
+                backgroundColor: "rgba(239, 68, 68, 0.08)",
+                tension: 0.35,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: "top" } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        destroyChart(aeLineChart);
+        aeLineChart = new Chart(document.getElementById("aeLineChart"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Daily volume (AE)",
+                data: amountAeRegistered,
+                backgroundColor: "#0ea5e9",
+                borderRadius: 4,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        destroyChart(registeredBarChart);
+        registeredBarChart = new Chart(document.getElementById("registeredBarChart"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [{ label: "Registered", data: registered, backgroundColor: "#3b82f6", borderRadius: 4 }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+
+        destroyChart(redeemedBarChart);
+        redeemedBarChart = new Chart(document.getElementById("redeemedBarChart"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [{ label: "Redeemed", data: redeemed, backgroundColor: "#10b981", borderRadius: 4 }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+              x: { grid: { display: false } },
+            },
+          },
+        });
+      }
+
+      async function updateDashboard() {
+        const { start_date, end_date } = getDateRange();
+        persistDateRangeToUrl(start_date, end_date);
+        const [dashboard, topInviters] = await Promise.all([
+          fetchDashboardData(start_date, end_date),
+          fetchTopInviters(start_date, end_date),
+        ]);
+
+        renderStats(dashboard.summary, dashboard.series, dashboard.queryMs);
+        renderCharts(dashboard.series);
+        renderTopInviters(topInviters.items);
+      }
+
+      (async function init() {
+        setDefaultDateRange();
+        await updateDashboard();
+      })();
+    </script>
+</div>
+{{/main-layout}}
+
+

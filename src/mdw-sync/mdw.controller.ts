@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SyncState } from './entities/sync-state.entity';
@@ -136,5 +136,26 @@ export class MdwController {
       })),
       registeredPlugins: this.pluginRegistry.getPlugins().map((p) => p.name),
     };
+  }
+
+  /**
+   * Manually trigger plugin updateTransactions() (logs/data decoding + processing) for a single plugin.
+   * Useful for debugging and backfilling after plugin version bumps.
+   *
+   * Example: POST /api/mdw/plugins/bcl-affiliation/update?batchSize=200
+   */
+  @Get('plugins/:name/update')
+  async updatePlugin(
+    @Param('name') name: string,
+    @Query('batchSize', new DefaultValuePipe(100), ParseIntPipe) batchSize: number,
+  ) {
+    const plugin = this.pluginRegistry.getPluginByName(name);
+    if (!plugin) {
+      return { ok: false, error: `Plugin not found: ${name}` };
+    }
+
+    // Fire and await so caller can see success/failure in response.
+    await plugin.updateTransactions(batchSize);
+    return { ok: true, plugin: name, batchSize };
   }
 }

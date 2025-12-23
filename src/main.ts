@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { join } from 'path';
+import hbs from 'hbs';
+import { readFileSync } from 'fs';
 import { AppModule } from './app.module';
 import { DEBUG_ENABLED } from './configs';
 
@@ -48,6 +50,13 @@ async function bootstrap() {
   app.useStaticAssets(join(__dirname, '..', 'public'));
   app.setBaseViewsDir(join(__dirname, '..', 'views'));
   app.setViewEngine('hbs');
+  // `hbs` in this repo exposes `handlebars.registerPartial` (but not `registerPartials`).
+  // Register our shared layout explicitly so `{{#> main-layout}}` works.
+  const viewsDir = join(__dirname, '..', 'views');
+  const mainLayout = readFileSync(join(viewsDir, 'main-layout.hbs'), 'utf8');
+  hbs.handlebars.registerPartial('main-layout', mainLayout);
+  // Helper used by the shared layout to mark active sidebar links.
+  hbs.handlebars.registerHelper('eq', (a: any, b: any) => a === b);
 
   await app.listen(process.env.APP_PORT ?? 3000);
 }

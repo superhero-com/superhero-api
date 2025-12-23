@@ -7,16 +7,40 @@ import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { BclAffiliationPlugin } from './bcl-affiliation.plugin';
 import { BclAffiliationPluginSyncService } from './bcl-affiliation-plugin-sync.service';
 import { BclAffiliationTransactionProcessorService } from './services/bcl-affiliation-transaction-processor.service';
+import { BclInvitationRedeemed } from './entities/bcl-invitation-redeemed.view';
+import { BclInvitationRevoked } from './entities/bcl-invitation-revoked.view';
+import { BclInvitationRegistered } from './entities/bcl-invitation-registered.view';
+import { BclAffiliationInvitationsService } from './services/bcl-affiliation-invitations.service';
+import { BclAffiliationInvitationsController } from './controllers/bcl-affiliation-invitations.controller';
+import { BclAffiliationAnalyticsService } from './services/bcl-affiliation-analytics.service';
+import { BclAffiliationAnalyticsController } from './controllers/bcl-affiliation-analytics.controller';
+import { BclAffiliationTreeService } from './services/bcl-affiliation-tree.service';
+import { BclAffiliationTreeController } from './controllers/bcl-affiliation-tree.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Invitation]),
+    TypeOrmModule.forFeature([
+      Tx,
+      PluginSyncState,
+      Invitation,
+      BclInvitationRegistered,
+      BclInvitationRedeemed,
+      BclInvitationRevoked,
+    ]),
     AeModule,
   ],
   providers: [
     BclAffiliationTransactionProcessorService,
+    BclAffiliationInvitationsService,
+    BclAffiliationAnalyticsService,
+    BclAffiliationTreeService,
     BclAffiliationPluginSyncService,
     BclAffiliationPlugin,
+  ],
+  controllers: [
+    BclAffiliationInvitationsController,
+    BclAffiliationAnalyticsController,
+    BclAffiliationTreeController,
   ],
   exports: [BclAffiliationPlugin],
 })
