@@ -4,6 +4,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Query,
@@ -64,7 +65,7 @@ export class BclHistoricalController {
       address,
     );
     if (!tokenEntity) {
-      throw new BadRequestException('Address is required');
+      throw new NotFoundException('Token not found');
     }
 
     return this.bclTransactionHistoryService.getHistoricalData({
@@ -112,7 +113,7 @@ export class BclHistoricalController {
       address,
     );
     if (!tokenEntity) {
-      throw new BadRequestException('Address is required');
+      throw new NotFoundException('Token not found');
     }
 
     return this.bclTransactionHistoryService.getPaginatedHistoricalData({
@@ -152,7 +153,7 @@ export class BclHistoricalController {
       address,
     );
     if (!tokenEntity) {
-      throw new BadRequestException('Address is required');
+      throw new NotFoundException('Token not found');
     }
 
     return this.bclTransactionHistoryService.getForPreview(

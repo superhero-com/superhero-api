@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HistoricalController } from './historical.controller';
 import { TokensService } from '@/tokens/tokens.service';
-import { TransactionHistoryService } from '../services/transaction-history.service';
+import { TransactionHistoryService } from '../../transactions/services/transaction-history.service';
 import moment from 'moment';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Reflector } from '@nestjs/core';

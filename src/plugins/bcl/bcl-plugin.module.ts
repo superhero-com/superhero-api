@@ -71,7 +71,7 @@ import { BclHistoricalController } from './controllers/bcl-historical.controller
     BclTransactionHistoryService,
   ],
   controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController, BclTokenRankingsController, BclHistoricalController],
-  exports: [BclPlugin, BclTokensService],
+  exports: [BclPlugin, BclTokensService, BclTransactionHistoryService],
 })
 export class BclPluginModule {}
 
