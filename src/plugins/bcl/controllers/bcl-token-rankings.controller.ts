@@ -126,7 +126,7 @@ export class BclTokenRankingsController {
         last_sync_block_height: row.last_sync_block_height || 0,
         last_sync_tx_count: 0,
         tx_count: row.tx_count,
-        holders_count: 0,
+        holders_count: row.holders_count ?? 0,
         factory_address: row.factory_address,
         create_tx_hash: row.create_tx_hash,
         dao_address: row.dao_address,

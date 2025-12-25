@@ -198,7 +198,7 @@ export class BclTokensService {
       last_sync_block_height: token.last_sync_block_height || 0,
       last_sync_tx_count: 0,
       tx_count: token.tx_count,
-      holders_count: 0,
+      holders_count: token.holders_count ?? 0,
       factory_address: token.factory_address,
       create_tx_hash: token.create_tx_hash,
       dao_address: token.dao_address,

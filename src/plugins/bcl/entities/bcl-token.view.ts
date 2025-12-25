@@ -33,6 +33,14 @@ import { BclTokenStats } from './bcl-token-stats.view';
       WHERE sale_address IS NOT NULL
       GROUP BY sale_address
     ),
+    holder_counts AS (
+      SELECT
+        aex9_address,
+        COUNT(*)::int as holders_count
+      FROM token_holder
+      WHERE balance > 0
+      GROUP BY aex9_address
+    ),
     tokens_with_transactions AS (
       SELECT 
         bt.sale_address,
@@ -60,6 +68,7 @@ import { BclTokenStats } from './bcl-token-stats.view';
         lt.market_cap,
         lt.total_supply,
         COALESCE(tc.tx_count, 0) as tx_count,
+        COALESCE(hc.holders_count, 0) as holders_count,
         tp.past_24h,
         tp.past_7d,
         tp.past_30d,
@@ -67,6 +76,7 @@ import { BclTokenStats } from './bcl-token-stats.view';
       FROM bcl_tokens bt
       LEFT JOIN latest_transactions lt ON bt.sale_address = lt.sale_address
       LEFT JOIN transaction_counts tc ON bt.sale_address = tc.sale_address
+      LEFT JOIN holder_counts hc ON bt.address = hc.aex9_address
       LEFT JOIN bcl_token_stats ts ON bt.sale_address = ts.sale_address
       LEFT JOIN bcl_token_performance_view tp ON bt.sale_address = tp.sale_address
     )
@@ -96,6 +106,7 @@ import { BclTokenStats } from './bcl-token-stats.view';
       market_cap,
       total_supply,
       tx_count,
+      holders_count,
       json_build_object(
         'past_24h', past_24h,
         'past_7d', past_7d,
@@ -194,6 +205,9 @@ export class BclTokenView {
 
   @ViewColumn()
   tx_count: number;
+
+  @ViewColumn()
+  holders_count: number;
 
   @ViewColumn()
   performance: {
