@@ -130,39 +130,39 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
     if (tx.function === BCL_CONTRACT.FUNCTIONS.buy) {
       const mints = pluginLogs.data.filter((data) => data.name === 'Mint');
-      protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-      volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+      protocol_reward = new BigNumber(toAe(mints?.[0].args?.[1] ?? 0));
+      volume = new BigNumber(toAe(mints?.[mints.length - 1].args?.[1] ?? 0));
       _amount = new BigNumber(
-        toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[0]),
+        toAe(pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[0] ?? 0),
       );
       total_supply = new BigNumber(
-        toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[2]),
+        toAe(pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[2] ?? 0),
       ).plus(volume);
-      dao_balance = pluginLogs.data.find((data) => data.name === 'Buy').args[1];
+      dao_balance = pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[1] ?? '0';
     }
     if (tx.function === BCL_CONTRACT.FUNCTIONS.create_community) {
       if (pluginLogs.data.find((data) => data.name === 'PriceChange')) {
         const mints = pluginLogs.data.filter((data) => data.name === 'Mint');
-        protocol_reward = new BigNumber(toAe(mints[0].args[1]));
-        volume = new BigNumber(toAe(mints[mints.length - 1].args[1]));
+        protocol_reward = new BigNumber(toAe(mints?.[0].args?.[1] ?? 0));
+        volume = new BigNumber(toAe(mints?.[mints.length - 1].args?.[1] ?? 0));
         _amount = new BigNumber(
-          toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[0]),
+          toAe(pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[0] ?? 0),
         );
         total_supply = new BigNumber(
-          toAe(pluginLogs.data.find((data) => data.name === 'Buy').args[2]),
+          toAe(pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[2] ?? 0),
         ).plus(volume);
-        dao_balance = pluginLogs.data.find((data) => data.name === 'Buy').args[1];
+        dao_balance = pluginLogs.data.find((data) => data.name === 'Buy')?.args?.[1] ?? '0';
       }
     }
     if (tx.function === BCL_CONTRACT.FUNCTIONS.sell) {
       volume = new BigNumber(
-        toAe(pluginLogs.data.find((data) => data.name === 'Burn').args[1]),
+        toAe(pluginLogs.data.find((data) => data.name === 'Burn')?.args?.[1] ?? 0),
       );
       _amount = new BigNumber(
-        toAe(pluginLogs.data.find((data) => data.name === 'Sell').args[0]),
+        toAe(pluginLogs.data.find((data) => data.name === 'Sell')?.args?.[0] ?? 0),
       );
       total_supply = new BigNumber(
-        toAe(pluginLogs.data.find((data) => data.name === 'Sell').args[1]),
+        toAe(pluginLogs.data.find((data) => data.name === 'Sell')?.args?.[1] ?? 0),
       ).minus(volume);
     }
 
@@ -171,10 +171,10 @@ export class BclPluginSyncService extends BasePluginSyncService {
     );
     const _unit_price = _amount.div(volume);
     const _previous_buy_price = !!priceChangeData?.args
-      ? new BigNumber(toAe(priceChangeData.args[0]))
+      ? new BigNumber(toAe(priceChangeData.args?.[0] ?? 0))
       : _unit_price;
     const _buy_price = !!priceChangeData?.args
-      ? new BigNumber(toAe(priceChangeData.args[1]))
+      ? new BigNumber(toAe(priceChangeData.args?.[1] ?? 0))
       : _unit_price;
     const _market_cap = _buy_price.times(total_supply);
 
@@ -214,14 +214,17 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
     if (tx.function == BCL_CONTRACT.FUNCTIONS.create_community) {
 
-      const communityName = createCommunityLogs.args[0];
+      const communityName = createCommunityLogs?.args?.[0] ?? '';
       const collection = tx?.raw?.arguments?.[0]?.value;
+      if (!createCommunityLogs.args) {
+        return null;
+      }
       return {
         ...txData,
 
         address: transferLogs?.contract?.address,
         factory_address: createCommunityLogs?.contract?.address,
-        dao_address: createCommunityLogs.args[1],
+        dao_address: createCommunityLogs?.args?.[1] ?? '',
         sale_address: createCommunityLogs.args[2],
         creator_address: tx.caller_id,
         beneficiary_address: setOwnerLogs?.args[0],
@@ -233,6 +236,10 @@ export class BclPluginSyncService extends BasePluginSyncService {
         decimals: 18,
         collection: collection,
       };
+    }
+
+    if (!txData?.sale_address) {
+      return null;
     }
 
     return txData;
