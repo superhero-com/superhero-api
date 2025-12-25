@@ -2,6 +2,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Query,
@@ -48,7 +49,7 @@ export class DeprecatedTokensController {
     enum: ['all', 'word', 'number'],
     required: false,
   })
-  @ApiOperation({ 
+  @ApiOperation({
     operationId: 'listAll',
     deprecated: true,
     description: 'This endpoint is deprecated. Use /bcl/tokens instead.',
@@ -77,11 +78,11 @@ export class DeprecatedTokensController {
       'trending_score': 'trending_score',
       'holders_count': 'rank', // Holders count not directly sortable in BCL view
     };
-    
+
     const bclSortBy = sortFieldMap[orderBy] || 'rank';
     const bclOrder = orderDirection === 'ASC' ? 'ASC' : 'DESC';
 
-    return this.bclTokensService.findAll(
+    const result = await this.bclTokensService.findAll(
       { page, limit },
       {
         search,
@@ -94,9 +95,18 @@ export class DeprecatedTokensController {
       bclSortBy,
       bclOrder,
     );
+
+    return {
+      ...result,
+      items: result.items.map((item) => ({
+        _a: 0,
+        ...item,
+        rank: item.rank,
+      })),
+    }
   }
 
-  @ApiOperation({ 
+  @ApiOperation({
     operationId: 'findByAddress',
     deprecated: true,
     description: 'This endpoint is deprecated. Use /bcl/tokens/:address instead.',
@@ -114,6 +124,9 @@ export class DeprecatedTokensController {
   async findByAddress(@Param('address') address: string): Promise<BclTokenDto | null> {
     const token = await this.bclTokensService.findByAddress(address);
 
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
     return token;
   }
 }
