@@ -37,6 +37,8 @@ import { BclTokenStatsController } from './controllers/bcl-token-stats.controlle
 import { BclTokenPerformanceRefreshService } from './services/bcl-token-performance-refresh.service';
 import { BclTokenPerformanceController } from './controllers/bcl-token-performance.controller';
 import { BclTokenRankingsController } from './controllers/bcl-token-rankings.controller';
+import { BclTransactionHistoryService } from './services/bcl-transaction-history.service';
+import { BclHistoricalController } from './controllers/bcl-historical.controller';
 
 @Module({
   imports: [
@@ -66,8 +68,9 @@ import { BclTokenRankingsController } from './controllers/bcl-token-rankings.con
     BclTokenStatsService,
     BclTokenStatsRefreshService,
     BclTokenPerformanceRefreshService,
+    BclTransactionHistoryService,
   ],
-  controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController, BclTokenRankingsController],
+  controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController, BclTokenRankingsController, BclHistoricalController],
   exports: [BclPlugin, BclTokensService],
 })
 export class BclPluginModule {}

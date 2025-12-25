@@ -80,7 +80,11 @@ export class DeprecatedTokensController {
     };
 
     const bclSortBy = sortFieldMap[orderBy] || 'rank';
-    const bclOrder = orderDirection === 'ASC' ? 'ASC' : 'DESC';
+    const allowedOrderDirections = ['ASC', 'DESC'];
+    if (!allowedOrderDirections.includes(orderDirection)) {
+      orderDirection = 'DESC';
+    }
+    const bclOrder = orderDirection;
 
     const result = await this.bclTokensService.findAll(
       { page, limit },
