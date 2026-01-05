@@ -21,6 +21,7 @@ import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import { BclTokensService } from '@/plugins/bcl/services/bcl-tokens.service';
 import { BclTokenDto } from '@/plugins/bcl/dto/bcl-token.dto';
 import { TokenDto } from '@/tokens/dto/token.dto';
+import BigNumber from 'bignumber.js';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -64,29 +65,19 @@ export class DeprecatedTokensController {
     @Query('owner_address') owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-    @Query('order_by') orderBy: string = 'market_cap',
-    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
+    @Query('order_by') orderBy: string = 'rank',
+    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'ASC',
     @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<BclTokenDto> & { queryMs?: number }> {
-    // Map order_by to BCL service sortBy parameter
-    const sortFieldMap: Record<string, string> = {
-      'market_cap': 'rank',
-      'rank': 'rank',
-      'name': 'name',
-      'price': 'rank', // Price sorting maps to rank in BCL
-      'created_at': 'created_at',
-      'trending_score': 'trending_score',
-      'holders_count': 'rank', // Holders count not directly sortable in BCL view
-    };
 
-    const bclSortBy = sortFieldMap[orderBy] || 'rank';
+    const bclSortBy = orderBy;
     const allowedOrderDirections = ['ASC', 'DESC'];
     if (!allowedOrderDirections.includes(orderDirection)) {
       orderDirection = 'DESC';
     }
     const bclOrder = orderDirection;
 
-    const result = await this.bclTokensService.findAll(
+    return this.bclTokensService.findAll(
       { page, limit },
       {
         search,
@@ -99,15 +90,6 @@ export class DeprecatedTokensController {
       bclSortBy,
       bclOrder,
     );
-
-    return {
-      ...result,
-      items: result.items.map((item) => ({
-        _a: 0,
-        ...item,
-        rank: item.rank,
-      })),
-    }
   }
 
   @ApiOperation({

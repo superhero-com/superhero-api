@@ -97,7 +97,7 @@ export class BclTokensController {
     @Query('unlisted') unlisted?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
-    @Query('order_by') orderBy: string = 'market_cap',
+    @Query('order_by') orderBy: string = 'rank',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<BclTokenDto> & { queryMs: number }> {
     const unlistedBool = unlisted !== undefined ? unlisted === 'true' : undefined;
