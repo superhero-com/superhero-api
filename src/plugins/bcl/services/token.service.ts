@@ -204,30 +204,6 @@ export class TokenService {
       .getOne();
   }
 
-  /**
-   * Sync token price from live data
-   */
-  async syncTokenPrice(
-    token: Token,
-    manager?: EntityManager,
-  ): Promise<void> {
-    try {
-      const data = await this.getTokenLivePrice(token);
-      const repository = manager?.getRepository(Token) || this.tokensRepository;
-
-      await repository.update(token.sale_address, data as any);
-
-      // re-fetch token and broadcast outside transaction
-      if (!manager) {
-        this.tokenWebsocketGateway?.handleTokenUpdated({
-          sale_address: token.sale_address,
-          data,
-        });
-      }
-    } catch (error) {
-      this.logger.error(`Failed to sync token price for ${token.sale_address}`, error);
-    }
-  }
 
   /**
    * Update token trending score
