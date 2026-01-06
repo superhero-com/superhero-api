@@ -92,32 +92,26 @@ export class PluginRegistryService implements OnModuleInit {
     for (const plugin of this.plugins) {
       try {
         const startFromHeight = plugin.startFromHeight();
-        
+        // After upsert, fetch the current state to check if version needs updating
+        let existing = await this.pluginSyncStateRepository.findOne({
+          where: { plugin_name: plugin.name },
+        });
         // Always use upsert to atomically insert or update, preventing race conditions
         // This ensures only one record exists per plugin_name even if called concurrently
         // We use upsert with conflictPaths to handle the primary key constraint
         // skipUpdateIfNoValuesChanged: true means it will only INSERT if new, not UPDATE existing
-        await this.pluginSyncStateRepository.upsert(
-          {
+        if (!existing) {
+          existing = await this.pluginSyncStateRepository.create({
             plugin_name: plugin.name,
             version: plugin.version,
             last_synced_height: startFromHeight - 1,
             backward_synced_height: null, // Will be set when backward sync starts
             live_synced_height: null, // Will be set when live sync starts
             start_from_height: startFromHeight,
-          },
-          {
-            conflictPaths: ['plugin_name'],
-            // Only insert if new, don't update existing records (we handle updates separately below)
-            skipUpdateIfNoValuesChanged: true,
-          },
-        );
-        
-        // After upsert, fetch the current state to check if version needs updating
-        const existing = await this.pluginSyncStateRepository.findOne({
-          where: { plugin_name: plugin.name },
-        });
-        
+          });
+        }
+
+
         if (existing) {
           // Check if version changed - if so, reset sync state
           if (existing.version !== plugin.version) {

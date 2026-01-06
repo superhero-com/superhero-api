@@ -28,7 +28,7 @@ export class BlockSyncService {
     private configService: ConfigService,
     private pluginBatchProcessor: PluginBatchProcessorService,
     private microBlockService: MicroBlockService,
-  ) {}
+  ) { }
 
   async syncBlocks(startHeight: number, endHeight: number): Promise<void> {
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
@@ -64,10 +64,16 @@ export class BlockSyncService {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < blocksToSave.length; i += saveBatchSize) {
         const batch = blocksToSave.slice(i, i + saveBatchSize);
-        await this.blockRepository.upsert(batch, {
-          conflictPaths: ['height'],
-          skipUpdateIfNoValuesChanged: true,
-        });
+        try {
+          await this.blockRepository.upsert(batch, {
+            conflictPaths: ['height'],
+          });
+        } catch (error: any) {
+          // do block by block
+          for (const block of batch) {
+            await this.blockRepository.save(block);
+          }
+        }
       }
       this.logger.debug(
         `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
@@ -119,10 +125,17 @@ export class BlockSyncService {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
         const batch = microBlocksToSave.slice(i, i + saveBatchSize);
-        await this.microBlockRepository.upsert(batch, {
-          conflictPaths: ['hash'],
-          skipUpdateIfNoValuesChanged: true,
-        });
+        try {
+          await this.microBlockRepository.upsert(batch, {
+            conflictPaths: ['hash'],
+            skipUpdateIfNoValuesChanged: true,
+          });
+        } catch (error) {
+          // do micro block by micro block
+          for (const microBlock of batch) {
+            await this.microBlockRepository.save(microBlock);
+          }
+        }
       }
       this.logger.debug(
         `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
@@ -183,7 +196,7 @@ export class BlockSyncService {
 
     if (mdwTxs.length > 0) {
       let savedTxs: Tx[] = [];
-      
+
       if (useBulkMode) {
         // Use bulk insert for better performance
         // Note: bulkInsertTransactions processes batches internally as they're inserted
@@ -269,7 +282,7 @@ export class BlockSyncService {
         await this.txRepository.upsert(batch, {
           conflictPaths: ['hash'],
         });
-        
+
         // Collect hashes of transactions to fetch
         const batchHashes = batch
           .map((tx) => tx.hash)
@@ -343,12 +356,12 @@ export class BlockSyncService {
     if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
       payload = decode(tx?.tx?.payload).toString();
     }
-    
+
     // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
     // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
     const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
     const sanitizedSignatures = tx.signatures ? sanitizeJsonForPostgres(tx.signatures) : [];
-    
+
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,

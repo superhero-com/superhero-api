@@ -13,25 +13,22 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
 @Entity({
   name: 'key_blocks',
 })
-@Index(['height'])
-@Index(['hash'])
-@Index(['prev_hash'])
-@Index(['prev_key_hash'])
 @ObjectType()
 export class KeyBlock {
-  @PrimaryColumn()
-  @Field()
-  @ApiProperty()
-  @Sortable()
-  @Searchable()
-  hash: string;
-
-  @Column({ unique: true })
+  @PrimaryColumn({ type: 'int' })
   @Field(() => Int)
   @ApiProperty()
   @Sortable()
   @Searchable()
   height: number;
+
+
+  @Column()
+  @Field()
+  @ApiProperty()
+  @Sortable()
+  @Searchable()
+  hash: string;
 
   @Column()
   @Field()
