@@ -20,7 +20,7 @@ export class FixTokensService {
   }
 
   onModuleInit() {
-    this.fixTokensWithNoPrice();
+    // this.fixTokensWithNoPrice();
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -53,22 +53,22 @@ export class FixTokensService {
     this.fixingTokens = false;
   }
 
-  isFixingTokensWithNoPrice = false;
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  async fixTokensWithNoPrice() {
-    if (this.isFixingTokensWithNoPrice) {
-      return;
-    }
-    this.isFixingTokensWithNoPrice = true;
-    const tokens = await this.tokensRepository
-      .createQueryBuilder('token')
-      .where('token.price = :price', { price: '0' })
-      .orderBy('token.created_at', 'DESC')
-      .take(100)
-      .getMany();
-    for (const token of tokens) {
-      await this.tokensService.syncTokenPrice(token);
-    }
-    this.isFixingTokensWithNoPrice = false;
-  }
+  // isFixingTokensWithNoPrice = false;
+  // @Cron(CronExpression.EVERY_5_MINUTES)
+  // async fixTokensWithNoPrice() {
+  //   if (this.isFixingTokensWithNoPrice) {
+  //     return;
+  //   }
+  //   this.isFixingTokensWithNoPrice = true;
+  //   const tokens = await this.tokensRepository
+  //     .createQueryBuilder('token')
+  //     .where('token.price = :price', { price: '0' })
+  //     .orderBy('token.created_at', 'DESC')
+  //     .take(100)
+  //     .getMany();
+  //   for (const token of tokens) {
+  //     await this.tokensService.syncTokenPrice(token);
+  //   }
+  //   this.isFixingTokensWithNoPrice = false;
+  // }
 }

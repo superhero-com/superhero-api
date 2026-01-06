@@ -230,31 +230,6 @@ export class TokenService {
   }
 
   /**
-   * Get live token price data
-   */
-  private async getTokenLivePrice(token: Token): Promise<
-    Partial<{
-      price: BigNumber;
-      sell_price: BigNumber;
-      total_supply: BigNumber;
-      market_cap: BigNumber;
-      address: string;
-      name: string;
-      symbol: string;
-      beneficiary_address: string;
-      bonding_curve_address: string;
-      owner_address: string;
-      dao_balance: BigNumber;
-      price_data: any;
-      sell_price_data: any;
-      market_cap_data: any;
-    }>
-  > {
-    // Delegate to TokensService for complex contract interaction logic
-    return this.tokensService.getTokeLivePrice(token);
-  }
-
-  /**
    * Update token trending score
    */
   async updateTokenTrendingScore(token: Token): Promise<{
