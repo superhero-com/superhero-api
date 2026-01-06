@@ -89,10 +89,62 @@ import { DeprecatedApisModule } from './@deprecated-apis/deprecated-apis.module'
   providers: [AppService],
 })
 export class AppModule implements OnModuleInit {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(private readonly dataSource: DataSource) { }
 
   async onModuleInit() {
+    await this.fixCoinPricesPk();
     // Run synchronization with error handling for constraint conflicts
     await synchronizeWithErrorHandling(this.dataSource);
+  }
+
+  async fixCoinPricesPk(): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      // Only run if duplicates/nulls exist (optional but recommended)
+      const [{ dup_ids }] = await manager.query(`
+        SELECT COUNT(*)::int AS "dup_ids"
+        FROM (
+          SELECT id
+          FROM coin_prices
+          WHERE id IS NOT NULL
+          GROUP BY id
+          HAVING COUNT(*) > 1
+        ) t
+      `);
+
+      const [{ null_ids }] = await manager.query(`
+        SELECT COUNT(*)::int AS "null_ids"
+        FROM coin_prices
+        WHERE id IS NULL
+      `);
+
+      if (dup_ids === 0 && null_ids === 0) return;
+
+      await manager.query(`
+        WITH ordered AS (
+          SELECT ctid, row_number() OVER (ORDER BY created_at, ctid) AS new_id
+          FROM coin_prices
+        )
+        UPDATE coin_prices cp
+        SET id = ordered.new_id
+        FROM ordered
+        WHERE cp.ctid = ordered.ctid
+      `);
+
+      await manager.query(`
+        CREATE SEQUENCE IF NOT EXISTS coin_prices_id_seq OWNED BY coin_prices.id
+      `);
+
+      await manager.query(`
+        SELECT setval(
+          'coin_prices_id_seq',
+          COALESCE((SELECT MAX(id) FROM coin_prices), 0)
+        )
+      `);
+
+      await manager.query(`
+        ALTER TABLE coin_prices
+        ALTER COLUMN id SET DEFAULT nextval('coin_prices_id_seq')
+      `);
+    });
   }
 }
