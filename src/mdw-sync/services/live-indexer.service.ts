@@ -145,10 +145,11 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (microBlocks.length > 0) {
-        await this.microBlockRepository.upsert(microBlocks, {
-          conflictPaths: ['hash'],
-          skipUpdateIfNoValuesChanged: true,
-        });
+        try {
+          await this.microBlockRepository.save(microBlocks);
+        } catch (error: any) {
+          this.logger.error(`Failed to save micro-blocks: ${microBlocks.map(microBlock => microBlock.hash).join(', ')}`, error.stack);
+        }
         this.logger.debug(
           `Live sync: saved ${microBlocks.length} micro-blocks for key block ${keyBlockHash}`,
         );
