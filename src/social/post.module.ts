@@ -7,6 +7,7 @@ import { Tip } from '@/tipping/entities/tip.entity';
 import { TrendingTag } from '@/trending-tags/entities/trending-tags.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { BclTokenView } from '@/plugins/bcl/entities/bcl-token.view';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { PostReadsDaily } from './entities/post-reads.entity';
 import { ReadsService } from './services/reads.service';
@@ -33,6 +34,7 @@ import { getPopularRankingContributorProvider } from '@/plugins';
       TrendingTag,
       TokenHolder,
       Token,
+      BclTokenView,
       Invitation,
       PostReadsDaily,
     ]),

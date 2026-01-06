@@ -32,7 +32,7 @@ export class FixHoldersService {
   }
 
   onModuleInit() {
-    this.fixBrokenHolders();
+    // this.fixBrokenHolders();
   }
 
   async syncTokenHolders(token: Token) {

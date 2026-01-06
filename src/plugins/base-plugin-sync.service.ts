@@ -40,6 +40,14 @@ export abstract class BasePluginSyncService {
   }
 
   /**
+   * Called when the update is complete.
+   * @returns void
+   */
+  async onUpdateComplete(): Promise<void> {
+    return;
+  }
+
+  /**
    * Process a single transaction. Must be implemented by each plugin.
    * @param tx - Transaction to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing

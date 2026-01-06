@@ -62,9 +62,6 @@ export abstract class BasePlugin implements Plugin {
               data: decodedLogs,
             },
           };
-
-          // Save transaction with updated logs
-          await this.txRepository.save(tx);
         }
 
         // Step 2: Decode data (after logs are saved)
@@ -79,10 +76,11 @@ export abstract class BasePlugin implements Plugin {
               data: decodedData,
             },
           };
-
-          // Save transaction with updated data
-          await this.txRepository.save(tx);
         }
+        await this.txRepository.upsert(tx, {
+          conflictPaths: ['hash'],
+          upsertType: 'on-conflict-do-update',
+        });
 
         updatedTxs.push(tx);
       } catch (error: any) {
@@ -199,7 +197,7 @@ export abstract class BasePlugin implements Plugin {
               );
             }
 
-            await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
+            await syncService.processTransaction(tx, SyncDirectionEnum.Upgrade);
             processedCount++;
 
             // Update sync state periodically
@@ -390,6 +388,7 @@ export abstract class BasePlugin implements Plugin {
               try {
                 const needsReDecode = this.needsReDecode(tx);
                 let wasUpdated = false;
+                //
 
                 // Update logs if needed
                 if (needsReDecode.logs) {
@@ -445,6 +444,7 @@ export abstract class BasePlugin implements Plugin {
 
                 totalProcessed++;
                 if (wasUpdated) {
+                  await syncService.processTransaction(tx, SyncDirectionEnum.Upgrade);
                   totalUpdated++;
                 }
 
@@ -502,6 +502,8 @@ export abstract class BasePlugin implements Plugin {
       this.logger.log(
         `[${this.name}] Update completed. Processed ${totalProcessed} transactions, updated ${totalUpdated}`,
       );
+      // notify the plugin that the update is complete
+      await syncService.onUpdateComplete();
     } catch (error: any) {
       this.logger.error(
         `[${this.name}] Update transactions failed`,

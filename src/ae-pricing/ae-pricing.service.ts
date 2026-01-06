@@ -4,7 +4,7 @@ import BigNumber from 'bignumber.js';
 import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 import { CoinPrice } from './entities/coin-price.entity';
 
 @Injectable()
@@ -15,7 +15,7 @@ export class AePricingService {
     public coinGeckoService: CoinGeckoService,
     @InjectRepository(CoinPrice)
     private coinPriceRepository: Repository<CoinPrice>,
-  ) {}
+  ) { }
 
   async pullAndSaveCoinCurrencyRates() {
     const rates =
@@ -40,15 +40,27 @@ export class AePricingService {
    * @param price - The amount of AE tokens.
    * @returns An object containing the price data for AE and other currencies.
    */
-  async getPriceData(price: BigNumber): Promise<IPriceDto> {
+  async getPriceData(price: BigNumber, date?: Date, asBigNumber = true): Promise<IPriceDto> {
     let latestRates = null;
+
+
     try {
-      latestRates = await this.coinPriceRepository.findOne({
-        where: {},
-        order: {
-          created_at: 'DESC',
-        },
-      });
+      if (date) {
+        latestRates = await this.coinPriceRepository.findOne({
+          where: {
+            created_at: LessThan(date),
+          },
+        });
+      }
+
+      if (!latestRates) {
+        latestRates = await this.coinPriceRepository.findOne({
+          where: {},
+          order: {
+            created_at: 'DESC',
+          },
+        });
+      }
     } catch (error) {
       //
     }
@@ -57,7 +69,7 @@ export class AePricingService {
     }
 
     const prices = {
-      ae: price,
+      ae: asBigNumber ? price : price.toNumber(),
     };
 
     if (!this.latestRates) {
@@ -66,7 +78,8 @@ export class AePricingService {
 
     CURRENCIES.forEach(({ code }) => {
       try {
-        prices[code] = price.multipliedBy(this.latestRates.rates![code]) as any;
+        const rate = price.multipliedBy(this.latestRates.rates![code])
+        prices[code] = asBigNumber ? rate : rate.toNumber() as any;
       } catch (error) {
         // console.warn(`Failed to calculate price for ${code}`);
         prices[code] = null;

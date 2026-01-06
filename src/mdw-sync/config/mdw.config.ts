@@ -6,6 +6,16 @@ export default registerAs('mdw', () => ({
   syncIntervalMs: parseInt(process.env.SYNC_INTERVAL_MS || '3000', 10),
   pageLimit: parseInt(process.env.MDW_PAGE_LIMIT || '100', 10),
   backfillBatchBlocks: parseInt(process.env.BACKFILL_BATCH_BLOCKS || '50', 10),
+  // Forward catch-up (used on restart when tip advanced while server was down)
+  forwardCatchupBatchBlocks: parseInt(
+    process.env.FORWARD_CATCHUP_BATCH_BLOCKS || '200',
+    10,
+  ),
+  // Optional cap per sync tick; set to 0 to allow full catch-up in one tick
+  forwardCatchupMaxBlocksPerTick: parseInt(
+    process.env.FORWARD_CATCHUP_MAX_BLOCKS_PER_TICK || '0',
+    10,
+  ),
   bulkModeBatchBlocks: parseInt(
     process.env.BULK_MODE_BATCH_BLOCKS || '1000',
     10,

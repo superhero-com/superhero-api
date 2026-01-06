@@ -4,32 +4,26 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Query,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
-
-import { TokensService } from '@/tokens/tokens.service';
 import moment from 'moment';
-import {
-  ITransactionPreview,
-  TransactionHistoryService,
-} from '../services/transaction-history.service';
 
-@Controller('tokens')
+import { BclTransactionHistoryService } from '../services/bcl-transaction-history.service';
+
+@Controller('bcl/tokens')
 @UseInterceptors(CacheInterceptor)
-@ApiTags('Transaction Historical')
-export class HistoricalController {
+@ApiTags('BCL Transaction Historical')
+export class BclHistoricalController {
   constructor(
-    private tokenService: TokensService,
-    private readonly tokenHistoryService: TransactionHistoryService,
-  ) {
-    //
-  }
+    private readonly bclTransactionHistoryService: BclTransactionHistoryService,
+  ) {}
 
-  @ApiOperation({ operationId: 'findByAddress' })
+  @ApiOperation({ operationId: 'findBclHistoryByAddress' })
   @ApiQuery({
     name: 'interval',
     type: 'number',
@@ -46,13 +40,12 @@ export class HistoricalController {
     enum: ['normal', 'aggregated'],
     required: false,
   })
-  // startDate
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiParam({
     name: 'address',
     type: 'string',
-    description: 'Token address or name',
+    description: 'BCL token sale address, token address, name, or symbol',
   })
   @CacheTTL(1000)
   @Get(':address/transactions')
@@ -67,9 +60,19 @@ export class HistoricalController {
     const newStartDate = startDate
       ? this.parseDate(startDate)
       : moment().subtract(2, 'days');
-    const token = await this.tokenService.getToken(address);
-    return this.tokenHistoryService.getHistoricalData({
-      token,
+
+    const tokenEntity = await this.bclTransactionHistoryService.getTokenByAddress(
+      address,
+    );
+    if (!tokenEntity) {
+      throw new NotFoundException('Token not found');
+    }
+
+    return this.bclTransactionHistoryService.getHistoricalData({
+      token: {
+        sale_address: tokenEntity.sale_address,
+        symbol: tokenEntity.symbol,
+      },
       interval,
       startDate: newStartDate,
       endDate: this.parseDate(endDate),
@@ -78,7 +81,7 @@ export class HistoricalController {
     });
   }
 
-  @ApiOperation({ operationId: 'getPaginatedHistory' })
+  @ApiOperation({ operationId: 'getBclPaginatedHistory' })
   @ApiQuery({
     name: 'interval',
     type: 'number',
@@ -93,7 +96,7 @@ export class HistoricalController {
   @ApiParam({
     name: 'address',
     type: 'string',
-    description: 'Token address or name',
+    description: 'BCL token sale address, token address, name, or symbol',
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
@@ -106,9 +109,18 @@ export class HistoricalController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
-    const token = await this.tokenService.getToken(address);
-    return this.tokenHistoryService.getPaginatedHistoricalData({
-      token,
+    const tokenEntity = await this.bclTransactionHistoryService.getTokenByAddress(
+      address,
+    );
+    if (!tokenEntity) {
+      throw new NotFoundException('Token not found');
+    }
+
+    return this.bclTransactionHistoryService.getPaginatedHistoricalData({
+      token: {
+        sale_address: tokenEntity.sale_address,
+        symbol: tokenEntity.symbol,
+      },
       interval,
       convertTo,
       page,
@@ -116,11 +128,11 @@ export class HistoricalController {
     });
   }
 
-  @ApiOperation({ operationId: 'getForPreview' })
+  @ApiOperation({ operationId: 'getBclForPreview' })
   @ApiParam({
     name: 'address',
     type: 'string',
-    description: 'Token address or name',
+    description: 'BCL token sale address, token address, name, or symbol',
   })
   @ApiQuery({
     name: 'interval',
@@ -129,23 +141,36 @@ export class HistoricalController {
     example: '7d',
   })
   @CacheTTL(5)
-  @Get('/preview/:address')
+  @Get(':address/history/preview')
   async getForPreview(
     @Param('address') address: string,
     @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
-  ): Promise<ITransactionPreview> {
-    if (!address || address == 'null') {
+  ) {
+    if (!address || address === 'null') {
       throw new BadRequestException('Address is required');
     }
-    const token = await this.tokenService.getToken(address);
-    return this.tokenHistoryService.getForPreview(token, interval);
+    const tokenEntity = await this.bclTransactionHistoryService.getTokenByAddress(
+      address,
+    );
+    if (!tokenEntity) {
+      throw new NotFoundException('Token not found');
+    }
+
+    return this.bclTransactionHistoryService.getForPreview(
+      {
+        sale_address: tokenEntity.sale_address,
+        symbol: tokenEntity.symbol,
+      },
+      interval,
+    );
   }
 
   private parseDate(value: string | number | undefined) {
-    // if timestamp
     if (typeof value === 'number') {
       return moment.unix(value);
     }
     return moment(value);
   }
 }
+
+

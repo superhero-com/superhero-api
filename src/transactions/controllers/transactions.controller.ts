@@ -110,8 +110,14 @@ export class TransactionsController {
           'token.collection',
         ]);
     }
+    const startTime = Date.now();
+    const result = await paginate<Transaction>(queryBuilder, { page, limit });
+    const queryMs = Date.now() - startTime;
 
-    return paginate<Transaction>(queryBuilder, { page, limit });
+    return {
+      ...result,
+      queryMs,
+    } as any;
   }
 
   @ApiQuery({

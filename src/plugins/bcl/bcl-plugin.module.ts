@@ -20,10 +20,29 @@ import { TransactionDataService } from './services/transaction-data.service';
 import { TransactionPersistenceService } from './services/transaction-persistence.service';
 import { TransactionProcessorService } from './services/transaction-processor.service';
 import { TokenHolderService } from './services/token-holder.service';
+import { BclTransaction } from './entities/bcl-transaction.entity';
+import { BclTransactionsService } from './services/bcl-transactions.service';
+import { BclTransactionsController } from './controllers/bcl-transactions.controller';
+import { BclTransactionPersistenceService } from './services/bcl-transaction-persistence.service';
+import { BclToken } from './entities/bcl-token.entity';
+import { BclTokenView } from './entities/bcl-token.view';
+import { BclTokenStats } from './entities/bcl-token-stats.view';
+import { BclTokenPerformanceView } from './entities/bcl-token-performance.view';
+import { BclTokenPersistenceService } from './services/bcl-token-persistence.service';
+import { BclTokensService } from './services/bcl-tokens.service';
+import { BclTokensController } from './controllers/bcl-tokens.controller';
+import { BclTokenStatsService } from './services/bcl-token-stats.service';
+import { BclTokenStatsRefreshService } from './services/bcl-token-stats-refresh.service';
+import { BclTokenStatsController } from './controllers/bcl-token-stats.controller';
+import { BclTokenPerformanceRefreshService } from './services/bcl-token-performance-refresh.service';
+import { BclTokenPerformanceController } from './controllers/bcl-token-performance.controller';
+import { BclTokenRankingsController } from './controllers/bcl-token-rankings.controller';
+import { BclTransactionHistoryService } from './services/bcl-transaction-history.service';
+import { BclHistoricalController } from './controllers/bcl-historical.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token]),
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token, BclTransaction, BclToken, BclTokenView, BclTokenStats, BclTokenPerformanceView]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
@@ -40,10 +59,19 @@ import { TokenHolderService } from './services/token-holder.service';
     TokenService,
     TokenHolderService,
     TransactionProcessorService,
+    BclTransactionPersistenceService,
+    BclTokenPersistenceService,
     BclPluginSyncService,
     BclPlugin,
+    BclTransactionsService,
+    BclTokensService,
+    BclTokenStatsService,
+    BclTokenStatsRefreshService,
+    BclTokenPerformanceRefreshService,
+    BclTransactionHistoryService,
   ],
-  exports: [BclPlugin],
+  controllers: [BclTransactionsController, BclTokensController, BclTokenStatsController, BclTokenPerformanceController, BclTokenRankingsController, BclHistoricalController],
+  exports: [BclPlugin, BclTokensService, BclTransactionHistoryService],
 })
 export class BclPluginModule {}
 

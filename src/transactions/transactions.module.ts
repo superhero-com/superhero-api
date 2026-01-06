@@ -6,7 +6,6 @@ import { BullModule } from '@nestjs/bull';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsTransactionsController } from './controllers/analytics-transactions.controller';
-import { HistoricalController } from './controllers/historical.controller';
 import { TransactionsController } from './controllers/transactions.controller';
 import { Transaction } from './entities/transaction.entity';
 import { TransactionHistoryService } from './services/transaction-history.service';
@@ -26,7 +25,6 @@ import { TransactionService } from './services/transaction.service';
   exports: [TypeOrmModule, TransactionService],
   controllers: [
     TransactionsController,
-    HistoricalController,
     AnalyticsTransactionsController,
   ],
 })
