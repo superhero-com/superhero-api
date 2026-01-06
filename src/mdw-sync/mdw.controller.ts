@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Post, Query, DefaultValuePipe, ParseIntPipe } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { SyncState } from './entities/sync-state.entity';
 import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { PluginRegistryService } from './services/plugin-registry.service';
@@ -8,6 +8,7 @@ import { IndexerService } from './services/indexer.service';
 import { LiveIndexerService } from './services/live-indexer.service';
 import { BlockValidationService } from './services/block-validation.service';
 import { Tx } from './entities/tx.entity';
+import { KeyBlock } from './entities/key-block.entity';
 
 @Controller('mdw')
 export class MdwController {
@@ -19,6 +20,9 @@ export class MdwController {
 
     @InjectRepository(Tx)
     private mdwTxRepository: Repository<Tx>,
+    @InjectRepository(KeyBlock)
+    private keyBlockRepository: Repository<KeyBlock>,
+    private dataSource: DataSource,
     private pluginRegistry: PluginRegistryService,
     private indexerService: IndexerService,
     private liveIndexerService: LiveIndexerService,
@@ -27,9 +31,14 @@ export class MdwController {
 
   @Get('health')
   async getHealth() {
-    const syncState = await this.syncStateRepository.findOne({
-      where: { id: 'global' },
-    });
+    const hasIndexerHeadColumn = await this.hasSyncStateColumn('indexer_head_height');
+    const syncStateQb = this.syncStateRepository
+      .createQueryBuilder('sync_state')
+      .where('sync_state.id = :id', { id: 'global' });
+    if (hasIndexerHeadColumn) {
+      syncStateQb.addSelect('sync_state.indexer_head_height');
+    }
+    const syncState = await syncStateQb.getOne();
 
     const pluginStates = await this.pluginSyncStateRepository.find();
     const totalTxs = await this.mdwTxRepository.count();
@@ -55,6 +64,25 @@ export class MdwController {
     const liveSyncedHeight = syncState.live_synced_height ?? 0;
     const targetBackwardHeight = 0; // Backward sync target is always 0
 
+    // Forward catch-up metrics (missing blocks while server was down)
+    const localDbTipHeight = await this.getLocalTipHeight();
+    // indexer_head_height is select:false and may not exist in older schemas.
+    const indexerHeadHeight =
+      typeof (syncState as any).indexer_head_height === 'number'
+        ? (syncState as any).indexer_head_height
+        : 0;
+    const forwardCatchupRemaining = Math.max(0, tipHeight - indexerHeadHeight);
+    const forwardCatchupProgress =
+      tipHeight > 0
+        ? Math.max(0, Math.min(100, (indexerHeadHeight / tipHeight) * 100))
+        : 0;
+    const forwardCatchupStatus =
+      forwardCatchupRemaining === 0
+        ? 'complete'
+        : this.indexerService.getIsRunning()
+          ? 'running'
+          : 'stopped';
+
     // Calculate backward sync metrics
     const backwardSyncRemaining = Math.max(0, backwardSyncedHeight - targetBackwardHeight);
     const backwardSyncComplete = backwardSyncedHeight <= targetBackwardHeight;
@@ -69,6 +97,7 @@ export class MdwController {
         : 'stopped';
 
     // Calculate live sync metrics
+    // Note: live_synced_height can advance via websocket live indexing and/or forward catch-up on restart.
     const liveSyncLag = Math.max(0, tipHeight - liveSyncedHeight);
     const liveSyncProgress =
       tipHeight > 0 ? Math.max(0, Math.min(100, (liveSyncedHeight / tipHeight) * 100)) : 0;
@@ -99,6 +128,15 @@ export class MdwController {
     return {
       status: overallStatus,
       totalTxs,
+      forwardCatchup: {
+        status: forwardCatchupStatus,
+        // Only indexer_head_height is considered "final" for catch-up decisions.
+        indexerHeadHeight,
+        localDbTipHeight,
+        remoteTipHeight: tipHeight,
+        remainingBlocks: forwardCatchupRemaining,
+        progressPercent: Number(forwardCatchupProgress.toFixed(2)),
+      },
       backwardSync: {
         status: backwardSyncStatus,
         syncedHeight: backwardSyncedHeight,
@@ -136,6 +174,32 @@ export class MdwController {
       })),
       registeredPlugins: this.pluginRegistry.getPlugins().map((p) => p.name),
     };
+  }
+
+  private async getLocalTipHeight(): Promise<number> {
+    const raw = await this.keyBlockRepository
+      .createQueryBuilder('kb')
+      .select('MAX(kb.height)', 'max')
+      .getRawOne<{ max: string | number | null }>();
+
+    const max = raw?.max;
+    const n = typeof max === 'number' ? max : max ? parseInt(max, 10) : 0;
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  private async hasSyncStateColumn(columnName: string): Promise<boolean> {
+    const rows = await this.dataSource.query(
+      `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sync_state'
+        AND column_name = $1
+      LIMIT 1
+      `,
+      [columnName],
+    );
+    return Array.isArray(rows) && rows.length > 0;
   }
 
   /**

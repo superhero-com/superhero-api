@@ -116,6 +116,7 @@ type SyncState {
   backward_synced_height: Int
   created_at: DateTime!
   id: String!
+  indexer_head_height: Int
   is_bulk_mode: Boolean!
   last_synced_hash: String!
   last_synced_height: Int!

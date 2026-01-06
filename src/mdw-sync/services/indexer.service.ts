@@ -22,6 +22,8 @@ export class IndexerService implements OnModuleInit {
   private readonly logger = new Logger(IndexerService.name);
   private isRunning = false;
   private syncInterval: NodeJS.Timeout;
+  private schemaWaitTimer?: NodeJS.Timeout;
+  private schemaWaitLogged = false;
 
   constructor(
     @InjectRepository(Tx)
@@ -47,7 +49,6 @@ export class IndexerService implements OnModuleInit {
   async onModuleInit() {
     const disableMdwSync = this.configService.get<boolean>('mdw.disableMdwSync', false);
     
-    await this.initializeSyncState();
     // Plugin sync states are initialized by PluginRegistryService.onModuleInit()
     // which runs before this, so they should already exist. But we verify here
     // to ensure backward indexer doesn't start until plugins are ready.
@@ -55,10 +56,64 @@ export class IndexerService implements OnModuleInit {
     await this.pluginRegistryService.initializePluginSyncStates();
     
     if (!disableMdwSync) {
-      this.startSync();
+      // Defer indexer start until DB schema is ready (older DBs may not have indexer_head_height yet).
+      void this.startWhenSchemaReady();
     } else {
       this.logger.log('MDW sync is disabled, skipping sync loop start');
     }
+  }
+
+  private async startWhenSchemaReady(): Promise<void> {
+    try {
+      const hasIndexerHeadColumn = await this.hasSyncStateColumn('indexer_head_height');
+      if (!hasIndexerHeadColumn) {
+        if (!this.schemaWaitLogged) {
+          this.schemaWaitLogged = true;
+          this.logger.warn(
+            `SyncState.indexer_head_height column is missing. Waiting for DB sync/migration before starting MDW indexer...`,
+          );
+        }
+
+        // Avoid scheduling multiple timers
+        if (!this.schemaWaitTimer) {
+          this.schemaWaitTimer = setTimeout(() => {
+            this.schemaWaitTimer = undefined;
+            void this.startWhenSchemaReady();
+          }, 5000);
+        }
+        return;
+      }
+
+      // Schema ready: initialize state and start sync loop
+      await this.initializeSyncState();
+      this.startSync();
+      this.logger.log('MDW indexer started (schema ready)');
+    } catch (error: any) {
+      this.logger.error('Failed to start MDW indexer (schema readiness check)', error);
+      // Retry with backoff-ish delay
+      if (!this.schemaWaitTimer) {
+        this.schemaWaitTimer = setTimeout(() => {
+          this.schemaWaitTimer = undefined;
+          void this.startWhenSchemaReady();
+        }, 10000);
+      }
+    }
+  }
+
+  private async hasSyncStateColumn(columnName: string): Promise<boolean> {
+    // Works even when TypeORM metadata includes new columns that aren't in DB yet.
+    const rows = await this.dataSource.query(
+      `
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'sync_state'
+        AND column_name = $1
+      LIMIT 1
+      `,
+      [columnName],
+    );
+    return Array.isArray(rows) && rows.length > 0;
   }
 
   private async initializeSyncState() {
@@ -79,18 +134,37 @@ export class IndexerService implements OnModuleInit {
         is_bulk_mode: false,
         backward_synced_height: tipHeight, // Start from tip, will decrease as we sync backward
         live_synced_height: 0, // Start from 0, will increase as live indexer syncs forward
+        indexer_head_height: tipHeight, // Indexer-owned "final" head height
       });
     } else {
       // Migrate existing sync state
+      const updateData: Partial<SyncState> = {};
+
       if (existing.backward_synced_height === null || existing.backward_synced_height === undefined) {
-        await this.syncStateRepository.update(
-          { id: 'global' },
-          {
-            backward_synced_height: existing.tip_height || existing.last_synced_height,
-            live_synced_height: existing.last_synced_height || 0,
-          },
-        );
+        updateData.backward_synced_height = existing.tip_height || existing.last_synced_height;
       }
+
+      if (existing.live_synced_height === null || existing.live_synced_height === undefined) {
+        updateData.live_synced_height = existing.last_synced_height || 0;
+      }
+
+      if (Object.keys(updateData).length > 0) {
+        await this.syncStateRepository.update({ id: 'global' }, updateData);
+      }
+
+      // Initialize indexer_head_height if it's null (don't overwrite existing values).
+      // We intentionally don't read the column here (it's select:false); we use a COALESCE update instead.
+      const initHeight = existing.tip_height || existing.last_synced_height || 0;
+      await this.syncStateRepository
+        .createQueryBuilder()
+        .update(SyncState)
+        .set({
+          indexer_head_height: () =>
+            'COALESCE(indexer_head_height, :initHeight)',
+        })
+        .where('id = :id', { id: 'global' })
+        .setParameters({ initHeight })
+        .execute();
     }
   }
 
@@ -119,9 +193,11 @@ export class IndexerService implements OnModuleInit {
       // Note: Block validation runs periodically via cron job, not during sync
 
       // Get current sync state
-      const syncState = await this.syncStateRepository.findOne({
-        where: { id: 'global' },
-      });
+      const syncState = await this.syncStateRepository
+        .createQueryBuilder('sync_state')
+        .addSelect('sync_state.indexer_head_height')
+        .where('sync_state.id = :id', { id: 'global' })
+        .getOne();
 
       if (!syncState) {
         this.logger.error('No sync state found');
@@ -142,6 +218,17 @@ export class IndexerService implements OnModuleInit {
       // Get target backward sync height (stop at 0 or configured start height)
       const targetBackwardHeight = 0; // Could be configurable in the future
       const currentBackwardHeight = syncState.backward_synced_height ?? tipHeight;
+
+      // Forward catch-up (restart gap fill): ensure we sync new blocks that happened while the server was down
+      // BEFORE resuming backward backfill.
+      const forwardCaughtUp = await this.syncForwardCatchupIfNeeded(
+        tipHeight,
+        syncState.indexer_head_height ?? currentBackwardHeight,
+      );
+      if (!forwardCaughtUp) {
+        // Still catching up; don't run backward sync until we're fully caught up to remote tip.
+        return;
+      }
 
       // Check if backward sync is complete
       if (currentBackwardHeight <= targetBackwardHeight) {
@@ -193,6 +280,9 @@ export class IndexerService implements OnModuleInit {
         await this.blockSyncService.syncBlockRange(startHeight, endHeight, true);
       }
 
+      // Indexer-owned head height should never regress; update it to at least the endHeight we've processed.
+      await this.updateIndexerHeadHeightAtLeast(endHeight);
+
       // Update backward sync state (decrease backward_synced_height as we go backward)
       const newBackwardHeight = startHeight - 1;
       await this.syncStateRepository.update(
@@ -217,6 +307,107 @@ export class IndexerService implements OnModuleInit {
     }
   }
 
+
+  /**
+   * Forward catch-up for the gap created while the server was down.
+   *
+   * Example: we previously stored blocks up to 1000, server stops, network reaches 1200.
+   * On restart we want to sync 1001-1200 first (forward), then resume backward backfill.
+   *
+   * Returns:
+   * - true  => caught up (or no catch-up needed), safe to proceed with backward sync
+   * - false => catch-up is still in progress (likely due to per-tick cap); skip backward this tick
+   */
+  private async syncForwardCatchupIfNeeded(
+    remoteTipHeight: number,
+    indexerHeadHeight: number,
+  ): Promise<boolean> {
+    if (indexerHeadHeight >= remoteTipHeight) {
+      return true;
+    }
+
+    const batchBlocks = this.configService.get<number>(
+      'mdw.forwardCatchupBatchBlocks',
+      200,
+    );
+    const maxBlocksPerTick = this.configService.get<number>(
+      'mdw.forwardCatchupMaxBlocksPerTick',
+      0,
+    );
+
+    const startHeight = indexerHeadHeight + 1;
+    const endHeight = remoteTipHeight;
+    const totalMissing = endHeight - startHeight + 1;
+    const cappedTotal =
+      maxBlocksPerTick && maxBlocksPerTick > 0
+        ? Math.min(totalMissing, maxBlocksPerTick)
+        : totalMissing;
+
+    this.logger.log(
+      `Forward catch-up: indexerHead=${indexerHeadHeight}, remoteTip=${remoteTipHeight}, syncing ${startHeight}-${startHeight + cappedTotal - 1} (${cappedTotal}/${totalMissing} missing blocks this tick)`,
+    );
+
+    let processed = 0;
+    while (processed < cappedTotal) {
+      const batchStart = startHeight + processed;
+      const batchEnd = Math.min(endHeight, batchStart + batchBlocks - 1);
+
+      await this.blockSyncService.syncBlockRange(batchStart, batchEnd, false);
+      await this.updateLiveSyncedHeightAtLeast(batchEnd);
+      await this.updateIndexerHeadHeightAtLeast(batchEnd);
+
+      processed += batchEnd - batchStart + 1;
+      this.logger.log(
+        `Forward catch-up progress: synced ${batchStart}-${batchEnd} (${processed}/${cappedTotal} this tick)`,
+      );
+    }
+
+    const fullyCaughtUp = indexerHeadHeight + cappedTotal >= remoteTipHeight;
+    if (fullyCaughtUp) {
+      this.logger.log(
+        `Forward catch-up complete: indexerHead reached remoteTip=${remoteTipHeight}`,
+      );
+      return true;
+    }
+
+    this.logger.log(
+      `Forward catch-up paused: ${remoteTipHeight - (indexerHeadHeight + cappedTotal)} blocks still missing; will continue next tick`,
+    );
+    return false;
+  }
+
+  /**
+   * Monotonic update to avoid regressing live_synced_height if websocket live indexing advanced further.
+   */
+  private async updateLiveSyncedHeightAtLeast(newHeight: number): Promise<void> {
+    await this.syncStateRepository
+      .createQueryBuilder()
+      .update(SyncState)
+      .set({
+        live_synced_height: () =>
+          'GREATEST(COALESCE(live_synced_height, 0), :newHeight)',
+      })
+      .where('id = :id', { id: 'global' })
+      .setParameters({ newHeight })
+      .execute();
+  }
+
+  /**
+   * Monotonic update for indexer-owned "final" head height.
+   * This value is used for forward catch-up decisions and must not be affected by websocket live indexing.
+   */
+  private async updateIndexerHeadHeightAtLeast(newHeight: number): Promise<void> {
+    await this.syncStateRepository
+      .createQueryBuilder()
+      .update(SyncState)
+      .set({
+        indexer_head_height: () =>
+          'GREATEST(COALESCE(indexer_head_height, 0), :newHeight)',
+      })
+      .where('id = :id', { id: 'global' })
+      .setParameters({ newHeight })
+      .execute();
+  }
 
   /**
    * Parallel processing of multiple block ranges for bulk backward sync
@@ -278,6 +469,9 @@ export class IndexerService implements OnModuleInit {
   onModuleDestroy() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
+    }
+    if (this.schemaWaitTimer) {
+      clearTimeout(this.schemaWaitTimer);
     }
   }
 }

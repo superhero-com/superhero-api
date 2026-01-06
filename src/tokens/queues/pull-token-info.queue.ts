@@ -34,15 +34,15 @@ export class PullTokenInfoQueue {
       this.logger.debug(
         `PullTokenInfoQueue->completed:${job.data.saleAddress}`,
       );
-      void this.syncTokenHoldersQueue.add(
-        {
-          saleAddress: job.data.saleAddress,
-        },
-        {
-          jobId: `syncTokenHolders-${job.data.saleAddress}`,
-          removeOnComplete: true,
-        },
-      );
+      // void this.syncTokenHoldersQueue.add(
+      //   {
+      //     saleAddress: job.data.saleAddress,
+      //   },
+      //   {
+      //     jobId: `syncTokenHolders-${job.data.saleAddress}`,
+      //     removeOnComplete: true,
+      //   },
+      // );
     } catch (error) {
       this.logger.error(`PullTokenInfoQueue->error`, error);
     }

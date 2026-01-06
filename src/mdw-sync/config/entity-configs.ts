@@ -182,6 +182,7 @@ export const SYNC_STATE_CONFIG: EntityConfig<SyncState> = {
     'is_bulk_mode',
     'backward_synced_height',
     'live_synced_height',
+    'indexer_head_height',
     'created_at',
     'updated_at',
   ],
