@@ -106,10 +106,11 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       };
 
       // Upsert the key block to handle duplicate key violations gracefully
-      await this.blockRepository.upsert(blockToSave, {
-        conflictPaths: ['height'],
-        skipUpdateIfNoValuesChanged: true,
-      });
+      try {
+        await this.blockRepository.save(blockToSave);
+      } catch (error: any) {
+        this.logger.error(`Failed to save key block: ${blockToSave.height} ${blockToSave.hash}`, error.stack);
+      }
 
       // Update live_synced_height
       await this.syncStateRepository.update(
