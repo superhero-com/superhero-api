@@ -28,9 +28,9 @@ export class RefreshPerformanceViewService {
 
       try {
         // Try concurrent refresh first (requires unique index)
-        // await this.dataSource.query(
-        //   'REFRESH MATERIALIZED VIEW CONCURRENTLY token_performance_view',
-        // );
+        await this.dataSource.query(
+          'REFRESH MATERIALIZED VIEW CONCURRENTLY token_performance_view',
+        );
       } catch (concurrentError: any) {
         // If concurrent refresh fails, fall back to non-concurrent refresh
         const errorMessage =

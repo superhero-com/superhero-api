@@ -201,10 +201,10 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
           WHERE tx.sale_address = t.sale_address
             AND tx.buy_price->>'ae' != 'NaN'
             AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at ASC
+          ORDER BY created_at DESC
           LIMIT 1
         ) x
-      ) as all_time_first,
+      ) as all_time_latest,
       (
         SELECT row_to_json(x)
         FROM (
@@ -351,8 +351,8 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
       ) as past_30d,
       -- Grouped all_time object
       json_build_object(
-        'current', all_time_first->'buy_price',
-        'current_date', all_time_first->>'created_at',
+        'current', all_time_latest->'buy_price',
+        'current_date', all_time_latest->>'created_at',
         'high', all_time_high->'buy_price',
         'high_date', all_time_high->>'created_at',
         'low', all_time_low->'buy_price',
