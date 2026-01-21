@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TopicDto } from './topic.dto';
+import { PostTrendMentionDto } from './post-trend-mention.dto';
 
 export class PostDto {
   @ApiProperty({
@@ -51,6 +52,13 @@ export class PostDto {
     type: () => [TopicDto],
   })
   topics: TopicDto[];
+
+  @ApiProperty({
+    description: 'Trend mentions extracted from #trendName in content',
+    type: () => [PostTrendMentionDto],
+    required: false,
+  })
+  trend_mentions?: PostTrendMentionDto[];
 
   @ApiProperty({
     description: 'Array of media URLs associated with the post',

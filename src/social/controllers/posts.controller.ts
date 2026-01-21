@@ -27,6 +27,7 @@ import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
+import { extractTrendMentions } from '../utils/content-parser.util';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -34,10 +35,83 @@ export class PostsController {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    @InjectRepository(Token)
+    private readonly tokenRepository: Repository<Token>,
     private readonly popularRankingService: PopularRankingService,
     private readonly readsService: ReadsService,
   ) {
     //
+  }
+
+  private async attachTrendMentionsPerformance(
+    items: Array<{ id: string; content: string }>,
+  ): Promise<void> {
+    const mentionsByPost = new Map<string, string[]>();
+    const mentionedSymbols = new Set<string>();
+
+    for (const item of items) {
+      if (!item?.id || !item?.content) {
+        continue;
+      }
+      const mentions = extractTrendMentions(item.content);
+      if (mentions.length === 0) {
+        continue;
+      }
+      mentionsByPost.set(item.id, mentions);
+      mentions.forEach((name) => mentionedSymbols.add(name));
+    }
+
+    if (mentionedSymbols.size === 0) {
+      return;
+    }
+
+    const tokens = await this.tokenRepository
+      .createQueryBuilder('token')
+      .leftJoinAndMapOne(
+        'token.performance',
+        TokenPerformanceView,
+        'token_performance_view',
+        'token.sale_address = token_performance_view.sale_address',
+      )
+      .where('token.unlisted = false')
+      .andWhere('UPPER(token.symbol) IN (:...names)', {
+        names: [...mentionedSymbols],
+      })
+      .orderBy('token.created_at', 'DESC')
+      .getMany();
+
+    const tokensBySymbol = new Map<
+      string,
+      Token & { performance?: TokenPerformanceView }
+    >();
+    for (const token of tokens) {
+      if (token?.symbol) {
+        const key = token.symbol.toUpperCase();
+        if (!tokensBySymbol.has(key)) {
+          tokensBySymbol.set(key, token as any);
+        }
+      }
+    }
+
+    for (const item of items) {
+      const names = mentionsByPost.get(item.id);
+      if (!names) {
+        continue;
+      }
+      (item as any).trend_mentions = names.map((name) => {
+        const token = tokensBySymbol.get(name);
+        return {
+          name,
+          sale_address: token?.sale_address ?? null,
+          performance: token?.performance
+            ? {
+                past_24h: token.performance.past_24h ?? null,
+                past_7d: token.performance.past_7d ?? null,
+              }
+            : null,
+        };
+      });
+    }
   }
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
@@ -131,10 +205,10 @@ export class PostsController {
     const orderColumn = orderBy || 'created_at';
     // Use MIN/MAX aggregate to get one value per post.id for ordering
     const aggregateFn = orderDirection === 'DESC' ? 'MAX' : 'MIN';
-    
+
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
-    
+
     // Execute subquery to get distinct post IDs with pagination
     const distinctPostIds = await baseQuery
       .select('post.id', 'id')
@@ -167,7 +241,7 @@ export class PostsController {
       .createQueryBuilder('post')
       .leftJoin('post.topics', 'topic')
       .where('post.is_hidden = false');
-    
+
     if (search) {
       const searchTerm = `%${search}%`;
       totalCountQuery.andWhere(
@@ -175,13 +249,13 @@ export class PostsController {
         { searchTerm },
       );
     }
-    
+
     if (account_address) {
       totalCountQuery.andWhere('post.sender_address = :account_address', {
         account_address,
       });
     }
-    
+
     if (topics) {
       const topicNames = topics
         .split(',')
@@ -198,7 +272,7 @@ export class PostsController {
         totalCountQuery.andWhere(`(${topicConditions})`, topicParams);
       }
     }
-    
+
     const totalCount = await totalCountQuery
       .select('COUNT(DISTINCT post.id)', 'count')
       .getRawOne<{ count: string }>();
@@ -222,12 +296,12 @@ export class PostsController {
         'token.sale_address = token_performance_view.sale_address',
       )
       .where('post.id IN (:...postIds)', { postIds });
-      // Note: We don't use orderBy here because SQL IN clauses don't preserve order
-      // Instead, we'll sort in memory to preserve the pagination order
+    // Note: We don't use orderBy here because SQL IN clauses don't preserve order
+    // Instead, we'll sort in memory to preserve the pagination order
 
     // Execute the main query
     const items = await query.getMany();
-    
+
     // Sort items to match the order from the pagination query
     // This preserves the pagination integrity and prevents duplicates/skips across pages
     items.sort((a, b) => {
@@ -235,7 +309,9 @@ export class PostsController {
       const bIndex = postIdOrder.get(b.id) ?? Infinity;
       return aIndex - bIndex;
     });
-    
+
+    await this.attachTrendMentionsPerformance(items);
+
     // Return paginated result
     return {
       items,
@@ -274,15 +350,16 @@ export class PostsController {
     const offset = (page - 1) * limit;
     try {
       // Get total count of popular posts for the given window
-      const totalItems = await this.popularRankingService.getTotalPostsCount(window);
+      const totalItems =
+        await this.popularRankingService.getTotalPostsCount(window);
       const totalPages = Math.ceil(totalItems / limit);
-      
+
       const items = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
-      
+
       // Transform items to include type discriminator
       const transformedItems = items.map((item) => {
         if ('type' in item && item.type !== 'post' && 'metadata' in item) {
@@ -297,7 +374,9 @@ export class PostsController {
             sender_address: pluginItem.sender_address,
             content: pluginItem.content,
             total_comments: pluginItem.total_comments,
-            ...(pluginItem.metadata !== undefined && { metadata: pluginItem.metadata }),
+            ...(pluginItem.metadata !== undefined && {
+              metadata: pluginItem.metadata,
+            }),
           };
         }
         // Regular post
@@ -306,7 +385,11 @@ export class PostsController {
           type: 'post',
         };
       });
-      
+
+      await this.attachTrendMentionsPerformance(
+        transformedItems as Array<{ id: string; content: string }>,
+      );
+
       const response: any = {
         items: transformedItems,
         meta: {
@@ -381,6 +464,7 @@ export class PostsController {
     if (!post) {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
+    await this.attachTrendMentionsPerformance([post]);
     // fire-and-forget: do not block response
     void this.readsService.recordRead(post.id, req);
     return post;
