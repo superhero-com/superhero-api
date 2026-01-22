@@ -109,6 +109,48 @@ export function extractMedia(
 }
 
 /**
+ * Extracts #trend mentions from content
+ */
+export function extractTrendMentions(
+  content: string,
+  maxMentions: number = 10,
+): string[] {
+  if (!content || typeof content !== 'string') {
+    return [];
+  }
+
+  const tokenMentionPattern = /#([A-Za-z0-9_][A-Za-z0-9_-]{0,49})/g;
+  const mentions: string[] = [];
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenMentionPattern.exec(content)) !== null) {
+    const raw = match[1]?.trim();
+    if (!raw) {
+      continue;
+    }
+
+    const normalized = raw.toUpperCase();
+    if (normalized.length === 0 || normalized.length > 50) {
+      continue;
+    }
+
+    if (seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    mentions.push(normalized);
+    if (mentions.length >= maxMentions) {
+      break;
+    }
+  }
+
+  // Remove duplicates while preserving order
+  return [...new Set(mentions)];
+}
+
+/**
  * Basic content sanitization
  */
 export function sanitizeContent(content: string): string {
