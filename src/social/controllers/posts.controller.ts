@@ -465,6 +465,12 @@ export class PostsController {
         'token_performance_view',
         'token.sale_address = token_performance_view.sale_address',
       )
+      .leftJoinAndMapOne(
+        'post.sender',
+        Account,
+        'account',
+        'account.address = post.sender_address',
+      )
       .where('(post.id = :id OR post.slug = :id)', { id })
       .getOne();
 
