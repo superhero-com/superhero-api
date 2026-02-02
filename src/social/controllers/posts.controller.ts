@@ -28,6 +28,7 @@ import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
+import { Account } from '@/account/entities/account.entity';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -283,6 +284,12 @@ export class PostsController {
     const query = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
+      .leftJoinAndMapOne(
+        'post.sender',
+        Account,
+        'account',
+        'account.address = post.sender_address',
+      )
       .leftJoinAndMapOne(
         'topic.token',
         Token,
