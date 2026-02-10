@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { ProfileService } from './profile.service';
 import { Profile } from '../entities/profile.entity';
@@ -20,6 +20,7 @@ describe('ProfileService', () => {
     findOne: jest.fn(),
     save: jest.fn(),
     update: jest.fn(),
+    createQueryBuilder: jest.fn(),
   };
 
   const mockChallengeRepository = {
@@ -239,5 +240,43 @@ describe('ProfileService', () => {
         '127.0.0.1',
       ),
     ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejects duplicate username on challenge issue', async () => {
+    const queryBuilderMock = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        address: 'ak_existing',
+        username: 'taken_name',
+      }),
+    };
+    profileRepository.createQueryBuilder.mockReturnValue(
+      queryBuilderMock as any,
+    );
+
+    await expect(
+      service.issueUpdateChallenge(
+        'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
+        { username: 'taken_name' },
+        '127.0.0.1',
+        'jest',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects chain_name that is not currently owned by address', async () => {
+    jest
+      .spyOn(service, 'getOwnedChainNames')
+      .mockResolvedValue(['owned.chain']);
+
+    await expect(
+      service.issueUpdateChallenge(
+        'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
+        { chain_name: 'not-owned.chain' },
+        '127.0.0.1',
+        'jest',
+      ),
+    ).rejects.toThrow(BadRequestException);
   });
 });

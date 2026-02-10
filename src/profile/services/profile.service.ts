@@ -11,6 +11,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { Repository } from 'typeorm';
+import { ACTIVE_NETWORK } from '@/configs/network';
+import { fetchJson } from '@/utils/common';
 import { Profile } from '../entities/profile.entity';
 import { ProfileUpdateChallenge } from '../entities/profile-update-challenge.entity';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
@@ -79,6 +81,75 @@ export class ProfileService {
     return profile;
   }
 
+  async getOwnedChainNames(address: string): Promise<string[]> {
+    const middlewareUrl = ACTIVE_NETWORK.middlewareUrl;
+    const pointeesUrl = `${middlewareUrl}/v3/accounts/${encodeURIComponent(address)}/names/pointees`;
+
+    type NameRecord = {
+      active: boolean;
+      name: string;
+      block_height?: number;
+      block_time?: number;
+      tx?: {
+        pointers?: Array<{
+          id: string;
+        }>;
+      };
+    };
+
+    try {
+      const response = await fetchJson<{ data: NameRecord[] }>(pointeesUrl);
+      if (!response?.data || !Array.isArray(response.data)) {
+        return [];
+      }
+
+      const latestByName = new Map<string, NameRecord>();
+      for (const item of response.data) {
+        if (!item.active || !item.name) {
+          continue;
+        }
+        const existing = latestByName.get(item.name);
+        const currentHeight = item.block_height ?? 0;
+        const existingHeight = existing?.block_height ?? 0;
+        if (!existing || currentHeight > existingHeight) {
+          latestByName.set(item.name, item);
+        }
+      }
+
+      const verifiedNames: string[] = [];
+      for (const item of latestByName.values()) {
+        try {
+          const nameUrl = `${middlewareUrl}/v3/names/${encodeURIComponent(item.name)}`;
+          const nameResponse = await fetchJson<{
+            active: boolean;
+            pointers: Array<{ id: string }>;
+          }>(nameUrl);
+          const hasMatchingPointer =
+            nameResponse?.active === true &&
+            Array.isArray(nameResponse.pointers) &&
+            nameResponse.pointers.some((pointer) => pointer?.id === address);
+
+          if (hasMatchingPointer) {
+            verifiedNames.push(item.name);
+          }
+        } catch {
+          const pointers = item.tx?.pointers;
+          if (
+            item.active &&
+            Array.isArray(pointers) &&
+            pointers.some((pointer) => pointer?.id === address)
+          ) {
+            verifiedNames.push(item.name);
+          }
+        }
+      }
+
+      return [...new Set(verifiedNames)];
+    } catch {
+      return [];
+    }
+  }
+
   async issueUpdateChallenge(
     address: string,
     payload: UpdateProfileDto,
@@ -97,6 +168,8 @@ export class ProfileService {
         'At least one profile field must be provided',
       );
     }
+    await this.assertUsernameAvailable(address, normalizedPayload.username);
+    await this.assertOwnedChainName(address, normalizedPayload.chain_name);
 
     const payloadHash = this.createPayloadHash(address, normalizedPayload);
     const now = Date.now();
@@ -139,6 +212,8 @@ export class ProfileService {
         'At least one profile field must be provided',
       );
     }
+    await this.assertUsernameAvailable(address, normalizedPayload.username);
+    await this.assertOwnedChainName(address, normalizedPayload.chain_name);
 
     const payloadHash = this.createPayloadHash(address, normalizedPayload);
     const challengeEntry = await this.challengeRepository.findOne({
@@ -255,6 +330,41 @@ export class ProfileService {
     const canonicalString = JSON.stringify(canonicalObject);
 
     return createHash('sha256').update(canonicalString).digest('hex');
+  }
+
+  private async assertUsernameAvailable(
+    address: string,
+    username?: string,
+  ): Promise<void> {
+    if (typeof username === 'undefined') {
+      return;
+    }
+
+    const conflict = await this.profileRepository
+      .createQueryBuilder('profile')
+      .where('LOWER(profile.username) = LOWER(:username)', { username })
+      .andWhere('profile.address != :address', { address })
+      .getOne();
+
+    if (conflict) {
+      throw new BadRequestException('username is already taken');
+    }
+  }
+
+  private async assertOwnedChainName(
+    address: string,
+    chainName?: string,
+  ): Promise<void> {
+    if (typeof chainName === 'undefined') {
+      return;
+    }
+
+    const ownedNames = await this.getOwnedChainNames(address);
+    if (!ownedNames.includes(chainName)) {
+      throw new BadRequestException(
+        'chain_name must be one of the names currently owned by address',
+      );
+    }
   }
 
   private enforceRateLimit(

@@ -35,6 +35,19 @@ export class ProfileController {
     return await this.profileService.getProfile(address);
   }
 
+  @ApiOperation({ operationId: 'getOwnedChainNames' })
+  @Get(':address/owned-names')
+  async getOwnedChainNames(@Param('address') address: string) {
+    if (!/^ak_[A-Za-z0-9]{30,80}$/.test(address)) {
+      throw new BadRequestException('address must be a valid ak_ address');
+    }
+    const names = await this.profileService.getOwnedChainNames(address);
+    return {
+      address,
+      owned_chain_names: names,
+    };
+  }
+
   @ApiOperation({ operationId: 'issueProfileUpdateChallenge' })
   @Post(':address/challenge')
   async issueChallenge(
