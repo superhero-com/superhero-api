@@ -292,6 +292,45 @@ describe('ProfileService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('handles username: null without throwing (omit null in payload)', async () => {
+    challengeRepository.save.mockResolvedValue({} as ProfileUpdateChallenge);
+
+    const result = await service.issueUpdateChallenge(
+      'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
+      { username: null as any, fullname: 'Test' },
+      '127.0.0.1',
+      'jest',
+    );
+
+    expect(result.challenge).toBeDefined();
+    expect(result.payload_hash).toBeDefined();
+    // username was omitted (null not written), so payload has only fullname
+    expect(challengeRepository.save).toHaveBeenCalled();
+  });
+
+  it('rejects username that differs only in case from an existing one', async () => {
+    const queryBuilderMock = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        address: 'ak_other',
+        username: 'johndoe',
+      }),
+    };
+    profileRepository.createQueryBuilder.mockReturnValue(
+      queryBuilderMock as any,
+    );
+
+    await expect(
+      service.issueUpdateChallenge(
+        'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
+        { username: 'JohnDoe' },
+        '127.0.0.1',
+        'jest',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('rejects chain_name that is not currently owned by address', async () => {
     mockGetOwnedChainNames.mockResolvedValueOnce(['owned.chain']);
 

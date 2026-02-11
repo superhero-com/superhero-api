@@ -290,7 +290,7 @@ export class ProfileService {
     const payload: Partial<Profile> = {};
     for (const key of PROFILE_KEYS) {
       const value = input[key];
-      if (typeof value === 'undefined') {
+      if (value === undefined || value === null) {
         continue;
       }
 
@@ -299,7 +299,11 @@ export class ProfileService {
       if (normalized === '') {
         continue;
       }
-      payload[key] = normalized;
+      // Store username in lowercase so the DB unique constraint enforces case-insensitive uniqueness
+      payload[key] =
+        key === 'username' && typeof normalized === 'string'
+          ? normalized.toLowerCase()
+          : normalized;
     }
 
     return payload;
@@ -345,15 +349,16 @@ export class ProfileService {
 
   private async assertUsernameAvailable(
     address: string,
-    username?: string,
+    username?: string | null,
   ): Promise<void> {
-    if (typeof username === 'undefined') {
+    if (typeof username !== 'string') {
       return;
     }
 
+    const canonical = username.toLowerCase();
     const conflict = await this.profileRepository
       .createQueryBuilder('profile')
-      .where('LOWER(profile.username) = LOWER(:username)', { username })
+      .where('LOWER(profile.username) = :canonical', { canonical })
       .andWhere('profile.address != :address', { address })
       .getOne();
 

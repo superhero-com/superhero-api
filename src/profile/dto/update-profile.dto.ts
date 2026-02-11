@@ -4,9 +4,9 @@ import { IsOptional, IsString, IsUrl, Length, Matches } from 'class-validator';
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{1,32}$/;
 
-/** Trim strings before validation so @Length(1, ...) rejects whitespace-only values */
+/** Normalize null to undefined so @IsOptional() treats it as omitted; trim strings for validation */
 const trimString = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.trim() : value;
+  value === null ? undefined : typeof value === 'string' ? value.trim() : value;
 
 export class UpdateProfileDto {
   @ApiPropertyOptional({ example: 'Nikita Novikov', maxLength: 100 })

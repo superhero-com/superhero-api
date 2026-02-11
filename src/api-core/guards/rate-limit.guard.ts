@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { getClientIp } from '../utils/client-ip.util';
 
 interface RateLimitEntry {
   count: number;
@@ -24,7 +25,7 @@ export class RateLimitGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
-    const clientId = this.getClientId(request);
+    const clientId = this.buildClientId(request);
     const now = Date.now();
 
     // Clean up old entries periodically (every 100 requests)
@@ -61,19 +62,8 @@ export class RateLimitGuard implements CanActivate {
     return true;
   }
 
-  private getClientId(request: Request): string {
-    // Use IP address as client identifier
-    // Check for forwarded IP (if behind proxy)
-    const forwarded = request.headers['x-forwarded-for'];
-    const ip =
-      (typeof forwarded === 'string'
-        ? forwarded.split(',')[0].trim()
-        : forwarded?.[0]) ||
-      request.ip ||
-      request.socket.remoteAddress ||
-      'unknown';
-
-    // Include the route path to rate limit per endpoint
+  private buildClientId(request: Request): string {
+    const ip = getClientIp(request);
     const route = request.route?.path || request.path;
     return `${ip}:${route}`;
   }
