@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsNumber, IsString, IsIn } from 'class-validator';
+import {
+  IsOptional,
+  IsInt,
+  IsString,
+  IsIn,
+  IsDateString,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class GetPortfolioHistoryQueryDto {
@@ -11,7 +18,7 @@ export class GetPortfolioHistoryQueryDto {
     example: '2024-01-01T00:00:00.000Z',
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   startDate?: string;
 
   @ApiProperty({
@@ -22,7 +29,7 @@ export class GetPortfolioHistoryQueryDto {
     example: '2024-12-31T23:59:59.999Z',
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   endDate?: string;
 
   @ApiProperty({
@@ -34,7 +41,8 @@ export class GetPortfolioHistoryQueryDto {
     default: 86400,
   })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
   @Type(() => Number)
   interval?: number;
 

@@ -317,8 +317,11 @@ export class ProfileService {
       return;
     }
 
-    const previous = existingProfile?.x_username ?? null;
-    const incoming = payload.x_username ?? null;
+    const previous = existingProfile?.x_username?.toLowerCase() ?? null;
+    const incoming =
+      typeof payload.x_username === 'string'
+        ? payload.x_username.toLowerCase()
+        : null;
     if (previous !== incoming) {
       payload.x_verified = false;
       payload.x_verified_at = null;

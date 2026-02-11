@@ -1,5 +1,6 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -8,6 +9,8 @@ import {
   Param,
   ParseIntPipe,
   Query,
+  UsePipes,
+  ValidationPipe,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiOkResponse, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
@@ -108,6 +111,7 @@ export class AccountsController {
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
   @CacheTTL(60 * 10) // 10 minutes
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
     @Param('address') address: string,
@@ -115,6 +119,17 @@ export class AccountsController {
   ) {
     const start = query.startDate ? moment(query.startDate) : undefined;
     const end = query.endDate ? moment(query.endDate) : undefined;
+    if (start && !start.isValid()) {
+      throw new BadRequestException('startDate must be a valid ISO 8601 date');
+    }
+    if (end && !end.isValid()) {
+      throw new BadRequestException('endDate must be a valid ISO 8601 date');
+    }
+    if (start && end && start.isAfter(end)) {
+      throw new BadRequestException(
+        'startDate must be before or equal to endDate',
+      );
+    }
     const includeFields = query.include
       ? query.include.split(',').map((f) => f.trim())
       : [];

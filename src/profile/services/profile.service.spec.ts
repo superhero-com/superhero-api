@@ -474,4 +474,68 @@ describe('ProfileService', () => {
       }),
     );
   });
+
+  it('does not reset x verification flags when x_username casing changes only', async () => {
+    const address = 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi';
+    const now = Date.now();
+    const challengeEntry: Partial<ProfileUpdateChallenge> = {
+      id: 'c6',
+      challenge: 'challenge-x-case-only',
+      address,
+      action: 'update_profile',
+      expires_at: new Date(now + 60_000),
+      consumed_at: null,
+    };
+    const payloadHash = (service as any).createPayloadHash(address, {
+      x_username: 'MyHandle',
+    });
+    (challengeEntry as any).payload_hash = payloadHash;
+
+    challengeRepository.findOne.mockResolvedValue(
+      challengeEntry as ProfileUpdateChallenge,
+    );
+    (verifyMessage as jest.Mock).mockReturnValue(true);
+
+    const queryBuilderMock = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    challengeRepository.createQueryBuilder.mockReturnValue(
+      queryBuilderMock as any,
+    );
+
+    profileRepository.findOne
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'myhandle',
+        x_verified: true,
+      } as Profile)
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'myhandle',
+        x_verified: true,
+      } as Profile);
+
+    await service.updateProfileWithChallenge(
+      address,
+      {
+        x_username: 'MyHandle',
+        challenge: 'challenge-x-case-only',
+        signature: 'abcdef123456',
+      } as any,
+      '127.0.0.1',
+    );
+
+    const updatePayload = (profileRepository.update as jest.Mock).mock.calls[0][1];
+    expect(updatePayload).toEqual(
+      expect.objectContaining({
+        x_username: 'MyHandle',
+      }),
+    );
+    expect(updatePayload).not.toHaveProperty('x_verified');
+    expect(updatePayload).not.toHaveProperty('x_verified_at');
+  });
 });
