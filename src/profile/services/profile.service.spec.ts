@@ -1,7 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { AccountService } from '@/account/services/account.service';
 import { OAuthService } from '@/affiliation/services/oauth.service';
@@ -299,6 +303,16 @@ describe('ProfileService', () => {
         'jest',
       ),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('throws ServiceUnavailableException when owned chain names fetch fails', async () => {
+    mockGetOwnedChainNames.mockResolvedValueOnce(undefined);
+
+    await expect(
+      service.getOwnedChainNames(
+        'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
+      ),
+    ).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('verifies x_username when OAuth username matches', async () => {

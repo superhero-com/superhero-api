@@ -6,6 +6,7 @@ import {
   HttpException,
   HttpStatus,
   RequestTimeoutException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
@@ -89,7 +90,12 @@ export class ProfileService {
 
   async getOwnedChainNames(address: string): Promise<string[]> {
     const names = await this.accountService.getOwnedChainNames(address);
-    return names ?? [];
+    if (names === undefined) {
+      throw new ServiceUnavailableException(
+        'Unable to verify chain names; try again later',
+      );
+    }
+    return names;
   }
 
   async verifyXUsername(address: string, accessCode: string): Promise<Profile> {
