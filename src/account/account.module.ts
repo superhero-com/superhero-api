@@ -37,7 +37,7 @@ import { LeaderboardSnapshotService } from './services/leaderboard-snapshot.serv
     LeaderboardService,
     LeaderboardSnapshotService,
   ],
-  exports: [TypeOrmModule],
+  exports: [TypeOrmModule, AccountService],
   controllers: [LeaderboardController, AccountsController, BclPnlController],
 })
 export class AccountModule {

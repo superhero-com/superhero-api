@@ -11,8 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { Repository } from 'typeorm';
-import { ACTIVE_NETWORK } from '@/configs/network';
-import { fetchJson } from '@/utils/common';
+import { AccountService } from '@/account/services/account.service';
 import { Profile } from '../entities/profile.entity';
 import { ProfileUpdateChallenge } from '../entities/profile-update-challenge.entity';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
@@ -59,6 +58,7 @@ export class ProfileService {
     private readonly profileRepository: Repository<Profile>,
     @InjectRepository(ProfileUpdateChallenge)
     private readonly challengeRepository: Repository<ProfileUpdateChallenge>,
+    private readonly accountService: AccountService,
   ) {}
 
   private readonly getProfileTimeoutMs = 15_000;
@@ -67,87 +67,27 @@ export class ProfileService {
     const findPromise = this.profileRepository.findOne({
       where: { address },
     });
+    let timeoutId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(
+      timeoutId = setTimeout(
         () => reject(new RequestTimeoutException('Profile fetch timeout')),
         this.getProfileTimeoutMs,
       );
     });
-    const profile = await Promise.race([findPromise, timeoutPromise]);
-    if (!profile) {
-      throw new NotFoundException('Profile not found');
+    try {
+      const profile = await Promise.race([findPromise, timeoutPromise]);
+      if (!profile) {
+        throw new NotFoundException('Profile not found');
+      }
+      return profile;
+    } finally {
+      clearTimeout(timeoutId!);
     }
-
-    return profile;
   }
 
   async getOwnedChainNames(address: string): Promise<string[]> {
-    const middlewareUrl = ACTIVE_NETWORK.middlewareUrl;
-    const pointeesUrl = `${middlewareUrl}/v3/accounts/${encodeURIComponent(address)}/names/pointees`;
-
-    type NameRecord = {
-      active: boolean;
-      name: string;
-      block_height?: number;
-      block_time?: number;
-      tx?: {
-        pointers?: Array<{
-          id: string;
-        }>;
-      };
-    };
-
-    try {
-      const response = await fetchJson<{ data: NameRecord[] }>(pointeesUrl);
-      if (!response?.data || !Array.isArray(response.data)) {
-        return [];
-      }
-
-      const latestByName = new Map<string, NameRecord>();
-      for (const item of response.data) {
-        if (!item.active || !item.name) {
-          continue;
-        }
-        const existing = latestByName.get(item.name);
-        const currentHeight = item.block_height ?? 0;
-        const existingHeight = existing?.block_height ?? 0;
-        if (!existing || currentHeight > existingHeight) {
-          latestByName.set(item.name, item);
-        }
-      }
-
-      const verifiedNames: string[] = [];
-      for (const item of latestByName.values()) {
-        try {
-          const nameUrl = `${middlewareUrl}/v3/names/${encodeURIComponent(item.name)}`;
-          const nameResponse = await fetchJson<{
-            active: boolean;
-            pointers: Array<{ id: string }>;
-          }>(nameUrl);
-          const hasMatchingPointer =
-            nameResponse?.active === true &&
-            Array.isArray(nameResponse.pointers) &&
-            nameResponse.pointers.some((pointer) => pointer?.id === address);
-
-          if (hasMatchingPointer) {
-            verifiedNames.push(item.name);
-          }
-        } catch {
-          const pointers = item.tx?.pointers;
-          if (
-            item.active &&
-            Array.isArray(pointers) &&
-            pointers.some((pointer) => pointer?.id === address)
-          ) {
-            verifiedNames.push(item.name);
-          }
-        }
-      }
-
-      return [...new Set(verifiedNames)];
-    } catch {
-      return [];
-    }
+    const names = await this.accountService.getOwnedChainNames(address);
+    return names ?? [];
   }
 
   async issueUpdateChallenge(
@@ -304,7 +244,12 @@ export class ProfileService {
         continue;
       }
 
-      payload[key] = typeof value === 'string' ? value.trim() : value;
+      const normalized = typeof value === 'string' ? value.trim() : value;
+      // Omit empty strings so we never store "" (DTO should reject these; this is defense-in-depth)
+      if (normalized === '') {
+        continue;
+      }
+      payload[key] = normalized;
     }
 
     return payload;
@@ -367,12 +312,19 @@ export class ProfileService {
     }
   }
 
+  private readonly rateLimitCleanupThreshold = 1000;
+
   private enforceRateLimit(
     map: Map<string, RateLimitEntry>,
     key: string,
     limit: number,
   ): void {
     const now = Date.now();
+
+    if (map.size > this.rateLimitCleanupThreshold) {
+      this.cleanupRateLimitMap(map, now);
+    }
+
     const entry = map.get(key);
 
     if (!entry || now > entry.resetAt) {
@@ -388,5 +340,16 @@ export class ProfileService {
     }
 
     entry.count += 1;
+  }
+
+  private cleanupRateLimitMap(
+    map: Map<string, RateLimitEntry>,
+    now: number,
+  ): void {
+    for (const [k, entry] of map.entries()) {
+      if (now > entry.resetAt) {
+        map.delete(k);
+      }
+    }
   }
 }

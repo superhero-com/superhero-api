@@ -3,12 +3,20 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { verifyMessage } from '@aeternity/aepp-sdk';
+import { AccountService } from '@/account/services/account.service';
 import { ProfileService } from './profile.service';
 import { Profile } from '../entities/profile.entity';
 import { ProfileUpdateChallenge } from '../entities/profile-update-challenge.entity';
 
 jest.mock('@aeternity/aepp-sdk', () => ({
   verifyMessage: jest.fn(),
+}));
+
+const mockGetOwnedChainNames = jest.fn().mockResolvedValue([]);
+jest.mock('@/account/services/account.service', () => ({
+  AccountService: class {
+    getOwnedChainNames = mockGetOwnedChainNames;
+  },
 }));
 
 describe('ProfileService', () => {
@@ -30,6 +38,7 @@ describe('ProfileService', () => {
   };
 
   beforeEach(async () => {
+    mockGetOwnedChainNames.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ProfileService,
@@ -40,6 +49,12 @@ describe('ProfileService', () => {
         {
           provide: getRepositoryToken(ProfileUpdateChallenge),
           useValue: mockChallengeRepository,
+        },
+        {
+          provide: AccountService,
+          useValue: new (AccountService as unknown as new () => {
+            getOwnedChainNames: typeof mockGetOwnedChainNames;
+          })(),
         },
       ],
     }).compile();
@@ -266,9 +281,7 @@ describe('ProfileService', () => {
   });
 
   it('rejects chain_name that is not currently owned by address', async () => {
-    jest
-      .spyOn(service, 'getOwnedChainNames')
-      .mockResolvedValue(['owned.chain']);
+    mockGetOwnedChainNames.mockResolvedValueOnce(['owned.chain']);
 
     await expect(
       service.issueUpdateChallenge(
