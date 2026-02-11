@@ -16,7 +16,7 @@ import { OAuthService } from './services/oauth.service';
     TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation]),
   ],
   providers: [OAuthService],
-  exports: [],
+  exports: [OAuthService],
   controllers: [AffiliationController, InvitationsController],
 })
 export class AffiliationModule {

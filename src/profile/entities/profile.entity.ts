@@ -31,6 +31,17 @@ export class Profile {
   @Column({ nullable: true })
   x_username: string;
 
+  @Column({
+    default: false,
+  })
+  x_verified: boolean;
+
+  @Column({
+    nullable: true,
+    type: 'timestamp',
+  })
+  x_verified_at: Date | null;
+
   @Column({ nullable: true })
   chain_name: string;
 

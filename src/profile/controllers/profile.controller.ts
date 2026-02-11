@@ -18,6 +18,7 @@ import { ProfileService } from '../services/profile.service';
 import { IssueProfileChallengeDto } from '../dto/issue-profile-challenge.dto';
 import { ConsumeProfileChallengeDto } from '../dto/consume-profile-challenge.dto';
 import { AddressParamDto } from '../dto/address-param.dto';
+import { VerifyXDto } from '../dto/verify-x.dto';
 
 @ApiTags('Profile')
 @UseGuards(RateLimitGuard)
@@ -74,6 +75,18 @@ export class ProfileController {
       params.address,
       body,
       this.getClientIp(req),
+    );
+  }
+
+  @ApiOperation({ operationId: 'verifyXUsername' })
+  @Post(':address/verify-x')
+  async verifyXUsername(
+    @Param() params: AddressParamDto,
+    @Body() body: VerifyXDto,
+  ) {
+    return await this.profileService.verifyXUsername(
+      params.address,
+      body.access_code,
     );
   }
 

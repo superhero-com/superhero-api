@@ -40,7 +40,11 @@ export class UpdateProfileDto {
   @Length(1, 500)
   avatarurl?: string;
 
-  @ApiPropertyOptional({ example: 'nikit_dev' })
+  @ApiPropertyOptional({
+    example: 'nikit_dev',
+    description:
+      'Changing this value resets x verification state until re-verified',
+  })
   @IsOptional()
   @IsString()
   @Transform(trimString)

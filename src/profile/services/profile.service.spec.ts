@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { AccountService } from '@/account/services/account.service';
+import { OAuthService } from '@/affiliation/services/oauth.service';
 import { ProfileService } from './profile.service';
 import { Profile } from '../entities/profile.entity';
 import { ProfileUpdateChallenge } from '../entities/profile-update-challenge.entity';
@@ -36,6 +37,9 @@ describe('ProfileService', () => {
     save: jest.fn(),
     createQueryBuilder: jest.fn(),
   };
+  const mockOAuthService = {
+    verifyAccessToken: jest.fn(),
+  };
 
   beforeEach(async () => {
     mockGetOwnedChainNames.mockResolvedValue([]);
@@ -55,6 +59,10 @@ describe('ProfileService', () => {
           useValue: new (AccountService as unknown as new () => {
             getOwnedChainNames: typeof mockGetOwnedChainNames;
           })(),
+        },
+        {
+          provide: OAuthService,
+          useValue: mockOAuthService,
         },
       ],
     }).compile();
@@ -291,5 +299,126 @@ describe('ProfileService', () => {
         'jest',
       ),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('verifies x_username when OAuth username matches', async () => {
+    const address = 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi';
+    profileRepository.findOne
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'my_handle',
+      } as Profile)
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'my_handle',
+        x_verified: true,
+      } as Profile);
+    mockOAuthService.verifyAccessToken.mockResolvedValue({
+      id: 'x-1',
+      name: 'My User',
+      email: '',
+      provider: 'x',
+      username: 'my_handle',
+    });
+
+    const result = await service.verifyXUsername(address, 'oauth_token');
+    expect(mockOAuthService.verifyAccessToken).toHaveBeenCalledWith(
+      'x',
+      'oauth_token',
+    );
+    expect(profileRepository.update).toHaveBeenCalledWith(
+      address,
+      expect.objectContaining({
+        x_verified: true,
+        x_username: 'my_handle',
+      }),
+    );
+    expect(result?.x_verified).toBe(true);
+  });
+
+  it('rejects x verification when oauth user does not match profile x_username', async () => {
+    const address = 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi';
+    profileRepository.findOne.mockResolvedValue({
+      address,
+      x_username: 'my_handle',
+    } as Profile);
+    mockOAuthService.verifyAccessToken.mockResolvedValue({
+      id: 'x-2',
+      name: 'Other',
+      email: '',
+      provider: 'x',
+      username: 'other_handle',
+    });
+
+    await expect(
+      service.verifyXUsername(address, 'oauth_token'),
+    ).rejects.toThrow(BadRequestException);
+    expect(profileRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('resets x verification flags when x_username changes in update flow', async () => {
+    const address = 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi';
+    const challengeEntry: Partial<ProfileUpdateChallenge> = {
+      id: 'cx',
+      challenge: 'challenge-x-reset',
+      address,
+      action: 'update_profile',
+      expires_at: new Date(Date.now() + 60_000),
+      consumed_at: null,
+    };
+
+    const payloadHash = (service as any).createPayloadHash(address, {
+      x_username: 'new_handle',
+      x_verified: false,
+      x_verified_at: null,
+    });
+    (challengeEntry as any).payload_hash = payloadHash;
+
+    challengeRepository.findOne.mockResolvedValue(
+      challengeEntry as ProfileUpdateChallenge,
+    );
+    (verifyMessage as jest.Mock).mockReturnValue(true);
+
+    const queryBuilderMock = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    challengeRepository.createQueryBuilder.mockReturnValue(
+      queryBuilderMock as any,
+    );
+
+    profileRepository.findOne
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'old_handle',
+        x_verified: true,
+      } as Profile)
+      .mockResolvedValueOnce({
+        address,
+        x_username: 'old_handle',
+        x_verified: true,
+      } as Profile);
+
+    await service.updateProfileWithChallenge(
+      address,
+      {
+        x_username: 'new_handle',
+        challenge: 'challenge-x-reset',
+        signature: 'abcdef123456',
+      } as any,
+      '127.0.0.1',
+    );
+
+    expect(profileRepository.update).toHaveBeenCalledWith(
+      address,
+      expect.objectContaining({
+        x_username: 'new_handle',
+        x_verified: false,
+        x_verified_at: null,
+      }),
+    );
   });
 });

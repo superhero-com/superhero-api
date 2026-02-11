@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'crypto';
 import { verifyMessage } from '@aeternity/aepp-sdk';
 import { Repository } from 'typeorm';
 import { AccountService } from '@/account/services/account.service';
+import { OAuthService } from '@/affiliation/services/oauth.service';
 import { Profile } from '../entities/profile.entity';
 import { ProfileUpdateChallenge } from '../entities/profile-update-challenge.entity';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
@@ -59,6 +60,7 @@ export class ProfileService {
     @InjectRepository(ProfileUpdateChallenge)
     private readonly challengeRepository: Repository<ProfileUpdateChallenge>,
     private readonly accountService: AccountService,
+    private readonly oauthService: OAuthService,
   ) {}
 
   private readonly getProfileTimeoutMs = 15_000;
@@ -90,6 +92,44 @@ export class ProfileService {
     return names ?? [];
   }
 
+  async verifyXUsername(address: string, accessCode: string): Promise<Profile> {
+    const profile = await this.profileRepository.findOne({
+      where: { address },
+    });
+    if (!profile) {
+      throw new NotFoundException('Profile not found');
+    }
+    if (!profile.x_username) {
+      throw new BadRequestException(
+        'x_username must be set before verification',
+      );
+    }
+
+    const userInfo = await this.oauthService.verifyAccessToken('x', accessCode);
+    if (!userInfo.username) {
+      throw new BadRequestException(
+        'Could not resolve username from X OAuth response',
+      );
+    }
+
+    const profileUsername = profile.x_username.toLowerCase();
+    const oauthUsername = userInfo.username.toLowerCase();
+    if (profileUsername !== oauthUsername) {
+      throw new BadRequestException(
+        'x_username does not match authenticated X account',
+      );
+    }
+
+    const now = new Date();
+    await this.profileRepository.update(address, {
+      x_verified: true,
+      x_verified_at: now,
+      x_username: userInfo.username,
+    });
+
+    return (await this.profileRepository.findOne({ where: { address } }))!;
+  }
+
   async issueUpdateChallenge(
     address: string,
     payload: UpdateProfileDto,
@@ -102,7 +142,11 @@ export class ProfileService {
       10,
     );
 
+    const existingProfile = await this.profileRepository.findOne({
+      where: { address },
+    });
     const normalizedPayload = this.extractProfilePayload(payload);
+    this.applyXVerificationReset(existingProfile, normalizedPayload);
     if (Object.keys(normalizedPayload).length === 0) {
       throw new BadRequestException(
         'At least one profile field must be provided',
@@ -146,7 +190,11 @@ export class ProfileService {
       20,
     );
 
+    const existingProfile = await this.profileRepository.findOne({
+      where: { address },
+    });
     const normalizedPayload = this.extractProfilePayload(payload);
+    this.applyXVerificationReset(existingProfile, normalizedPayload);
     if (Object.keys(normalizedPayload).length === 0) {
       throw new BadRequestException(
         'At least one profile field must be provided',
@@ -203,11 +251,7 @@ export class ProfileService {
       throw new UnauthorizedException('Challenge already used or expired');
     }
 
-    const existing = await this.profileRepository.findOne({
-      where: { address },
-    });
-
-    if (!existing) {
+    if (!existingProfile) {
       await this.profileRepository.save({
         address,
         ...normalizedPayload,
@@ -253,6 +297,22 @@ export class ProfileService {
     }
 
     return payload;
+  }
+
+  private applyXVerificationReset(
+    existingProfile: Profile | null,
+    payload: Partial<Profile>,
+  ): void {
+    if (typeof payload.x_username === 'undefined') {
+      return;
+    }
+
+    const previous = existingProfile?.x_username ?? null;
+    const incoming = payload.x_username ?? null;
+    if (previous !== incoming) {
+      payload.x_verified = false;
+      payload.x_verified_at = null;
+    }
   }
 
   private createPayloadHash(

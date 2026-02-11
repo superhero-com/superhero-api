@@ -7,6 +7,7 @@ export interface OAuthUserInfo {
   name: string;
   email: string;
   provider: string;
+  username?: string;
 }
 
 @Injectable()
@@ -150,6 +151,7 @@ export class OAuthService {
         name: userData.name || userData.username,
         email: userData.email || '', // X doesn't always provide email
         provider: 'x',
+        username: userData.username || undefined,
       };
     } catch (error) {
       this.logger.error('X token verification failed:', error);
