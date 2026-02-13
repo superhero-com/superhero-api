@@ -1,6 +1,6 @@
 import { AccountModule } from '@/account/account.module';
 import { AeModule } from '@/ae/ae.module';
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AffiliationController } from './controllers/affiliation.controller';
 import { InvitationsController } from './controllers/invitations.controller';
@@ -12,11 +12,11 @@ import { OAuthService } from './services/oauth.service';
 @Module({
   imports: [
     AeModule,
-    AccountModule,
+    forwardRef(() => AccountModule),
     TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation]),
   ],
   providers: [OAuthService],
-  exports: [],
+  exports: [OAuthService],
   controllers: [AffiliationController, InvitationsController],
 })
 export class AffiliationModule {

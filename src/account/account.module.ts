@@ -16,10 +16,12 @@ import { LeaderboardService } from './services/leaderboard.service';
 import { LeaderboardController } from './controllers/leaderboard.controller';
 import { AccountLeaderboardSnapshot } from './entities/account-leaderboard-snapshot.entity';
 import { LeaderboardSnapshotService } from './services/leaderboard-snapshot.service';
+import { ProfileModule } from '@/profile/profile.module';
 
 @Module({
   imports: [
     AeModule, // Includes CoinGeckoService
+    ProfileModule,
     TransactionsModule,
     TokensModule,
     TypeOrmModule.forFeature([
