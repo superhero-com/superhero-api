@@ -305,7 +305,8 @@ export class PopularRankingService {
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
     const key = this.getRedisKey(window);
     const hours = this.getWindowHours(window);
-    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    // For 'all' window, don't calculate since date (would be invalid with Number.MAX_SAFE_INTEGER)
+    const since = window === 'all' ? null : new Date(Date.now() - hours * 60 * 60 * 1000);
 
     this.logger.log(`Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
     
@@ -318,15 +319,27 @@ export class PopularRankingService {
     }
 
     // Fetch candidate posts (top-level, not hidden) within window
-    const candidates = await this.postRepository
+    const queryBuilder = this.postRepository
       .createQueryBuilder('post')
       .leftJoinAndSelect('post.topics', 'topic')
       .where('post.is_hidden = false')
-      .andWhere('post.post_id IS NULL')
-      .andWhere(window === 'all' ? '1=1' : 'post.created_at >= :since', {
-        since,
-      })
-      .orderBy('post.created_at', 'DESC')
+      .andWhere('post.post_id IS NULL');
+    
+    if (window !== 'all' && since) {
+      queryBuilder.andWhere('post.created_at >= :since', { since });
+    }
+    
+    // For 'all' window, order by total engagement signals to get truly popular posts
+    // For time-limited windows, order by recency to get recent popular posts
+    if (window === 'all') {
+      // Order by total comments to prioritize highly engaged posts
+      // No secondary sort by recency - we want all-time great posts regardless of age
+      queryBuilder.orderBy('COALESCE(post.total_comments, 0)', 'DESC');
+    } else {
+      queryBuilder.orderBy('post.created_at', 'DESC');
+    }
+    
+    const candidates = await queryBuilder
       .limit(maxCandidates)
       .getMany();
 
@@ -450,16 +463,18 @@ export class PopularRankingService {
     );
 
     // Preload reads over window per post
-    const fromDate = new Date(Date.now() - hours * 3600 * 1000);
-    const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
-      fromDate.getUTCMonth() + 1,
-    ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
+    // For 'all' window, get all reads (no date filter)
+    // For time-limited windows, filter reads by date
     const readsQB = this.postReadsRepository
       .createQueryBuilder('r')
       .select('r.post_id', 'post_id')
       .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
       .where('r.post_id IN (:...ids)', { ids });
     if (window !== 'all') {
+      const fromDate = new Date(Date.now() - hours * 3600 * 1000);
+      const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
+        fromDate.getUTCMonth() + 1,
+      ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
       readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
     }
     const readsRows = await readsQB
@@ -482,11 +497,17 @@ export class PopularRankingService {
           ? parseInt(tipsAgg.unique_tippers || '0', 10)
           : 0;
 
-        const ageHours = Math.max(
-          1,
-          (Date.now() - new Date(post.created_at).getTime()) / 3_600_000,
-        );
-        const interactionsPerHour = (comments + uniqueTippers) / ageHours;
+        // For 'all' window, skip age calculation entirely - no recency bias
+        // For time-limited windows, calculate age for per-hour metrics
+        const ageHours = window === 'all' 
+          ? 1 // Dummy value, not used for 'all' window
+          : Math.max(1, (Date.now() - new Date(post.created_at).getTime()) / 3_600_000);
+        
+        // For 'all' window, use total interactions (not per-hour) to avoid favoring newer posts
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const interactionsPerHour = window === 'all' 
+          ? (comments + uniqueTippers) // Total interactions for all-time
+          : (comments + uniqueTippers) / ageHours; // Per-hour rate for time-limited windows
 
         // trending boost (max topic score)
         let trendingBoost = 0;
@@ -558,7 +579,11 @@ export class PopularRankingService {
 
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = readsByPost.get(post.id) || 0;
-        const readsPerHour = reads / ageHours;
+        // For 'all' window, use total reads (not per-hour) to avoid favoring newer posts
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const readsPerHour = window === 'all' 
+          ? reads // Total reads for all-time
+          : reads / ageHours; // Per-hour rate for time-limited windows
         // owned trends factor: normalize value portfolio into [0..1]
         const ownedRaw = ownedValueByAddress.get(post.sender_address) || 0;
         const normalizer =
@@ -591,10 +616,11 @@ export class PopularRankingService {
         } else if (window === '24h') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY;
         }
-        // window === 'all' uses gravity = 0.0 (no time decay)
-        const score =
-          numerator /
-          Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
+        // For 'all' window, score = numerator (no age-based decay)
+        // For time-limited windows, apply gravity-based time decay
+        const score = window === 'all'
+          ? numerator // No time decay for all-time ranking
+          : numerator / Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
         return { postId: post.id, score, type: 'post' };
       }),
     );
@@ -609,11 +635,17 @@ export class PopularRankingService {
         const tipsCount = 0;
         const uniqueTippers = 0;
 
-        const ageHours = Math.max(
-          1,
-          (Date.now() - new Date(item.created_at).getTime()) / 3_600_000,
-        );
-        const interactionsPerHour = (comments + uniqueTippers) / ageHours;
+        // For 'all' window, skip age calculation entirely - no recency bias
+        // For time-limited windows, calculate age for per-hour metrics
+        const ageHours = window === 'all' 
+          ? 1 // Dummy value, not used for 'all' window
+          : Math.max(1, (Date.now() - new Date(item.created_at).getTime()) / 3_600_000);
+        
+        // For 'all' window, use total interactions (not per-hour) to avoid favoring newer items
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const interactionsPerHour = window === 'all' 
+          ? (comments + uniqueTippers) // Total interactions for all-time
+          : (comments + uniqueTippers) / ageHours; // Per-hour rate for time-limited windows
 
         // Trending boost (max topic score)
         let trendingBoost = 0;
@@ -684,7 +716,11 @@ export class PopularRankingService {
 
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = 0; // Plugin items don't have reads tracking (for now)
-        const readsPerHour = reads / ageHours;
+        // For 'all' window, use total reads (not per-hour) to avoid favoring newer items
+        // For time-limited windows, use per-hour rate to favor recent engagement
+        const readsPerHour = window === 'all' 
+          ? reads // Total reads for all-time
+          : reads / ageHours; // Per-hour rate for time-limited windows
         const ownedRaw = ownedValueByAddress.get(item.sender_address) || 0;
         const normalizer =
           POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
@@ -707,15 +743,19 @@ export class PopularRankingService {
           w.invites * invitesFactor +
           w.ownedTrends * ownedNorm;
 
+        // Apply gravity based on window
+        // For "all" window, no gravity (0.0) means all items compete equally regardless of age
         let gravity = 0.0;
         if (window === '7d') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY_7D;
         } else if (window === '24h') {
           gravity = POPULAR_RANKING_CONFIG.GRAVITY;
         }
-        const score =
-          numerator /
-          Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
+        // For 'all' window, score = numerator (no age-based decay)
+        // For time-limited windows, apply gravity-based time decay
+        const score = window === 'all'
+          ? numerator // No time decay for all-time ranking
+          : numerator / Math.pow(ageHours + POPULAR_RANKING_CONFIG.T_BIAS, gravity);
         return {
           postId: item.id,
           score,
@@ -727,6 +767,9 @@ export class PopularRankingService {
 
     // Merge all scored items
     const scored = [...scoredPosts, ...scoredPluginItems];
+
+    // Sort by score DESC to ensure consistent ordering
+    scored.sort((a, b) => b.score - a.score);
 
     // Apply score floor (hide zero-signal posts)
     let scoreFloor: number = POPULAR_RANKING_CONFIG.SCORE_FLOOR_DEFAULT;
