@@ -20,6 +20,7 @@ import { PortfolioService } from '../services/portfolio.service';
 import { AccountService } from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
+import { ProfileReadService } from '@/profile/services/profile-read.service';
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -32,6 +33,7 @@ export class AccountsController {
     private readonly accountRepository: Repository<Account>,
     private readonly portfolioService: PortfolioService,
     private readonly accountService: AccountService,
+    private readonly profileReadService: ProfileReadService,
   ) {
     //
   }
@@ -81,7 +83,6 @@ export class AccountsController {
       return 86400;
     }
 
-    const periodDays = end.diff(start, 'days');
     const periodMonths = end.diff(start, 'months', true);
 
     // If period is in days or weeks (less than 1 month), hourly interval is okay
@@ -122,7 +123,7 @@ export class AccountsController {
     // Calculate minimum allowed interval based on period
     const minimumInterval = this.getMinimumInterval(start, end);
     const requestedInterval = query.interval || 86400;
-    
+
     // Use the larger of requested interval or minimum allowed interval
     const finalInterval = Math.max(requestedInterval, minimumInterval);
 
@@ -154,44 +155,39 @@ export class AccountsController {
     }
 
     // Fetch chain name from middleware if stale (older than 24 hours) or never checked
-    // This ensures we respect the timestamp even when chain_name is null (no name found)
     const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
     const now = new Date();
-    const isStale = account.chain_name_updated_at 
+    const isStale = account.chain_name_updated_at
       ? (now.getTime() - account.chain_name_updated_at.getTime()) > CHAIN_NAME_STALE_THRESHOLD_MS
-      : true; // If never updated, consider it stale
-    
+      : true;
+
     let chainName = account.chain_name;
     let chainNameUpdatedAt = account.chain_name_updated_at;
-    
-    // Only fetch if stale - respect the timestamp even when chainName is null
-    // This prevents repeated middleware calls for accounts with no chain name
+
     if (isStale) {
       const fetchedChainName = await this.accountService.getChainNameForAccount(address);
-      
-      // Only update if fetch succeeded (not undefined)
-      // undefined means fetch failed - preserve existing chain_name to avoid data loss
+
       if (fetchedChainName !== undefined) {
         chainName = fetchedChainName;
-        chainNameUpdatedAt = now; // Update timestamp for response consistency
-        // Update the database (but don't block the response)
+        chainNameUpdatedAt = now;
         const updateData: Partial<Account> = {
           chain_name: chainName,
           chain_name_updated_at: now,
         };
         this.accountRepository.update(address, updateData).catch((err) => {
-          // Log but don't throw - this is a background update
           this.logger.warn(`Failed to update chain_name for ${address}`, err);
         });
       }
-      // If fetchedChainName is undefined, keep existing chainName and chainNameUpdatedAt
-      // This prevents middleware errors from overwriting valid chain names with null
     }
+
+    const profile = await this.profileReadService.getProfile(address);
 
     return {
       ...account,
       chain_name: chainName,
       chain_name_updated_at: chainNameUpdatedAt,
+      profile: profile.profile,
+      public_name: profile.public_name,
     };
   }
 }
