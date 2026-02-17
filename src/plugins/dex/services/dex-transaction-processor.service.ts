@@ -137,7 +137,9 @@ export class DexTransactionProcessorService {
     let decodedEvents = null;
     try {
       if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log);
+        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log, {
+          omitUnknown: true,
+        });
       }
     } catch (error: any) {
       // Try factory contract if router fails
@@ -146,7 +148,9 @@ export class DexTransactionProcessorService {
     if (!decodedEvents) {
       try {
         if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log);
+          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log, {
+            omitUnknown: true,
+          });
         }
       } catch (error: any) {
         this.logger.debug(

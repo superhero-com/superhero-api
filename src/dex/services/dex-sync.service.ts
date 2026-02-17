@@ -196,13 +196,17 @@ export class DexSyncService {
     // console.log('transaction.tx.function:', transaction.tx.function);
     let decodedEvents = null;
     try {
-      decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log);
+      decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log, {
+        omitUnknown: true,
+      });
     } catch (error: any) {
       // console.log('routerContract.$decodeEvents error', error?.message);
     }
     if (!decodedEvents) {
       try {
-        decodedEvents = this.factoryContract.$decodeEvents(transaction.tx.log);
+        decodedEvents = this.factoryContract.$decodeEvents(transaction.tx.log, {
+          omitUnknown: true,
+        });
         // console.log('factoryContract.$decodeEvents decodedEvents', decodedEvents);
       } catch (error: any) {
         console.log('factoryContract.$decodeEvents error', error?.message);
@@ -419,17 +423,7 @@ export class DexSyncService {
       pairMintInfo: any;
     },
   ): Promise<PairTransaction> {
-    const existingTransaction = await this.dexPairTransactionRepository
-      .createQueryBuilder('pairTransaction')
-      .where('pairTransaction.tx_hash = :tx_hash', {
-        tx_hash: transaction.hash,
-      })
-      .getOne();
-    if (existingTransaction) {
-      return existingTransaction;
-    }
-
-    return this.dexPairTransactionRepository.save({
+    await this.dexPairTransactionRepository.upsert({
       pair: pair,
       account_address: transaction.tx.callerId,
       tx_type: transaction.tx.function,
