@@ -49,6 +49,10 @@ export async function fetchJson<T = any>(
     return response.json() as Promise<T>;
   } catch (error: any) {
     if (error?.name === 'AbortError') {
+      // Respect caller cancellation: do not retry when the parent signal aborted.
+      if (options?.signal?.aborted) {
+        throw error;
+      }
       incrementFetchTimeout();
     }
     if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED && !shouldNotRetry) {
