@@ -57,14 +57,25 @@ export class BclPluginSyncService extends BasePluginSyncService {
 
     try {
       const contract = await this.getContract(BCL_CONTRACT.contractAddress, CommunityFactoryACI);
-      const decodedLogs = contract.$decodeEvents(tx.raw.log);
+      const decodedLogs = contract.$decodeEvents(tx.raw.log, {
+        omitUnknown: true,
+      });
 
       return serializeBigInts(decodedLogs);
     } catch (error: any) {
-      this.logger.error(
-        `Failed to decode logs for transaction ${tx.hash}`,
-        error.stack,
-      );
+      const isUnknownEventError =
+        error?.name === 'MissingEventDefinitionError'
+        || error?.message?.includes("Can't find definition");
+      if (isUnknownEventError) {
+        this.logger.warn(
+          `Failed to decode logs for transaction ${tx.hash} due to unknown event definition`,
+        );
+      } else {
+        this.logger.error(
+          `Failed to decode logs for transaction ${tx.hash}`,
+          error.stack,
+        );
+      }
       return null;
     }
 

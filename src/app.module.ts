@@ -32,6 +32,7 @@ import { TipModule } from './tipping/tip.module';
 import { MdwModule } from './mdw-sync/mdw.module';
 import { SyncState } from './mdw-sync/entities/sync-state.entity';
 import { ProfileModule } from './profile/profile.module';
+import { StabilizationModule } from './stabilization/stabilization.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { ProfileModule } from './profile/profile.module';
     DexModule,
     TipModule,
     ProfileModule,
+    StabilizationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
