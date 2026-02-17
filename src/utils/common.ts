@@ -4,6 +4,15 @@ import {
 } from '@/configs/constants';
 import { incrementFetchTimeout } from './stabilization-metrics';
 
+const DEFAULT_FETCH_JSON_TIMEOUT_MS = 30_000;
+const rawTimeout = Number(
+  process.env.FETCH_JSON_TIMEOUT_MS ?? DEFAULT_FETCH_JSON_TIMEOUT_MS,
+);
+const FETCH_JSON_TIMEOUT_MS =
+  Number.isFinite(rawTimeout) && rawTimeout > 0
+    ? rawTimeout
+    : DEFAULT_FETCH_JSON_TIMEOUT_MS;
+
 /**
  * Fetches JSON data from the specified URL.
  *
@@ -17,8 +26,23 @@ export async function fetchJson<T = any>(
   shouldNotRetry = false,
   totalRetries = 1,
 ): Promise<T | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_JSON_TIMEOUT_MS);
+  const onParentAbort = () => controller.abort();
+
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+  }
+
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
     if (response.status === 204) {
       return null;
     }
@@ -35,6 +59,9 @@ export async function fetchJson<T = any>(
       return fetchJson(url, options, shouldNotRetry, totalRetries);
     }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    options?.signal?.removeEventListener('abort', onParentAbort);
   }
 }
 
