@@ -19,6 +19,7 @@ export interface OnChainProfile {
 export class ProfileContractService {
   private readonly logger = new Logger(ProfileContractService.name);
   private readonly contractAddress = PROFILE_REGISTRY_CONTRACT_ADDRESS;
+  private readonly aciFileName = 'ProfileRegistryACI.json';
   private cachedAci: any | null = null;
   private cachedContract: any | null = null;
 
@@ -113,12 +114,7 @@ export class ProfileContractService {
       return this.cachedContract;
     }
     if (!this.cachedAci) {
-      const aciPath = path.join(
-        __dirname,
-        '..',
-        'contract',
-        'ProfileRegistryACI.json',
-      );
+      const aciPath = this.resolveAciPath();
       this.cachedAci = JSON.parse(fs.readFileSync(aciPath, 'utf-8'));
     }
     this.cachedContract = await this.aeSdkService.sdk.initializeContract({
@@ -126,6 +122,31 @@ export class ProfileContractService {
       address: this.contractAddress as `ct_${string}`,
     });
     return this.cachedContract;
+  }
+
+  private resolveAciPath(): string {
+    const fileName = this.aciFileName;
+    const candidatePaths = [
+      // Typical runtime path (works in ts-jest and some dist layouts).
+      path.join(__dirname, '..', 'contract', fileName),
+      // Nested dist path: dist/src/profile/services -> dist/profile/contract
+      path.join(__dirname, '..', '..', '..', 'profile', 'contract', fileName),
+      // Explicit CWD-based fallbacks for different build setups.
+      path.join(process.cwd(), 'dist', 'src', 'profile', 'contract', fileName),
+      path.join(process.cwd(), 'dist', 'profile', 'contract', fileName),
+      path.join(process.cwd(), 'src', 'profile', 'contract', fileName),
+    ];
+
+    const existingPath = candidatePaths.find((candidatePath) =>
+      fs.existsSync(candidatePath),
+    );
+    if (existingPath) {
+      return existingPath;
+    }
+
+    throw new Error(
+      `Profile contract ACI file not found. Searched: ${candidatePaths.join(', ')}`,
+    );
   }
 
   private unwrapOption(value: any): any {
