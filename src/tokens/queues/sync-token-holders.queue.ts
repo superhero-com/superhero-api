@@ -35,10 +35,34 @@ export class SyncTokenHoldersQueue {
 
     const runningSync = this.inFlightSyncs.get(saleAddress);
     if (runningSync) {
+      const runningSince =
+        this.inFlightStartedAt.get(saleAddress) ?? Date.now();
       this.logger.warn(
-        `SyncTokenHoldersQueue->join-inflight:${saleAddress} (${Date.now() - (this.inFlightStartedAt.get(saleAddress) || Date.now())}ms running)`,
+        `SyncTokenHoldersQueue->join-inflight:${saleAddress} (${Date.now() - runningSince}ms running)`,
       );
-      await runningSync;
+      let joinTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          runningSync,
+          new Promise<void>((_, reject) => {
+            joinTimeoutHandle = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `SyncTokenHoldersQueue join-inflight timeout after ${this.jobTimeoutMs}ms`,
+                  ),
+                ),
+              this.jobTimeoutMs,
+            );
+          }),
+        ]);
+      } catch (joinError: any) {
+        this.inFlightSyncs.delete(saleAddress);
+        this.inFlightStartedAt.delete(saleAddress);
+        throw joinError;
+      } finally {
+        if (joinTimeoutHandle) clearTimeout(joinTimeoutHandle);
+      }
       return;
     }
 
@@ -77,6 +101,10 @@ export class SyncTokenHoldersQueue {
         `SyncTokenHoldersQueue->completed:${saleAddress} (${durationMs}ms)`,
       );
     } catch (error: any) {
+      if (this.inFlightSyncs.get(saleAddress) === syncPromise) {
+        this.inFlightSyncs.delete(saleAddress);
+        this.inFlightStartedAt.delete(saleAddress);
+      }
       this.logger.error(
         `SyncTokenHoldersQueue->error:${saleAddress} (${Date.now() - startedAt}ms)`,
         error,
