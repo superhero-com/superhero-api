@@ -145,7 +145,7 @@ export class DexTransactionProcessorService {
       // Try factory contract if router fails
     }
 
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       try {
         if (this.factoryContract) {
           decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log, {
@@ -159,7 +159,7 @@ export class DexTransactionProcessorService {
       }
     }
 
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       return null;
     }
 
@@ -451,6 +451,9 @@ export class DexTransactionProcessorService {
 
     const savedTransaction = await pairTransactionRepository.findOne({
       where: { tx_hash: tx.hash },
+      relations: {
+        pair: true,
+      },
     });
 
     if (!savedTransaction) {
