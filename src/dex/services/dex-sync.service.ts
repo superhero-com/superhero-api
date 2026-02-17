@@ -445,6 +445,20 @@ export class DexSyncService {
       swap_info: pairInfo.swapInfo,
       pair_mint_info: pairInfo.pairMintInfo,
       created_at: moment(transaction.microTime).toDate(),
+    }, {
+      conflictPaths: ['tx_hash'],
     });
+
+    const savedTransaction = await this.dexPairTransactionRepository.findOne({
+      where: { tx_hash: transaction.hash },
+    });
+
+    if (!savedTransaction) {
+      throw new Error(
+        `Failed to create or retrieve transaction ${transaction.hash}`,
+      );
+    }
+
+    return savedTransaction;
   }
 }

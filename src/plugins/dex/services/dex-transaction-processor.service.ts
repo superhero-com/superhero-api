@@ -419,20 +419,11 @@ export class DexTransactionProcessorService {
   ): Promise<PairTransaction> {
     const pairTransactionRepository = manager.getRepository(PairTransaction);
 
-    // Check if transaction already exists
-    const existingTransaction = await pairTransactionRepository.findOne({
-      where: { tx_hash: tx.hash },
-    });
-
-    if (existingTransaction) {
-      return existingTransaction;
-    }
-
     const reserve0Num = new BigNumber(pairInfo.reserve0 || '0').toNumber();
     const reserve1Num = new BigNumber(pairInfo.reserve1 || '0').toNumber();
     const microTime = parseInt(tx.micro_time, 10);
 
-    return await pairTransactionRepository.save({
+    await pairTransactionRepository.upsert({
       pair: pair,
       account_address: tx.caller_id || null,
       tx_type: tx.function || '',
@@ -454,7 +445,19 @@ export class DexTransactionProcessorService {
       swap_info: pairInfo.swapInfo,
       pair_mint_info: pairInfo.pairMintInfo,
       created_at: moment(microTime).toDate(),
+    }, {
+      conflictPaths: ['tx_hash'],
     });
+
+    const savedTransaction = await pairTransactionRepository.findOne({
+      where: { tx_hash: tx.hash },
+    });
+
+    if (!savedTransaction) {
+      throw new Error(`Failed to create or retrieve transaction ${tx.hash}`);
+    }
+
+    return savedTransaction;
   }
 }
 
