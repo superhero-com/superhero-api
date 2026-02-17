@@ -3,6 +3,11 @@ import 'dotenv/config';
 
 type ValidLoggerType = 'debug' | 'advanced-console' | 'simple-console' | 'file';
 
+const parseNumber = (value: string | undefined, defaultValue: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+};
+
 // Validate logger value
 const getValidLogger = (loggerValue: string | undefined): ValidLoggerType => {
   const validLoggers: ValidLoggerType[] = [
@@ -27,4 +32,13 @@ export const DATABASE_CONFIG: TypeOrmModuleOptions = {
   autoLoadEntities: true,
   logging: process.env.DB_LOGGING === 'true',
   logger: getValidLogger(process.env.DB_LOGGER),
+  extra: {
+    max: parseNumber(process.env.DB_POOL_MAX, 40),
+    min: parseNumber(process.env.DB_POOL_MIN, 5),
+    idleTimeoutMillis: parseNumber(process.env.DB_POOL_IDLE_TIMEOUT_MS, 30_000),
+    connectionTimeoutMillis: parseNumber(
+      process.env.DB_POOL_CONNECTION_TIMEOUT_MS,
+      10_000,
+    ),
+  },
 };
