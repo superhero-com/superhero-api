@@ -45,11 +45,7 @@ export class BlockSyncService {
 
       // Convert blocks to entity format
       for (const block of blocks) {
-        blocksToSave.push({
-          ...block,
-          timestamp: block.time,
-          created_at: new Date(block.time),
-        });
+        blocksToSave.push(this.normalizeKeyBlock(block));
       }
 
       // Check if there's a next page
@@ -331,6 +327,15 @@ export class BlockSyncService {
     await this.syncMicroBlocks(startHeight, endHeight);
     const txHashesByBlock = await this.syncTransactions(startHeight, endHeight, true, backward); // Use bulk mode
     return txHashesByBlock;
+  }
+
+  private normalizeKeyBlock(block: any): Partial<KeyBlock> {
+    return {
+      ...block,
+      nonce: block?.nonce?.toString() || '0',
+      pow: Array.isArray(block?.pow) ? block.pow : [],
+      created_at: new Date(block.time),
+    };
   }
 
   convertToMdwTx(tx: ITransaction): Partial<Tx> {
