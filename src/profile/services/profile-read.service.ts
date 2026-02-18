@@ -408,6 +408,7 @@ export class ProfileReadService {
     return (
       tx?.function?.toString?.() ||
       tx?.tx?.function?.toString?.() ||
+      tx?.tx?.tx?.function?.toString?.() ||
       tx?.call_info?.function?.toString?.() ||
       ''
     );
@@ -417,6 +418,7 @@ export class ProfileReadService {
     return (
       tx?.caller_id?.toString?.() ||
       tx?.tx?.caller_id?.toString?.() ||
+      tx?.tx?.tx?.caller_id?.toString?.() ||
       tx?.call_info?.caller_id?.toString?.() ||
       null
     );

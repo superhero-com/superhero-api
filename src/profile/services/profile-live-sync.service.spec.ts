@@ -127,5 +127,70 @@ describe('ProfileLiveSyncService', () => {
       '321',
     );
   });
+
+  it('uses caller as signer for pay-for payloads', async () => {
+    const { service, websocketService, profileIndexerService } = setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_payfor_1',
+      microTime: 456,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_profile_full',
+        callerId: 'ak_real_user',
+        payerId: 'ak_team_payer',
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
+      'ak_real_user',
+      '456',
+    );
+    expect(profileIndexerService.refreshAddress).not.toHaveBeenCalledWith(
+      'ak_team_payer',
+      '456',
+    );
+  });
+
+  it('unwraps nested PayingForTx payload shape from middleware', async () => {
+    const { service, websocketService, profileIndexerService } = setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_payfor_nested_1',
+      microTime: 789,
+      tx: {
+        fee: '100',
+        payerId: 'ak_team_payer',
+        tx: {
+          signatures: ['sg_inner'],
+          tx: {
+            contractId: 'ct_profile',
+            function: 'set_profile_full',
+            callerId: 'ak_nested_user',
+            log: [],
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
+      'ak_nested_user',
+      '789',
+    );
+    expect(profileIndexerService.refreshAddress).not.toHaveBeenCalledWith(
+      'ak_team_payer',
+      '789',
+    );
+  });
 });
 
