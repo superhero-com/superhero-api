@@ -214,14 +214,24 @@ export class TokenService {
     try {
       const data = await this.getTokenLivePrice(token);
       const repository = manager?.getRepository(Token) || this.tokensRepository;
+      const updatePayload = Object.fromEntries(
+        Object.entries(data ?? {}).filter(([, value]) => value !== undefined),
+      );
 
-      await repository.update(token.sale_address, data as any);
+      if (!Object.keys(updatePayload).length) {
+        this.logger.debug(
+          `Skipping token price sync for ${token.sale_address}: no values to update`,
+        );
+        return;
+      }
+
+      await repository.update(token.sale_address, updatePayload as any);
 
       // re-fetch token and broadcast outside transaction
       if (!manager) {
         this.tokenWebsocketGateway?.handleTokenUpdated({
           sale_address: token.sale_address,
-          data,
+          data: updatePayload,
         });
       }
     } catch (error) {

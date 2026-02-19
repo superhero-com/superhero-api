@@ -112,6 +112,10 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     return (
       transaction?.tx?.contractId?.toString?.() ||
       (transaction as any)?.tx?.contract_id?.toString?.() ||
+      (transaction as any)?.tx?.tx?.contractId?.toString?.() ||
+      (transaction as any)?.tx?.tx?.contract_id?.toString?.() ||
+      (transaction as any)?.tx?.tx?.tx?.contractId?.toString?.() ||
+      (transaction as any)?.tx?.tx?.tx?.contract_id?.toString?.() ||
       (transaction as any)?.contractId?.toString?.() ||
       (transaction as any)?.contract_id?.toString?.() ||
       ''
@@ -122,6 +126,8 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     return (
       transaction?.tx?.function?.toString?.() ||
       (transaction as any)?.tx?.function?.toString?.() ||
+      (transaction as any)?.tx?.tx?.function?.toString?.() ||
+      (transaction as any)?.tx?.tx?.tx?.function?.toString?.() ||
       (transaction as any)?.function?.toString?.() ||
       ''
     );
@@ -131,6 +137,10 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     return (
       transaction?.tx?.callerId?.toString?.() ||
       (transaction as any)?.tx?.caller_id?.toString?.() ||
+      (transaction as any)?.tx?.tx?.callerId?.toString?.() ||
+      (transaction as any)?.tx?.tx?.caller_id?.toString?.() ||
+      (transaction as any)?.tx?.tx?.tx?.callerId?.toString?.() ||
+      (transaction as any)?.tx?.tx?.tx?.caller_id?.toString?.() ||
       (transaction as any)?.callerId?.toString?.() ||
       (transaction as any)?.caller_id?.toString?.() ||
       null
@@ -151,7 +161,8 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
 
   private extractRawLog(transaction: ITransaction): any[] {
     const tx: any = transaction as any;
-    const rawLog = tx?.tx?.log || tx?.log || tx?.raw?.log || [];
+    const rawLog =
+      tx?.tx?.log || tx?.tx?.tx?.log || tx?.tx?.tx?.tx?.log || tx?.log || tx?.raw?.log || [];
     return Array.isArray(rawLog) ? rawLog : [];
   }
 

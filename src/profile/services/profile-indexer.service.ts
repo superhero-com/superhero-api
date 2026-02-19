@@ -61,7 +61,7 @@ export class ProfileIndexerService {
             break;
           }
 
-          const fn = (tx?.function || '').toString();
+          const fn = this.extractTxFunction(tx);
           if (this.profileMutationFunctions.has(fn)) {
             const affected = await this.extractAffectedAddresses(tx, fn);
             for (const address of affected) {
@@ -170,7 +170,7 @@ export class ProfileIndexerService {
     functionName: string,
   ): Promise<Set<string>> {
     const addresses = new Set<string>();
-    const caller = tx?.caller_id?.toString?.();
+    const caller = this.extractTxSigner(tx);
     if (caller) {
       addresses.add(caller);
     }
@@ -200,7 +200,31 @@ export class ProfileIndexerService {
   }
 
   private extractRawLog(tx: any): any[] {
-    const rawLog = tx?.tx?.log || tx?.log || tx?.raw?.log || [];
+    const rawLog =
+      tx?.tx?.log ||
+      tx?.tx?.tx?.log ||
+      tx?.tx?.tx?.tx?.log ||
+      tx?.log ||
+      tx?.raw?.log ||
+      [];
     return Array.isArray(rawLog) ? rawLog : [];
+  }
+
+  private extractTxSigner(tx: any): string | null {
+    return (
+      tx?.caller_id?.toString?.() ||
+      tx?.tx?.caller_id?.toString?.() ||
+      tx?.tx?.tx?.caller_id?.toString?.() ||
+      null
+    );
+  }
+
+  private extractTxFunction(tx: any): string {
+    return (
+      tx?.function?.toString?.() ||
+      tx?.tx?.function?.toString?.() ||
+      tx?.tx?.tx?.function?.toString?.() ||
+      ''
+    );
   }
 }

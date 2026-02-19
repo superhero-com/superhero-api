@@ -6,7 +6,10 @@ import { fetchJson } from '@/utils/common';
 import { Account } from '@/account/entities/account.entity';
 import { ProfileCache } from '../entities/profile-cache.entity';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
-import { OnChainProfile, ProfileContractService } from './profile-contract.service';
+import {
+  OnChainProfile,
+  ProfileContractService,
+} from './profile-contract.service';
 
 interface GetProfileOptions {
   includeOnChain?: boolean;
@@ -18,6 +21,15 @@ export class ProfileReadService {
   private static readonly PROFILE_MUTATION_FUNCTIONS = new Set<string>(
     PROFILE_MUTATION_FUNCTIONS,
   );
+  private recentChangedAddressesCache: {
+    addresses: string[];
+    expiresAt: number;
+  } | null = null;
+  private recentChangedAddressesInFlight: {
+    targetUnique: number;
+    promise: Promise<string[]>;
+  } | null = null;
+  private readonly recentChangedAddressesTtlMs = 15_000;
 
   constructor(
     @InjectRepository(ProfileCache)
@@ -55,7 +67,8 @@ export class ProfileReadService {
   }
 
   async getOnChainProfile(address: string) {
-    const onChainProfile = await this.profileContractService.getProfile(address);
+    const onChainProfile =
+      await this.profileContractService.getProfile(address);
     if (!onChainProfile) {
       return {
         address,
@@ -96,7 +109,9 @@ export class ProfileReadService {
       }),
     ]);
 
-    const cacheByAddress = new Map(caches.map((cache) => [cache.address, cache]));
+    const cacheByAddress = new Map(
+      caches.map((cache) => [cache.address, cache]),
+    );
     const accountByAddress = new Map(
       accounts.map((account) => [account.address, account]),
     );
@@ -124,10 +139,31 @@ export class ProfileReadService {
     });
 
     if (caches.length === 0) {
-      const fallbackItems = await this.buildFeedFromOnChainFallback(
-        safeLimit,
-        safeOffset,
-      );
+      let fallbackItems: Array<{
+        address: string;
+        profile: {
+          fullname: string;
+          bio: string;
+          avatarurl: string;
+          username: string | null;
+          x_username: string | null;
+          chain_name: string | null;
+          display_source: string;
+          chain_expires_at: string | null;
+        };
+        public_name: string;
+      }> = [];
+      try {
+        fallbackItems = await this.buildFeedFromOnChainFallback(
+          safeLimit,
+          safeOffset,
+        );
+      } catch (error) {
+        this.logger.warn(
+          'Failed to build profile feed from on-chain fallback',
+          error,
+        );
+      }
       return {
         items: fallbackItems,
         pagination: {
@@ -147,23 +183,35 @@ export class ProfileReadService {
     );
 
     const items = caches.map((cache) => {
-      const merged = this.mergeProfile(cache, null, accountByAddress.get(cache.address) || null);
+      const merged = this.mergeProfile(
+        cache,
+        null,
+        accountByAddress.get(cache.address) || null,
+      );
       return {
         address: cache.address,
         profile: merged,
-        public_name: cache.public_name || this.resolvePublicName(merged, cache.address),
+        public_name:
+          cache.public_name || this.resolvePublicName(merged, cache.address),
       };
     });
 
     // If cache page is underfilled, top up from recent middleware-derived addresses.
     // This avoids empty/near-empty feeds when indexer cache hasn't fully backfilled yet.
     if (items.length < safeLimit) {
-      const fallbackItems = await this.buildFeedFromOnChainFallback(
-        safeLimit - items.length,
-        0,
-        new Set(items.map((item) => item.address)),
-      );
-      items.push(...fallbackItems);
+      try {
+        const fallbackItems = await this.buildFeedFromOnChainFallback(
+          safeLimit - items.length,
+          0,
+          new Set(items.map((item) => item.address)),
+        );
+        items.push(...fallbackItems);
+      } catch (error) {
+        this.logger.warn(
+          'Failed to top up profile feed from on-chain fallback',
+          error,
+        );
+      }
     }
 
     return {
@@ -211,9 +259,11 @@ export class ProfileReadService {
       avatarurl: onChain?.avatarurl ?? cache?.avatarurl ?? '',
       username: onChain?.username ?? cache?.username ?? null,
       x_username: onChain?.x_username ?? cache?.x_username ?? null,
-      chain_name: onChain?.chain_name ?? cache?.chain_name ?? account?.chain_name ?? null,
+      chain_name:
+        onChain?.chain_name ?? cache?.chain_name ?? account?.chain_name ?? null,
       display_source: normalizedDisplaySource || 'custom',
-      chain_expires_at: onChain?.chain_expires_at ?? cache?.chain_expires_at ?? null,
+      chain_expires_at:
+        onChain?.chain_expires_at ?? cache?.chain_expires_at ?? null,
     };
   }
 
@@ -239,7 +289,12 @@ export class ProfileReadService {
       return profile.x_username;
     }
 
-    return profile.username || profile.chain_name || profile.x_username || shortAddress;
+    return (
+      profile.username ||
+      profile.chain_name ||
+      profile.x_username ||
+      shortAddress
+    );
   }
 
   private isCacheEffectivelyEmpty(cache: ProfileCache): boolean {
@@ -253,12 +308,18 @@ export class ProfileReadService {
     );
   }
 
-  private normalizeDisplaySource(value: string | null | undefined): string | null {
+  private normalizeDisplaySource(
+    value: string | null | undefined,
+  ): string | null {
     if (!value) {
       return null;
     }
     const normalized = value.trim().toLowerCase();
-    if (normalized === 'custom' || normalized === 'chain' || normalized === 'x') {
+    if (
+      normalized === 'custom' ||
+      normalized === 'chain' ||
+      normalized === 'x'
+    ) {
       return normalized;
     }
     return null;
@@ -286,6 +347,80 @@ export class ProfileReadService {
       accounts.map((account) => [account.address, account]),
     );
 
+    const itemsWithIndex: Array<{
+      index: number;
+      item: {
+        address: string;
+        profile: {
+          fullname: string;
+          bio: string;
+          avatarurl: string;
+          username: string | null;
+          x_username: string | null;
+          chain_name: string | null;
+          display_source: string;
+          chain_expires_at: string | null;
+        };
+        public_name: string;
+      };
+      snapshot: ProfileCache;
+    }> = [];
+    const candidateSubset = candidates
+      .slice(offset)
+      .filter((address) => !excludeAddresses.has(address));
+    const maxConcurrency = Math.min(5, candidateSubset.length, limit);
+    let nextIndex = 0;
+    let collectedCount = 0;
+
+    const runWorker = async () => {
+      while (true) {
+        if (collectedCount >= limit) {
+          return;
+        }
+        const candidateIndex = nextIndex;
+        nextIndex += 1;
+        if (candidateIndex >= candidateSubset.length) {
+          return;
+        }
+
+        const address = candidateSubset[candidateIndex];
+        const account = accountByAddress.get(address) || null;
+        let onChain: OnChainProfile | null = null;
+        try {
+          onChain = await this.profileContractService.getProfile(address);
+        } catch (error) {
+          this.logger.warn(`Feed fallback failed for ${address}`, error);
+          continue;
+        }
+        if (!onChain || this.isOnChainProfileEffectivelyEmpty(onChain)) {
+          continue;
+        }
+
+        if (collectedCount >= limit) {
+          return;
+        }
+
+        const merged = this.mergeProfile(null, onChain, account);
+        const publicName = this.resolvePublicName(merged, address);
+        collectedCount += 1;
+        itemsWithIndex.push({
+          index: candidateIndex,
+          item: {
+            address,
+            profile: merged,
+            public_name: publicName,
+          },
+          snapshot: this.toProfileCacheSnapshot(address, merged, publicName),
+        });
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: maxConcurrency }, () => runWorker()),
+    );
+
+    itemsWithIndex.sort((left, right) => left.index - right.index);
+    const selected = itemsWithIndex.slice(0, limit);
     const items: Array<{
       address: string;
       profile: {
@@ -299,43 +434,21 @@ export class ProfileReadService {
         chain_expires_at: string | null;
       };
       public_name: string;
-    }> = [];
-
-    const toCache: ProfileCache[] = [];
-    for (const address of candidates.slice(offset)) {
-      if (items.length >= limit) {
-        break;
-      }
-      if (excludeAddresses.has(address)) {
-        continue;
-      }
-      const account = accountByAddress.get(address) || null;
-      let onChain: OnChainProfile | null = null;
-      try {
-        onChain = await this.profileContractService.getProfile(address);
-      } catch (error) {
-        this.logger.warn(`Feed fallback failed for ${address}`, error);
-        continue;
-      }
-      if (!onChain || this.isOnChainProfileEffectivelyEmpty(onChain)) {
-        continue;
-      }
-
-      const merged = this.mergeProfile(null, onChain, account);
-      const publicName = this.resolvePublicName(merged, address);
-      items.push({
-        address,
-        profile: merged,
-        public_name: publicName,
-      });
-
-      toCache.push(this.toProfileCacheSnapshot(address, merged, publicName));
-    }
+    }> = selected.map((entry) => entry.item);
+    const toCache = selected.map((entry) => entry.snapshot);
 
     if (toCache.length > 0) {
-      await this.profileCacheRepository.upsert(toCache, {
-        conflictPaths: ['address'],
-      });
+      // Keep cache writes out of the hot response path.
+      void this.profileCacheRepository
+        .upsert(toCache, {
+          conflictPaths: ['address'],
+        })
+        .catch((error) => {
+          this.logger.warn(
+            'Failed to persist profile feed fallback cache snapshots',
+            error,
+          );
+        });
     }
 
     return items;
@@ -344,10 +457,56 @@ export class ProfileReadService {
   private async getRecentChangedAddressesFromMiddleware(
     targetUnique: number,
   ): Promise<string[]> {
-    if (!this.profileContractService.isConfigured()) {
+    if (targetUnique <= 0) {
+      return [];
+    }
+    if (
+      typeof this.profileContractService.isConfigured !== 'function' ||
+      !this.profileContractService.isConfigured()
+    ) {
       return [];
     }
 
+    const now = Date.now();
+    const cached = this.recentChangedAddressesCache;
+    if (
+      cached &&
+      cached.expiresAt > now &&
+      cached.addresses.length >= targetUnique
+    ) {
+      return cached.addresses.slice(0, targetUnique);
+    }
+    if (this.recentChangedAddressesInFlight) {
+      const inFlight = this.recentChangedAddressesInFlight;
+      const inFlightAddresses = await inFlight.promise;
+      if (inFlightAddresses.length >= targetUnique) {
+        return inFlightAddresses.slice(0, targetUnique);
+      }
+      // A larger request arrived while a smaller fetch was in-flight.
+      // Continue below and fetch up to targetUnique to avoid truncated fallback pages.
+    }
+
+    const fetchPromise =
+      this.fetchRecentChangedAddressesFromMiddleware(targetUnique);
+    this.recentChangedAddressesInFlight = {
+      targetUnique,
+      promise: fetchPromise,
+    };
+    try {
+      const addresses = await fetchPromise;
+      this.recentChangedAddressesCache = {
+        addresses,
+        expiresAt: now + this.recentChangedAddressesTtlMs,
+      };
+      return addresses.slice(0, targetUnique);
+    } finally {
+      this.recentChangedAddressesInFlight = null;
+    }
+  }
+
+  private async fetchRecentChangedAddressesFromMiddleware(
+    targetUnique: number,
+  ): Promise<string[]> {
     const middlewareUrl = ACTIVE_NETWORK.middlewareUrl;
     const contractAddress = this.profileContractService.getContractAddress();
     let endpoint = `${middlewareUrl}/v3/transactions?type=contract_call&contract=${contractAddress}&direction=backward&limit=100`;
@@ -356,13 +515,20 @@ export class ProfileReadService {
     const addresses: string[] = [];
     const seen = new Set<string>();
 
-    while (endpoint && safetyCounter < maxPages && addresses.length < targetUnique) {
+    while (
+      endpoint &&
+      safetyCounter < maxPages &&
+      addresses.length < targetUnique
+    ) {
       safetyCounter += 1;
       let response: any;
       try {
         response = await fetchJson<any>(endpoint, undefined, true);
       } catch (error) {
-        this.logger.warn('Failed to fetch profile tx page from middleware', error);
+        this.logger.warn(
+          'Failed to fetch profile tx page from middleware',
+          error,
+        );
         break;
       }
       const txs = response?.data || [];
@@ -408,6 +574,7 @@ export class ProfileReadService {
     return (
       tx?.function?.toString?.() ||
       tx?.tx?.function?.toString?.() ||
+      tx?.tx?.tx?.function?.toString?.() ||
       tx?.call_info?.function?.toString?.() ||
       ''
     );
@@ -417,6 +584,7 @@ export class ProfileReadService {
     return (
       tx?.caller_id?.toString?.() ||
       tx?.tx?.caller_id?.toString?.() ||
+      tx?.tx?.tx?.caller_id?.toString?.() ||
       tx?.call_info?.caller_id?.toString?.() ||
       null
     );

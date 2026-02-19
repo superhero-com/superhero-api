@@ -231,9 +231,10 @@ export class TokensService {
     if (token.address) {
       return token.address;
     }
-    const { instance } = await this.getTokenContractsBySaleAddress(
+    const contracts = await this.getTokenContractsBySaleAddress(
       token.sale_address as Encoded.ContractAddress,
     );
+    const instance = contracts?.instance;
     if (!instance) {
       return null;
     }
@@ -255,7 +256,8 @@ export class TokensService {
       );
       return null;
     }
-    const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
+    const contracts = await this.getTokenContractsBySaleAddress(saleAddress);
+    const instance = contracts?.instance;
 
     if (!instance) {
       return null;
