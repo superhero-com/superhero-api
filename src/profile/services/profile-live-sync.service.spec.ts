@@ -340,5 +340,137 @@ describe('ProfileLiveSyncService', () => {
       '789',
     );
   });
+
+  it('rewards nested PayingForTx using caller, not payer', async () => {
+    const {
+      service,
+      websocketService,
+      profileXVerificationRewardService,
+      profileIndexerService,
+    } = setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_payfor_x_success_1',
+      pending: false,
+      microTime: 790,
+      tx: {
+        fee: '100',
+        payerId: 'ak_team_payer',
+        tx: {
+          signatures: ['sg_inner'],
+          tx: {
+            contractId: 'ct_profile',
+            function: 'set_x_name_with_attestation',
+            callerId: 'ak_verified_user',
+            returnType: 'ok',
+            arguments: [{ value: '@VerifiedUser' }],
+            log: [],
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
+      'ak_verified_user',
+      'verifieduser',
+    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalledWith('ak_team_payer', expect.any(String));
+    expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
+      'ak_verified_user',
+      '790',
+    );
+  });
+
+  it('does not reward nested PayingForTx when inner tx is reverted', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_payfor_x_revert_1',
+      pending: false,
+      microTime: 791,
+      tx: {
+        fee: '100',
+        payerId: 'ak_team_payer',
+        tx: {
+          signatures: ['sg_inner'],
+          tx: {
+            contractId: 'ct_profile',
+            function: 'set_x_name_with_attestation',
+            callerId: 'ak_verified_user',
+            returnType: 'revert',
+            arguments: [{ value: 'verifieduser' }],
+            log: [],
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rewards inner caller for sponsored x verification payload', async () => {
+    const {
+      service,
+      websocketService,
+      profileXVerificationRewardService,
+      profileIndexerService,
+    } = setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_payfor_nested_1',
+      pending: false,
+      microTime: 2001,
+      tx: {
+        contractId: 'ct_outer_not_profile',
+        function: 'paying_for',
+        callerId: 'ak_team_payer',
+        payerId: 'ak_team_payer',
+        tx: {
+          signatures: ['sg_inner'],
+          tx: {
+            contractId: 'ct_profile',
+            function: 'set_x_name_with_attestation',
+            callerId: 'ak_verified_user',
+            returnType: 'ok',
+            arguments: [{ value: '@VerifiedOnX' }],
+            log: [],
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
+      'ak_verified_user',
+      'verifiedonx',
+    );
+    expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
+      'ak_verified_user',
+      '2001',
+    );
+    expect(profileIndexerService.refreshAddress).not.toHaveBeenCalledWith(
+      'ak_team_payer',
+      '2001',
+    );
+  });
 });
 

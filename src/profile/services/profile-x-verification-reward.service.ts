@@ -1,11 +1,16 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { encode, Encoding, MemoryAccount } from '@aeternity/aepp-sdk';
+import {
+  AE_AMOUNT_FORMATS,
+  encode,
+  Encoding,
+  MemoryAccount,
+  toAettos,
+} from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import {
   PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE,
-  PROFILE_X_VERIFICATION_REWARD_ENABLED,
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
 } from '../profile.constants';
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
@@ -65,9 +70,6 @@ export class ProfileXVerificationRewardService {
     address: string,
     xUsername: string,
   ): Promise<void> {
-    if (!PROFILE_X_VERIFICATION_REWARD_ENABLED) {
-      return;
-    }
     if (!PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY) {
       this.logger.warn(
         'X verification reward is enabled but PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY is not configured',
@@ -84,6 +86,10 @@ export class ProfileXVerificationRewardService {
       this.logger.error(
         `Skipping X verification reward, invalid PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE: ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE}`,
       );
+      return;
+    }
+    const rewardAmountAettos = this.getRewardAmountAettos();
+    if (!rewardAmountAettos) {
       return;
     }
 
@@ -126,7 +132,7 @@ export class ProfileXVerificationRewardService {
     try {
       const rewardAccount = this.getRewardAccount();
       const spendResult = await this.aeSdkService.sdk.spend(
-        PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE,
+        rewardAmountAettos,
         address as `ak_${string}`,
         { onAccount: rewardAccount },
       );
@@ -183,6 +189,27 @@ export class ProfileXVerificationRewardService {
       return false;
     }
     return Number(value) > 0;
+  }
+
+  private getRewardAmountAettos(): string | null {
+    try {
+      const amount = toAettos(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE, {
+        denomination: AE_AMOUNT_FORMATS.AE,
+      });
+      if (!/^\d+$/.test(amount) || amount === '0') {
+        this.logger.error(
+          `Skipping X verification reward, converted aettos amount is invalid: ${amount}`,
+        );
+        return null;
+      }
+      return amount;
+    } catch (error) {
+      this.logger.error(
+        'Skipping X verification reward, failed to convert amount to aettos',
+        error instanceof Error ? error.stack : String(error),
+      );
+      return null;
+    }
   }
 
   private normalizePrivateKey(privateKey: string): `sk_${string}` {

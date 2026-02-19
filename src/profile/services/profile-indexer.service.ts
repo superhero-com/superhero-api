@@ -214,7 +214,9 @@ export class ProfileIndexerService {
   }
 
   private extractRawLog(tx: any): any[] {
+    const payload = this.extractMutationPayload(tx);
     const rawLog =
+      payload?.log ||
       tx?.tx?.log ||
       tx?.tx?.tx?.log ||
       tx?.tx?.tx?.tx?.log ||
@@ -225,28 +227,33 @@ export class ProfileIndexerService {
   }
 
   private extractTxSigner(tx: any): string | null {
+    const payload = this.extractMutationPayload(tx);
     return (
+      payload?.caller_id?.toString?.() ||
+      payload?.callerId?.toString?.() ||
       tx?.caller_id?.toString?.() ||
-      tx?.tx?.caller_id?.toString?.() ||
-      tx?.tx?.tx?.caller_id?.toString?.() ||
+      tx?.callerId?.toString?.() ||
       null
     );
   }
 
   private extractTxFunction(tx: any): string {
+    const payload = this.extractMutationPayload(tx);
     return (
+      payload?.function?.toString?.() ||
       tx?.function?.toString?.() ||
-      tx?.tx?.function?.toString?.() ||
-      tx?.tx?.tx?.function?.toString?.() ||
       ''
     );
   }
 
   private isSuccessfulMutation(tx: any): boolean {
+    const payload = this.extractMutationPayload(tx);
     if (tx?.pending === true || tx?.tx?.pending === true) {
       return false;
     }
     const returnType = (
+      payload?.return_type?.toString?.() ||
+      payload?.returnType?.toString?.() ||
       tx?.tx?.return_type?.toString?.() ||
       tx?.tx?.returnType?.toString?.() ||
       tx?.return_type?.toString?.() ||
@@ -262,14 +269,24 @@ export class ProfileIndexerService {
   }
 
   private extractXUsername(tx: any): string | null {
+    const payload = this.extractMutationPayload(tx);
     const xUsername =
-      tx?.tx?.arguments?.[0]?.value?.toString?.() ||
-      tx?.tx?.tx?.arguments?.[0]?.value?.toString?.() ||
+      payload?.arguments?.[0]?.value?.toString?.() ||
       tx?.arguments?.[0]?.value?.toString?.() ||
       null;
     if (!xUsername) {
       return null;
     }
     return xUsername.trim().toLowerCase().replace(/^@+/, '');
+  }
+
+  private extractMutationPayload(tx: any): any {
+    const candidates = [tx?.tx?.tx?.tx, tx?.tx?.tx, tx?.tx, tx];
+    const matched = candidates.find((candidate) => {
+      const contractId = candidate?.contractId || candidate?.contract_id;
+      const fn = candidate?.function;
+      return !!contractId && !!fn;
+    });
+    return matched || tx;
   }
 }

@@ -123,13 +123,10 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private extractContractId(transaction: ITransaction): string {
+    const payload = this.extractMutationPayload(transaction);
     return (
-      transaction?.tx?.contractId?.toString?.() ||
-      (transaction as any)?.tx?.contract_id?.toString?.() ||
-      (transaction as any)?.tx?.tx?.contractId?.toString?.() ||
-      (transaction as any)?.tx?.tx?.contract_id?.toString?.() ||
-      (transaction as any)?.tx?.tx?.tx?.contractId?.toString?.() ||
-      (transaction as any)?.tx?.tx?.tx?.contract_id?.toString?.() ||
+      payload?.contractId?.toString?.() ||
+      payload?.contract_id?.toString?.() ||
       (transaction as any)?.contractId?.toString?.() ||
       (transaction as any)?.contract_id?.toString?.() ||
       ''
@@ -137,24 +134,19 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private extractFunctionName(transaction: ITransaction): string {
+    const payload = this.extractMutationPayload(transaction);
     return (
-      transaction?.tx?.function?.toString?.() ||
-      (transaction as any)?.tx?.function?.toString?.() ||
-      (transaction as any)?.tx?.tx?.function?.toString?.() ||
-      (transaction as any)?.tx?.tx?.tx?.function?.toString?.() ||
+      payload?.function?.toString?.() ||
       (transaction as any)?.function?.toString?.() ||
       ''
     );
   }
 
   private extractCaller(transaction: ITransaction): string | null {
+    const payload = this.extractMutationPayload(transaction);
     return (
-      transaction?.tx?.callerId?.toString?.() ||
-      (transaction as any)?.tx?.caller_id?.toString?.() ||
-      (transaction as any)?.tx?.tx?.callerId?.toString?.() ||
-      (transaction as any)?.tx?.tx?.caller_id?.toString?.() ||
-      (transaction as any)?.tx?.tx?.tx?.callerId?.toString?.() ||
-      (transaction as any)?.tx?.tx?.tx?.caller_id?.toString?.() ||
+      payload?.callerId?.toString?.() ||
+      payload?.caller_id?.toString?.() ||
       (transaction as any)?.callerId?.toString?.() ||
       (transaction as any)?.caller_id?.toString?.() ||
       null
@@ -174,10 +166,13 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isSuccessfulMutation(transaction: ITransaction): boolean {
+    const payload = this.extractMutationPayload(transaction);
     if (transaction?.pending === true) {
       return false;
     }
     const returnType = (
+      payload?.returnType ||
+      payload?.return_type ||
       (transaction as any)?.tx?.returnType ||
       (transaction as any)?.tx?.return_type ||
       (transaction as any)?.returnType ||
@@ -193,9 +188,9 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private extractXUsername(transaction: ITransaction): string | null {
+    const payload = this.extractMutationPayload(transaction);
     const username =
-      (transaction as any)?.tx?.arguments?.[0]?.value?.toString?.() ||
-      (transaction as any)?.tx?.tx?.arguments?.[0]?.value?.toString?.() ||
+      payload?.arguments?.[0]?.value?.toString?.() ||
       (transaction as any)?.arguments?.[0]?.value?.toString?.() ||
       null;
     if (!username) {
@@ -205,10 +200,22 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private extractRawLog(transaction: ITransaction): any[] {
+    const payload = this.extractMutationPayload(transaction);
     const tx: any = transaction as any;
     const rawLog =
-      tx?.tx?.log || tx?.tx?.tx?.log || tx?.tx?.tx?.tx?.log || tx?.log || tx?.raw?.log || [];
+      payload?.log || tx?.tx?.log || tx?.tx?.tx?.log || tx?.tx?.tx?.tx?.log || tx?.log || tx?.raw?.log || [];
     return Array.isArray(rawLog) ? rawLog : [];
+  }
+
+  private extractMutationPayload(transaction: ITransaction): any {
+    const tx: any = transaction as any;
+    const candidates = [tx?.tx?.tx?.tx, tx?.tx?.tx, tx?.tx, tx];
+    const matched = candidates.find((candidate) => {
+      const contractId = candidate?.contractId || candidate?.contract_id;
+      const fn = candidate?.function;
+      return !!contractId && !!fn;
+    });
+    return matched || tx?.tx || tx;
   }
 
   private async extractAutoRenamedAddresses(
