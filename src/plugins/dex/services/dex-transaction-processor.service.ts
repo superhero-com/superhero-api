@@ -5,10 +5,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirection, SyncDirectionEnum } from '../../plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
@@ -32,11 +29,13 @@ interface PairInfo {
   pairMintInfo: any;
 }
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 @Injectable()
 export class DexTransactionProcessorService {
   private readonly logger = new Logger(DexTransactionProcessorService.name);
-  private routerContract: ContractWithMethods<ContractMethodsBase> | null = null;
-  private factoryContract: ContractWithMethods<ContractMethodsBase> | null = null;
+  private routerContract: ContractInstance | null = null;
+  private factoryContract: ContractInstance | null = null;
 
   constructor(
     @InjectRepository(DexToken)
@@ -54,13 +53,15 @@ export class DexTransactionProcessorService {
    */
   private async ensureContractsInitialized(): Promise<void> {
     if (!this.routerContract) {
-      this.routerContract = await this.aeSdkService.sdk.initializeContract({
+      this.routerContract = await Contract.initialize({
+        ...this.aeSdkService.sdk.getContext(),
         aci: routerInterface,
         address: DEX_CONTRACTS.router as Encoded.ContractAddress,
       });
     }
     if (!this.factoryContract) {
-      this.factoryContract = await this.aeSdkService.sdk.initializeContract({
+      this.factoryContract = await Contract.initialize({
+        ...this.aeSdkService.sdk.getContext(),
         aci: factoryInterface,
         address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
       });

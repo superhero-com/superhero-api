@@ -1,4 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { Contract } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import fs from 'fs';
 import path from 'path';
@@ -101,7 +102,7 @@ export class ProfileContractService {
     }
     try {
       const contract = await this.getContractInstance();
-      const decoded = contract.$decodeEvents(rawLog);
+      const decoded = contract.$decodeEvents(rawLog, { omitUnknown: true });
       return Array.isArray(decoded) ? decoded : [];
     } catch (error) {
       this.logger.warn('Failed to decode profile contract events');
@@ -117,7 +118,8 @@ export class ProfileContractService {
       const aciPath = this.resolveAciPath();
       this.cachedAci = JSON.parse(fs.readFileSync(aciPath, 'utf-8'));
     }
-    this.cachedContract = await this.aeSdkService.sdk.initializeContract({
+    this.cachedContract = await Contract.initialize({
+      ...this.aeSdkService.sdk.getContext(),
       aci: this.cachedAci,
       address: this.contractAddress as `ct_${string}`,
     });

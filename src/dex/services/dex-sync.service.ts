@@ -5,9 +5,7 @@ import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { IMiddlewareRequestConfig } from '@/social/interfaces/post.interfaces';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
@@ -24,10 +22,12 @@ import { PairHistoryService } from './pair-history.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DexTokenSummaryService } from './dex-token-summary.service';
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 @Injectable()
 export class DexSyncService {
-  routerContract: ContractWithMethods<ContractMethodsBase>;
-  factoryContract: ContractWithMethods<ContractMethodsBase>;
+  routerContract: ContractInstance;
+  factoryContract: ContractInstance;
   constructor(
     @InjectRepository(DexToken)
     private readonly dexTokenRepository: Repository<DexToken>,
@@ -53,11 +53,13 @@ export class DexSyncService {
     console.log('========================');
     // await this.dexPairTransactionRepository.clear();
 
-    // this.routerContract = await this.aeSdkService.sdk.initializeContract({
+    // this.routerContract = await Contract.initialize({
+    //   ...this.aeSdkService.sdk.getContext(),
     //   aci: routerInterface,
     //   address: DEX_CONTRACTS.router as Encoded.ContractAddress,
     // });
-    // this.factoryContract = await this.aeSdkService.sdk.initializeContract({
+    // this.factoryContract = await Contract.initialize({
+    //   ...this.aeSdkService.sdk.getContext(),
     //   aci: factoryInterface,
     //   address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
     // });

@@ -1,8 +1,7 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { decode, MemoryAccount } from '@aeternity/aepp-sdk';
+import { encode, Encoding, MemoryAccount } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
-import nacl from 'tweetnacl';
 import { Repository } from 'typeorm';
 import {
   PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE,
@@ -186,10 +185,10 @@ export class ProfileXVerificationRewardService {
     return Number(value) > 0;
   }
 
-  private normalizePrivateKey(privateKey: string): Uint8Array {
+  private normalizePrivateKey(privateKey: string): `sk_${string}` {
     let keyBytes: Uint8Array;
     if (privateKey.startsWith('sk_')) {
-      keyBytes = new Uint8Array(decode(privateKey as any));
+      return privateKey as `sk_${string}`;
     } else {
       const normalizedHex = privateKey.startsWith('0x')
         ? privateKey.slice(2)
@@ -206,10 +205,13 @@ export class ProfileXVerificationRewardService {
     }
 
     if (keyBytes.length === 64) {
-      return keyBytes;
+      return encode(
+        keyBytes.subarray(0, 32),
+        Encoding.AccountSecretKey,
+      ) as `sk_${string}`;
     }
     if (keyBytes.length === 32) {
-      return nacl.sign.keyPair.fromSeed(keyBytes).secretKey;
+      return encode(keyBytes, Encoding.AccountSecretKey) as `sk_${string}`;
     }
 
     throw new Error(

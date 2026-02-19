@@ -10,9 +10,6 @@ import { ACTIVE_NETWORK, TRENDING_SCORE_CONFIG } from '@/configs';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
 import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
@@ -26,7 +23,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 
 type TokenContracts = {
   instance?: TokenSale;
-  tokenContractInstance?: ContractWithMethods<ContractMethodsBase>;
+  tokenContractInstance?: any;
   token?: Token;
   lastUsedAt?: number;
 };
@@ -367,7 +364,7 @@ export class TokensService {
     }
     try {
       const { instance } = await initTokenSale(
-        this.aeSdkService.sdk,
+        this.aeSdkService.sdk as any,
         saleAddress,
       );
       const tokenContractInstance = await instance?.tokenContractInstance();
@@ -911,7 +908,7 @@ export class TokensService {
           await this.getTokenContractsBySaleAddress(
             token.sale_address as Encoded.ContractAddress,
           );
-        const holderBalances = await this.withTimeout(
+        const holderBalances = await this.withTimeout<any>(
           tokenContractInstance.balances(),
           this.contractCallTimeoutMs,
           `balances() timeout for ${aex9Address}`,
