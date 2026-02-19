@@ -8,6 +8,7 @@ import { ProfileCache } from '../entities/profile-cache.entity';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
 import { ProfileSyncState } from '../entities/profile-sync-state.entity';
 import { ProfileContractService } from './profile-contract.service';
+import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 
 @Injectable()
 export class ProfileIndexerService {
@@ -29,6 +30,7 @@ export class ProfileIndexerService {
     @InjectRepository(ProfileSyncState)
     private readonly profileSyncStateRepository: Repository<ProfileSyncState>,
     private readonly profileContractService: ProfileContractService,
+    private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
   ) {}
 
   @Cron('*/30 * * * * *')
@@ -63,6 +65,18 @@ export class ProfileIndexerService {
 
           const fn = this.extractTxFunction(tx);
           if (this.profileMutationFunctions.has(fn)) {
+            if (
+              fn === 'set_x_name_with_attestation' &&
+              this.isSuccessfulMutation(tx)
+            ) {
+              const caller = this.extractTxSigner(tx);
+              const xUsername = this.extractXUsername(tx);
+              if (caller && xUsername) {
+                void this.profileXVerificationRewardService
+                  .sendRewardIfEligible(caller, xUsername)
+                  .catch(() => undefined);
+              }
+            }
             const affected = await this.extractAffectedAddresses(tx, fn);
             for (const address of affected) {
               changedAddresses.add(address);
@@ -226,5 +240,36 @@ export class ProfileIndexerService {
       tx?.tx?.tx?.function?.toString?.() ||
       ''
     );
+  }
+
+  private isSuccessfulMutation(tx: any): boolean {
+    if (tx?.pending === true || tx?.tx?.pending === true) {
+      return false;
+    }
+    const returnType = (
+      tx?.tx?.return_type?.toString?.() ||
+      tx?.tx?.returnType?.toString?.() ||
+      tx?.return_type?.toString?.() ||
+      tx?.returnType?.toString?.() ||
+      ''
+    )
+      .toString()
+      .toLowerCase();
+    if (!returnType) {
+      return false;
+    }
+    return returnType !== 'revert';
+  }
+
+  private extractXUsername(tx: any): string | null {
+    const xUsername =
+      tx?.tx?.arguments?.[0]?.value?.toString?.() ||
+      tx?.tx?.tx?.arguments?.[0]?.value?.toString?.() ||
+      tx?.arguments?.[0]?.value?.toString?.() ||
+      null;
+    if (!xUsername) {
+      return null;
+    }
+    return xUsername.trim().toLowerCase().replace(/^@+/, '');
   }
 }

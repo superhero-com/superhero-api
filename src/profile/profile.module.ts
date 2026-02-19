@@ -6,17 +6,24 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfileController } from './controllers/profile.controller';
 import { ProfileCache } from './entities/profile-cache.entity';
 import { ProfileSyncState } from './entities/profile-sync-state.entity';
+import { ProfileXVerificationReward } from './entities/profile-x-verification-reward.entity';
 import { ProfileAttestationService } from './services/profile-attestation.service';
 import { ProfileContractService } from './services/profile-contract.service';
 import { ProfileIndexerService } from './services/profile-indexer.service';
 import { ProfileLiveSyncService } from './services/profile-live-sync.service';
 import { ProfileReadService } from './services/profile-read.service';
+import { ProfileXVerificationRewardService } from './services/profile-x-verification-reward.service';
 
 @Module({
   imports: [
     AeModule,
     forwardRef(() => AffiliationModule),
-    TypeOrmModule.forFeature([ProfileCache, ProfileSyncState, Account]),
+    TypeOrmModule.forFeature([
+      ProfileCache,
+      ProfileSyncState,
+      ProfileXVerificationReward,
+      Account,
+    ]),
   ],
   providers: [
     ProfileAttestationService,
@@ -24,6 +31,7 @@ import { ProfileReadService } from './services/profile-read.service';
     ProfileIndexerService,
     ProfileLiveSyncService,
     ProfileReadService,
+    ProfileXVerificationRewardService,
   ],
   controllers: [ProfileController],
   exports: [TypeOrmModule, ProfileReadService, ProfileContractService],

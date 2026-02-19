@@ -14,16 +14,21 @@ describe('ProfileLiveSyncService', () => {
       getContractAddress: jest.fn().mockReturnValue('ct_profile'),
       decodeEvents: jest.fn().mockResolvedValue([]),
     } as any;
+    const profileXVerificationRewardService = {
+      sendRewardIfEligible: jest.fn().mockResolvedValue(undefined),
+    } as any;
     const service = new ProfileLiveSyncService(
       websocketService,
       profileIndexerService,
       profileContractService,
+      profileXVerificationRewardService,
     );
     return {
       service,
       websocketService,
       profileIndexerService,
       profileContractService,
+      profileXVerificationRewardService,
       unsubscribe,
     };
   };
@@ -65,6 +70,149 @@ describe('ProfileLiveSyncService', () => {
       'ak_1',
       '123',
     );
+  });
+
+  it('rewards only after successful on-chain x verification tx', async () => {
+    const {
+      service,
+      websocketService,
+      profileIndexerService,
+      profileXVerificationRewardService,
+    } = setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_verified_1',
+      pending: false,
+      microTime: 1001,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_rewarded_user',
+        returnType: 'ok',
+        arguments: [{ value: 'AliceOnX' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
+      'ak_rewarded_user',
+      'aliceonx',
+    );
+    expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
+      'ak_rewarded_user',
+      '1001',
+    );
+  });
+
+  it('does not reward when x verification tx is pending', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_pending_1',
+      pending: true,
+      microTime: 1002,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_pending_user',
+        returnType: 'ok',
+        arguments: [{ value: 'PendingX' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not reward when x verification tx is reverted', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_revert_1',
+      pending: false,
+      microTime: 1003,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_reverted_user',
+        returnType: 'revert',
+        arguments: [{ value: 'RevertedX' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not reward when x verification tx return type is uppercase revert', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_revert_upper_1',
+      pending: false,
+      microTime: 1004,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_reverted_user_upper',
+        returnType: 'REVERT',
+        arguments: [{ value: 'RevertedUpper' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does not reward when x verification tx has no return type', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_no_return_type_1',
+      pending: false,
+      microTime: 1005,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_missing_return_type',
+        arguments: [{ value: 'NoReturnType' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
   });
 
   it('ignores duplicate transaction hashes', async () => {

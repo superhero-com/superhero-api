@@ -9,6 +9,7 @@ import { ITransaction } from '@/utils/types';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
 import { ProfileContractService } from './profile-contract.service';
 import { ProfileIndexerService } from './profile-indexer.service';
+import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 
 @Injectable()
 export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
@@ -30,6 +31,7 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     private readonly websocketService: WebSocketService,
     private readonly profileIndexerService: ProfileIndexerService,
     private readonly profileContractService: ProfileContractService,
+    private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
   ) {}
 
   onModuleInit() {
@@ -78,6 +80,18 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
       !this.profileMutationFunctions.has(functionName)
     ) {
       return;
+    }
+
+    if (
+      functionName === 'set_x_name_with_attestation' &&
+      this.isSuccessfulMutation(transaction)
+    ) {
+      const xUsername = this.extractXUsername(transaction);
+      if (caller && xUsername) {
+        void this.profileXVerificationRewardService
+          .sendRewardIfEligible(caller, xUsername)
+          .catch(() => undefined);
+      }
     }
 
     const affectedAddresses = new Set<string>();
@@ -157,6 +171,37 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
       return undefined;
     }
     return value.toString();
+  }
+
+  private isSuccessfulMutation(transaction: ITransaction): boolean {
+    if (transaction?.pending === true) {
+      return false;
+    }
+    const returnType = (
+      (transaction as any)?.tx?.returnType ||
+      (transaction as any)?.tx?.return_type ||
+      (transaction as any)?.returnType ||
+      (transaction as any)?.return_type ||
+      ''
+    )
+      .toString()
+      .toLowerCase();
+    if (!returnType) {
+      return false;
+    }
+    return returnType !== 'revert';
+  }
+
+  private extractXUsername(transaction: ITransaction): string | null {
+    const username =
+      (transaction as any)?.tx?.arguments?.[0]?.value?.toString?.() ||
+      (transaction as any)?.tx?.tx?.arguments?.[0]?.value?.toString?.() ||
+      (transaction as any)?.arguments?.[0]?.value?.toString?.() ||
+      null;
+    if (!username) {
+      return null;
+    }
+    return username.trim().toLowerCase().replace(/^@+/, '');
   }
 
   private extractRawLog(transaction: ITransaction): any[] {

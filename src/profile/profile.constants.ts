@@ -12,6 +12,25 @@ export const PROFILE_ATTESTATION_TTL_SECONDS = parseInt(
   10,
 );
 
+const parseBooleanEnv = (value: string | undefined, defaultValue: boolean) => {
+  if (value === undefined || value === null || value.trim() === '') {
+    return defaultValue;
+  }
+  return value.toLowerCase() === 'true';
+};
+
+export const PROFILE_X_VERIFICATION_REWARD_ENABLED = parseBooleanEnv(
+  process.env.PROFILE_X_VERIFICATION_REWARD_ENABLED,
+  true,
+);
+
+export const PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE =
+  process.env.PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE || '0.01';
+
+export const PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY =
+  process.env.PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY ||
+  PROFILE_ATTESTATION_PRIVATE_KEY;
+
 export const PROFILE_MUTATION_FUNCTIONS = [
   'set_profile',
   'set_profile_full',
