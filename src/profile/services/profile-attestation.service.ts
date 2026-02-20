@@ -1,4 +1,4 @@
-import { decode, encode, Encoding, hash } from '@aeternity/aepp-sdk';
+import { encode, Encoding, hash } from '@aeternity/aepp-sdk';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { OAuthService } from '@/affiliation/services/oauth.service';
 import crypto from 'crypto';
@@ -8,6 +8,7 @@ import {
   PROFILE_ATTESTATION_SIGNER_ADDRESS,
   PROFILE_ATTESTATION_TTL_SECONDS,
 } from '../profile.constants';
+import { parseProfilePrivateKeyBytes } from './profile-private-key.util';
 
 @Injectable()
 export class ProfileAttestationService {
@@ -90,26 +91,15 @@ export class ProfileAttestationService {
   }
 
   private parsePrivateKey(privateKey: string): Buffer {
-    if (privateKey.startsWith('sk_')) {
-      const decoded = Buffer.from(decode(privateKey as any));
-      return this.normalizeSecretKey(decoded);
+    try {
+      return this.normalizeSecretKey(
+        Buffer.from(parseProfilePrivateKeyBytes(privateKey)),
+      );
+    } catch {
+      throw new BadRequestException(
+        'PROFILE_ATTESTATION_PRIVATE_KEY must be 32-byte seed or 64-byte secret key',
+      );
     }
-
-    const hexKey = privateKey.startsWith('0x')
-      ? privateKey.slice(2)
-      : privateKey;
-    if (/^[a-fA-F0-9]+$/.test(hexKey) && hexKey.length % 2 === 0) {
-      return this.normalizeSecretKey(Buffer.from(hexKey, 'hex'));
-    }
-
-    const b64 = Buffer.from(privateKey, 'base64');
-    if (b64.length > 0) {
-      return this.normalizeSecretKey(b64);
-    }
-
-    throw new BadRequestException(
-      'Unsupported PROFILE_ATTESTATION_PRIVATE_KEY format',
-    );
   }
 
   private normalizeSecretKey(secretOrSeed: Buffer): Buffer {
