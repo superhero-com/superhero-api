@@ -1,12 +1,6 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import {
-  AE_AMOUNT_FORMATS,
-  encode,
-  Encoding,
-  MemoryAccount,
-  toAettos,
-} from '@aeternity/aepp-sdk';
+import { encode, Encoding, MemoryAccount, toAettos } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import {
@@ -20,6 +14,7 @@ export class ProfileXVerificationRewardService {
   private readonly logger = new Logger(ProfileXVerificationRewardService.name);
   private readonly inFlightByAddress = new Map<string, Promise<void>>();
   private readonly inFlightByXUsername = new Map<string, Promise<void>>();
+  private spendQueue: Promise<void> = Promise.resolve();
   private rewardAccount: MemoryAccount | null = null;
   private rewardAccountInitError: Error | null = null;
 
@@ -129,32 +124,44 @@ export class ProfileXVerificationRewardService {
 
     await this.rewardRepository.save(rewardEntry);
 
-    try {
-      const rewardAccount = this.getRewardAccount();
-      const spendResult = await this.aeSdkService.sdk.spend(
-        rewardAmountAettos,
-        address as `ak_${string}`,
-        { onAccount: rewardAccount },
-      );
-      rewardEntry.tx_hash = spendResult.hash || null;
-      rewardEntry.status = 'paid';
-      rewardEntry.error = null;
-      await this.rewardRepository.save(rewardEntry);
-      this.logger.log(
-        `Sent ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE} AE X verification reward to ${address}`,
-      );
-    } catch (error: any) {
-      rewardEntry.status = 'failed';
-      rewardEntry.error =
-        error instanceof Error
-          ? error.message
-          : String(error || 'Unknown error');
-      await this.rewardRepository.save(rewardEntry);
-      this.logger.error(
-        `Failed to send X verification reward to ${address}`,
-        error?.stack || error,
-      );
-    }
+    // Serialize all spends from the same backend account to avoid nonce conflicts.
+    await this.enqueueSpend(async () => {
+      try {
+        const rewardAccount = this.getRewardAccount();
+        const spendResult = await this.aeSdkService.sdk.spend(
+          rewardAmountAettos,
+          address as `ak_${string}`,
+          { onAccount: rewardAccount },
+        );
+        rewardEntry.tx_hash = spendResult.hash || null;
+        rewardEntry.status = 'paid';
+        rewardEntry.error = null;
+        await this.rewardRepository.save(rewardEntry);
+        this.logger.log(
+          `Sent ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE} AE X verification reward to ${address}`,
+        );
+      } catch (error: any) {
+        rewardEntry.status = 'failed';
+        rewardEntry.error =
+          error instanceof Error
+            ? error.message
+            : String(error || 'Unknown error');
+        await this.rewardRepository.save(rewardEntry);
+        this.logger.error(
+          `Failed to send X verification reward to ${address}`,
+          error?.stack || error,
+        );
+      }
+    });
+  }
+
+  private async enqueueSpend(work: () => Promise<void>): Promise<void> {
+    const current = this.spendQueue.then(work, work);
+    this.spendQueue = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
   }
 
   private getRewardAccount(): MemoryAccount {
@@ -193,9 +200,7 @@ export class ProfileXVerificationRewardService {
 
   private getRewardAmountAettos(): string | null {
     try {
-      const amount = toAettos(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE, {
-        denomination: AE_AMOUNT_FORMATS.AE,
-      });
+      const amount = toAettos(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE);
       if (!/^\d+$/.test(amount) || amount === '0') {
         this.logger.error(
           `Skipping X verification reward, converted aettos amount is invalid: ${amount}`,
