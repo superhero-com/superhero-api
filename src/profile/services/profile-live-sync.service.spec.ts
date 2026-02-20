@@ -176,6 +176,66 @@ describe('ProfileLiveSyncService', () => {
     );
   });
 
+  it('does not reprocess hash after pending/confirmed when queue evicts once', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    (service as any).maxRecentTxHashes = 2;
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_hash_state_1',
+      pending: true,
+      microTime: 11001,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_hash_state_user',
+        returnType: 'ok',
+        arguments: [{ value: 'HashStateUser' }],
+      },
+    });
+    callback({
+      hash: 'th_hash_state_1',
+      pending: false,
+      microTime: 11002,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_hash_state_user',
+        returnType: 'ok',
+        arguments: [{ value: 'HashStateUser' }],
+      },
+    });
+    callback({
+      hash: 'th_other_hash_1',
+      pending: false,
+      microTime: 11003,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_profile',
+        callerId: 'ak_other_user',
+      },
+    });
+    callback({
+      hash: 'th_hash_state_1',
+      pending: false,
+      microTime: 11004,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_hash_state_user',
+        returnType: 'ok',
+        arguments: [{ value: 'HashStateUser' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledTimes(1);
+  });
+
   it('does not reward when x verification tx is reverted', async () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);

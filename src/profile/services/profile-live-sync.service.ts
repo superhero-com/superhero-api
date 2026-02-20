@@ -14,7 +14,6 @@ import {
   extractProfileMutationCaller,
   extractProfileMutationContractId,
   extractProfileMutationFunction,
-  extractProfileMutationPayload,
   extractProfileMutationRawLog,
   extractProfileMutationXUsername,
   isPendingProfileMutation,
@@ -133,15 +132,19 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private rememberHash(hash: string, pending: boolean) {
-    const previous = this.recentTxHashes.get(hash) || {
+    const previous = this.recentTxHashes.get(hash);
+    const isNewHash = !previous;
+    const current = previous || {
       seenPending: false,
       seenConfirmed: false,
     };
     this.recentTxHashes.set(hash, {
-      seenPending: previous.seenPending || pending,
-      seenConfirmed: previous.seenConfirmed || !pending,
+      seenPending: current.seenPending || pending,
+      seenConfirmed: current.seenConfirmed || !pending,
     });
-    this.recentTxHashQueue.push(hash);
+    if (isNewHash) {
+      this.recentTxHashQueue.push(hash);
+    }
     if (this.recentTxHashQueue.length > this.maxRecentTxHashes) {
       const oldest = this.recentTxHashQueue.shift();
       if (oldest) {
@@ -167,11 +170,7 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isPendingTransaction(transaction: ITransaction): boolean {
-    if (isPendingProfileMutation(transaction as any)) {
-      return true;
-    }
-    const payload = extractProfileMutationPayload(transaction as any);
-    return payload?.pending === true;
+    return isPendingProfileMutation(transaction as any);
   }
 
   private async extractAutoRenamedAddresses(

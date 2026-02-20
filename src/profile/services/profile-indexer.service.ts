@@ -30,6 +30,7 @@ export class ProfileIndexerService {
     'set_x_name_with_attestation',
     'set_profile_full',
   ]);
+  private readonly maxRecentRewardTxHashes = 2000;
 
   constructor(
     @InjectRepository(ProfileCache)
@@ -57,6 +58,9 @@ export class ProfileIndexerService {
       const changedAddresses = new Set<string>();
       let reachedIndexedBoundary = false;
       let pageSafetyCounter = 0;
+      const rewardTxStates = new Map<string, { seenConfirmed: boolean }>();
+      const rewardTxHashQueue: string[] = [];
+      const rewardDispatches: Promise<void>[] = [];
 
       while (endpoint && !reachedIndexedBoundary && pageSafetyCounter < 200) {
         pageSafetyCounter += 1;
@@ -76,12 +80,24 @@ export class ProfileIndexerService {
               fn === 'set_x_name_with_attestation' &&
               isSuccessfulProfileMutation(tx)
             ) {
-              const caller = extractProfileMutationCaller(tx);
-              const xUsername = extractProfileMutationXUsername(tx);
-              if (caller && xUsername) {
-                void this.profileXVerificationRewardService
-                  .sendRewardIfEligible(caller, xUsername)
-                  .catch(() => undefined);
+              const hash = this.extractTxHash(tx);
+              if (
+                this.shouldProcessRewardTxHash(
+                  hash,
+                  rewardTxStates,
+                  rewardTxHashQueue,
+                )
+              ) {
+                const caller = extractProfileMutationCaller(tx);
+                const xUsername = extractProfileMutationXUsername(tx);
+                if (caller && xUsername) {
+                  rewardDispatches.push(
+                    this.profileXVerificationRewardService.sendRewardIfEligible(
+                      caller,
+                      xUsername,
+                    ),
+                  );
+                }
               }
             }
             const affected = await this.extractAffectedAddresses(tx, fn);
@@ -106,6 +122,16 @@ export class ProfileIndexerService {
 
       for (const address of changedAddresses) {
         await this.refreshAddress(address, nextStateMicroTime.toString());
+      }
+
+      const rewardResults = await Promise.allSettled(rewardDispatches);
+      const failedRewardCount = rewardResults.filter(
+        (result) => result.status === 'rejected',
+      ).length;
+      if (failedRewardCount > 0) {
+        this.logger.warn(
+          `Failed to process ${failedRewardCount} X verification reward dispatch(es) in indexer sync; continuing`,
+        );
       }
 
       if (nextStateMicroTime > lastIndexedMicroTime) {
@@ -159,8 +185,8 @@ export class ProfileIndexerService {
     xName: string | null,
   ): string | null {
     const source = (displaySource || '').toLowerCase();
-    if (source === 'custom' && username) {
-      return username;
+    if (source === 'custom') {
+      return username || null;
     }
     if (source === 'chain' && chainName) {
       return chainName;
@@ -222,5 +248,38 @@ export class ProfileIndexerService {
 
   private extractRawLog(tx: any): any[] {
     return extractProfileMutationRawLog(tx);
+  }
+
+  private extractTxHash(tx: any): string {
+    return tx?.hash?.toString?.() || tx?.tx_hash?.toString?.() || '';
+  }
+
+  private shouldProcessRewardTxHash(
+    hash: string,
+    states: Map<string, { seenConfirmed: boolean }>,
+    queue: string[],
+  ): boolean {
+    if (!hash) {
+      return false;
+    }
+    const existing = states.get(hash);
+    if (existing?.seenConfirmed) {
+      return false;
+    }
+
+    const isNew = !existing;
+    states.set(hash, {
+      seenConfirmed: true,
+    });
+    if (isNew) {
+      queue.push(hash);
+    }
+    if (queue.length > this.maxRecentRewardTxHashes) {
+      const oldest = queue.shift();
+      if (oldest) {
+        states.delete(oldest);
+      }
+    }
+    return true;
   }
 }

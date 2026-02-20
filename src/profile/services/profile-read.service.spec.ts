@@ -54,6 +54,33 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe('x_one');
   });
 
+  it('does not fallback to chain/x when display source is custom', async () => {
+    const profileCacheRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        address: 'ak_abc1234567890',
+        username: null,
+        chain_name: 'chain_one',
+        x_username: 'x_one',
+        display_source: 'custom',
+      } as ProfileCache),
+    } as any;
+    const accountRepository = {
+      findOne: jest.fn().mockResolvedValue(null as Account | null),
+    } as any;
+    const profileContractService = {
+      getProfile: jest.fn().mockResolvedValue(null),
+    } as unknown as ProfileContractService;
+
+    const service = new ProfileReadService(
+      profileCacheRepository,
+      accountRepository,
+      profileContractService,
+    );
+    const result = await service.getProfile('ak_abc1234567890');
+
+    expect(result.public_name).toBe('ak_abc...7890');
+  });
+
   it('returns batch profiles in requested order', async () => {
     const profileCacheRepository = {
       findOne: jest.fn(),

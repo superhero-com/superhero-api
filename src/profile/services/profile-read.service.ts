@@ -279,8 +279,8 @@ export class ProfileReadService {
     const display = (profile.display_source || '').toLowerCase();
     const shortAddress = `${address.slice(0, 6)}...${address.slice(-4)}`;
 
-    if (display === 'custom' && profile.username) {
-      return profile.username;
+    if (display === 'custom') {
+      return profile.username || shortAddress;
     }
     if (display === 'chain' && profile.chain_name) {
       return profile.chain_name;

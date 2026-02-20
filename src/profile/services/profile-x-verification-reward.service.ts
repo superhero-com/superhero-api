@@ -89,20 +89,33 @@ export class ProfileXVerificationRewardService {
       return;
     }
 
-    const [existingReward, existingRewardForX] = await Promise.all([
-      this.rewardRepository.findOne({
-        where: { address },
-      }),
-      this.rewardRepository.findOne({
-        where: { x_username: xUsername, status: 'paid' },
-      }),
-    ]);
+    const [existingReward, existingPaidRewardForX, existingPendingRewardForX] =
+      await Promise.all([
+        this.rewardRepository.findOne({
+          where: { address },
+        }),
+        this.rewardRepository.findOne({
+          where: { x_username: xUsername, status: 'paid' },
+        }),
+        this.rewardRepository.findOne({
+          where: { x_username: xUsername, status: 'pending' },
+        }),
+      ]);
     if (existingReward?.status === 'paid') {
       return;
     }
-    if (existingRewardForX && existingRewardForX.address !== address) {
+    if (existingPaidRewardForX && existingPaidRewardForX.address !== address) {
       this.logger.warn(
-        `Skipping X verification reward for ${address}, X user ${xUsername} already rewarded on ${existingRewardForX.address}`,
+        `Skipping X verification reward for ${address}, X user ${xUsername} already rewarded on ${existingPaidRewardForX.address}`,
+      );
+      return;
+    }
+    if (
+      existingPendingRewardForX &&
+      existingPendingRewardForX.address !== address
+    ) {
+      this.logger.warn(
+        `Skipping X verification reward for ${address}, X user ${xUsername} has pending reward on ${existingPendingRewardForX.address}`,
       );
       return;
     }
@@ -152,6 +165,7 @@ export class ProfileXVerificationRewardService {
           `Failed to send X verification reward to ${address}`,
           error?.stack || error,
         );
+        throw error;
       }
     });
   }
