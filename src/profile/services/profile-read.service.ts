@@ -55,7 +55,7 @@ export class ProfileReadService {
     const profile = this.mergeProfile(cache, onChainProfile, account);
 
     const publicName =
-      cache?.public_name || this.resolvePublicName(profile, address);
+      cache?.public_name ?? this.resolvePublicName(profile, address);
     if (onChainProfile) {
       await this.saveProfileCacheSnapshot(address, profile, publicName);
     }
@@ -192,7 +192,7 @@ export class ProfileReadService {
         address: cache.address,
         profile: merged,
         public_name:
-          cache.public_name || this.resolvePublicName(merged, cache.address),
+          cache.public_name ?? this.resolvePublicName(merged, cache.address),
       };
     });
 
@@ -241,7 +241,7 @@ export class ProfileReadService {
       address,
       profile,
       public_name:
-        cache?.public_name || this.resolvePublicName(profile, address),
+        cache?.public_name ?? this.resolvePublicName(profile, address),
     };
   }
 
@@ -280,13 +280,13 @@ export class ProfileReadService {
     const shortAddress = `${address.slice(0, 6)}...${address.slice(-4)}`;
 
     if (display === 'custom') {
-      return profile.username || shortAddress;
+      return profile.username || '';
     }
-    if (display === 'chain' && profile.chain_name) {
-      return profile.chain_name;
+    if (display === 'chain') {
+      return profile.chain_name || '';
     }
-    if (display === 'x' && profile.x_username) {
-      return profile.x_username;
+    if (display === 'x') {
+      return profile.x_username || '';
     }
 
     return (

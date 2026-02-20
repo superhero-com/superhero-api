@@ -188,11 +188,11 @@ export class ProfileIndexerService {
     if (source === 'custom') {
       return username || null;
     }
-    if (source === 'chain' && chainName) {
-      return chainName;
+    if (source === 'chain') {
+      return chainName || null;
     }
-    if (source === 'x' && xName) {
-      return xName;
+    if (source === 'x') {
+      return xName || null;
     }
     return username || chainName || xName || null;
   }
