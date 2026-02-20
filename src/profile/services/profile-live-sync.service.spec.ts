@@ -135,6 +135,47 @@ describe('ProfileLiveSyncService', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('rewards when same hash arrives pending first, then confirmed', async () => {
+    const { service, websocketService, profileXVerificationRewardService } =
+      setup(true);
+    service.onModuleInit();
+    const callback = websocketService.subscribeForTransactionsUpdates.mock
+      .calls[0][0];
+
+    callback({
+      hash: 'th_x_pending_then_confirmed_1',
+      pending: true,
+      microTime: 10021,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_pending_then_confirmed',
+        returnType: 'ok',
+        arguments: [{ value: 'PendingThenConfirmed' }],
+      },
+    });
+    callback({
+      hash: 'th_x_pending_then_confirmed_1',
+      pending: false,
+      microTime: 10022,
+      tx: {
+        contractId: 'ct_profile',
+        function: 'set_x_name_with_attestation',
+        callerId: 'ak_pending_then_confirmed',
+        returnType: 'ok',
+        arguments: [{ value: 'PendingThenConfirmed' }],
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledTimes(1);
+    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
+      'ak_pending_then_confirmed',
+      'pendingthenconfirmed',
+    );
+  });
+
   it('does not reward when x verification tx is reverted', async () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);

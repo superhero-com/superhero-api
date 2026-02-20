@@ -14,8 +14,10 @@ import {
   extractProfileMutationCaller,
   extractProfileMutationContractId,
   extractProfileMutationFunction,
+  extractProfileMutationPayload,
   extractProfileMutationRawLog,
   extractProfileMutationXUsername,
+  isPendingProfileMutation,
   isSuccessfulProfileMutation,
 } from './profile-mutation-tx.util';
 
@@ -26,7 +28,10 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly profileMutationFunctions = new Set<string>(
     PROFILE_MUTATION_FUNCTIONS,
   );
-  private readonly recentTxHashes = new Set<string>();
+  private readonly recentTxHashes = new Map<
+    string,
+    { seenPending: boolean; seenConfirmed: boolean }
+  >();
   private readonly recentTxHashQueue: string[] = [];
   private readonly maxRecentTxHashes = 500;
   private readonly autoRenamePossibleFunctions = new Set<string>([
@@ -72,10 +77,18 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async handleTransaction(transaction: ITransaction) {
     const hash = transaction?.hash?.toString?.() || '';
-    if (!hash || this.recentTxHashes.has(hash)) {
+    if (!hash) {
       return;
     }
-    this.rememberHash(hash);
+    const pending = this.isPendingTransaction(transaction);
+    const existingState = this.recentTxHashes.get(hash);
+    if (existingState?.seenConfirmed) {
+      return;
+    }
+    if (pending && existingState?.seenPending) {
+      return;
+    }
+    this.rememberHash(hash, pending);
 
     const contractId = extractProfileMutationContractId(transaction);
     const functionName = extractProfileMutationFunction(transaction);
@@ -119,8 +132,15 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private rememberHash(hash: string) {
-    this.recentTxHashes.add(hash);
+  private rememberHash(hash: string, pending: boolean) {
+    const previous = this.recentTxHashes.get(hash) || {
+      seenPending: false,
+      seenConfirmed: false,
+    };
+    this.recentTxHashes.set(hash, {
+      seenPending: previous.seenPending || pending,
+      seenConfirmed: previous.seenConfirmed || !pending,
+    });
     this.recentTxHashQueue.push(hash);
     if (this.recentTxHashQueue.length > this.maxRecentTxHashes) {
       const oldest = this.recentTxHashQueue.shift();
@@ -144,6 +164,14 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
 
   private extractRawLog(transaction: ITransaction): any[] {
     return extractProfileMutationRawLog(transaction as any);
+  }
+
+  private isPendingTransaction(transaction: ITransaction): boolean {
+    if (isPendingProfileMutation(transaction as any)) {
+      return true;
+    }
+    const payload = extractProfileMutationPayload(transaction as any);
+    return payload?.pending === true;
   }
 
   private async extractAutoRenamedAddresses(

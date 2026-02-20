@@ -50,11 +50,7 @@ export const extractProfileMutationRawLog = (tx: any): any[] => {
 
 export const isSuccessfulProfileMutation = (tx: any): boolean => {
   const payload = extractProfileMutationPayload(tx);
-  if (
-    tx?.pending === true ||
-    tx?.tx?.pending === true ||
-    payload?.pending === true
-  ) {
+  if (isPendingProfileMutation(tx)) {
     return false;
   }
   const returnType = (
@@ -72,6 +68,15 @@ export const isSuccessfulProfileMutation = (tx: any): boolean => {
     return false;
   }
   return returnType === 'ok';
+};
+
+export const isPendingProfileMutation = (tx: any): boolean => {
+  const payload = extractProfileMutationPayload(tx);
+  return (
+    tx?.pending === true ||
+    tx?.tx?.pending === true ||
+    payload?.pending === true
+  );
 };
 
 export const extractProfileMutationXUsername = (tx: any): string | null => {
