@@ -62,4 +62,22 @@ describe('profile-mutation-tx.util', () => {
       }),
     ).toBe(false);
   });
+
+  it('treats runtime error return type as unsuccessful', () => {
+    expect(
+      isSuccessfulProfileMutation({
+        ...nestedPayingForTx,
+        tx: {
+          ...nestedPayingForTx.tx,
+          tx: {
+            ...nestedPayingForTx.tx.tx,
+            tx: {
+              ...nestedPayingForTx.tx.tx.tx,
+              return_type: 'error',
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
 });

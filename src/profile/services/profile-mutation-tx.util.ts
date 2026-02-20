@@ -21,11 +21,7 @@ export const extractProfileMutationContractId = (tx: any): string => {
 
 export const extractProfileMutationFunction = (tx: any): string => {
   const payload = extractProfileMutationPayload(tx);
-  return (
-    payload?.function?.toString?.() ||
-    tx?.function?.toString?.() ||
-    ''
-  );
+  return payload?.function?.toString?.() || tx?.function?.toString?.() || '';
 };
 
 export const extractProfileMutationCaller = (tx: any): string | null => {
@@ -54,7 +50,11 @@ export const extractProfileMutationRawLog = (tx: any): any[] => {
 
 export const isSuccessfulProfileMutation = (tx: any): boolean => {
   const payload = extractProfileMutationPayload(tx);
-  if (tx?.pending === true || tx?.tx?.pending === true || payload?.pending === true) {
+  if (
+    tx?.pending === true ||
+    tx?.tx?.pending === true ||
+    payload?.pending === true
+  ) {
     return false;
   }
   const returnType = (
@@ -71,7 +71,7 @@ export const isSuccessfulProfileMutation = (tx: any): boolean => {
   if (!returnType) {
     return false;
   }
-  return returnType !== 'revert';
+  return returnType === 'ok';
 };
 
 export const extractProfileMutationXUsername = (tx: any): string | null => {
