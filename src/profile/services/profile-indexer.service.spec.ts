@@ -232,8 +232,33 @@ describe('ProfileIndexerService', () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
       display_source: 'custom',
-      public_name: null,
+      public_name: '',
       chain_name: 'chain_name',
+      x_username: 'x_name',
+    });
+  });
+
+  it('does not set public_name from custom/x when display source is chain', async () => {
+    const { service, profileContractService } = createService();
+    profileContractService.getProfile.mockResolvedValue({
+      fullname: '',
+      bio: '',
+      avatarurl: '',
+      username: 'custom_name',
+      x_username: 'x_name',
+      chain_name: null,
+      display_source: 'chain',
+      chain_expires_at: null,
+    });
+
+    const upsertMock = (service as any).profileCacheRepository.upsert as jest.Mock;
+    await service.refreshAddress('ak_chain_source');
+
+    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(upsertMock.mock.calls[0][0]).toMatchObject({
+      display_source: 'chain',
+      public_name: '',
+      username: 'custom_name',
       x_username: 'x_name',
     });
   });

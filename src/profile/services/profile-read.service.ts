@@ -54,8 +54,9 @@ export class ProfileReadService {
       : null;
     const profile = this.mergeProfile(cache, onChainProfile, account);
 
-    const publicName =
-      cache?.public_name || this.resolvePublicName(profile, address);
+    const publicName = onChainProfile
+      ? this.resolvePublicName(profile)
+      : (cache?.public_name ?? this.resolvePublicName(profile));
     if (onChainProfile) {
       await this.saveProfileCacheSnapshot(address, profile, publicName);
     }
@@ -80,7 +81,7 @@ export class ProfileReadService {
     return {
       address,
       profile: onChainProfile,
-      public_name: this.resolvePublicName(onChainProfile, address),
+      public_name: this.resolvePublicName(onChainProfile),
     };
   }
 
@@ -191,8 +192,7 @@ export class ProfileReadService {
       return {
         address: cache.address,
         profile: merged,
-        public_name:
-          cache.public_name || this.resolvePublicName(merged, cache.address),
+        public_name: cache.public_name ?? this.resolvePublicName(merged),
       };
     });
 
@@ -240,8 +240,9 @@ export class ProfileReadService {
     return {
       address,
       profile,
-      public_name:
-        cache?.public_name || this.resolvePublicName(profile, address),
+      public_name: onChainProfile
+        ? this.resolvePublicName(profile)
+        : (cache?.public_name ?? this.resolvePublicName(profile)),
     };
   }
 
@@ -267,34 +268,25 @@ export class ProfileReadService {
     };
   }
 
-  private resolvePublicName(
-    profile: {
-      username?: string | null;
-      x_username?: string | null;
-      chain_name?: string | null;
-      display_source?: string | null;
-    },
-    address: string,
-  ): string {
+  private resolvePublicName(profile: {
+    username?: string | null;
+    x_username?: string | null;
+    chain_name?: string | null;
+    display_source?: string | null;
+  }): string {
     const display = (profile.display_source || '').toLowerCase();
-    const shortAddress = `${address.slice(0, 6)}...${address.slice(-4)}`;
 
     if (display === 'custom') {
-      return profile.username || shortAddress;
+      return profile.username || '';
     }
-    if (display === 'chain' && profile.chain_name) {
-      return profile.chain_name;
+    if (display === 'chain') {
+      return profile.chain_name || '';
     }
-    if (display === 'x' && profile.x_username) {
-      return profile.x_username;
+    if (display === 'x') {
+      return profile.x_username || '';
     }
 
-    return (
-      profile.username ||
-      profile.chain_name ||
-      profile.x_username ||
-      shortAddress
-    );
+    return profile.username || profile.chain_name || profile.x_username || '';
   }
 
   private isCacheEffectivelyEmpty(cache: ProfileCache): boolean {
@@ -401,7 +393,7 @@ export class ProfileReadService {
         }
 
         const merged = this.mergeProfile(null, onChain, account);
-        const publicName = this.resolvePublicName(merged, address);
+        const publicName = this.resolvePublicName(merged);
         collectedCount += 1;
         itemsWithIndex.push({
           index: candidateIndex,

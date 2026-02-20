@@ -28,7 +28,7 @@ import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
-import { Account } from '@/account/entities/account.entity';
+import { ProfileReadService } from '@/profile/services/profile-read.service';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -40,6 +40,7 @@ export class PostsController {
     private readonly tokenRepository: Repository<Token>,
     private readonly popularRankingService: PopularRankingService,
     private readonly readsService: ReadsService,
+    private readonly profileReadService: ProfileReadService,
   ) {
     //
   }
@@ -112,6 +113,75 @@ export class PostsController {
             : null,
         };
       });
+    }
+  }
+
+  private isPluginContentItem(
+    item: Post | PopularRankingContentItem,
+  ): item is PopularRankingContentItem {
+    return (
+      'type' in item &&
+      typeof item.type === 'string' &&
+      item.type.length > 0 &&
+      item.type !== 'post'
+    );
+  }
+
+  private async fetchPostsWithRelations(postIds: string[]): Promise<Post[]> {
+    if (postIds.length === 0) {
+      return [];
+    }
+
+    return this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.topics', 'topic')
+      .leftJoinAndMapOne(
+        'topic.token',
+        Token,
+        'token',
+        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
+      )
+      .leftJoinAndMapOne(
+        'token.performance',
+        TokenPerformanceView,
+        'token_performance_view',
+        'token.sale_address = token_performance_view.sale_address',
+      )
+      .where('post.id IN (:...postIds)', { postIds })
+      .andWhere('post.is_hidden = false')
+      .getMany();
+  }
+
+  private async attachProfileSenderInfo(
+    items: Array<{ sender_address?: string }>,
+  ): Promise<void> {
+    const addresses = Array.from(
+      new Set(
+        items
+          .map((item) => item.sender_address || '')
+          .filter((address) => address.length > 0),
+      ),
+    );
+    if (addresses.length === 0) {
+      return;
+    }
+
+    const profiles =
+      await this.profileReadService.getProfilesByAddresses(addresses);
+    const profileByAddress = new Map(
+      profiles.map((entry) => [entry.address, entry]),
+    );
+
+    for (const item of items) {
+      const address = item.sender_address || '';
+      const profile = profileByAddress.get(address);
+      (item as any).sender = {
+        address,
+        public_name: profile?.public_name ?? '',
+        bio: profile?.profile?.bio ?? '',
+        avatarurl: profile?.profile?.avatarurl ?? '',
+        display_source: profile?.profile?.display_source ?? 'custom',
+      };
     }
   }
 
@@ -279,35 +349,9 @@ export class PostsController {
       .getRawOne<{ count: string }>();
     const totalItems = parseInt(totalCount?.count || '0', 10);
 
-    // Now build the main query that joins topics and other relations
-    // Filter by the distinct post IDs
-    const query = this.postRepository
-      .createQueryBuilder('post')
-      .leftJoinAndSelect('post.topics', 'topic')
-      .leftJoinAndMapOne(
-        'post.sender',
-        Account,
-        'account',
-        'account.address = post.sender_address',
-      )
-      .leftJoinAndMapOne(
-        'topic.token',
-        Token,
-        'token',
-        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
-      )
-      .leftJoinAndMapOne(
-        'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
-      )
-      .where('post.id IN (:...postIds)', { postIds });
-    // Note: We don't use orderBy here because SQL IN clauses don't preserve order
-    // Instead, we'll sort in memory to preserve the pagination order
-
-    // Execute the main query
-    const items = await query.getMany();
+    // Build the main hydrated posts payload from the paginated IDs.
+    // Note: SQL IN clauses don't preserve order, so we sort in memory below.
+    const items = await this.fetchPostsWithRelations(postIds);
 
     // Sort items to match the order from the pagination query
     // This preserves the pagination integrity and prevents duplicates/skips across pages
@@ -318,6 +362,7 @@ export class PostsController {
     });
 
     await this.attachTrendMentionsPerformance(items);
+    await this.attachProfileSenderInfo(items);
 
     // Return paginated result
     return {
@@ -361,15 +406,21 @@ export class PostsController {
         await this.popularRankingService.getTotalPostsCount(window);
       const totalPages = Math.ceil(totalItems / limit);
 
-      const items = await this.popularRankingService.getPopularPosts(
+      const rankedItems = await this.popularRankingService.getPopularPosts(
         window,
         limit,
         offset,
       );
 
+      const rankedPostIds = rankedItems
+        .filter((item) => !this.isPluginContentItem(item))
+        .map((item) => item.id);
+      const hydratedPosts = await this.fetchPostsWithRelations(rankedPostIds);
+      const postsById = new Map(hydratedPosts.map((post) => [post.id, post]));
+
       // Transform items to include type discriminator
-      const transformedItems = items.map((item) => {
-        if ('type' in item && item.type !== 'post' && 'metadata' in item) {
+      const transformedItems = rankedItems.map((item) => {
+        if (this.isPluginContentItem(item)) {
           // Plugin content item (e.g., poll)
           const pluginItem = item as PopularRankingContentItem;
           return {
@@ -387,14 +438,18 @@ export class PostsController {
           };
         }
         // Regular post
+        const hydratedPost = postsById.get(item.id);
         return {
-          ...item,
+          ...(hydratedPost || item),
           type: 'post',
         };
       });
 
       await this.attachTrendMentionsPerformance(
         transformedItems as Array<{ id: string; content: string }>,
+      );
+      await this.attachProfileSenderInfo(
+        transformedItems as Array<{ sender_address?: string }>,
       );
 
       const response: any = {
@@ -415,7 +470,7 @@ export class PostsController {
       }
       return response;
     } catch (error) {
-      const items = await this.postRepository
+      const fallbackBasePosts = await this.postRepository
         .createQueryBuilder('post')
         .where('post.is_hidden = false')
         .andWhere('post.post_id IS NULL')
@@ -423,6 +478,27 @@ export class PostsController {
         .offset(offset)
         .limit(limit)
         .getMany();
+      const fallbackPostIds = fallbackBasePosts.map((post) => post.id);
+      const fallbackOrder = new Map(
+        fallbackPostIds.map((id, index) => [id, index]),
+      );
+      const hydratedFallbackPosts =
+        await this.fetchPostsWithRelations(fallbackPostIds);
+      hydratedFallbackPosts.sort((a, b) => {
+        const aIndex = fallbackOrder.get(a.id) ?? Infinity;
+        const bIndex = fallbackOrder.get(b.id) ?? Infinity;
+        return aIndex - bIndex;
+      });
+      const items = hydratedFallbackPosts.map((item) => ({
+        ...item,
+        type: 'post',
+      }));
+      await this.attachTrendMentionsPerformance(
+        items as Array<{ id: string; content: string }>,
+      );
+      await this.attachProfileSenderInfo(
+        items as Array<{ sender_address?: string }>,
+      );
       return {
         items,
         meta: {
@@ -465,12 +541,6 @@ export class PostsController {
         'token_performance_view',
         'token.sale_address = token_performance_view.sale_address',
       )
-      .leftJoinAndMapOne(
-        'post.sender',
-        Account,
-        'account',
-        'account.address = post.sender_address',
-      )
       .where('(post.id = :id OR post.slug = :id)', { id })
       .getOne();
 
@@ -478,6 +548,7 @@ export class PostsController {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
     await this.attachTrendMentionsPerformance([post]);
+    await this.attachProfileSenderInfo([post]);
     // fire-and-forget: do not block response
     void this.readsService.recordRead(post.id, req);
     return post;
