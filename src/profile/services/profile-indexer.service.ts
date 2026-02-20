@@ -8,6 +8,13 @@ import { ProfileCache } from '../entities/profile-cache.entity';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
 import { ProfileSyncState } from '../entities/profile-sync-state.entity';
 import { ProfileContractService } from './profile-contract.service';
+import {
+  extractProfileMutationCaller,
+  extractProfileMutationFunction,
+  extractProfileMutationRawLog,
+  extractProfileMutationXUsername,
+  isSuccessfulProfileMutation,
+} from './profile-mutation-tx.util';
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 
 @Injectable()
@@ -63,14 +70,14 @@ export class ProfileIndexerService {
             break;
           }
 
-          const fn = this.extractTxFunction(tx);
+          const fn = extractProfileMutationFunction(tx);
           if (this.profileMutationFunctions.has(fn)) {
             if (
               fn === 'set_x_name_with_attestation' &&
-              this.isSuccessfulMutation(tx)
+              isSuccessfulProfileMutation(tx)
             ) {
-              const caller = this.extractTxSigner(tx);
-              const xUsername = this.extractXUsername(tx);
+              const caller = extractProfileMutationCaller(tx);
+              const xUsername = extractProfileMutationXUsername(tx);
               if (caller && xUsername) {
                 void this.profileXVerificationRewardService
                   .sendRewardIfEligible(caller, xUsername)
@@ -184,7 +191,7 @@ export class ProfileIndexerService {
     functionName: string,
   ): Promise<Set<string>> {
     const addresses = new Set<string>();
-    const caller = this.extractTxSigner(tx);
+    const caller = extractProfileMutationCaller(tx);
     if (caller) {
       addresses.add(caller);
     }
@@ -214,79 +221,6 @@ export class ProfileIndexerService {
   }
 
   private extractRawLog(tx: any): any[] {
-    const payload = this.extractMutationPayload(tx);
-    const rawLog =
-      payload?.log ||
-      tx?.tx?.log ||
-      tx?.tx?.tx?.log ||
-      tx?.tx?.tx?.tx?.log ||
-      tx?.log ||
-      tx?.raw?.log ||
-      [];
-    return Array.isArray(rawLog) ? rawLog : [];
-  }
-
-  private extractTxSigner(tx: any): string | null {
-    const payload = this.extractMutationPayload(tx);
-    return (
-      payload?.caller_id?.toString?.() ||
-      payload?.callerId?.toString?.() ||
-      tx?.caller_id?.toString?.() ||
-      tx?.callerId?.toString?.() ||
-      null
-    );
-  }
-
-  private extractTxFunction(tx: any): string {
-    const payload = this.extractMutationPayload(tx);
-    return (
-      payload?.function?.toString?.() ||
-      tx?.function?.toString?.() ||
-      ''
-    );
-  }
-
-  private isSuccessfulMutation(tx: any): boolean {
-    const payload = this.extractMutationPayload(tx);
-    if (tx?.pending === true || tx?.tx?.pending === true) {
-      return false;
-    }
-    const returnType = (
-      payload?.return_type?.toString?.() ||
-      payload?.returnType?.toString?.() ||
-      tx?.tx?.return_type?.toString?.() ||
-      tx?.tx?.returnType?.toString?.() ||
-      tx?.return_type?.toString?.() ||
-      tx?.returnType?.toString?.() ||
-      ''
-    )
-      .toString()
-      .toLowerCase();
-    if (!returnType) {
-      return false;
-    }
-    return returnType !== 'revert';
-  }
-
-  private extractXUsername(tx: any): string | null {
-    const payload = this.extractMutationPayload(tx);
-    const xUsername =
-      payload?.arguments?.[0]?.value?.toString?.() ||
-      tx?.arguments?.[0]?.value?.toString?.() ||
-      null;
-    if (!xUsername) {
-      return null;
-    }
-    return xUsername.trim().toLowerCase().replace(/^@+/, '');
-  }
-
-  private extractMutationPayload(tx: any): any {
-    const candidates = [tx?.tx?.tx?.tx, tx?.tx?.tx, tx?.tx, tx];
-    const matched = candidates.find((candidate) => {
-      const contractId = candidate?.contractId || candidate?.contract_id;
-      const fn = candidate?.function;
-      return !!contractId && !!fn;
-    });
-    return matched || tx;
+    return extractProfileMutationRawLog(tx);
   }
 }

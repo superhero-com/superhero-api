@@ -10,6 +10,14 @@ import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
 import { ProfileContractService } from './profile-contract.service';
 import { ProfileIndexerService } from './profile-indexer.service';
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
+import {
+  extractProfileMutationCaller,
+  extractProfileMutationContractId,
+  extractProfileMutationFunction,
+  extractProfileMutationRawLog,
+  extractProfileMutationXUsername,
+  isSuccessfulProfileMutation,
+} from './profile-mutation-tx.util';
 
 @Injectable()
 export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
@@ -69,9 +77,9 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     }
     this.rememberHash(hash);
 
-    const contractId = this.extractContractId(transaction);
-    const functionName = this.extractFunctionName(transaction);
-    const caller = this.extractCaller(transaction);
+    const contractId = extractProfileMutationContractId(transaction);
+    const functionName = extractProfileMutationFunction(transaction);
+    const caller = extractProfileMutationCaller(transaction);
     const microTime = this.extractMicroTime(transaction);
 
     if (
@@ -84,9 +92,9 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
 
     if (
       functionName === 'set_x_name_with_attestation' &&
-      this.isSuccessfulMutation(transaction)
+      isSuccessfulProfileMutation(transaction)
     ) {
-      const xUsername = this.extractXUsername(transaction);
+      const xUsername = extractProfileMutationXUsername(transaction);
       if (caller && xUsername) {
         void this.profileXVerificationRewardService
           .sendRewardIfEligible(caller, xUsername)
@@ -122,37 +130,6 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private extractContractId(transaction: ITransaction): string {
-    const payload = this.extractMutationPayload(transaction);
-    return (
-      payload?.contractId?.toString?.() ||
-      payload?.contract_id?.toString?.() ||
-      (transaction as any)?.contractId?.toString?.() ||
-      (transaction as any)?.contract_id?.toString?.() ||
-      ''
-    );
-  }
-
-  private extractFunctionName(transaction: ITransaction): string {
-    const payload = this.extractMutationPayload(transaction);
-    return (
-      payload?.function?.toString?.() ||
-      (transaction as any)?.function?.toString?.() ||
-      ''
-    );
-  }
-
-  private extractCaller(transaction: ITransaction): string | null {
-    const payload = this.extractMutationPayload(transaction);
-    return (
-      payload?.callerId?.toString?.() ||
-      payload?.caller_id?.toString?.() ||
-      (transaction as any)?.callerId?.toString?.() ||
-      (transaction as any)?.caller_id?.toString?.() ||
-      null
-    );
-  }
-
   private extractMicroTime(transaction: ITransaction): string | undefined {
     const value =
       transaction?.microTime ??
@@ -165,57 +142,8 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     return value.toString();
   }
 
-  private isSuccessfulMutation(transaction: ITransaction): boolean {
-    const payload = this.extractMutationPayload(transaction);
-    if (transaction?.pending === true) {
-      return false;
-    }
-    const returnType = (
-      payload?.returnType ||
-      payload?.return_type ||
-      (transaction as any)?.tx?.returnType ||
-      (transaction as any)?.tx?.return_type ||
-      (transaction as any)?.returnType ||
-      (transaction as any)?.return_type ||
-      ''
-    )
-      .toString()
-      .toLowerCase();
-    if (!returnType) {
-      return false;
-    }
-    return returnType !== 'revert';
-  }
-
-  private extractXUsername(transaction: ITransaction): string | null {
-    const payload = this.extractMutationPayload(transaction);
-    const username =
-      payload?.arguments?.[0]?.value?.toString?.() ||
-      (transaction as any)?.arguments?.[0]?.value?.toString?.() ||
-      null;
-    if (!username) {
-      return null;
-    }
-    return username.trim().toLowerCase().replace(/^@+/, '');
-  }
-
   private extractRawLog(transaction: ITransaction): any[] {
-    const payload = this.extractMutationPayload(transaction);
-    const tx: any = transaction as any;
-    const rawLog =
-      payload?.log || tx?.tx?.log || tx?.tx?.tx?.log || tx?.tx?.tx?.tx?.log || tx?.log || tx?.raw?.log || [];
-    return Array.isArray(rawLog) ? rawLog : [];
-  }
-
-  private extractMutationPayload(transaction: ITransaction): any {
-    const tx: any = transaction as any;
-    const candidates = [tx?.tx?.tx?.tx, tx?.tx?.tx, tx?.tx, tx];
-    const matched = candidates.find((candidate) => {
-      const contractId = candidate?.contractId || candidate?.contract_id;
-      const fn = candidate?.function;
-      return !!contractId && !!fn;
-    });
-    return matched || tx?.tx || tx;
+    return extractProfileMutationRawLog(transaction as any);
   }
 
   private async extractAutoRenamedAddresses(
