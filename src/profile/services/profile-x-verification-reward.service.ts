@@ -8,6 +8,7 @@ import {
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
 } from '../profile.constants';
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
+import { parseProfilePrivateKeyBytes } from './profile-private-key.util';
 
 @Injectable()
 export class ProfileXVerificationRewardService {
@@ -218,36 +219,14 @@ export class ProfileXVerificationRewardService {
   }
 
   private normalizePrivateKey(privateKey: string): `sk_${string}` {
-    let keyBytes: Uint8Array;
-    if (privateKey.startsWith('sk_')) {
-      return privateKey as `sk_${string}`;
-    } else {
-      const normalizedHex = privateKey.startsWith('0x')
-        ? privateKey.slice(2)
-        : privateKey;
-      if (
-        normalizedHex.length > 0 &&
-        normalizedHex.length % 2 === 0 &&
-        /^[a-fA-F0-9]+$/.test(normalizedHex)
-      ) {
-        keyBytes = Uint8Array.from(Buffer.from(normalizedHex, 'hex'));
-      } else {
-        keyBytes = Uint8Array.from(Buffer.from(privateKey, 'base64'));
-      }
+    try {
+      const keyBytes = parseProfilePrivateKeyBytes(privateKey);
+      const seed = keyBytes.length === 64 ? keyBytes.subarray(0, 32) : keyBytes;
+      return encode(seed, Encoding.AccountSecretKey) as `sk_${string}`;
+    } catch {
+      throw new Error(
+        'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY must be a 32-byte seed or 64-byte secret key',
+      );
     }
-
-    if (keyBytes.length === 64) {
-      return encode(
-        keyBytes.subarray(0, 32),
-        Encoding.AccountSecretKey,
-      ) as `sk_${string}`;
-    }
-    if (keyBytes.length === 32) {
-      return encode(keyBytes, Encoding.AccountSecretKey) as `sk_${string}`;
-    }
-
-    throw new Error(
-      'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY must be a 32-byte seed or 64-byte secret key',
-    );
   }
 }
