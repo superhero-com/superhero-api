@@ -232,7 +232,7 @@ describe('ProfileIndexerService', () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
       display_source: 'custom',
-      public_name: null,
+      public_name: '',
       chain_name: 'chain_name',
       x_username: 'x_name',
     });
@@ -257,7 +257,7 @@ describe('ProfileIndexerService', () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
       display_source: 'chain',
-      public_name: null,
+      public_name: '',
       username: 'custom_name',
       x_username: 'x_name',
     });

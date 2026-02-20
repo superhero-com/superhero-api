@@ -108,6 +108,83 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe('');
   });
 
+  it('recomputes public_name from fresh on-chain profile even when cache stores empty value', async () => {
+    const profileCacheRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        address: 'ak_refresh',
+        public_name: '',
+        display_source: 'x',
+        x_username: null,
+      } as ProfileCache),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    const accountRepository = {
+      findOne: jest.fn().mockResolvedValue(null as Account | null),
+    } as any;
+    const profileContractService = {
+      getProfile: jest.fn().mockResolvedValue({
+        fullname: '',
+        bio: '',
+        avatarurl: '',
+        username: null,
+        x_username: 'x_fresh',
+        chain_name: null,
+        display_source: 'x',
+        chain_expires_at: null,
+      }),
+    } as unknown as ProfileContractService;
+
+    const service = new ProfileReadService(
+      profileCacheRepository,
+      accountRepository,
+      profileContractService,
+    );
+    const result = await service.getProfile('ak_refresh', {
+      includeOnChain: true,
+    });
+
+    expect(result.public_name).toBe('x_fresh');
+  });
+
+  it('recomputes batch public_name from fresh on-chain profile when includeOnChain=true', async () => {
+    const profileCacheRepository = {
+      find: jest.fn().mockResolvedValue([
+        {
+          address: 'ak_batch_refresh',
+          public_name: '',
+          display_source: 'x',
+          x_username: null,
+        } as ProfileCache,
+      ]),
+    } as any;
+    const accountRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    } as any;
+    const profileContractService = {
+      getProfile: jest.fn().mockResolvedValue({
+        fullname: '',
+        bio: '',
+        avatarurl: '',
+        username: null,
+        x_username: 'x_batch_fresh',
+        chain_name: null,
+        display_source: 'x',
+        chain_expires_at: null,
+      }),
+    } as unknown as ProfileContractService;
+
+    const service = new ProfileReadService(
+      profileCacheRepository,
+      accountRepository,
+      profileContractService,
+    );
+    const result = await service.getProfilesByAddresses(['ak_batch_refresh'], {
+      includeOnChain: true,
+    });
+
+    expect(result[0].public_name).toBe('x_batch_fresh');
+  });
+
   it('returns batch profiles in requested order', async () => {
     const profileCacheRepository = {
       findOne: jest.fn(),

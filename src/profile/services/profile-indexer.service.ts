@@ -183,18 +183,18 @@ export class ProfileIndexerService {
     username: string | null,
     chainName: string | null,
     xName: string | null,
-  ): string | null {
+  ): string {
     const source = (displaySource || '').toLowerCase();
     if (source === 'custom') {
-      return username || null;
+      return username || '';
     }
     if (source === 'chain') {
-      return chainName || null;
+      return chainName || '';
     }
     if (source === 'x') {
-      return xName || null;
+      return xName || '';
     }
-    return username || chainName || xName || null;
+    return username || chainName || xName || '';
   }
 
   private async getOrCreateState(): Promise<ProfileSyncState> {
