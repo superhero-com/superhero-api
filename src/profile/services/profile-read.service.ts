@@ -256,7 +256,7 @@ export class ProfileReadService {
     );
     return {
       fullname: onChain?.fullname ?? cache?.fullname ?? '',
-      bio: onChain?.bio ?? cache?.bio ?? account?.bio ?? '',
+      bio: onChain?.bio ?? cache?.bio ?? '',
       avatarurl: onChain?.avatarurl ?? cache?.avatarurl ?? '',
       username: onChain?.username ?? cache?.username ?? null,
       x_username: onChain?.x_username ?? cache?.x_username ?? null,

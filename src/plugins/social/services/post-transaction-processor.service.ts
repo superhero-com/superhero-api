@@ -116,14 +116,6 @@ export class PostTransactionProcessorService {
         };
       }
 
-      // Handle bio update
-      if (postTypeInfo.isBioUpdate) {
-        const callerId = tx.caller_id || tx.raw?.callerId;
-        if (callerId) {
-          await this.persistenceService.handleBioUpdate(callerId, content);
-        }
-      }
-
       // For new comments, validate parent post exists with retry logic
       if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
         const parentPostExists = await this.persistenceService.validateParentPost(

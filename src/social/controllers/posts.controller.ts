@@ -45,6 +45,13 @@ export class PostsController {
     //
   }
 
+  private mapRegularPostItem<T extends Record<string, any>>(item: T) {
+    return {
+      ...item,
+      type: 'post',
+    };
+  }
+
   private async attachTrendMentionsPerformance(
     items: Array<{ id: string; content: string }>,
   ): Promise<void> {
@@ -134,19 +141,6 @@ export class PostsController {
 
     return this.postRepository
       .createQueryBuilder('post')
-      .leftJoinAndSelect('post.topics', 'topic')
-      .leftJoinAndMapOne(
-        'topic.token',
-        Token,
-        'token',
-        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
-      )
-      .leftJoinAndMapOne(
-        'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
-      )
       .where('post.id IN (:...postIds)', { postIds })
       .andWhere('post.is_hidden = false')
       .getMany();
@@ -364,11 +358,15 @@ export class PostsController {
     await this.attachTrendMentionsPerformance(items);
     await this.attachProfileSenderInfo(items);
 
+    const responseItems = (items as any[]).map((item) =>
+      this.mapRegularPostItem(item),
+    );
+
     // Return paginated result
     return {
-      items,
+      items: responseItems,
       meta: {
-        itemCount: items.length,
+        itemCount: responseItems.length,
         totalItems,
         totalPages: Math.ceil(totalItems / limit),
         currentPage: page,
@@ -439,17 +437,14 @@ export class PostsController {
         }
         // Regular post
         const hydratedPost = postsById.get(item.id);
-        return {
-          ...(hydratedPost || item),
-          type: 'post',
-        };
+        return this.mapRegularPostItem((hydratedPost || item) as any);
       });
 
       await this.attachTrendMentionsPerformance(
-        transformedItems as Array<{ id: string; content: string }>,
+        transformedItems as unknown as Array<{ id: string; content: string }>,
       );
       await this.attachProfileSenderInfo(
-        transformedItems as Array<{ sender_address?: string }>,
+        transformedItems as unknown as Array<{ sender_address?: string }>,
       );
 
       const response: any = {
@@ -489,15 +484,14 @@ export class PostsController {
         const bIndex = fallbackOrder.get(b.id) ?? Infinity;
         return aIndex - bIndex;
       });
-      const items = hydratedFallbackPosts.map((item) => ({
-        ...item,
-        type: 'post',
-      }));
+      const items = hydratedFallbackPosts.map((item) =>
+        this.mapRegularPostItem(item as any),
+      );
       await this.attachTrendMentionsPerformance(
-        items as Array<{ id: string; content: string }>,
+        items as unknown as Array<{ id: string; content: string }>,
       );
       await this.attachProfileSenderInfo(
-        items as Array<{ sender_address?: string }>,
+        items as unknown as Array<{ sender_address?: string }>,
       );
       return {
         items,
@@ -528,19 +522,6 @@ export class PostsController {
   async getById(@Param('id') id: string, @Req() req: Request) {
     const post = await this.postRepository
       .createQueryBuilder('post')
-      .leftJoinAndSelect('post.topics', 'topic')
-      .leftJoinAndMapOne(
-        'topic.token',
-        Token,
-        'token',
-        'UPPER(topic.name) = UPPER(token.symbol) AND token.unlisted = false',
-      )
-      .leftJoinAndMapOne(
-        'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
-      )
       .where('(post.id = :id OR post.slug = :id)', { id })
       .getOne();
 
@@ -551,7 +532,7 @@ export class PostsController {
     await this.attachProfileSenderInfo([post]);
     // fire-and-forget: do not block response
     void this.readsService.recordRead(post.id, req);
-    return post;
+    return this.mapRegularPostItem(post as any);
   }
 
   @ApiParam({ name: 'id', type: 'string', description: 'Post ID' })

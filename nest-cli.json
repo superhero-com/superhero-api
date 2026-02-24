@@ -5,6 +5,7 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "assets": [
+      { "include": "../views/**/*", "outDir": "dist/views" },
       { "include": "profile/contract/*.json", "outDir": "dist" },
       { "include": "profile/contract/*.json", "outDir": "dist/src" }
     ]

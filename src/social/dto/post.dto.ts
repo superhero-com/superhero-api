@@ -1,5 +1,4 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TopicDto } from './topic.dto';
 import { PostTrendMentionDto } from './post-trend-mention.dto';
 import { PostSenderDto } from './post-sender.dto';
 
@@ -53,12 +52,6 @@ export class PostDto {
     example: 'Hello world! This is my first post on the blockchain.',
   })
   content: string;
-
-  @ApiProperty({
-    description: 'Array of topics/hashtags associated with the post',
-    type: () => [TopicDto],
-  })
-  topics: TopicDto[];
 
   @ApiProperty({
     description: 'Trend mentions extracted from #trendName in content',

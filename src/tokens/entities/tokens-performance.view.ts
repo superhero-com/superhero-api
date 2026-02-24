@@ -240,31 +240,31 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
       sale_address,
       -- Grouped past_24h object
       json_build_object(
-        'current', past_24h->'buy_price',
-        'current_date', past_24h->>'created_at',
-        'current_change', 
-          CASE 
-            WHEN past_24h_high->>'buy_price' IS NOT NULL 
-              AND past_24h_low->>'buy_price' IS NOT NULL 
-            THEN CAST(past_24h_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION)
+        'current', past_24h_latest->'buy_price',
+        'current_date', past_24h_latest->>'created_at',
+        'current_change',
+          CASE
+            WHEN past_24h_latest->>'buy_price' IS NOT NULL
+              AND past_24h->>'buy_price' IS NOT NULL
+            THEN CAST(past_24h_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION)
             ELSE NULL
           END,
         'current_change_percent',
-          CASE 
-            WHEN past_24h_high->>'buy_price' IS NOT NULL 
-              AND past_24h_low->>'buy_price' IS NOT NULL 
-              AND CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
-            THEN ((CAST(past_24h_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
+          CASE
+            WHEN past_24h_latest->>'buy_price' IS NOT NULL
+              AND past_24h->>'buy_price' IS NOT NULL
+              AND CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
+            THEN ((CAST(past_24h_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
             ELSE NULL
           END,
         'current_change_direction',
-          CASE 
-            WHEN past_24h_high->>'buy_price' IS NOT NULL 
-              AND past_24h_low->>'buy_price' IS NOT NULL 
-            THEN 
-              CASE 
-                WHEN CAST(past_24h_high->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
-                WHEN CAST(past_24h_high->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_24h_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
+          CASE
+            WHEN past_24h_latest->>'buy_price' IS NOT NULL
+              AND past_24h->>'buy_price' IS NOT NULL
+            THEN
+              CASE
+                WHEN CAST(past_24h_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
+                WHEN CAST(past_24h_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_24h->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
                 ELSE 'neutral'
               END
             ELSE NULL
@@ -277,31 +277,31 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
       ) as past_24h,
       -- Grouped past_7d object
       json_build_object(
-        'current', past_7d->'buy_price',
-        'current_date', past_7d->>'created_at',
+        'current', past_7d_latest->'buy_price',
+        'current_date', past_7d_latest->>'created_at',
         'current_change',
-          CASE 
-            WHEN past_7d_high->>'buy_price' IS NOT NULL 
-              AND past_7d_low->>'buy_price' IS NOT NULL 
-            THEN CAST(past_7d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)
+          CASE
+            WHEN past_7d_latest->>'buy_price' IS NOT NULL
+              AND past_7d->>'buy_price' IS NOT NULL
+            THEN CAST(past_7d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION)
             ELSE NULL
           END,
         'current_change_percent',
-          CASE 
-            WHEN past_7d_high->>'buy_price' IS NOT NULL 
-              AND past_7d_low->>'buy_price' IS NOT NULL 
-              AND CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
-            THEN ((CAST(past_7d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
+          CASE
+            WHEN past_7d_latest->>'buy_price' IS NOT NULL
+              AND past_7d->>'buy_price' IS NOT NULL
+              AND CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
+            THEN ((CAST(past_7d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
             ELSE NULL
           END,
         'current_change_direction',
-          CASE 
-            WHEN past_7d_high->>'buy_price' IS NOT NULL 
-              AND past_7d_low->>'buy_price' IS NOT NULL 
-            THEN 
-              CASE 
-                WHEN CAST(past_7d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
-                WHEN CAST(past_7d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_7d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
+          CASE
+            WHEN past_7d_latest->>'buy_price' IS NOT NULL
+              AND past_7d->>'buy_price' IS NOT NULL
+            THEN
+              CASE
+                WHEN CAST(past_7d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
+                WHEN CAST(past_7d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_7d->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
                 ELSE 'neutral'
               END
             ELSE NULL
@@ -314,31 +314,31 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
       ) as past_7d,
       -- Grouped past_30d object
       json_build_object(
-        'current', past_30d->'buy_price',
-        'current_date', past_30d->>'created_at',
+        'current', past_30d_latest->'buy_price',
+        'current_date', past_30d_latest->>'created_at',
         'current_change',
-          CASE 
-            WHEN past_30d_high->>'buy_price' IS NOT NULL 
-              AND past_30d_low->>'buy_price' IS NOT NULL 
-            THEN CAST(past_30d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)
+          CASE
+            WHEN past_30d_latest->>'buy_price' IS NOT NULL
+              AND past_30d->>'buy_price' IS NOT NULL
+            THEN CAST(past_30d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION)
             ELSE NULL
           END,
         'current_change_percent',
-          CASE 
-            WHEN past_30d_high->>'buy_price' IS NOT NULL 
-              AND past_30d_low->>'buy_price' IS NOT NULL 
-              AND CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
-            THEN ((CAST(past_30d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
+          CASE
+            WHEN past_30d_latest->>'buy_price' IS NOT NULL
+              AND past_30d->>'buy_price' IS NOT NULL
+              AND CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION) != 0
+            THEN ((CAST(past_30d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) - CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION)) / CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION)) * 100
             ELSE NULL
           END,
         'current_change_direction',
-          CASE 
-            WHEN past_30d_high->>'buy_price' IS NOT NULL 
-              AND past_30d_low->>'buy_price' IS NOT NULL 
-            THEN 
-              CASE 
-                WHEN CAST(past_30d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
-                WHEN CAST(past_30d_high->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_30d_low->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
+          CASE
+            WHEN past_30d_latest->>'buy_price' IS NOT NULL
+              AND past_30d->>'buy_price' IS NOT NULL
+            THEN
+              CASE
+                WHEN CAST(past_30d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) > CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'up'
+                WHEN CAST(past_30d_latest->'buy_price'->>'ae' AS DOUBLE PRECISION) < CAST(past_30d->'buy_price'->>'ae' AS DOUBLE PRECISION) THEN 'down'
                 ELSE 'neutral'
               END
             ELSE NULL
