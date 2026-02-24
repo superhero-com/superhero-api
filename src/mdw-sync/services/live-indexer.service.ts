@@ -14,6 +14,7 @@ import { WebSocketService } from '@/ae/websocket.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
+import { isSelfTransferTx } from '../utils/common';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -45,6 +46,10 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     // Subscribe to transaction updates
     this.unsubscribeTransactions = this.websocketService.subscribeForTransactionsUpdates(
       (transaction: ITransaction) => {
+        // Ingore self-transfer transaction
+        if (isSelfTransferTx(transaction)) {
+          return;
+        }
         // Prevent duplicate transactions
         if (!this.syncedTransactions.includes(transaction.hash)) {
           this.handleLiveTransaction(transaction);
