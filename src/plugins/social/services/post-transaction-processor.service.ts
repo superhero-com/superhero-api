@@ -2,9 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
-import { Topic } from '@/social/entities/topic.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { IPostContract, IPostProcessingResult, IPostTypeInfo } from '@/social/interfaces/post.interfaces';
 import { parsePostContent } from '@/social/utils/content-parser.util';
 import { PostTransactionValidationService } from './post-transaction-validation.service';
 import { PostTypeDetectionService } from './post-type-detection.service';
@@ -69,15 +67,17 @@ export class PostTransactionProcessorService {
       }
 
       // Check if post already exists
-      const existingPost = await this.persistenceService.getExistingPost(txHash);
+      const existingPost =
+        await this.persistenceService.getExistingPost(txHash);
 
       // Handle existing post that needs to be converted to comment
       if (existingPost && postTypeInfo.isComment && !existingPost.post_id) {
-        const result = await this.persistenceService.processExistingPostAsComment(
-          existingPost,
-          postTypeInfo,
-          txHash,
-        );
+        const result =
+          await this.persistenceService.processExistingPostAsComment(
+            existingPost,
+            postTypeInfo,
+            txHash,
+          );
 
         if (result.success) {
           return {
@@ -118,9 +118,10 @@ export class PostTransactionProcessorService {
 
       // For new comments, validate parent post exists with retry logic
       if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
-        const parentPostExists = await this.persistenceService.validateParentPost(
-          postTypeInfo.parentPostId,
-        );
+        const parentPostExists =
+          await this.persistenceService.validateParentPost(
+            postTypeInfo.parentPostId,
+          );
         if (!parentPostExists) {
           this.logger.warn(
             'Cannot create comment: parent post not found after retries',
@@ -182,7 +183,10 @@ export class PostTransactionProcessorService {
           );
 
           // Update topic post counts within the same transaction
-          await this.topicManagementService.updateTopicPostCounts(topics, manager);
+          await this.topicManagementService.updateTopicPostCounts(
+            topics,
+            manager,
+          );
 
           return savedPost;
         },
@@ -220,4 +224,3 @@ export class PostTransactionProcessorService {
     }
   }
 }
-

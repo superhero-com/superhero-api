@@ -75,7 +75,10 @@ export class GovernancePollDto {
   @ApiProperty({ description: 'Close at height', nullable: true })
   close_at_height?: number;
 
-  @ApiProperty({ description: 'Total number of votes (including vote and revoke_vote transactions)' })
+  @ApiProperty({
+    description:
+      'Total number of votes (including vote and revoke_vote transactions)',
+  })
   votes_count: number;
 
   @ApiProperty({ description: 'Total number of revoked votes' })
@@ -124,7 +127,9 @@ export class GovernanceVoteDto {
   @ApiProperty({ description: 'Poll transaction (add_poll)' })
   poll: GovernancePollDto;
 
-  @ApiProperty({ description: 'Vote transactions (vote or revoke_vote)', type: [GovernancePollVoteDto] })
+  @ApiProperty({
+    description: 'Vote transactions (vote or revoke_vote)',
+    type: [GovernancePollVoteDto],
+  })
   votes: GovernancePollVoteDto[];
 }
-

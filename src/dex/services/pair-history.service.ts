@@ -47,10 +47,7 @@ export interface ITransactionPreview {
 
 @Injectable()
 export class PairHistoryService {
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractInstance
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
   constructor(
     private aeSdkService: AeSdkService,
 

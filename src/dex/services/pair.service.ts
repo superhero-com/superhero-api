@@ -17,10 +17,7 @@ type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
 @Injectable()
 export class PairService {
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractInstance
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
   constructor(
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,

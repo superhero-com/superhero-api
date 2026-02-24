@@ -127,7 +127,9 @@ export function sanitizeJsonForPostgres(obj: any): any {
   if (typeof obj === 'string') {
     // Remove null bytes and other control characters that PostgreSQL cannot handle
     // Keep only printable characters and common whitespace (space, tab, newline, carriage return)
-    return obj.replace(/\u0000/g, '').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    return obj
+      .replace(/\u0000/g, '')
+      .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
   }
 
   if (Array.isArray(obj)) {

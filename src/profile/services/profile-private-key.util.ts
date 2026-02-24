@@ -2,7 +2,9 @@ import { decode } from '@aeternity/aepp-sdk';
 
 export const parseProfilePrivateKeyBytes = (privateKey: string): Uint8Array => {
   if (privateKey.startsWith('sk_')) {
-    return normalizePrivateKeyLength(Uint8Array.from(decode(privateKey as any)));
+    return normalizePrivateKeyLength(
+      Uint8Array.from(decode(privateKey as any)),
+    );
   }
 
   const normalizedHex = privateKey.startsWith('0x')
@@ -18,14 +20,14 @@ export const parseProfilePrivateKeyBytes = (privateKey: string): Uint8Array => {
     );
   }
 
-  return normalizePrivateKeyLength(Uint8Array.from(Buffer.from(privateKey, 'base64')));
+  return normalizePrivateKeyLength(
+    Uint8Array.from(Buffer.from(privateKey, 'base64')),
+  );
 };
 
 const normalizePrivateKeyLength = (privateKeyBytes: Uint8Array): Uint8Array => {
   if (privateKeyBytes.length === 32 || privateKeyBytes.length === 64) {
     return privateKeyBytes;
   }
-  throw new Error(
-    'Private key must be a 32-byte seed or 64-byte secret key',
-  );
+  throw new Error('Private key must be a 32-byte seed or 64-byte secret key');
 };

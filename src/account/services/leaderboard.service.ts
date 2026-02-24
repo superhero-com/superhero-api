@@ -42,9 +42,7 @@ export class LeaderboardService {
     private readonly snapshotRepository: Repository<AccountLeaderboardSnapshot>,
   ) {}
 
-  async getLeaders(
-    params: GetLeadersParams,
-  ): Promise<{
+  async getLeaders(params: GetLeadersParams): Promise<{
     items: LeaderboardItem[];
     totalCandidates: number;
     page: number;

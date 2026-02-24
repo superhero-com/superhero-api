@@ -17,7 +17,6 @@ import { PostsController } from './controllers/posts.controller';
 import { TopicsController } from './controllers/topics.controller';
 import { AccountModule } from '@/account/account.module';
 import { GovernancePluginModule } from '@/plugins/governance/governance-plugin.module';
-import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
 import { getPopularRankingContributorProvider } from '@/plugins';
 import { ProfileModule } from '@/profile/profile.module';
 

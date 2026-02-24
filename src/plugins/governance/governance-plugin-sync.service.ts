@@ -23,8 +23,10 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     super(aeSdkService);
   }
 
-
-  async processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void> {
+  async processTransaction(
+    tx: Tx,
+    syncDirection: SyncDirection,
+  ): Promise<void> {
     try {
       // Basic implementation - will be expanded once contract is debugged
       this.logger.debug('Processing governance transaction', {
@@ -47,20 +49,27 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
       return null;
     }
 
-    if ([
-      GOVERNANCE_CONTRACT.FUNCTIONS.add_poll,
-      GOVERNANCE_CONTRACT.FUNCTIONS.delegate,
-      GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
-    ].includes(tx.function)) {
+    if (
+      [
+        GOVERNANCE_CONTRACT.FUNCTIONS.add_poll,
+        GOVERNANCE_CONTRACT.FUNCTIONS.delegate,
+        GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
+      ].includes(tx.function)
+    ) {
       try {
-        const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress, GovernanceRegistryACI);
-        const decodedLogs = contract.$decodeEvents(tx.raw.log, { omitUnknown: true });
+        const contract = await this.getContract(
+          GOVERNANCE_CONTRACT.contractAddress,
+          GovernanceRegistryACI,
+        );
+        const decodedLogs = contract.$decodeEvents(tx.raw.log, {
+          omitUnknown: true,
+        });
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
         const isUnknownEventError =
-          error?.name === 'MissingEventDefinitionError'
-          || error?.message?.includes("Can't find definition");
+          error?.name === 'MissingEventDefinitionError' ||
+          error?.message?.includes("Can't find definition");
 
         if (isUnknownEventError) {
           this.logger.warn(
@@ -76,19 +85,26 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
       }
     }
 
-    if ([GOVERNANCE_CONTRACT.FUNCTIONS.vote, GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote].includes(tx.function)) {
+    if (
+      [
+        GOVERNANCE_CONTRACT.FUNCTIONS.vote,
+        GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote,
+      ].includes(tx.function)
+    ) {
       try {
         const contract = await this.getContract(
           tx.contract_id as Encoded.ContractAddress,
           GovernancePollACI,
         );
-        const decodedLogs = contract.$decodeEvents(tx.raw.log, { omitUnknown: true });
+        const decodedLogs = contract.$decodeEvents(tx.raw.log, {
+          omitUnknown: true,
+        });
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
         const isUnknownEventError =
-          error?.name === 'MissingEventDefinitionError'
-          || error?.message?.includes("Can't find definition");
+          error?.name === 'MissingEventDefinitionError' ||
+          error?.message?.includes("Can't find definition");
 
         if (isUnknownEventError) {
           this.logger.warn(
@@ -103,7 +119,6 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
         return null;
       }
     }
-
 
     return null;
   }
@@ -171,16 +186,14 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
 
     if (tx.function == GOVERNANCE_CONTRACT.FUNCTIONS.vote) {
       const decodedLogs = pluginLogs.data[0];
-      let balance = "0";
+      let balance = '0';
       const voter = decodedLogs.args[1];
       try {
         balance = await this.aeSdkService.sdk.getBalance(voter, {
           height: tx.block_height,
           format: AE_AMOUNT_FORMATS.AE,
         });
-      } catch (error) {
-
-      }
+      } catch (error) {}
       return {
         poll_address: decodedLogs.contract.address,
         poll: decodedLogs.args[0],
@@ -217,4 +230,3 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     return null;
   }
 }
-

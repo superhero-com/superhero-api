@@ -13,18 +13,17 @@ import { DexTransactionProcessorService } from './services/dex-transaction-proce
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, DexToken, Pair, PairTransaction]),
+    TypeOrmModule.forFeature([
+      Tx,
+      PluginSyncState,
+      DexToken,
+      Pair,
+      PairTransaction,
+    ]),
     AeModule,
     DexModule,
   ],
-  providers: [
-    DexTransactionProcessorService,
-    DexPluginSyncService,
-    DexPlugin,
-  ],
+  providers: [DexTransactionProcessorService, DexPluginSyncService, DexPlugin],
   exports: [DexPlugin],
 })
 export class DexPluginModule {}
-
-
-

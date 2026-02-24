@@ -17,11 +17,7 @@ export class TransactionsService {
   /**
    * Decode transaction events from a Tx entity
    */
-  async decodeTxEvents(
-    token: Token,
-    tx: Tx,
-    retries = 0,
-  ): Promise<Tx> {
+  async decodeTxEvents(token: Token, tx: Tx, retries = 0): Promise<Tx> {
     try {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
@@ -130,14 +126,12 @@ export class TransactionsService {
     const factory = await this.communityFactoryService.getCurrentFactory();
 
     if (
-      token.factory_address !== factory.address
-      && !Object.keys(factory.collections).includes(token.collection)
+      token.factory_address !== factory.address &&
+      !Object.keys(factory.collections).includes(token.collection)
     ) {
       return false;
     }
 
     return true;
   }
-
 }
-

@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
-    IPaginationOptions,
-    paginate,
-    Pagination,
+  IPaginationOptions,
+  paginate,
+  Pagination,
 } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import {
-    GovernanceDelegationHistoryItemDto,
-    GovernanceDelegationWithRevokedDto
+  GovernanceDelegationHistoryItemDto,
+  GovernanceDelegationWithRevokedDto,
 } from '../dto/governance-delegation.dto';
 import { GovernanceDelegation } from '../entities/governance-delegation.view';
 import { GovernanceRevokedDelegation } from '../entities/governance-revoked-delegation.view';
@@ -67,7 +67,9 @@ export class GovernanceDelegationService {
           revoked_at: isRevoked ? revocation!.created_at : undefined,
         } as GovernanceDelegationWithRevokedDto;
       })
-      .filter((item): item is GovernanceDelegationWithRevokedDto => item !== null);
+      .filter(
+        (item): item is GovernanceDelegationWithRevokedDto => item !== null,
+      );
 
     // If we filtered out revoked items, update itemCount in metadata
     // Note: totalItems and totalPages reflect all delegations, not filtered ones
@@ -87,10 +89,7 @@ export class GovernanceDelegationService {
   ): Promise<GovernanceDelegationHistoryItemDto[]> {
     // Get all delegations where account is delegator or delegatee
     const delegations = await this.delegationRepository.find({
-      where: [
-        { delegator: accountAddress },
-        { delegatee: accountAddress },
-      ],
+      where: [{ delegator: accountAddress }, { delegatee: accountAddress }],
       order: { created_at: 'ASC' },
     });
 
@@ -140,4 +139,3 @@ export class GovernanceDelegationService {
     return history;
   }
 }
-

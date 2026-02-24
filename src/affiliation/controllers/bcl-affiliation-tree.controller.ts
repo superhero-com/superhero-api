@@ -20,5 +20,3 @@ export class BclAffiliationTreeController {
     return { message: 'Hello world!' };
   }
 }
-
-

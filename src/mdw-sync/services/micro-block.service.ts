@@ -111,9 +111,7 @@ export class MicroBlockService {
 
       // Convert micro-blocks to entity format
       for (const microBlock of microBlocks) {
-        microBlocksToSave.push(
-          this.convertToMicroBlockEntity(microBlock),
-        );
+        microBlocksToSave.push(this.convertToMicroBlockEntity(microBlock));
       }
 
       // Check if there's a next page
@@ -125,4 +123,3 @@ export class MicroBlockService {
     return microBlocksToSave;
   }
 }
-

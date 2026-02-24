@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, Repository } from 'typeorm';
+import { In, LessThan, Repository } from 'typeorm';
 
 import { Token } from '../entities/token.entity';
 import { TokensService } from '../tokens.service';

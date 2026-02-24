@@ -14,8 +14,7 @@ export class XAttestationAuthConstraint implements ValidatorConstraintInterface 
   validate(_value: unknown, args: ValidationArguments) {
     const dto = args.object as CreateXAttestationDto;
     const hasToken = !!dto.accessToken;
-    const hasCodeFlow =
-      !!dto.code && !!dto.code_verifier && !!dto.redirect_uri;
+    const hasCodeFlow = !!dto.code && !!dto.code_verifier && !!dto.redirect_uri;
     if (hasToken && !hasCodeFlow) return true;
     if (!hasToken && hasCodeFlow) return true;
     return false;

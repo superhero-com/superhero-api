@@ -291,7 +291,9 @@ export class TokensService {
     });
     const newToken = await this.findByAddress(saleAddress);
     if (!newToken) {
-      throw new Error(`Failed to create or retrieve token for sale address: ${saleAddress}`);
+      throw new Error(
+        `Failed to create or retrieve token for sale address: ${saleAddress}`,
+      );
     }
     const factoryAddress = await this.updateTokenFactoryAddress(newToken);
 
@@ -427,7 +429,7 @@ export class TokensService {
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch((error) => {
+        .catch(() => {
           return new BigNumber(0);
         }),
       instance
@@ -435,7 +437,7 @@ export class TokensService {
         // @ts-ignore
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch((error) => {
+        .catch(() => {
           return new BigNumber(0);
         }),
       instance.metaInfo().catch((error) => {
@@ -963,7 +965,10 @@ export class TokensService {
   ): Promise<T> {
     let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<T>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+      timeoutHandle = setTimeout(
+        () => reject(new Error(errorMessage)),
+        timeoutMs,
+      );
     });
 
     try {
@@ -975,8 +980,9 @@ export class TokensService {
 
   private isOutOfGasError(error: any): boolean {
     const message = error?.message?.toLowerCase?.() || '';
-    return message.includes('out of gas')
-      || error?.name === 'NodeInvocationError';
+    return (
+      message.includes('out of gas') || error?.name === 'NodeInvocationError'
+    );
   }
 
   private sleep(ms: number): Promise<void> {

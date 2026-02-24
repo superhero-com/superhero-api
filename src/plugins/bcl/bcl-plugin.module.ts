@@ -23,7 +23,13 @@ import { TokenHolderService } from './services/token-holder.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Transaction, TokenHolder, Token]),
+    TypeOrmModule.forFeature([
+      Tx,
+      PluginSyncState,
+      Transaction,
+      TokenHolder,
+      Token,
+    ]),
     TransactionsModule,
     TokensModule,
     AePricingModule,
@@ -46,4 +52,3 @@ import { TokenHolderService } from './services/token-holder.service';
   exports: [BclPlugin],
 })
 export class BclPluginModule {}
-

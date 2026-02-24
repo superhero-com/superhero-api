@@ -39,12 +39,16 @@ describe('SyncTokenHoldersQueue', () => {
     const firstJob = queue.process({ data: { saleAddress } } as any);
     const secondJob = queue.process({ data: { saleAddress } } as any);
 
-    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(1);
+    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(
+      1,
+    );
 
     resolveFirst();
     await Promise.all([firstJob, secondJob]);
 
-    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(1);
+    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(
+      1,
+    );
   });
 
   it('join-inflight path times out so queue recovery can retry', async () => {
@@ -64,7 +68,7 @@ describe('SyncTokenHoldersQueue', () => {
       .catch((e: Error) => e);
 
     await jest.advanceTimersByTimeAsync(50);
-    const [_, joinResult] = await Promise.all([
+    const [, joinResult] = await Promise.all([
       firstJobPromise,
       joiningJobPromise,
     ]);
@@ -98,7 +102,9 @@ describe('SyncTokenHoldersQueue', () => {
     expect(firstError).toBeInstanceOf(Error);
 
     const secondJobPromise = queue.process({ data: { saleAddress } } as any);
-    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(2);
+    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(
+      2,
+    );
 
     resolveSecond();
     await secondJobPromise;

@@ -1,4 +1,13 @@
-import { Body, Controller, DefaultValuePipe, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  DefaultValuePipe,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProfileAttestationService } from '../services/profile-attestation.service';
 import { ProfileReadService } from '../services/profile-read.service';
@@ -26,7 +35,10 @@ export class ProfileController {
           code_verifier: body.code_verifier!,
           redirect_uri: body.redirect_uri!,
         };
-    return this.profileAttestationService.createXAttestation(body.address, options);
+    return this.profileAttestationService.createXAttestation(
+      body.address,
+      options,
+    );
   }
 
   @Get('feed')
@@ -88,7 +100,8 @@ export class ProfileController {
   @ApiQuery({
     name: 'includeOnChain',
     required: false,
-    description: 'When true, augments response with fresh on-chain contract read',
+    description:
+      'When true, augments response with fresh on-chain contract read',
   })
   async getProfile(
     @Param('address') address: string,

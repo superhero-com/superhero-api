@@ -35,9 +35,11 @@ describe('DexTransactionProcessorService', () => {
       .spyOn(service as any, 'ensureContractsInitialized')
       .mockResolvedValue(undefined);
     const routerDecode = jest.fn().mockReturnValue([]);
-    const factoryDecode = jest.fn().mockReturnValue([
-      { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
-    ]);
+    const factoryDecode = jest
+      .fn()
+      .mockReturnValue([
+        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
+      ]);
     (service as any).routerContract = { $decodeEvents: routerDecode };
     (service as any).factoryContract = { $decodeEvents: factoryDecode };
     jest

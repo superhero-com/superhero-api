@@ -46,4 +46,3 @@ export class SocialTippingPluginSyncService extends BasePluginSyncService {
     }
   }
 }
-
