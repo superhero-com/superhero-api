@@ -39,9 +39,11 @@ describe('DexSyncService', () => {
   it('falls back to factory decode when router decode returns empty array', async () => {
     const { service } = setup();
     const routerDecode = jest.fn().mockReturnValue([]);
-    const factoryDecode = jest.fn().mockReturnValue([
-      { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
-    ]);
+    const factoryDecode = jest
+      .fn()
+      .mockReturnValue([
+        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
+      ]);
     (service as any).routerContract = { $decodeEvents: routerDecode };
     (service as any).factoryContract = { $decodeEvents: factoryDecode };
     jest

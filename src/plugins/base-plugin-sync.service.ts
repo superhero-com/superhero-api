@@ -9,14 +9,9 @@ type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 export abstract class BasePluginSyncService {
   protected abstract readonly logger: Logger;
 
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractInstance
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
 
-  constructor(
-    protected readonly aeSdkService: AeSdkService,
-  ) { }
+  constructor(protected readonly aeSdkService: AeSdkService) {}
 
   /**
    * Decode transaction logs from tx.raw.log.
@@ -25,6 +20,7 @@ export abstract class BasePluginSyncService {
    * @returns Decoded log data or null if not applicable
    */
   async decodeLogs(tx: Tx): Promise<any | null> {
+    void tx;
     return null;
   }
 
@@ -35,6 +31,7 @@ export abstract class BasePluginSyncService {
    * @returns Decoded data or null if not applicable
    */
   async decodeData(tx: Tx): Promise<any | null> {
+    void tx;
     return null;
   }
 
@@ -43,7 +40,10 @@ export abstract class BasePluginSyncService {
    * @param tx - Transaction to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
-  abstract processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void>;
+  abstract processTransaction(
+    tx: Tx,
+    syncDirection: SyncDirection,
+  ): Promise<void>;
 
   /**
    * Process a batch of transactions. Default implementation loops through and calls processTransaction.
@@ -90,7 +90,10 @@ export abstract class BasePluginSyncService {
     );
   }
 
-  async getContract(contractAddress: Encoded.ContractAddress, aci: any): Promise<ContractInstance> {
+  async getContract(
+    contractAddress: Encoded.ContractAddress,
+    aci: any,
+  ): Promise<ContractInstance> {
     if (this.contracts[contractAddress]) {
       return this.contracts[contractAddress];
     }
@@ -103,4 +106,3 @@ export abstract class BasePluginSyncService {
     return contract;
   }
 }
-

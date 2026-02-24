@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { Token } from '@/tokens/entities/token.entity';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { toAe } from '@aeternity/aepp-sdk';
@@ -119,13 +118,9 @@ export class TransactionDataService {
       created_at: moment(parseInt(decodedTx.micro_time, 10)).toDate(),
       verified:
         !parsedData._should_revalidate &&
-        moment().diff(
-          moment(parseInt(decodedTx.micro_time, 10)),
-          'hours',
-        ) >= 5,
+        moment().diff(moment(parseInt(decodedTx.micro_time, 10)), 'hours') >= 5,
     };
 
     return txData;
   }
 }
-

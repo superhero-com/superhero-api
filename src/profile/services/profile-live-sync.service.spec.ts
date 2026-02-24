@@ -36,22 +36,24 @@ describe('ProfileLiveSyncService', () => {
   it('subscribes on module init when configured', async () => {
     const { service, websocketService } = setup(true);
     service.onModuleInit();
-    expect(websocketService.subscribeForTransactionsUpdates).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(
+      websocketService.subscribeForTransactionsUpdates,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('does not subscribe when contract is not configured', async () => {
     const { service, websocketService } = setup(false);
     service.onModuleInit();
-    expect(websocketService.subscribeForTransactionsUpdates).not.toHaveBeenCalled();
+    expect(
+      websocketService.subscribeForTransactionsUpdates,
+    ).not.toHaveBeenCalled();
   });
 
   it('refreshes profile cache for matching live profile mutation tx', async () => {
     const { service, websocketService, profileIndexerService } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_1',
@@ -80,8 +82,8 @@ describe('ProfileLiveSyncService', () => {
       profileXVerificationRewardService,
     } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_verified_1',
@@ -98,10 +100,9 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
-      'ak_rewarded_user',
-      'aliceonx',
-    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledWith('ak_rewarded_user', 'aliceonx');
     expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
       'ak_rewarded_user',
       '1001',
@@ -112,8 +113,8 @@ describe('ProfileLiveSyncService', () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_pending_1',
@@ -139,8 +140,8 @@ describe('ProfileLiveSyncService', () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_pending_then_confirmed_1',
@@ -169,11 +170,12 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledTimes(1);
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
-      'ak_pending_then_confirmed',
-      'pendingthenconfirmed',
-    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledWith('ak_pending_then_confirmed', 'pendingthenconfirmed');
   });
 
   it('does not reprocess hash after pending/confirmed when queue evicts once', async () => {
@@ -181,8 +183,8 @@ describe('ProfileLiveSyncService', () => {
       setup(true);
     (service as any).maxRecentTxHashes = 2;
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_hash_state_1',
@@ -233,15 +235,17 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledTimes(1);
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('does not reward when x verification tx is reverted', async () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_revert_1',
@@ -267,8 +271,8 @@ describe('ProfileLiveSyncService', () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_revert_upper_1',
@@ -294,8 +298,8 @@ describe('ProfileLiveSyncService', () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_no_return_type_1',
@@ -319,8 +323,8 @@ describe('ProfileLiveSyncService', () => {
   it('ignores duplicate transaction hashes', async () => {
     const { service, websocketService, profileIndexerService } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
     const tx = {
       hash: 'th_dup',
       microTime: 999,
@@ -340,8 +344,12 @@ describe('ProfileLiveSyncService', () => {
   });
 
   it('refreshes auto-renamed loser address from decoded events', async () => {
-    const { service, websocketService, profileIndexerService, profileContractService } =
-      setup(true);
+    const {
+      service,
+      websocketService,
+      profileIndexerService,
+      profileContractService,
+    } = setup(true);
     profileContractService.decodeEvents.mockResolvedValue([
       {
         name: 'CustomNameAutoRenamed',
@@ -350,8 +358,8 @@ describe('ProfileLiveSyncService', () => {
     ]);
 
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_chain_1',
@@ -380,8 +388,8 @@ describe('ProfileLiveSyncService', () => {
   it('uses caller as signer for pay-for payloads', async () => {
     const { service, websocketService, profileIndexerService } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_payfor_1',
@@ -409,8 +417,8 @@ describe('ProfileLiveSyncService', () => {
   it('unwraps nested PayingForTx payload shape from middleware', async () => {
     const { service, websocketService, profileIndexerService } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_payfor_nested_1',
@@ -450,8 +458,8 @@ describe('ProfileLiveSyncService', () => {
       profileIndexerService,
     } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_payfor_x_success_1',
@@ -476,10 +484,9 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
-      'ak_verified_user',
-      'verifieduser',
-    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledWith('ak_verified_user', 'verifieduser');
     expect(
       profileXVerificationRewardService.sendRewardIfEligible,
     ).not.toHaveBeenCalledWith('ak_team_payer', expect.any(String));
@@ -493,8 +500,8 @@ describe('ProfileLiveSyncService', () => {
     const { service, websocketService, profileXVerificationRewardService } =
       setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_payfor_x_revert_1',
@@ -532,8 +539,8 @@ describe('ProfileLiveSyncService', () => {
       profileIndexerService,
     } = setup(true);
     service.onModuleInit();
-    const callback = websocketService.subscribeForTransactionsUpdates.mock
-      .calls[0][0];
+    const callback =
+      websocketService.subscribeForTransactionsUpdates.mock.calls[0][0];
 
     callback({
       hash: 'th_x_payfor_nested_1',
@@ -560,10 +567,9 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
-      'ak_verified_user',
-      'verifiedonx',
-    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledWith('ak_verified_user', 'verifiedonx');
     expect(profileIndexerService.refreshAddress).toHaveBeenCalledWith(
       'ak_verified_user',
       '2001',
@@ -574,4 +580,3 @@ describe('ProfileLiveSyncService', () => {
     );
   });
 });
-

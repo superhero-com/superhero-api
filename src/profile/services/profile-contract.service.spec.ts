@@ -30,9 +30,11 @@ describe('ProfileContractService', () => {
       'ProfileRegistryACI.json',
     );
 
-    jest.spyOn(fs, 'existsSync').mockImplementation((candidatePath: fs.PathLike) =>
-      String(candidatePath) === expectedPath,
-    );
+    jest
+      .spyOn(fs, 'existsSync')
+      .mockImplementation(
+        (candidatePath: fs.PathLike) => String(candidatePath) === expectedPath,
+      );
     jest.spyOn(fs, 'readFileSync').mockReturnValue('{}' as any);
 
     await (service as any).getContractInstance();
@@ -51,9 +53,11 @@ describe('ProfileContractService', () => {
       'ProfileRegistryACI.json',
     );
 
-    jest.spyOn(fs, 'existsSync').mockImplementation((candidatePath: fs.PathLike) =>
-      String(candidatePath) === fallbackPath,
-    );
+    jest
+      .spyOn(fs, 'existsSync')
+      .mockImplementation(
+        (candidatePath: fs.PathLike) => String(candidatePath) === fallbackPath,
+      );
     jest.spyOn(fs, 'readFileSync').mockReturnValue('{}' as any);
 
     await (service as any).getContractInstance();

@@ -69,4 +69,3 @@ export class BclAffiliationPlugin extends BasePlugin {
     return this.bclAffiliationPluginSyncService;
   }
 }
-

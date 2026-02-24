@@ -28,7 +28,10 @@ export class BlockValidationService {
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async validateBlocksPeriodically() {
-    const disableMdwSync = this.configService.get<boolean>('mdw.disableMdwSync', false);
+    const disableMdwSync = this.configService.get<boolean>(
+      'mdw.disableMdwSync',
+      false,
+    );
     if (disableMdwSync) {
       this.logger.debug('MDW sync is disabled, skipping block validation');
       return;
@@ -50,7 +53,10 @@ export class BlockValidationService {
   }
 
   async validateAndRefreshBlocks(): Promise<void> {
-    const validationDepth = this.configService.get<number>('mdw.reorgDepth', 100);
+    const validationDepth = this.configService.get<number>(
+      'mdw.reorgDepth',
+      100,
+    );
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
     try {
@@ -68,7 +74,11 @@ export class BlockValidationService {
 
       // Refetch blocks, microblocks, and transactions using BlockSyncService
       // Get transaction hashes grouped by block height that were just synced
-      const syncedTxHashesByBlock = await this.blockSyncService.syncBlockRange(startHeight, endHeight, false);
+      const syncedTxHashesByBlock = await this.blockSyncService.syncBlockRange(
+        startHeight,
+        endHeight,
+        false,
+      );
 
       // For each block, compare stored transactions with refetched transactions
       // and remove transactions that no longer exist
@@ -115,7 +125,7 @@ export class BlockValidationService {
       // Get stored transactions for this block that are NOT in refetched data
       // Using Not(In(...)) to filter directly in the database query, avoiding large data in memory
       const storedTxs = await this.txRepository.find({
-        where: { 
+        where: {
           block_height: blockHeight,
           hash: Not(In(refetchedTxHashes)),
         },
@@ -171,6 +181,4 @@ export class BlockValidationService {
   getIsValidating(): boolean {
     return this.isValidating;
   }
-
 }
-

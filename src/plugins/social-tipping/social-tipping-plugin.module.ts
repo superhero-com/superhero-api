@@ -25,4 +25,3 @@ import { SocialTippingTransactionProcessorService } from './services/social-tipp
   exports: [SocialTippingPlugin],
 })
 export class SocialTippingPluginModule {}
-

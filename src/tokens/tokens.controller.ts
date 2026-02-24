@@ -214,7 +214,9 @@ export class TokensController {
             type: 'exponential',
             delay: 3_000,
           },
-          timeout: Number(process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000),
+          timeout: Number(
+            process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000,
+          ),
         },
       );
     }

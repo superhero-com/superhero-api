@@ -63,5 +63,3 @@ export class BclAffiliationAnalyticsController {
     return { message: 'Hello world!' };
   }
 }
-
-

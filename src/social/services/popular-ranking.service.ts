@@ -13,7 +13,10 @@ import { Token } from '@/tokens/entities/token.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { PostReadsDaily } from '../entities/post-reads.entity';
-import { PopularRankingContributor, PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
+import {
+  PopularRankingContributor,
+  PopularRankingContentItem,
+} from '@/plugins/popular-ranking.interface';
 import { Inject, Optional } from '@nestjs/common';
 import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
 
@@ -78,7 +81,10 @@ export class PopularRankingService {
    * Get verified popular post IDs from Redis, ensuring they exist in DB
    * This shared method ensures consistency between getPopularPosts and getTotalPostsCount
    */
-  private async getVerifiedPopularIds(window: PopularWindow, maxCandidates?: number): Promise<string[]> {
+  private async getVerifiedPopularIds(
+    window: PopularWindow,
+    maxCandidates?: number,
+  ): Promise<string[]> {
     const key = this.getRedisKey(window);
 
     // Get popular post ranks from Redis (ID -> rank/score)
@@ -87,7 +93,12 @@ export class PopularRankingService {
       const totalPopular = await this.redis.zcard(key);
       if (totalPopular > 0) {
         // Fetch all popular IDs with their scores
-        const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
+        const cached = await this.redis.zrevrange(
+          key,
+          0,
+          totalPopular - 1,
+          'WITHSCORES',
+        );
         for (let i = 0; i < cached.length; i += 2) {
           popularRanks.set(cached[i], parseFloat(cached[i + 1]));
         }
@@ -109,16 +120,28 @@ export class PopularRankingService {
         await this.recompute(window, maxCandidates ?? fallbackMax);
         const totalPopular = await this.redis.zcard(key);
         if (totalPopular > 0) {
-          const cached = await this.redis.zrevrange(key, 0, totalPopular - 1, 'WITHSCORES');
+          const cached = await this.redis.zrevrange(
+            key,
+            0,
+            totalPopular - 1,
+            'WITHSCORES',
+          );
           for (let i = 0; i < cached.length; i += 2) {
             popularRanks.set(cached[i], parseFloat(cached[i + 1]));
           }
-          this.logger.log(`Recomputed popular posts for window ${window}: ${totalPopular} posts cached`);
+          this.logger.log(
+            `Recomputed popular posts for window ${window}: ${totalPopular} posts cached`,
+          );
         } else {
-          this.logger.warn(`Recompute completed but no posts cached for window ${window}`);
+          this.logger.warn(
+            `Recompute completed but no posts cached for window ${window}`,
+          );
         }
       } catch (error) {
-        this.logger.error(`Failed to recompute popular posts for window ${window}:`, error);
+        this.logger.error(
+          `Failed to recompute popular posts for window ${window}:`,
+          error,
+        );
         // Continue with empty popular ranks
       }
     }
@@ -156,7 +179,7 @@ export class PopularRankingService {
         is_hidden: false,
         post_id: null,
       });
-      existingPosts.forEach(p => existingIdsSet.add(p.id));
+      existingPosts.forEach((p) => existingIdsSet.add(p.id));
     }
 
     // Verify plugin content IDs by checking with contributors
@@ -165,14 +188,16 @@ export class PopularRankingService {
     for (const id of pluginContentIds) {
       // Check if any contributor can provide this ID
       const [type] = id.split(':');
-      const hasContributor = this.rankingContributors.some(c => c.name === type);
+      const hasContributor = this.rankingContributors.some(
+        (c) => c.name === type,
+      );
       if (hasContributor) {
         existingIdsSet.add(id);
       }
     }
 
     // Filter allPopularIds to only include verified IDs, preserving the score DESC order
-    const verifiedIds = allPopularIds.filter(id => existingIdsSet.has(id));
+    const verifiedIds = allPopularIds.filter((id) => existingIdsSet.has(id));
 
     return verifiedIds;
   }
@@ -185,14 +210,14 @@ export class PopularRankingService {
   ): Promise<(Post | PopularRankingContentItem)[]> {
     // Get verified popular IDs (ensures consistency with getTotalPostsCount)
     const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
-    
+
     if (verifiedIds.length === 0) {
       return [];
     }
 
     // Paginate the verified IDs
     const paginatedIds = verifiedIds.slice(offset, offset + limit);
-    
+
     if (paginatedIds.length === 0) {
       return [];
     }
@@ -210,13 +235,14 @@ export class PopularRankingService {
     }
 
     // Fetch posts
-    const posts = postIds.length > 0
-      ? await this.postRepository.findBy({
-          id: In(postIds),
-          is_hidden: false,
-          post_id: null,
-        })
-      : [];
+    const posts =
+      postIds.length > 0
+        ? await this.postRepository.findBy({
+            id: In(postIds),
+            is_hidden: false,
+            post_id: null,
+          })
+        : [];
 
     // Fetch plugin content items
     const pluginItems: PopularRankingContentItem[] = [];
@@ -239,24 +265,30 @@ export class PopularRankingService {
             // Fetch all candidates and filter to requested IDs
             const allItems = await contributor.getRankingCandidates(
               window,
-              window === 'all' ? null : new Date(Date.now() - this.getWindowHours(window) * 60 * 60 * 1000),
+              window === 'all'
+                ? null
+                : new Date(
+                    Date.now() - this.getWindowHours(window) * 60 * 60 * 1000,
+                  ),
               10000, // Large limit to get all items
             );
-            const requestedItems = allItems.filter(item =>
-              typeIds.includes(item.id)
+            const requestedItems = allItems.filter((item) =>
+              typeIds.includes(item.id),
             );
             pluginItems.push(...requestedItems);
           } catch (error) {
-            this.logger.error(`Failed to fetch plugin content from ${contributor.name}:`, error);
+            this.logger.error(
+              `Failed to fetch plugin content from ${contributor.name}:`,
+              error,
+            );
           }
         }
       }
     }
 
     // Merge posts and plugin items, preserving order from paginatedIds
-    const idOrder = new Map(paginatedIds.map((id, index) => [id, index]));
-    const postsMap = new Map(posts.map(p => [p.id, p]));
-    const pluginItemsMap = new Map(pluginItems.map(item => [item.id, item]));
+    const postsMap = new Map(posts.map((p) => [p.id, p]));
+    const pluginItemsMap = new Map(pluginItems.map((item) => [item.id, item]));
 
     const result: (Post | PopularRankingContentItem)[] = [];
     for (const id of paginatedIds) {
@@ -296,19 +328,23 @@ export class PopularRankingService {
       const verifiedIds = await this.getVerifiedPopularIds(window);
       return verifiedIds.length;
     } catch (error) {
-      this.logger.error(`Error in getTotalPostsCount for window ${window}:`, error);
+      this.logger.error(
+        `Error in getTotalPostsCount for window ${window}:`,
+        error,
+      );
       return 0;
     }
   }
-
 
   async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
     const key = this.getRedisKey(window);
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    this.logger.log(`Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`);
-    
+    this.logger.log(
+      `Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`,
+    );
+
     // Verify Redis connection
     try {
       await this.redis.ping();
@@ -330,11 +366,15 @@ export class PopularRankingService {
       .limit(maxCandidates)
       .getMany();
 
-    this.logger.log(`Found ${candidates.length} candidate posts for window ${window}`);
+    this.logger.log(
+      `Found ${candidates.length} candidate posts for window ${window}`,
+    );
 
     // Fetch plugin content items
     const pluginContentItems: PopularRankingContentItem[] = [];
-    const pluginLimit = Math.floor(maxCandidates / Math.max(1, this.rankingContributors.length + 1));
+    const pluginLimit = Math.floor(
+      maxCandidates / Math.max(1, this.rankingContributors.length + 1),
+    );
     for (const contributor of this.rankingContributors) {
       try {
         const items = await contributor.getRankingCandidates(
@@ -343,22 +383,36 @@ export class PopularRankingService {
           pluginLimit,
         );
         pluginContentItems.push(...items);
-        this.logger.log(`Plugin ${contributor.name} contributed ${items.length} items for window ${window}`);
+        this.logger.log(
+          `Plugin ${contributor.name} contributed ${items.length} items for window ${window}`,
+        );
       } catch (error) {
-        this.logger.error(`Failed to fetch content from plugin ${contributor.name}:`, error);
+        this.logger.error(
+          `Failed to fetch content from plugin ${contributor.name}:`,
+          error,
+        );
       }
     }
-    this.logger.log(`Found ${pluginContentItems.length} plugin content items for window ${window}`);
+    this.logger.log(
+      `Found ${pluginContentItems.length} plugin content items for window ${window}`,
+    );
 
     if (candidates.length === 0 && pluginContentItems.length === 0) {
       await this.redis.del(key);
-      this.logger.warn(`No candidates found for window ${window}, deleted Redis key`);
+      this.logger.warn(
+        `No candidates found for window ${window}, deleted Redis key`,
+      );
       return;
     }
 
     // Log first few candidate IDs for debugging
     if (candidates.length > 0) {
-      this.logger.log(`First 5 candidate IDs: ${candidates.slice(0, 5).map(c => c.id).join(', ')}`);
+      this.logger.log(
+        `First 5 candidate IDs: ${candidates
+          .slice(0, 5)
+          .map((c) => c.id)
+          .join(', ')}`,
+      );
     }
 
     // Preload tips per post (sum and count and unique tippers)
@@ -737,14 +791,16 @@ export class PopularRankingService {
     }
     const eligible = scored.filter((s) => s.score >= scoreFloor);
 
-    this.logger.log(`Window ${window}: ${scored.length} posts scored, ${eligible.length} eligible (scoreFloor: ${scoreFloor})`);
-    
+    this.logger.log(
+      `Window ${window}: ${scored.length} posts scored, ${eligible.length} eligible (scoreFloor: ${scoreFloor})`,
+    );
+
     // Log top scores for debugging
     if (scored.length > 0) {
       const topScores = scored
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
-        .map(s => `${s.postId}:${s.score.toFixed(4)}`)
+        .map((s) => `${s.postId}:${s.score.toFixed(4)}`)
         .join(', ');
       this.logger.log(`Top 5 scores: ${topScores}`);
     }
@@ -753,12 +809,14 @@ export class PopularRankingService {
     try {
       // Delete existing key first
       await this.redis.del(key);
-      
+
       if (eligible.length === 0) {
-        this.logger.warn(`No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`);
+        this.logger.warn(
+          `No eligible posts to cache for window ${window} (all posts below score floor ${scoreFloor})`,
+        );
         return;
       }
-      
+
       // Use pipeline instead of multi for better error handling
       const pipeline = this.redis.pipeline();
       for (const item of eligible) {
@@ -766,32 +824,43 @@ export class PopularRankingService {
       }
       pipeline.expire(key, POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS);
       const results = await pipeline.exec();
-      
+
       // Check for errors in results
       if (results === null) {
         const error = new Error(`Redis pipeline failed for window ${window}`);
         this.logger.error(error.message);
         throw error;
       }
-      
-      const errors = results.filter((result) => result[0] !== null).map((result) => result[0]);
+
+      const errors = results
+        .filter((result) => result[0] !== null)
+        .map((result) => result[0]);
       if (errors.length > 0) {
-        const error = new Error(`Redis pipeline errors for window ${window}: ${JSON.stringify(errors)}`);
+        const error = new Error(
+          `Redis pipeline errors for window ${window}: ${JSON.stringify(errors)}`,
+        );
         this.logger.error(error.message);
         throw error;
       }
-      
-      this.logger.log(`Successfully cached ${eligible.length} popular posts in Redis key ${key}`);
-      
+
+      this.logger.log(
+        `Successfully cached ${eligible.length} popular posts in Redis key ${key}`,
+      );
+
       // Verify the cache was written
       const verifyCount = await this.redis.zcard(key);
       if (verifyCount !== eligible.length) {
-        const error = new Error(`Redis key ${key} has ${verifyCount} items but expected ${eligible.length}`);
+        const error = new Error(
+          `Redis key ${key} has ${verifyCount} items but expected ${eligible.length}`,
+        );
         this.logger.error(error.message);
         throw error;
       }
     } catch (error) {
-      this.logger.error(`Failed to cache popular posts in Redis for window ${window}:`, error);
+      this.logger.error(
+        `Failed to cache popular posts in Redis for window ${window}:`,
+        error,
+      );
       throw error;
     }
   }

@@ -5,7 +5,12 @@ import {
   Param,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiOkResponse,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
 import { GetPnlQueryDto } from '../dto/get-pnl-query.dto';
@@ -31,7 +36,9 @@ export class BclPnlController {
     let targetBlockHeight: number;
     if (query.blockHeight !== undefined && query.blockHeight !== null) {
       if (isNaN(query.blockHeight) || query.blockHeight < 0) {
-        throw new BadRequestException('blockHeight must be a valid positive number');
+        throw new BadRequestException(
+          'blockHeight must be a valid positive number',
+        );
       }
       targetBlockHeight = query.blockHeight;
     } else {
@@ -72,4 +79,3 @@ export class BclPnlController {
     };
   }
 }
-

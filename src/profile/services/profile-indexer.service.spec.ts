@@ -24,7 +24,9 @@ describe('ProfileIndexerService', () => {
       isConfigured: jest.fn().mockReturnValue(true),
       getContractAddress: jest
         .fn()
-        .mockReturnValue('ct_J54WNvrpzK95kPFDE83qcggoxwABzPdBT8YkUyaLqTfNvcfHk'),
+        .mockReturnValue(
+          'ct_J54WNvrpzK95kPFDE83qcggoxwABzPdBT8YkUyaLqTfNvcfHk',
+        ),
       getProfile: jest.fn().mockResolvedValue({
         fullname: '',
         bio: '',
@@ -123,13 +125,12 @@ describe('ProfileIndexerService', () => {
     await service.syncProfileChanges();
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledTimes(
-      1,
-    );
-    expect(profileXVerificationRewardService.sendRewardIfEligible).toHaveBeenCalledWith(
-      'ak_verified',
-      'verified',
-    );
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).toHaveBeenCalledWith('ak_verified', 'verified');
     expect(profileSyncStateRepository.update).toHaveBeenCalled();
   });
 
@@ -226,7 +227,8 @@ describe('ProfileIndexerService', () => {
       chain_expires_at: null,
     });
 
-    const upsertMock = (service as any).profileCacheRepository.upsert as jest.Mock;
+    const upsertMock = (service as any).profileCacheRepository
+      .upsert as jest.Mock;
     await service.refreshAddress('ak_custom_source');
 
     expect(upsertMock).toHaveBeenCalledTimes(1);
@@ -251,7 +253,8 @@ describe('ProfileIndexerService', () => {
       chain_expires_at: null,
     });
 
-    const upsertMock = (service as any).profileCacheRepository.upsert as jest.Mock;
+    const upsertMock = (service as any).profileCacheRepository
+      .upsert as jest.Mock;
     await service.refreshAddress('ak_chain_source');
 
     expect(upsertMock).toHaveBeenCalledTimes(1);
@@ -300,7 +303,9 @@ describe('ProfileIndexerService', () => {
 
     await service.syncProfileChanges();
 
-    expect(profileXVerificationRewardService.sendRewardIfEligible).not.toHaveBeenCalled();
+    expect(
+      profileXVerificationRewardService.sendRewardIfEligible,
+    ).not.toHaveBeenCalled();
     expect(profileSyncStateRepository.update).toHaveBeenCalled();
   });
 });

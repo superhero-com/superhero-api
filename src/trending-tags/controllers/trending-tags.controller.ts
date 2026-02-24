@@ -25,7 +25,6 @@ import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTagsService } from '../services/trending-tags.service';
 import { ApiKeyGuard } from '../guards/api-key.guard';
-import { Token } from 'src/tokens/entities/token.entity';
 
 @Controller('trending-tags')
 @ApiTags('Trending Tags')

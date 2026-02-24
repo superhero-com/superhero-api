@@ -40,7 +40,9 @@ describe('ProfileXVerificationRewardService', () => {
     const decoded = Uint8Array.from(decode(normalized as any));
 
     expect(decoded).toHaveLength(32);
-    expect(Buffer.from(decoded).toString('hex')).toBe(Buffer.from(seed).toString('hex'));
+    expect(Buffer.from(decoded).toString('hex')).toBe(
+      Buffer.from(seed).toString('hex'),
+    );
     expect(() => new MemoryAccount(normalized)).not.toThrow();
   });
 
@@ -160,8 +162,12 @@ describe('ProfileXVerificationRewardService', () => {
       ),
     ).rejects.toThrow('boom');
 
-    expect(savedSnapshots.some((entry) => entry.status === 'pending')).toBe(true);
-    expect(savedSnapshots.some((entry) => entry.status === 'failed')).toBe(true);
+    expect(savedSnapshots.some((entry) => entry.status === 'pending')).toBe(
+      true,
+    );
+    expect(savedSnapshots.some((entry) => entry.status === 'failed')).toBe(
+      true,
+    );
     expect(savedSnapshots.some((entry) => entry.error === 'boom')).toBe(true);
   });
 
@@ -218,7 +224,9 @@ describe('ProfileXVerificationRewardService', () => {
     } as any;
     const aeSdkService = {
       sdk: {
-        spend: jest.fn().mockResolvedValue({ hash: 'th_reward_failed_owner_b' }),
+        spend: jest
+          .fn()
+          .mockResolvedValue({ hash: 'th_reward_failed_owner_b' }),
       },
     } as any;
 

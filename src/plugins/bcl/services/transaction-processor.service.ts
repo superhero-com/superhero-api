@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
@@ -49,9 +49,8 @@ export class TransactionProcessorService {
     syncDirection: SyncDirection,
   ): Promise<ProcessTransactionResult | null> {
     // Validate transaction and get sale address
-    const validation = await this.validationService.validateTransaction(
-      rawTransaction,
-    );
+    const validation =
+      await this.validationService.validateTransaction(rawTransaction);
     if (!validation.isValid || !validation.saleAddress) {
       return null;
     }
@@ -132,8 +131,10 @@ export class TransactionProcessorService {
         );
 
         // Save transaction
-        const savedTransaction =
-          await this.persistenceService.saveTransaction(txData, manager);
+        const savedTransaction = await this.persistenceService.saveTransaction(
+          txData,
+          manager,
+        );
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
         if (syncDirection === SyncDirectionEnum.Live) {
@@ -166,7 +167,7 @@ export class TransactionProcessorService {
         if (syncDirection === SyncDirectionEnum.Live) {
           await this.tokenService.syncTokenPrice(transactionToken, manager);
 
-           // Update token holder
+          // Update token holder
           await this.tokenHolderService.updateTokenHolder(
             transactionToken,
             decodedTx,
@@ -174,7 +175,6 @@ export class TransactionProcessorService {
             manager,
           );
         }
-       
 
         return {
           transactionToken,
@@ -188,7 +188,9 @@ export class TransactionProcessorService {
     // Update token trending score (non-critical operation outside transaction)
     if (result?.isSupported && syncDirection === SyncDirectionEnum.Live) {
       try {
-        await this.tokenService.updateTokenTrendingScore(result.transactionToken);
+        await this.tokenService.updateTokenTrendingScore(
+          result.transactionToken,
+        );
       } catch (error) {
         this.logger.error(
           `Failed to update trending score for token ${result.transactionToken.sale_address}`,
@@ -201,4 +203,3 @@ export class TransactionProcessorService {
     return result;
   }
 }
-

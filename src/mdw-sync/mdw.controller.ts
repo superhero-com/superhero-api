@@ -56,11 +56,20 @@ export class MdwController {
     const targetBackwardHeight = 0; // Backward sync target is always 0
 
     // Calculate backward sync metrics
-    const backwardSyncRemaining = Math.max(0, backwardSyncedHeight - targetBackwardHeight);
+    const backwardSyncRemaining = Math.max(
+      0,
+      backwardSyncedHeight - targetBackwardHeight,
+    );
     const backwardSyncComplete = backwardSyncedHeight <= targetBackwardHeight;
     const backwardSyncProgress =
       tipHeight > 0
-        ? Math.max(0, Math.min(100, ((tipHeight - backwardSyncedHeight) / tipHeight) * 100))
+        ? Math.max(
+            0,
+            Math.min(
+              100,
+              ((tipHeight - backwardSyncedHeight) / tipHeight) * 100,
+            ),
+          )
         : 0;
     const backwardSyncStatus = backwardSyncComplete
       ? 'complete'
@@ -71,9 +80,13 @@ export class MdwController {
     // Calculate live sync metrics
     const liveSyncLag = Math.max(0, tipHeight - liveSyncedHeight);
     const liveSyncProgress =
-      tipHeight > 0 ? Math.max(0, Math.min(100, (liveSyncedHeight / tipHeight) * 100)) : 0;
+      tipHeight > 0
+        ? Math.max(0, Math.min(100, (liveSyncedHeight / tipHeight) * 100))
+        : 0;
     const liveSyncGapFromBackward = liveSyncedHeight - backwardSyncedHeight;
-    const liveSyncStatus = this.liveIndexerService.getIsActive() ? 'active' : 'inactive';
+    const liveSyncStatus = this.liveIndexerService.getIsActive()
+      ? 'active'
+      : 'inactive';
 
     // Calculate validation metrics
     const isValidating = this.blockValidationService.getIsValidating();
@@ -86,7 +99,10 @@ export class MdwController {
     let overallStatus: 'healthy' | 'warning' | 'critical' = 'healthy';
     if (backwardSyncComplete && liveSyncLag > 100) {
       overallStatus = 'warning'; // Live sync lagging significantly
-    } else if (liveSyncLag > 1000 || (!backwardSyncComplete && backwardSyncRemaining > 10000)) {
+    } else if (
+      liveSyncLag > 1000 ||
+      (!backwardSyncComplete && backwardSyncRemaining > 10000)
+    ) {
       overallStatus = 'warning';
     } else if (
       liveSyncLag > 5000 ||

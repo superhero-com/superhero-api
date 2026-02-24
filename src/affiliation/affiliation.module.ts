@@ -19,9 +19,18 @@ import { BclAffiliationTreeController } from './controllers/bcl-affiliation-tree
     forwardRef(() => AccountModule),
     TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation]),
   ],
-  providers: [OAuthService, BclAffiliationAnalyticsService, BclAffiliationTreeService],
+  providers: [
+    OAuthService,
+    BclAffiliationAnalyticsService,
+    BclAffiliationTreeService,
+  ],
   exports: [OAuthService],
-  controllers: [AffiliationController, InvitationsController, BclAffiliationAnalyticsController, BclAffiliationTreeController],
+  controllers: [
+    AffiliationController,
+    InvitationsController,
+    BclAffiliationAnalyticsController,
+    BclAffiliationTreeController,
+  ],
 })
 export class AffiliationModule {
   //

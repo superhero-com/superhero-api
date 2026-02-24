@@ -41,4 +41,3 @@ import { GovernancePopularRankingService } from './services/governance-popular-r
   exports: [GovernancePlugin, GovernancePopularRankingService],
 })
 export class GovernancePluginModule {}
-

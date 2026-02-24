@@ -28,6 +28,7 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Invitation[] | null> {
+    void syncDirection;
     try {
       // Check transaction result
       if (tx.raw.result !== 'ok') {
@@ -74,7 +75,7 @@ export class BclAffiliationTransactionProcessorService {
 
     const senderAddress = tx.caller_id;
     const inviteesArgs = tx.raw.arguments?.[0];
-    
+
     if (!inviteesArgs || !inviteesArgs.value) {
       return [];
     }
@@ -212,4 +213,3 @@ export class BclAffiliationTransactionProcessorService {
     return updatedInvitation ? [updatedInvitation] : null;
   }
 }
-

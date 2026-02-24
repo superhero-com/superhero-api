@@ -10,7 +10,13 @@ import {
   Query,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiOperation, ApiOkResponse, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiOkResponse,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
@@ -77,7 +83,10 @@ export class AccountsController {
    * @param end End date moment object
    * @returns Minimum interval in seconds
    */
-  private getMinimumInterval(start?: moment.Moment, end?: moment.Moment): number {
+  private getMinimumInterval(
+    start?: moment.Moment,
+    end?: moment.Moment,
+  ): number {
     if (!start || !end) {
       // If no dates provided, default to daily interval
       return 86400;
@@ -127,7 +136,8 @@ export class AccountsController {
     // Use the larger of requested interval or minimum allowed interval
     const finalInterval = Math.max(requestedInterval, minimumInterval);
 
-    const includePnl = includeFields.includes('pnl') || includeFields.includes('pnl-range');
+    const includePnl =
+      includeFields.includes('pnl') || includeFields.includes('pnl-range');
     const useRangeBasedPnl = includeFields.includes('pnl-range');
 
     return await this.portfolioService.getPortfolioHistory(address, {
@@ -158,14 +168,16 @@ export class AccountsController {
     const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
     const now = new Date();
     const isStale = account.chain_name_updated_at
-      ? (now.getTime() - account.chain_name_updated_at.getTime()) > CHAIN_NAME_STALE_THRESHOLD_MS
+      ? now.getTime() - account.chain_name_updated_at.getTime() >
+        CHAIN_NAME_STALE_THRESHOLD_MS
       : true;
 
     let chainName = account.chain_name;
     let chainNameUpdatedAt = account.chain_name_updated_at;
 
     if (isStale) {
-      const fetchedChainName = await this.accountService.getChainNameForAccount(address);
+      const fetchedChainName =
+        await this.accountService.getChainNameForAccount(address);
 
       if (fetchedChainName !== undefined) {
         chainName = fetchedChainName;

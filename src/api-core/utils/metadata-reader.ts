@@ -1,7 +1,14 @@
 import 'reflect-metadata';
 import { Type } from '@nestjs/common';
-import { SORTABLE_METADATA_KEY, SORTABLE_FIELDS_KEY } from '../decorators/sortable.decorator';
-import { SEARCHABLE_METADATA_KEY, SEARCHABLE_FIELDS_KEY, SearchResolver } from '../decorators/searchable.decorator';
+import {
+  SORTABLE_METADATA_KEY,
+  SORTABLE_FIELDS_KEY,
+} from '../decorators/sortable.decorator';
+import {
+  SEARCHABLE_METADATA_KEY,
+  SEARCHABLE_FIELDS_KEY,
+  SearchResolver,
+} from '../decorators/searchable.decorator';
 
 export interface SearchableField {
   field: string;
@@ -20,13 +27,16 @@ export interface SortableField {
  */
 export function getSortableFields(entity: Type<any>): SortableField[] {
   const prototype = entity.prototype;
-  
+
   // First, try to get the map of sortable fields from class-level metadata
   const fieldsMap = Reflect.getMetadata(SORTABLE_FIELDS_KEY, prototype);
   if (fieldsMap && fieldsMap instanceof Map) {
     const sortableFields: SortableField[] = [];
     for (const [field, metadata] of fieldsMap.entries()) {
-      const meta = metadata && typeof metadata === 'object' ? metadata : { description: undefined };
+      const meta =
+        metadata && typeof metadata === 'object'
+          ? metadata
+          : { description: undefined };
       sortableFields.push({
         field: String(field),
         description: meta.description,
@@ -34,18 +44,28 @@ export function getSortableFields(entity: Type<any>): SortableField[] {
     }
     return sortableFields;
   }
-  
+
   // Fallback: try to discover fields by checking metadata on properties
   const sortableFields: SortableField[] = [];
   try {
     const propertyNames = Object.getOwnPropertyNames(prototype);
     for (const propertyName of propertyNames) {
-      if (propertyName === 'constructor' || typeof prototype[propertyName] === 'function') {
+      if (
+        propertyName === 'constructor' ||
+        typeof prototype[propertyName] === 'function'
+      ) {
         continue;
       }
-      const metadata = Reflect.getMetadata(SORTABLE_METADATA_KEY, prototype, propertyName);
+      const metadata = Reflect.getMetadata(
+        SORTABLE_METADATA_KEY,
+        prototype,
+        propertyName,
+      );
       if (metadata !== undefined) {
-        const meta = metadata && typeof metadata === 'object' ? metadata : { description: undefined };
+        const meta =
+          metadata && typeof metadata === 'object'
+            ? metadata
+            : { description: undefined };
         sortableFields.push({
           field: propertyName,
           description: meta.description,
@@ -66,13 +86,16 @@ export function getSortableFields(entity: Type<any>): SortableField[] {
  */
 export function getSearchableFields(entity: Type<any>): SearchableField[] {
   const prototype = entity.prototype;
-  
+
   // First, try to get the map of searchable fields from class-level metadata
   const fieldsMap = Reflect.getMetadata(SEARCHABLE_FIELDS_KEY, prototype);
   if (fieldsMap && fieldsMap instanceof Map) {
     const searchableFields: SearchableField[] = [];
     for (const [field, metadata] of fieldsMap.entries()) {
-      const meta = metadata && typeof metadata === 'object' ? metadata : { resolver: metadata || null, description: undefined };
+      const meta =
+        metadata && typeof metadata === 'object'
+          ? metadata
+          : { resolver: metadata || null, description: undefined };
       searchableFields.push({
         field: String(field),
         resolver: meta.resolver || undefined,
@@ -81,18 +104,28 @@ export function getSearchableFields(entity: Type<any>): SearchableField[] {
     }
     return searchableFields;
   }
-  
+
   // Fallback: try to discover fields by checking metadata on properties
   const searchableFields: SearchableField[] = [];
   try {
     const propertyNames = Object.getOwnPropertyNames(prototype);
     for (const propertyName of propertyNames) {
-      if (propertyName === 'constructor' || typeof prototype[propertyName] === 'function') {
+      if (
+        propertyName === 'constructor' ||
+        typeof prototype[propertyName] === 'function'
+      ) {
         continue;
       }
-      const metadata = Reflect.getMetadata(SEARCHABLE_METADATA_KEY, prototype, propertyName);
+      const metadata = Reflect.getMetadata(
+        SEARCHABLE_METADATA_KEY,
+        prototype,
+        propertyName,
+      );
       if (metadata !== undefined) {
-        const meta = metadata && typeof metadata === 'object' ? metadata : { resolver: metadata || null, description: undefined };
+        const meta =
+          metadata && typeof metadata === 'object'
+            ? metadata
+            : { resolver: metadata || null, description: undefined };
         searchableFields.push({
           field: propertyName,
           resolver: meta.resolver || undefined,
@@ -106,4 +139,3 @@ export function getSearchableFields(entity: Type<any>): SearchableField[] {
 
   return searchableFields;
 }
-

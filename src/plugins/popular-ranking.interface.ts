@@ -71,4 +71,3 @@ export interface PopularRankingContributor {
     limit: number,
   ): Promise<PopularRankingContentItem[]>;
 }
-

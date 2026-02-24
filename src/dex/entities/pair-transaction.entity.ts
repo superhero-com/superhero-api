@@ -4,7 +4,7 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
-  PrimaryColumn
+  PrimaryColumn,
 } from 'typeorm';
 import { Pair } from './pair.entity';
 

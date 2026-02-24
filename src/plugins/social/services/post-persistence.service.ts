@@ -4,7 +4,12 @@ import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Topic } from '@/social/entities/topic.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { IPostContract, ICreatePostData, IPostTypeInfo, ICommentProcessingResult } from '@/social/interfaces/post.interfaces';
+import {
+  IPostContract,
+  ICreatePostData,
+  IPostTypeInfo,
+  ICommentProcessingResult,
+} from '@/social/interfaces/post.interfaces';
 import moment from 'moment';
 
 @Injectable()
@@ -172,10 +177,7 @@ export class PostPersistenceService {
   /**
    * Generates a unique post ID
    */
-  generatePostId(
-    tx: Tx,
-    contract: IPostContract,
-  ): string {
+  generatePostId(tx: Tx, contract: IPostContract): string {
     const returnValue = tx.raw?.return?.value;
     if (returnValue) {
       return `${returnValue}_v${contract.version}`;
@@ -240,7 +242,7 @@ export class PostPersistenceService {
   ): ICreatePostData {
     const id = this.generatePostId(tx, contract);
     const slug = this.generatePostSlug(parsedContent.content, id);
-    
+
     return {
       id: id,
       slug: slug,
@@ -294,4 +296,3 @@ export class PostPersistenceService {
     return content;
   }
 }
-
