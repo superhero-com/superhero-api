@@ -27,7 +27,7 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe('');
   });
 
-  it('prefers selected display source when available', async () => {
+  it('prefers chain_name over other name sources', async () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue({
         address: 'ak_abc',
@@ -51,10 +51,10 @@ describe('ProfileReadService', () => {
     );
     const result = await service.getProfile('ak_abc');
 
-    expect(result.public_name).toBe('x_one');
+    expect(result.public_name).toBe('chain_one');
   });
 
-  it('keeps public_name empty when custom display source has no value', async () => {
+  it('uses chain_name when custom name is missing', async () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue({
         address: 'ak_abc1234567890',
@@ -78,10 +78,10 @@ describe('ProfileReadService', () => {
     );
     const result = await service.getProfile('ak_abc1234567890');
 
-    expect(result.public_name).toBe('');
+    expect(result.public_name).toBe('chain_one');
   });
 
-  it('keeps public_name empty when chain display source has no value', async () => {
+  it('falls back to custom name when chain_name is missing', async () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue({
         address: 'ak_chain1234567890',
@@ -105,10 +105,10 @@ describe('ProfileReadService', () => {
     );
     const result = await service.getProfile('ak_chain1234567890');
 
-    expect(result.public_name).toBe('');
+    expect(result.public_name).toBe('custom_one');
   });
 
-  it('recomputes public_name from fresh on-chain profile even when cache stores empty value', async () => {
+  it('does not derive public_name from x_username during fresh on-chain merge', async () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue({
         address: 'ak_refresh',
@@ -143,10 +143,10 @@ describe('ProfileReadService', () => {
       includeOnChain: true,
     });
 
-    expect(result.public_name).toBe('x_fresh');
+    expect(result.public_name).toBe('');
   });
 
-  it('recomputes batch public_name from fresh on-chain profile when includeOnChain=true', async () => {
+  it('does not derive batch public_name from x_username when includeOnChain=true', async () => {
     const profileCacheRepository = {
       find: jest.fn().mockResolvedValue([
         {
@@ -182,7 +182,7 @@ describe('ProfileReadService', () => {
       includeOnChain: true,
     });
 
-    expect(result[0].public_name).toBe('x_batch_fresh');
+    expect(result[0].public_name).toBe('');
   });
 
   it('returns batch profiles in requested order', async () => {

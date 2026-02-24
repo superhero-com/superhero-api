@@ -274,19 +274,12 @@ export class ProfileReadService {
     chain_name?: string | null;
     display_source?: string | null;
   }): string {
-    const display = (profile.display_source || '').toLowerCase();
-
-    if (display === 'custom') {
-      return profile.username || '';
+    // Business rule: only custom and chain names are user-selectable.
+    // If chain name exists, it must be the public name.
+    if (profile.chain_name) {
+      return profile.chain_name;
     }
-    if (display === 'chain') {
-      return profile.chain_name || '';
-    }
-    if (display === 'x') {
-      return profile.x_username || '';
-    }
-
-    return profile.username || profile.chain_name || profile.x_username || '';
+    return profile.username || '';
   }
 
   private isCacheEffectivelyEmpty(cache: ProfileCache): boolean {

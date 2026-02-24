@@ -214,7 +214,7 @@ describe('ProfileIndexerService', () => {
     expect(profileSyncStateRepository.update).toHaveBeenCalledTimes(1);
   });
 
-  it('does not set public_name from chain/x when display source is custom', async () => {
+  it('sets public_name from chain_name even when display source is custom', async () => {
     const { service, profileContractService } = createService();
     profileContractService.getProfile.mockResolvedValue({
       fullname: '',
@@ -234,13 +234,13 @@ describe('ProfileIndexerService', () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
       display_source: 'custom',
-      public_name: '',
+      public_name: 'chain_name',
       chain_name: 'chain_name',
       x_username: 'x_name',
     });
   });
 
-  it('does not set public_name from custom/x when display source is chain', async () => {
+  it('falls back to custom username when chain_name is missing', async () => {
     const { service, profileContractService } = createService();
     profileContractService.getProfile.mockResolvedValue({
       fullname: '',
@@ -260,7 +260,7 @@ describe('ProfileIndexerService', () => {
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
       display_source: 'chain',
-      public_name: '',
+      public_name: 'custom_name',
       username: 'custom_name',
       x_username: 'x_name',
     });
