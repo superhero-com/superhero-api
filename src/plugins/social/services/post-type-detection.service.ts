@@ -17,7 +17,6 @@ export class PostTypeDetectionService {
 
     const postTypeInfo: IPostTypeInfo = {
       isComment: false,
-      isBioUpdate: false,
       isBclSale: false,
       isBclTx: false,
       isBclGain: false,
@@ -52,10 +51,6 @@ export class PostTypeDetectionService {
       }
     }
 
-    postTypeInfo.isBioUpdate = argument.value.some((arg) =>
-      arg.value?.includes('bio-update'),
-    );
-
     postTypeInfo.isHidden = argument.value.some((arg) =>
       arg.value?.includes('hidden'),
     );
@@ -75,4 +70,3 @@ export class PostTypeDetectionService {
     return postTypeInfo;
   }
 }
-

@@ -91,7 +91,6 @@ export interface ICommentInfo {
 export interface IPostTypeInfo {
   isComment?: boolean;
   parentPostId?: string;
-  isBioUpdate?: boolean;
   isBclSale?: boolean;
   isBclTx?: boolean;
   isBclGain?: boolean;
