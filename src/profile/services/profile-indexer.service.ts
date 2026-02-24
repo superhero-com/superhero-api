@@ -157,7 +157,6 @@ export class ProfileIndexerService {
       profile.display_source || 'custom',
       profile.username || null,
       profile.chain_name || null,
-      profile.x_username || null,
     );
 
     await this.profileCacheRepository.upsert(
@@ -179,22 +178,15 @@ export class ProfileIndexerService {
   }
 
   private selectPublicName(
-    displaySource: string,
+    _displaySource: string,
     username: string | null,
     chainName: string | null,
-    xName: string | null,
   ): string {
-    const source = (displaySource || '').toLowerCase();
-    if (source === 'custom') {
-      return username || '';
+    // Business rule: chain name takes precedence when present.
+    if (chainName) {
+      return chainName;
     }
-    if (source === 'chain') {
-      return chainName || '';
-    }
-    if (source === 'x') {
-      return xName || '';
-    }
-    return username || chainName || xName || '';
+    return username || '';
   }
 
   private async getOrCreateState(): Promise<ProfileSyncState> {
