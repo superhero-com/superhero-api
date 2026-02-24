@@ -26,7 +26,9 @@ export class TransactionsService {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      const decodedData = factory.contract.$decodeEvents(tx.raw?.log || []);
+      const decodedData = factory.contract.$decodeEvents(tx.raw?.log || [], {
+        omitUnknown: true,
+      });
 
       return {
         ...tx,

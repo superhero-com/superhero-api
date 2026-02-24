@@ -54,14 +54,24 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     ].includes(tx.function)) {
       try {
         const contract = await this.getContract(GOVERNANCE_CONTRACT.contractAddress, GovernanceRegistryACI);
-        const decodedLogs = contract.$decodeEvents(tx.raw.log);
+        const decodedLogs = contract.$decodeEvents(tx.raw.log, { omitUnknown: true });
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
-        this.logger.error(
-          `Failed to decode logs for transaction ${tx.hash}`,
-          error.stack,
-        );
+        const isUnknownEventError =
+          error?.name === 'MissingEventDefinitionError'
+          || error?.message?.includes("Can't find definition");
+
+        if (isUnknownEventError) {
+          this.logger.warn(
+            `Failed to decode logs for transaction ${tx.hash} due to unknown event definition (contract: ${tx.contract_id}, function: ${tx.function})`,
+          );
+        } else {
+          this.logger.error(
+            `Failed to decode logs for transaction ${tx.hash}`,
+            error.stack,
+          );
+        }
         return null;
       }
     }
@@ -72,14 +82,24 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
           tx.contract_id as Encoded.ContractAddress,
           GovernancePollACI,
         );
-        const decodedLogs = contract.$decodeEvents(tx.raw.log);
+        const decodedLogs = contract.$decodeEvents(tx.raw.log, { omitUnknown: true });
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
-        this.logger.error(
-          `Failed to decode logs for transaction ${tx.hash}`,
-          error.stack,
-        );
+        const isUnknownEventError =
+          error?.name === 'MissingEventDefinitionError'
+          || error?.message?.includes("Can't find definition");
+
+        if (isUnknownEventError) {
+          this.logger.warn(
+            `Failed to decode logs for transaction ${tx.hash} due to unknown event definition (contract: ${tx.contract_id}, function: ${tx.function})`,
+          );
+        } else {
+          this.logger.error(
+            `Failed to decode logs for transaction ${tx.hash}`,
+            error.stack,
+          );
+        }
         return null;
       }
     }

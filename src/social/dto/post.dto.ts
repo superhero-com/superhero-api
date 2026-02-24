@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TopicDto } from './topic.dto';
 import { PostTrendMentionDto } from './post-trend-mention.dto';
+import { PostSenderDto } from './post-sender.dto';
 
 export class PostDto {
   @ApiProperty({
@@ -28,6 +29,12 @@ export class PostDto {
     example: 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi',
   })
   sender_address: string;
+
+  @ApiProperty({
+    description: 'Minimal sender profile info',
+    type: () => PostSenderDto,
+  })
+  sender: PostSenderDto;
 
   @ApiProperty({
     description: 'Address of the smart contract',
