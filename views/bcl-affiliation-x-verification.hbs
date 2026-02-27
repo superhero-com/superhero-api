@@ -1,0 +1,299 @@
+{{#> main-layout title="BCL X Verification Analytics" active="bcl-affiliation-x-verification"}}
+<style>
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    min-width: 0;
+  }
+
+  .stat-card h2 {
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+    color: #475569;
+  }
+
+  .stat-card .subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.2;
+    min-height: 1.1rem;
+  }
+
+  .stat-card .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+    margin-top: 0.35rem;
+  }
+
+  .date-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .date-range > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 150px;
+  }
+
+  .date-range label {
+    font-size: 0.875rem;
+    color: #475569;
+  }
+
+  .date-range input {
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+    width: 100%;
+  }
+
+  .date-range button {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .chart-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 420px;
+  }
+
+  .chart-container h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #475569;
+  }
+
+  .chart-wrapper {
+    height: calc(100% - 2rem);
+    position: relative;
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+    .date-range {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .date-range button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
+</style>
+
+<div class="container">
+  <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
+    <span class="pill mono" id="queryMs">queryMs: -</span>
+  </div>
+
+  <div class="date-range">
+    <div>
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div>
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" />
+    </div>
+    <button onclick="updateDashboard()">Apply</button>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <h2>Total Verified Users</h2>
+      <div class="subtitle">Distinct users that verified X in selected range.</div>
+      <div class="value" id="totalVerifiedUsers">-</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-container">
+      <h2>Daily new X verifications</h2>
+      <div class="chart-wrapper">
+        <canvas id="xDailyChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-container">
+      <h2>Cumulative X verified users</h2>
+      <div class="chart-wrapper">
+        <canvas id="xCumulativeChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = "/api";
+  let xDailyChart = null;
+  let xCumulativeChart = null;
+
+  function destroyChart(chart) {
+    if (chart) chart.destroy();
+  }
+
+  function formatNumber(num) {
+    return (num ?? 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function setDefaultDateRange() {
+    const qs = new URLSearchParams(window.location.search);
+    const qsStart = qs.get("start_date");
+    const qsEnd = qs.get("end_date");
+
+    const endDate = qsEnd && moment(qsEnd, "YYYY-MM-DD", true).isValid()
+      ? moment(qsEnd, "YYYY-MM-DD")
+      : moment();
+    const startDate = qsStart && moment(qsStart, "YYYY-MM-DD", true).isValid()
+      ? moment(qsStart, "YYYY-MM-DD")
+      : moment().subtract(14, "days");
+
+    document.getElementById("startDate").value = startDate.format("YYYY-MM-DD");
+    document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+  }
+
+  function getDateRange() {
+    const startDate = document.getElementById("startDate").value;
+    const endDate = document.getElementById("endDate").value;
+    return {
+      start_date: moment(startDate).format("YYYY-MM-DD"),
+      end_date: moment(endDate).format("YYYY-MM-DD"),
+    };
+  }
+
+  function persistDateRangeToUrl(start_date, end_date) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("start_date", start_date);
+    url.searchParams.set("end_date", end_date);
+    window.history.replaceState({}, "", url.toString());
+  }
+
+  async function fetchXVerificationData(start_date, end_date) {
+    const res = await fetch(`${API_URL}/bcl-affiliation/analytics/x-verification?start_date=${start_date}&end_date=${end_date}`);
+    return await res.json();
+  }
+
+  function renderXVerification(data) {
+    const summary = data?.summary || {};
+    const series = data?.series || [];
+    document.getElementById("queryMs").textContent = `queryMs: ${data?.queryMs ?? "-"}`;
+    document.getElementById("totalVerifiedUsers").textContent = formatNumber(summary.total_verified_users ?? 0);
+
+    const labels = series.map((p) => moment(p.date).format("MMM D"));
+    const dailyNew = series.map((p) => p.daily_new_verified ?? 0);
+    const cumulative = series.map((p) => p.cumulative_verified ?? 0);
+
+    destroyChart(xDailyChart);
+    xDailyChart = new Chart(document.getElementById("xDailyChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Daily new verified",
+            data: dailyNew,
+            borderColor: "#0ea5e9",
+            backgroundColor: "rgba(14, 165, 233, 0.12)",
+            tension: 0.3,
+            fill: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+
+    destroyChart(xCumulativeChart);
+    xCumulativeChart = new Chart(document.getElementById("xCumulativeChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Cumulative verified users",
+            data: cumulative,
+            borderColor: "#8b5cf6",
+            backgroundColor: "rgba(139, 92, 246, 0.12)",
+            tension: 0.25,
+            fill: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  async function updateDashboard() {
+    const { start_date, end_date } = getDateRange();
+    persistDateRangeToUrl(start_date, end_date);
+    const data = await fetchXVerificationData(start_date, end_date);
+    renderXVerification(data);
+  }
+
+  (async function init() {
+    setDefaultDateRange();
+    await updateDashboard();
+  })();
+</script>
+{{/main-layout}}
