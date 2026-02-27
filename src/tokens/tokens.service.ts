@@ -249,11 +249,13 @@ export class TokensService {
       );
       return null;
     }
-    const { instance } = await this.getTokenContractsBySaleAddress(saleAddress);
+    const contracts = await this.getTokenContractsBySaleAddress(saleAddress);
 
-    if (!instance) {
+    if (!contracts?.instance) {
       return null;
     }
+
+    const { instance } = contracts;
 
     const [tokenMetaInfo] = await Promise.all([
       instance.metaInfo().catch(() => {
@@ -265,6 +267,11 @@ export class TokensService {
       sale_address: saleAddress,
       ...(tokenMetaInfo?.token || {}),
     };
+
+    if (!tokenData.name) {
+      return null;
+    }
+
     // prevent duplicate tokens
     const existingToken = await this.findByAddress(saleAddress);
     if (existingToken) {
@@ -451,7 +458,9 @@ export class TokensService {
         this.aePricingService.getPriceData(price),
         this.aePricingService.getPriceData(sell_price),
         this.aePricingService.getPriceData(market_cap),
-        this.aeSdkService.sdk.getBalance(metaInfo?.beneficiary),
+        metaInfo?.beneficiary
+          ? this.aeSdkService.sdk.getBalance(metaInfo.beneficiary)
+          : Promise.resolve('0'),
       ]);
 
     return {

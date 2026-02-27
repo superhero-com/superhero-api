@@ -213,6 +213,8 @@ export class TokenService {
   ): Promise<void> {
     try {
       const data = await this.getTokenLivePrice(token);
+      if (!data || Object.keys(data).length === 0) return;
+
       const repository = manager?.getRepository(Token) || this.tokensRepository;
 
       await repository.update(token.sale_address, data as any);
