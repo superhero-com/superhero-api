@@ -855,10 +855,13 @@ export class TokensService {
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
     try {
-      const { tokenContractInstance } =
-        await this.getTokenContractsBySaleAddress(
-          token.sale_address as Encoded.ContractAddress,
-        );
+      const contracts = await this.getTokenContractsBySaleAddress(
+        token.sale_address as Encoded.ContractAddress,
+      );
+      if (!contracts?.tokenContractInstance) {
+        return [];
+      }
+      const { tokenContractInstance } = contracts;
       const holderBalances = await tokenContractInstance.balances();
       const holders = Array.from(holderBalances.decodedResult)
         .map(([key, value]: any) => ({
