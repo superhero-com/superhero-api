@@ -102,10 +102,22 @@ export class MicroBlockService {
   ): Promise<Partial<MicroBlock>[]> {
     const microBlocksToSave: Partial<MicroBlock>[] = [];
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-    let microBlocksUrl = `${middlewareUrl}/v3/key-blocks/${keyBlockHash}/micro-blocks?limit=100`;
+    let microBlocksUrl: string | null = `${middlewareUrl}/v3/key-blocks/${keyBlockHash}/micro-blocks?limit=100`;
+
+    // A single key block realistically contains at most a few hundred micro-blocks.
+    // Cap at 1 000 pages as a safety guard against a runaway pagination response.
+    const maxPages = 1_000;
+    let pageCount = 0;
 
     // Handle pagination
     while (microBlocksUrl) {
+      if (++pageCount > maxPages) {
+        this.logger.warn(
+          `fetchMicroBlocksForKeyBlock: exceeded max pages (${maxPages}) for key block ${keyBlockHash}, stopping pagination`,
+        );
+        break;
+      }
+
       const response = await fetchJson(microBlocksUrl);
       const microBlocks = response?.data || [];
 
@@ -117,7 +129,7 @@ export class MicroBlockService {
       }
 
       // Check if there's a next page
-      microBlocksUrl = response.next
+      microBlocksUrl = response?.next
         ? `${middlewareUrl}${response.next}`
         : null;
     }
