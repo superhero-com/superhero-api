@@ -5,64 +5,57 @@ jest.mock('../profile.constants', () => ({
 }));
 
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
-import { decode, MemoryAccount } from '@aeternity/aepp-sdk';
-import nacl from 'tweetnacl';
 
 describe('ProfileXVerificationRewardService', () => {
-  it('normalizes 32-byte seed to sk_ seed accepted by MemoryAccount', () => {
-    const rewardRepository = {} as any;
-    const aeSdkService = {} as any;
+  const getService = (overrides?: {
+    rewardRepository?: any;
+    aeSdkService?: any;
+    profileXInviteService?: any;
+    profileSpendQueueService?: any;
+  }) => {
+    const rewardRepository =
+      overrides?.rewardRepository ||
+      ({
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation((value) => value),
+        save: jest.fn().mockImplementation(async (value) => value),
+      } as any);
+    const aeSdkService =
+      overrides?.aeSdkService ||
+      ({
+        sdk: {
+          spend: jest.fn().mockResolvedValue({ hash: 'th_reward_1' }),
+        },
+      } as any);
+    const profileXInviteService =
+      overrides?.profileXInviteService ||
+      ({
+        processInviteeXVerified: jest.fn().mockResolvedValue(undefined),
+      } as any);
+    const profileSpendQueueService =
+      overrides?.profileSpendQueueService ||
+      ({
+        enqueueSpend: jest.fn().mockImplementation(async (_k, work) => work()),
+        getRewardAccount: jest.fn().mockReturnValue({}),
+      } as any);
+
     const service = new ProfileXVerificationRewardService(
       rewardRepository,
       aeSdkService,
+      profileXInviteService,
+      profileSpendQueueService,
     );
-
-    const seedHex = '11'.repeat(32);
-    const normalized = (service as any).normalizePrivateKey(seedHex);
-    const decoded = Uint8Array.from(decode(normalized as any));
-
-    expect(decoded).toHaveLength(32);
-    expect(() => new MemoryAccount(normalized)).not.toThrow();
-  });
-
-  it('normalizes 64-byte key to seed accepted by MemoryAccount', () => {
-    const rewardRepository = {} as any;
-    const aeSdkService = {} as any;
-    const service = new ProfileXVerificationRewardService(
+    return {
+      service,
       rewardRepository,
       aeSdkService,
-    );
-
-    const seed = Uint8Array.from(Buffer.from('22'.repeat(32), 'hex'));
-    const secretKey = nacl.sign.keyPair.fromSeed(seed).secretKey;
-    const secretHex = Buffer.from(secretKey).toString('hex');
-    const normalized = (service as any).normalizePrivateKey(secretHex);
-    const decoded = Uint8Array.from(decode(normalized as any));
-
-    expect(decoded).toHaveLength(32);
-    expect(Buffer.from(decoded).toString('hex')).toBe(
-      Buffer.from(seed).toString('hex'),
-    );
-    expect(() => new MemoryAccount(normalized)).not.toThrow();
-  });
+      profileXInviteService,
+      profileSpendQueueService,
+    };
+  };
 
   it('converts AE amount to integer aettos before spend', async () => {
-    const rewardRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => value),
-    } as any;
-    const aeSdkService = {
-      sdk: {
-        spend: jest.fn().mockResolvedValue({ hash: 'th_reward_1' }),
-      },
-    } as any;
-
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    const { service, aeSdkService } = getService();
 
     await service.sendRewardIfEligible(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
@@ -77,12 +70,20 @@ describe('ProfileXVerificationRewardService', () => {
     );
   });
 
+  it('triggers invite verification credit after successful payout', async () => {
+    const { service, profileXInviteService } = getService();
+
+    await service.sendRewardIfEligible(
+      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+      'reward_user_hook',
+    );
+
+    expect(profileXInviteService.processInviteeXVerified).toHaveBeenCalledWith(
+      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+    );
+  });
+
   it('serializes spends across different recipients', async () => {
-    const rewardRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => value),
-    } as any;
     let resolveFirstSpend: (() => void) | null = null;
     const aeSdkService = {
       sdk: {
@@ -97,12 +98,19 @@ describe('ProfileXVerificationRewardService', () => {
           .mockResolvedValueOnce({ hash: 'th_reward_2' }),
       },
     } as any;
-
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    let queue: Promise<void> = Promise.resolve();
+    const profileSpendQueueService = {
+      enqueueSpend: jest.fn().mockImplementation(async (_k, work) => {
+        const current = queue.then(work, work);
+        queue = current.then(
+          () => undefined,
+          () => undefined,
+        );
+        return current;
+      }),
+      getRewardAccount: jest.fn().mockReturnValue({}),
+    } as any;
+    const { service } = getService({ aeSdkService, profileSpendQueueService });
 
     const first = service.sendRewardIfEligible(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
@@ -149,11 +157,7 @@ describe('ProfileXVerificationRewardService', () => {
       },
     } as any;
 
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    const { service } = getService({ rewardRepository, aeSdkService });
 
     await expect(
       service.sendRewardIfEligible(
@@ -179,7 +183,9 @@ describe('ProfileXVerificationRewardService', () => {
           if (where?.address) {
             return null;
           }
-          if (where?.x_username === 'alice' && where?.status === status) {
+          if (
+            where?.x_username === 'alice'
+          ) {
             return {
               address: 'ak_first',
               x_username: 'alice',
@@ -196,12 +202,7 @@ describe('ProfileXVerificationRewardService', () => {
           spend: jest.fn(),
         },
       } as any;
-
-      const service = new ProfileXVerificationRewardService(
-        rewardRepository,
-        aeSdkService,
-      );
-      (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+      const { service } = getService({ rewardRepository, aeSdkService });
 
       await service.sendRewardIfEligible('ak_second', 'alice');
 
@@ -230,11 +231,7 @@ describe('ProfileXVerificationRewardService', () => {
       },
     } as any;
 
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    const { service } = getService({ rewardRepository, aeSdkService });
 
     await service.sendRewardIfEligible('ak_second', 'alice');
 

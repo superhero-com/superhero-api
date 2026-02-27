@@ -1,28 +1,29 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { encode, Encoding, MemoryAccount, toAettos } from '@aeternity/aepp-sdk';
+import { toAettos } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE,
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
 } from '../profile.constants';
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
-import { parseProfilePrivateKeyBytes } from './profile-private-key.util';
+import { ProfileXInviteService } from './profile-x-invite.service';
+import { ProfileSpendQueueService } from './profile-spend-queue.service';
 
 @Injectable()
 export class ProfileXVerificationRewardService {
   private readonly logger = new Logger(ProfileXVerificationRewardService.name);
+  private static readonly ADDRESS_REGEX = /^ak_[1-9A-HJ-NP-Za-km-z]+$/;
   private readonly inFlightByAddress = new Map<string, Promise<void>>();
   private readonly inFlightByXUsername = new Map<string, Promise<void>>();
-  private spendQueue: Promise<void> = Promise.resolve();
-  private rewardAccount: MemoryAccount | null = null;
-  private rewardAccountInitError: Error | null = null;
 
   constructor(
     @InjectRepository(ProfileXVerificationReward)
     private readonly rewardRepository: Repository<ProfileXVerificationReward>,
     private readonly aeSdkService: AeSdkService,
+    private readonly profileXInviteService: ProfileXInviteService,
+    private readonly profileSpendQueueService: ProfileSpendQueueService,
   ) {}
 
   async sendRewardIfEligible(
@@ -72,7 +73,7 @@ export class ProfileXVerificationRewardService {
       );
       return;
     }
-    if (!address.startsWith('ak_')) {
+    if (!ProfileXVerificationRewardService.ADDRESS_REGEX.test(address || '')) {
       this.logger.warn(
         `Skipping X verification reward, invalid account address: ${address}`,
       );
@@ -89,18 +90,22 @@ export class ProfileXVerificationRewardService {
       return;
     }
 
-    const [existingReward, existingPaidRewardForX, existingPendingRewardForX] =
+    const [existingReward, existingRewardForX] =
       await Promise.all([
         this.rewardRepository.findOne({
           where: { address },
         }),
         this.rewardRepository.findOne({
-          where: { x_username: xUsername, status: 'paid' },
-        }),
-        this.rewardRepository.findOne({
-          where: { x_username: xUsername, status: 'pending' },
+          where: {
+            x_username: xUsername,
+            status: In(['paid', 'pending']),
+          },
         }),
       ]);
+    const existingPaidRewardForX =
+      existingRewardForX?.status === 'paid' ? existingRewardForX : null;
+    const existingPendingRewardForX =
+      existingRewardForX?.status === 'pending' ? existingRewardForX : null;
     if (existingReward?.status === 'paid') {
       return;
     }
@@ -138,10 +143,14 @@ export class ProfileXVerificationRewardService {
 
     await this.rewardRepository.save(rewardEntry);
 
-    // Serialize all spends from the same backend account to avoid nonce conflicts.
-    await this.enqueueSpend(async () => {
+    await this.profileSpendQueueService.enqueueSpend(
+      PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
+      async () => {
       try {
-        const rewardAccount = this.getRewardAccount();
+        const rewardAccount = this.profileSpendQueueService.getRewardAccount(
+          PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
+          'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY',
+        );
         const spendResult = await this.aeSdkService.sdk.spend(
           rewardAmountAettos,
           address as `ak_${string}`,
@@ -151,6 +160,14 @@ export class ProfileXVerificationRewardService {
         rewardEntry.status = 'paid';
         rewardEntry.error = null;
         await this.rewardRepository.save(rewardEntry);
+        void Promise.resolve(
+          this.profileXInviteService.processInviteeXVerified(address),
+        )
+          .catch((error) =>
+            this.logger.warn(
+              `Failed to process invite X verification credit for ${address}: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
         this.logger.log(
           `Sent ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE} AE X verification reward to ${address}`,
         );
@@ -167,35 +184,8 @@ export class ProfileXVerificationRewardService {
         );
         throw error;
       }
-    });
-  }
-
-  private async enqueueSpend(work: () => Promise<void>): Promise<void> {
-    const current = this.spendQueue.then(work, work);
-    this.spendQueue = current.then(
-      () => undefined,
-      () => undefined,
+      },
     );
-    return current;
-  }
-
-  private getRewardAccount(): MemoryAccount {
-    if (this.rewardAccount) {
-      return this.rewardAccount;
-    }
-    if (this.rewardAccountInitError) {
-      throw this.rewardAccountInitError;
-    }
-    try {
-      this.rewardAccount = new MemoryAccount(
-        this.normalizePrivateKey(PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY),
-      );
-      return this.rewardAccount;
-    } catch (error) {
-      this.rewardAccountInitError =
-        error instanceof Error ? error : new Error(String(error));
-      throw this.rewardAccountInitError;
-    }
   }
 
   private normalizeXUsername(value: string): string | null {
@@ -232,15 +222,4 @@ export class ProfileXVerificationRewardService {
     }
   }
 
-  private normalizePrivateKey(privateKey: string): `sk_${string}` {
-    try {
-      const keyBytes = parseProfilePrivateKeyBytes(privateKey);
-      const seed = keyBytes.length === 64 ? keyBytes.subarray(0, 32) : keyBytes;
-      return encode(seed, Encoding.AccountSecretKey) as `sk_${string}`;
-    } catch {
-      throw new Error(
-        'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY must be a 32-byte seed or 64-byte secret key',
-      );
-    }
-  }
 }
