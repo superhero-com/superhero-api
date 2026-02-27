@@ -300,15 +300,18 @@ docker compose up --build
 
 The database automatically syncs schema changes in development (`DB_SYNC=true`). For production, you should manage database migrations manually.
 
+For the X invite and verification reward schema added in this codebase, apply `docs/profile-x-invites-manual-migration.sql` before deploying with `DB_SYNC=false`.
+
 ## 🚀 Production Deployment
 
 For production deployment:
 
 1. Set appropriate environment variables
-2. Disable `DB_SYNC`
-3. Use proper secrets management
-4. Configure proper network settings
-5. Enable SSL/TLS
+2. Apply the required manual SQL migration files
+3. Disable `DB_SYNC`
+4. Use proper secrets management
+5. Configure proper network settings
+6. Enable SSL/TLS
 
 ## 🤝 Contributing
 

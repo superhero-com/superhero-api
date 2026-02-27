@@ -1,13 +1,28 @@
 import { Controller, Post, Body, Param, Get, Render } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiProperty,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ArrayNotEmpty, IsArray, IsString, Matches } from 'class-validator';
 import { Repository } from 'typeorm';
 import { Affiliation } from '../entities/affiliation.entity';
 import { AffiliationCode } from '../entities/affiliation-code.entity';
 import { OAuthService } from '../services/oauth.service';
 
 class CreateAffiliationDto {
+  @ApiProperty({ example: 'ak_2F4ExampleAddress' })
+  @IsString()
+  @Matches(/^ak_[1-9A-HJ-NP-Za-km-z]+$/)
   sender_address: string;
+
+  @ApiProperty({ example: ['code1', 'code2', 'code3'] })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
   codes: string[];
 }
 

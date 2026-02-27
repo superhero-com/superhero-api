@@ -27,16 +27,45 @@ export class ProfileXVerificationReward {
   tx_hash: string | null;
 
   @Column({
-    enum: ['pending', 'paid', 'failed'],
+    enum: [
+      'pending',
+      'paid',
+      'failed',
+      'ineligible_followers',
+      'blocked_username_conflict',
+    ],
     default: 'pending',
   })
-  status: 'pending' | 'paid' | 'failed';
+  status:
+    | 'pending'
+    | 'paid'
+    | 'failed'
+    | 'ineligible_followers'
+    | 'blocked_username_conflict';
 
   @Column({
     type: 'text',
     nullable: true,
   })
   error: string | null;
+
+  @Column({
+    type: 'int',
+    default: 0,
+  })
+  retry_count: number;
+
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+  })
+  next_retry_at: Date | null;
+
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+  })
+  last_attempt_at: Date | null;
 
   @CreateDateColumn({
     type: 'timestamp',
