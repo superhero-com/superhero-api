@@ -380,6 +380,18 @@ export class TokensService {
 
       return this.contracts[saleAddress];
     } catch (error: any) {
+      // A 404/not_present means the contract simply does not exist on-chain
+      // (e.g. a sale address from an old/invalid transaction).  This is an
+      // expected condition, not a system error — log at WARN and cache the
+      // negative result so we never hit the node for this address again.
+      if (
+        error?.statusCode === 404 ||
+        error?.details?.errorCode === 'not_present' ||
+        error?.message?.includes('not_present')
+      ) {
+        return undefined;
+      }
+
       this.logger.error(
         `getTokenContractsBySaleAddress->error:: ${saleAddress}`,
         error,
@@ -697,8 +709,8 @@ export class TokensService {
         tx?.callerId || tx?.caller_id || tokenExists?.creator_address,
       created_at: moment(
         rawTransaction?.microTime ||
-          rawTransaction?.micro_time ||
-          tokenExists?.created_at,
+        rawTransaction?.micro_time ||
+        tokenExists?.created_at,
       ).toDate(),
       name: tokenName,
       symbol: tokenName,
@@ -1017,7 +1029,7 @@ export class TokensService {
     const calculated_trending_score =
       TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * tx_normalization_result +
       TRENDING_SCORE_CONFIG.VOLUME_WEIGHT *
-        (volume_normalization_result / lifetimeMinutes);
+      (volume_normalization_result / lifetimeMinutes);
 
     let final_trending_score_result = calculated_trending_score;
     if (calculated_trending_score < 0) {
