@@ -46,11 +46,7 @@ export class BlockSyncService {
 
       // Convert blocks to entity format
       for (const block of blocks) {
-        blocksToSave.push({
-          ...block,
-          timestamp: block.time,
-          created_at: new Date(block.time),
-        });
+        blocksToSave.push(this.normalizeKeyBlock(block));
       }
 
       // Check if there's a next page
@@ -76,8 +72,6 @@ export class BlockSyncService {
   }
 
   async syncMicroBlocks(startHeight: number, endHeight: number): Promise<void> {
-    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-
     // Get all key-blocks in the height range
     const keyBlocks = await this.blockRepository.find({
       where: {
@@ -183,7 +177,7 @@ export class BlockSyncService {
 
     if (mdwTxs.length > 0) {
       let savedTxs: Tx[] = [];
-      
+
       if (useBulkMode) {
         // Use bulk insert for better performance
         // Note: bulkInsertTransactions processes batches internally as they're inserted
@@ -199,7 +193,10 @@ export class BlockSyncService {
           savedTxs = Array.isArray(saved) ? saved : [saved];
           // Process batch for plugins (fallback case)
           if (savedTxs.length > 0) {
-            await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
+            await this.pluginBatchProcessor.processBatch(
+              savedTxs,
+              SyncDirectionEnum.Backward,
+            );
           }
         }
       } else {
@@ -208,7 +205,10 @@ export class BlockSyncService {
         savedTxs = Array.isArray(saved) ? saved : [saved];
         // Process batch for plugins immediately
         if (savedTxs.length > 0) {
-          await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
+          await this.pluginBatchProcessor.processBatch(
+            savedTxs,
+            SyncDirectionEnum.Backward,
+          );
         }
       }
 
@@ -226,11 +226,15 @@ export class BlockSyncService {
 
       // Log warning if some transactions failed to save
       if (savedTxs.length < mdwTxs.length) {
-        const savedHashes = new Set(savedTxs.map(tx => tx.hash).filter(Boolean));
-        const failedTxs = mdwTxs.filter(tx => tx.hash && !savedHashes.has(tx.hash));
+        const savedHashes = new Set(
+          savedTxs.map((tx) => tx.hash).filter(Boolean),
+        );
+        const failedTxs = mdwTxs.filter(
+          (tx) => tx.hash && !savedHashes.has(tx.hash),
+        );
         this.logger.warn(
           `Only ${savedTxs.length} of ${mdwTxs.length} transactions were saved. ` +
-          `Failed hashes: ${failedTxs.map(tx => tx.hash).join(', ')}`
+            `Failed hashes: ${failedTxs.map((tx) => tx.hash).join(', ')}`,
         );
       }
     }
@@ -269,7 +273,7 @@ export class BlockSyncService {
         await this.txRepository.upsert(batch, {
           conflictPaths: ['hash'],
         });
-        
+
         // Collect hashes of transactions to fetch
         const batchHashes = batch
           .map((tx) => tx.hash)
@@ -283,18 +287,23 @@ export class BlockSyncService {
 
           // Log warning if some transactions weren't found after upsert
           if (savedBatchTxs.length < batchHashes.length) {
-            const savedHashes = new Set(savedBatchTxs.map(tx => tx.hash));
-            const missingHashes = batchHashes.filter(hash => !savedHashes.has(hash));
+            const savedHashes = new Set(savedBatchTxs.map((tx) => tx.hash));
+            const missingHashes = batchHashes.filter(
+              (hash) => !savedHashes.has(hash),
+            );
             this.logger.warn(
               `After upsert, only ${savedBatchTxs.length} of ${batchHashes.length} transactions found in database. ` +
-              `Missing hashes: ${missingHashes.slice(0, 10).join(', ')}${missingHashes.length > 10 ? '...' : ''}`
+                `Missing hashes: ${missingHashes.slice(0, 10).join(', ')}${missingHashes.length > 10 ? '...' : ''}`,
             );
           }
 
           // Process batch for plugins immediately (don't wait for full run)
           if (savedBatchTxs.length > 0) {
             // Process immediately - await to ensure batch is processed before next batch
-            await this.pluginBatchProcessor.processBatch(savedBatchTxs, SyncDirectionEnum.Backward);
+            await this.pluginBatchProcessor.processBatch(
+              savedBatchTxs,
+              SyncDirectionEnum.Backward,
+            );
 
             // Collect for return value
             allSavedTxs.push(...savedBatchTxs);
@@ -334,8 +343,22 @@ export class BlockSyncService {
   ): Promise<Map<number, string[]>> {
     await this.syncBlocks(startHeight, endHeight);
     await this.syncMicroBlocks(startHeight, endHeight);
-    const txHashesByBlock = await this.syncTransactions(startHeight, endHeight, true, backward); // Use bulk mode
+    const txHashesByBlock = await this.syncTransactions(
+      startHeight,
+      endHeight,
+      true,
+      backward,
+    ); // Use bulk mode
     return txHashesByBlock;
+  }
+
+  private normalizeKeyBlock(block: any): Partial<KeyBlock> {
+    return {
+      ...block,
+      nonce: block?.nonce?.toString() || '0',
+      pow: Array.isArray(block?.pow) ? block.pow : [],
+      created_at: new Date(block.time),
+    };
   }
 
   convertToMdwTx(tx: ITransaction): Partial<Tx> {
@@ -343,12 +366,14 @@ export class BlockSyncService {
     if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
       payload = decode(tx?.tx?.payload).toString();
     }
-    
+
     // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
     // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
     const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
-    const sanitizedSignatures = tx.signatures ? sanitizeJsonForPostgres(tx.signatures) : [];
-    
+    const sanitizedSignatures = tx.signatures
+      ? sanitizeJsonForPostgres(tx.signatures)
+      : [];
+
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,
@@ -370,4 +395,3 @@ export class BlockSyncService {
     };
   }
 }
-

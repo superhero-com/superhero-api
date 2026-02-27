@@ -1,8 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
@@ -16,12 +13,11 @@ import { Repository } from 'typeorm';
 import { Pair } from '../entities/pair.entity';
 import { getPaths } from '../utils/paths';
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 @Injectable()
 export class PairService {
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractWithMethods<ContractMethodsBase>
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
   constructor(
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
@@ -162,7 +158,8 @@ export class PairService {
     if (this.contracts[pair.address]) {
       return this.contracts[pair.address];
     }
-    const pairContract = await this.aeSdkService.sdk.initializeContract({
+    const pairContract = await Contract.initialize({
+      ...this.aeSdkService.sdk.getContext(),
       aci: pairInterface,
       address: pair.address as Encoded.ContractAddress,
     });

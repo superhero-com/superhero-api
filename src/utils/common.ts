@@ -2,6 +2,16 @@ import {
   MAX_RETRIES_WHEN_REQUEST_FAILED,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs/constants';
+import { incrementFetchTimeout } from './stabilization-metrics';
+
+const DEFAULT_FETCH_JSON_TIMEOUT_MS = 30_000;
+const rawTimeout = Number(
+  process.env.FETCH_JSON_TIMEOUT_MS ?? DEFAULT_FETCH_JSON_TIMEOUT_MS,
+);
+const FETCH_JSON_TIMEOUT_MS =
+  Number.isFinite(rawTimeout) && rawTimeout > 0
+    ? rawTimeout
+    : DEFAULT_FETCH_JSON_TIMEOUT_MS;
 
 /**
  * Fetches JSON data from the specified URL.
@@ -16,13 +26,35 @@ export async function fetchJson<T = any>(
   shouldNotRetry = false,
   totalRetries = 1,
 ): Promise<T | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_JSON_TIMEOUT_MS);
+  const onParentAbort = () => controller.abort();
+
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      options.signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+  }
+
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
     if (response.status === 204) {
       return null;
     }
     return response.json() as Promise<T>;
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      // Respect caller cancellation: do not retry when the parent signal aborted.
+      if (options?.signal?.aborted) {
+        throw error;
+      }
+      incrementFetchTimeout();
+    }
     if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED && !shouldNotRetry) {
       totalRetries++;
       await new Promise((resolve) =>
@@ -31,6 +63,9 @@ export async function fetchJson<T = any>(
       return fetchJson(url, options, shouldNotRetry, totalRetries);
     }
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    options?.signal?.removeEventListener('abort', onParentAbort);
   }
 }
 
@@ -92,7 +127,9 @@ export function sanitizeJsonForPostgres(obj: any): any {
   if (typeof obj === 'string') {
     // Remove null bytes and other control characters that PostgreSQL cannot handle
     // Keep only printable characters and common whitespace (space, tab, newline, carriage return)
-    return obj.replace(/\u0000/g, '').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+    return obj
+      .replace(/\u0000/g, '')
+      .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, '');
   }
 
   if (Array.isArray(obj)) {

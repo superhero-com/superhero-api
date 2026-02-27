@@ -208,6 +208,15 @@ export class TokensController {
         {
           jobId: `syncTokenHolders-${token.sale_address}`,
           removeOnComplete: true,
+          removeOnFail: true,
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 3_000,
+          },
+          timeout: Number(
+            process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000,
+          ),
         },
       );
     }

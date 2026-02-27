@@ -1,5 +1,8 @@
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { SyncDirection, SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import {
+  SyncDirection,
+  SyncDirectionEnum,
+} from '@/mdw-sync/types/sync-direction';
 import { Repository } from 'typeorm';
 
 export { Tx };
@@ -42,7 +45,16 @@ export interface Plugin {
    * @returns Array of query functions that return transactions needing updates
    * @param cursor - Optional cursor with block_height and micro_time for pagination
    */
-  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, limit: number, cursor?: { block_height: number; micro_time: string }) => Promise<Tx[]>>;
+  getUpdateQueries(
+    pluginName: string,
+    currentVersion: number,
+  ): Array<
+    (
+      repository: Repository<Tx>,
+      limit: number,
+      cursor?: { block_height: number; micro_time: string },
+    ) => Promise<Tx[]>
+  >;
   /**
    * Update transactions that have version mismatches or missing plugin data.
    * Processes transactions in batches with pagination.
@@ -50,4 +62,3 @@ export interface Plugin {
    */
   updateTransactions(batchSize?: number): Promise<void>;
 }
-

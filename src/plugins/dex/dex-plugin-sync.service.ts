@@ -46,6 +46,3 @@ export class DexPluginSyncService extends BasePluginSyncService {
     }
   }
 }
-
-
-

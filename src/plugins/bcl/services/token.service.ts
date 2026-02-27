@@ -161,7 +161,11 @@ export class TokenService {
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
       await repository.update(tokenExists.sale_address, tokenData);
-      token = await this.findByAddress(tokenExists.sale_address, false, manager);
+      token = await this.findByAddress(
+        tokenExists.sale_address,
+        false,
+        manager,
+      );
     } else {
       // Use upsert to handle race conditions where token might be created concurrently
       await repository.upsert(tokenData, {
@@ -207,27 +211,37 @@ export class TokenService {
   /**
    * Sync token price from live data
    */
-  async syncTokenPrice(
-    token: Token,
-    manager?: EntityManager,
-  ): Promise<void> {
+  async syncTokenPrice(token: Token, manager?: EntityManager): Promise<void> {
     try {
       const data = await this.getTokenLivePrice(token);
       if (!data || Object.keys(data).length === 0) return;
 
       const repository = manager?.getRepository(Token) || this.tokensRepository;
+      const updatePayload = Object.fromEntries(
+        Object.entries(data ?? {}).filter(([, value]) => value !== undefined),
+      );
 
-      await repository.update(token.sale_address, data as any);
+      if (!Object.keys(updatePayload).length) {
+        this.logger.debug(
+          `Skipping token price sync for ${token.sale_address}: no values to update`,
+        );
+        return;
+      }
+
+      await repository.update(token.sale_address, updatePayload as any);
 
       // re-fetch token and broadcast outside transaction
       if (!manager) {
         this.tokenWebsocketGateway?.handleTokenUpdated({
           sale_address: token.sale_address,
-          data,
+          data: updatePayload,
         });
       }
     } catch (error) {
-      this.logger.error(`Failed to sync token price for ${token.sale_address}`, error);
+      this.logger.error(
+        `Failed to sync token price for ${token.sale_address}`,
+        error,
+      );
     }
   }
 
@@ -306,4 +320,3 @@ export class TokenService {
     return tx.contract_id as Encoded.ContractAddress;
   }
 }
-

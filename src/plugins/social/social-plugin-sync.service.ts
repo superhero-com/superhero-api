@@ -16,7 +16,10 @@ export class SocialPluginSyncService extends BasePluginSyncService {
     super(aeSdkService);
   }
 
-  async processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void> {
+  async processTransaction(
+    tx: Tx,
+    syncDirection: SyncDirection,
+  ): Promise<void> {
     try {
       // Delegate transaction processing to processor service
       const result =
@@ -47,4 +50,3 @@ export class SocialPluginSyncService extends BasePluginSyncService {
     }
   }
 }
-

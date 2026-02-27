@@ -90,7 +90,7 @@ export class GetPnlResponseDto {
     type: 'object',
     additionalProperties: { type: 'object' },
     example: {
-      'ct_2AfnEfCSPx4A6UYXj2XHDqHXcC7EF2bgbp8UN1KPAJDysPJT32': {
+      ct_2AfnEfCSPx4A6UYXj2XHDqHXcC7EF2bgbp8UN1KPAJDysPJT32: {
         current_unit_price: { ae: 0.001, usd: 0.0005 },
         percentage: 15.5,
         invested: { ae: 100, usd: 50 },
@@ -101,4 +101,3 @@ export class GetPnlResponseDto {
   })
   tokens_pnl: Record<string, TokenPnlDto>;
 }
-

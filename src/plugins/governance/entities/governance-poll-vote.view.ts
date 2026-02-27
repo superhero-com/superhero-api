@@ -50,4 +50,3 @@ export class GovernancePollVote {
   @ViewColumn()
   poll_address?: string;
 }
-

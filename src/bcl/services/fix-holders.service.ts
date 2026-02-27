@@ -1,6 +1,4 @@
-import {
-  MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS,
-} from '@/configs/constants';
+import { MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS } from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
@@ -43,6 +41,15 @@ export class FixHoldersService {
       {
         jobId: `syncTokenHolders-${token.sale_address}`,
         removeOnComplete: true,
+        removeOnFail: true,
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 3_000,
+        },
+        timeout: Number(
+          process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000,
+        ),
       },
     );
   }

@@ -28,7 +28,6 @@ import {
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
-import { Account } from '@/account/entities/account.entity';
 
 @Injectable()
 export class PostService {
@@ -39,9 +38,6 @@ export class PostService {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
-
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
 
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
@@ -347,13 +343,6 @@ export class PostService {
             ]
         },
         {
-            "title": "My new bio",
-            "media": [
-                "bio-update",
-                "hidden"
-            ]
-        },
-        {
             "title": "See my new tokens",
             "media": [
                 "bcl:{sale_address}"
@@ -417,27 +406,6 @@ export class PostService {
       if (typeof content !== 'string' || content.trim().length === 0) {
         this.logger.warn('Invalid or empty content', { txHash });
         return null;
-      }
-
-      // Update or create the user account
-      if (postTypeInfo.isBioUpdate) {
-        try {
-          const account = await this.accountRepository.findOne({
-            where: { address: transaction.tx.callerId },
-          });
-          if (account) {
-            await this.accountRepository.update(account.address, {
-              bio: content,
-            });
-          } else {
-            await this.accountRepository.save({
-              address: transaction.tx.callerId,
-              bio: content,
-            });
-          }
-        } catch (error) {
-          this.logger.error('Error updating or creating account', error);
-        }
       }
 
       // For new comments, validate parent post exists with retry logic
@@ -628,8 +596,6 @@ export class PostService {
 
     const postTypeInfo: IPostTypeInfo = {
       isComment: false,
-
-      isBioUpdate: false,
       isBclSale: false,
       isBclTx: false,
       isBclGain: false,
@@ -663,10 +629,6 @@ export class PostService {
         postTypeInfo.parentPostId = undefined;
       }
     }
-
-    postTypeInfo.isBioUpdate = argument.value.some((arg) =>
-      arg.value?.includes('bio-update'),
-    );
 
     postTypeInfo.isHidden = argument.value.some((arg) =>
       arg.value?.includes('hidden'),

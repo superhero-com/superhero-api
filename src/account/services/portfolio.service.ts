@@ -29,7 +29,7 @@ export interface PortfolioHistorySnapshot {
     invested: {
       ae: number;
       usd: number;
-    },
+    };
     current_value: {
       ae: number;
       usd: number;
@@ -43,25 +43,28 @@ export interface PortfolioHistorySnapshot {
       to: Moment | Date;
     };
   };
-  tokens_pnl?: Record<string, {
-    current_unit_price: {
-      ae: number;
-      usd: number;
-    };
-    percentage: number;
-    invested: {
-      ae: number;
-      usd: number;
-    },
-    current_value: {
-      ae: number;
-      usd: number;
-    };
-    gain: {
-      ae: number;
-      usd: number;
-    };
-  }>;
+  tokens_pnl?: Record<
+    string,
+    {
+      current_unit_price: {
+        ae: number;
+        usd: number;
+      };
+      percentage: number;
+      invested: {
+        ae: number;
+        usd: number;
+      };
+      current_value: {
+        ae: number;
+        usd: number;
+      };
+      gain: {
+        ae: number;
+        usd: number;
+      };
+    }
+  >;
 }
 
 export interface GetPortfolioHistoryOptions {
@@ -69,15 +72,15 @@ export interface GetPortfolioHistoryOptions {
   endDate?: Moment;
   interval?: number; // seconds, default 86400 (daily)
   convertTo?:
-  | 'ae'
-  | 'usd'
-  | 'eur'
-  | 'aud'
-  | 'brl'
-  | 'cad'
-  | 'chf'
-  | 'gbp'
-  | 'xau';
+    | 'ae'
+    | 'usd'
+    | 'eur'
+    | 'aud'
+    | 'brl'
+    | 'cad'
+    | 'chf'
+    | 'gbp'
+    | 'xau';
   includePnl?: boolean; // Whether to include PNL data
   useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
 }
@@ -97,8 +100,7 @@ export class PortfolioService {
     private readonly aeSdkService: AeSdkService,
     private readonly coinGeckoService: CoinGeckoService,
     private readonly bclPnlService: BclPnlService,
-  ) { }
-
+  ) {}
 
   async getPortfolioHistory(
     address: string,
@@ -108,7 +110,6 @@ export class PortfolioService {
       startDate,
       endDate,
       interval = 86400, // Default daily (24 hours)
-      convertTo = 'ae',
       includePnl = false,
       useRangeBasedPnl = false,
     } = options;
@@ -118,7 +119,7 @@ export class PortfolioService {
     // Only add 1 day if no endDate is provided (for default 90-day range)
     const now = moment();
     const requestedEnd = endDate || now;
-    const end = endDate 
+    const end = endDate
       ? moment(requestedEnd) // Use exact end date if provided
       : moment(requestedEnd).add(1, 'day'); // Add 1 day only for default range
     const start = startDate || moment().subtract(90, 'days'); // Default to last 90 days
@@ -143,12 +144,12 @@ export class PortfolioService {
         );
         break;
       }
-      
+
       // Don't generate timestamps in the future
       if (current.valueOf() > now.valueOf()) {
         break;
       }
-      
+
       timestamps.push(moment(current));
       const previousTimestamp = current.valueOf();
       current.add(safeInterval, 'seconds');
@@ -170,13 +171,17 @@ export class PortfolioService {
     // Always use 'daily' interval from CoinGecko - hourly data is not reliably available
     // We'll use the closest daily price for any timestamp (including hourly requests)
     const priceInterval: 'daily' | 'hourly' = 'daily';
-    const aePriceHistory = (await this.coinGeckoService.fetchHistoricalPrice(
-      AETERNITY_COIN_ID,
-      'usd', // force to usd
-      days,
-      priceInterval,
-    )).sort((a, b) => b[0] - a[0]);
-    const currentAePrice = await this.coinGeckoService.getPriceData(new BigNumber(1));
+    const aePriceHistory = (
+      await this.coinGeckoService.fetchHistoricalPrice(
+        AETERNITY_COIN_ID,
+        'usd', // force to usd
+        days,
+        priceInterval,
+      )
+    ).sort((a, b) => b[0] - a[0]);
+    const currentAePrice = await this.coinGeckoService.getPriceData(
+      new BigNumber(1),
+    );
 
     // First, calculate all block heights sequentially (since previousHeight is used as a hint)
     const blockHeights: number[] = [];
@@ -192,16 +197,17 @@ export class PortfolioService {
 
     // Store the actual startDate for range-based PNL calculations
     const actualStartDate = start;
-    
+
     // Calculate block height for startDate once (for range-based PNL last snapshot)
-    const startBlockHeight = useRangeBasedPnl && includePnl
-      ? await timestampToAeHeight(
-          actualStartDate.valueOf(),
-          undefined,
-          this.dataSource,
-        )
-      : undefined;
-    
+    const startBlockHeight =
+      useRangeBasedPnl && includePnl
+        ? await timestampToAeHeight(
+            actualStartDate.valueOf(),
+            undefined,
+            this.dataSource,
+          )
+        : undefined;
+
     const data = await Promise.all(
       timestamps.map(async (timestamp, index) => {
         // the aePriceHistory is an array of [timestamp_ms, price] pairs
@@ -211,13 +217,17 @@ export class PortfolioService {
         });
         const price = closestPrice ? closestPrice[1] : currentAePrice?.usd || 0;
         const blockHeight = blockHeights[index];
-        const previousBlockHeight = index > 0 ? blockHeights[index - 1] : undefined;
-        
         // Prepare promises for parallel execution
         const promises: [
           Promise<string>,
-          Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>,
-          ...Array<Promise<Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>>>
+          Promise<
+            Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
+          >,
+          ...Array<
+            Promise<
+              Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
+            >
+          >,
         ] = [
           this.aeSdkService.sdk.getBalance(
             address as any,
@@ -226,18 +236,28 @@ export class PortfolioService {
             } as any,
           ),
           // Always call without fromBlockHeight to get cumulative token values (all tokens owned)
-          this.bclPnlService.calculateTokenPnls(address, blockHeight, undefined),
+          this.bclPnlService.calculateTokenPnls(
+            address,
+            blockHeight,
+            undefined,
+          ),
         ];
 
         // If range-based PNL is requested, calculate it separately for PNL fields only
         // Note: For index === 0, we use cumulative PNL (same as tokensPnl), so no need to call again
-        let rangeBasedPnl: Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>> | undefined = undefined;
+        let rangeBasedPnl:
+          | Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
+          | undefined = undefined;
         if (useRangeBasedPnl && includePnl && index > 0) {
           // For snapshots after the first: PNL from startDate to this timestamp
           // This allows hover to use PNL data directly from the snapshot
           // Calculate range-based PNL separately (will be used only for PNL fields)
           promises.push(
-            this.bclPnlService.calculateTokenPnls(address, blockHeight, startBlockHeight),
+            this.bclPnlService.calculateTokenPnls(
+              address,
+              blockHeight,
+              startBlockHeight,
+            ),
           );
         }
 
@@ -275,7 +295,7 @@ export class PortfolioService {
           // Token values (tokens_value_ae, tokens_value_usd) always use cumulative tokensPnl
           // PNL fields (invested, gain, percentage) use rangeBasedPnl when range-based PNL is enabled
           const pnlData = rangeBasedPnl || tokensPnl;
-          
+
           // Calculate total PNL percentage
           const totalPnlPercentage =
             pnlData.totalCostBasisAe > 0
@@ -304,9 +324,7 @@ export class PortfolioService {
             // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
             // First snapshot: cumulative from start (null) to current timestamp
             // All other snapshots: from startDate to current timestamp
-            const rangeFrom = index === 0 
-              ? null 
-              : actualStartDate;
+            const rangeFrom = index === 0 ? null : actualStartDate;
             const rangeTo = timestamp;
             result.total_pnl.range = {
               from: rangeFrom,

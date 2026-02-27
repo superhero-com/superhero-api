@@ -18,10 +18,12 @@ import { PluginFailedTransactionService } from './services/plugin-failed-transac
 import { MicroBlockService } from './services/micro-block.service';
 import { BlockValidationService } from './services/block-validation.service';
 import { BlockSyncService } from './services/block-sync.service';
-import { MDW_PLUGIN } from '@/plugins/plugin.tokens';
 import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
 import { AeModule } from '@/ae/ae.module';
-import { createEntityControllers, createEntityResolvers } from '@/api-core/factories/entity-factory';
+import {
+  createEntityControllers,
+  createEntityResolvers,
+} from '@/api-core/factories/entity-factory';
 import { ENTITY_CONFIGS } from './config/entity-configs';
 
 // Generate controllers for all entities
@@ -46,10 +48,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     // Import plugin modules
     ...PLUGIN_MODULES,
   ],
-  controllers: [
-    MdwController,
-    ...generatedControllers,
-  ],
+  controllers: [MdwController, ...generatedControllers],
   providers: [
     PluginRegistryService,
     PluginBatchProcessorService,
@@ -72,7 +71,7 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     PluginBatchProcessorService,
   ],
 })
-export class MdwModule { }
+export class MdwModule {}
 
 // Re-export types for convenience
 export { SyncDirection, SyncDirectionEnum } from './types/sync-direction';

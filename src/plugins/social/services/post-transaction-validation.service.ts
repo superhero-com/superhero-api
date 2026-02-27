@@ -76,9 +76,7 @@ export class PostTransactionValidationService {
   /**
    * Validate transaction and contract support
    */
-  async validateTransaction(
-    tx: Tx,
-  ): Promise<PostTransactionValidationResult> {
+  async validateTransaction(tx: Tx): Promise<PostTransactionValidationResult> {
     // Validate transaction structure
     if (!this.validateTransactionStructure(tx)) {
       return {
@@ -124,4 +122,3 @@ export class PostTransactionValidationService {
     };
   }
 }
-

@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DataSource, In, Repository } from 'typeorm';
-import moment from 'moment';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Account } from '../entities/account.entity';
 import { Token } from '@/tokens/entities/token.entity';
@@ -181,8 +180,7 @@ export class LeaderboardSnapshotService {
     const endMs = end.getTime();
     const startMs = start ? start.getTime() : endMs;
     const durationMs = Math.max(endMs - startMs, 1);
-    const pointCount =
-      window === '7d' ? 8 : window === '30d' ? 12 : 24;
+    const pointCount = window === '7d' ? 8 : window === '30d' ? 12 : 24;
     const sampleTimestamps: number[] = [];
     for (let i = 0; i < pointCount; i++) {
       const ratio = i / (pointCount - 1);
@@ -234,7 +232,6 @@ export class LeaderboardSnapshotService {
         const aumStartSpark = spark[0][1];
         const aumEndUsd = spark[spark.length - 1][1];
 
-        let aumStartUsd = aumStartSpark;
         let pnlWindowUsd = aumEndUsd - aumStartSpark;
         let roiWindowPct =
           aumStartSpark > 0 ? (pnlWindowUsd / aumStartSpark) * 100 : 0;
@@ -247,8 +244,6 @@ export class LeaderboardSnapshotService {
           const totalCostBasisAe = lastPnl.totalCostBasisAe;
 
           pnlWindowUsd = totalGainUsd;
-          aumStartUsd = Math.max(aumEndUsd - totalGainUsd, 0);
-
           if (totalCostBasisUsd > 0) {
             roiWindowPct = (totalGainUsd / totalCostBasisUsd) * 100;
           } else if (totalCostBasisAe > 0) {
@@ -321,5 +316,3 @@ export class LeaderboardSnapshotService {
     return items;
   }
 }
-
-

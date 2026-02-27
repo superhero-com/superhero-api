@@ -6,12 +6,7 @@ import {
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { GovernanceVoteService } from '../services/governance-vote.service';
 import {
   GovernancePollDto,
@@ -23,17 +18,14 @@ import { Pagination } from 'nestjs-typeorm-paginate';
 @Controller('governance/votes')
 @ApiTags('Governance')
 export class GovernanceVotesController {
-  constructor(
-    private readonly governanceVoteService: GovernanceVoteService,
-  ) {}
+  constructor(private readonly governanceVoteService: GovernanceVoteService) {}
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({
     operationId: 'listGovernancePolls',
     summary: 'Get all governance polls',
-    description:
-      'Retrieve a paginated list of governance polls',
+    description: 'Retrieve a paginated list of governance polls',
   })
   @ApiOkResponsePaginated(GovernancePollDto)
   @Get()
@@ -62,4 +54,3 @@ export class GovernanceVotesController {
     return this.governanceVoteService.findOne(pollAddress);
   }
 }
-

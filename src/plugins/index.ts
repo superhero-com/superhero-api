@@ -35,10 +35,31 @@ export const PLUGIN_MODULES: Type[] = [
  */
 export const getPluginProvider = (): Provider => ({
   provide: MDW_PLUGIN,
-  useFactory: (bclPlugin: BclPlugin, socialPlugin: SocialPlugin, dexPlugin: DexPlugin, socialTippingPlugin: SocialTippingPlugin, bclAffiliationPlugin: BclAffiliationPlugin, governancePlugin: GovernancePlugin) => {
-    return [bclPlugin, socialPlugin, dexPlugin, socialTippingPlugin, bclAffiliationPlugin, governancePlugin];
+  useFactory: (
+    bclPlugin: BclPlugin,
+    socialPlugin: SocialPlugin,
+    dexPlugin: DexPlugin,
+    socialTippingPlugin: SocialTippingPlugin,
+    bclAffiliationPlugin: BclAffiliationPlugin,
+    governancePlugin: GovernancePlugin,
+  ) => {
+    return [
+      bclPlugin,
+      socialPlugin,
+      dexPlugin,
+      socialTippingPlugin,
+      bclAffiliationPlugin,
+      governancePlugin,
+    ];
   },
-  inject: [BclPlugin, SocialPlugin, DexPlugin, SocialTippingPlugin, BclAffiliationPlugin, GovernancePlugin],
+  inject: [
+    BclPlugin,
+    SocialPlugin,
+    DexPlugin,
+    SocialTippingPlugin,
+    BclAffiliationPlugin,
+    GovernancePlugin,
+  ],
 });
 
 /**
@@ -47,9 +68,10 @@ export const getPluginProvider = (): Provider => ({
  */
 export const getPopularRankingContributorProvider = (): Provider => ({
   provide: POPULAR_RANKING_CONTRIBUTOR,
-  useFactory: (governanceRankingService: GovernancePopularRankingService): PopularRankingContributor[] => {
+  useFactory: (
+    governanceRankingService: GovernancePopularRankingService,
+  ): PopularRankingContributor[] => {
     return [governanceRankingService];
   },
   inject: [GovernancePopularRankingService],
 });
-

@@ -1,8 +1,13 @@
 import { Logger } from '@nestjs/common';
-import { Repository, MoreThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
-import { Plugin, PluginFilter, SyncDirection, SyncDirectionEnum } from './plugin.interface';
+import {
+  Plugin,
+  PluginFilter,
+  SyncDirection,
+  SyncDirectionEnum,
+} from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 import { sanitizeJsonForPostgres } from '@/utils/common';
 
@@ -30,7 +35,18 @@ export abstract class BasePlugin implements Plugin {
    * @returns Array of query functions that return transactions needing updates
    * @param cursor - Optional cursor with block_height and micro_time for pagination
    */
-  getUpdateQueries(pluginName: string, currentVersion: number): Array<(repository: Repository<Tx>, limit: number, cursor?: { block_height: number; micro_time: string }) => Promise<Tx[]>> {
+  getUpdateQueries(
+    pluginName: string,
+    currentVersion: number,
+  ): Array<
+    (
+      repository: Repository<Tx>,
+      limit: number,
+      cursor?: { block_height: number; micro_time: string },
+    ) => Promise<Tx[]>
+  > {
+    void pluginName;
+    void currentVersion;
     return [];
   }
 
@@ -128,14 +144,15 @@ export abstract class BasePlugin implements Plugin {
       });
 
       if (!syncState) {
-        this.logger.warn(
-          `[${this.name}] Plugin sync state not found`,
-        );
+        this.logger.warn(`[${this.name}] Plugin sync state not found`);
         return;
       }
 
       // Use backward_synced_height if available, otherwise fall back to last_synced_height
-      const syncedHeight = syncState.backward_synced_height ?? syncState.last_synced_height ?? syncState.start_from_height - 1;
+      const syncedHeight =
+        syncState.backward_synced_height ??
+        syncState.last_synced_height ??
+        syncState.start_from_height - 1;
       const startHeight = syncedHeight + 1;
       const batchSize = 100;
       let processedCount = 0;
@@ -199,14 +216,17 @@ export abstract class BasePlugin implements Plugin {
               );
             }
 
-            await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
+            await syncService.processTransaction(
+              tx,
+              SyncDirectionEnum.Backward,
+            );
             processedCount++;
 
             // Update sync state periodically
             if (processedCount % 10 === 0) {
               await this.pluginSyncStateRepository.update(
                 { plugin_name: this.name },
-                { 
+                {
                   last_synced_height: tx.block_height, // Keep for backward compatibility
                   backward_synced_height: tx.block_height,
                 },
@@ -353,7 +373,8 @@ export abstract class BasePlugin implements Plugin {
       // Process each query
       for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
         const query = queries[queryIndex];
-        let cursor: { block_height: number; micro_time: string } | undefined = undefined;
+        let cursor: { block_height: number; micro_time: string } | undefined =
+          undefined;
         let hasMore = true;
 
         this.logger.log(
@@ -510,4 +531,3 @@ export abstract class BasePlugin implements Plugin {
     }
   }
 }
-
