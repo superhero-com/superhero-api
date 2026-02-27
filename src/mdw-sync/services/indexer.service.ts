@@ -131,6 +131,10 @@ export class IndexerService implements OnModuleInit {
       // Get tip height from MDW
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
       const status = await fetchJson(`${middlewareUrl}/v3/status`);
+      if (!status?.mdw_height) {
+        this.logger.warn('MDW status unavailable or returned an empty response, skipping sync cycle');
+        return;
+      }
       const tipHeight = status.mdw_height;
 
       // Update tip height
