@@ -4,10 +4,19 @@ import {
 } from '@/configs/constants';
 
 /**
+ * Default HTTP request timeout in milliseconds.
+ * Prevents fetch calls from hanging indefinitely when a remote server stops responding.
+ */
+export const FETCH_TIMEOUT_MS = 30_000;
+
+/**
  * Fetches JSON data from the specified URL.
  *
  * @param url - The URL to fetch the JSON data from.
  * @param options - Optional request options.
+ * @param shouldNotRetry - When true, do not retry on failure.
+ * @param totalRetries - Internal retry counter (do not pass manually).
+ * @param timeoutMs - Per-request timeout in ms (default 30 s). Pass 0 to disable.
  * @returns A promise that resolves to the JSON data or null if the response status is 204.
  */
 export async function fetchJson<T = any>(
@@ -15,9 +24,27 @@ export async function fetchJson<T = any>(
   options?: RequestInit,
   shouldNotRetry = false,
   totalRetries = 1,
+  timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<T | null> {
+  // Set up a per-request AbortController timeout unless the caller already
+  // supplied a signal (in which case we respect it and skip our own timer).
+  let controller: AbortController | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  if (timeoutMs > 0 && !options?.signal) {
+    controller = new AbortController();
+    timer = setTimeout(
+      () => controller!.abort(new Error(`fetchJson timed out after ${timeoutMs}ms: ${url}`)),
+      timeoutMs,
+    );
+  }
+
   try {
-    const response = await fetch(url, options);
+    const fetchOptions: RequestInit = controller
+      ? { ...options, signal: controller.signal }
+      : { ...options };
+
+    const response = await fetch(url, fetchOptions);
     if (response.status === 204) {
       return null;
     }
@@ -28,9 +55,13 @@ export async function fetchJson<T = any>(
       await new Promise((resolve) =>
         setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
       );
-      return fetchJson(url, options, shouldNotRetry, totalRetries);
+      return fetchJson(url, options, shouldNotRetry, totalRetries, timeoutMs);
     }
     throw error;
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
   }
 }
 
