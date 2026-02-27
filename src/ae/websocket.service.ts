@@ -51,14 +51,34 @@ export class WebSocketService {
   }
 
   async handleWebsocketOpen() {
-    await new Promise((resolve) => {
+    // Wait for the WebSocket to reach OPEN state, but bail out after a
+    // generous timeout instead of polling forever (which would permanently
+    // suspend the open handler if the connection never completes).
+    const pollIntervalMs = 100;
+    const maxWaitMs = WEB_SOCKET_RECONNECT_TIMEOUT * 3; // 3× reconnect timeout
+
+    const isOpen = await new Promise<boolean>((resolve) => {
+      let elapsed = 0;
       const interval = setInterval(() => {
         if (this.wsClient.readyState === WebSocket.OPEN) {
           clearInterval(interval);
           resolve(true);
+          return;
         }
-      }, 100);
+        elapsed += pollIntervalMs;
+        if (elapsed >= maxWaitMs) {
+          clearInterval(interval);
+          resolve(false);
+        }
+      }, pollIntervalMs);
     });
+
+    if (!isOpen) {
+      this.logger.warn(
+        `WebSocket did not reach OPEN state within ${maxWaitMs}ms — will retry on next reconnect cycle`,
+      );
+      return;
+    }
 
     this.isWsConnected = true;
     try {
@@ -66,9 +86,15 @@ export class WebSocketService {
         this.wsClient.send(JSON.stringify(message));
       });
     } catch (error) {
-      setTimeout(() => {
-        this.handleWebsocketOpen();
-      }, WEB_SOCKET_RECONNECT_TIMEOUT);
+      // Sending queued subscriptions failed — trigger a clean reconnect
+      // instead of recursively calling handleWebsocketOpen() which can
+      // build an unbounded chain of scheduled retries.
+      this.logger.error(
+        'Failed to send queued WebSocket subscriptions, triggering reconnect',
+        error,
+      );
+      this.isWsConnected = false;
+      this.reconnect();
     }
   }
 
