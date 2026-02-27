@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import moment from 'moment';
 import { Invitation } from '../entities/invitation.entity';
+import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { PROFILE_REGISTRY_CONTRACT_ADDRESS } from '@/profile/profile.constants';
 
 export type BclAffiliationDailyPoint = {
   date: string; // YYYY-MM-DD
@@ -36,11 +38,23 @@ export type BclAffiliationTopInviter = {
   total_amount_ae: number;
 };
 
+export type BclXVerificationDailyPoint = {
+  date: string; // YYYY-MM-DD
+  daily_new_verified: number;
+  cumulative_verified: number;
+};
+
+export type BclXVerificationSummary = {
+  total_verified_users: number;
+};
+
 @Injectable()
 export class BclAffiliationAnalyticsService {
   constructor(
     @InjectRepository(Invitation)
     private readonly invitationRepo: Repository<Invitation>,
+    @InjectRepository(Tx)
+    private readonly txRepo: Repository<Tx>,
   ) {}
 
   async getDashboardData(params: {
@@ -49,6 +63,10 @@ export class BclAffiliationAnalyticsService {
   }): Promise<{
     series: BclAffiliationDailyPoint[];
     summary: BclAffiliationSummary;
+    xVerification: {
+      series: BclXVerificationDailyPoint[];
+      summary: BclXVerificationSummary;
+    };
     queryMs: number;
   }> {
     const { startDate, endDate } = this.parseDateRange(params);
@@ -56,11 +74,12 @@ export class BclAffiliationAnalyticsService {
     const start = Date.now();
     const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] =
       await Promise.all([
-        this.getDailyRegisteredCounts(startDate, endDate),
-        this.getDailyStatusCounts('claimed', startDate, endDate),
-        this.getDailyStatusCounts('revoked', startDate, endDate),
-        this.getDailyRegisteredAmount(startDate, endDate),
-      ]);
+      this.getDailyRegisteredCounts(startDate, endDate),
+      this.getDailyStatusCounts('claimed', startDate, endDate),
+      this.getDailyStatusCounts('revoked', startDate, endDate),
+      this.getDailyRegisteredAmount(startDate, endDate),
+    ]);
+    const xVerification = await this.getXVerificationData(params);
 
     const [totals, uniques, amountTotals] = await Promise.all([
       this.getTotals(startDate, endDate),
@@ -74,7 +93,6 @@ export class BclAffiliationAnalyticsService {
       revoked: revokedByDay,
       amount_ae_registered: amountByDay,
     });
-
     const total_outstanding =
       totals.total_registered - totals.total_redeemed - totals.total_revoked;
 
@@ -110,7 +128,37 @@ export class BclAffiliationAnalyticsService {
         redeemed_rate,
         revoked_rate,
       },
+      xVerification: {
+        series: xVerification.series,
+        summary: xVerification.summary,
+      },
       queryMs,
+    };
+  }
+
+  async getXVerificationData(params: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    series: BclXVerificationDailyPoint[];
+    summary: BclXVerificationSummary;
+    queryMs: number;
+  }> {
+    const { startDate, endDate } = this.parseDateRange(params);
+    const start = Date.now();
+
+    const [xVerifiedByDay, totalVerifiedUsers] = await Promise.all([
+      this.getDailyXVerifications(startDate, endDate),
+      this.getTotalVerifiedUsers(startDate, endDate),
+    ]);
+    const series = this.buildXVerificationSeries(startDate, endDate, xVerifiedByDay);
+
+    return {
+      series,
+      summary: {
+        total_verified_users: totalVerifiedUsers,
+      },
+      queryMs: Date.now() - start,
     };
   }
 
@@ -365,6 +413,92 @@ export class BclAffiliationAnalyticsService {
 
     return {
       total_amount_ae_registered: Number(row?.amount || 0),
+    };
+  }
+
+  private async getDailyXVerifications(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<Record<string, number>> {
+    const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
+    let qb = this.txRepo
+      .createQueryBuilder('t')
+      .select(
+        `to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD')`,
+        'date',
+      )
+      .addSelect('COUNT(DISTINCT t.caller_id)::int', 'count')
+      .where('t.function = :fn', { fn: 'set_x_name_with_attestation' })
+      .andWhere('t.caller_id IS NOT NULL')
+      .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
+      .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
+
+    if (PROFILE_REGISTRY_CONTRACT_ADDRESS) {
+      qb = qb.andWhere('t.contract_id = :contractId', {
+        contractId: PROFILE_REGISTRY_CONTRACT_ADDRESS,
+      });
+    }
+
+    const rows = await qb
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; count: number }>();
+
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.date] = Number(r.count || 0);
+    return out;
+  }
+
+  private async getTotalVerifiedUsers(startDate: Date, endDate: Date) {
+    const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
+    let qb = this.txRepo
+      .createQueryBuilder('t')
+      .select('COUNT(DISTINCT t.caller_id)::int', 'count')
+      .where('t.function = :fn', { fn: 'set_x_name_with_attestation' })
+      .andWhere('t.caller_id IS NOT NULL')
+      .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
+      .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
+
+    if (PROFILE_REGISTRY_CONTRACT_ADDRESS) {
+      qb = qb.andWhere('t.contract_id = :contractId', {
+        contractId: PROFILE_REGISTRY_CONTRACT_ADDRESS,
+      });
+    }
+
+    const row = await qb.getRawOne<{ count: number }>();
+    return Number(row?.count || 0);
+  }
+
+  private buildXVerificationSeries(
+    startDate: Date,
+    endDate: Date,
+    dailyVerifiedByDate: Record<string, number>,
+  ): BclXVerificationDailyPoint[] {
+    const start = moment(startDate).startOf('day');
+    const end = moment(endDate).startOf('day');
+    const out: BclXVerificationDailyPoint[] = [];
+    let cumulative = 0;
+
+    const cursor = start.clone();
+    while (cursor.isBefore(end)) {
+      const d = cursor.format('YYYY-MM-DD');
+      const daily = dailyVerifiedByDate[d] ?? 0;
+      cumulative += daily;
+      out.push({
+        date: d,
+        daily_new_verified: daily,
+        cumulative_verified: cumulative,
+      });
+      cursor.add(1, 'day');
+    }
+
+    return out;
+  }
+
+  private getMicroTimeRange(startDate: Date, endDate: Date) {
+    return {
+      startMicro: (BigInt(startDate.getTime()) * 1000n).toString(),
+      endMicro: (BigInt(endDate.getTime()) * 1000n).toString(),
     };
   }
 
