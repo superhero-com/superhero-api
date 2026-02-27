@@ -794,63 +794,76 @@ export class TokensService {
   async loadData(
     token: Token,
     aex9Address: string,
-    url: string,
+    initialUrl: string,
     totalHolders = [],
   ) {
-    try {
-      const response = await fetchJson(url);
-      if (!response.data) {
-        this.logger.error(
-          `SyncTokenHoldersQueue:failed to load data from url::${url}`,
-        );
-        this.logger.error(`SyncTokenHoldersQueue:response::`, response);
-        return totalHolders;
-      }
-      const holders = response.data.filter((item) => item.amount > 0);
-      this.logger.debug(
-        `SyncTokenHoldersQueue->holders:${holders.length}`,
-        url,
-      );
+    // Safety cap to prevent an infinite loop if the API returns a runaway
+    // pagination chain. A realistic token has at most tens of thousands of
+    // holders, well within this limit at 100 per page.
+    const maxPages = 10_000;
+    let pageCount = 0;
+    let url: string | null = initialUrl;
 
-      for (const holder of holders) {
-        try {
-          const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances/${holder.account_id}`;
-          const holderData = await fetchJson(holderUrl);
-          if (!holderData?.amount) {
-            this.logger.warn(
-              `SyncTokenHoldersQueue->holderData:${holderUrl}`,
-              holderData,
+    while (url) {
+      if (++pageCount > maxPages) {
+        this.logger.warn(
+          `SyncTokenHoldersQueue->loadData: exceeded max pages (${maxPages}) for ${aex9Address}, stopping pagination`,
+        );
+        break;
+      }
+
+      try {
+        const response = await fetchJson(url);
+        if (!response?.data) {
+          this.logger.error(
+            `SyncTokenHoldersQueue:failed to load data from url::${url}`,
+          );
+          this.logger.error(`SyncTokenHoldersQueue:response::`, response);
+          break;
+        }
+
+        const holders = response.data.filter((item) => item.amount > 0);
+        this.logger.debug(
+          `SyncTokenHoldersQueue->holders:${holders.length}`,
+          url,
+        );
+
+        for (const holder of holders) {
+          try {
+            const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances/${holder.account_id}`;
+            const holderData = await fetchJson(holderUrl);
+            if (!holderData?.amount) {
+              this.logger.warn(
+                `SyncTokenHoldersQueue->holderData:${holderUrl}`,
+                holderData,
+              );
+            }
+            totalHolders.push({
+              id: `${holderData?.account || holder.account_id}_${aex9Address}`,
+              aex9_address: aex9Address,
+              address: holderData?.account || holder.account_id,
+              balance: new BigNumber(holderData?.amount || 0),
+            });
+          } catch (error: any) {
+            this.logger.error(
+              `SyncTokenHoldersQueue->error:${error.message}`,
+              error,
+              error.stack,
             );
           }
-          totalHolders.push({
-            id: `${holderData?.account || holder.account_id}_${aex9Address}`,
-            aex9_address: aex9Address,
-            address: holderData?.account || holder.account_id,
-            balance: new BigNumber(holderData?.amount || 0),
-          });
-        } catch (error: any) {
-          this.logger.error(
-            `SyncTokenHoldersQueue->error:${error.message}`,
-            error,
-            error.stack,
-          );
         }
-      }
 
-      if (response.next) {
-        return this.loadData(
-          token,
-          aex9Address,
-          `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
-          totalHolders,
-        );
+        // Advance to the next page (or exit the loop)
+        url = response.next
+          ? `${ACTIVE_NETWORK.middlewareUrl}${response.next}`
+          : null;
+      } catch (error: any) {
+        this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
+        break;
       }
-
-      return totalHolders;
-    } catch (error: any) {
-      this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
-      return totalHolders;
     }
+
+    return totalHolders;
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
