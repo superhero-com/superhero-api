@@ -214,6 +214,8 @@ export class TokenService {
   async syncTokenPrice(token: Token, manager?: EntityManager): Promise<void> {
     try {
       const data = await this.getTokenLivePrice(token);
+      if (!data || Object.keys(data).length === 0) return;
+
       const repository = manager?.getRepository(Token) || this.tokensRepository;
       const updatePayload = Object.fromEntries(
         Object.entries(data ?? {}).filter(([, value]) => value !== undefined),
