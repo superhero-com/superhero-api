@@ -15,7 +15,6 @@ import { join } from 'path';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
-import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
 import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
 
@@ -288,10 +287,30 @@ export class CoinGeckoService {
    * @param searchParams - The search parameters to be included in the request.
    * @returns A Promise that resolves to the fetched data.
    */
-  fetchFromApi(path: string, searchParams: Record<string, string>) {
+  async fetchFromApi(path: string, searchParams: Record<string, string>) {
     const query = new URLSearchParams(searchParams).toString();
     const url = `${COIN_GECKO_API_URL}${path}?${query}`;
-    return fetchJson(url);
+    const response = await fetch(url);
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    const text = await response.text();
+
+    if (response.status === 429) {
+      this.logger.warn(`CoinGecko rate limit hit (429): ${text.trim().slice(0, 100)}`);
+      return { status: { error_code: 429, error_message: text.trim() } };
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      this.logger.warn(
+        `CoinGecko returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 100)}`,
+      );
+      return { status: { error_code: response.status, error_message: text.trim() } };
+    }
   }
 
   /**
