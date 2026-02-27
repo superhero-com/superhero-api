@@ -56,10 +56,38 @@ export class BclAffiliationAnalyticsController {
     });
   }
 
+  @Get('x-verification')
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiOperation({ operationId: 'getBclAffiliationXVerificationAnalytics' })
+  async getXVerificationAnalytics(
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+  ) {
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      throw new BadRequestException('start_date must be YYYY-MM-DD');
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      throw new BadRequestException('end_date must be YYYY-MM-DD');
+    }
+
+    return this.bclAffiliationAnalyticsService.getXVerificationData({
+      start_date,
+      end_date,
+    });
+  }
+
   @Get('preview')
   @Render('bcl-affiliation-analytics')
   @ApiOperation({ operationId: 'previewBclAffiliationAnalytics' })
   preview() {
+    return { message: 'Hello world!' };
+  }
+
+  @Get('x-verification/preview')
+  @Render('bcl-affiliation-x-verification')
+  @ApiOperation({ operationId: 'previewBclAffiliationXVerificationAnalytics' })
+  xVerificationPreview() {
     return { message: 'Hello world!' };
   }
 }
