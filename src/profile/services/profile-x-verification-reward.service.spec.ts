@@ -1,68 +1,199 @@
 jest.mock('../profile.constants', () => ({
+  PROFILE_X_VERIFICATION_MIN_FOLLOWERS: 50,
   PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE: '0.01',
+  PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS: 5000,
+  PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS: 1,
+  PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS: 60,
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY:
     '1111111111111111111111111111111111111111111111111111111111111111',
 }));
 
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
-import { decode, MemoryAccount } from '@aeternity/aepp-sdk';
-import nacl from 'tweetnacl';
+import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
 
 describe('ProfileXVerificationRewardService', () => {
-  it('normalizes 32-byte seed to sk_ seed accepted by MemoryAccount', () => {
-    const rewardRepository = {} as any;
-    const aeSdkService = {} as any;
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
+  const originalFetch = global.fetch;
+  let xFollowersCount = 75;
 
-    const seedHex = '11'.repeat(32);
-    const normalized = (service as any).normalizePrivateKey(seedHex);
-    const decoded = Uint8Array.from(decode(normalized as any));
+  type RewardRow = Partial<ProfileXVerificationReward> & { address: string };
 
-    expect(decoded).toHaveLength(32);
-    expect(() => new MemoryAccount(normalized)).not.toThrow();
+  beforeEach(() => {
+    xFollowersCount = 75;
+    global.fetch = jest.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/2/oauth2/token')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'x_app_token', expires_in: 3600 }),
+        } as any;
+      }
+      if (url.includes('/2/users/by/username/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: { public_metrics: { followers_count: xFollowersCount } },
+          }),
+        } as any;
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    }) as any;
   });
 
-  it('normalizes 64-byte key to seed accepted by MemoryAccount', () => {
-    const rewardRepository = {} as any;
-    const aeSdkService = {} as any;
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-
-    const seed = Uint8Array.from(Buffer.from('22'.repeat(32), 'hex'));
-    const secretKey = nacl.sign.keyPair.fromSeed(seed).secretKey;
-    const secretHex = Buffer.from(secretKey).toString('hex');
-    const normalized = (service as any).normalizePrivateKey(secretHex);
-    const decoded = Uint8Array.from(decode(normalized as any));
-
-    expect(decoded).toHaveLength(32);
-    expect(Buffer.from(decoded).toString('hex')).toBe(
-      Buffer.from(seed).toString('hex'),
-    );
-    expect(() => new MemoryAccount(normalized)).not.toThrow();
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
-  it('converts AE amount to integer aettos before spend', async () => {
+  afterAll(() => {
+    global.fetch = originalFetch;
+  });
+
+  const extractFindOperatorValue = (value: any) => value?._value ?? value?.value;
+
+  const createRowsStore = (seed?: RewardRow[]) => {
+    const rows = new Map<string, RewardRow>();
+    for (const row of seed || []) {
+      rows.set(row.address, {
+        retry_count: 0,
+        status: 'pending',
+        ...row,
+      });
+    }
+    return rows;
+  };
+
+  const getService = (overrides?: {
+    rows?: Map<string, RewardRow>;
+    aeSdkService?: any;
+    profileXInviteService?: any;
+    profileSpendQueueService?: any;
+  }) => {
+    const rows = overrides?.rows || createRowsStore();
+
     const rewardRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => value),
+      findOne: jest.fn().mockImplementation(async ({ where }) => {
+        if (where?.address) {
+          return rows.get(where.address) || null;
+        }
+        return null;
+      }),
+      find: jest.fn().mockImplementation(async () => {
+        const now = Date.now();
+        return Array.from(rows.values()).filter((row) => {
+          if (row.status !== 'pending' && row.status !== 'failed') {
+            return false;
+          }
+          if (!row.next_retry_at) {
+            return true;
+          }
+          return new Date(row.next_retry_at).getTime() <= now;
+        });
+      }),
+      create: jest.fn().mockImplementation((value) => ({
+        retry_count: 0,
+        status: 'pending',
+        ...value,
+      })),
+      save: jest.fn().mockImplementation(async (value) => {
+        rows.set(value.address, {
+          ...rows.get(value.address),
+          ...value,
+        });
+        return rows.get(value.address);
+      }),
     } as any;
-    const aeSdkService = {
-      sdk: {
-        spend: jest.fn().mockResolvedValue({ hash: 'th_reward_1' }),
-      },
+
+    const managerRepo = {
+      createQueryBuilder: jest.fn().mockImplementation(() => {
+        const state: { address?: string } = {};
+        return {
+          setLock: jest.fn().mockReturnThis(),
+          where: jest.fn().mockImplementation((_query: string, params: any) => {
+            state.address = params.address;
+            return {
+              getOne: jest.fn().mockResolvedValue(
+                state.address ? rows.get(state.address) || null : null,
+              ),
+            };
+          }),
+        };
+      }),
+      findOne: jest.fn().mockImplementation(async ({ where }) => {
+        const xUsername = where?.x_username;
+        const excludedAddress = extractFindOperatorValue(where?.address);
+        for (const row of rows.values()) {
+          if (row.address === excludedAddress) {
+            continue;
+          }
+          if (row.x_username !== xUsername) {
+            continue;
+          }
+          if (row.status === 'pending' || row.status === 'paid') {
+            return row;
+          }
+        }
+        return null;
+      }),
+      save: jest.fn().mockImplementation(async (value) => {
+        rows.set(value.address, {
+          ...rows.get(value.address),
+          ...value,
+        });
+        return rows.get(value.address);
+      }),
     } as any;
+
+    const dataSource = {
+      transaction: jest
+        .fn()
+        .mockImplementation(async (work: (manager: any) => Promise<any>) =>
+          work({
+            getRepository: jest.fn().mockReturnValue(managerRepo),
+          }),
+        ),
+    } as any;
+
+    const aeSdkService =
+      overrides?.aeSdkService ||
+      ({
+        sdk: {
+          spend: jest.fn().mockResolvedValue({ hash: 'th_reward_1' }),
+        },
+      } as any);
+    const profileXInviteService =
+      overrides?.profileXInviteService ||
+      ({
+        processInviteeXVerified: jest.fn().mockResolvedValue(undefined),
+      } as any);
+    const profileSpendQueueService =
+      overrides?.profileSpendQueueService ||
+      ({
+        enqueueSpend: jest.fn().mockImplementation(async (_k, work) => work()),
+        getRewardAccount: jest.fn().mockReturnValue({}),
+      } as any);
 
     const service = new ProfileXVerificationRewardService(
       rewardRepository,
+      dataSource,
       aeSdkService,
+      profileXInviteService,
+      profileSpendQueueService,
     );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    return {
+      service,
+      rewardRepository,
+      aeSdkService,
+      profileXInviteService,
+      profileSpendQueueService,
+      rows,
+      managerRepo,
+      dataSource,
+    };
+  };
+
+  it('pays when followers count is exactly 50', async () => {
+    xFollowersCount = 50;
+    const { service, aeSdkService, rows } = getService();
 
     await service.sendRewardIfEligible(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
@@ -75,170 +206,148 @@ describe('ProfileXVerificationRewardService', () => {
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
       { onAccount: {} },
     );
+    expect(
+      rows.get('ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo')?.status,
+    ).toBe('paid');
   });
 
-  it('serializes spends across different recipients', async () => {
-    const rewardRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => value),
-    } as any;
-    let resolveFirstSpend: (() => void) | null = null;
+  it('marks below-threshold users as terminal ineligible', async () => {
+    xFollowersCount = 49;
+    const { service, aeSdkService, rows } = getService();
+
+    await service.sendRewardIfEligible(
+      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+      'too_small',
+    );
+
+    const row = rows.get('ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo');
+    expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
+    expect(row?.status).toBe('ineligible_followers');
+    expect(row?.next_retry_at).toBeNull();
+  });
+
+  it('schedules retry when spend fails and later pays on retry', async () => {
     const aeSdkService = {
       sdk: {
         spend: jest
           .fn()
-          .mockImplementationOnce(
-            () =>
-              new Promise((resolve) => {
-                resolveFirstSpend = () => resolve({ hash: 'th_reward_1' });
-              }),
-          )
+          .mockRejectedValueOnce(new Error('insufficient balance'))
           .mockResolvedValueOnce({ hash: 'th_reward_2' }),
       },
     } as any;
+    const { service, rows } = getService({ aeSdkService });
 
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
+    const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
+    await service.sendRewardIfEligible(
+      address,
+      'retry_user',
     );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
+    let row = rows.get(address);
+    expect(row?.status).toBe('pending');
+    expect(row?.retry_count).toBe(1);
+    expect(row?.next_retry_at).toBeTruthy();
 
+    rows.set(address, {
+      ...row!,
+      next_retry_at: new Date(Date.now() - 1000),
+    });
+
+    await service.processDueRewards();
+    row = rows.get(address);
+    expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(2);
+    expect(row?.status).toBe('paid');
+    expect(row?.tx_hash).toBe('th_reward_2');
+    expect(row?.next_retry_at).toBeNull();
+  });
+
+  it('avoids duplicate payout for concurrent same-address requests', async () => {
+    let resolveSpend: (() => void) | null = null;
+    const aeSdkService = {
+      sdk: {
+        spend: jest.fn().mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resolveSpend = () => resolve({ hash: 'th_reward_once' });
+            }),
+        ),
+      },
+    } as any;
+    const { service, rows } = getService({ aeSdkService });
+    const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
     const first = service.sendRewardIfEligible(
-      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
-      'first_user',
+      address,
+      'same_user',
     );
     const second = service.sendRewardIfEligible(
-      'ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC',
-      'second_user',
+      address,
+      'same_user',
     );
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
 
+    await new Promise((resolve) => setImmediate(resolve));
     expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(1);
-    expect(resolveFirstSpend).not.toBeNull();
-
-    resolveFirstSpend?.();
+    resolveSpend?.();
     await Promise.all([first, second]);
 
-    expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(2);
-    expect(aeSdkService.sdk.spend.mock.calls[0][1]).toBe(
+    expect(rows.get(address)?.status).toBe('paid');
+    expect(rows.get(address)?.tx_hash).toBe('th_reward_once');
+  });
+
+  it('marks as blocked when username is already rewarded elsewhere', async () => {
+    const rows = createRowsStore([
+      {
+        address: 'ak_paid_owner',
+        x_username: 'alice',
+        status: 'paid',
+      },
+    ]);
+    const { service, aeSdkService } = getService({ rows });
+
+    await service.sendRewardIfEligible(
+      'ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC',
+      'alice',
+    );
+
+    const row = rows.get('ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC');
+    expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
+    expect(row?.status).toBe('blocked_username_conflict');
+    expect(row?.next_retry_at).toBeNull();
+  });
+
+  it('retries when X lookup fails instead of losing reward', async () => {
+    (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (url.includes('/2/oauth2/token')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'x_app_token', expires_in: 3600 }),
+        } as any;
+      }
+      throw new Error('x api down');
+    });
+
+    const { service, aeSdkService, rows } = getService();
+    const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
+    await service.sendRewardIfEligible(
+      address,
+      'lookup_failure_user',
+    );
+    const row = rows.get(address);
+    expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
+    expect(row?.status).toBe('pending');
+    expect(row?.retry_count).toBe(1);
+    expect(row?.next_retry_at).toBeTruthy();
+  });
+
+  it('triggers invite verification credit after successful payout', async () => {
+    const { service, profileXInviteService } = getService();
+
+    await service.sendRewardIfEligible(
+      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+      'reward_user_hook',
+    );
+
+    expect(profileXInviteService.processInviteeXVerified).toHaveBeenCalledWith(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
     );
-    expect(aeSdkService.sdk.spend.mock.calls[1][1]).toBe(
-      'ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC',
-    );
-  });
-
-  it('rethrows spend failures after persisting failed status', async () => {
-    const savedSnapshots: Array<{ status: string; error: string | null }> = [];
-    const rewardRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => {
-        savedSnapshots.push({
-          status: value.status,
-          error: value.error ?? null,
-        });
-        return value;
-      }),
-    } as any;
-    const aeSdkService = {
-      sdk: {
-        spend: jest.fn().mockRejectedValue(new Error('boom')),
-      },
-    } as any;
-
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
-
-    await expect(
-      service.sendRewardIfEligible(
-        'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
-        'broken_user',
-      ),
-    ).rejects.toThrow('boom');
-
-    expect(savedSnapshots.some((entry) => entry.status === 'pending')).toBe(
-      true,
-    );
-    expect(savedSnapshots.some((entry) => entry.status === 'failed')).toBe(
-      true,
-    );
-    expect(savedSnapshots.some((entry) => entry.error === 'boom')).toBe(true);
-  });
-
-  it.each(['pending', 'paid'])(
-    'does not reward another address when same X username is %s elsewhere',
-    async (status) => {
-      const rewardRepository = {
-        findOne: jest.fn().mockImplementation(async ({ where }) => {
-          if (where?.address) {
-            return null;
-          }
-          if (where?.x_username === 'alice' && where?.status === status) {
-            return {
-              address: 'ak_first',
-              x_username: 'alice',
-              status,
-            };
-          }
-          return null;
-        }),
-        create: jest.fn().mockImplementation((value) => value),
-        save: jest.fn().mockImplementation(async (value) => value),
-      } as any;
-      const aeSdkService = {
-        sdk: {
-          spend: jest.fn(),
-        },
-      } as any;
-
-      const service = new ProfileXVerificationRewardService(
-        rewardRepository,
-        aeSdkService,
-      );
-      (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
-
-      await service.sendRewardIfEligible('ak_second', 'alice');
-
-      expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
-      expect(rewardRepository.save).not.toHaveBeenCalled();
-    },
-  );
-
-  it('allows another address when same X username only has failed rewards', async () => {
-    const rewardRepository = {
-      findOne: jest.fn().mockImplementation(async ({ where }) => {
-        if (where?.address) {
-          return null;
-        }
-        // No paid/pending entry for this x_username.
-        return null;
-      }),
-      create: jest.fn().mockImplementation((value) => value),
-      save: jest.fn().mockImplementation(async (value) => value),
-    } as any;
-    const aeSdkService = {
-      sdk: {
-        spend: jest
-          .fn()
-          .mockResolvedValue({ hash: 'th_reward_failed_owner_b' }),
-      },
-    } as any;
-
-    const service = new ProfileXVerificationRewardService(
-      rewardRepository,
-      aeSdkService,
-    );
-    (service as any).getRewardAccount = jest.fn().mockReturnValue({} as any);
-
-    await service.sendRewardIfEligible('ak_second', 'alice');
-
-    expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(1);
-    expect(aeSdkService.sdk.spend.mock.calls[0][1]).toBe('ak_second');
   });
 });
