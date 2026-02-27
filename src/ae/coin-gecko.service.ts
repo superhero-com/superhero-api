@@ -290,7 +290,20 @@ export class CoinGeckoService {
   async fetchFromApi(path: string, searchParams: Record<string, string>) {
     const query = new URLSearchParams(searchParams).toString();
     const url = `${COIN_GECKO_API_URL}${path}?${query}`;
-    const response = await fetch(url);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        this.logger.warn(`CoinGecko request timed out after 30s: ${url}`);
+        return { status: { error_code: 408, error_message: 'Request timed out' } };
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (response.status === 204) {
       return null;
