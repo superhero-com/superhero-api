@@ -76,11 +76,12 @@ export class TokensController {
     @Query('creator_address') creator_address = undefined,
     @Query('owner_address') owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+    @Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit = 30,
     @Query('order_by') orderBy: string = 'market_cap',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
+    limit = Math.min(limit, 30);
     // Now, wrap with RANK()
     // allowed sort fields to avoid SQL Injection
     const allowedSortFields = [

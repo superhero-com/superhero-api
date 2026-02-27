@@ -152,13 +152,14 @@ export class PostsController {
   @Get()
   async listAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+    @Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit = 30,
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('search') search?: string,
     @Query('account_address') account_address?: string,
     @Query('topics') topics?: string,
   ) {
+    limit = Math.min(limit, 30);
     // Build base query for filtering to get distinct post IDs
     // This prevents duplicates when posts have multiple topics
     const baseQuery = this.postRepository
