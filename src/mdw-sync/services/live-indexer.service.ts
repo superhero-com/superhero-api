@@ -52,7 +52,12 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
         }
         // Prevent duplicate transactions
         if (!this.syncedTransactions.includes(transaction.hash)) {
-          this.handleLiveTransaction(transaction);
+          // WebSocket callbacks are synchronous; attach .catch() so any
+          // rejection from the async handler is logged rather than becoming
+          // an unhandled promise rejection that can crash the process.
+          this.handleLiveTransaction(transaction).catch((err) => {
+            this.logger.error('Unhandled error in handleLiveTransaction', err);
+          });
           this.syncedTransactions.push(transaction.hash);
 
           // Reset synced transactions after 100 transactions
@@ -66,7 +71,9 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     // Subscribe to key block updates
     this.unsubscribeKeyBlocks = this.websocketService.subscribeForKeyBlocksUpdates(
       (keyBlockHeader: ITopHeader) => {
-        this.handleKeyBlock(keyBlockHeader);
+        this.handleKeyBlock(keyBlockHeader).catch((err) => {
+          this.logger.error('Unhandled error in handleKeyBlock', err);
+        });
       },
     );
 

@@ -36,11 +36,24 @@ export class BlockSyncService {
     // Use batch endpoint to fetch multiple blocks at once
     const limit = Math.min(endHeight - startHeight + 1, 100);
     const scope = `gen:${startHeight}-${endHeight}`;
-    let url = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
+    let url: string | null = `${middlewareUrl}/v3/key-blocks?scope=${scope}&limit=${limit}`;
     const blocksToSave: Partial<KeyBlock>[] = [];
+
+    // Max pages guard: a range of (endHeight - startHeight + 1) blocks split
+    // into pages of 100 yields at most ceil(range/100) pages. We add a generous
+    // safety buffer to handle any unexpected pagination from the API.
+    const maxPages = Math.ceil((endHeight - startHeight + 1) / 100) + 10;
+    let pageCount = 0;
 
     // Process all pages
     while (url) {
+      if (++pageCount > maxPages) {
+        this.logger.warn(
+          `syncBlocks: exceeded max pages (${maxPages}) for range ${startHeight}-${endHeight}, stopping pagination`,
+        );
+        break;
+      }
+
       const response = await fetchJson(url);
       const blocks = response?.data || [];
 
@@ -54,7 +67,7 @@ export class BlockSyncService {
       }
 
       // Check if there's a next page
-      url = response.next ? `${middlewareUrl}${response.next}` : null;
+      url = response?.next ? `${middlewareUrl}${response.next}` : null;
     }
 
     // Batch upsert all blocks (split into smaller batches to avoid PostgreSQL parameter limits)
@@ -157,89 +170,104 @@ export class BlockSyncService {
   }
 
   private async processTransactionPage(
-    url: string,
+    initialUrl: string,
     useBulkMode = false,
     txHashesByBlock: Map<number, string[]> = new Map(),
   ): Promise<Map<number, string[]>> {
-    const response = await fetchJson(url);
-    const transactions = response?.data || [];
+    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
+    let url: string | null = initialUrl;
 
-    if (transactions.length === 0) {
-      return;
-    }
+    // Safety cap: prevents an infinite loop if the API returns a runaway
+    // pagination chain (e.g. circular or always-non-null next URLs).
+    const maxPages = 100_000;
+    let pageCount = 0;
 
-    // Convert transactions
-    const mdwTxs: Partial<Tx>[] = [];
-
-    for (const tx of transactions) {
-      const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-      const mdwTx = this.convertToMdwTx(camelTx);
-      // ignore self transfer transactions
-      if (isSelfTransferTx(camelTx)) {
-        continue;
+    while (url) {
+      if (++pageCount > maxPages) {
+        this.logger.warn(
+          `processTransactionPage: exceeded max pages (${maxPages}), stopping pagination`,
+        );
+        break;
       }
-      mdwTxs.push(mdwTx);
-    }
 
-    if (mdwTxs.length > 0) {
-      let savedTxs: Tx[] = [];
-      
-      if (useBulkMode) {
-        // Use bulk insert for better performance
-        // Note: bulkInsertTransactions processes batches internally as they're inserted
-        try {
-          savedTxs = await this.bulkInsertTransactions(mdwTxs);
-        } catch (error: any) {
-          this.logger.error(
-            `Bulk insert failed for page, trying repository.save as fallback`,
-            error,
-          );
-          // Fallback to repository.save if bulk insert fails
+      const response = await fetchJson(url);
+      const transactions = response?.data || [];
+
+      if (transactions.length === 0) {
+        break;
+      }
+
+      // Convert transactions
+      const mdwTxs: Partial<Tx>[] = [];
+
+      for (const tx of transactions) {
+        const camelTx = camelcaseKeysDeep(tx) as ITransaction;
+        const mdwTx = this.convertToMdwTx(camelTx);
+        // ignore self transfer transactions
+        if (isSelfTransferTx(camelTx)) {
+          continue;
+        }
+        mdwTxs.push(mdwTx);
+      }
+
+      if (mdwTxs.length > 0) {
+        let savedTxs: Tx[] = [];
+
+        if (useBulkMode) {
+          // Use bulk insert for better performance
+          // Note: bulkInsertTransactions processes batches internally as they're inserted
+          try {
+            savedTxs = await this.bulkInsertTransactions(mdwTxs);
+          } catch (error: any) {
+            this.logger.error(
+              `Bulk insert failed for page, trying repository.save as fallback`,
+              error,
+            );
+            // Fallback to repository.save if bulk insert fails
+            const saved = await this.txRepository.save(mdwTxs);
+            savedTxs = Array.isArray(saved) ? saved : [saved];
+            // Process batch for plugins (fallback case)
+            if (savedTxs.length > 0) {
+              await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
+            }
+          }
+        } else {
+          // Save transactions
           const saved = await this.txRepository.save(mdwTxs);
           savedTxs = Array.isArray(saved) ? saved : [saved];
-          // Process batch for plugins (fallback case)
+          // Process batch for plugins immediately
           if (savedTxs.length > 0) {
             await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
           }
         }
-      } else {
-        // Save transactions
-        const saved = await this.txRepository.save(mdwTxs);
-        savedTxs = Array.isArray(saved) ? saved : [saved];
-        // Process batch for plugins immediately
-        if (savedTxs.length > 0) {
-          await this.pluginBatchProcessor.processBatch(savedTxs, SyncDirectionEnum.Backward);
-        }
-      }
 
-      // Collect transaction hashes ONLY after successful save
-      // This ensures we only track transactions that are actually in the database
-      for (const savedTx of savedTxs) {
-        if (savedTx.hash && savedTx.block_height !== undefined) {
-          const blockHeight = savedTx.block_height;
-          if (!txHashesByBlock.has(blockHeight)) {
-            txHashesByBlock.set(blockHeight, []);
+        // Collect transaction hashes ONLY after successful save
+        // This ensures we only track transactions that are actually in the database
+        for (const savedTx of savedTxs) {
+          if (savedTx.hash && savedTx.block_height !== undefined) {
+            const blockHeight = savedTx.block_height;
+            if (!txHashesByBlock.has(blockHeight)) {
+              txHashesByBlock.set(blockHeight, []);
+            }
+            txHashesByBlock.get(blockHeight)!.push(savedTx.hash);
           }
-          txHashesByBlock.get(blockHeight)!.push(savedTx.hash);
+        }
+
+        // Log warning if some transactions failed to save
+        if (savedTxs.length < mdwTxs.length) {
+          const savedHashes = new Set(savedTxs.map(tx => tx.hash).filter(Boolean));
+          const failedTxs = mdwTxs.filter(tx => tx.hash && !savedHashes.has(tx.hash));
+          this.logger.warn(
+            `Only ${savedTxs.length} of ${mdwTxs.length} transactions were saved. ` +
+            `Failed hashes: ${failedTxs.map(tx => tx.hash).join(', ')}`
+          );
         }
       }
 
-      // Log warning if some transactions failed to save
-      if (savedTxs.length < mdwTxs.length) {
-        const savedHashes = new Set(savedTxs.map(tx => tx.hash).filter(Boolean));
-        const failedTxs = mdwTxs.filter(tx => tx.hash && !savedHashes.has(tx.hash));
-        this.logger.warn(
-          `Only ${savedTxs.length} of ${mdwTxs.length} transactions were saved. ` +
-          `Failed hashes: ${failedTxs.map(tx => tx.hash).join(', ')}`
-        );
-      }
+      // Advance to the next page (or exit the loop when there are none)
+      url = response?.next ? `${middlewareUrl}${response.next}` : null;
     }
 
-    // Process next page if available
-    if (response.next) {
-      const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
-      await this.processTransactionPage(nextUrl, useBulkMode, txHashesByBlock);
-    }
     return txHashesByBlock;
   }
 

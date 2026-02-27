@@ -118,101 +118,108 @@ export class IndexerService implements OnModuleInit {
     try {
       // Note: Block validation runs periodically via cron job, not during sync
 
-      // Get current sync state
-      const syncState = await this.syncStateRepository.findOne({
-        where: { id: 'global' },
-      });
-
-      if (!syncState) {
-        this.logger.error('No sync state found');
-        return;
-      }
-
-      // Get tip height from MDW
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-      const status = await fetchJson(`${middlewareUrl}/v3/status`);
-      if (!status?.mdw_height) {
-        this.logger.warn('MDW status unavailable or returned an empty response, skipping sync cycle');
-        return;
-      }
-      const tipHeight = status.mdw_height;
-
-      // Update tip height
-      await this.syncStateRepository.update(
-        { id: 'global' },
-        { tip_height: tipHeight },
-      );
-
-      // Get target backward sync height (stop at 0 or configured start height)
       const targetBackwardHeight = 0; // Could be configurable in the future
-      const currentBackwardHeight = syncState.backward_synced_height ?? tipHeight;
 
-      // Check if backward sync is complete
-      if (currentBackwardHeight <= targetBackwardHeight) {
-        this.logger.debug('Backward sync complete, no more blocks to sync backward');
-        return;
-      }
+      // Keep processing batches back-to-back until sync is complete or an error
+      // occurs. Using an iterative loop avoids unbounded async recursion (stack
+      // overflow) which would happen when there are millions of blocks to sync.
+      while (true) {
+        // Re-fetch sync state each iteration so we always work with the latest
+        // persisted height (could be updated externally, e.g. by a reorg handler).
+        const syncState = await this.syncStateRepository.findOne({
+          where: { id: 'global' },
+        });
 
-      // Determine sync mode based on how much we need to sync backward
-      const remainingBlocks = currentBackwardHeight - targetBackwardHeight;
-      const shouldUseBulkMode = remainingBlocks > this.configService.get<number>(
-        'mdw.bulkModeThreshold',
-        100,
-      );
-
-      // Update bulk mode state if it changed
-      if (syncState.is_bulk_mode !== shouldUseBulkMode) {
-        await this.syncStateRepository.update(
-          { id: 'global' },
-          { is_bulk_mode: shouldUseBulkMode },
-        );
-
-        // Emit event when transitioning from bulk to normal mode
-        if (syncState.is_bulk_mode && !shouldUseBulkMode) {
-          this.logger.log('Transitioning from bulk mode to normal backward sync mode');
-          this.eventEmitter.emit('sync.bulk-complete');
-        } else if (!syncState.is_bulk_mode && shouldUseBulkMode) {
-          this.logger.log('Entering bulk mode for backward sync');
+        if (!syncState) {
+          this.logger.error('No sync state found');
+          break;
         }
 
-        // Emit event to invalidate subscriber cache
-        this.eventEmitter.emit('sync.bulk-mode-changed');
-      }
+        // Get tip height from MDW
+        const status = await fetchJson(`${middlewareUrl}/v3/status`);
+        if (!status?.mdw_height) {
+          this.logger.warn('MDW status unavailable or returned an empty response, skipping sync cycle');
+          break;
+        }
+        const tipHeight = status.mdw_height;
 
-      // Sync backward: from currentBackwardHeight down to targetBackwardHeight
-      const batchSize = shouldUseBulkMode
-        ? this.configService.get<number>('mdw.bulkModeBatchBlocks', 1000)
-        : this.configService.get<number>('mdw.backfillBatchBlocks', 50);
+        // Update tip height
+        await this.syncStateRepository.update(
+          { id: 'global' },
+          { tip_height: tipHeight },
+        );
 
-      // Calculate range: endHeight is higher (more recent), startHeight is lower (older)
-      // We sync from endHeight down to startHeight
-      const endHeight = currentBackwardHeight;
-      const startHeight = Math.max(targetBackwardHeight, endHeight - batchSize + 1);
+        const currentBackwardHeight = syncState.backward_synced_height ?? tipHeight;
 
-      if (shouldUseBulkMode) {
-        // Use parallel processing in bulk mode
-        await this.syncBlocksParallelBackward(startHeight, endHeight);
-      } else {
-        // Use sequential processing
-        await this.blockSyncService.syncBlockRange(startHeight, endHeight, true);
-      }
+        // Check if backward sync is complete
+        if (currentBackwardHeight <= targetBackwardHeight) {
+          this.logger.debug('Backward sync complete, no more blocks to sync backward');
+          break;
+        }
 
-      // Update backward sync state (decrease backward_synced_height as we go backward)
-      const newBackwardHeight = startHeight - 1;
-      await this.syncStateRepository.update(
-        { id: 'global' },
-        {
-          backward_synced_height: newBackwardHeight,
-          last_synced_height: newBackwardHeight, // Keep for backward compatibility
-          last_synced_hash: '', // Will be updated when we store the block
-        },
-      );
+        // Determine sync mode based on how much we need to sync backward
+        const remainingBlocks = currentBackwardHeight - targetBackwardHeight;
+        const shouldUseBulkMode = remainingBlocks > this.configService.get<number>(
+          'mdw.bulkModeThreshold',
+          100,
+        );
 
-      this.isRunning = false;
-      // Check if there's more work to do and continue immediately if so
-      // This allows fast continuous syncing when batches complete quickly
-      if (newBackwardHeight > targetBackwardHeight) {
-        return this.sync()
+        // Update bulk mode state if it changed
+        if (syncState.is_bulk_mode !== shouldUseBulkMode) {
+          await this.syncStateRepository.update(
+            { id: 'global' },
+            { is_bulk_mode: shouldUseBulkMode },
+          );
+
+          // Emit event when transitioning from bulk to normal mode
+          if (syncState.is_bulk_mode && !shouldUseBulkMode) {
+            this.logger.log('Transitioning from bulk mode to normal backward sync mode');
+            this.eventEmitter.emit('sync.bulk-complete');
+          } else if (!syncState.is_bulk_mode && shouldUseBulkMode) {
+            this.logger.log('Entering bulk mode for backward sync');
+          }
+
+          // Emit event to invalidate subscriber cache
+          this.eventEmitter.emit('sync.bulk-mode-changed');
+        }
+
+        // Sync backward: from currentBackwardHeight down to targetBackwardHeight
+        const batchSize = shouldUseBulkMode
+          ? this.configService.get<number>('mdw.bulkModeBatchBlocks', 1000)
+          : this.configService.get<number>('mdw.backfillBatchBlocks', 50);
+
+        // Calculate range: endHeight is higher (more recent), startHeight is lower (older)
+        const endHeight = currentBackwardHeight;
+        const startHeight = Math.max(targetBackwardHeight, endHeight - batchSize + 1);
+
+        if (shouldUseBulkMode) {
+          // Use parallel processing in bulk mode
+          await this.syncBlocksParallelBackward(startHeight, endHeight);
+        } else {
+          // Use sequential processing
+          await this.blockSyncService.syncBlockRange(startHeight, endHeight, true);
+        }
+
+        // Update backward sync state (decrease backward_synced_height as we go backward)
+        const newBackwardHeight = startHeight - 1;
+        await this.syncStateRepository.update(
+          { id: 'global' },
+          {
+            backward_synced_height: newBackwardHeight,
+            last_synced_height: newBackwardHeight, // Keep for backward compatibility
+            last_synced_hash: '', // Will be updated when we store the block
+          },
+        );
+
+        // No more blocks to process — exit the loop cleanly
+        if (newBackwardHeight <= targetBackwardHeight) {
+          this.logger.debug('Backward sync complete');
+          break;
+        }
+
+        // There is more work; loop immediately without waiting for the next
+        // setInterval tick (fast continuous back-to-back batching).
       }
     } catch (error: any) {
       this.logger.error('Backward sync failed', error);
