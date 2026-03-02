@@ -1,0 +1,353 @@
+{{#> main-layout title="BCL X Invite Analytics" active="bcl-affiliation-x-invite"}}
+<style>
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    gap: 0.75rem;
+  }
+
+  .date-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .date-range > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 150px;
+  }
+
+  .date-range label {
+    font-size: 0.875rem;
+    color: #475569;
+  }
+
+  .date-range input {
+    width: 100%;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+  }
+
+  .date-range button {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    min-width: 0;
+  }
+
+  .stat-card h2 {
+    font-size: 0.8rem;
+    margin-bottom: 0.15rem;
+    color: #475569;
+  }
+
+  .stat-card .subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.2;
+    min-height: 1.1rem;
+  }
+
+  .stat-card .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+    margin-top: 0.35rem;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .chart-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 380px;
+  }
+
+  .chart-container h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #475569;
+  }
+
+  .chart-wrapper {
+    height: calc(100% - 2rem);
+    position: relative;
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+    .date-range {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .date-range button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
+</style>
+
+<div class="container">
+  <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
+    <span class="pill mono" id="queryMs">queryMs: -</span>
+  </div>
+
+  <div class="date-range">
+    <div>
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div>
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" />
+    </div>
+    <button onclick="updateDashboard()">Apply</button>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <h2>Created Codes</h2>
+      <div class="subtitle">Invite codes created in selected range.</div>
+      <div class="value" id="totalCreatedCodes">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Invited Users</h2>
+      <div class="subtitle">Users bound to invite codes in selected range.</div>
+      <div class="value" id="totalInvitedUsers">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Bind Rate</h2>
+      <div class="subtitle">Invited users / created codes in range.</div>
+      <div class="value" id="bindRate">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Avg Created / Day</h2>
+      <div class="subtitle">Average daily code creation volume.</div>
+      <div class="value" id="avgCreatedPerDay">-</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-container">
+      <h2>Daily usage</h2>
+      <div class="chart-wrapper">
+        <canvas id="usageChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-container">
+      <h2>Cumulative usage</h2>
+      <div class="chart-wrapper">
+        <canvas id="cumulativeChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = "/api";
+  let usageChart = null;
+  let cumulativeChart = null;
+
+  function destroyChart(chart) {
+    if (chart) chart.destroy();
+  }
+
+  function formatNumber(num) {
+    return (num ?? 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function formatPercent(rate) {
+    return `${((rate ?? 0) * 100).toFixed(2)}%`;
+  }
+
+  function setDefaultDateRange() {
+    const qs = new URLSearchParams(window.location.search);
+    const qsStart = qs.get("start_date");
+    const qsEnd = qs.get("end_date");
+
+    const endDate = qsEnd && moment(qsEnd, "YYYY-MM-DD", true).isValid()
+      ? moment(qsEnd, "YYYY-MM-DD")
+      : moment();
+    const startDate = qsStart && moment(qsStart, "YYYY-MM-DD", true).isValid()
+      ? moment(qsStart, "YYYY-MM-DD")
+      : moment().subtract(14, "days");
+
+    document.getElementById("startDate").value = startDate.format("YYYY-MM-DD");
+    document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+  }
+
+  function getDateRange() {
+    const startDate = document.getElementById("startDate").value;
+    const endDate = document.getElementById("endDate").value;
+    return {
+      start_date: moment(startDate).format("YYYY-MM-DD"),
+      end_date: moment(endDate).format("YYYY-MM-DD"),
+    };
+  }
+
+  function persistDateRangeToUrl(start_date, end_date) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("start_date", start_date);
+    url.searchParams.set("end_date", end_date);
+    window.history.replaceState({}, "", url.toString());
+  }
+
+  async function fetchUsageData(start_date, end_date) {
+    const res = await fetch(`${API_URL}/bcl-affiliation/analytics/x-invite?start_date=${start_date}&end_date=${end_date}`);
+    return await res.json();
+  }
+
+  function renderStats(summary, series, queryMs) {
+    document.getElementById("queryMs").textContent = `queryMs: ${queryMs ?? "-"}`;
+    document.getElementById("totalCreatedCodes").textContent = formatNumber(summary.total_created_codes);
+    document.getElementById("totalInvitedUsers").textContent = formatNumber(summary.total_invited_users);
+    document.getElementById("bindRate").textContent = formatPercent(summary.invite_bind_rate);
+
+    const days = Math.max(series?.length || 0, 1);
+    const avg = (summary.total_created_codes || 0) / days;
+    document.getElementById("avgCreatedPerDay").textContent = avg.toFixed(2);
+  }
+
+  function renderCharts(series) {
+    const labels = series.map((p) => moment(p.date).format("MMM D"));
+    const created = series.map((p) => p.created_codes ?? 0);
+    const invited = series.map((p) => p.invited_users ?? 0);
+
+    destroyChart(usageChart);
+    usageChart = new Chart(document.getElementById("usageChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Created codes",
+            data: created,
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59, 130, 246, 0.12)",
+            fill: true,
+            tension: 0.3,
+          },
+          {
+            label: "Invited users",
+            data: invited,
+            borderColor: "#10b981",
+            backgroundColor: "rgba(16, 185, 129, 0.10)",
+            fill: true,
+            tension: 0.3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "top" } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+
+    const cumulativeCreated = [];
+    const cumulativeInvited = [];
+    let createdRunning = 0;
+    let invitedRunning = 0;
+    for (const p of series) {
+      createdRunning += Number(p.created_codes || 0);
+      invitedRunning += Number(p.invited_users || 0);
+      cumulativeCreated.push(createdRunning);
+      cumulativeInvited.push(invitedRunning);
+    }
+
+    destroyChart(cumulativeChart);
+    cumulativeChart = new Chart(document.getElementById("cumulativeChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Cumulative created codes",
+            data: cumulativeCreated,
+            borderColor: "#1d4ed8",
+            backgroundColor: "rgba(29, 78, 216, 0.10)",
+            fill: true,
+            tension: 0.25,
+          },
+          {
+            label: "Cumulative invited users",
+            data: cumulativeInvited,
+            borderColor: "#059669",
+            backgroundColor: "rgba(5, 150, 105, 0.10)",
+            fill: true,
+            tension: 0.25,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "top" } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  async function updateDashboard() {
+    const { start_date, end_date } = getDateRange();
+    persistDateRangeToUrl(start_date, end_date);
+    const data = await fetchUsageData(start_date, end_date);
+    renderStats(data.summary, data.series, data.queryMs);
+    renderCharts(data.series);
+  }
+
+  (async function init() {
+    setDefaultDateRange();
+    await updateDashboard();
+  })();
+</script>
+{{/main-layout}}
