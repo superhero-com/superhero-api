@@ -13,12 +13,19 @@ import { BclAffiliationTreeService } from './services/bcl-affiliation-tree.servi
 import { BclAffiliationAnalyticsController } from './controllers/bcl-affiliation-analytics.controller';
 import { BclAffiliationTreeController } from './controllers/bcl-affiliation-tree.controller';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
 
 @Module({
   imports: [
     AeModule,
     forwardRef(() => AccountModule),
-    TypeOrmModule.forFeature([Affiliation, AffiliationCode, Invitation, Tx]),
+    TypeOrmModule.forFeature([
+      Affiliation,
+      AffiliationCode,
+      Invitation,
+      Tx,
+      ProfileXInvite,
+    ]),
   ],
   providers: [
     OAuthService,

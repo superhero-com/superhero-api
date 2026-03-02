@@ -5,6 +5,7 @@ import moment from 'moment';
 import { Invitation } from '../entities/invitation.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PROFILE_REGISTRY_CONTRACT_ADDRESS } from '@/profile/profile.constants';
+import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
 
 export type BclAffiliationDailyPoint = {
   date: string; // YYYY-MM-DD
@@ -48,6 +49,18 @@ export type BclXVerificationSummary = {
   total_verified_users: number;
 };
 
+export type BclXInviteUsageDailyPoint = {
+  date: string; // YYYY-MM-DD
+  created_codes: number;
+  invited_users: number;
+};
+
+export type BclXInviteUsageSummary = {
+  total_created_codes: number;
+  total_invited_users: number;
+  invite_bind_rate: number;
+};
+
 @Injectable()
 export class BclAffiliationAnalyticsService {
   constructor(
@@ -55,6 +68,8 @@ export class BclAffiliationAnalyticsService {
     private readonly invitationRepo: Repository<Invitation>,
     @InjectRepository(Tx)
     private readonly txRepo: Repository<Tx>,
+    @InjectRepository(ProfileXInvite)
+    private readonly profileXInviteRepo: Repository<ProfileXInvite>,
   ) {}
 
   async getDashboardData(params: {
@@ -157,6 +172,41 @@ export class BclAffiliationAnalyticsService {
       series,
       summary: {
         total_verified_users: totalVerifiedUsers,
+      },
+      queryMs: Date.now() - start,
+    };
+  }
+
+  async getXInviteUsageData(params: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    series: BclXInviteUsageDailyPoint[];
+    summary: BclXInviteUsageSummary;
+    queryMs: number;
+  }> {
+    const { startDate, endDate } = this.parseDateRange(params);
+    const start = Date.now();
+
+    const [createdByDay, invitedByDay, totalCreated, totalInvited] =
+      await Promise.all([
+        this.getDailyXInviteCreatedCounts(startDate, endDate),
+        this.getDailyXInviteBoundCounts(startDate, endDate),
+        this.getTotalXInviteCreated(startDate, endDate),
+        this.getTotalXInviteBound(startDate, endDate),
+      ]);
+
+    const series = this.buildXInviteUsageSeries(startDate, endDate, {
+      created_codes: createdByDay,
+      invited_users: invitedByDay,
+    });
+
+    return {
+      series,
+      summary: {
+        total_created_codes: totalCreated,
+        total_invited_users: totalInvited,
+        invite_bind_rate: totalCreated > 0 ? totalInvited / totalCreated : 0,
       },
       queryMs: Date.now() - start,
     };
@@ -500,6 +550,88 @@ export class BclAffiliationAnalyticsService {
       startMicro: (BigInt(startDate.getTime()) * 1000n).toString(),
       endMicro: (BigInt(endDate.getTime()) * 1000n).toString(),
     };
+  }
+
+  private async getDailyXInviteCreatedCounts(startDate: Date, endDate: Date) {
+    const rows = await this.profileXInviteRepo
+      .createQueryBuilder('i')
+      .select(`to_char(date_trunc('day', i.created_at), 'YYYY-MM-DD')`, 'date')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('i.created_at >= :startDate', { startDate })
+      .andWhere('i.created_at < :endDate', { endDate })
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; count: number }>();
+
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.date] = Number(r.count || 0);
+    return out;
+  }
+
+  private async getDailyXInviteBoundCounts(startDate: Date, endDate: Date) {
+    const rows = await this.profileXInviteRepo
+      .createQueryBuilder('i')
+      .select(`to_char(date_trunc('day', i.bound_at), 'YYYY-MM-DD')`, 'date')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('i.status = :status', { status: 'bound' })
+      .andWhere('i.bound_at IS NOT NULL')
+      .andWhere('i.bound_at >= :startDate', { startDate })
+      .andWhere('i.bound_at < :endDate', { endDate })
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; count: number }>();
+
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.date] = Number(r.count || 0);
+    return out;
+  }
+
+  private async getTotalXInviteCreated(startDate: Date, endDate: Date) {
+    const row = await this.profileXInviteRepo
+      .createQueryBuilder('i')
+      .select('COUNT(*)::int', 'count')
+      .where('i.created_at >= :startDate', { startDate })
+      .andWhere('i.created_at < :endDate', { endDate })
+      .getRawOne<{ count: number }>();
+    return Number(row?.count || 0);
+  }
+
+  private async getTotalXInviteBound(startDate: Date, endDate: Date) {
+    const row = await this.profileXInviteRepo
+      .createQueryBuilder('i')
+      .select('COUNT(*)::int', 'count')
+      .where('i.status = :status', { status: 'bound' })
+      .andWhere('i.bound_at IS NOT NULL')
+      .andWhere('i.bound_at >= :startDate', { startDate })
+      .andWhere('i.bound_at < :endDate', { endDate })
+      .getRawOne<{ count: number }>();
+    return Number(row?.count || 0);
+  }
+
+  private buildXInviteUsageSeries(
+    startDate: Date,
+    endDate: Date,
+    counts: {
+      created_codes: Record<string, number>;
+      invited_users: Record<string, number>;
+    },
+  ): BclXInviteUsageDailyPoint[] {
+    const start = moment(startDate).startOf('day');
+    const end = moment(endDate).startOf('day');
+    const out: BclXInviteUsageDailyPoint[] = [];
+
+    const cursor = start.clone();
+    while (cursor.isBefore(end)) {
+      const d = cursor.format('YYYY-MM-DD');
+      out.push({
+        date: d,
+        created_codes: counts.created_codes[d] ?? 0,
+        invited_users: counts.invited_users[d] ?? 0,
+      });
+      cursor.add(1, 'day');
+    }
+
+    return out;
   }
 
   private parseDateRange(params: { start_date?: string; end_date?: string }) {
