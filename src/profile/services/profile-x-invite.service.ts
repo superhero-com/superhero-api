@@ -32,6 +32,7 @@ export class ProfileXInviteService {
   private readonly logger = new Logger(ProfileXInviteService.name);
   private static readonly ADDRESS_REGEX = /^ak_[1-9A-HJ-NP-Za-km-z]+$/;
   private static readonly CODE_REGEX = /^[a-z0-9]{12}$/;
+  private static readonly POSTING_RECHECK_CHALLENGE_CODE = 'recheck00001';
 
   constructor(
     @InjectRepository(ProfileXInvite)
@@ -55,14 +56,17 @@ export class ProfileXInviteService {
     this.assertValidAddress(params.address, 'address');
     const code = this.normalizeCode(params.code);
     if (params.purpose === 'bind' && !code) {
-      throw new BadRequestException('Invite code is required for bind challenge');
+      throw new BadRequestException(
+        'Invite code is required for bind challenge',
+      );
     }
     if (code && !ProfileXInviteService.CODE_REGEX.test(code)) {
       throw new BadRequestException('Invalid invite code format');
     }
 
     const nonce = randomBytes(24).toString('hex');
-    const expiresAt = Date.now() + PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS * 1000;
+    const expiresAt =
+      Date.now() + PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS * 1000;
     const message = this.createChallengeMessage(
       params.purpose,
       params.address,
@@ -89,10 +93,18 @@ export class ProfileXInviteService {
     };
   }
 
-  async createInvite(inviterAddress: string): Promise<{
-    code: string;
-    invite_link: string;
-  }>;
+  async createPostingRewardRecheckChallenge(address: string): Promise<{
+    nonce: string;
+    expires_at: number;
+    message: string;
+  }> {
+    return this.createChallenge({
+      address,
+      purpose: 'bind',
+      code: ProfileXInviteService.POSTING_RECHECK_CHALLENGE_CODE,
+    });
+  }
+
   async createInvite(params: {
     inviterAddress: string;
     challengeNonce: string;
@@ -101,29 +113,7 @@ export class ProfileXInviteService {
   }): Promise<{
     code: string;
     invite_link: string;
-  }>;
-  async createInvite(
-    inviterOrParams:
-      | string
-      | {
-          inviterAddress: string;
-          challengeNonce: string;
-          challengeExpiresAt: number;
-          signatureHex: string;
-        },
-  ): Promise<{
-    code: string;
-    invite_link: string;
   }> {
-    const params =
-      typeof inviterOrParams === 'string'
-        ? {
-            inviterAddress: inviterOrParams,
-            challengeNonce: '',
-            challengeExpiresAt: 0,
-            signatureHex: '',
-          }
-        : inviterOrParams;
     const { inviterAddress, challengeNonce, challengeExpiresAt, signatureHex } =
       params;
     this.assertValidAddress(inviterAddress, 'inviter');
@@ -160,12 +150,6 @@ export class ProfileXInviteService {
     throw new BadRequestException('Failed to generate unique invite code');
   }
 
-  async bindInvite(code: string, inviteeAddress: string): Promise<{
-    code: string;
-    inviter_address: string;
-    invitee_address: string;
-    status: 'bound';
-  }>;
   async bindInvite(params: {
     code: string;
     inviteeAddress: string;
@@ -177,34 +161,7 @@ export class ProfileXInviteService {
     inviter_address: string;
     invitee_address: string;
     status: 'bound';
-  }>;
-  async bindInvite(
-    codeOrParams:
-      | string
-      | {
-          code: string;
-          inviteeAddress: string;
-          challengeNonce: string;
-          challengeExpiresAt: number;
-          signatureHex: string;
-        },
-    inviteeAddressArg?: string,
-  ): Promise<{
-    code: string;
-    inviter_address: string;
-    invitee_address: string;
-    status: 'bound';
   }> {
-    const params =
-      typeof codeOrParams === 'string'
-        ? {
-            code: codeOrParams,
-            inviteeAddress: inviteeAddressArg || '',
-            challengeNonce: '',
-            challengeExpiresAt: 0,
-            signatureHex: '',
-          }
-        : codeOrParams;
     const inviteCode = this.normalizeAndValidateCode(params.code);
     this.assertValidAddress(params.inviteeAddress, 'invitee');
     await this.verifyAndConsumeChallenge({
@@ -241,7 +198,10 @@ export class ProfileXInviteService {
           status: 'bound' as const,
         };
       }
-      if (invite.invitee_address && invite.invitee_address !== params.inviteeAddress) {
+      if (
+        invite.invitee_address &&
+        invite.invitee_address !== params.inviteeAddress
+      ) {
         throw new BadRequestException('Invite code already bound');
       }
 
@@ -257,7 +217,9 @@ export class ProfileXInviteService {
         alreadyBoundForInvitee.code !== invite.code &&
         alreadyBoundForInvitee.status === 'bound'
       ) {
-        throw new BadRequestException('Invitee already bound to another invite');
+        throw new BadRequestException(
+          'Invitee already bound to another invite',
+        );
       }
 
       invite.invitee_address = params.inviteeAddress;
@@ -271,6 +233,23 @@ export class ProfileXInviteService {
         invitee_address: params.inviteeAddress,
         status: 'bound' as const,
       };
+    });
+  }
+
+  async verifyPostingRewardRecheckChallenge(params: {
+    address: string;
+    nonce: string;
+    expiresAt: number;
+    signatureHex: string;
+  }): Promise<void> {
+    this.assertValidAddress(params.address, 'address');
+    await this.verifyAndConsumeChallenge({
+      address: params.address,
+      purpose: 'bind',
+      inviteCode: ProfileXInviteService.POSTING_RECHECK_CHALLENGE_CODE,
+      nonce: params.nonce,
+      expiresAt: params.expiresAt,
+      signatureHex: params.signatureHex,
     });
   }
 
@@ -405,34 +384,34 @@ export class ProfileXInviteService {
     await this.profileSpendQueueService.enqueueSpend(
       PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY,
       async () => {
-      try {
-        const rewardAccount = this.profileSpendQueueService.getRewardAccount(
-          PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY,
-          'PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY',
-        );
-        const spendResult = await this.aeSdkService.sdk.spend(
-          rewardAmountAettos,
-          inviterAddress as `ak_${string}`,
-          { onAccount: rewardAccount },
-        );
-        rewardEntry.tx_hash = spendResult.hash || null;
-        rewardEntry.status = 'paid';
-        rewardEntry.error = null;
-        await this.milestoneRewardRepository.save(rewardEntry);
-      } catch (error: any) {
-        rewardEntry.tx_hash = null;
-        rewardEntry.status = 'failed';
-        rewardEntry.error =
-          error instanceof Error
-            ? error.message
-            : String(error || 'Unknown error');
-        await this.milestoneRewardRepository.save(rewardEntry);
-        this.logger.error(
-          `Failed to send invite milestone reward to ${inviterAddress}`,
-          error?.stack || error,
-        );
-        throw error;
-      }
+        try {
+          const rewardAccount = this.profileSpendQueueService.getRewardAccount(
+            PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY,
+            'PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY',
+          );
+          const spendResult = await this.aeSdkService.sdk.spend(
+            rewardAmountAettos,
+            inviterAddress as `ak_${string}`,
+            { onAccount: rewardAccount },
+          );
+          rewardEntry.tx_hash = spendResult.hash || null;
+          rewardEntry.status = 'paid';
+          rewardEntry.error = null;
+          await this.milestoneRewardRepository.save(rewardEntry);
+        } catch (error: any) {
+          rewardEntry.tx_hash = null;
+          rewardEntry.status = 'failed';
+          rewardEntry.error =
+            error instanceof Error
+              ? error.message
+              : String(error || 'Unknown error');
+          await this.milestoneRewardRepository.save(rewardEntry);
+          this.logger.error(
+            `Failed to send invite milestone reward to ${inviterAddress}`,
+            error?.stack || error,
+          );
+          throw error;
+        }
       },
     );
   }
@@ -513,7 +492,9 @@ export class ProfileXInviteService {
     const driverError = (error as any)?.driverError || error;
     const code = String(driverError?.code || '');
     const constraint = String(driverError?.constraint || '').toLowerCase();
-    const detail = String(driverError?.detail || driverError?.message || '').toLowerCase();
+    const detail = String(
+      driverError?.detail || driverError?.message || '',
+    ).toLowerCase();
     return (
       code === '23505' &&
       (constraint.includes('code') ||

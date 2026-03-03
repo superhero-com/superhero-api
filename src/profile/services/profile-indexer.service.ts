@@ -15,6 +15,7 @@ import {
   extractProfileMutationXUsername,
   isSuccessfulProfileMutation,
 } from './profile-mutation-tx.util';
+import { ProfileXPostingRewardService } from './profile-x-posting-reward.service';
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class ProfileIndexerService {
     @InjectRepository(ProfileSyncState)
     private readonly profileSyncStateRepository: Repository<ProfileSyncState>,
     private readonly profileContractService: ProfileContractService,
+    private readonly profileXPostingRewardService: ProfileXPostingRewardService,
     private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
   ) {}
 
@@ -92,6 +94,14 @@ export class ProfileIndexerService {
                 const xUsername = extractProfileMutationXUsername(tx);
                 if (caller && xUsername) {
                   rewardDispatches.push(
+                    this.profileXPostingRewardService.upsertVerifiedCandidateFromTx(
+                      caller,
+                      xUsername,
+                      microTime.toString(),
+                      hash,
+                    ),
+                  );
+                  rewardDispatches.push(
                     this.profileXVerificationRewardService.sendRewardIfEligible(
                       caller,
                       xUsername,
@@ -130,7 +140,7 @@ export class ProfileIndexerService {
       ).length;
       if (failedRewardCount > 0) {
         this.logger.warn(
-          `Failed to process ${failedRewardCount} X verification reward dispatch(es) in indexer sync; continuing`,
+          `Failed to process ${failedRewardCount} profile reward dispatch(es) in indexer sync; continuing`,
         );
       }
 

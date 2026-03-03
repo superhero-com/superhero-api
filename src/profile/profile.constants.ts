@@ -39,6 +39,57 @@ export const PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS = parseInt(
   10,
 );
 
+export const PROFILE_X_POSTING_REWARD_AMOUNT_AE =
+  process.env.PROFILE_X_POSTING_REWARD_AMOUNT_AE || '0.05';
+
+export const PROFILE_X_POSTING_REWARD_THRESHOLD = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_THRESHOLD || '10',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_SCAN_INTERVAL_SECONDS = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_SCAN_INTERVAL_SECONDS || '60',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_RETRY_BASE_SECONDS = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_RETRY_BASE_SECONDS || '30',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_RETRY_MAX_SECONDS = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_RETRY_MAX_SECONDS || '3600',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS || '5000',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH =
+  (process.env.PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH || 'false')
+    .trim()
+    .toLowerCase() !== 'false';
+
+export const PROFILE_X_POSTING_REWARD_ENABLE_PERIODIC_RECHECKS =
+  (process.env.PROFILE_X_POSTING_REWARD_ENABLE_PERIODIC_RECHECKS || 'false')
+    .trim()
+    .toLowerCase() !== 'false';
+
+export const PROFILE_X_POSTING_REWARD_MANUAL_RECHECK_COOLDOWN_SECONDS = parseInt(
+  process.env.PROFILE_X_POSTING_REWARD_MANUAL_RECHECK_COOLDOWN_SECONDS || '3600',
+  10,
+);
+
+export const PROFILE_X_POSTING_REWARD_KEYWORDS = (
+  process.env.PROFILE_X_POSTING_REWARD_KEYWORDS ||
+  'superhero.com,superhero_chain'
+)
+  .split(',')
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+
 export const PROFILE_X_INVITE_MILESTONE_THRESHOLD = parseInt(
   process.env.PROFILE_X_INVITE_MILESTONE_THRESHOLD || '10',
   10,

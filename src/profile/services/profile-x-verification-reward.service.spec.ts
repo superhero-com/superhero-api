@@ -20,7 +20,7 @@ describe('ProfileXVerificationRewardService', () => {
   beforeEach(() => {
     xFollowersCount = 75;
     global.fetch = jest.fn().mockImplementation(async (url: string) => {
-      if (url.includes('/2/oauth2/token')) {
+      if (url.includes('/oauth2/token')) {
         return {
           ok: true,
           status: 200,
@@ -318,7 +318,7 @@ describe('ProfileXVerificationRewardService', () => {
 
   it('retries when X lookup fails instead of losing reward', async () => {
     (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
-      if (url.includes('/2/oauth2/token')) {
+      if (url.includes('/oauth2/token')) {
         return {
           ok: true,
           status: 200,

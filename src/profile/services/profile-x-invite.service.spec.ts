@@ -99,6 +99,23 @@ describe('ProfileXInviteService', () => {
     expect(inviteChallengeRepository.save).toHaveBeenCalledTimes(1);
   });
 
+  it('creates posting reward recheck challenge through existing bind challenge storage', async () => {
+    const { service, inviteChallengeRepository } = getService();
+
+    const result = await service.createPostingRewardRecheckChallenge(
+      'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
+    );
+
+    expect(result.nonce).toBeTruthy();
+    expect(result.message).toContain('profile_x_invite:bind:');
+    expect(inviteChallengeRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'bind',
+        invite_code: 'recheck00001',
+      }),
+    );
+  });
+
   it('creates invite after challenge verification', async () => {
     const { service, inviteRepository } = getService();
     jest

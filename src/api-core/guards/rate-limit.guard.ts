@@ -62,16 +62,8 @@ export class RateLimitGuard implements CanActivate {
   }
 
   private getClientId(request: Request): string {
-    // Use IP address as client identifier
-    // Check for forwarded IP (if behind proxy)
-    const forwarded = request.headers['x-forwarded-for'];
-    const ip =
-      (typeof forwarded === 'string'
-        ? forwarded.split(',')[0].trim()
-        : forwarded?.[0]) ||
-      request.ip ||
-      request.socket.remoteAddress ||
-      'unknown';
+    // Use the Express-resolved IP first so proxy trust stays centralized.
+    const ip = request.ip || request.socket.remoteAddress || 'unknown';
 
     // Include the route path to rate limit per endpoint
     const route = request.route?.path || request.path;

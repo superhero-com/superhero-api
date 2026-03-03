@@ -9,6 +9,7 @@ import { ITransaction } from '@/utils/types';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
 import { ProfileContractService } from './profile-contract.service';
 import { ProfileIndexerService } from './profile-indexer.service';
+import { ProfileXPostingRewardService } from './profile-x-posting-reward.service';
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 import {
   extractProfileMutationCaller,
@@ -43,6 +44,7 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     private readonly websocketService: WebSocketService,
     private readonly profileIndexerService: ProfileIndexerService,
     private readonly profileContractService: ProfileContractService,
+    private readonly profileXPostingRewardService: ProfileXPostingRewardService,
     private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
   ) {}
 
@@ -108,6 +110,9 @@ export class ProfileLiveSyncService implements OnModuleInit, OnModuleDestroy {
     ) {
       const xUsername = extractProfileMutationXUsername(transaction);
       if (caller && xUsername) {
+        void this.profileXPostingRewardService
+          .upsertVerifiedCandidateFromTx(caller, xUsername, microTime, hash)
+          .catch(() => undefined);
         void this.profileXVerificationRewardService
           .sendRewardIfEligible(caller, xUsername)
           .catch(() => undefined);
