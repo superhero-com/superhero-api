@@ -22,7 +22,12 @@ import {
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
 import { ProfileXInviteService } from './profile-x-invite.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
-import { X_CLIENT_ID, X_CLIENT_SECRET } from '@/configs/social';
+import {
+  X_CLIENT_ID,
+  X_CLIENT_SCOPE,
+  X_CLIENT_SECRET,
+  X_CLIENT_TYPE,
+} from '@/configs/social';
 
 @Injectable()
 export class ProfileXVerificationRewardService {
@@ -32,9 +37,17 @@ export class ProfileXVerificationRewardService {
     ProfileXVerificationReward['status']
   > = ['pending', 'failed'];
   private static readonly DEFAULT_X_APP_TOKEN_TTL_SECONDS = 3600;
+  private static readonly X_APP_TOKEN_MAX_ATTEMPTS = 3;
+  private static readonly X_APP_TOKEN_RETRY_BASE_DELAY_MS = 500;
+  private static readonly X_APP_TOKEN_FAILURE_COOLDOWN_MS = 60_000;
   private static readonly DEFAULT_RETRY_BATCH_SIZE = 100;
+  private static readonly X_READ_API_BASE_URLS = [
+    'https://api.x.com',
+    'https://api.twitter.com',
+  ];
   private xAppAccessTokenCache: { token: string; expiresAtMs: number } | null =
     null;
+  private xAppTokenFetchBlockedUntilMs = 0;
   private readonly processingByAddress = new Map<string, Promise<void>>();
   private isRetryWorkerRunning = false;
 
@@ -118,6 +131,37 @@ export class ProfileXVerificationRewardService {
     await this.processAddressWithGuard(address);
   }
 
+  async getRewardStatus(address: string): Promise<{
+    status: ProfileXVerificationReward['status'] | 'not_started';
+    x_username: string | null;
+    tx_hash: string | null;
+    retry_count: number;
+    next_retry_at: Date | null;
+    error: string | null;
+  }> {
+    const reward = await this.rewardRepository.findOne({
+      where: { address },
+    });
+    if (!reward) {
+      return {
+        status: 'not_started',
+        x_username: null,
+        tx_hash: null,
+        retry_count: 0,
+        next_retry_at: null,
+        error: null,
+      };
+    }
+    return {
+      status: reward.status,
+      x_username: reward.x_username,
+      tx_hash: reward.tx_hash,
+      retry_count: reward.retry_count || 0,
+      next_retry_at: reward.next_retry_at,
+      error: reward.error,
+    };
+  }
+
   private async processAddressWithGuard(address: string): Promise<void> {
     const existingInFlight = this.processingByAddress.get(address);
     if (existingInFlight) {
@@ -184,19 +228,17 @@ export class ProfileXVerificationRewardService {
     if (!token) {
       return null;
     }
-    const endpoint = `https://api.x.com/2/users/by/username/${encodeURIComponent(xUsername)}?user.fields=public_metrics`;
     try {
-      const response = await this.fetchWithTimeout(endpoint, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      const body = await response.json().catch(() => ({}));
+      const { response, body, baseUrl } = await this.fetchXReadWithAuthFallback(
+        `/2/users/by/username/${encodeURIComponent(xUsername)}?user.fields=public_metrics`,
+        token,
+      );
       if (!response.ok) {
         this.logger.warn(
           'X user lookup failed while checking reward eligibility',
           {
             x_username: xUsername,
+            base_url: baseUrl,
             status: response.status,
             detail: (body as any)?.detail,
           },
@@ -227,6 +269,9 @@ export class ProfileXVerificationRewardService {
     ) {
       return this.xAppAccessTokenCache.token;
     }
+    if (this.xAppTokenFetchBlockedUntilMs > Date.now()) {
+      return null;
+    }
     if (!X_CLIENT_ID || !X_CLIENT_SECRET) {
       this.logger.warn(
         'Skipping X verification reward, X_CLIENT_ID/X_CLIENT_SECRET are required to verify followers count',
@@ -238,43 +283,104 @@ export class ProfileXVerificationRewardService {
         `${X_CLIENT_ID}:${X_CLIENT_SECRET}`,
         'utf-8',
       ).toString('base64');
-      const body = new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: X_CLIENT_ID,
-      });
-      const response = await this.fetchWithTimeout(
-        'https://api.x.com/2/oauth2/token',
+      let payload: any = {};
+      let lastStatus: number | null = null;
+      let lastBaseUrl = 'https://api.x.com';
+      let lastDetail: string | null = null;
+      const tokenEndpoints = [
         {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Authorization: `Basic ${basicAuth}`,
-          },
-          body: body.toString(),
+          baseUrl: 'https://api.x.com',
+          url: 'https://api.x.com/2/oauth2/token',
+          body: new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: X_CLIENT_ID,
+            client_secret: X_CLIENT_SECRET,
+            client_type: X_CLIENT_TYPE,
+            scope: X_CLIENT_SCOPE,
+          }),
+        },
+        {
+          baseUrl: 'https://api.twitter.com',
+          url: 'https://api.twitter.com/oauth2/token',
+          body: new URLSearchParams({
+            grant_type: 'client_credentials',
+          }),
+        },
+      ];
+      for (
+        let attempt = 1;
+        attempt <= ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS;
+        attempt += 1
+      ) {
+        let shouldRetry = false;
+        let hadNetworkError = false;
+        try {
+          for (const endpoint of tokenEndpoints) {
+            const response = await this.fetchWithTimeout(endpoint.url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                Authorization: `Basic ${basicAuth}`,
+              },
+              body: endpoint.body.toString(),
+            });
+            payload = await response.json().catch(() => ({}));
+            lastStatus = response.status;
+            lastBaseUrl = endpoint.baseUrl;
+            lastDetail = this.extractXApiErrorDetail(payload);
+            if (response.ok && (payload as any)?.access_token) {
+              const expiresInSeconds = Number((payload as any).expires_in);
+              const ttlSeconds =
+                Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
+                  ? expiresInSeconds
+                  : ProfileXVerificationRewardService.DEFAULT_X_APP_TOKEN_TTL_SECONDS;
+              this.xAppAccessTokenCache = {
+                token: (payload as any).access_token,
+                expiresAtMs: Date.now() + Math.max(ttlSeconds - 60, 30) * 1000,
+              };
+              this.xAppTokenFetchBlockedUntilMs = 0;
+              return this.xAppAccessTokenCache.token;
+            }
+            if (this.shouldRetryXTokenFetch(response.status)) {
+              shouldRetry = true;
+            }
+          }
+        } catch (error) {
+          hadNetworkError = true;
+          if (
+            attempt ===
+            ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS
+          ) {
+            throw error;
+          }
+        }
+        if (
+          attempt ===
+            ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS ||
+          (!shouldRetry && !hadNetworkError)
+        ) {
+          break;
+        }
+        const delayMs =
+          ProfileXVerificationRewardService.X_APP_TOKEN_RETRY_BASE_DELAY_MS *
+          2 ** (attempt - 1);
+        await this.sleep(delayMs);
+      }
+      this.logger.warn(
+        'Failed to obtain X app access token for reward checks',
+        {
+          base_url: lastBaseUrl,
+          status: lastStatus,
+          error: (payload as any)?.error,
+          error_description: (payload as any)?.error_description,
+          detail:
+            lastDetail || (payload as any)?.detail || (payload as any)?.title,
         },
       );
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !(payload as any)?.access_token) {
-        this.logger.warn(
-          'Failed to obtain X app access token for reward checks',
-          {
-            status: response.status,
-            error: (payload as any)?.error,
-            error_description: (payload as any)?.error_description,
-          },
-        );
-        return null;
-      }
-      const expiresInSeconds = Number((payload as any).expires_in);
-      const ttlSeconds =
-        Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
-          ? expiresInSeconds
-          : ProfileXVerificationRewardService.DEFAULT_X_APP_TOKEN_TTL_SECONDS;
-      this.xAppAccessTokenCache = {
-        token: (payload as any).access_token,
-        expiresAtMs: Date.now() + Math.max(ttlSeconds - 60, 30) * 1000,
-      };
-      return this.xAppAccessTokenCache.token;
+      this.xAppTokenFetchBlockedUntilMs =
+        Date.now() +
+        ProfileXVerificationRewardService.X_APP_TOKEN_FAILURE_COOLDOWN_MS;
+      return null;
     } catch (error) {
       this.logger.warn(
         `Failed to obtain X app access token for reward checks: ${error instanceof Error ? error.message : String(error)}`,
@@ -527,5 +633,78 @@ export class ProfileXVerificationRewardService {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async fetchXReadWithAuthFallback(
+    pathAndQuery: string,
+    bearerToken: string,
+  ): Promise<{ response: Response; body: any; baseUrl: string }> {
+    let lastResponse: Response | null = null;
+    let lastBody: any = {};
+    let lastBaseUrl = 'https://api.x.com';
+
+    for (const baseUrl of ProfileXVerificationRewardService.X_READ_API_BASE_URLS) {
+      const endpoint = `${baseUrl}${pathAndQuery}`;
+      const response = await this.fetchWithTimeout(endpoint, {
+        headers: {
+          Authorization: `Bearer ${String(bearerToken || '').trim()}`,
+        },
+      });
+      const body = await response.json().catch(() => ({}));
+      lastResponse = response;
+      lastBody = body;
+      lastBaseUrl = baseUrl;
+      if (response.ok) {
+        return { response, body, baseUrl };
+      }
+      if (!this.isUnsupportedAuthenticationError(response.status, body)) {
+        return { response, body, baseUrl };
+      }
+    }
+
+    if (!lastResponse) {
+      throw new Error('No response received from X read endpoints');
+    }
+    return { response: lastResponse, body: lastBody, baseUrl: lastBaseUrl };
+  }
+
+  private isUnsupportedAuthenticationError(status: number, body: any): boolean {
+    if (status !== 403) {
+      return false;
+    }
+    const detail = String(body?.detail || body?.title || '').toLowerCase();
+    return (
+      detail.includes('unsupported authentication') ||
+      detail.includes('authenticating with unknown')
+    );
+  }
+
+  private shouldRetryXTokenFetch(status: number): boolean {
+    return status === 429 || status >= 500;
+  }
+
+  private extractXApiErrorDetail(body: any): string | null {
+    if (!body || typeof body !== 'object') {
+      return null;
+    }
+    const topLevel =
+      body.error_description || body.detail || body.title || body.error || null;
+    if (topLevel) {
+      return String(topLevel);
+    }
+    const firstError = Array.isArray(body.errors) ? body.errors[0] : null;
+    if (!firstError || typeof firstError !== 'object') {
+      return null;
+    }
+    const code = firstError.code ? `code=${String(firstError.code)}` : null;
+    const message = firstError.message ? String(firstError.message) : null;
+    if (code && message) {
+      return `${code} ${message}`;
+    }
+    return code || message || null;
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

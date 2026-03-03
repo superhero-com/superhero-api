@@ -42,16 +42,21 @@ describe('ProfileIndexerService', () => {
     const profileXVerificationRewardService = {
       sendRewardIfEligible: jest.fn().mockResolvedValue(undefined),
     } as any;
+    const profileXPostingRewardService = {
+      upsertVerifiedCandidate: jest.fn().mockResolvedValue(undefined),
+    } as any;
 
     const service = new ProfileIndexerService(
       profileCacheRepository,
       profileSyncStateRepository,
       profileContractService,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
     );
 
     return {
       service,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
       profileSyncStateRepository,
       profileContractService,
@@ -65,6 +70,7 @@ describe('ProfileIndexerService', () => {
   it('rewards once for pending->confirmed hash transition in backfill stream', async () => {
     const {
       service,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
       profileSyncStateRepository,
     } = createService();
@@ -126,6 +132,12 @@ describe('ProfileIndexerService', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(
+      profileXPostingRewardService.upsertVerifiedCandidate,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      profileXPostingRewardService.upsertVerifiedCandidate,
+    ).toHaveBeenCalledWith('ak_verified', 'verified', '201');
+    expect(
       profileXVerificationRewardService.sendRewardIfEligible,
     ).toHaveBeenCalledTimes(1);
     expect(
@@ -137,16 +149,20 @@ describe('ProfileIndexerService', () => {
   it('does not advance sync state before reward dispatch settles', async () => {
     const {
       service,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
       profileSyncStateRepository,
     } = createService();
 
     let resolveReward: (() => void) | null = null;
+    const barrierPromise = new Promise<void>((resolve) => {
+      resolveReward = resolve;
+    });
     profileXVerificationRewardService.sendRewardIfEligible.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveReward = resolve;
-        }),
+      () => barrierPromise,
+    );
+    profileXPostingRewardService.upsertVerifiedCandidate.mockImplementation(
+      () => barrierPromise,
     );
 
     fetchJsonMock.mockResolvedValueOnce({
@@ -183,10 +199,14 @@ describe('ProfileIndexerService', () => {
   it('advances sync state even when reward dispatch rejects', async () => {
     const {
       service,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
       profileSyncStateRepository,
     } = createService();
 
+    profileXPostingRewardService.upsertVerifiedCandidate.mockRejectedValue(
+      new Error('posting spend failed'),
+    );
     profileXVerificationRewardService.sendRewardIfEligible.mockRejectedValue(
       new Error('spend failed'),
     );

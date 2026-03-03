@@ -14,6 +14,9 @@ describe('ProfileLiveSyncService', () => {
       getContractAddress: jest.fn().mockReturnValue('ct_profile'),
       decodeEvents: jest.fn().mockResolvedValue([]),
     } as any;
+    const profileXPostingRewardService = {
+      upsertVerifiedCandidate: jest.fn().mockResolvedValue(undefined),
+    } as any;
     const profileXVerificationRewardService = {
       sendRewardIfEligible: jest.fn().mockResolvedValue(undefined),
     } as any;
@@ -21,6 +24,7 @@ describe('ProfileLiveSyncService', () => {
       websocketService,
       profileIndexerService,
       profileContractService,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
     );
     return {
@@ -28,6 +32,7 @@ describe('ProfileLiveSyncService', () => {
       websocketService,
       profileIndexerService,
       profileContractService,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
       unsubscribe,
     };
@@ -79,6 +84,7 @@ describe('ProfileLiveSyncService', () => {
       service,
       websocketService,
       profileIndexerService,
+      profileXPostingRewardService,
       profileXVerificationRewardService,
     } = setup(true);
     service.onModuleInit();
@@ -100,6 +106,9 @@ describe('ProfileLiveSyncService', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
+    expect(
+      profileXPostingRewardService.upsertVerifiedCandidate,
+    ).toHaveBeenCalledWith('ak_rewarded_user', 'aliceonx', '1001');
     expect(
       profileXVerificationRewardService.sendRewardIfEligible,
     ).toHaveBeenCalledWith('ak_rewarded_user', 'aliceonx');
