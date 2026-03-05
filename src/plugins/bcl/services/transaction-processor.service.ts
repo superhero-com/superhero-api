@@ -92,7 +92,10 @@ export class TransactionProcessorService {
             manager,
           );
           if (!transactionToken) {
-            throw new Error('Failed to create token');
+            this.logger.warn(
+              `Skipping create_community tx ${rawTransaction.hash}: failed to create token for ${saleAddress}`,
+            );
+            return null;
           }
         }
 
@@ -121,6 +124,12 @@ export class TransactionProcessorService {
             false,
             manager,
           );
+          if (!transactionToken) {
+            this.logger.warn(
+              `Skipping create_community tx ${rawTransaction.hash}: token disappeared after metadata update for ${saleAddress}`,
+            );
+            return null;
+          }
         }
 
         // Calculate prices
@@ -145,7 +154,7 @@ export class TransactionProcessorService {
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
         if (syncDirection === SyncDirectionEnum.Live) {
-          transactionToken = await this.tokenService.update(
+          const updatedToken = await this.tokenService.update(
             transactionToken,
             {
               last_tx_hash: decodedTx.hash,
@@ -153,6 +162,13 @@ export class TransactionProcessorService {
             },
             manager,
           );
+          if (updatedToken) {
+            transactionToken = updatedToken;
+          } else {
+            this.logger.warn(
+              `Token update returned null for ${saleAddress}; continuing with in-memory token`,
+            );
+          }
         }
 
         // Check if token is supported collection
