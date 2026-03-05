@@ -230,7 +230,11 @@ export class TokensService {
     return this.createToken(address as Encoded.ContractAddress);
   }
 
-  async getTokenAex9Address(token: Token): Promise<string> {
+  async getTokenAex9Address(token: Token | null | undefined): Promise<string> {
+    if (!token?.sale_address) {
+      return null;
+    }
+
     if (token.address) {
       return token.address;
     }
@@ -798,8 +802,21 @@ export class TokensService {
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
     const token = await this.getToken(saleAddress);
+    if (!token) {
+      this.logger.warn(
+        `SyncTokenHoldersQueue: token not found for ${saleAddress}, skipping holders sync`,
+      );
+      return;
+    }
+
     const aex9Address =
       token?.address || (await this.getTokenAex9Address(token));
+    if (!aex9Address) {
+      this.logger.warn(
+        `SyncTokenHoldersQueue: aex9 address unavailable for ${saleAddress}, skipping holders sync`,
+      );
+      return;
+    }
 
     const { holders: totalHolders, truncated } = await this._loadHoldersData(
       token,
@@ -813,14 +830,21 @@ export class TokensService {
       return;
     }
 
-    if (totalHolders.length > 0) {
+    const uniqueHolders = Array.from(
+      new Map(totalHolders.map((holder) => [holder.id, holder])).values(),
+    );
+
+    if (uniqueHolders.length > 0) {
       await this.tokenHoldersRepository.delete({
         aex9_address: aex9Address,
       });
-      await this.tokenHoldersRepository.insert(totalHolders);
+      await this.tokenHoldersRepository.upsert(uniqueHolders, {
+        conflictPaths: ['id'],
+        skipUpdateIfNoValuesChanged: true,
+      });
     }
     await this.tokensRepository.update(token.sale_address, {
-      holders_count: totalHolders.length,
+      holders_count: uniqueHolders.length,
     });
   }
 
