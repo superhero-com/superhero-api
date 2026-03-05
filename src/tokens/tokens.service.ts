@@ -65,6 +65,12 @@ export class TokensService {
   private readonly contractCallTimeoutMs = Number(
     process.env.TOKEN_CONTRACT_CALL_TIMEOUT_MS || 30_000,
   );
+  private readonly contractNotPresentMaxAttempts = Number(
+    process.env.TOKEN_CONTRACT_NOT_PRESENT_MAX_ATTEMPTS || 4,
+  );
+  private readonly contractNotPresentRetryDelayMs = Number(
+    process.env.TOKEN_CONTRACT_NOT_PRESENT_RETRY_DELAY_MS || 750,
+  );
   private readonly maxHoldersPages = Number(
     process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
   );
@@ -370,29 +376,51 @@ export class TokensService {
       this.contracts[saleAddress].lastUsedAt = Date.now();
       return this.contracts[saleAddress];
     }
-    try {
-      const { instance } = await initTokenSale(
-        this.aeSdkService.sdk as any,
-        saleAddress,
-      );
-      const tokenContractInstance = await instance?.tokenContractInstance();
 
-      this.contracts[saleAddress] = {
-        ...(this.contracts[saleAddress] || {}),
-        instance,
-        tokenContractInstance,
-        lastUsedAt: Date.now(),
-      };
+    for (
+      let attempt = 1;
+      attempt <= this.contractNotPresentMaxAttempts;
+      attempt++
+    ) {
+      try {
+        const { instance } = await initTokenSale(
+          this.aeSdkService.sdk as any,
+          saleAddress,
+        );
+        const tokenContractInstance = await instance?.tokenContractInstance();
 
-      return this.contracts[saleAddress];
-    } catch (error: any) {
-      this.logger.error(
-        `getTokenContractsBySaleAddress->error:: ${saleAddress}`,
-        error,
-        error.stack,
-      );
-      return undefined;
+        this.contracts[saleAddress] = {
+          ...(this.contracts[saleAddress] || {}),
+          instance,
+          tokenContractInstance,
+          lastUsedAt: Date.now(),
+        };
+
+        return this.contracts[saleAddress];
+      } catch (error: any) {
+        const isNotPresent = this.isContractNotPresentError(error);
+        const hasRetry =
+          isNotPresent && attempt < this.contractNotPresentMaxAttempts;
+
+        if (hasRetry) {
+          const delayMs = this.contractNotPresentRetryDelayMs * attempt;
+          this.logger.warn(
+            `getTokenContractsBySaleAddress->not_present:: ${saleAddress}, attempt ${attempt}/${this.contractNotPresentMaxAttempts}, retrying in ${delayMs}ms`,
+          );
+          await this.sleep(delayMs);
+          continue;
+        }
+
+        this.logger.error(
+          `getTokenContractsBySaleAddress->error:: ${saleAddress}`,
+          error,
+          error.stack,
+        );
+        return undefined;
+      }
     }
+
+    return undefined;
   }
 
   async getTokeLivePrice(token: Token): Promise<
@@ -991,6 +1019,11 @@ export class TokensService {
     return (
       message.includes('out of gas') || error?.name === 'NodeInvocationError'
     );
+  }
+
+  private isContractNotPresentError(error: any): boolean {
+    const message = `${error?.message || ''} ${error?.reason || ''}`.toLowerCase();
+    return message.includes('contract not found') || message.includes('not_present');
   }
 
   private sleep(ms: number): Promise<void> {
