@@ -71,7 +71,8 @@ export class TransactionProcessorService {
           );
         }
 
-        // Get or create token within transaction
+        // Resolve token first. For buy/sell this may lazily create token by sale
+        // address via TokensService.getToken().
         try {
           transactionToken = await this.tokenService.getToken(saleAddress);
         } catch (error) {
@@ -79,11 +80,17 @@ export class TransactionProcessorService {
         }
 
         if (!transactionToken) {
-          transactionToken =
-            await this.tokenService.createTokenFromRawTransaction(
-              rawTransaction,
-              manager,
+          if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
+            this.logger.warn(
+              `Skipping ${rawTransaction.function} tx ${rawTransaction.hash}: token unavailable for ${saleAddress}`,
             );
+            return null;
+          }
+
+          transactionToken = await this.tokenService.createTokenFromRawTransaction(
+            rawTransaction,
+            manager,
+          );
           if (!transactionToken) {
             throw new Error('Failed to create token');
           }

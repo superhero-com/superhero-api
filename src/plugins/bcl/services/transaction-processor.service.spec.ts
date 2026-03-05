@@ -7,7 +7,7 @@ describe('TransactionProcessorService', () => {
   let validationService: { validateTransaction: jest.Mock };
   let persistenceService: { cleanupOldTransactions: jest.Mock };
   let tokenService: {
-    findByAddress: jest.Mock;
+    getToken: jest.Mock;
     createTokenFromRawTransaction: jest.Mock;
   };
 
@@ -20,7 +20,7 @@ describe('TransactionProcessorService', () => {
     };
 
     tokenService = {
-      findByAddress: jest.fn(),
+      getToken: jest.fn(),
       createTokenFromRawTransaction: jest.fn(),
     };
 
@@ -46,7 +46,7 @@ describe('TransactionProcessorService', () => {
       isValid: true,
       saleAddress: 'ct_missing',
     });
-    tokenService.findByAddress.mockResolvedValue(null);
+    tokenService.getToken.mockResolvedValue(null);
 
     const result = await service.processTransaction(
       {
@@ -57,11 +57,7 @@ describe('TransactionProcessorService', () => {
     );
 
     expect(result).toBeNull();
-    expect(tokenService.findByAddress).toHaveBeenCalledWith(
-      'ct_missing',
-      true,
-      expect.any(Object),
-    );
+    expect(tokenService.getToken).toHaveBeenCalledWith('ct_missing');
     expect(tokenService.createTokenFromRawTransaction).not.toHaveBeenCalled();
   });
 
@@ -70,7 +66,7 @@ describe('TransactionProcessorService', () => {
       isValid: true,
       saleAddress: 'ct_missing',
     });
-    tokenService.findByAddress.mockResolvedValue(null);
+    tokenService.getToken.mockResolvedValue(null);
     tokenService.createTokenFromRawTransaction.mockResolvedValue(null);
 
     const result = await service.processTransaction(
