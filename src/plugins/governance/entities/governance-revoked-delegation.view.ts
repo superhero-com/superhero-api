@@ -56,4 +56,3 @@ export class GovernanceRevokedDelegation {
   @ViewColumn()
   delegator?: string;
 }
-

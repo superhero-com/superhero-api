@@ -1,6 +1,4 @@
-import {
-  MAX_RETRIES_FOR_FAILED_TRANSACTIONS,
-} from '@/configs';
+import { MAX_RETRIES_FOR_FAILED_TRANSACTIONS } from '@/configs';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { fetchJson } from '@/utils/common';

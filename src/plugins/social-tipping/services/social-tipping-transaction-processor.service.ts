@@ -33,6 +33,7 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Tip | null> {
+    void syncDirection;
     try {
       // Validate transaction
       const tipType = this.validateTransaction(tx);
@@ -41,11 +42,9 @@ export class SocialTippingTransactionProcessorService {
       }
 
       // Wrap operations in a transaction for consistency
-      return await this.tipRepository.manager.transaction(
-        async (manager) => {
-          return await this.saveTipFromTransaction(tx, tipType, manager);
-        },
-      );
+      return await this.tipRepository.manager.transaction(async (manager) => {
+        return await this.saveTipFromTransaction(tx, tipType, manager);
+      });
     } catch (error: any) {
       this.logger.error(
         `Failed to process tip transaction ${tx.hash}`,
@@ -58,13 +57,10 @@ export class SocialTippingTransactionProcessorService {
   /**
    * Validate transaction and determine tip type
    */
-  private validateTransaction(
-    tx: Tx,
-  ): false | 'TIP_PROFILE' | 'TIP_POST' {
+  private validateTransaction(tx: Tx): false | 'TIP_PROFILE' | 'TIP_POST' {
     if (!tx || tx.type !== 'SpendTx' || !tx.raw?.payload) {
       return false;
     }
-
 
     try {
       const payloadData = decode(tx.raw.payload).toString();
@@ -92,9 +88,7 @@ export class SocialTippingTransactionProcessorService {
   ): Promise<Tip> {
     const tipRepository = manager.getRepository(Tip);
 
-    const amount = tx?.raw?.amount
-      ? toAe(tx.raw.amount)
-      : '0';
+    const amount = tx?.raw?.amount ? toAe(tx.raw.amount) : '0';
 
     if (!tx.sender_id || !tx.recipient_id) {
       throw new Error(
@@ -109,9 +103,7 @@ export class SocialTippingTransactionProcessorService {
     ]);
 
     if (!senderAccount || !receiverAccount) {
-      throw new Error(
-        `Failed to create accounts for transaction ${tx.hash}`,
-      );
+      throw new Error(`Failed to create accounts for transaction ${tx.hash}`);
     }
 
     // Handle post tip
@@ -161,7 +153,7 @@ export class SocialTippingTransactionProcessorService {
   ): Promise<Account | null> {
     try {
       const accountRepository = manager.getRepository(Account);
-      
+
       // Use upsert to handle duplicate key violations gracefully during parallel processing
       await accountRepository.upsert(
         { address },
@@ -181,4 +173,3 @@ export class SocialTippingTransactionProcessorService {
     }
   }
 }
-

@@ -1,10 +1,14 @@
 import { fetchJson, sanitizeJsonForPostgres } from '@/utils/common';
 import { ITransaction, ITopHeader } from '@/utils/types';
 import { decode } from '@aeternity/aepp-sdk';
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
@@ -44,31 +48,33 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
 
   private setupWebsocketSubscriptions() {
     // Subscribe to transaction updates
-    this.unsubscribeTransactions = this.websocketService.subscribeForTransactionsUpdates(
-      (transaction: ITransaction) => {
-        // Ingore self-transfer transaction
-        if (isSelfTransferTx(transaction)) {
-          return;
-        }
-        // Prevent duplicate transactions
-        if (!this.syncedTransactions.includes(transaction.hash)) {
-          this.handleLiveTransaction(transaction);
-          this.syncedTransactions.push(transaction.hash);
-
-          // Reset synced transactions after 100 transactions
-          if (this.syncedTransactions.length > 100) {
-            this.syncedTransactions = [];
+    this.unsubscribeTransactions =
+      this.websocketService.subscribeForTransactionsUpdates(
+        (transaction: ITransaction) => {
+          // Ingore self-transfer transaction
+          if (isSelfTransferTx(transaction)) {
+            return;
           }
-        }
-      },
-    );
+          // Prevent duplicate transactions
+          if (!this.syncedTransactions.includes(transaction.hash)) {
+            this.handleLiveTransaction(transaction);
+            this.syncedTransactions.push(transaction.hash);
+
+            // Reset synced transactions after 100 transactions
+            if (this.syncedTransactions.length > 100) {
+              this.syncedTransactions = [];
+            }
+          }
+        },
+      );
 
     // Subscribe to key block updates
-    this.unsubscribeKeyBlocks = this.websocketService.subscribeForKeyBlocksUpdates(
-      (keyBlockHeader: ITopHeader) => {
-        this.handleKeyBlock(keyBlockHeader);
-      },
-    );
+    this.unsubscribeKeyBlocks =
+      this.websocketService.subscribeForKeyBlocksUpdates(
+        (keyBlockHeader: ITopHeader) => {
+          this.handleKeyBlock(keyBlockHeader);
+        },
+      );
 
     this.logger.log('Websocket subscriptions established for live indexing');
   }
@@ -81,19 +87,21 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       const savedTx = await this.txRepository.save(mdwTx);
 
       // Process batch for plugins (single tx in array) - live sync
-      await this.pluginBatchProcessor.processBatch([savedTx], SyncDirectionEnum.Live);
-      
+      await this.pluginBatchProcessor.processBatch(
+        [savedTx],
+        SyncDirectionEnum.Live,
+      );
+
       this.logger.debug(`Live sync: saved transaction ${transaction.hash}`);
     } catch (error: any) {
       this.logger.error('Failed to handle live transaction', error);
     }
   }
 
-
   async handleKeyBlock(keyBlockHeader: ITopHeader) {
     try {
       const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
-      
+
       // Fetch full key block details from MDW
       const fullBlock = await fetchJson(
         `${middlewareUrl}/v3/key-blocks/${keyBlockHeader.hash}`,
@@ -121,7 +129,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Fetch and save micro-blocks for this key block
-      await this.fetchAndSaveMicroBlocks(keyBlockHeader.hash, middlewareUrl);
+      await this.fetchAndSaveMicroBlocks(keyBlockHeader.hash);
 
       this.logger.debug(
         `Live sync: saved key block ${keyBlockHeader.hash} at height ${keyBlockHeader.height}`,
@@ -134,14 +142,10 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async fetchAndSaveMicroBlocks(
-    keyBlockHash: string,
-    middlewareUrl: string,
-  ): Promise<void> {
+  private async fetchAndSaveMicroBlocks(keyBlockHash: string): Promise<void> {
     try {
-      const microBlocks = await this.microBlockService.fetchMicroBlocksForKeyBlock(
-        keyBlockHash,
-      );
+      const microBlocks =
+        await this.microBlockService.fetchMicroBlocksForKeyBlock(keyBlockHash);
 
       if (microBlocks.length > 0) {
         await this.microBlockRepository.upsert(microBlocks, {
@@ -160,18 +164,19 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-
   private convertToMdwTx(tx: ITransaction): Partial<Tx> {
     let payload = '';
     if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
       payload = decode(tx?.tx?.payload).toString();
     }
-    
+
     // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
     // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
     const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
-    const sanitizedSignatures = tx.signatures ? sanitizeJsonForPostgres(tx.signatures) : [];
-    
+    const sanitizedSignatures = tx.signatures
+      ? sanitizeJsonForPostgres(tx.signatures)
+      : [];
+
     return {
       hash: tx.hash,
       block_height: tx.blockHeight,
@@ -197,7 +202,10 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
    * Get whether the live indexer is active (websocket subscriptions are established)
    */
   getIsActive(): boolean {
-    return this.unsubscribeTransactions !== null && this.unsubscribeKeyBlocks !== null;
+    return (
+      this.unsubscribeTransactions !== null &&
+      this.unsubscribeKeyBlocks !== null
+    );
   }
 
   onModuleDestroy() {
@@ -210,4 +218,3 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 }
-

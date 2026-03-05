@@ -54,12 +54,13 @@ export class BclAffiliationAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(params);
 
     const start = Date.now();
-    const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] = await Promise.all([
-      this.getDailyRegisteredCounts(startDate, endDate),
-      this.getDailyStatusCounts('claimed', startDate, endDate),
-      this.getDailyStatusCounts('revoked', startDate, endDate),
-      this.getDailyRegisteredAmount(startDate, endDate),
-    ]);
+    const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] =
+      await Promise.all([
+        this.getDailyRegisteredCounts(startDate, endDate),
+        this.getDailyStatusCounts('claimed', startDate, endDate),
+        this.getDailyStatusCounts('revoked', startDate, endDate),
+        this.getDailyRegisteredAmount(startDate, endDate),
+      ]);
 
     const [totals, uniques, amountTotals] = await Promise.all([
       this.getTotals(startDate, endDate),
@@ -137,10 +138,12 @@ export class BclAffiliationAnalyticsService {
       .orderBy('registered_count', 'DESC')
       .addOrderBy('total_amount_ae', 'DESC')
       .limit(limit)
-      .getRawMany<Pick<
-        BclAffiliationTopInviter,
-        'inviter' | 'registered_count' | 'total_amount_ae'
-      >>();
+      .getRawMany<
+        Pick<
+          BclAffiliationTopInviter,
+          'inviter' | 'registered_count' | 'total_amount_ae'
+        >
+      >();
 
     const inviters = rows.map((r) => r.inviter).filter(Boolean);
 
@@ -334,7 +337,10 @@ export class BclAffiliationAnalyticsService {
     const rows = await this.invitationRepo
       .createQueryBuilder('r')
       .select(`to_char(date_trunc('day', r.created_at), 'YYYY-MM-DD')`, 'date')
-      .addSelect(`COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`, 'amount')
+      .addSelect(
+        `COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`,
+        'amount',
+      )
       .where('r.created_at >= :startDate', { startDate })
       .andWhere('r.created_at < :endDate', { endDate })
       .groupBy('date')
@@ -349,7 +355,10 @@ export class BclAffiliationAnalyticsService {
   private async getAmountTotals(startDate: Date, endDate: Date) {
     const row = await this.invitationRepo
       .createQueryBuilder('r')
-      .select(`COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`, 'amount')
+      .select(
+        `COALESCE(SUM(NULLIF(r.amount, '')::numeric), 0)::float`,
+        'amount',
+      )
       .where('r.created_at >= :startDate', { startDate })
       .andWhere('r.created_at < :endDate', { endDate })
       .getRawOne<{ amount: number }>();
@@ -372,8 +381,12 @@ export class BclAffiliationAnalyticsService {
     );
 
     return {
-      startDate: startDate.isValid() ? startDate.toDate() : moment().subtract(14, 'days').toDate(),
-      endDate: endDate.isValid() ? endDate.toDate() : moment().add(1, 'day').toDate(),
+      startDate: startDate.isValid()
+        ? startDate.toDate()
+        : moment().subtract(14, 'days').toDate(),
+      endDate: endDate.isValid()
+        ? endDate.toDate()
+        : moment().add(1, 'day').toDate(),
     };
   }
 

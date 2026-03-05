@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PnlAmountDto, TotalPnlDto, TokenPnlDto } from './pnl-response.dto';
+import { TotalPnlDto, TokenPnlDto } from './pnl-response.dto';
 
 export class PortfolioHistorySnapshotDto {
   @ApiProperty({
@@ -72,10 +72,10 @@ export class PortfolioHistorySnapshotDto {
   total_pnl?: TotalPnlDto;
 
   @ApiProperty({
-    description: 'PNL breakdown per token (included if requested), keyed by token sale_address',
+    description:
+      'PNL breakdown per token (included if requested), keyed by token sale_address',
     type: Object,
     required: false,
   })
   tokens_pnl?: Record<string, TokenPnlDto>;
 }
-

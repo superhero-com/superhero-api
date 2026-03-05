@@ -26,7 +26,10 @@ export class CommunityFactoryService {
       return this.factories[address];
     }
 
-    const factory = await initCommunityFactory(this.aeSdkService.sdk, address);
+    const factory = await initCommunityFactory(
+      this.aeSdkService.sdk as any,
+      address,
+    );
 
     this.factories[address] = factory;
 

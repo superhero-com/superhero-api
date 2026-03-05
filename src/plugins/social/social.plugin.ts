@@ -62,4 +62,3 @@ export class SocialPlugin extends BasePlugin {
     return this.socialPluginSyncService;
   }
 }
-

@@ -159,11 +159,9 @@ export class GovernancePoll {
   @ViewColumn()
   votes_count: number;
 
-
   @ViewColumn()
   votes_revoked_count: number;
 
   @ViewColumn()
   votes_count_by_option?: Record<string, number>;
 }
-

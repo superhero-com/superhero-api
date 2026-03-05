@@ -4,7 +4,6 @@ import { KeyBlock } from '../entities/key-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { EntityConfig } from '@/api-core/types/entity-config.interface';
-import { Field, Int } from '@nestjs/graphql';
 
 export const TX_CONFIG: EntityConfig<Tx> = {
   entity: Tx,
@@ -95,7 +94,14 @@ export const MICRO_BLOCK_CONFIG: EntityConfig<MicroBlock> = {
       },
       isArray: true,
       nullable: false,
-      filterableFields: ['type', 'function', 'sender_id', 'recipient_id', 'contract_id', 'caller_id'],
+      filterableFields: [
+        'type',
+        'function',
+        'sender_id',
+        'recipient_id',
+        'contract_id',
+        'caller_id',
+      ],
       defaultOrderBy: 'micro_index',
       defaultOrderDirection: 'ASC',
     },
@@ -156,7 +162,12 @@ export const KEY_BLOCK_CONFIG: EntityConfig<KeyBlock> = {
       },
       isArray: true,
       nullable: false,
-      filterableFields: ['transactions_count', 'gas', 'version', 'micro_block_index'],
+      filterableFields: [
+        'transactions_count',
+        'gas',
+        'version',
+        'micro_block_index',
+      ],
       defaultOrderBy: 'micro_block_index',
       defaultOrderDirection: 'ASC',
     },
@@ -218,4 +229,3 @@ export const ENTITY_CONFIGS = [
   SYNC_STATE_CONFIG,
   PLUGIN_SYNC_STATE_CONFIG,
 ];
-

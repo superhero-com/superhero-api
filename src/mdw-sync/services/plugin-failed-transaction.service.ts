@@ -5,7 +5,7 @@ import { PluginFailedTransaction } from '../entities/plugin-failed-transaction.e
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { PluginRegistryService } from './plugin-registry.service';
-import { SyncDirection, SyncDirectionEnum } from '../types/sync-direction';
+import { SyncDirectionEnum } from '../types/sync-direction';
 
 @Injectable()
 export class PluginFailedTransactionService {
@@ -198,7 +198,9 @@ export class PluginFailedTransactionService {
   /**
    * Get all failed transactions for a plugin
    */
-  async getFailedTransactions(pluginName: string): Promise<PluginFailedTransaction[]> {
+  async getFailedTransactions(
+    pluginName: string,
+  ): Promise<PluginFailedTransaction[]> {
     return this.failedTransactionRepository.find({
       where: { plugin_name: pluginName },
       order: { created_at: 'DESC' },
@@ -212,7 +214,7 @@ export class PluginFailedTransactionService {
   async checkAndRetryVersionMismatches(): Promise<void> {
     try {
       const plugins = this.pluginRegistryService.getPlugins();
-      
+
       for (const plugin of plugins) {
         const syncState = await this.pluginSyncStateRepository.findOne({
           where: { plugin_name: plugin.name },
@@ -223,7 +225,7 @@ export class PluginFailedTransactionService {
         }
 
         const currentVersion = syncState.version;
-        
+
         // Find failed transactions with older versions
         const failedTxs = await this.failedTransactionRepository.find({
           where: {
@@ -247,7 +249,11 @@ export class PluginFailedTransactionService {
             this.logger.log(
               `[${plugin.name}] Found ${transactions.length} failed transactions from version ${oldVersion}, retrying with version ${currentVersion}`,
             );
-            await this.retryFailedTransactions(plugin.name, oldVersion, currentVersion);
+            await this.retryFailedTransactions(
+              plugin.name,
+              oldVersion,
+              currentVersion,
+            );
           }
         }
       }
@@ -256,4 +262,3 @@ export class PluginFailedTransactionService {
     }
   }
 }
-

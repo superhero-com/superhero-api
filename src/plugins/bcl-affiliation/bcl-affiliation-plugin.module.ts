@@ -21,4 +21,3 @@ import { BclAffiliationTransactionProcessorService } from './services/bcl-affili
   exports: [BclAffiliationPlugin],
 })
 export class BclAffiliationPluginModule {}
-

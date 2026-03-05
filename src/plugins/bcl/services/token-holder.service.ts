@@ -137,11 +137,7 @@ export class TokenHolderService {
           })
           .getCount();
 
-        await this.updateTokenHoldersCount(
-          token,
-          tokenHolderCount,
-          manager,
-        );
+        await this.updateTokenHoldersCount(token, tokenHolderCount, manager);
       }
     } catch (error) {
       this.logger.error('Error updating token holder', error);
@@ -164,4 +160,3 @@ export class TokenHolderService {
     }
   }
 }
-

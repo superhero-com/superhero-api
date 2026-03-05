@@ -2,10 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
-import { Account } from '@/account/entities/account.entity';
 import { Topic } from '@/social/entities/topic.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { IPostContract, ICreatePostData, IPostTypeInfo, ICommentProcessingResult } from '@/social/interfaces/post.interfaces';
+import {
+  IPostContract,
+  ICreatePostData,
+  IPostTypeInfo,
+  ICommentProcessingResult,
+} from '@/social/interfaces/post.interfaces';
 import moment from 'moment';
 
 @Injectable()
@@ -16,8 +20,6 @@ export class PostPersistenceService {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
   ) {}
@@ -173,38 +175,9 @@ export class PostPersistenceService {
   }
 
   /**
-   * Handles bio update for account
-   */
-  async handleBioUpdate(
-    callerId: string,
-    content: string,
-  ): Promise<void> {
-    try {
-      const account = await this.accountRepository.findOne({
-        where: { address: callerId },
-      });
-      if (account) {
-        await this.accountRepository.update(account.address, {
-          bio: content,
-        });
-      } else {
-        await this.accountRepository.save({
-          address: callerId,
-          bio: content,
-        });
-      }
-    } catch (error) {
-      this.logger.error('Error updating or creating account', error);
-    }
-  }
-
-  /**
    * Generates a unique post ID
    */
-  generatePostId(
-    tx: Tx,
-    contract: IPostContract,
-  ): string {
+  generatePostId(tx: Tx, contract: IPostContract): string {
     const returnValue = tx.raw?.return?.value;
     if (returnValue) {
       return `${returnValue}_v${contract.version}`;
@@ -269,7 +242,7 @@ export class PostPersistenceService {
   ): ICreatePostData {
     const id = this.generatePostId(tx, contract);
     const slug = this.generatePostSlug(parsedContent.content, id);
-    
+
     return {
       id: id,
       slug: slug,
@@ -323,4 +296,3 @@ export class PostPersistenceService {
     return content;
   }
 }
-

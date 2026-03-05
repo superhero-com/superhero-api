@@ -76,4 +76,3 @@ export function getActiveContractAddressesDefault(): string[] {
 export function isContractSupportedDefault(address: string): boolean {
   return isContractSupported(POST_CONTRACTS, address);
 }
-

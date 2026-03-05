@@ -71,13 +71,22 @@ export class GovernanceDelegationWithRevokedDto extends GovernanceDelegationDto 
   @ApiProperty({ description: 'Whether this delegation has been revoked' })
   revoked: boolean;
 
-  @ApiProperty({ description: 'Revocation transaction hash if revoked', nullable: true })
+  @ApiProperty({
+    description: 'Revocation transaction hash if revoked',
+    nullable: true,
+  })
   revoked_hash?: string;
 
-  @ApiProperty({ description: 'Revocation block height if revoked', nullable: true })
+  @ApiProperty({
+    description: 'Revocation block height if revoked',
+    nullable: true,
+  })
   revoked_block_height?: number;
 
-  @ApiProperty({ description: 'Revocation timestamp if revoked', nullable: true })
+  @ApiProperty({
+    description: 'Revocation timestamp if revoked',
+    nullable: true,
+  })
   revoked_at?: Date;
 }
 
@@ -115,4 +124,3 @@ export class GovernanceDelegationHistoryItemDto {
   @ApiProperty({ description: 'Delegatee address', nullable: true })
   delegatee?: string;
 }
-

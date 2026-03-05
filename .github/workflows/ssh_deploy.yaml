@@ -50,6 +50,21 @@ on:
       TRENDING_TAGS_API_KEY:
         description: "Trending tags API key"
         required: true
+      X_CLIENT_ID:
+        description: "X-Client-Id for API requests"
+        required: false
+      X_CLIENT_SECRET:
+        description: "X-Client-Secret for API requests"
+        required: false
+      PROFILE_REGISTRY_CONTRACT_ADDRESS:
+        description: "Profile registry contract address"
+        required: false
+      PROFILE_ATTESTATION_SIGNER_ADDRESS:
+        description: "Profile attestation signer address"
+        required: false
+      PROFILE_ATTESTATION_PRIVATE_KEY:
+        description: "Profile attestation signer private key"
+        required: false
 jobs:
   deploy:
     name: Deploy via ssh
@@ -67,6 +82,11 @@ jobs:
           DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
           DB_DATABASE: "${{ secrets.DB_DATABASE }}"
           TRENDING_TAGS_API_KEY: "${{ secrets.TRENDING_TAGS_API_KEY }}"
+          X_CLIENT_ID: "${{ secrets.X_CLIENT_ID }}"
+          X_CLIENT_SECRET: "${{ secrets.X_CLIENT_SECRET }}"
+          PROFILE_REGISTRY_CONTRACT_ADDRESS: "${{ secrets.PROFILE_REGISTRY_CONTRACT_ADDRESS }}"
+          PROFILE_ATTESTATION_SIGNER_ADDRESS: "${{ secrets.PROFILE_ATTESTATION_SIGNER_ADDRESS }}"
+          PROFILE_ATTESTATION_PRIVATE_KEY: "${{ secrets.PROFILE_ATTESTATION_PRIVATE_KEY }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
           username: "${{ secrets.DEPLOY_USERNAME }}"
@@ -79,6 +99,11 @@ jobs:
             API_HOST_PORT,
             HOST_DATA_DIR,
             TRENDING_TAGS_API_KEY,
+            X_CLIENT_ID,
+            X_CLIENT_SECRET,
+            PROFILE_REGISTRY_CONTRACT_ADDRESS,
+            PROFILE_ATTESTATION_SIGNER_ADDRESS,
+            PROFILE_ATTESTATION_PRIVATE_KEY,
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
@@ -98,6 +123,11 @@ jobs:
               -e AE_NETWORK_ID \
               -e DB_DATABASE \
               -e TRENDING_TAGS_API_KEY \
+              -e X_CLIENT_ID \
+              -e X_CLIENT_SECRET \
+              -e PROFILE_REGISTRY_CONTRACT_ADDRESS \
+              -e PROFILE_ATTESTATION_SIGNER_ADDRESS \
+              -e PROFILE_ATTESTATION_PRIVATE_KEY \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
               -e REDIS_PORT=6379 \

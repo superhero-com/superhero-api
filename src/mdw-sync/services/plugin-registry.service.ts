@@ -113,14 +113,19 @@ export class PluginRegistryService implements OnModuleInit {
             );
           } catch (error: any) {
             // Handle race condition: if another process/service created it concurrently
-            if (error.code === '23505' || error.message?.includes('duplicate')) {
+            if (
+              error.code === '23505' ||
+              error.message?.includes('duplicate')
+            ) {
               this.logger.debug(
                 `Sync state for plugin ${plugin.name} was created concurrently, fetching existing state`,
               );
               // Fetch the existing state that was just created
-              const createdState = await this.pluginSyncStateRepository.findOne({
-                where: { plugin_name: plugin.name },
-              });
+              const createdState = await this.pluginSyncStateRepository.findOne(
+                {
+                  where: { plugin_name: plugin.name },
+                },
+              );
               if (createdState) {
                 // Verify it's properly initialized, update if needed
                 const updateData: Partial<PluginSyncState> = {};
@@ -206,10 +211,7 @@ export class PluginRegistryService implements OnModuleInit {
         await plugin.updateTransactions();
         this.logger.log(`[${plugin.name}] Auto-update completed`);
       } catch (error: any) {
-        this.logger.error(
-          `[${plugin.name}] Auto-update failed`,
-          error.stack,
-        );
+        this.logger.error(`[${plugin.name}] Auto-update failed`, error.stack);
         // Continue with other plugins even if one fails
       }
     }

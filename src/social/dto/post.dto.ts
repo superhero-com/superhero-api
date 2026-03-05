@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TopicDto } from './topic.dto';
 import { PostTrendMentionDto } from './post-trend-mention.dto';
+import { PostSenderDto } from './post-sender.dto';
 
 export class PostDto {
   @ApiProperty({
@@ -30,6 +30,12 @@ export class PostDto {
   sender_address: string;
 
   @ApiProperty({
+    description: 'Minimal sender profile info',
+    type: () => PostSenderDto,
+  })
+  sender: PostSenderDto;
+
+  @ApiProperty({
     description: 'Address of the smart contract',
     example: 'ct_2AfnEfCSPx4A6UYXj2XHDqHXcC7EF2bgbp8UN1KPAJDysPJT32',
   })
@@ -46,12 +52,6 @@ export class PostDto {
     example: 'Hello world! This is my first post on the blockchain.',
   })
   content: string;
-
-  @ApiProperty({
-    description: 'Array of topics/hashtags associated with the post',
-    type: () => [TopicDto],
-  })
-  topics: TopicDto[];
 
   @ApiProperty({
     description: 'Trend mentions extracted from #trendName in content',

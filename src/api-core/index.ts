@@ -1,9 +1,9 @@
 /**
  * API Core - Dynamic API Generation System
- * 
+ *
  * This module provides a reusable system for automatically generating
  * REST API endpoints and GraphQL resolvers from TypeORM entities.
- * 
+ *
  * @module api-core
  */
 
@@ -24,4 +24,3 @@ export * from './factories/entity-factory';
 // Base classes (for extension)
 export { createBaseController } from './base/base.controller';
 export { createBaseResolver } from './base/base.resolver';
-

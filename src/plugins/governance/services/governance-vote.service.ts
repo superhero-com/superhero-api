@@ -10,7 +10,6 @@ import { GovernancePoll } from '../entities/governance-poll.view';
 import { GovernancePollVote } from '../entities/governance-poll-vote.view';
 import {
   GovernancePollDto,
-  GovernancePollVoteDto,
   GovernanceVoteDto,
 } from '../dto/governance-vote.dto';
 
@@ -39,9 +38,7 @@ export class GovernanceVoteService {
     });
 
     if (!poll) {
-      throw new NotFoundException(
-        `Poll with address ${pollAddress} not found`,
-      );
+      throw new NotFoundException(`Poll with address ${pollAddress} not found`);
     }
 
     const votes = await this.voteRepository.find({
@@ -55,4 +52,3 @@ export class GovernanceVoteService {
     };
   }
 }
-

@@ -18,7 +18,7 @@ export class PluginBatchProcessorService {
     private failedTransactionService: PluginFailedTransactionService,
     @InjectRepository(PluginSyncState)
     private pluginSyncStateRepository: Repository<PluginSyncState>,
-  ) { }
+  ) {}
 
   /**
    * Process a batch of transactions for all plugins
@@ -213,4 +213,3 @@ export class PluginBatchProcessorService {
     }
   }
 }
-

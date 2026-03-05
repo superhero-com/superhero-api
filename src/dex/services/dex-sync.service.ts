@@ -5,14 +5,9 @@ import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { IMiddlewareRequestConfig } from '@/social/interfaces/post.interfaces';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
-import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
 import { Repository } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
@@ -27,10 +22,12 @@ import { PairHistoryService } from './pair-history.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DexTokenSummaryService } from './dex-token-summary.service';
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 @Injectable()
 export class DexSyncService {
-  routerContract: ContractWithMethods<ContractMethodsBase>;
-  factoryContract: ContractWithMethods<ContractMethodsBase>;
+  routerContract: ContractInstance;
+  factoryContract: ContractInstance;
   constructor(
     @InjectRepository(DexToken)
     private readonly dexTokenRepository: Repository<DexToken>,
@@ -56,11 +53,13 @@ export class DexSyncService {
     console.log('========================');
     // await this.dexPairTransactionRepository.clear();
 
-    // this.routerContract = await this.aeSdkService.sdk.initializeContract({
+    // this.routerContract = await Contract.initialize({
+    //   ...this.aeSdkService.sdk.getContext(),
     //   aci: routerInterface,
     //   address: DEX_CONTRACTS.router as Encoded.ContractAddress,
     // });
-    // this.factoryContract = await this.aeSdkService.sdk.initializeContract({
+    // this.factoryContract = await Contract.initialize({
+    //   ...this.aeSdkService.sdk.getContext(),
     //   aci: factoryInterface,
     //   address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
     // });
@@ -78,6 +77,9 @@ export class DexSyncService {
     }
     const pairTransaction = await this.saveTransaction(transaction);
     if (!pairTransaction) {
+      return;
+    }
+    if (!pairTransaction.pair?.address) {
       return;
     }
     const pairInfo = await this.pairService.findByAddress(
@@ -196,19 +198,23 @@ export class DexSyncService {
     // console.log('transaction.tx.function:', transaction.tx.function);
     let decodedEvents = null;
     try {
-      decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log);
+      decodedEvents = this.routerContract.$decodeEvents(transaction.tx.log, {
+        omitUnknown: true,
+      });
     } catch (error: any) {
       // console.log('routerContract.$decodeEvents error', error?.message);
     }
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       try {
-        decodedEvents = this.factoryContract.$decodeEvents(transaction.tx.log);
+        decodedEvents = this.factoryContract.$decodeEvents(transaction.tx.log, {
+          omitUnknown: true,
+        });
         // console.log('factoryContract.$decodeEvents decodedEvents', decodedEvents);
       } catch (error: any) {
         console.log('factoryContract.$decodeEvents error', error?.message);
       }
     }
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       return null;
     }
     const pairAddress = decodedEvents.find(
@@ -419,38 +425,48 @@ export class DexSyncService {
       pairMintInfo: any;
     },
   ): Promise<PairTransaction> {
-    const existingTransaction = await this.dexPairTransactionRepository
-      .createQueryBuilder('pairTransaction')
-      .where('pairTransaction.tx_hash = :tx_hash', {
+    await this.dexPairTransactionRepository.upsert(
+      {
+        pair: pair,
+        account_address: transaction.tx.callerId,
+        tx_type: transaction.tx.function,
         tx_hash: transaction.hash,
-      })
-      .getOne();
-    if (existingTransaction) {
-      return existingTransaction;
+        block_height: transaction.blockHeight,
+        reserve0: pairInfo.reserve0,
+        reserve1: pairInfo.reserve1,
+        total_supply: new BigNumber(pairInfo.reserve0)
+          .plus(pairInfo.reserve1)
+          .toNumber(),
+        ratio0: new BigNumber(pairInfo.reserve0)
+          .div(pairInfo.reserve1)
+          .toNumber(),
+        ratio1: new BigNumber(pairInfo.reserve1)
+          .div(pairInfo.reserve0)
+          .toNumber(),
+        volume0: pairInfo.volume0,
+        volume1: pairInfo.volume1,
+        swap_info: pairInfo.swapInfo,
+        pair_mint_info: pairInfo.pairMintInfo,
+        created_at: moment(transaction.microTime).toDate(),
+      },
+      {
+        conflictPaths: ['tx_hash'],
+      },
+    );
+
+    const savedTransaction = await this.dexPairTransactionRepository.findOne({
+      where: { tx_hash: transaction.hash },
+      relations: {
+        pair: true,
+      },
+    });
+
+    if (!savedTransaction) {
+      throw new Error(
+        `Failed to create or retrieve transaction ${transaction.hash}`,
+      );
     }
 
-    return this.dexPairTransactionRepository.save({
-      pair: pair,
-      account_address: transaction.tx.callerId,
-      tx_type: transaction.tx.function,
-      tx_hash: transaction.hash,
-      block_height: transaction.blockHeight,
-      reserve0: pairInfo.reserve0,
-      reserve1: pairInfo.reserve1,
-      total_supply: new BigNumber(pairInfo.reserve0)
-        .plus(pairInfo.reserve1)
-        .toNumber(),
-      ratio0: new BigNumber(pairInfo.reserve0)
-        .div(pairInfo.reserve1)
-        .toNumber(),
-      ratio1: new BigNumber(pairInfo.reserve1)
-        .div(pairInfo.reserve0)
-        .toNumber(),
-      volume0: pairInfo.volume0,
-      volume1: pairInfo.volume1,
-      swap_info: pairInfo.swapInfo,
-      pair_mint_info: pairInfo.pairMintInfo,
-      created_at: moment(transaction.microTime).toDate(),
-    });
+    return savedTransaction;
   }
 }

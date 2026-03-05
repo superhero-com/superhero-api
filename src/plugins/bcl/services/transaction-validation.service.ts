@@ -72,4 +72,3 @@ export class TransactionValidationService {
     return { isValid: true, saleAddress };
   }
 }
-

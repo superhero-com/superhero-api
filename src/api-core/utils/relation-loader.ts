@@ -57,11 +57,20 @@ export function checkHasArrayRelations(
     if (relationConfig && relationConfig.isArray) {
       return true;
     }
-    
+
     // Recursively check nested includes
     if (Object.keys(nestedIncludes).length > 0) {
-      const relatedEntityConfig = configRegistry.get(relationConfig!.relatedEntity);
-      if (relatedEntityConfig && checkHasArrayRelations(relatedEntityConfig, nestedIncludes, configRegistry)) {
+      const relatedEntityConfig = configRegistry.get(
+        relationConfig!.relatedEntity,
+      );
+      if (
+        relatedEntityConfig &&
+        checkHasArrayRelations(
+          relatedEntityConfig,
+          nestedIncludes,
+          configRegistry,
+        )
+      ) {
         return true;
       }
     }
@@ -122,7 +131,9 @@ export function applyIncludesToQueryBuilder<T>(
     }
 
     // Get the related entity's config
-    const relatedEntityConfig = configRegistry.get(relationConfig.relatedEntity);
+    const relatedEntityConfig = configRegistry.get(
+      relationConfig.relatedEntity,
+    );
     if (!relatedEntityConfig) {
       // Related entity config not found, skip
       continue;
@@ -138,18 +149,13 @@ export function applyIncludesToQueryBuilder<T>(
     // Build the property path for mapping
     // For root level relations, use rootAlias.relationField (e.g., "micro_block.keyBlock")
     // For nested relations, use parentPath.relationField (e.g., "micro_block.txs.block")
-    const mapPath = depth === 0 
-      ? `${rootAlias}.${relationField}`
-      : parentPath 
-        ? `${parentPath}.${relationField}` 
-        : `${rootAlias}.${relationField}`;
+    const mapPath =
+      depth === 0
+        ? `${rootAlias}.${relationField}`
+        : parentPath
+          ? `${parentPath}.${relationField}`
+          : `${rootAlias}.${relationField}`;
 
-    // Get the related entity's metadata and table name
-    const relatedEntityMetadata = queryBuilder.connection.getMetadata(
-      relationConfig.relatedEntity,
-    );
-    const relatedTableName = relatedEntityMetadata.tableName;
-    
     // Use leftJoinAndMapOne for single relations, leftJoinAndMapMany for array relations
     // Note: leftJoinAndMapOne/leftJoinAndMapMany can accept either entity class or table name string
     // We use the entity class which should work, but if it doesn't, we can fall back to table name
@@ -190,4 +196,3 @@ export function applyIncludesToQueryBuilder<T>(
     }
   }
 }
-

@@ -31,6 +31,8 @@ import { DexModule } from './dex/dex.module';
 import { TipModule } from './tipping/tip.module';
 import { MdwModule } from './mdw-sync/mdw.module';
 import { SyncState } from './mdw-sync/entities/sync-state.entity';
+import { ProfileModule } from './profile/profile.module';
+import { StabilizationModule } from './stabilization/stabilization.module';
 
 @Module({
   imports: [
@@ -81,6 +83,8 @@ import { SyncState } from './mdw-sync/entities/sync-state.entity';
     PostModule,
     DexModule,
     TipModule,
+    ProfileModule,
+    StabilizationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

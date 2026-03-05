@@ -58,4 +58,3 @@ export class SocialTippingPlugin extends BasePlugin {
     return this.socialTippingPluginSyncService;
   }
 }
-

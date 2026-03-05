@@ -65,5 +65,3 @@ export class AccountLeaderboardSnapshot {
   })
   updated_at: Date;
 }
-
-

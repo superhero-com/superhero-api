@@ -2,13 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { SyncDirection, SyncDirectionEnum } from '../../plugin.interface';
+import { SyncDirection } from '../../plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
@@ -32,11 +29,13 @@ interface PairInfo {
   pairMintInfo: any;
 }
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 @Injectable()
 export class DexTransactionProcessorService {
   private readonly logger = new Logger(DexTransactionProcessorService.name);
-  private routerContract: ContractWithMethods<ContractMethodsBase> | null = null;
-  private factoryContract: ContractWithMethods<ContractMethodsBase> | null = null;
+  private routerContract: ContractInstance | null = null;
+  private factoryContract: ContractInstance | null = null;
 
   constructor(
     @InjectRepository(DexToken)
@@ -54,13 +53,15 @@ export class DexTransactionProcessorService {
    */
   private async ensureContractsInitialized(): Promise<void> {
     if (!this.routerContract) {
-      this.routerContract = await this.aeSdkService.sdk.initializeContract({
+      this.routerContract = await Contract.initialize({
+        ...this.aeSdkService.sdk.getContext(),
         aci: routerInterface,
         address: DEX_CONTRACTS.router as Encoded.ContractAddress,
       });
     }
     if (!this.factoryContract) {
-      this.factoryContract = await this.aeSdkService.sdk.initializeContract({
+      this.factoryContract = await Contract.initialize({
+        ...this.aeSdkService.sdk.getContext(),
         aci: factoryInterface,
         address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
       });
@@ -77,6 +78,7 @@ export class DexTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<PairTransaction | null> {
+    void syncDirection;
     try {
       // Check if this is a DEX router transaction
       if (tx.contract_id !== DEX_CONTRACTS.router) {
@@ -94,12 +96,7 @@ export class DexTransactionProcessorService {
       return await this.dexPairTransactionRepository.manager.transaction(
         async (manager) => {
           const pair = await this.saveDexPair(pairInfo, tx, manager);
-          return await this.saveDexPairTransaction(
-            pair,
-            pairInfo,
-            tx,
-            manager,
-          );
+          return await this.saveDexPairTransaction(pair, pairInfo, tx, manager);
         },
       );
     } catch (error: any) {
@@ -133,29 +130,30 @@ export class DexTransactionProcessorService {
     // Ensure contracts are initialized
     await this.ensureContractsInitialized();
 
-
     let decodedEvents = null;
     try {
       if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log);
+        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log, {
+          omitUnknown: true,
+        });
       }
     } catch (error: any) {
       // Try factory contract if router fails
     }
 
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       try {
         if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log);
+          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log, {
+            omitUnknown: true,
+          });
         }
       } catch (error: any) {
-        this.logger.debug(
-          `Failed to decode events for transaction ${tx.hash}`,
-        );
+        this.logger.debug(`Failed to decode events for transaction ${tx.hash}`);
       }
     }
 
-    if (!decodedEvents) {
+    if (!decodedEvents || decodedEvents.length === 0) {
       return null;
     }
 
@@ -366,10 +364,7 @@ export class DexTransactionProcessorService {
 
     // Pull pair data asynchronously (outside transaction)
     this.pairService.pullPairData(pair).catch((error) => {
-      this.logger.error(
-        `Failed to pull pair data for ${pair.address}`,
-        error,
-      );
+      this.logger.error(`Failed to pull pair data for ${pair.address}`, error);
     });
 
     // Update token pairs count
@@ -415,42 +410,50 @@ export class DexTransactionProcessorService {
   ): Promise<PairTransaction> {
     const pairTransactionRepository = manager.getRepository(PairTransaction);
 
-    // Check if transaction already exists
-    const existingTransaction = await pairTransactionRepository.findOne({
-      where: { tx_hash: tx.hash },
-    });
-
-    if (existingTransaction) {
-      return existingTransaction;
-    }
-
     const reserve0Num = new BigNumber(pairInfo.reserve0 || '0').toNumber();
     const reserve1Num = new BigNumber(pairInfo.reserve1 || '0').toNumber();
     const microTime = parseInt(tx.micro_time, 10);
 
-    return await pairTransactionRepository.save({
-      pair: pair,
-      account_address: tx.caller_id || null,
-      tx_type: tx.function || '',
-      tx_hash: tx.hash,
-      block_height: tx.block_height,
-      reserve0: reserve0Num,
-      reserve1: reserve1Num,
-      total_supply: new BigNumber(reserve0Num).plus(reserve1Num).toNumber(),
-      ratio0:
-        reserve1Num > 0
-          ? new BigNumber(reserve0Num).div(reserve1Num).toNumber()
-          : 0,
-      ratio1:
-        reserve0Num > 0
-          ? new BigNumber(reserve1Num).div(reserve0Num).toNumber()
-          : 0,
-      volume0: pairInfo.volume0,
-      volume1: pairInfo.volume1,
-      swap_info: pairInfo.swapInfo,
-      pair_mint_info: pairInfo.pairMintInfo,
-      created_at: moment(microTime).toDate(),
+    await pairTransactionRepository.upsert(
+      {
+        pair: pair,
+        account_address: tx.caller_id || null,
+        tx_type: tx.function || '',
+        tx_hash: tx.hash,
+        block_height: tx.block_height,
+        reserve0: reserve0Num,
+        reserve1: reserve1Num,
+        total_supply: new BigNumber(reserve0Num).plus(reserve1Num).toNumber(),
+        ratio0:
+          reserve1Num > 0
+            ? new BigNumber(reserve0Num).div(reserve1Num).toNumber()
+            : 0,
+        ratio1:
+          reserve0Num > 0
+            ? new BigNumber(reserve1Num).div(reserve0Num).toNumber()
+            : 0,
+        volume0: pairInfo.volume0,
+        volume1: pairInfo.volume1,
+        swap_info: pairInfo.swapInfo,
+        pair_mint_info: pairInfo.pairMintInfo,
+        created_at: moment(microTime).toDate(),
+      },
+      {
+        conflictPaths: ['tx_hash'],
+      },
+    );
+
+    const savedTransaction = await pairTransactionRepository.findOne({
+      where: { tx_hash: tx.hash },
+      relations: {
+        pair: true,
+      },
     });
+
+    if (!savedTransaction) {
+      throw new Error(`Failed to create or retrieve transaction ${tx.hash}`);
+    }
+
+    return savedTransaction;
   }
 }
-

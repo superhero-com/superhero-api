@@ -55,9 +55,10 @@ export class TransactionPersistenceService {
       where: { tx_hash: txData.tx_hash },
     });
     if (!transaction) {
-      throw new Error(`Failed to create or retrieve transaction ${txData.tx_hash}`);
+      throw new Error(
+        `Failed to create or retrieve transaction ${txData.tx_hash}`,
+      );
     }
     return transaction;
   }
 }
-

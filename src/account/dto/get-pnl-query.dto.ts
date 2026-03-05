@@ -15,4 +15,3 @@ export class GetPnlQueryDto {
   @Type(() => Number)
   blockHeight?: number;
 }
-

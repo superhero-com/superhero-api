@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { CoinHistoricalPrice } from '../entities/coin-historical-price.entity';
 
 @Injectable()
@@ -241,9 +241,7 @@ export class CoinHistoricalPriceService {
       }
 
       // Check gap at the end
-      if (
-        existingTimestamps[existingTimestamps.length - 1] < requestedEndMs
-      ) {
+      if (existingTimestamps[existingTimestamps.length - 1] < requestedEndMs) {
         missingRanges.push([
           existingTimestamps[existingTimestamps.length - 1] + 1,
           requestedEndMs,
@@ -282,11 +280,8 @@ export class CoinHistoricalPriceService {
     }
 
     // Convert back to array and sort by timestamp
-    const merged = Array.from(mergedMap.entries()).sort(
-      (a, b) => a[0] - b[0],
-    );
+    const merged = Array.from(mergedMap.entries()).sort((a, b) => a[0] - b[0]);
 
     return merged;
   }
 }
-

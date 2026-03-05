@@ -56,7 +56,10 @@ export class CoinGeckoService {
   rates: CurrencyRates | null = null;
   last_pull_time: Moment;
   private ratesPullInFlight: Promise<void> | null = null;
-  private marketDataInFlight = new Map<string, Promise<CoinGeckoMarketResponse>>();
+  private marketDataInFlight = new Map<
+    string,
+    Promise<CoinGeckoMarketResponse>
+  >();
   private readonly marketCacheKeyPrefix = 'coingecko:market:v1';
 
   /**
@@ -69,11 +72,14 @@ export class CoinGeckoService {
     private historicalPriceService?: CoinHistoricalPriceService,
   ) {
     // Periodic pull with error handling to avoid unhandled promise rejections
-    setInterval(() => {
-      this.pullData().catch((error: unknown) => {
-        this.logger.error('Failed to pull CoinGecko data on interval', error);
-      });
-    }, 1000 * 60 * 5); // 5 minutes
+    setInterval(
+      () => {
+        this.pullData().catch((error: unknown) => {
+          this.logger.error('Failed to pull CoinGecko data on interval', error);
+        });
+      },
+      1000 * 60 * 5,
+    ); // 5 minutes
 
     // Initial pull with guarded error logging
     this.pullData().catch((error: unknown) => {
@@ -99,7 +105,8 @@ export class CoinGeckoService {
     } else {
       // If API fails, try to use cached rates
       try {
-        const cachedRates = await this.cacheManager.get<CurrencyRates>('coingecko:rates');
+        const cachedRates =
+          await this.cacheManager.get<CurrencyRates>('coingecko:rates');
         if (cachedRates) {
           this.logger.log('Using cached currency rates due to API failure');
           this.rates = cachedRates;
@@ -147,7 +154,10 @@ export class CoinGeckoService {
       this.ratesPullInFlight = this.pullData()
         .catch((err: unknown) => {
           // pullData already tries cache + fallback internally; this catch prevents unhandled rejections
-          this.logger.warn('Rates refresh failed (will try cached/fallback)', err);
+          this.logger.warn(
+            'Rates refresh failed (will try cached/fallback)',
+            err,
+          );
         })
         .finally(() => {
           this.ratesPullInFlight = null;
@@ -170,7 +180,10 @@ export class CoinGeckoService {
         return cachedRates;
       }
     } catch (error) {
-      this.logger.warn('Failed to read cached rates in getAeternityRates:', error);
+      this.logger.warn(
+        'Failed to read cached rates in getAeternityRates:',
+        error,
+      );
     }
 
     const fallbackRates = this.getFallbackRates();
@@ -224,9 +237,12 @@ export class CoinGeckoService {
 
     // If rates are still null, try to get from cache or fallback
     if (this.rates === null) {
-      this.logger.warn('CoinGecko rates are null after pullData, trying cache and fallback');
+      this.logger.warn(
+        'CoinGecko rates are null after pullData, trying cache and fallback',
+      );
       try {
-        const cachedRates = await this.cacheManager.get<CurrencyRates>('coingecko:rates');
+        const cachedRates =
+          await this.cacheManager.get<CurrencyRates>('coingecko:rates');
         if (cachedRates) {
           this.logger.log('Using cached rates as fallback');
           this.rates = cachedRates;
@@ -354,13 +370,17 @@ export class CoinGeckoService {
       }
 
       if (marketData.length > 0) {
-        const result = camelcaseKeysDeep(marketData[0]) as CoinGeckoMarketResponse;
+        const result = camelcaseKeysDeep(
+          marketData[0],
+        ) as CoinGeckoMarketResponse;
         this.logger.debug(
           `Fetched CoinGecko market data for ${coinId} in ${currencyCode}`,
         );
         return result;
       }
-      this.logger.warn(`No market data found in CoinGecko response for ${coinId}`);
+      this.logger.warn(
+        `No market data found in CoinGecko response for ${coinId}`,
+      );
       return null;
     } catch (error) {
       this.logger.error(
@@ -390,8 +410,14 @@ export class CoinGeckoService {
     try {
       cached = (await this.cacheManager.get<CachedMarket>(cacheKey)) ?? null;
       const fetchedAtOk =
-        cached && typeof cached.fetchedAt === 'number' && Number.isFinite(cached.fetchedAt);
-      if (cached?.data && fetchedAtOk && Date.now() - cached.fetchedAt <= maxAgeMs) {
+        cached &&
+        typeof cached.fetchedAt === 'number' &&
+        Number.isFinite(cached.fetchedAt);
+      if (
+        cached?.data &&
+        fetchedAtOk &&
+        Date.now() - cached.fetchedAt <= maxAgeMs
+      ) {
         return cached.data;
       }
     } catch (error) {
@@ -453,18 +479,23 @@ export class CoinGeckoService {
       const filePath = join(process.cwd(), 'src', 'data', 'ae-pricing.json');
       const fileContent = readFileSync(filePath, 'utf-8');
       const data = JSON.parse(fileContent);
-      
+
       if (data?.prices && Array.isArray(data.prices)) {
         this.logger.log(
           `Loaded fallback price data from JSON file: ${data.prices.length} price points`,
         );
         return data.prices;
       }
-      
-      this.logger.error('Fallback JSON file does not contain valid prices array');
+
+      this.logger.error(
+        'Fallback JSON file does not contain valid prices array',
+      );
       return [];
     } catch (error) {
-      this.logger.error('Failed to read fallback price data from JSON file:', error);
+      this.logger.error(
+        'Failed to read fallback price data from JSON file:',
+        error,
+      );
       return [];
     }
   }
@@ -519,7 +550,10 @@ export class CoinGeckoService {
           `Found ${dbData.length} price points in database for ${coinId} (${vsCurrency}, ${days}d)`,
         );
       } catch (error) {
-        this.logger.warn(`Failed to query database for historical prices:`, error);
+        this.logger.warn(
+          `Failed to query database for historical prices:`,
+          error,
+        );
       }
     }
 
@@ -545,7 +579,8 @@ export class CoinGeckoService {
           // Latest data is more than 1 hour old, fetch new data
           needsFetch = true;
           // Calculate days needed: from latest timestamp to now
-          const hoursSinceLatest = (endTimeMs - latestTimestamp) / (1000 * 60 * 60);
+          const hoursSinceLatest =
+            (endTimeMs - latestTimestamp) / (1000 * 60 * 60);
           fetchDays = Math.ceil(hoursSinceLatest / 24);
           fetchStartTime = latestTimestamp + 1; // Start from after latest timestamp
         }
@@ -575,7 +610,9 @@ export class CoinGeckoService {
             });
             fetchStartTime = largestRange[0];
             const fetchEndTime = largestRange[1];
-            fetchDays = Math.ceil((fetchEndTime - fetchStartTime) / (1000 * 60 * 60 * 24));
+            fetchDays = Math.ceil(
+              (fetchEndTime - fetchStartTime) / (1000 * 60 * 60 * 24),
+            );
           }
         } catch (error) {
           this.logger.warn(`Failed to check missing data ranges:`, error);
@@ -666,7 +703,8 @@ export class CoinGeckoService {
         if (prices && prices.length > 0) {
           // Filter to only include data in the requested range
           newData = prices.filter(
-            ([timestamp]) => timestamp >= fetchStartTime && timestamp <= endTimeMs,
+            ([timestamp]) =>
+              timestamp >= fetchStartTime && timestamp <= endTimeMs,
           );
 
           // Log first and last price points for debugging
@@ -687,7 +725,10 @@ export class CoinGeckoService {
                 newData,
               );
             } catch (error) {
-              this.logger.error(`Failed to save price data to database:`, error);
+              this.logger.error(
+                `Failed to save price data to database:`,
+                error,
+              );
               // Continue even if save fails
             }
           }
@@ -701,7 +742,10 @@ export class CoinGeckoService {
           return this.readFallbackPriceData();
         }
       } catch (error) {
-        this.logger.warn(`Failed to fetch historical price from CoinGecko:`, error);
+        this.logger.warn(
+          `Failed to fetch historical price from CoinGecko:`,
+          error,
+        );
         // Use database data if available
         if (dbData.length > 0) {
           this.logger.log('Using database data due to CoinGecko fetch failure');

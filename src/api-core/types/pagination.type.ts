@@ -49,4 +49,3 @@ export function PaginatedResponse<TItem>(TItemClass: ClassType<TItem>) {
   }
   return PaginatedResponseClass;
 }
-

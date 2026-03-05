@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PopularRankingContributor, PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
+import {
+  PopularRankingContributor,
+  PopularRankingContentItem,
+} from '@/plugins/popular-ranking.interface';
 import { PopularWindow } from '@/social/services/popular-ranking.service';
 import { GovernancePoll } from '../entities/governance-poll.view';
 
@@ -34,7 +37,8 @@ export class GovernancePopularRankingService implements PopularRankingContributo
       const polls = await queryBuilder.getMany();
 
       return polls.map((poll) => {
-        const metadata = poll.metadata || ({} as { title?: string; description?: string });
+        const metadata =
+          poll.metadata || ({} as { title?: string; description?: string });
         const title = metadata.title || 'Untitled poll';
         const description = metadata.description || '';
         const content = `${title}${description ? ` - ${description}` : ''}`;
@@ -69,4 +73,3 @@ export class GovernancePopularRankingService implements PopularRankingContributo
     }
   }
 }
-

@@ -257,12 +257,12 @@ export class BclPnlService {
       )
       .where('tx.address = :address', { address })
       .andWhere('tx.block_height < :blockHeight', { blockHeight });
-    
+
     // If fromBlockHeight is provided, we need to calculate range-based PNL:
     // - Calculate holdings cumulatively (all transactions up to blockHeight) - represents actual token balance
     // - Calculate cost basis only for tokens bought in the range (>= fromBlockHeight)
     // - This ensures holdings reflect actual balance while PNL reflects range performance
-    
+
     tokenPnlsQuery
       .groupBy('tx.sale_address')
       .having(
@@ -292,12 +292,12 @@ export class BclPnlService {
         ) > 0`,
       )
       .setParameter('blockHeight', blockHeight);
-    
+
     // Set fromBlockHeight parameter if provided (needed for range-based PNL calculations)
     if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
       tokenPnlsQuery.setParameter('fromBlockHeight', fromBlockHeight);
     }
-    
+
     const tokenPnls = await tokenPnlsQuery.getRawMany();
 
     const result: Record<
@@ -324,8 +324,12 @@ export class BclPnlService {
       const totalVolumeSold = Number(tokenPnl.total_volume_sold || 0);
       const totalAmountSpentAe = Number(tokenPnl.total_amount_spent_ae || 0);
       const totalAmountSpentUsd = Number(tokenPnl.total_amount_spent_usd || 0);
-      const totalAmountReceivedAe = Number(tokenPnl.total_amount_received_ae || 0);
-      const totalAmountReceivedUsd = Number(tokenPnl.total_amount_received_usd || 0);
+      const totalAmountReceivedAe = Number(
+        tokenPnl.total_amount_received_ae || 0,
+      );
+      const totalAmountReceivedUsd = Number(
+        tokenPnl.total_amount_received_usd || 0,
+      );
       const currentUnitPriceAe = Number(tokenPnl.current_unit_price_ae || 0);
       const currentUnitPriceUsd = Number(tokenPnl.current_unit_price_usd || 0);
 
@@ -339,13 +343,15 @@ export class BclPnlService {
       // If fromBlockHeight is provided, cost basis should only include tokens bought in the range
       // Cost basis = total amount spent on purchases in range
       // If fromBlockHeight is not provided, use all currentHoldings (cumulative PNL)
-      const costBasisAe = fromBlockHeight !== undefined && fromBlockHeight !== null
-        ? totalAmountSpentAe // Only purchases in range
-        : currentHoldings * averageCostPerTokenAe; // All holdings for cumulative PNL
-      const costBasisUsd = fromBlockHeight !== undefined && fromBlockHeight !== null
-        ? totalAmountSpentUsd // Only purchases in range
-        : currentHoldings * averageCostPerTokenUsd; // All holdings for cumulative PNL
-      
+      const costBasisAe =
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? totalAmountSpentAe // Only purchases in range
+          : currentHoldings * averageCostPerTokenAe; // All holdings for cumulative PNL
+      const costBasisUsd =
+        fromBlockHeight !== undefined && fromBlockHeight !== null
+          ? totalAmountSpentUsd // Only purchases in range
+          : currentHoldings * averageCostPerTokenUsd; // All holdings for cumulative PNL
+
       totalCostBasisAe += costBasisAe;
       totalCostBasisUsd += costBasisUsd;
 
@@ -354,7 +360,7 @@ export class BclPnlService {
       // The range filter (fromBlockHeight) should only affect cost basis and sale proceeds, not current value
       // This ensures accurate portfolio value even when tokens were bought before range and sold within range
       const holdingsForCurrentValue = currentHoldings; // Always use cumulative holdings for current value
-      
+
       const currentValueAe = holdingsForCurrentValue * currentUnitPriceAe;
       const currentValueUsd = holdingsForCurrentValue * currentUnitPriceUsd;
       totalCurrentValueAe += currentValueAe;
@@ -371,25 +377,29 @@ export class BclPnlService {
         // Range-based PNL: calculate value of tokens bought in range that are still held
         // Remaining tokens from range = max(0, totalVolumeBought - totalVolumeSold)
         // But cap at currentHoldings to handle edge cases
-        const remainingFromRange = Math.max(0, Math.min(currentHoldings, totalVolumeBought - totalVolumeSold));
+        const remainingFromRange = Math.max(
+          0,
+          Math.min(currentHoldings, totalVolumeBought - totalVolumeSold),
+        );
         const currentValueFromRangeAe = remainingFromRange * currentUnitPriceAe;
-        const currentValueFromRangeUsd = remainingFromRange * currentUnitPriceUsd;
-        
+        const currentValueFromRangeUsd =
+          remainingFromRange * currentUnitPriceUsd;
+
         // Gain = (proceeds from sales + current value of tokens bought in range) - cost of purchases
-        gainAe = (totalAmountReceivedAe + currentValueFromRangeAe) - costBasisAe;
-        gainUsd = (totalAmountReceivedUsd + currentValueFromRangeUsd) - costBasisUsd;
+        gainAe = totalAmountReceivedAe + currentValueFromRangeAe - costBasisAe;
+        gainUsd =
+          totalAmountReceivedUsd + currentValueFromRangeUsd - costBasisUsd;
       } else {
         // Cumulative PNL: current value - cost basis
         gainAe = currentValueAe - costBasisAe;
         gainUsd = currentValueUsd - costBasisUsd;
       }
-      
+
       totalGainAe += gainAe;
       totalGainUsd += gainUsd;
 
       // Calculate PNL percentage
-      const pnlPercentage =
-        costBasisAe > 0 ? (gainAe / costBasisAe) * 100 : 0;
+      const pnlPercentage = costBasisAe > 0 ? (gainAe / costBasisAe) * 100 : 0;
 
       result[saleAddress] = {
         current_unit_price: {
@@ -423,4 +433,3 @@ export class BclPnlService {
     };
   }
 }
-

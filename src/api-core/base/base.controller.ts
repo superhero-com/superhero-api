@@ -21,10 +21,13 @@ import {
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
-import { EntityConfig, RelationConfig } from '../types/entity-config.interface';
-import { getSortableFields, getSearchableFields } from '../utils/metadata-reader';
+import { EntityConfig } from '../types/entity-config.interface';
+import {
+  getSortableFields,
+  getSearchableFields,
+} from '../utils/metadata-reader';
 import { parseIncludesToTree } from '../utils/includes-parser';
 import {
   applyIncludesToQueryBuilder,
@@ -59,13 +62,19 @@ function buildIncludesDescription(
   const relationNames: string[] = [];
 
   for (const relation of entityConfig.relations) {
-    const relationPath = parentPath ? `${parentPath}.${relation.field}` : relation.field;
+    const relationPath = parentPath
+      ? `${parentPath}.${relation.field}`
+      : relation.field;
     relationNames.push(relationPath);
 
     // Recursively get nested relations if registry is available
     if (configRegistry && depth < 2) {
       const relatedEntityConfig = configRegistry.get(relation.relatedEntity);
-      if (relatedEntityConfig && relatedEntityConfig.relations && relatedEntityConfig.relations.length > 0) {
+      if (
+        relatedEntityConfig &&
+        relatedEntityConfig.relations &&
+        relatedEntityConfig.relations.length > 0
+      ) {
         const nestedNames = buildIncludesDescription(
           relatedEntityConfig,
           configRegistry,
@@ -120,7 +129,9 @@ function limitArrayRelations<T>(
 
     // Recursively process nested includes
     if (Object.keys(nestedIncludes).length > 0) {
-      const relatedEntityConfig = configRegistry.get(relationConfig.relatedEntity);
+      const relatedEntityConfig = configRegistry.get(
+        relationConfig.relatedEntity,
+      );
       if (relatedEntityConfig) {
         for (const item of items) {
           const relationValue = (item as any)[relationField];
@@ -150,19 +161,20 @@ export function createBaseController<T>(
   configRegistry?: EntityConfigRegistry,
 ) {
   const ResponseType = config.dto || config.entity;
-  
+
   // Read sortable and searchable fields from entity metadata
   const sortableFields = getSortableFields(config.entity);
   const searchableFields = getSearchableFields(config.entity);
-  
+
   // Use sortable fields from metadata if orderByFields not provided in config
-  const orderByFields = config.orderByFields || sortableFields.map(f => f.field);
-  
+  const orderByFields =
+    config.orderByFields || sortableFields.map((f) => f.field);
+
   // Build includes description only if relations exist
   const hasRelations = config.relations && config.relations.length > 0;
   let includesDescription = '';
   let exampleRelation = '';
-  
+
   if (hasRelations) {
     const availableRelations = buildIncludesDescription(config, configRegistry);
     const firstRelation = config.relations![0];
@@ -174,10 +186,10 @@ export function createBaseController<T>(
         exampleRelation = `${firstRelation.field},${firstRelation.field}.${relatedConfig.relations[0].field}`;
       }
     }
-    
+
     includesDescription = `Comma-separated list of relations to include. Supports nested relations. Available: ${availableRelations}${exampleRelation ? `. Example: "${exampleRelation}"` : ''}`;
   }
-  
+
   // Build all decorators array
   const allDecorators: Array<MethodDecorator | PropertyDecorator> = [
     ApiQuery({ name: 'page', type: 'number', required: false }),
@@ -187,7 +199,11 @@ export function createBaseController<T>(
       enum: orderByFields.length > 0 ? orderByFields : undefined,
       required: false,
     }),
-    ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false }),
+    ApiQuery({
+      name: 'order_direction',
+      enum: ['ASC', 'DESC'],
+      required: false,
+    }),
     // Only add includes query param if relations exist
     ...(hasRelations
       ? [
@@ -215,10 +231,10 @@ export function createBaseController<T>(
     }),
     ApiOkResponsePaginated(ResponseType),
   ];
-  
+
   // Combine all decorators
   const listAllDecorators = applyDecorators(...allDecorators);
-  
+
   // Build decorators for findOne method
   const findOneDecorators: Array<MethodDecorator | PropertyDecorator> = [
     ApiParam({
@@ -246,9 +262,9 @@ export function createBaseController<T>(
       description: `${config.queryNames.singular} retrieved successfully`,
     }),
   ];
-  
+
   const findOneDecoratorsCombined = applyDecorators(...findOneDecorators);
-  
+
   @Controller(config.routePrefix)
   @ApiTags(config.swaggerTag)
   @ApiExtraModels(ResponseType)
@@ -278,9 +294,7 @@ export function createBaseController<T>(
     ) {
       // Hard limit: maximum 100 items per request
       if (limit > 100) {
-        throw new BadRequestException(
-          'Maximum limit is 100 items per request',
-        );
+        throw new BadRequestException('Maximum limit is 100 items per request');
       }
 
       // Performance monitoring
@@ -288,9 +302,14 @@ export function createBaseController<T>(
       const _queryDate = new Date().toISOString();
 
       // Check if we have array relations that would cause pagination issues
-      const hasArrayRelations = includes && this.configRegistry
-        ? checkHasArrayRelations(config, parseIncludesToTree(includes), this.configRegistry)
-        : false;
+      const hasArrayRelations =
+        includes && this.configRegistry
+          ? checkHasArrayRelations(
+              config,
+              parseIncludesToTree(includes),
+              this.configRegistry,
+            )
+          : false;
 
       let result: any;
 
@@ -298,13 +317,19 @@ export function createBaseController<T>(
         // When we have array relations, we need to use a subquery approach:
         // 1. First get the paginated IDs of parent entities (without joins)
         // 2. Then fetch the full entities with relations using those IDs
-        
+
         // Step 1: Build a query to get paginated parent IDs
         const idQuery = this.repository.createQueryBuilder(config.tableAlias);
-        
+
         // Apply filters from searchable fields
         if (allQueryParams) {
-          const excludedParams = ['page', 'limit', 'order_by', 'order_direction', 'includes'];
+          const excludedParams = [
+            'page',
+            'limit',
+            'order_by',
+            'order_direction',
+            'includes',
+          ];
           for (const searchableField of searchableFields) {
             const filterValue = allQueryParams[searchableField.field];
             if (
@@ -314,7 +339,12 @@ export function createBaseController<T>(
               !excludedParams.includes(searchableField.field)
             ) {
               if (searchableField.resolver) {
-                searchableField.resolver(idQuery, config.tableAlias, searchableField.field, filterValue);
+                searchableField.resolver(
+                  idQuery,
+                  config.tableAlias,
+                  searchableField.field,
+                  filterValue,
+                );
               } else {
                 idQuery.andWhere(
                   `${config.tableAlias}.${searchableField.field} = :${searchableField.field}`,
@@ -331,7 +361,10 @@ export function createBaseController<T>(
         }
 
         // Get paginated IDs
-        const idResult = await paginate(idQuery.select(`${config.tableAlias}.${config.primaryKey}`), { page, limit });
+        const idResult = await paginate(
+          idQuery.select(`${config.tableAlias}.${config.primaryKey}`),
+          { page, limit },
+        );
         const ids = idResult.items.map((item: any) => item[config.primaryKey]);
 
         if (ids.length === 0) {
@@ -344,9 +377,11 @@ export function createBaseController<T>(
 
         // Step 2: Fetch full entities with relations using the paginated IDs
         const query = this.repository.createQueryBuilder(config.tableAlias);
-        
+
         // Filter by the paginated IDs
-        query.where(`${config.tableAlias}.${config.primaryKey} IN (:...ids)`, { ids });
+        query.where(`${config.tableAlias}.${config.primaryKey} IN (:...ids)`, {
+          ids,
+        });
 
         // Apply includes with relations
         const includesTree = parseIncludesToTree(includes!);
@@ -362,9 +397,13 @@ export function createBaseController<T>(
 
         // Reorder entities to match the original pagination order
         // Create a map for O(1) lookup
-        const entityMap = new Map(entities.map((e: any) => [e[config.primaryKey], e]));
+        const entityMap = new Map(
+          entities.map((e: any) => [e[config.primaryKey], e]),
+        );
         // Reorder based on the original ID order
-        const orderedEntities = ids.map((id: any) => entityMap.get(id)).filter(Boolean);
+        const orderedEntities = ids
+          .map((id: any) => entityMap.get(id))
+          .filter(Boolean);
 
         // Adjust pagination metadata to reflect actual item count
         // Some entities may not exist (e.g., due to concurrent deletion),
@@ -396,7 +435,13 @@ export function createBaseController<T>(
 
         // Apply filters from searchable fields
         if (allQueryParams) {
-          const excludedParams = ['page', 'limit', 'order_by', 'order_direction', 'includes'];
+          const excludedParams = [
+            'page',
+            'limit',
+            'order_by',
+            'order_direction',
+            'includes',
+          ];
           for (const searchableField of searchableFields) {
             const filterValue = allQueryParams[searchableField.field];
             if (
@@ -406,7 +451,12 @@ export function createBaseController<T>(
               !excludedParams.includes(searchableField.field)
             ) {
               if (searchableField.resolver) {
-                searchableField.resolver(query, config.tableAlias, searchableField.field, filterValue);
+                searchableField.resolver(
+                  query,
+                  config.tableAlias,
+                  searchableField.field,
+                  filterValue,
+                );
               } else {
                 query.andWhere(
                   `${config.tableAlias}.${searchableField.field} = :${searchableField.field}`,
@@ -428,7 +478,12 @@ export function createBaseController<T>(
       // Limit array relations to 50 items if includes were used
       if (includes && this.configRegistry) {
         const includesTree = parseIncludesToTree(includes);
-        limitArrayRelations(result.items, config, this.configRegistry, includesTree);
+        limitArrayRelations(
+          result.items,
+          config,
+          this.configRegistry,
+          includesTree,
+        );
       }
 
       // Calculate query duration
@@ -480,7 +535,12 @@ export function createBaseController<T>(
       // Limit array relations to 50 items if includes were used
       if (includes && this.configRegistry) {
         const includesTree = parseIncludesToTree(includes);
-        limitArrayRelations([entity], config, this.configRegistry, includesTree);
+        limitArrayRelations(
+          [entity],
+          config,
+          this.configRegistry,
+          includesTree,
+        );
       }
 
       // Calculate query duration
@@ -497,4 +557,3 @@ export function createBaseController<T>(
 
   return BaseController;
 }
-

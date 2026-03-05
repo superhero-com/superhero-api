@@ -1,23 +1,17 @@
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import { Logger } from '@nestjs/common';
 import { PluginFilter, SyncDirection } from './plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
 export abstract class BasePluginSyncService {
   protected abstract readonly logger: Logger;
 
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractWithMethods<ContractMethodsBase>
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
 
-  constructor(
-    protected readonly aeSdkService: AeSdkService,
-  ) { }
+  constructor(protected readonly aeSdkService: AeSdkService) {}
 
   /**
    * Decode transaction logs from tx.raw.log.
@@ -26,6 +20,7 @@ export abstract class BasePluginSyncService {
    * @returns Decoded log data or null if not applicable
    */
   async decodeLogs(tx: Tx): Promise<any | null> {
+    void tx;
     return null;
   }
 
@@ -36,6 +31,7 @@ export abstract class BasePluginSyncService {
    * @returns Decoded data or null if not applicable
    */
   async decodeData(tx: Tx): Promise<any | null> {
+    void tx;
     return null;
   }
 
@@ -44,7 +40,10 @@ export abstract class BasePluginSyncService {
    * @param tx - Transaction to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
-  abstract processTransaction(tx: Tx, syncDirection: SyncDirection): Promise<void>;
+  abstract processTransaction(
+    tx: Tx,
+    syncDirection: SyncDirection,
+  ): Promise<void>;
 
   /**
    * Process a batch of transactions. Default implementation loops through and calls processTransaction.
@@ -91,11 +90,15 @@ export abstract class BasePluginSyncService {
     );
   }
 
-  async getContract(contractAddress: Encoded.ContractAddress, aci: any): Promise<ContractWithMethods<ContractMethodsBase>> {
+  async getContract(
+    contractAddress: Encoded.ContractAddress,
+    aci: any,
+  ): Promise<ContractInstance> {
     if (this.contracts[contractAddress]) {
       return this.contracts[contractAddress];
     }
-    const contract = await this.aeSdkService.sdk.initializeContract({
+    const contract = await Contract.initialize({
+      ...this.aeSdkService.sdk.getContext(),
       aci,
       address: contractAddress as Encoded.ContractAddress,
     });
@@ -103,4 +106,3 @@ export abstract class BasePluginSyncService {
     return contract;
   }
 }
-

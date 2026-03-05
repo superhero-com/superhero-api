@@ -111,7 +111,7 @@ export class Tx {
   @ApiProperty({ required: false })
   @Sortable()
   @Searchable()
-  sender_id?: string; 
+  sender_id?: string;
 
   @Column({ nullable: true })
   @Field({ nullable: true })

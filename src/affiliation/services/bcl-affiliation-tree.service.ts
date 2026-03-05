@@ -47,7 +47,11 @@ export class BclAffiliationTreeService {
       ])
       .where('r.sender_address IS NOT NULL')
       .andWhere('r.invitee_address IS NOT NULL')
-      .getRawMany<{ inviter: string; invitee: string; amount: string | null }>();
+      .getRawMany<{
+        inviter: string;
+        invitee: string;
+        amount: string | null;
+      }>();
 
     // Counts per inviter/invitee
     const inviterRegisteredCount = new Map<string, number>();
@@ -61,9 +65,15 @@ export class BclAffiliationTreeService {
       const invitee = row.invitee;
       const amount = Number(row.amount ?? 0) || 0;
 
-      inviterRegisteredCount.set(inviter, (inviterRegisteredCount.get(inviter) ?? 0) + 1);
+      inviterRegisteredCount.set(
+        inviter,
+        (inviterRegisteredCount.get(inviter) ?? 0) + 1,
+      );
       inviterAmount.set(inviter, (inviterAmount.get(inviter) ?? 0) + amount);
-      inviteeReceivedCount.set(invitee, (inviteeReceivedCount.get(invitee) ?? 0) + 1);
+      inviteeReceivedCount.set(
+        invitee,
+        (inviteeReceivedCount.get(invitee) ?? 0) + 1,
+      );
       total_amount_ae += amount;
 
       const set = inviterInvitees.get(inviter) ?? new Set<string>();
@@ -109,17 +119,20 @@ export class BclAffiliationTreeService {
       const pending_count = registered_count - redeemed_count - revoked_count;
       const amount = inviterAmount.get(inviter) ?? 0;
 
-      const invitees = Array.from(inviterInvitees.get(inviter) ?? []).map((addr) => {
-        return {
-          address: addr,
-          total_invitation_count: 0,
-          total_claimed_invitation_count: 0,
-          total_revoked_invitation_count: 0,
-          total_pending_invitation_count: 0,
-          total_amount_ae: 0,
-          total_received_invitation_count: inviteeReceivedCount.get(addr) ?? 0,
-        } satisfies BclAffiliationTreeAddressStats;
-      });
+      const invitees = Array.from(inviterInvitees.get(inviter) ?? []).map(
+        (addr) => {
+          return {
+            address: addr,
+            total_invitation_count: 0,
+            total_claimed_invitation_count: 0,
+            total_revoked_invitation_count: 0,
+            total_pending_invitation_count: 0,
+            total_amount_ae: 0,
+            total_received_invitation_count:
+              inviteeReceivedCount.get(addr) ?? 0,
+          } satisfies BclAffiliationTreeAddressStats;
+        },
+      );
 
       items.push({
         sender_address: inviter,
@@ -130,7 +143,8 @@ export class BclAffiliationTreeService {
           total_revoked_invitation_count: revoked_count,
           total_pending_invitation_count: pending_count,
           total_amount_ae: amount,
-          total_received_invitation_count: inviteeReceivedCount.get(inviter) ?? 0,
+          total_received_invitation_count:
+            inviteeReceivedCount.get(inviter) ?? 0,
         },
         invitees,
         amount,
@@ -143,12 +157,16 @@ export class BclAffiliationTreeService {
         unique_inviters: uniqueInviters.size,
         unique_invitees: uniqueInvitees.size,
         total_registered: registered.length,
-        total_redeemed: redeemedByInviter.reduce((a, r) => a + Number(r.count || 0), 0),
-        total_revoked: revokedByInviter.reduce((a, r) => a + Number(r.count || 0), 0),
+        total_redeemed: redeemedByInviter.reduce(
+          (a, r) => a + Number(r.count || 0),
+          0,
+        ),
+        total_revoked: revokedByInviter.reduce(
+          (a, r) => a + Number(r.count || 0),
+          0,
+        ),
         total_amount_ae,
       },
     };
   }
 }
-
-

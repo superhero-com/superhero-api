@@ -261,16 +261,14 @@ export class TransactionService {
     };
   }
 
-  async decodeTxEvents(
-    token: Token,
-    tx: Tx,
-    retries = 0,
-  ): Promise<Tx> {
+  async decodeTxEvents(token: Token, tx: Tx, retries = 0): Promise<Tx> {
     try {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      const decodedData = factory.contract.$decodeEvents(tx.raw.log);
+      const decodedData = factory.contract.$decodeEvents(tx.raw.log, {
+        omitUnknown: true,
+      });
 
       return {
         ...tx,
@@ -305,7 +303,12 @@ export class TransactionService {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      const decodedData = factory.contract.$decodeEvents(rawTransaction.tx.log);
+      const decodedData = factory.contract.$decodeEvents(
+        rawTransaction.tx.log,
+        {
+          omitUnknown: true,
+        },
+      );
 
       return {
         ...rawTransaction,

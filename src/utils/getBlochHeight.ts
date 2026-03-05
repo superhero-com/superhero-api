@@ -216,14 +216,9 @@ export async function timestampToAeHeight(
   previousHeight?: number,
   dataSource?: DataSource,
 ): Promise<number> {
-  let requestCount = 0;
-  let binarySearchIterations = 0;
-  let sanityCheckIterations = 0;
-
   const targetDate = new Date(targetMs);
-  
+
   // Request 1: Get top block (cached)
-  requestCount++;
   const top = await getTop();
 
   // Check if target is within 48 hours of current time to determine precision
@@ -232,8 +227,8 @@ export async function timestampToAeHeight(
   const useHourPrecision = timeDiff >= 0 && timeDiff <= hours48Ms;
 
   // Use hour-level precision if within 48 hours, otherwise use day-level precision
-  const targetTimestampMs = useHourPrecision 
-    ? targetMs 
+  const targetTimestampMs = useHourPrecision
+    ? targetMs
     : (() => {
         // Convert to end of day for day-level precision
         const endOfDay = new Date(targetDate);
@@ -253,7 +248,11 @@ export async function timestampToAeHeight(
   let guess: number | null = null;
 
   if (dataSource) {
-    guess = await getApproximateBlockHeightFromDB(targetMs, dataSource, useHourPrecision);
+    guess = await getApproximateBlockHeightFromDB(
+      targetMs,
+      dataSource,
+      useHourPrecision,
+    );
   }
 
   if (guess) {
@@ -264,14 +263,15 @@ export async function timestampToAeHeight(
   // For sequential timestamps, we can estimate based on typical interval
   if (!guess && previousHeight) {
     // Request 2: Get recent blocks for median interval calculation (cached)
-    requestCount++;
     const intervalMs = await getRecentMedianIntervalMs(33); // ~32 recent intervals
 
     // Calculate time difference from previous timestamp
     // If previousHeight was used, we need to estimate based on time difference
     // For now, use a conservative estimate if we don't have the previous timestamp
     const estimatedBlocks = Math.floor(
-      (targetTimestampMs - (top.time - (top.height - previousHeight) * intervalMs)) / intervalMs,
+      (targetTimestampMs -
+        (top.time - (top.height - previousHeight) * intervalMs)) /
+        intervalMs,
     );
     guess = previousHeight + estimatedBlocks;
   }
@@ -279,7 +279,6 @@ export async function timestampToAeHeight(
   // If still no guess, use linear estimate from tip
   if (!guess) {
     // Request 2: Get recent blocks for median interval calculation (cached)
-    requestCount++;
     const intervalMs = await getRecentMedianIntervalMs(33); // ~32 recent intervals
 
     // Linear estimate from tip:
@@ -314,10 +313,8 @@ export async function timestampToAeHeight(
 
   // Binary search within [low, high] - looking for block at target timestamp
   while (low < high) {
-    binarySearchIterations++;
     const mid = Math.floor((low + high + 1) / 2);
 
-    requestCount++;
     const { time } = await getKeyBlock(mid);
 
     if (time <= targetTimestampMs) {
@@ -332,14 +329,11 @@ export async function timestampToAeHeight(
   // Sanity check and correct by stepping back if needed.
   // (Usually unnecessary; left as defensive guard.)
   try {
-    requestCount++;
     let { time: lowTime } = await getKeyBlock(low);
 
     while (low > 1 && lowTime > targetTimestampMs) {
-      sanityCheckIterations++;
       low--;
 
-      requestCount++;
       lowTime = (await getKeyBlock(low)).time;
     }
   } catch (error) {
@@ -350,13 +344,12 @@ export async function timestampToAeHeight(
     // Continue with current low value
   }
 
-  const totalIterations = binarySearchIterations + sanityCheckIterations;
-//   console.log(
-//     `[timestampToAeHeight] Final result: block height ${low} for timestamp ${targetDate.toISOString()} (${new Date(targetTimestampMs).toISOString()})`,
-//   );
-//   console.log(
-//     `[timestampToAeHeight] Summary: ${totalIterations} total iterations (${binarySearchIterations} binary search + ${sanityCheckIterations} sanity check), ${requestCount} total API requests`,
-//   );
+  //   console.log(
+  //     `[timestampToAeHeight] Final result: block height ${low} for timestamp ${targetDate.toISOString()} (${new Date(targetTimestampMs).toISOString()})`,
+  //   );
+  //   console.log(
+  //     `[timestampToAeHeight] Summary: ${totalIterations} total iterations (${binarySearchIterations} binary search + ${sanityCheckIterations} sanity check), ${requestCount} total API requests`,
+  //   );
 
   return low;
 }

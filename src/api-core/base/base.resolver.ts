@@ -1,23 +1,25 @@
 import 'reflect-metadata';
-import { Resolver, Query, Args, Int, ResolveField, Parent } from '@nestjs/graphql';
+import {
+  Resolver,
+  Query,
+  Args,
+  Int,
+  ResolveField,
+  Parent,
+} from '@nestjs/graphql';
 import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
-import { Inject, Optional, forwardRef } from '@nestjs/common';
+import { Inject, Optional } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { PaginatedResponse } from '../types/pagination.type';
-import { EntityConfig, RelationConfig } from '../types/entity-config.interface';
-import { getSortableFields, getSearchableFields } from '../utils/metadata-reader';
+import { EntityConfig } from '../types/entity-config.interface';
 
 export function createBaseResolver<T>(config: EntityConfig<T>) {
   const PaginatedResponseType = PaginatedResponse(config.entity);
-  
-  // Read sortable and searchable fields from entity metadata
-  const sortableFields = getSortableFields(config.entity);
-  const searchableFields = getSearchableFields(config.entity);
 
   // Collect all unique related entity types for repository injection
   const relatedEntityTypes = config.relations
-    ? Array.from(new Set(config.relations.map(r => r.relatedEntity)))
+    ? Array.from(new Set(config.relations.map((r) => r.relatedEntity)))
     : [];
 
   @Resolver(() => config.entity)
@@ -35,7 +37,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
     ) {
       this.repository = repository;
       this.relatedRepositories = new Map<Function, Repository<any>>();
-      
+
       // Map related repositories by entity type (only use the ones that exist)
       const repos = [repo0, repo1, repo2, repo3, repo4];
       relatedEntityTypes.forEach((entityType, index) => {
@@ -82,9 +84,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
       name: config.queryNames.singular,
       nullable: true,
     })
-    async findOne(
-      @Args(config.primaryKey, { type: () => String }) id: string,
-    ) {
+    async findOne(@Args(config.primaryKey, { type: () => String }) id: string) {
       return this.repository.findOne({
         where: { [config.primaryKey]: id } as any,
       });
@@ -93,18 +93,23 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
 
   // Apply parameter decorators for repository injection
   InjectRepository(config.entity)(BaseResolver, undefined, 0);
-  
+
   // Apply @Optional() to all optional repository parameters (1-5) so NestJS knows they're optional
   // This prevents NestJS from trying to resolve them when they don't have @Inject() decorators
   for (let i = 1; i <= 5; i++) {
     Optional()(BaseResolver, undefined, i);
   }
-  
+
   // Apply @Inject() decorators only for parameters that actually have related entity types
   relatedEntityTypes.forEach((entityType, index) => {
     const paramIndex = index + 1;
-    if (paramIndex <= 5) { // Only support up to 5 related repositories
-      Inject(getRepositoryToken(entityType))(BaseResolver, undefined, paramIndex);
+    if (paramIndex <= 5) {
+      // Only support up to 5 related repositories
+      Inject(getRepositoryToken(entityType))(
+        BaseResolver,
+        undefined,
+        paramIndex,
+      );
     }
   });
 
@@ -112,26 +117,37 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
   if (config.relations && config.relations.length > 0) {
     config.relations.forEach((relation) => {
       const resolveMethodName = `resolve${relation.field.charAt(0).toUpperCase() + relation.field.slice(1)}`;
-      
+
       if (relation.isArray) {
         // Array relation (OneToMany) - create resolver function with explicit parameters
         // We need explicit parameters (not rest params) so GraphQL can read metadata
         // Build the function dynamically with explicit parameters for each filterable field
-        
+
         // Create resolver function with explicit parameters for filterable fields
         // We need explicit parameters (not rest params) so GraphQL can read metadata
         const filterableFields = relation.filterableFields || [];
-        
+
         // Build parameter mapping for reserved keywords (e.g., 'function' -> 'function_')
         const paramMapping: Record<string, string> = {};
-        filterableFields.forEach(f => {
+        filterableFields.forEach((f) => {
           // JavaScript reserved keywords that can't be used as parameter names
-          const reservedKeywords = ['function', 'class', 'return', 'if', 'else', 'for', 'while', 'var', 'let', 'const'];
+          const reservedKeywords = [
+            'function',
+            'class',
+            'return',
+            'if',
+            'else',
+            'for',
+            'while',
+            'var',
+            'let',
+            'const',
+          ];
           if (reservedKeywords.includes(f)) {
             paramMapping[f] = `${f}_`;
           }
         });
-        
+
         // Build parameter list for the function signature (plain JavaScript, no TypeScript types)
         const paramList = [
           'parent',
@@ -139,9 +155,9 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           'offset = 0',
           'orderBy',
           'orderDirection',
-          ...filterableFields.map(f => paramMapping[f] || f)
+          ...filterableFields.map((f) => paramMapping[f] || f),
         ].join(', ');
-        
+
         // Build function body with proper parameter name references
         // Use mapped parameter names for reserved keywords, but keep original field names for DB columns
         // Note: Must use plain JavaScript (no TypeScript syntax like 'as any')
@@ -167,15 +183,17 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
             { parentValue },
           );
 
-          ${filterableFields.map(field => {
-            const paramName = paramMapping[field] || field;
-            return `
+          ${filterableFields
+            .map((field) => {
+              const paramName = paramMapping[field] || field;
+              return `
           if (${paramName} !== undefined && ${paramName} !== null && ${paramName} !== '') {
             query.andWhere(\`\${tableAlias}.${field} = :${field}\`, {
               ${field}: ${paramName},
             });
           }`;
-          }).join('')}
+            })
+            .join('')}
 
           if (orderBy) {
             query.orderBy(
@@ -192,18 +210,18 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           query.limit(limit).offset(offset);
           return query.getMany();
         `;
-        
+
         // Create function using Function constructor with closure variables passed as parameters
         const resolverImpl = new Function(
           'relation',
           'BaseResolver',
           'T',
-          `return async function(${paramList}) {${functionBody}}`
+          `return async function(${paramList}) {${functionBody}}`,
         )(relation, BaseResolver, config.entity);
-        
+
         // Assign implementation to prototype first
         (BaseResolver.prototype as any)[resolveMethodName] = resolverImpl;
-        
+
         // Set parameter type metadata manually so GraphQL can read it
         // This must be set after the function is assigned to the prototype
         const paramTypes: any[] = [
@@ -213,41 +231,57 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           Number, // offset
           String, // orderBy
           String, // orderDirection
-          ...filterableFields.map(() => String) // filterable fields
+          ...filterableFields.map(() => String), // filterable fields
         ];
-        
+
         // Set metadata on both the prototype method and the function itself
-        Reflect.defineMetadata('design:paramtypes', paramTypes, BaseResolver.prototype, resolveMethodName);
+        Reflect.defineMetadata(
+          'design:paramtypes',
+          paramTypes,
+          BaseResolver.prototype,
+          resolveMethodName,
+        );
         Reflect.defineMetadata('design:paramtypes', paramTypes, resolverImpl);
 
         // Apply decorators: @ResolveField and @Args for each parameter
         // We need to apply @Parent and @Args decorators to the method parameters
-        const descriptor = Object.getOwnPropertyDescriptor(BaseResolver.prototype, resolveMethodName) || {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          BaseResolver.prototype,
+          resolveMethodName,
+        ) || {
           value: resolverImpl,
           writable: true,
           enumerable: true,
           configurable: true,
         };
-        ResolveField(() => relation.returnType(), { 
+        ResolveField(() => relation.returnType(), {
           name: relation.field,
           nullable: relation.nullable || false,
         })(BaseResolver.prototype, resolveMethodName, descriptor);
 
         // Apply @Parent decorator to first parameter
         Parent()(BaseResolver.prototype, resolveMethodName, 0);
-        
+
         // Apply @Args decorators for standard parameters
         Args('limit', { type: () => Int, nullable: true, defaultValue: 100 })(
-          BaseResolver.prototype, resolveMethodName, 1
+          BaseResolver.prototype,
+          resolveMethodName,
+          1,
         );
         Args('offset', { type: () => Int, nullable: true, defaultValue: 0 })(
-          BaseResolver.prototype, resolveMethodName, 2
+          BaseResolver.prototype,
+          resolveMethodName,
+          2,
         );
         Args('orderBy', { type: () => String, nullable: true })(
-          BaseResolver.prototype, resolveMethodName, 3
+          BaseResolver.prototype,
+          resolveMethodName,
+          3,
         );
         Args('orderDirection', { type: () => String, nullable: true })(
-          BaseResolver.prototype, resolveMethodName, 4
+          BaseResolver.prototype,
+          resolveMethodName,
+          4,
         );
 
         // Apply @Args decorators for filterableFields
@@ -255,19 +289,25 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           relation.filterableFields.forEach((field, index) => {
             const paramIndex = 5 + index;
             Args(field, { type: () => String, nullable: true })(
-              BaseResolver.prototype, resolveMethodName, paramIndex
+              BaseResolver.prototype,
+              resolveMethodName,
+              paramIndex,
             );
           });
         }
       } else {
         // Single relation (ManyToOne/OneToOne)
-        const resolverImpl = async function(this: BaseResolver, parent: T) {
+        const resolverImpl = async function (this: BaseResolver, parent: T) {
           const repo = this.relatedRepositories.get(relation.relatedEntity);
           if (!repo) {
-            throw new Error(`Repository for ${relation.relatedEntity.name} not found`);
+            throw new Error(
+              `Repository for ${relation.relatedEntity.name} not found`,
+            );
           }
 
-          const parentValue = (parent as any)[relation.joinCondition.parentField];
+          const parentValue = (parent as any)[
+            relation.joinCondition.parentField
+          ];
           if (parentValue === undefined || parentValue === null) {
             return relation.nullable ? null : undefined;
           }
@@ -280,7 +320,10 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
         (BaseResolver.prototype as any)[resolveMethodName] = resolverImpl;
 
         // Apply ResolveField and Parent decorators
-        const descriptor = Object.getOwnPropertyDescriptor(BaseResolver.prototype, resolveMethodName) || {
+        const descriptor = Object.getOwnPropertyDescriptor(
+          BaseResolver.prototype,
+          resolveMethodName,
+        ) || {
           value: resolverImpl,
           writable: true,
           enumerable: true,
@@ -290,7 +333,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           name: relation.field,
           nullable: relation.nullable !== false,
         })(BaseResolver.prototype, resolveMethodName, descriptor);
-        
+
         Parent()(BaseResolver.prototype, resolveMethodName, 0);
       }
     });

@@ -10,9 +10,6 @@ import { ACTIVE_NETWORK, TRENDING_SCORE_CONFIG } from '@/configs';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
 import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
@@ -26,7 +23,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 
 type TokenContracts = {
   instance?: TokenSale;
-  tokenContractInstance?: ContractWithMethods<ContractMethodsBase>;
+  tokenContractInstance?: any;
   token?: Token;
   lastUsedAt?: number;
 };
@@ -65,6 +62,12 @@ interface TrendingMetrics {
 @Injectable()
 export class TokensService {
   private readonly logger = new Logger(TokensService.name);
+  private readonly contractCallTimeoutMs = Number(
+    process.env.TOKEN_CONTRACT_CALL_TIMEOUT_MS || 30_000,
+  );
+  private readonly maxHoldersPages = Number(
+    process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
+  );
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
   constructor(
@@ -225,9 +228,10 @@ export class TokensService {
     if (token.address) {
       return token.address;
     }
-    const { instance } = await this.getTokenContractsBySaleAddress(
+    const contracts = await this.getTokenContractsBySaleAddress(
       token.sale_address as Encoded.ContractAddress,
     );
+    const instance = contracts?.instance;
     if (!instance) {
       return null;
     }
@@ -293,7 +297,9 @@ export class TokensService {
     });
     const newToken = await this.findByAddress(saleAddress);
     if (!newToken) {
-      throw new Error(`Failed to create or retrieve token for sale address: ${saleAddress}`);
+      throw new Error(
+        `Failed to create or retrieve token for sale address: ${saleAddress}`,
+      );
     }
     const factoryAddress = await this.updateTokenFactoryAddress(newToken);
 
@@ -366,7 +372,7 @@ export class TokensService {
     }
     try {
       const { instance } = await initTokenSale(
-        this.aeSdkService.sdk,
+        this.aeSdkService.sdk as any,
         saleAddress,
       );
       const tokenContractInstance = await instance?.tokenContractInstance();
@@ -429,7 +435,7 @@ export class TokensService {
       instance
         .price(1)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch((error) => {
+        .catch(() => {
           return new BigNumber(0);
         }),
       instance
@@ -437,7 +443,7 @@ export class TokensService {
         // @ts-ignore
         .sellReturn?.('1' as string)
         .then((res: string) => new BigNumber(res || '0'))
-        .catch((error) => {
+        .catch(() => {
           return new BigNumber(0);
         }),
       instance.metaInfo().catch((error) => {
@@ -767,7 +773,18 @@ export class TokensService {
     const aex9Address =
       token?.address || (await this.getTokenAex9Address(token));
 
-    const totalHolders = await this._loadHoldersData(token, aex9Address);
+    const { holders: totalHolders, truncated } = await this._loadHoldersData(
+      token,
+      aex9Address,
+    );
+
+    if (truncated) {
+      this.logger.warn(
+        `SyncTokenHoldersQueue: skipping save for ${aex9Address} (partial data, max pages reached); holders_count unchanged`,
+      );
+      return;
+    }
+
     if (totalHolders.length > 0) {
       await this.tokenHoldersRepository.delete({
         aex9_address: aex9Address,
@@ -779,11 +796,25 @@ export class TokensService {
     });
   }
 
-  async _loadHoldersData(token: Token, aex9Address: string) {
+  async _loadHoldersData(
+    token: Token,
+    aex9Address: string,
+  ): Promise<{
+    holders: Array<{
+      id: string;
+      aex9_address: string;
+      address: string;
+      balance: BigNumber;
+    }>;
+    truncated: boolean;
+  }> {
     const _holders = await this._loadHoldersFromContract(token, aex9Address);
     if (_holders.length > 0) {
-      return _holders;
+      return { holders: _holders, truncated: false };
     }
+    this.logger.warn(
+      `SyncTokenHoldersQueue: falling back to middleware balances for ${aex9Address}`,
+    );
     return this.loadData(
       token,
       aex9Address,
@@ -795,16 +826,37 @@ export class TokensService {
     token: Token,
     aex9Address: string,
     url: string,
-    totalHolders = [],
-  ) {
+    totalHolders: Array<{
+      id: string;
+      aex9_address: string;
+      address: string;
+      balance: BigNumber;
+    }> = [],
+    page = 1,
+  ): Promise<{
+    holders: Array<{
+      id: string;
+      aex9_address: string;
+      address: string;
+      balance: BigNumber;
+    }>;
+    truncated: boolean;
+  }> {
     try {
+      if (page > this.maxHoldersPages) {
+        this.logger.error(
+          `SyncTokenHoldersQueue:max pages reached for ${aex9Address} (${this.maxHoldersPages})`,
+        );
+        return { holders: totalHolders, truncated: true };
+      }
+
       const response = await fetchJson(url);
       if (!response.data) {
         this.logger.error(
           `SyncTokenHoldersQueue:failed to load data from url::${url}`,
         );
         this.logger.error(`SyncTokenHoldersQueue:response::`, response);
-        return totalHolders;
+        return { holders: totalHolders, truncated: totalHolders.length > 0 };
       }
       const holders = response.data.filter((item) => item.amount > 0);
       this.logger.debug(
@@ -843,42 +895,106 @@ export class TokensService {
           aex9Address,
           `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
           totalHolders,
+          page + 1,
         );
       }
 
-      return totalHolders;
+      return { holders: totalHolders, truncated: false };
     } catch (error: any) {
       this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
-      return totalHolders;
+      return {
+        holders: totalHolders,
+        truncated: totalHolders.length > 0,
+      };
     }
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
-    try {
-      const { tokenContractInstance } =
-        await this.getTokenContractsBySaleAddress(
-          token.sale_address as Encoded.ContractAddress,
-        );
-      const holderBalances = await tokenContractInstance.balances();
-      const holders = Array.from(holderBalances.decodedResult)
-        .map(([key, value]: any) => ({
-          id: `${key}_${aex9Address}`,
-          aex9_address: aex9Address,
-          address: key,
-          balance: new BigNumber(value),
-        }))
-        .filter((item) => item.balance.gt(0))
-        .sort((a, b) => b.balance.minus(a.balance).toNumber());
+    const maxAttempts = 3;
 
-      return holders || [];
-    } catch (error: any) {
-      this.logger.error(
-        `SyncTokenHoldersQueue->_loadHoldersFromContract:failed to load holders from contract`,
-        error,
-        error.stack,
-      );
-      return [];
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const { tokenContractInstance } =
+          await this.getTokenContractsBySaleAddress(
+            token.sale_address as Encoded.ContractAddress,
+          );
+        const holderBalances = await this.withTimeout<any>(
+          tokenContractInstance.balances(),
+          this.contractCallTimeoutMs,
+          `balances() timeout for ${aex9Address}`,
+        );
+        const holders = Array.from(holderBalances.decodedResult)
+          .map(([key, value]: any) => ({
+            id: `${key}_${aex9Address}`,
+            aex9_address: aex9Address,
+            address: key,
+            balance: new BigNumber(value),
+          }))
+          .filter((item) => item.balance.gt(0))
+          .sort((a, b) => b.balance.minus(a.balance).toNumber());
+
+        return holders || [];
+      } catch (error: any) {
+        const isOutOfGasError = this.isOutOfGasError(error);
+        const isTimeoutError = error?.message?.includes('timeout');
+
+        if (isOutOfGasError) {
+          this.logger.warn(
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: out of gas for ${aex9Address}, switching to middleware`,
+          );
+          return [];
+        }
+
+        if (attempt < maxAttempts) {
+          const waitMs = 500 * attempt;
+          this.logger.warn(
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: attempt ${attempt}/${maxAttempts} failed for ${aex9Address}${isTimeoutError ? ' (timeout)' : ''}, retrying in ${waitMs}ms`,
+          );
+          await this.sleep(waitMs);
+          continue;
+        }
+
+        this.logger.error(
+          `SyncTokenHoldersQueue->_loadHoldersFromContract:failed to load holders from contract`,
+          error,
+          error.stack,
+        );
+        return [];
+      }
     }
+
+    return [];
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    errorMessage: string,
+  ): Promise<T> {
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error(errorMessage)),
+        timeoutMs,
+      );
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+  }
+
+  private isOutOfGasError(error: any): boolean {
+    const message = error?.message?.toLowerCase?.() || '';
+    return (
+      message.includes('out of gas') || error?.name === 'NodeInvocationError'
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

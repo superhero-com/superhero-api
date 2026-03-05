@@ -72,6 +72,3 @@ export class DexPlugin extends BasePlugin {
     return this.dexPluginSyncService;
   }
 }
-
-
-

@@ -61,4 +61,3 @@ export class GovernanceDelegation {
   @ViewColumn()
   delegatee?: string;
 }
-

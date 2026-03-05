@@ -21,7 +21,12 @@ export function parseIncludes(includesString: string): string[][] {
     .split(',')
     .map((path) => path.trim())
     .filter((path) => path.length > 0)
-    .map((path) => path.split('.').map((segment) => segment.trim()).filter((segment) => segment.length > 0));
+    .map((path) =>
+      path
+        .split('.')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0),
+    );
 }
 
 /**
@@ -54,4 +59,3 @@ export function parseIncludesToTree(includesString: string): IncludesTree {
   const parsed = parseIncludes(includesString);
   return buildIncludesTree(parsed);
 }
-

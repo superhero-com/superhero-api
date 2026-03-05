@@ -20,7 +20,9 @@ describe('fetchJson', () => {
     const result = await fetchJson('https://api.example.com/data');
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.example.com/data',
-      undefined,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(result).toEqual(mockData);
   });
@@ -33,7 +35,9 @@ describe('fetchJson', () => {
     const result = await fetchJson('https://api.example.com/no-content');
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.example.com/no-content',
-      undefined,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(result).toBeNull();
   });
@@ -52,21 +56,50 @@ describe('fetchJson', () => {
     const result = await fetchJson('https://api.example.com/data', mockOptions);
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.example.com/data',
-      mockOptions,
+      expect.objectContaining({
+        ...mockOptions,
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(result).toEqual(mockData);
   });
 
   it('should throw an error if fetch fails', async () => {
+    jest.useFakeTimers();
     (global.fetch as jest.Mock).mockRejectedValue(new Error('Network Error'));
+    const request = fetchJson('https://api.example.com/error');
 
-    await expect(fetchJson('https://api.example.com/error')).rejects.toThrow(
-      'Network Error',
-    );
+    const expectation = expect(request).rejects.toThrow('Network Error');
+    await jest.runAllTimersAsync();
+    await expectation;
     expect(global.fetch).toHaveBeenCalledWith(
       'https://api.example.com/error',
-      undefined,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+      }),
     );
+    jest.useRealTimers();
+  });
+
+  it('should not retry when caller signal is already aborted', async () => {
+    jest.useFakeTimers();
+    const abortError = new Error('aborted');
+    (abortError as any).name = 'AbortError';
+    (global.fetch as jest.Mock).mockRejectedValue(abortError);
+    const controller = new AbortController();
+    controller.abort();
+
+    const request = fetchJson('https://api.example.com/aborted', {
+      signal: controller.signal,
+    });
+    const expectation = expect(request).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await jest.runAllTimersAsync();
+    await expectation;
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    jest.useRealTimers();
   });
 });
 

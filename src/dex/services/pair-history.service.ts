@@ -1,10 +1,7 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
-import { Encoded } from '@aeternity/aepp-sdk';
-import ContractWithMethods, {
-  ContractMethodsBase,
-} from '@aeternity/aepp-sdk/es/contract/Contract';
+import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
@@ -13,6 +10,8 @@ import { DataSource } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 import { PairSummaryDto } from '../dto/pair-summary.dto';
 import { Pair } from '../entities/pair.entity';
+
+type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -48,10 +47,7 @@ export interface ITransactionPreview {
 
 @Injectable()
 export class PairHistoryService {
-  contracts: Record<
-    Encoded.ContractAddress,
-    ContractWithMethods<ContractMethodsBase>
-  > = {};
+  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
   constructor(
     private aeSdkService: AeSdkService,
 

@@ -1,5 +1,4 @@
 import { fetchJson } from '@/utils/common';
-import { ITransaction } from '@/utils/types';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,7 +14,6 @@ import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { PluginRegistryService } from './plugin-registry.service';
 import { MicroBlockService } from './micro-block.service';
 import { BlockSyncService } from './block-sync.service';
-import { SyncDirectionEnum } from '../types/sync-direction';
 
 @Injectable()
 export class IndexerService implements OnModuleInit {
@@ -45,15 +43,18 @@ export class IndexerService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    const disableMdwSync = this.configService.get<boolean>('mdw.disableMdwSync', false);
-    
+    const disableMdwSync = this.configService.get<boolean>(
+      'mdw.disableMdwSync',
+      false,
+    );
+
     await this.initializeSyncState();
     // Plugin sync states are initialized by PluginRegistryService.onModuleInit()
     // which runs before this, so they should already exist. But we verify here
     // to ensure backward indexer doesn't start until plugins are ready.
     // The initializePluginSyncStates() method is idempotent, so calling it again is safe.
     await this.pluginRegistryService.initializePluginSyncStates();
-    
+
     if (!disableMdwSync) {
       this.startSync();
     } else {
@@ -82,18 +83,21 @@ export class IndexerService implements OnModuleInit {
       });
     } else {
       // Migrate existing sync state
-      if (existing.backward_synced_height === null || existing.backward_synced_height === undefined) {
+      if (
+        existing.backward_synced_height === null ||
+        existing.backward_synced_height === undefined
+      ) {
         await this.syncStateRepository.update(
           { id: 'global' },
           {
-            backward_synced_height: existing.tip_height || existing.last_synced_height,
+            backward_synced_height:
+              existing.tip_height || existing.last_synced_height,
             live_synced_height: existing.last_synced_height || 0,
           },
         );
       }
     }
   }
-
 
   private startSync() {
     const syncIntervalMs = this.configService.get<number>(
@@ -141,20 +145,22 @@ export class IndexerService implements OnModuleInit {
 
       // Get target backward sync height (stop at 0 or configured start height)
       const targetBackwardHeight = 0; // Could be configurable in the future
-      const currentBackwardHeight = syncState.backward_synced_height ?? tipHeight;
+      const currentBackwardHeight =
+        syncState.backward_synced_height ?? tipHeight;
 
       // Check if backward sync is complete
       if (currentBackwardHeight <= targetBackwardHeight) {
-        this.logger.debug('Backward sync complete, no more blocks to sync backward');
+        this.logger.debug(
+          'Backward sync complete, no more blocks to sync backward',
+        );
         return;
       }
 
       // Determine sync mode based on how much we need to sync backward
       const remainingBlocks = currentBackwardHeight - targetBackwardHeight;
-      const shouldUseBulkMode = remainingBlocks > this.configService.get<number>(
-        'mdw.bulkModeThreshold',
-        100,
-      );
+      const shouldUseBulkMode =
+        remainingBlocks >
+        this.configService.get<number>('mdw.bulkModeThreshold', 100);
 
       // Update bulk mode state if it changed
       if (syncState.is_bulk_mode !== shouldUseBulkMode) {
@@ -165,7 +171,9 @@ export class IndexerService implements OnModuleInit {
 
         // Emit event when transitioning from bulk to normal mode
         if (syncState.is_bulk_mode && !shouldUseBulkMode) {
-          this.logger.log('Transitioning from bulk mode to normal backward sync mode');
+          this.logger.log(
+            'Transitioning from bulk mode to normal backward sync mode',
+          );
           this.eventEmitter.emit('sync.bulk-complete');
         } else if (!syncState.is_bulk_mode && shouldUseBulkMode) {
           this.logger.log('Entering bulk mode for backward sync');
@@ -183,14 +191,21 @@ export class IndexerService implements OnModuleInit {
       // Calculate range: endHeight is higher (more recent), startHeight is lower (older)
       // We sync from endHeight down to startHeight
       const endHeight = currentBackwardHeight;
-      const startHeight = Math.max(targetBackwardHeight, endHeight - batchSize + 1);
+      const startHeight = Math.max(
+        targetBackwardHeight,
+        endHeight - batchSize + 1,
+      );
 
       if (shouldUseBulkMode) {
         // Use parallel processing in bulk mode
         await this.syncBlocksParallelBackward(startHeight, endHeight);
       } else {
         // Use sequential processing
-        await this.blockSyncService.syncBlockRange(startHeight, endHeight, true);
+        await this.blockSyncService.syncBlockRange(
+          startHeight,
+          endHeight,
+          true,
+        );
       }
 
       // Update backward sync state (decrease backward_synced_height as we go backward)
@@ -208,7 +223,7 @@ export class IndexerService implements OnModuleInit {
       // Check if there's more work to do and continue immediately if so
       // This allows fast continuous syncing when batches complete quickly
       if (newBackwardHeight > targetBackwardHeight) {
-        return this.sync()
+        return this.sync();
       }
     } catch (error: any) {
       this.logger.error('Backward sync failed', error);
@@ -216,7 +231,6 @@ export class IndexerService implements OnModuleInit {
       this.isRunning = false;
     }
   }
-
 
   /**
    * Parallel processing of multiple block ranges for bulk backward sync
@@ -250,13 +264,15 @@ export class IndexerService implements OnModuleInit {
       const batch = ranges.slice(i, i + parallelWorkers);
       await Promise.all(
         batch.map((range) =>
-          this.blockSyncService.syncBlockRange(range.start, range.end, true).catch((error: any) => {
-            this.logger.error(
-              `Failed to sync range ${range.start}-${range.end}`,
-              error,
-            );
-            throw error;
-          }),
+          this.blockSyncService
+            .syncBlockRange(range.start, range.end, true)
+            .catch((error: any) => {
+              this.logger.error(
+                `Failed to sync range ${range.start}-${range.end}`,
+                error,
+              );
+              throw error;
+            }),
         ),
       );
 

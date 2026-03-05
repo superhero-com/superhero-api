@@ -69,4 +69,3 @@ export class GetPortfolioHistoryQueryDto {
   @IsString()
   include?: string;
 }
-

@@ -76,4 +76,3 @@ export class PluginFailedTransaction {
   @Sortable()
   updated_at: Date;
 }
-

@@ -34,4 +34,3 @@ import { PostTransactionProcessorService } from './services/post-transaction-pro
   exports: [SocialPlugin],
 })
 export class SocialPluginModule {}
-

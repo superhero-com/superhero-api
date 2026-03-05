@@ -7,12 +7,7 @@ import {
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
-import {
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { GovernanceDelegationService } from '../services/governance-delegation.service';
 import {
   GovernanceDelegationWithRevokedDto,
@@ -71,7 +66,8 @@ export class GovernanceDelegationsController {
   async findHistoryByAccount(
     @Param('accountAddress') accountAddress: string,
   ): Promise<GovernanceDelegationHistoryItemDto[]> {
-    return this.governanceDelegationService.findHistoryByAccount(accountAddress);
+    return this.governanceDelegationService.findHistoryByAccount(
+      accountAddress,
+    );
   }
 }
-
