@@ -3,7 +3,7 @@ import { AffiliationModule } from '@/affiliation/affiliation.module';
 import { Account } from '@/account/entities/account.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ProfileController } from './controllers/profile.controller';
+// import { ProfileController } from './controllers/profile.controller';
 import { ProfileCache } from './entities/profile-cache.entity';
 import { ProfileSyncState } from './entities/profile-sync-state.entity';
 import { ProfileXVerificationReward } from './entities/profile-x-verification-reward.entity';
@@ -33,7 +33,8 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
     ProfileReadService,
     ProfileXVerificationRewardService,
   ],
-  controllers: [ProfileController],
+  // TODO: Disable unfinished profile feature
+  // controllers: [ProfileController],
   exports: [TypeOrmModule, ProfileReadService, ProfileContractService],
 })
 export class ProfileModule {}
