@@ -9,9 +9,18 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { ProfileAttestationService } from '../services/profile-attestation.service';
 import { ProfileReadService } from '../services/profile-read.service';
 import { CreateXAttestationDto } from '../dto/create-x-attestation.dto';
+import { ProfileXInviteService } from '../services/profile-x-invite.service';
+import { CreateXInviteDto } from '../dto/create-x-invite.dto';
+import { BindXInviteDto } from '../dto/bind-x-invite.dto';
+import { CreateXInviteChallengeDto } from '../dto/create-x-invite-challenge.dto';
+import { ProfileXVerificationRewardService } from '../services/profile-x-verification-reward.service';
+import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
+import { Invitation } from '@/affiliation/entities/invitation.entity';
 
 @Controller('profile')
 @ApiTags('Profile')
@@ -19,6 +28,11 @@ export class ProfileController {
   constructor(
     private readonly profileAttestationService: ProfileAttestationService,
     private readonly profileReadService: ProfileReadService,
+    private readonly profileXInviteService: ProfileXInviteService,
+    private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
+    private readonly profileXPostingRewardService: ProfileXPostingRewardService,
+    @InjectRepository(Invitation)
+    private readonly invitationRepository: Repository<Invitation>,
   ) {}
 
   @Post('x/attestation')
@@ -39,6 +53,48 @@ export class ProfileController {
       body.address,
       options,
     );
+  }
+
+  @Post('x-invites')
+  @ApiOperation({
+    operationId: 'createXInviteLink',
+    summary: 'Create a dedicated X verification invite link for an inviter',
+  })
+  async createXInvite(@Body() body: CreateXInviteDto) {
+    return this.profileXInviteService.createInvite({
+      inviterAddress: body.inviter_address,
+      challengeNonce: body.challenge_nonce,
+      challengeExpiresAt: Number(body.challenge_expires_at),
+      signatureHex: body.signature_hex,
+    });
+  }
+
+  @Post('x-invites/challenge')
+  @ApiOperation({
+    operationId: 'createXInviteChallenge',
+    summary: 'Create challenge message for invite create/bind ownership proof',
+  })
+  async createXInviteChallenge(@Body() body: CreateXInviteChallengeDto) {
+    return this.profileXInviteService.createChallenge({
+      address: body.address,
+      purpose: body.purpose,
+      code: body.code,
+    });
+  }
+
+  @Post('x-invites/:code/bind')
+  @ApiOperation({
+    operationId: 'bindXInviteLink',
+    summary: 'Bind invite code to an invitee address',
+  })
+  async bindXInvite(@Param('code') code: string, @Body() body: BindXInviteDto) {
+    return this.profileXInviteService.bindInvite({
+      code,
+      inviteeAddress: body.invitee_address,
+      challengeNonce: body.challenge_nonce,
+      challengeExpiresAt: Number(body.challenge_expires_at),
+      signatureHex: body.signature_hex,
+    });
   }
 
   @Get('feed')
@@ -90,6 +146,82 @@ export class ProfileController {
   })
   async getOnChainProfile(@Param('address') address: string) {
     return this.profileReadService.getOnChainProfile(address);
+  }
+
+  @Get(':address/x-invite-progress')
+  @ApiOperation({
+    operationId: 'getXInviteProgress',
+    summary: 'Get X invite progress for inviter',
+  })
+  async getXInviteProgress(@Param('address') address: string) {
+    return this.profileXInviteService.getProgress(address);
+  }
+
+  @Get(':address/rewards-progress')
+  @ApiOperation({
+    operationId: 'getRewardsProgress',
+    summary: 'Get combined progress across all profile reward systems',
+  })
+  async getRewardsProgress(@Param('address') address: string) {
+    const [xVerification, xPosting, xInvite] = await Promise.all([
+      this.profileXVerificationRewardService.getRewardStatus(address),
+      this.profileXPostingRewardService.getRewardStatus(address),
+      this.profileXInviteService.getProgress(address),
+    ]);
+    const affiliation = await this.getAffiliationProgress(address);
+    return {
+      address,
+      x_verification_reward: xVerification,
+      x_posting_reward: xPosting,
+      x_invite_reward: xInvite,
+      affiliation,
+    };
+  }
+
+  private async getAffiliationProgress(address: string) {
+    const [
+      totalInvitationsAsInviter,
+      totalClaimedAsInviter,
+      totalRevokedAsInviter,
+      totalReceivedAsInvitee,
+      totalClaimedAsInvitee,
+      amountAgg,
+    ] = await Promise.all([
+      this.invitationRepository.count({
+        where: { sender_address: address },
+      }),
+      this.invitationRepository.count({
+        where: { sender_address: address, status: 'claimed' },
+      }),
+      this.invitationRepository.count({
+        where: { sender_address: address, status: 'revoked' },
+      }),
+      this.invitationRepository.count({
+        where: { invitee_address: address },
+      }),
+      this.invitationRepository.count({
+        where: { invitee_address: address, status: 'claimed' },
+      }),
+      this.invitationRepository
+        .createQueryBuilder('invitation')
+        .select('COALESCE(SUM(CAST(invitation.amount as numeric)), 0)', 'total')
+        .where('invitation.sender_address = :address', { address })
+        .getRawOne<{ total: string | number | null }>(),
+    ]);
+    return {
+      as_inviter: {
+        total_invitations: totalInvitationsAsInviter,
+        claimed_invitations: totalClaimedAsInviter,
+        revoked_invitations: totalRevokedAsInviter,
+        pending_invitations:
+          totalInvitationsAsInviter - totalClaimedAsInviter - totalRevokedAsInviter,
+        total_amount_ae: Number(amountAgg?.total || 0),
+      },
+      as_invitee: {
+        total_received_invitations: totalReceivedAsInvitee,
+        claimed_received_invitations: totalClaimedAsInvitee,
+      },
+    };
   }
 
   @Get(':address')
