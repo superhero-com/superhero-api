@@ -4,6 +4,7 @@ import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { TokensService } from '../tokens.service';
+import { TokenHoldersLockService } from '../services/token-holders-lock.service';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 
 export interface ISyncTokenHoldersQueue {
@@ -19,7 +20,10 @@ export class SyncTokenHoldersQueue {
   private readonly inFlightSyncs = new Map<string, Promise<void>>();
   private readonly inFlightStartedAt = new Map<string, number>();
 
-  constructor(private tokenService: TokensService) {
+  constructor(
+    private tokenService: TokensService,
+    private readonly tokenHoldersLockService: TokenHoldersLockService,
+  ) {
     //
   }
 
@@ -63,6 +67,13 @@ export class SyncTokenHoldersQueue {
       } finally {
         if (joinTimeoutHandle) clearTimeout(joinTimeoutHandle);
       }
+      return;
+    }
+
+    const lockOwnerToken =
+      await this.tokenHoldersLockService.acquireLock(saleAddress);
+    if (!lockOwnerToken) {
+      this.logger.warn(`SyncTokenHoldersQueue->skip-locked:${saleAddress}`);
       return;
     }
 
@@ -114,6 +125,15 @@ export class SyncTokenHoldersQueue {
     } finally {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
+      }
+      const released = await this.tokenHoldersLockService.releaseLock(
+        saleAddress,
+        lockOwnerToken,
+      );
+      if (!released) {
+        this.logger.warn(
+          `SyncTokenHoldersQueue->lock-release-missed:${saleAddress}`,
+        );
       }
     }
   }

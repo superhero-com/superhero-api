@@ -8,6 +8,10 @@ jest.mock('@/utils/stabilization-metrics', () => ({
 describe('SyncTokenHoldersQueue', () => {
   const saleAddress = 'ct_testAddress' as any;
   let tokenService: { loadAndSaveTokenHoldersFromMdw: jest.Mock };
+  let tokenHoldersLockService: {
+    acquireLock: jest.Mock;
+    releaseLock: jest.Mock;
+  };
   let queue: SyncTokenHoldersQueue;
 
   beforeEach(() => {
@@ -15,7 +19,14 @@ describe('SyncTokenHoldersQueue', () => {
     tokenService = {
       loadAndSaveTokenHoldersFromMdw: jest.fn(),
     };
-    queue = new SyncTokenHoldersQueue(tokenService as any);
+    tokenHoldersLockService = {
+      acquireLock: jest.fn().mockResolvedValue('lock-owner'),
+      releaseLock: jest.fn().mockResolvedValue(true),
+    };
+    queue = new SyncTokenHoldersQueue(
+      tokenService as any,
+      tokenHoldersLockService as any,
+    );
   });
 
   it('clears timeout handle when sync completes quickly', async () => {
@@ -26,6 +37,22 @@ describe('SyncTokenHoldersQueue', () => {
 
     expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(recordSyncTokenHoldersDuration).toHaveBeenCalledTimes(1);
+    expect(tokenHoldersLockService.acquireLock).toHaveBeenCalledWith(
+      saleAddress,
+    );
+    expect(tokenHoldersLockService.releaseLock).toHaveBeenCalledWith(
+      saleAddress,
+      'lock-owner',
+    );
+  });
+
+  it('skips processing when distributed lock is not acquired', async () => {
+    tokenHoldersLockService.acquireLock.mockResolvedValue(null);
+
+    await queue.process({ data: { saleAddress } } as any);
+
+    expect(tokenService.loadAndSaveTokenHoldersFromMdw).not.toHaveBeenCalled();
+    expect(tokenHoldersLockService.releaseLock).not.toHaveBeenCalled();
   });
 
   it('joins in-flight sync for the same token and avoids overlap', async () => {
@@ -37,7 +64,9 @@ describe('SyncTokenHoldersQueue', () => {
     tokenService.loadAndSaveTokenHoldersFromMdw.mockReturnValue(firstPromise);
 
     const firstJob = queue.process({ data: { saleAddress } } as any);
+    await Promise.resolve();
     const secondJob = queue.process({ data: { saleAddress } } as any);
+    await Promise.resolve();
 
     expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(
       1,
@@ -102,6 +131,7 @@ describe('SyncTokenHoldersQueue', () => {
     expect(firstError).toBeInstanceOf(Error);
 
     const secondJobPromise = queue.process({ data: { saleAddress } } as any);
+    await Promise.resolve();
     expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledTimes(
       2,
     );
@@ -110,5 +140,20 @@ describe('SyncTokenHoldersQueue', () => {
     await secondJobPromise;
 
     jest.useRealTimers();
+  });
+
+  it('releases distributed lock when sync throws', async () => {
+    tokenService.loadAndSaveTokenHoldersFromMdw.mockRejectedValue(
+      new Error('sync failed'),
+    );
+
+    await expect(queue.process({ data: { saleAddress } } as any)).rejects.toThrow(
+      'sync failed',
+    );
+
+    expect(tokenHoldersLockService.releaseLock).toHaveBeenCalledWith(
+      saleAddress,
+      'lock-owner',
+    );
   });
 });
