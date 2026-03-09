@@ -164,7 +164,7 @@ export class ProfileIndexerService {
     }
 
     const publicName = this.selectPublicName(
-      profile.display_source || 'custom',
+      address,
       profile.username || null,
       profile.chain_name || null,
     );
@@ -178,7 +178,6 @@ export class ProfileIndexerService {
         username: profile.username || null,
         x_username: profile.x_username || null,
         chain_name: profile.chain_name || null,
-        display_source: profile.display_source || 'custom',
         chain_expires_at: profile.chain_expires_at || null,
         public_name: publicName,
         last_seen_micro_time: microTime || null,
@@ -188,15 +187,14 @@ export class ProfileIndexerService {
   }
 
   private selectPublicName(
-    _displaySource: string,
+    address: string,
     username: string | null,
     chainName: string | null,
   ): string {
-    // Business rule: chain name takes precedence when present.
     if (chainName) {
       return chainName;
     }
-    return username || '';
+    return username || address;
   }
 
   private async getOrCreateState(): Promise<ProfileSyncState> {

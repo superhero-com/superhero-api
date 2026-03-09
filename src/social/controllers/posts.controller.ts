@@ -174,7 +174,6 @@ export class PostsController {
         public_name: profile?.public_name ?? '',
         bio: profile?.profile?.bio ?? '',
         avatarurl: profile?.profile?.avatarurl ?? '',
-        display_source: profile?.profile?.display_source ?? 'custom',
       };
     }
   }

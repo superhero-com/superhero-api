@@ -34,7 +34,6 @@ describe('ProfileIndexerService', () => {
         username: null,
         x_username: null,
         chain_name: null,
-        display_source: 'custom',
         chain_expires_at: null,
       }),
       decodeEvents: jest.fn().mockResolvedValue([]),
@@ -234,7 +233,7 @@ describe('ProfileIndexerService', () => {
     expect(profileSyncStateRepository.update).toHaveBeenCalledTimes(1);
   });
 
-  it('sets public_name from chain_name even when display source is custom', async () => {
+  it('sets public_name from chain_name when it is present', async () => {
     const { service, profileContractService } = createService();
     profileContractService.getProfile.mockResolvedValue({
       fullname: '',
@@ -243,7 +242,6 @@ describe('ProfileIndexerService', () => {
       username: null,
       x_username: 'x_name',
       chain_name: 'chain_name',
-      display_source: 'custom',
       chain_expires_at: null,
     });
 
@@ -253,7 +251,6 @@ describe('ProfileIndexerService', () => {
 
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
-      display_source: 'custom',
       public_name: 'chain_name',
       chain_name: 'chain_name',
       x_username: 'x_name',
@@ -269,7 +266,6 @@ describe('ProfileIndexerService', () => {
       username: 'custom_name',
       x_username: 'x_name',
       chain_name: null,
-      display_source: 'chain',
       chain_expires_at: null,
     });
 
@@ -279,10 +275,34 @@ describe('ProfileIndexerService', () => {
 
     expect(upsertMock).toHaveBeenCalledTimes(1);
     expect(upsertMock.mock.calls[0][0]).toMatchObject({
-      display_source: 'chain',
       public_name: 'custom_name',
       username: 'custom_name',
       x_username: 'x_name',
+    });
+  });
+
+  it('falls back to address when neither chain_name nor username exists', async () => {
+    const { service, profileContractService } = createService();
+    profileContractService.getProfile.mockResolvedValue({
+      fullname: '',
+      bio: '',
+      avatarurl: '',
+      username: null,
+      x_username: 'x_name',
+      chain_name: null,
+      chain_expires_at: null,
+    });
+
+    const upsertMock = (service as any).profileCacheRepository
+      .upsert as jest.Mock;
+    await service.refreshAddress('ak_no_name');
+
+    expect(upsertMock).toHaveBeenCalledTimes(1);
+    expect(upsertMock.mock.calls[0][0]).toMatchObject({
+      public_name: 'ak_no_name',
+      x_username: 'x_name',
+      username: null,
+      chain_name: null,
     });
   });
 

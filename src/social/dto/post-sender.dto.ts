@@ -8,7 +8,7 @@ export class PostSenderDto {
   address: string;
 
   @ApiProperty({
-    description: 'Public profile name resolved from profile display source',
+    description: 'Public profile name resolved from profile data',
     example: 'hero_name',
   })
   public_name: string;
@@ -24,10 +24,4 @@ export class PostSenderDto {
     example: 'https://example.com/avatar.png',
   })
   avatarurl: string;
-
-  @ApiProperty({
-    description: 'Selected source used for public profile name',
-    example: 'custom',
-  })
-  display_source: string;
 }

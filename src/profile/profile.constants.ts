@@ -124,7 +124,6 @@ export const PROFILE_MUTATION_FUNCTIONS = [
   'clear_chain_name',
   'set_x_name_with_attestation',
   'clear_x_name',
-  'set_display_source',
 ] as const;
 
 export const PROFILE_REGISTRY_ACI = [
@@ -142,7 +141,6 @@ export const PROFILE_REGISTRY_ACI = [
             { name: 'username', type: { option: 'string' } },
             { name: 'x_username', type: { option: 'string' } },
             { name: 'chain_name', type: { option: 'string' } },
-            { name: 'display_source', type: 'string' },
             { name: 'chain_expires_at', type: { option: 'int' } },
           ],
         },
