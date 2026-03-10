@@ -37,21 +37,6 @@ export class TransactionsService {
     }
 
     try {
-      this.logger.warn(
-        JSON.stringify({
-          source: 'bcl-decode',
-          phase: 'before-decode',
-          retries,
-          hash: tx.hash,
-          function: tx.function,
-          contractId: tx.contract_id,
-          tokenFactoryAddress: token.factory_address,
-          hasRawLog: Array.isArray(tx.raw?.log),
-          rawLogLength: Array.isArray(tx.raw?.log) ? tx.raw.log.length : null,
-          existingPluginLogs: tx.logs?.bcl ?? null,
-        }),
-      );
-
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
@@ -93,16 +78,21 @@ export class TransactionsService {
     if (tx.function === BCL_FUNCTIONS.sell) {
       const sellLog = logs.find((log) => log?.topics?.[0] === this.SELL_TOPIC);
       const burnLog = logs.find((log) => log?.topics?.[0] === this.BURN_TOPIC);
+      const priceChangeLog = logs.find(
+        (log) => log?.topics?.[0] === this.PRICE_CHANGE_TOPIC,
+      );
 
       const amountRaw = sellLog?.topics?.[1]?.toString();
       const previousSupplyRaw = sellLog?.topics?.[2]?.toString();
       const volumeRaw = burnLog?.topics?.[2]?.toString();
+      const previousBuyPriceRaw = priceChangeLog?.topics?.[1]?.toString();
+      const buyPriceRaw = priceChangeLog?.topics?.[2]?.toString();
 
       if (!amountRaw || !previousSupplyRaw || !volumeRaw) {
         return [];
       }
 
-      return [
+      const decodedData = [
         {
           name: 'Sell',
           args: [amountRaw, previousSupplyRaw],
@@ -112,6 +102,15 @@ export class TransactionsService {
           args: [null, volumeRaw],
         },
       ];
+
+      if (previousBuyPriceRaw && buyPriceRaw) {
+        decodedData.push({
+          name: 'PriceChange',
+          args: [previousBuyPriceRaw, buyPriceRaw],
+        });
+      }
+
+      return decodedData;
     }
 
     if (

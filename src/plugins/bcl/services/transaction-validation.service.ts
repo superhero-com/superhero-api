@@ -41,20 +41,50 @@ export class TransactionValidationService {
     return null;
   }
 
-  /**
-   * Check if transaction already exists in database
-   * @param txHash - Transaction hash
-   * @returns True if transaction exists
-   */
-  async transactionExists(txHash: string): Promise<boolean> {
-    const exists = await this.transactionRepository
+  private async findExistingTransaction(
+    txHash: string,
+  ): Promise<Transaction | null> {
+    return this.transactionRepository
       .createQueryBuilder('token_transactions')
       .where('token_transactions.tx_hash = :tx_hash', {
         tx_hash: txHash,
       })
       .getOne();
+  }
 
-    return !!exists;
+  private isBrokenTradeTransaction(transaction: Transaction): boolean {
+    if (
+      !transaction ||
+      ![BCL_FUNCTIONS.buy, BCL_FUNCTIONS.sell].includes(transaction.tx_type)
+    ) {
+      return false;
+    }
+
+    const hasZeroVolume =
+      transaction.volume == null ||
+      (typeof transaction.volume?.isZero === 'function'
+        ? transaction.volume.isZero()
+        : `${transaction.volume}` === '0');
+
+    const amountAe = transaction.amount?.ae?.toString();
+    const unitPriceAe = transaction.unit_price?.ae?.toString();
+    const previousBuyPriceAe =
+      transaction.previous_buy_price?.ae?.toString();
+    const buyPriceAe = transaction.buy_price?.ae?.toString();
+    const marketCapAe = transaction.market_cap?.ae?.toString();
+
+    const hasInvalidPriceData = [
+      unitPriceAe,
+      previousBuyPriceAe,
+      buyPriceAe,
+      marketCapAe,
+    ].some((value) => value === 'NaN');
+
+    return !transaction.verified && (
+      hasZeroVolume ||
+      amountAe === '0' ||
+      hasInvalidPriceData
+    );
   }
 
   /**
@@ -69,10 +99,20 @@ export class TransactionValidationService {
     if (!Object.values(BCL_FUNCTIONS).includes(tx.function)) {
       return { isValid: false, saleAddress: null };
     }
-    // Check if transaction already exists
-    const exists = await this.transactionExists(tx.hash);
-    if (exists) {
+
+    // Allow block validation to repair previously persisted zero/NaN trade rows.
+    const existingTransaction = await this.findExistingTransaction(tx.hash);
+    if (
+      existingTransaction &&
+      !this.isBrokenTradeTransaction(existingTransaction)
+    ) {
       return { isValid: false, saleAddress: null };
+    }
+
+    if (existingTransaction) {
+      this.logger.warn(
+        `Reprocessing broken transaction ${tx.hash} to repair derived trade data`,
+      );
     }
 
     // Determine sale address

@@ -1,3 +1,4 @@
+import { TransactionDataService } from './transaction-data.service';
 import { TransactionsService } from './transactions.service';
 
 describe('TransactionsService', () => {
@@ -6,6 +7,7 @@ describe('TransactionsService', () => {
     loadFactory: jest.Mock;
     getCurrentFactory: jest.Mock;
   };
+  let transactionDataService: TransactionDataService;
 
   beforeEach(() => {
     communityFactoryService = {
@@ -17,6 +19,35 @@ describe('TransactionsService', () => {
     };
 
     service = new TransactionsService(communityFactoryService as any);
+    transactionDataService = new TransactionDataService({} as any);
+  });
+
+  it('does not emit warn logs for successful ABI decode', async () => {
+    communityFactoryService.loadFactory.mockResolvedValue({
+      contract: {
+        $decodeEvents: jest.fn().mockReturnValue([{ name: 'Buy', args: [] }]),
+      },
+    });
+    const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+    const tx = {
+      hash: 'th_success',
+      function: 'buy',
+      raw: {
+        log: [],
+      },
+    };
+
+    const decodedTx = await service.decodeTxEvents(
+      {
+        factory_address:
+          'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
+      } as any,
+      tx as any,
+    );
+
+    expect(decodedTx.raw.decodedData).toEqual([{ name: 'Buy', args: [] }]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('falls back to raw logs when ABI decode returns no events for buys', async () => {
@@ -257,14 +288,26 @@ describe('TransactionsService', () => {
         name: 'Burn',
         args: [null, '9931000000000000000000'],
       },
+      {
+        name: 'PriceChange',
+        args: ['12034498276971', '11933511576180'],
+      },
     ]);
 
     const parsed = await service.parseTransactionData(decodedTx as any);
+    const priceCalculations = transactionDataService.calculatePrices(
+      decodedTx as any,
+      parsed,
+    );
 
     expect(parsed.amount.toFixed()).toBe('0.117828884240788643');
     expect(parsed.volume.toFixed()).toBe('9931');
     expect(parsed.protocol_reward.toFixed()).toBe('0');
     expect(parsed.total_supply.toFixed()).toBe('1170536');
+    expect(priceCalculations._previous_buy_price.toFixed()).toBe(
+      '0.000012034498276971',
+    );
+    expect(priceCalculations._buy_price.toFixed()).toBe('0.00001193351157618');
     expect(parsed._should_revalidate).toBe(false);
   });
 });
