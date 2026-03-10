@@ -23,6 +23,8 @@ export interface ProcessTransactionResult {
   isSupported: boolean;
 }
 
+const REPROCESSABLE_BCL_FUNCTIONS = [BCL_FUNCTIONS.buy, BCL_FUNCTIONS.sell];
+
 @Injectable()
 export class TransactionProcessorService {
   private readonly logger = new Logger(TransactionProcessorService.name);
@@ -98,6 +100,17 @@ export class TransactionProcessorService {
         // Parse transaction data
         const parsedData =
           await this.transactionsService.parseTransactionData(decodedTx);
+
+        if (
+          parsedData._should_revalidate &&
+          REPROCESSABLE_BCL_FUNCTIONS.includes(
+            rawTransaction.function as (typeof REPROCESSABLE_BCL_FUNCTIONS)[number],
+          )
+        ) {
+          throw new Error(
+            `Missing decoded events for ${rawTransaction.function} transaction ${rawTransaction.hash}`,
+          );
+        }
 
         // Handle create_community special case
         if (
