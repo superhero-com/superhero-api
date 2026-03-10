@@ -67,6 +67,7 @@ export class TransactionsService {
 
   private async buildFallbackDecodedData(tx: Tx): Promise<any[]> {
     const logs = Array.isArray(tx.raw?.log) ? tx.raw.log : [];
+
     if (tx.function === BCL_FUNCTIONS.sell) {
       const sellLog = logs.find((log) => log?.topics?.[0] === this.SELL_TOPIC);
       const burnLog = logs.find((log) => log?.topics?.[0] === this.BURN_TOPIC);
@@ -141,12 +142,12 @@ export class TransactionsService {
       return [];
     }
 
-    const currentFactory = await this.communityFactoryService.getCurrentFactory();
-    const protocolRewardMintLog = logs.find(
-      (log) =>
-        log?.topics?.[0] === this.MINT_TOPIC &&
-        log?.address === currentFactory.bctsl_aex9_address,
-    );
+    const currentFactory =
+      await this.communityFactoryService.getCurrentFactory();
+    const mintLogs = logs.filter((log) => log?.topics?.[0] === this.MINT_TOPIC);
+    const protocolRewardMintLog =
+      mintLogs.find((log) => log?.address === currentFactory.bctsl_aex9_address) ||
+      mintLogs.find((log) => log?.topics?.[2]?.toString() !== volumeRaw);
     const protocolRewardRaw = protocolRewardMintLog?.topics?.[2]?.toString();
 
     if (!protocolRewardRaw) {
