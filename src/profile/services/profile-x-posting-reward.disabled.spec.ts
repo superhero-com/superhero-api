@@ -13,6 +13,7 @@ jest.mock('../profile.constants', () => ({
     '1111111111111111111111111111111111111111111111111111111111111111',
 }));
 
+import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileXPostingRewardService } from './profile-x-posting-reward.service';
 
 describe('ProfileXPostingRewardService disabled', () => {
@@ -34,6 +35,7 @@ describe('ProfileXPostingRewardService disabled', () => {
         enqueueSpend: jest.fn(),
         getRewardAccount: jest.fn(),
       } as any,
+      new ProfileXApiClientService(),
     );
 
     await expect(
@@ -45,7 +47,9 @@ describe('ProfileXPostingRewardService disabled', () => {
     });
 
     await expect(
-      service.getRewardStatus('ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo'),
+      service.getRewardStatus(
+        'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+      ),
     ).resolves.toMatchObject({
       status: 'not_started',
       error: 'Posting rewards are temporarily unavailable.',

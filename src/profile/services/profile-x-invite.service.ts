@@ -1,6 +1,6 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { decode, toAettos, verifyMessageSignature } from '@aeternity/aepp-sdk';
+import { decode, verifyMessageSignature } from '@aeternity/aepp-sdk';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
@@ -17,6 +17,10 @@ import { ProfileXInvite } from '../entities/profile-x-invite.entity';
 import { ProfileXInviteCredit } from '../entities/profile-x-invite-credit.entity';
 import { ProfileXInviteMilestoneReward } from '../entities/profile-x-invite-milestone-reward.entity';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
+import {
+  getRewardAmountAettos,
+  isValidAeAmount,
+} from './profile-x-reward.util';
 
 type InviteProgress = {
   inviter_address: string;
@@ -329,7 +333,7 @@ export class ProfileXInviteService {
       );
       return;
     }
-    if (!this.isValidAeAmount(PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE)) {
+    if (!isValidAeAmount(PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE)) {
       this.logger.warn(
         `Skipping invite milestone reward, invalid PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE: ${PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE}`,
       );
@@ -416,30 +420,12 @@ export class ProfileXInviteService {
     );
   }
 
-  private isValidAeAmount(value: string): boolean {
-    if (!/^\d+(\.\d+)?$/.test(value)) {
-      return false;
-    }
-    return Number(value) > 0;
-  }
-
   private getRewardAmountAettos(): string | null {
-    try {
-      const amount = toAettos(PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE);
-      if (!/^\d+$/.test(amount) || amount === '0') {
-        this.logger.error(
-          `Skipping invite milestone reward, converted aettos amount is invalid: ${amount}`,
-        );
-        return null;
-      }
-      return amount;
-    } catch (error) {
-      this.logger.error(
-        'Skipping invite milestone reward, failed to convert amount to aettos',
-        error instanceof Error ? error.stack : String(error),
-      );
-      return null;
-    }
+    return getRewardAmountAettos({
+      amountAe: PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE,
+      logger: this.logger,
+      rewardLabel: 'invite milestone reward',
+    });
   }
 
   private assertValidAddress(address: string, label: string): void {

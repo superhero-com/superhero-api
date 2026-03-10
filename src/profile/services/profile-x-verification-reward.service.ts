@@ -1,6 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { toAettos } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
@@ -21,7 +20,15 @@ import {
 } from '../profile.constants';
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
 import { ProfileXInviteService } from './profile-x-invite.service';
+import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
+import {
+  getRewardAmountAettos,
+  isValidAeAmount,
+  isValidPositiveInteger,
+  normalizeXUsername,
+  processAddressWithGuard,
+} from './profile-x-reward.util';
 import {
   X_CLIENT_ID,
   X_CLIENT_SCOPE,
@@ -41,18 +48,7 @@ export class ProfileXVerificationRewardService {
   private static readonly RETRYABLE_STATUSES: Array<
     ProfileXVerificationReward['status']
   > = ['pending', 'failed'];
-  private static readonly DEFAULT_X_APP_TOKEN_TTL_SECONDS = 3600;
-  private static readonly X_APP_TOKEN_MAX_ATTEMPTS = 3;
-  private static readonly X_APP_TOKEN_RETRY_BASE_DELAY_MS = 500;
-  private static readonly X_APP_TOKEN_FAILURE_COOLDOWN_MS = 60_000;
   private static readonly DEFAULT_RETRY_BATCH_SIZE = 100;
-  private static readonly X_READ_API_BASE_URLS = [
-    'https://api.x.com',
-    'https://api.twitter.com',
-  ];
-  private xAppAccessTokenCache: { token: string; expiresAtMs: number } | null =
-    null;
-  private xAppTokenFetchBlockedUntilMs = 0;
   private readonly processingByAddress = new Map<string, Promise<void>>();
   private isRetryWorkerRunning = false;
 
@@ -63,6 +59,7 @@ export class ProfileXVerificationRewardService {
     private readonly aeSdkService: AeSdkService,
     private readonly profileXInviteService: ProfileXInviteService,
     private readonly profileSpendQueueService: ProfileSpendQueueService,
+    private readonly profileXApiClientService: ProfileXApiClientService,
   ) {}
 
   @Cron('*/30 * * * * *')
@@ -104,7 +101,7 @@ export class ProfileXVerificationRewardService {
     address: string,
     xUsername: string,
   ): Promise<void> {
-    const normalizedXUsername = this.normalizeXUsername(xUsername);
+    const normalizedXUsername = normalizeXUsername(xUsername);
     if (!normalizedXUsername) {
       this.logger.warn(
         `Skipping X verification reward, invalid x username: ${xUsername}`,
@@ -168,62 +165,21 @@ export class ProfileXVerificationRewardService {
   }
 
   private async processAddressWithGuard(address: string): Promise<void> {
-    const existingInFlight = this.processingByAddress.get(address);
-    if (existingInFlight) {
-      return existingInFlight;
-    }
-    const work = this.processAddressInternal(address).catch((error) => {
-      this.logger.error(
-        `Failed to process X verification reward for ${address}`,
-        error instanceof Error ? error.stack : String(error),
-      );
+    await processAddressWithGuard({
+      address,
+      processingByAddress: this.processingByAddress,
+      workFactory: () => this.processAddressInternal(address),
+      logger: this.logger,
+      errorMessage: `Failed to process X verification reward for ${address}`,
     });
-    this.processingByAddress.set(address, work);
-    try {
-      await work;
-    } finally {
-      if (this.processingByAddress.get(address) === work) {
-        this.processingByAddress.delete(address);
-      }
-    }
-  }
-
-  private normalizeXUsername(value: string): string | null {
-    if (!value) {
-      return null;
-    }
-    const normalized = value.trim().toLowerCase().replace(/^@+/, '');
-    return normalized || null;
-  }
-
-  private isValidAeAmount(value: string): boolean {
-    if (!/^\d+(\.\d+)?$/.test(value)) {
-      return false;
-    }
-    return Number(value) > 0;
-  }
-
-  private isValidPositiveInteger(value: number): boolean {
-    return Number.isInteger(value) && value > 0;
   }
 
   private getRewardAmountAettos(): string | null {
-    try {
-      const amount = toAettos(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE);
-      if (!/^\d+$/.test(amount) || amount === '0') {
-        this.logger.error(
-          `Skipping X verification reward, converted aettos amount is invalid: ${amount}`,
-        );
-        return null;
-      }
-      return amount;
-    } catch (error) {
-      this.logger.error(
-        'Skipping X verification reward, failed to convert amount to aettos',
-        error instanceof Error ? error.stack : String(error),
-      );
-      return null;
-    }
+    return getRewardAmountAettos({
+      amountAe: PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE,
+      logger: this.logger,
+      rewardLabel: 'X verification reward',
+    });
   }
 
   private async fetchXFollowersCount(
@@ -292,31 +248,15 @@ export class ProfileXVerificationRewardService {
   }
 
   private async getXAppAccessToken(): Promise<string | null> {
-    if (
-      this.xAppAccessTokenCache &&
-      this.xAppAccessTokenCache.expiresAtMs > Date.now()
-    ) {
-      return this.xAppAccessTokenCache.token;
-    }
-    if (this.xAppTokenFetchBlockedUntilMs > Date.now()) {
-      return null;
-    }
-    if (!X_CLIENT_ID || !X_CLIENT_SECRET) {
-      this.logger.warn(
-        'Skipping X verification reward, X_CLIENT_ID/X_CLIENT_SECRET are required to verify followers count',
-      );
-      return null;
-    }
-    try {
-      const basicAuth = Buffer.from(
-        `${X_CLIENT_ID}:${X_CLIENT_SECRET}`,
-        'utf-8',
-      ).toString('base64');
-      let payload: any = {};
-      let lastStatus: number | null = null;
-      let lastBaseUrl = 'https://api.x.com';
-      let lastDetail: string | null = null;
-      const tokenEndpoints = [
+    const timeoutMs = isValidPositiveInteger(
+      PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS,
+    )
+      ? PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS
+      : 5000;
+    return this.profileXApiClientService.getXAppAccessToken({
+      appKey: X_CLIENT_ID,
+      appSecret: X_CLIENT_SECRET,
+      tokenEndpoints: [
         {
           baseUrl: 'https://api.x.com',
           url: 'https://api.x.com/2/oauth2/token',
@@ -335,229 +275,163 @@ export class ProfileXVerificationRewardService {
             grant_type: 'client_credentials',
           }),
         },
-      ];
-      for (
-        let attempt = 1;
-        attempt <= ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS;
-        attempt += 1
-      ) {
-        let shouldRetry = false;
-        let hadNetworkError = false;
-        try {
-          for (const endpoint of tokenEndpoints) {
-            const response = await this.fetchWithTimeout(endpoint.url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                Authorization: `Basic ${basicAuth}`,
-              },
-              body: endpoint.body.toString(),
-            });
-            payload = await response.json().catch(() => ({}));
-            lastStatus = response.status;
-            lastBaseUrl = endpoint.baseUrl;
-            lastDetail = this.extractXApiErrorDetail(payload);
-            if (response.ok && (payload as any)?.access_token) {
-              const expiresInSeconds = Number((payload as any).expires_in);
-              const ttlSeconds =
-                Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
-                  ? expiresInSeconds
-                  : ProfileXVerificationRewardService.DEFAULT_X_APP_TOKEN_TTL_SECONDS;
-              this.xAppAccessTokenCache = {
-                token: (payload as any).access_token,
-                expiresAtMs: Date.now() + Math.max(ttlSeconds - 60, 30) * 1000,
-              };
-              this.xAppTokenFetchBlockedUntilMs = 0;
-              return this.xAppAccessTokenCache.token;
-            }
-            if (this.shouldRetryXTokenFetch(response.status)) {
-              shouldRetry = true;
-            }
-          }
-        } catch (error) {
-          hadNetworkError = true;
-          if (
-            attempt ===
-            ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS
-          ) {
-            throw error;
-          }
-        }
-        if (
-          attempt ===
-            ProfileXVerificationRewardService.X_APP_TOKEN_MAX_ATTEMPTS ||
-          (!shouldRetry && !hadNetworkError)
-        ) {
-          break;
-        }
-        const delayMs =
-          ProfileXVerificationRewardService.X_APP_TOKEN_RETRY_BASE_DELAY_MS *
-          2 ** (attempt - 1);
-        await this.sleep(delayMs);
-      }
-      this.logger.warn(
+      ],
+      logger: this.logger,
+      missingCredentialsMessage:
+        'Skipping X verification reward, X_CLIENT_ID/X_CLIENT_SECRET are required to verify followers count',
+      tokenFailureMessage:
         'Failed to obtain X app access token for reward checks',
-        {
-          base_url: lastBaseUrl,
-          status: lastStatus,
-          error: (payload as any)?.error,
-          error_description: (payload as any)?.error_description,
-          detail:
-            lastDetail || (payload as any)?.detail || (payload as any)?.title,
-        },
-      );
-      this.xAppTokenFetchBlockedUntilMs =
-        Date.now() +
-        ProfileXVerificationRewardService.X_APP_TOKEN_FAILURE_COOLDOWN_MS;
-      return null;
-    } catch (error) {
-      this.logger.warn(
-        `Failed to obtain X app access token for reward checks: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return null;
-    }
+      tokenErrorPrefix: 'Failed to obtain X app access token for reward checks',
+      timeoutMs,
+    });
   }
 
   private async processAddressInternal(address: string): Promise<void> {
-    const preparedReward = await this.dataSource.transaction(async (manager) => {
-      const rewardRepo = manager.getRepository(ProfileXVerificationReward);
-      const rewardEntry = await rewardRepo
-        .createQueryBuilder('reward')
-        .setLock('pessimistic_write')
-        .where('reward.address = :address', { address })
-        .getOne();
-      if (!rewardEntry) {
-        return;
-      }
-      if (rewardEntry.status === 'paid') {
-        return;
-      }
-      if (rewardEntry.status === 'ineligible_followers') {
-        return;
-      }
-      if (rewardEntry.status === 'blocked_username_conflict') {
-        return null;
-      }
+    const preparedReward = await this.dataSource.transaction(
+      async (manager) => {
+        const rewardRepo = manager.getRepository(ProfileXVerificationReward);
+        const rewardEntry = await rewardRepo
+          .createQueryBuilder('reward')
+          .setLock('pessimistic_write')
+          .where('reward.address = :address', { address })
+          .getOne();
+        if (!rewardEntry) {
+          return;
+        }
+        if (rewardEntry.status === 'paid') {
+          return;
+        }
+        if (rewardEntry.status === 'ineligible_followers') {
+          return;
+        }
+        if (rewardEntry.status === 'blocked_username_conflict') {
+          return null;
+        }
 
-      rewardEntry.last_attempt_at = new Date();
-      const normalizedXUsername = this.normalizeXUsername(
-        rewardEntry.x_username || '',
-      );
-      if (!normalizedXUsername) {
-        this.markRetry(
-          rewardEntry,
-          'Reward row has no valid X username yet',
-          'pending',
+        rewardEntry.last_attempt_at = new Date();
+        const normalizedXUsername = normalizeXUsername(
+          rewardEntry.x_username || '',
         );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      rewardEntry.x_username = normalizedXUsername;
+        if (!normalizedXUsername) {
+          this.markRetry(
+            rewardEntry,
+            'Reward row has no valid X username yet',
+            'pending',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        rewardEntry.x_username = normalizedXUsername;
 
-      if (!this.isValidAeAmount(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE)) {
-        this.markRetry(
-          rewardEntry,
-          `Invalid PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE: ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE}`,
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (!this.isValidPositiveInteger(PROFILE_X_VERIFICATION_MIN_FOLLOWERS)) {
-        this.markRetry(
-          rewardEntry,
-          `Invalid PROFILE_X_VERIFICATION_MIN_FOLLOWERS: ${PROFILE_X_VERIFICATION_MIN_FOLLOWERS}`,
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (
-        !this.isValidPositiveInteger(
-          PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS,
-        )
-      ) {
-        this.markRetry(
-          rewardEntry,
-          `Invalid PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS: ${PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS}`,
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (
-        !this.isValidPositiveInteger(
-          PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS,
-        )
-      ) {
-        this.markRetry(
-          rewardEntry,
-          `Invalid PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS: ${PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS}`,
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (!PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY) {
-        this.markRetry(
-          rewardEntry,
-          'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY is not configured',
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (
-        !ProfileXVerificationRewardService.ADDRESS_REGEX.test(
-          rewardEntry.address || '',
-        )
-      ) {
-        this.markRetry(rewardEntry, 'Reward row has invalid address', 'failed');
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
+        if (!isValidAeAmount(PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE)) {
+          this.markRetry(
+            rewardEntry,
+            `Invalid PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE: ${PROFILE_X_VERIFICATION_REWARD_AMOUNT_AE}`,
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (!isValidPositiveInteger(PROFILE_X_VERIFICATION_MIN_FOLLOWERS)) {
+          this.markRetry(
+            rewardEntry,
+            `Invalid PROFILE_X_VERIFICATION_MIN_FOLLOWERS: ${PROFILE_X_VERIFICATION_MIN_FOLLOWERS}`,
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (
+          !isValidPositiveInteger(
+            PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS,
+          )
+        ) {
+          this.markRetry(
+            rewardEntry,
+            `Invalid PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS: ${PROFILE_X_VERIFICATION_REWARD_RETRY_BASE_SECONDS}`,
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (
+          !isValidPositiveInteger(
+            PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS,
+          )
+        ) {
+          this.markRetry(
+            rewardEntry,
+            `Invalid PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS: ${PROFILE_X_VERIFICATION_REWARD_RETRY_MAX_SECONDS}`,
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (!PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY) {
+          this.markRetry(
+            rewardEntry,
+            'PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY is not configured',
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (
+          !ProfileXVerificationRewardService.ADDRESS_REGEX.test(
+            rewardEntry.address || '',
+          )
+        ) {
+          this.markRetry(
+            rewardEntry,
+            'Reward row has invalid address',
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
 
-      const existingRewardForX = await rewardRepo.findOne({
-        where: {
-          x_username: normalizedXUsername,
-          status: In(['paid', 'pending']),
-          address: Not(rewardEntry.address),
-        },
-      });
-      if (existingRewardForX?.status === 'paid') {
-        rewardEntry.status = 'blocked_username_conflict';
-        rewardEntry.error = `X user @${normalizedXUsername} already rewarded on ${existingRewardForX.address}`;
-        rewardEntry.next_retry_at = null;
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
-      if (existingRewardForX?.status === 'pending') {
-        this.markRetry(
-          rewardEntry,
-          `X user @${normalizedXUsername} has active reward processing on ${existingRewardForX.address}`,
-          'pending',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
+        const existingRewardForX = await rewardRepo.findOne({
+          where: {
+            x_username: normalizedXUsername,
+            status: In(['paid', 'pending']),
+            address: Not(rewardEntry.address),
+          },
+        });
+        if (existingRewardForX?.status === 'paid') {
+          rewardEntry.status = 'blocked_username_conflict';
+          rewardEntry.error = `X user @${normalizedXUsername} already rewarded on ${existingRewardForX.address}`;
+          rewardEntry.next_retry_at = null;
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
+        if (existingRewardForX?.status === 'pending') {
+          this.markRetry(
+            rewardEntry,
+            `X user @${normalizedXUsername} has active reward processing on ${existingRewardForX.address}`,
+            'pending',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
 
-      const rewardAmountAettos = this.getRewardAmountAettos();
-      if (!rewardAmountAettos) {
-        this.markRetry(
-          rewardEntry,
-          'Failed to convert reward amount to aettos',
-          'failed',
-        );
-        await rewardRepo.save(rewardEntry);
-        return null;
-      }
+        const rewardAmountAettos = this.getRewardAmountAettos();
+        if (!rewardAmountAettos) {
+          this.markRetry(
+            rewardEntry,
+            'Failed to convert reward amount to aettos',
+            'failed',
+          );
+          await rewardRepo.save(rewardEntry);
+          return null;
+        }
 
-      await rewardRepo.save(rewardEntry);
-      return {
-        normalizedXUsername,
-        rewardAmountAettos,
-      };
-    });
+        await rewardRepo.save(rewardEntry);
+        return {
+          normalizedXUsername,
+          rewardAmountAettos,
+        };
+      },
+    );
     if (!preparedReward) {
       return;
     }
@@ -566,26 +440,35 @@ export class ProfileXVerificationRewardService {
       preparedReward.normalizedXUsername,
     );
     if (followersLookup.kind === 'retry') {
-      await this.withLockedRewardEntry(address, async (rewardRepo, rewardEntry) => {
-        this.markRetry(rewardEntry, followersLookup.error, 'pending');
-        await rewardRepo.save(rewardEntry);
-      });
+      await this.withLockedRewardEntry(
+        address,
+        async (rewardRepo, rewardEntry) => {
+          this.markRetry(rewardEntry, followersLookup.error, 'pending');
+          await rewardRepo.save(rewardEntry);
+        },
+      );
       return;
     }
     if (followersLookup.kind === 'terminal') {
-      await this.withLockedRewardEntry(address, async (rewardRepo, rewardEntry) => {
-        this.markTerminalFailure(rewardEntry, followersLookup.error);
-        await rewardRepo.save(rewardEntry);
-      });
+      await this.withLockedRewardEntry(
+        address,
+        async (rewardRepo, rewardEntry) => {
+          this.markTerminalFailure(rewardEntry, followersLookup.error);
+          await rewardRepo.save(rewardEntry);
+        },
+      );
       return;
     }
     if (followersLookup.followersCount < PROFILE_X_VERIFICATION_MIN_FOLLOWERS) {
-      await this.withLockedRewardEntry(address, async (rewardRepo, rewardEntry) => {
-        rewardEntry.status = 'ineligible_followers';
-        rewardEntry.error = `@${preparedReward.normalizedXUsername} has ${followersLookup.followersCount} followers (minimum ${PROFILE_X_VERIFICATION_MIN_FOLLOWERS})`;
-        rewardEntry.next_retry_at = null;
-        await rewardRepo.save(rewardEntry);
-      });
+      await this.withLockedRewardEntry(
+        address,
+        async (rewardRepo, rewardEntry) => {
+          rewardEntry.status = 'ineligible_followers';
+          rewardEntry.error = `@${preparedReward.normalizedXUsername} has ${followersLookup.followersCount} followers (minimum ${PROFILE_X_VERIFICATION_MIN_FOLLOWERS})`;
+          rewardEntry.next_retry_at = null;
+          await rewardRepo.save(rewardEntry);
+        },
+      );
       this.logger.log(
         `Skipping X verification reward for ${address}, @${preparedReward.normalizedXUsername} has ${followersLookup.followersCount} followers (minimum ${PROFILE_X_VERIFICATION_MIN_FOLLOWERS})`,
       );
@@ -644,13 +527,16 @@ export class ProfileXVerificationRewardService {
             address as `ak_${string}`,
             { onAccount: rewardAccount },
           );
-          await this.withLockedRewardEntry(address, async (rewardRepo, rewardEntry) => {
-            rewardEntry.tx_hash = spendResult.hash || null;
-            rewardEntry.status = 'paid';
-            rewardEntry.error = null;
-            rewardEntry.next_retry_at = null;
-            await rewardRepo.save(rewardEntry);
-          });
+          await this.withLockedRewardEntry(
+            address,
+            async (rewardRepo, rewardEntry) => {
+              rewardEntry.tx_hash = spendResult.hash || null;
+              rewardEntry.status = 'paid';
+              rewardEntry.error = null;
+              rewardEntry.next_retry_at = null;
+              await rewardRepo.save(rewardEntry);
+            },
+          );
           void Promise.resolve(
             this.profileXInviteService.processInviteeXVerified(address),
           ).catch((error) =>
@@ -664,16 +550,19 @@ export class ProfileXVerificationRewardService {
         },
       );
     } catch (error) {
-      await this.withLockedRewardEntry(address, async (rewardRepo, rewardEntry) => {
-        this.markRetry(
-          rewardEntry,
-          error instanceof Error
-            ? error.message
-            : String(error || 'Unknown error'),
-          'pending',
-        );
-        await rewardRepo.save(rewardEntry);
-      });
+      await this.withLockedRewardEntry(
+        address,
+        async (rewardRepo, rewardEntry) => {
+          this.markRetry(
+            rewardEntry,
+            error instanceof Error
+              ? error.message
+              : String(error || 'Unknown error'),
+            'pending',
+          );
+          await rewardRepo.save(rewardEntry);
+        },
+      );
       this.logger.warn(
         `Failed to send X verification reward to ${address}, scheduled retry`,
       );
@@ -742,73 +631,21 @@ export class ProfileXVerificationRewardService {
     return Math.min(delay, max);
   }
 
-  private async fetchWithTimeout(
-    input: string,
-    init?: RequestInit,
-  ): Promise<Response> {
-    const timeoutMs = this.isValidPositiveInteger(
-      PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS,
-    )
-      ? PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS
-      : 5000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(input, {
-        ...(init || {}),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
   private async fetchXReadWithAuthFallback(
     pathAndQuery: string,
     bearerToken: string,
   ): Promise<{ response: Response; body: any; baseUrl: string }> {
-    let lastResponse: Response | null = null;
-    let lastBody: any = {};
-    let lastBaseUrl = 'https://api.x.com';
-
-    for (const baseUrl of ProfileXVerificationRewardService.X_READ_API_BASE_URLS) {
-      const endpoint = `${baseUrl}${pathAndQuery}`;
-      const response = await this.fetchWithTimeout(endpoint, {
-        headers: {
-          Authorization: `Bearer ${String(bearerToken || '').trim()}`,
-        },
-      });
-      const body = await response.json().catch(() => ({}));
-      lastResponse = response;
-      lastBody = body;
-      lastBaseUrl = baseUrl;
-      if (response.ok) {
-        return { response, body, baseUrl };
-      }
-      if (!this.isUnsupportedAuthenticationError(response.status, body)) {
-        return { response, body, baseUrl };
-      }
-    }
-
-    if (!lastResponse) {
-      throw new Error('No response received from X read endpoints');
-    }
-    return { response: lastResponse, body: lastBody, baseUrl: lastBaseUrl };
-  }
-
-  private isUnsupportedAuthenticationError(status: number, body: any): boolean {
-    if (status !== 403) {
-      return false;
-    }
-    const detail = String(body?.detail || body?.title || '').toLowerCase();
-    return (
-      detail.includes('unsupported authentication') ||
-      detail.includes('authenticating with unknown')
+    const timeoutMs = isValidPositiveInteger(
+      PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS,
+    )
+      ? PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS
+      : 5000;
+    return this.profileXApiClientService.fetchXReadWithAuthFallback(
+      pathAndQuery,
+      bearerToken,
+      timeoutMs,
+      'profile-x-read',
     );
-  }
-
-  private shouldRetryXTokenFetch(status: number): boolean {
-    return status === 429 || status >= 500;
   }
 
   private isTerminalXLookupError(status: number, body: any): boolean {
@@ -827,27 +664,6 @@ export class ProfileXVerificationRewardService {
   }
 
   private extractXApiErrorDetail(body: any): string | null {
-    if (!body || typeof body !== 'object') {
-      return null;
-    }
-    const topLevel =
-      body.error_description || body.detail || body.title || body.error || null;
-    if (topLevel) {
-      return String(topLevel);
-    }
-    const firstError = Array.isArray(body.errors) ? body.errors[0] : null;
-    if (!firstError || typeof firstError !== 'object') {
-      return null;
-    }
-    const code = firstError.code ? `code=${String(firstError.code)}` : null;
-    const message = firstError.message ? String(firstError.message) : null;
-    if (code && message) {
-      return `${code} ${message}`;
-    }
-    return code || message || null;
-  }
-
-  private async sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    return this.profileXApiClientService.extractXApiErrorDetail(body);
   }
 }

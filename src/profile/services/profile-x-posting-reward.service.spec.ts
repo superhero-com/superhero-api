@@ -14,11 +14,11 @@ jest.mock('../profile.constants', () => ({
 }));
 
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
+import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileXPostingRewardService } from './profile-x-posting-reward.service';
 
 describe('ProfileXPostingRewardService', () => {
   const ADDRESS = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
-  const OTHER_ADDRESS = 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s';
   const originalFetch = global.fetch;
   let userIdByUsername: Record<string, string>;
   let tweetsByUserId: Record<
@@ -62,7 +62,9 @@ describe('ProfileXPostingRewardService', () => {
         } as any;
       }
       if (url.pathname.startsWith('/2/users/by/username/')) {
-        const username = decodeURIComponent(url.pathname.split('/').pop() || '');
+        const username = decodeURIComponent(
+          url.pathname.split('/').pop() || '',
+        );
         const id = userIdByUsername[username];
         if (!id) {
           return {
@@ -77,52 +79,65 @@ describe('ProfileXPostingRewardService', () => {
           json: async () => ({ data: { id, username } }),
         } as any;
       }
-      if (url.pathname.startsWith('/2/users/') && url.pathname.endsWith('/tweets')) {
+      if (
+        url.pathname.startsWith('/2/users/') &&
+        url.pathname.endsWith('/tweets')
+      ) {
         const userId = url.pathname.split('/')[3] || '';
         const sinceId = url.searchParams.get('since_id');
         const startTime = url.searchParams.get('start_time');
         const pageToken = url.searchParams.get('pagination_token');
         const maxResults = Number(url.searchParams.get('max_results') || '100');
         const startIndex = Number(pageToken || '0');
-        const filteredTweets = (tweetsByUserId[userId] || []).filter((tweet) => {
-          if (!sinceId) {
-            if (!startTime) {
-              return true;
+        const filteredTweets = (tweetsByUserId[userId] || []).filter(
+          (tweet) => {
+            if (!sinceId) {
+              if (!startTime) {
+                return true;
+              }
+              return (
+                !!tweet.created_at &&
+                new Date(tweet.created_at).getTime() >=
+                  new Date(startTime).getTime()
+              );
             }
-            return !!tweet.created_at &&
-              new Date(tweet.created_at).getTime() >= new Date(startTime).getTime();
-          }
-          try {
-            return BigInt(tweet.id) > BigInt(sinceId);
-          } catch {
-            return tweet.id > sinceId;
-          }
-        });
-        const tweets = filteredTweets.slice(startIndex, startIndex + maxResults);
-        const newest = filteredTweets.reduce<string | null>((current, tweet) => {
-          if (!current) {
-            return tweet.id;
-          }
-          try {
-            return BigInt(tweet.id) > BigInt(current) ? tweet.id : current;
-          } catch {
-            return tweet.id > current ? tweet.id : current;
-          }
-        }, null);
+            try {
+              return BigInt(tweet.id) > BigInt(sinceId);
+            } catch {
+              return tweet.id > sinceId;
+            }
+          },
+        );
+        const tweets = filteredTweets.slice(
+          startIndex,
+          startIndex + maxResults,
+        );
+        const newest = filteredTweets.reduce<string | null>(
+          (current, tweet) => {
+            if (!current) {
+              return tweet.id;
+            }
+            try {
+              return BigInt(tweet.id) > BigInt(current) ? tweet.id : current;
+            } catch {
+              return tweet.id > current ? tweet.id : current;
+            }
+          },
+          null,
+        );
         return {
           ok: true,
           status: 200,
           json: async () => ({
             data: tweets,
-            meta:
-              newest
-                ? {
-                    newest_id: newest,
-                    ...(startIndex + maxResults < filteredTweets.length
-                      ? { next_token: String(startIndex + maxResults) }
-                      : {}),
-                  }
-                : {},
+            meta: newest
+              ? {
+                  newest_id: newest,
+                  ...(startIndex + maxResults < filteredTweets.length
+                    ? { next_token: String(startIndex + maxResults) }
+                    : {}),
+                }
+              : {},
           }),
         } as any;
       }
@@ -138,7 +153,8 @@ describe('ProfileXPostingRewardService', () => {
     global.fetch = originalFetch;
   });
 
-  const extractFindOperatorValue = (value: any) => value?._value ?? value?.value;
+  const extractFindOperatorValue = (value: any) =>
+    value?._value ?? value?.value;
   const extractFindOperatorType = (value: any) => value?._type ?? value?.type;
 
   const createRowsStore = (seed?: RewardRow[]) => {
@@ -177,7 +193,11 @@ describe('ProfileXPostingRewardService', () => {
     profileSpendQueueService?: any;
     profileCacheRow?: any;
     verificationRewardRow?: any;
-    updateImpl?: (criteria: any, partial: any, rows: Map<string, RewardRow>) => any;
+    updateImpl?: (
+      criteria: any,
+      partial: any,
+      rows: Map<string, RewardRow>,
+    ) => any;
   }) => {
     const rows = overrides?.rows || createRowsStore();
     const postingRewardRepository = {
@@ -254,9 +274,12 @@ describe('ProfileXPostingRewardService', () => {
       findOne: jest.fn().mockResolvedValue(overrides?.profileCacheRow || null),
     } as any;
     const verificationRewardRepository = {
-      findOne: jest.fn().mockResolvedValue(overrides?.verificationRewardRow || null),
+      findOne: jest
+        .fn()
+        .mockResolvedValue(overrides?.verificationRewardRow || null),
     } as any;
     const dataSource = {} as any;
+    const profileXApiClientService = new ProfileXApiClientService();
 
     const service = new ProfileXPostingRewardService(
       postingRewardRepository,
@@ -265,6 +288,7 @@ describe('ProfileXPostingRewardService', () => {
       dataSource,
       aeSdkService,
       profileSpendQueueService,
+      profileXApiClientService,
     );
     return {
       service,
@@ -417,8 +441,18 @@ describe('ProfileXPostingRewardService', () => {
   it('deduplicates reward processing by source transaction hash', async () => {
     const { service } = getService();
 
-    await service.upsertVerifiedCandidateFromTx(ADDRESS, 'poster', undefined, 'th_1');
-    await service.upsertVerifiedCandidateFromTx(ADDRESS, 'poster', undefined, 'th_1');
+    await service.upsertVerifiedCandidateFromTx(
+      ADDRESS,
+      'poster',
+      undefined,
+      'th_1',
+    );
+    await service.upsertVerifiedCandidateFromTx(
+      ADDRESS,
+      'poster',
+      undefined,
+      'th_1',
+    );
 
     const usernameLookups = (global.fetch as jest.Mock).mock.calls.filter(
       ([input]) => String(input).includes('/2/users/by/username/poster'),
@@ -442,22 +476,24 @@ describe('ProfileXPostingRewardService', () => {
         spend: jest.fn().mockResolvedValue({ hash: 'th_posting_reward_1' }),
       },
     } as any;
-    const updateImpl = jest.fn().mockImplementation(async (criteria, partial, map) => {
-      for (const row of map.values()) {
-        if (!matchesWhere(row, criteria)) {
-          continue;
+    const updateImpl = jest
+      .fn()
+      .mockImplementation(async (criteria, partial, map) => {
+        for (const row of map.values()) {
+          if (!matchesWhere(row, criteria)) {
+            continue;
+          }
+          if (partial.status === 'paid') {
+            throw new Error('db write failed');
+          }
+          map.set(row.address, {
+            ...row,
+            ...partial,
+          });
+          return { affected: 1 };
         }
-        if (partial.status === 'paid') {
-          throw new Error('db write failed');
-        }
-        map.set(row.address, {
-          ...row,
-          ...partial,
-        });
-        return { affected: 1 };
-      }
-      return { affected: 0 };
-    });
+        return { affected: 0 };
+      });
 
     const first = getService({
       rows,
@@ -519,7 +555,9 @@ describe('ProfileXPostingRewardService', () => {
         status: 'pending',
       },
     ]);
-    const { service, postingRewardRepository, aeSdkService } = getService({ rows });
+    const { service, postingRewardRepository, aeSdkService } = getService({
+      rows,
+    });
 
     await service.processDueRewards();
 

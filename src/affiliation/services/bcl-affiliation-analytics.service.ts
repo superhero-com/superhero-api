@@ -89,11 +89,11 @@ export class BclAffiliationAnalyticsService {
     const start = Date.now();
     const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] =
       await Promise.all([
-      this.getDailyRegisteredCounts(startDate, endDate),
-      this.getDailyStatusCounts('claimed', startDate, endDate),
-      this.getDailyStatusCounts('revoked', startDate, endDate),
-      this.getDailyRegisteredAmount(startDate, endDate),
-    ]);
+        this.getDailyRegisteredCounts(startDate, endDate),
+        this.getDailyStatusCounts('claimed', startDate, endDate),
+        this.getDailyStatusCounts('revoked', startDate, endDate),
+        this.getDailyRegisteredAmount(startDate, endDate),
+      ]);
     const xVerification = await this.getXVerificationData(params);
 
     const [totals, uniques, amountTotals] = await Promise.all([
@@ -166,7 +166,11 @@ export class BclAffiliationAnalyticsService {
       this.getDailyXVerifications(startDate, endDate),
       this.getTotalVerifiedUsers(startDate, endDate),
     ]);
-    const series = this.buildXVerificationSeries(startDate, endDate, xVerifiedByDay);
+    const series = this.buildXVerificationSeries(
+      startDate,
+      endDate,
+      xVerifiedByDay,
+    );
 
     return {
       series,
@@ -473,11 +477,11 @@ export class BclAffiliationAnalyticsService {
     const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
     let qb = this.txRepo
       .createQueryBuilder('t')
-      .select(
-        `to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD')`,
+      .select('t.caller_id', 'caller_id')
+      .addSelect(
+        `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD'))`,
         'date',
       )
-      .addSelect('COUNT(DISTINCT t.caller_id)::int', 'count')
       .where('t.function = :fn', { fn: 'set_x_name_with_attestation' })
       .andWhere('t.caller_id IS NOT NULL')
       .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
@@ -490,12 +494,17 @@ export class BclAffiliationAnalyticsService {
     }
 
     const rows = await qb
-      .groupBy('date')
+      .groupBy('t.caller_id')
       .orderBy('date', 'ASC')
-      .getRawMany<{ date: string; count: number }>();
+      .getRawMany<{ caller_id: string; date: string }>();
 
     const out: Record<string, number> = {};
-    for (const r of rows) out[r.date] = Number(r.count || 0);
+    for (const r of rows) {
+      if (!r.date) {
+        continue;
+      }
+      out[r.date] = (out[r.date] || 0) + 1;
+    }
     return out;
   }
 

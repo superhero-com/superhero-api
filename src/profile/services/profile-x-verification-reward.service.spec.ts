@@ -10,6 +10,7 @@ jest.mock('../profile.constants', () => ({
 
 import { ProfileXVerificationRewardService } from './profile-x-verification-reward.service';
 import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
+import { ProfileXApiClientService } from './profile-x-api-client.service';
 
 describe('ProfileXVerificationRewardService', () => {
   const originalFetch = global.fetch;
@@ -48,7 +49,8 @@ describe('ProfileXVerificationRewardService', () => {
     global.fetch = originalFetch;
   });
 
-  const extractFindOperatorValue = (value: any) => value?._value ?? value?.value;
+  const extractFindOperatorValue = (value: any) =>
+    value?._value ?? value?.value;
 
   const createRowsStore = (seed?: RewardRow[]) => {
     const rows = new Map<string, RewardRow>();
@@ -84,7 +86,10 @@ describe('ProfileXVerificationRewardService', () => {
           if (row.status === 'pending' && !row.next_retry_at) {
             return true;
           }
-          if ((row.status === 'pending' || row.status === 'failed') && row.next_retry_at) {
+          if (
+            (row.status === 'pending' || row.status === 'failed') &&
+            row.next_retry_at
+          ) {
             return new Date(row.next_retry_at).getTime() <= now;
           }
           return false;
@@ -112,9 +117,11 @@ describe('ProfileXVerificationRewardService', () => {
           where: jest.fn().mockImplementation((_query: string, params: any) => {
             state.address = params.address;
             return {
-              getOne: jest.fn().mockResolvedValue(
-                state.address ? rows.get(state.address) || null : null,
-              ),
+              getOne: jest
+                .fn()
+                .mockResolvedValue(
+                  state.address ? rows.get(state.address) || null : null,
+                ),
             };
           }),
         };
@@ -174,6 +181,7 @@ describe('ProfileXVerificationRewardService', () => {
         enqueueSpend: jest.fn().mockImplementation(async (_k, work) => work()),
         getRewardAccount: jest.fn().mockReturnValue({}),
       } as any);
+    const profileXApiClientService = new ProfileXApiClientService();
 
     const service = new ProfileXVerificationRewardService(
       rewardRepository,
@@ -181,6 +189,7 @@ describe('ProfileXVerificationRewardService', () => {
       aeSdkService,
       profileXInviteService,
       profileSpendQueueService,
+      profileXApiClientService,
     );
     return {
       service,
@@ -223,7 +232,9 @@ describe('ProfileXVerificationRewardService', () => {
       'too_small',
     );
 
-    const row = rows.get('ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo');
+    const row = rows.get(
+      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
+    );
     expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
     expect(row?.status).toBe('ineligible_followers');
     expect(row?.next_retry_at).toBeNull();
@@ -241,10 +252,7 @@ describe('ProfileXVerificationRewardService', () => {
     const { service, rows } = getService({ aeSdkService });
 
     const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
-    await service.sendRewardIfEligible(
-      address,
-      'retry_user',
-    );
+    await service.sendRewardIfEligible(address, 'retry_user');
     let row = rows.get(address);
     expect(row?.status).toBe('pending');
     expect(row?.retry_count).toBe(1);
@@ -277,14 +285,8 @@ describe('ProfileXVerificationRewardService', () => {
     } as any;
     const { service, rows } = getService({ aeSdkService });
     const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
-    const first = service.sendRewardIfEligible(
-      address,
-      'same_user',
-    );
-    const second = service.sendRewardIfEligible(
-      address,
-      'same_user',
-    );
+    const first = service.sendRewardIfEligible(address, 'same_user');
+    const second = service.sendRewardIfEligible(address, 'same_user');
 
     await new Promise((resolve) => setImmediate(resolve));
     expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(1);
@@ -310,7 +312,9 @@ describe('ProfileXVerificationRewardService', () => {
       'alice',
     );
 
-    const row = rows.get('ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC');
+    const row = rows.get(
+      'ak_2qUqjP8J5Mdrrnw9MhQN9jQHX8RWqA27RSh4BnhJrg5ioLHFgC',
+    );
     expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
     expect(row?.status).toBe('blocked_username_conflict');
     expect(row?.next_retry_at).toBeNull();
@@ -330,10 +334,7 @@ describe('ProfileXVerificationRewardService', () => {
 
     const { service, aeSdkService, rows } = getService();
     const address = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
-    await service.sendRewardIfEligible(
-      address,
-      'lookup_failure_user',
-    );
+    await service.sendRewardIfEligible(address, 'lookup_failure_user');
     const row = rows.get(address);
     expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
     expect(row?.status).toBe('pending');
@@ -355,7 +356,9 @@ describe('ProfileXVerificationRewardService', () => {
           ok: false,
           status: 404,
           json: async () => ({
-            errors: [{ message: 'Could not find user with username: missing_user' }],
+            errors: [
+              { message: 'Could not find user with username: missing_user' },
+            ],
           }),
         } as any;
       }
@@ -387,9 +390,11 @@ describe('ProfileXVerificationRewardService', () => {
           where: jest.fn().mockImplementation((_query: string, params: any) => {
             state.address = params.address;
             return {
-              getOne: jest.fn().mockResolvedValue(
-                state.address ? rows.get(state.address) || null : null,
-              ),
+              getOne: jest
+                .fn()
+                .mockResolvedValue(
+                  state.address ? rows.get(state.address) || null : null,
+                ),
             };
           }),
         };
@@ -419,16 +424,18 @@ describe('ProfileXVerificationRewardService', () => {
       }),
     } as any;
     const dataSource = {
-      transaction: jest.fn().mockImplementation(async (work: (manager: any) => Promise<any>) => {
-        inTransaction = true;
-        try {
-          return await work({
-            getRepository: jest.fn().mockReturnValue(managerRepo),
-          });
-        } finally {
-          inTransaction = false;
-        }
-      }),
+      transaction: jest
+        .fn()
+        .mockImplementation(async (work: (manager: any) => Promise<any>) => {
+          inTransaction = true;
+          try {
+            return await work({
+              getRepository: jest.fn().mockReturnValue(managerRepo),
+            });
+          } finally {
+            inTransaction = false;
+          }
+        }),
     } as any;
     const aeSdkService = {
       sdk: {

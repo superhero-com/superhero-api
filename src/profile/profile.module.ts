@@ -20,6 +20,7 @@ import { ProfileIndexerService } from './services/profile-indexer.service';
 import { ProfileLiveSyncService } from './services/profile-live-sync.service';
 import { ProfileReadService } from './services/profile-read.service';
 import { ProfileSpendQueueService } from './services/profile-spend-queue.service';
+import { ProfileXApiClientService } from './services/profile-x-api-client.service';
 import { ProfileXInviteService } from './services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from './services/profile-x-posting-reward.service';
 import { ProfileXVerificationRewardService } from './services/profile-x-verification-reward.service';
@@ -48,6 +49,7 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
     ProfileLiveSyncService,
     ProfileReadService,
     ProfileSpendQueueService,
+    ProfileXApiClientService,
     ProfileXInviteService,
     ProfileXPostingRewardService,
     ProfileXVerificationRewardService,
