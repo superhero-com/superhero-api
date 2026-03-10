@@ -37,6 +37,22 @@ export class TransactionsController {
     private transactionService: TransactionService,
   ) {}
 
+  private createEmptyPagination(
+    page: number,
+    limit: number,
+  ): Pagination<Transaction> {
+    return {
+      items: [],
+      meta: {
+        totalItems: 0,
+        itemCount: 0,
+        itemsPerPage: limit,
+        totalPages: 0,
+        currentPage: page,
+      },
+    };
+  }
+
   @ApiQuery({
     name: 'token_address',
     type: 'string',
@@ -85,7 +101,15 @@ export class TransactionsController {
     queryBuilder.orderBy(`transactions.created_at`, 'DESC');
 
     if (token_address) {
-      const token = await this.tokenService.getToken(token_address);
+      let token = null;
+      try {
+        token = await this.tokenService.getToken(token_address);
+      } catch (error) {
+        return this.createEmptyPagination(page, limit);
+      }
+      if (!token?.sale_address) {
+        return this.createEmptyPagination(page, limit);
+      }
       queryBuilder.where('transactions.sale_address = :sale_address', {
         sale_address: token.sale_address,
       });
