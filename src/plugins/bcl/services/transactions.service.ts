@@ -9,6 +9,16 @@ import BigNumber from 'bignumber.js';
 @Injectable()
 export class TransactionsService {
   private readonly logger = new Logger(TransactionsService.name);
+  private readonly BUY_TOPIC =
+    '103347481884921461187458933603797704361973189016747204637339841427224784760666';
+  private readonly SELL_TOPIC =
+    '23104635772480053538972224151762463181492989144154121566848232077119925570281';
+  private readonly PRICE_CHANGE_TOPIC =
+    '3577134775049335318224940963029268892731434609492265317583808375263764302639';
+  private readonly MINT_TOPIC =
+    '97248968993606906149864095761415446114204891017168990930824289305879066770211';
+  private readonly BURN_TOPIC =
+    '59519329313588602299792785325724171247065768738621522936987157301332531057158';
 
   constructor(
     private readonly communityFactoryService: CommunityFactoryService,
@@ -22,9 +32,18 @@ export class TransactionsService {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      const decodedData = factory.contract.$decodeEvents(tx.raw?.log || [], {
+      let decodedData = factory.contract.$decodeEvents(tx.raw?.log || [], {
         omitUnknown: true,
       });
+
+      if (!decodedData?.length) {
+        decodedData = await this.buildFallbackDecodedData(tx);
+        if (decodedData.length) {
+          this.logger.warn(
+            `Using raw.log fallback decoder for transaction ${tx.hash}`,
+          );
+        }
+      }
 
       return {
         ...tx,
@@ -44,6 +63,115 @@ export class TransactionsService {
       );
       return tx;
     }
+  }
+
+  private async buildFallbackDecodedData(tx: Tx): Promise<any[]> {
+    const logs = Array.isArray(tx.raw?.log) ? tx.raw.log : [];
+
+    if (tx.function === BCL_FUNCTIONS.sell) {
+      const sellLog = logs.find((log) => log?.topics?.[0] === this.SELL_TOPIC);
+      const burnLog = logs.find((log) => log?.topics?.[0] === this.BURN_TOPIC);
+      const priceChangeLog = logs.find(
+        (log) => log?.topics?.[0] === this.PRICE_CHANGE_TOPIC,
+      );
+
+      const amountRaw = sellLog?.topics?.[1]?.toString();
+      const previousSupplyRaw = sellLog?.topics?.[2]?.toString();
+      const volumeRaw = burnLog?.topics?.[2]?.toString();
+      const previousBuyPriceRaw = priceChangeLog?.topics?.[1]?.toString();
+      const buyPriceRaw = priceChangeLog?.topics?.[2]?.toString();
+
+      if (!amountRaw || !previousSupplyRaw || !volumeRaw) {
+        return [];
+      }
+
+      const decodedData = [
+        {
+          name: 'Sell',
+          args: [amountRaw, previousSupplyRaw],
+        },
+        {
+          name: 'Burn',
+          args: [null, volumeRaw],
+        },
+      ];
+
+      if (previousBuyPriceRaw && buyPriceRaw) {
+        decodedData.push({
+          name: 'PriceChange',
+          args: [previousBuyPriceRaw, buyPriceRaw],
+        });
+      }
+
+      return decodedData;
+    }
+
+    if (
+      ![BCL_FUNCTIONS.buy, BCL_FUNCTIONS.create_community].includes(
+        tx.function as typeof BCL_FUNCTIONS.buy,
+      )
+    ) {
+      return [];
+    }
+
+    const buyLog = logs.find((log) => log?.topics?.[0] === this.BUY_TOPIC);
+    const priceChangeLog = logs.find(
+      (log) => log?.topics?.[0] === this.PRICE_CHANGE_TOPIC,
+    );
+
+    if (!buyLog || !priceChangeLog) {
+      return [];
+    }
+
+    const volumeArgumentIndex =
+      tx.function === BCL_FUNCTIONS.create_community ? 2 : 0;
+    const volumeRaw =
+      tx.raw?.arguments?.[volumeArgumentIndex]?.value?.toString();
+    const amountRaw = tx.raw?.amount?.toString();
+    const previousSupplyRaw = buyLog?.topics?.[3]?.toString();
+    const previousBuyPriceRaw = priceChangeLog?.topics?.[1]?.toString();
+    const buyPriceRaw = priceChangeLog?.topics?.[2]?.toString();
+
+    if (
+      !volumeRaw ||
+      !amountRaw ||
+      !previousSupplyRaw ||
+      !previousBuyPriceRaw ||
+      !buyPriceRaw
+    ) {
+      return [];
+    }
+
+    const currentFactory =
+      await this.communityFactoryService.getCurrentFactory();
+    const mintLogs = logs.filter((log) => log?.topics?.[0] === this.MINT_TOPIC);
+    const protocolRewardMintLog =
+      mintLogs.find((log) => log?.address === currentFactory.bctsl_aex9_address) ||
+      mintLogs.find((log) => log?.topics?.[2]?.toString() !== volumeRaw);
+    const protocolRewardRaw = protocolRewardMintLog?.topics?.[2]?.toString();
+
+    if (!protocolRewardRaw) {
+      return [];
+    }
+
+    return [
+      {
+        name: 'Mint',
+        args: [null, protocolRewardRaw],
+      },
+      {
+        name: 'Buy',
+        args: [amountRaw, null, previousSupplyRaw],
+      },
+      {
+        name: 'PriceChange',
+        args: [previousBuyPriceRaw, buyPriceRaw],
+      },
+      {
+        name: 'Mint',
+        args: [null, volumeRaw],
+      },
+    ];
   }
 
   /**

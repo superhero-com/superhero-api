@@ -1,3 +1,4 @@
+import BigNumber from 'bignumber.js';
 import { BCL_FUNCTIONS } from '@/configs';
 import { SyncDirectionEnum } from '../../plugin.interface';
 import { TransactionProcessorService } from './transaction-processor.service';
@@ -5,23 +6,58 @@ import { TransactionProcessorService } from './transaction-processor.service';
 describe('TransactionProcessorService', () => {
   let service: TransactionProcessorService;
   let validationService: { validateTransaction: jest.Mock };
-  let persistenceService: { cleanupOldTransactions: jest.Mock };
-  let tokenService: {
-    findByAddress: jest.Mock;
-    createTokenFromRawTransaction: jest.Mock;
+  let dataService: {
+    calculatePrices: jest.Mock;
+    prepareTransactionData: jest.Mock;
   };
+  let persistenceService: {
+    cleanupOldTransactions: jest.Mock;
+    saveTransaction: jest.Mock;
+  };
+  let transactionsService: {
+    decodeTxEvents: jest.Mock;
+    parseTransactionData: jest.Mock;
+    isTokenSupportedCollection: jest.Mock;
+  };
+  let tokenService: {
+    getToken: jest.Mock;
+    createTokenFromRawTransaction: jest.Mock;
+    update: jest.Mock;
+    updateTokenMetaDataFromCreateTx: jest.Mock;
+    syncTokenPrice: jest.Mock;
+    updateTokenTrendingScore: jest.Mock;
+    findByAddress: jest.Mock;
+  };
+  let tokenHolderService: { updateTokenHolder: jest.Mock };
 
   beforeEach(() => {
     validationService = {
       validateTransaction: jest.fn(),
     };
+    dataService = {
+      calculatePrices: jest.fn(),
+      prepareTransactionData: jest.fn(),
+    };
     persistenceService = {
       cleanupOldTransactions: jest.fn(),
+      saveTransaction: jest.fn(),
     };
-
+    transactionsService = {
+      decodeTxEvents: jest.fn(),
+      parseTransactionData: jest.fn(),
+      isTokenSupportedCollection: jest.fn(),
+    };
     tokenService = {
-      findByAddress: jest.fn(),
+      getToken: jest.fn(),
       createTokenFromRawTransaction: jest.fn(),
+      update: jest.fn(),
+      updateTokenMetaDataFromCreateTx: jest.fn(),
+      syncTokenPrice: jest.fn(),
+      updateTokenTrendingScore: jest.fn(),
+      findByAddress: jest.fn(),
+    };
+    tokenHolderService = {
+      updateTokenHolder: jest.fn(),
     };
 
     const transactionRepository = {
@@ -32,57 +68,68 @@ describe('TransactionProcessorService', () => {
 
     service = new TransactionProcessorService(
       validationService as any,
-      {} as any,
+      dataService as any,
       persistenceService as any,
-      {} as any,
+      transactionsService as any,
       tokenService as any,
-      {} as any,
+      tokenHolderService as any,
       transactionRepository as any,
     );
   });
 
-  it('skips non-create tx when token is missing without creating token', async () => {
+  it('skips transactions rejected by validation', async () => {
     validationService.validateTransaction.mockResolvedValue({
-      isValid: true,
-      saleAddress: 'ct_missing',
+      isValid: false,
+      saleAddress: null,
     });
-    tokenService.findByAddress.mockResolvedValue(null);
 
     const result = await service.processTransaction(
       {
-        hash: 'th_non_create',
+        hash: 'th_invalid',
         function: BCL_FUNCTIONS.buy,
       } as any,
       SyncDirectionEnum.Live,
     );
 
     expect(result).toBeNull();
-    expect(tokenService.findByAddress).toHaveBeenCalledWith(
-      'ct_missing',
-      true,
-      expect.any(Object),
-    );
-    expect(tokenService.createTokenFromRawTransaction).not.toHaveBeenCalled();
+    expect(tokenService.getToken).not.toHaveBeenCalled();
+    expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
   });
 
-  it('skips create_community tx when token creation returns null', async () => {
+  it('rejects buy transactions that have no decoded events yet', async () => {
+    const rawTransaction = {
+      hash: 'th_broken_live',
+      function: BCL_FUNCTIONS.buy,
+      block_height: 123,
+      caller_id: 'ak_test',
+      raw: { log: [] },
+    };
+    const token = {
+      sale_address: 'ct_sale',
+      factory_address: 'ct_factory',
+    };
+
     validationService.validateTransaction.mockResolvedValue({
       isValid: true,
-      saleAddress: 'ct_missing',
+      saleAddress: 'ct_sale',
     });
-    tokenService.findByAddress.mockResolvedValue(null);
-    tokenService.createTokenFromRawTransaction.mockResolvedValue(null);
+    tokenService.getToken.mockResolvedValue(token);
+    transactionsService.decodeTxEvents.mockResolvedValue(rawTransaction);
+    transactionsService.parseTransactionData.mockResolvedValue({
+      amount: new BigNumber(0),
+      volume: new BigNumber(0),
+      total_supply: new BigNumber(0),
+      protocol_reward: new BigNumber(0),
+      _should_revalidate: true,
+    });
 
-    const result = await service.processTransaction(
-      {
-        hash: 'th_create',
-        function: BCL_FUNCTIONS.create_community,
-      } as any,
-      SyncDirectionEnum.Live,
+    await expect(
+      service.processTransaction(rawTransaction as any, SyncDirectionEnum.Live),
+    ).rejects.toThrow(
+      'Missing decoded events for buy transaction th_broken_live',
     );
 
-    expect(result).toBeNull();
-    expect(persistenceService.cleanupOldTransactions).toHaveBeenCalledTimes(1);
-    expect(tokenService.createTokenFromRawTransaction).toHaveBeenCalledTimes(1);
+    expect(dataService.calculatePrices).not.toHaveBeenCalled();
+    expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
   });
 });

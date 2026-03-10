@@ -386,6 +386,21 @@ export class TokensService {
 
       return this.contracts[saleAddress];
     } catch (error: any) {
+      const isUnsupportedSaleContractError =
+        error?.name === 'BytecodeMismatchError' ||
+        error?.message?.includes(
+          'Contract ACI do not correspond to the bytecode deployed on the chain',
+        ) ||
+        error?.message?.includes('Trying to call undefined function') ||
+        error?.message?.includes('function name: sale_type');
+
+      if (isUnsupportedSaleContractError) {
+        this.logger.warn(
+          `getTokenContractsBySaleAddress->unsupported:: ${saleAddress} (${error.message})`,
+        );
+        return undefined;
+      }
+
       this.logger.error(
         `getTokenContractsBySaleAddress->error:: ${saleAddress}`,
         error,
