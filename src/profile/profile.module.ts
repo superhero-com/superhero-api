@@ -4,7 +4,7 @@ import { Account } from '@/account/entities/account.entity';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-// import { ProfileController } from './controllers/profile.controller';
+import { ProfileController } from './controllers/profile.controller';
 import { ProfileRewardsController } from './controllers/profile-rewards.controller';
 import { ProfileCache } from './entities/profile-cache.entity';
 import { ProfileSyncState } from './entities/profile-sync-state.entity';
@@ -52,7 +52,7 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
     ProfileXPostingRewardService,
     ProfileXVerificationRewardService,
   ],
-  controllers: [ProfileRewardsController],
+  controllers: [ProfileRewardsController, ProfileController],
   exports: [TypeOrmModule, ProfileReadService, ProfileContractService],
 })
 export class ProfileModule {}
