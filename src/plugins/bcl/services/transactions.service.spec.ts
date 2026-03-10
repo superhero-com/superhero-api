@@ -223,6 +223,97 @@ describe('TransactionsService', () => {
     expect(parsed._should_revalidate).toBe(false);
   });
 
+  it('falls back to a non-volume mint when protocol reward address differs', async () => {
+    communityFactoryService.loadFactory.mockResolvedValue({
+      contract: {
+        $decodeEvents: jest.fn().mockReturnValue([]),
+      },
+    });
+
+    const tx = {
+      hash: 'th_AYC2mcfXbnws5gyuEbgwaW6xzCArVkUZA99Vr5qW486oFBDLY',
+      function: 'buy',
+      raw: {
+        amount: '7129391463946',
+        arguments: [{ type: 'int', value: '18000000000000000000' }],
+        log: [
+          {
+            address: 'ct_WTrFHjsSWtYbUnPrfeLYqKDtXp35G5ejDYzUdtdVJ9YBEy663',
+            data: 'cb_Xfbg4g==',
+            topics: [
+              '103347481884921461187458933603797704361973189016747204637339841427224784760666',
+              '6925358308294',
+              '34454518946',
+              '28269800000000000000000',
+            ],
+          },
+          {
+            address: 'ct_WTrFHjsSWtYbUnPrfeLYqKDtXp35G5ejDYzUdtdVJ9YBEy663',
+            data: 'cb_Xfbg4g==',
+            topics: [
+              '3577134775049335318224940963029268892731434609492265317583808375263764302639',
+              '384656679080',
+              '384837630243',
+            ],
+          },
+          {
+            address: 'ct_2fKygkEXvyH1PKesu3sGhFgnZ6t6fAv7hbJuSgTwbk5ztHo4uX',
+            data: 'cb_Xfbg4g==',
+            topics: [
+              '97248968993606906149864095761415446114204891017168990930824289305879066770211',
+              '94501853295475911678090929081597289095225831231298160182855370093688095414809',
+              '6925358308294000',
+            ],
+          },
+          {
+            address: 'ct_UJaJ9LfPsn4Uy6z4q8pDtYkTJH3RYzZtHE4rJEfZ4RTxX7obk',
+            data: 'cb_Xfbg4g==',
+            topics: [
+              '97248968993606906149864095761415446114204891017168990930824289305879066770211',
+              '94501853295475911678090929081597289095225831231298160182855370093688095414809',
+              '18000000000000000000',
+            ],
+          },
+        ],
+      },
+    };
+
+    const decodedTx = await service.decodeTxEvents(
+      {
+        factory_address:
+          'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN',
+      } as any,
+      tx as any,
+    );
+
+    expect(decodedTx.raw.decodedData).toEqual([
+      {
+        name: 'Mint',
+        args: [null, '6925358308294000'],
+      },
+      {
+        name: 'Buy',
+        args: ['7129391463946', null, '28269800000000000000000'],
+      },
+      {
+        name: 'PriceChange',
+        args: ['384656679080', '384837630243'],
+      },
+      {
+        name: 'Mint',
+        args: [null, '18000000000000000000'],
+      },
+    ]);
+
+    const parsed = await service.parseTransactionData(decodedTx as any);
+
+    expect(parsed.amount.toFixed()).toBe('0.000007129391463946');
+    expect(parsed.volume.toFixed()).toBe('18');
+    expect(parsed.protocol_reward.toFixed()).toBe('0.006925358308294');
+    expect(parsed.total_supply.toFixed()).toBe('28287.8');
+    expect(parsed._should_revalidate).toBe(false);
+  });
+
   it('falls back to raw logs for sells', async () => {
     communityFactoryService.loadFactory.mockResolvedValue({
       contract: {
