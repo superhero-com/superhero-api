@@ -87,16 +87,21 @@ export class BclAffiliationAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(params);
 
     const start = Date.now();
-    const [registeredByDay, redeemedByDay, revokedByDay, amountByDay] =
-      await Promise.all([
-        this.getDailyRegisteredCounts(startDate, endDate),
-        this.getDailyStatusCounts('claimed', startDate, endDate),
-        this.getDailyStatusCounts('revoked', startDate, endDate),
-        this.getDailyRegisteredAmount(startDate, endDate),
-      ]);
-    const xVerification = await this.getXVerificationData(params);
-
-    const [totals, uniques, amountTotals] = await Promise.all([
+    const [
+      registeredByDay,
+      redeemedByDay,
+      revokedByDay,
+      amountByDay,
+      xVerification,
+      totals,
+      uniques,
+      amountTotals,
+    ] = await Promise.all([
+      this.getDailyRegisteredCounts(startDate, endDate),
+      this.getDailyStatusCounts('claimed', startDate, endDate),
+      this.getDailyStatusCounts('revoked', startDate, endDate),
+      this.getDailyRegisteredAmount(startDate, endDate),
+      this.getXVerificationData(params),
       this.getTotals(startDate, endDate),
       this.getUniques(startDate, endDate),
       this.getAmountTotals(startDate, endDate),
