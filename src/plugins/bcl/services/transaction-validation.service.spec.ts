@@ -36,7 +36,7 @@ describe('TransactionValidationService', () => {
         hash: 'th_broken',
         function: BCL_FUNCTIONS.buy,
         contract_id: 'ct_sale',
-        raw: {},
+        raw: { return_type: 'ok' },
       } as any),
     ).resolves.toEqual({
       isValid: true,
@@ -67,7 +67,40 @@ describe('TransactionValidationService', () => {
         hash: 'th_healthy',
         function: BCL_FUNCTIONS.buy,
         contract_id: 'ct_sale',
-        raw: {},
+        raw: { return_type: 'ok' },
+      } as any),
+    ).resolves.toEqual({
+      isValid: false,
+      saleAddress: null,
+    });
+  });
+
+  it('skips transactions whose return type is not ok', async () => {
+    const getOne = jest.fn().mockResolvedValue(null);
+
+    createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      getOne,
+    });
+
+    await expect(
+      service.validateTransaction({
+        hash: 'th_revert',
+        function: BCL_FUNCTIONS.sell,
+        contract_id: 'ct_sale',
+        raw: { return_type: 'revert' },
+      } as any),
+    ).resolves.toEqual({
+      isValid: false,
+      saleAddress: null,
+    });
+
+    await expect(
+      service.validateTransaction({
+        hash: 'th_error',
+        function: BCL_FUNCTIONS.sell,
+        contract_id: 'ct_sale',
+        raw: { returnType: 'error' },
       } as any),
     ).resolves.toEqual({
       isValid: false,

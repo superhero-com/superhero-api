@@ -41,6 +41,11 @@ export class TransactionValidationService {
     return null;
   }
 
+  private hasSuccessfulReturn(tx: Tx): boolean {
+    const returnType = tx.raw?.returnType || tx.raw?.return_type;
+    return returnType === 'ok';
+  }
+
   private async findExistingTransaction(
     txHash: string,
   ): Promise<Transaction | null> {
@@ -97,6 +102,10 @@ export class TransactionValidationService {
     saleAddress: string | null;
   }> {
     if (!Object.values(BCL_FUNCTIONS).includes(tx.function)) {
+      return { isValid: false, saleAddress: null };
+    }
+
+    if (!this.hasSuccessfulReturn(tx)) {
       return { isValid: false, saleAddress: null };
     }
 
