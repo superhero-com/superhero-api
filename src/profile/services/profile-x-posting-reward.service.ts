@@ -26,6 +26,7 @@ import {
 } from 'typeorm';
 import {
   PROFILE_X_POSTING_REWARD_AMOUNT_AE,
+  PROFILE_X_POSTING_REWARD_ENABLED,
   PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH,
   PROFILE_X_POSTING_REWARD_ENABLE_PERIODIC_RECHECKS,
   PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS,
@@ -122,6 +123,9 @@ export class ProfileXPostingRewardService {
 
   @Cron('*/30 * * * * *')
   async processDueRewards(): Promise<void> {
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      return;
+    }
     if (!PROFILE_X_POSTING_REWARD_ENABLE_PERIODIC_RECHECKS) {
       return;
     }
@@ -163,6 +167,9 @@ export class ProfileXPostingRewardService {
     xUsername: string,
     verificationMicroTime?: string,
   ): Promise<void> {
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      return;
+    }
     const normalizedXUsername = this.normalizeXUsername(xUsername);
     if (!normalizedXUsername) {
       this.logger.warn(
@@ -214,6 +221,9 @@ export class ProfileXPostingRewardService {
     verificationMicroTime?: string,
     sourceTxHash?: string,
   ): Promise<void> {
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      return;
+    }
     const normalizedHash = String(sourceTxHash || '').trim();
     if (normalizedHash) {
       if (this.recentSourceTxHashes.has(normalizedHash)) {
@@ -245,6 +255,15 @@ export class ProfileXPostingRewardService {
     const reward = await this.postingRewardRepository.findOne({
       where: { address },
     });
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      if (reward?.status === 'paid') {
+        return this.toPublicRewardStatus(reward);
+      }
+      return {
+        ...this.toPublicRewardStatus(null),
+        error: 'Posting rewards are temporarily unavailable.',
+      };
+    }
     return this.toPublicRewardStatus(reward);
   }
 
@@ -252,6 +271,15 @@ export class ProfileXPostingRewardService {
     address: string,
   ): Promise<PublicPostingRewardStatusPayload> {
     this.assertValidAddress(address);
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      throw new HttpException(
+        {
+          status: HttpStatus.SERVICE_UNAVAILABLE,
+          message: 'Posting rewards are temporarily unavailable.',
+        },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
     const cooldownUntilMs = this.manualRecheckBlockedUntilByAddress.get(address) || 0;
     if (cooldownUntilMs > Date.now()) {
       throw new HttpException(

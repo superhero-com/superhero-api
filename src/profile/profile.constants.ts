@@ -42,6 +42,11 @@ export const PROFILE_X_VERIFICATION_REWARD_FETCH_TIMEOUT_MS = parseInt(
 export const PROFILE_X_POSTING_REWARD_AMOUNT_AE =
   process.env.PROFILE_X_POSTING_REWARD_AMOUNT_AE || '0.05';
 
+export const PROFILE_X_POSTING_REWARD_ENABLED =
+  (process.env.PROFILE_X_POSTING_REWARD_ENABLED || 'false')
+    .trim()
+    .toLowerCase() !== 'false';
+
 export const PROFILE_X_POSTING_REWARD_THRESHOLD = parseInt(
   process.env.PROFILE_X_POSTING_REWARD_THRESHOLD || '10',
   10,
