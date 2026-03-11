@@ -405,6 +405,20 @@ export class TokensService {
         const isNotPresent = this.isContractNotPresentError(error);
         const hasRetry =
           isNotPresent && attempt < this.contractNotPresentMaxAttempts;
+        const isUnsupportedSaleContractError =
+          error?.name === 'BytecodeMismatchError' ||
+          error?.message?.includes(
+            'Contract ACI do not correspond to the bytecode deployed on the chain',
+          ) ||
+          error?.message?.includes('Trying to call undefined function') ||
+          error?.message?.includes('function name: sale_type');
+
+        if (isUnsupportedSaleContractError) {
+          this.logger.warn(
+            `getTokenContractsBySaleAddress->unsupported:: ${saleAddress} (${error.message})`,
+          );
+          return undefined;
+        }
 
         if (hasRetry) {
           const delayMs = this.contractNotPresentRetryDelayMs * attempt;
