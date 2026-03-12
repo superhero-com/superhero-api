@@ -12,7 +12,6 @@ export interface OnChainProfile {
   username?: string | null;
   x_username?: string | null;
   chain_name?: string | null;
-  display_source?: string | null;
   chain_expires_at?: string | null;
 }
 
@@ -61,7 +60,6 @@ export class ProfileContractService {
         username: this.unwrapOption(profile.username),
         x_username: this.unwrapOption(profile.x_username),
         chain_name: this.unwrapOption(profile.chain_name),
-        display_source: this.normalizeDisplaySource(profile.display_source),
         chain_expires_at:
           this.unwrapOption(profile.chain_expires_at)?.toString?.() || null,
       };
@@ -164,36 +162,5 @@ export class ProfileContractService {
       }
     }
     return value;
-  }
-
-  private normalizeDisplaySource(value: any): string | null {
-    if (value === null || value === undefined) {
-      return null;
-    }
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (
-        normalized === 'custom' ||
-        normalized === 'chain' ||
-        normalized === 'x'
-      ) {
-        return normalized;
-      }
-      return null;
-    }
-    // Sophia variant can decode as object like { Custom: [] } / { Chain: [] } / { X: [] }
-    if (typeof value === 'object') {
-      if (Object.prototype.hasOwnProperty.call(value, 'Custom'))
-        return 'custom';
-      if (Object.prototype.hasOwnProperty.call(value, 'Chain')) return 'chain';
-      if (Object.prototype.hasOwnProperty.call(value, 'X')) return 'x';
-      if (Object.prototype.hasOwnProperty.call(value, 'tag')) {
-        const tagValue = String((value as any).tag || '').toLowerCase();
-        if (tagValue === 'custom' || tagValue === 'chain' || tagValue === 'x') {
-          return tagValue;
-        }
-      }
-    }
-    return null;
   }
 }

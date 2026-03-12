@@ -1,28 +1,37 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
 export class DailyTradeVolumeQueryDto {
   @ApiProperty({
     description: 'Start date for the query (YYYY-MM-DD)',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   start_date?: string;
 
   @ApiProperty({
     description: 'End date for the query (YYYY-MM-DD)',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   end_date?: string;
 
   @ApiProperty({
     description: 'Token address to filter by',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   token_address?: string;
 
   @ApiProperty({
     description: 'Account address to filter by',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   account_address?: string;
 }
 
@@ -51,18 +60,24 @@ export class DailyUniqueActiveUsersQueryDto {
     description: 'Start date for the query (YYYY-MM-DD)',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   start_date?: string;
 
   @ApiProperty({
     description: 'End date for the query (YYYY-MM-DD)',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   end_date?: string;
 
   @ApiProperty({
     description: 'Token address to filter by',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   token_address?: string;
 }
 

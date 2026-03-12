@@ -4,7 +4,7 @@ import { ProfileContractService } from './profile-contract.service';
 import { ProfileReadService } from './profile-read.service';
 
 describe('ProfileReadService', () => {
-  it('keeps public_name empty when no selected name has a value', async () => {
+  it('falls back to address when no selected name has a value', async () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue(null as ProfileCache | null),
     } as any;
@@ -24,7 +24,7 @@ describe('ProfileReadService', () => {
     const address = 'ak_2a5f9b9b4b0a8c2e5bc087ecbfc0ef6a1234567890abcd';
     const result = await service.getProfile(address);
 
-    expect(result.public_name).toBe('');
+    expect(result.public_name).toBe(address);
   });
 
   it('prefers chain_name over other name sources', async () => {
@@ -34,7 +34,6 @@ describe('ProfileReadService', () => {
         username: 'custom_one',
         chain_name: 'chain_one',
         x_username: 'x_one',
-        display_source: 'x',
       } as ProfileCache),
     } as any;
     const accountRepository = {
@@ -61,7 +60,6 @@ describe('ProfileReadService', () => {
         username: null,
         chain_name: 'chain_one',
         x_username: 'x_one',
-        display_source: 'custom',
       } as ProfileCache),
     } as any;
     const accountRepository = {
@@ -88,7 +86,6 @@ describe('ProfileReadService', () => {
         username: 'custom_one',
         chain_name: null,
         x_username: 'x_one',
-        display_source: 'chain',
       } as ProfileCache),
     } as any;
     const accountRepository = {
@@ -112,8 +109,6 @@ describe('ProfileReadService', () => {
     const profileCacheRepository = {
       findOne: jest.fn().mockResolvedValue({
         address: 'ak_refresh',
-        public_name: '',
-        display_source: 'x',
         x_username: null,
       } as ProfileCache),
       upsert: jest.fn().mockResolvedValue(undefined),
@@ -129,7 +124,6 @@ describe('ProfileReadService', () => {
         username: null,
         x_username: 'x_fresh',
         chain_name: null,
-        display_source: 'x',
         chain_expires_at: null,
       }),
     } as unknown as ProfileContractService;
@@ -143,7 +137,7 @@ describe('ProfileReadService', () => {
       includeOnChain: true,
     });
 
-    expect(result.public_name).toBe('');
+    expect(result.public_name).toBe('ak_refresh');
   });
 
   it('does not derive batch public_name from x_username when includeOnChain=true', async () => {
@@ -151,8 +145,6 @@ describe('ProfileReadService', () => {
       find: jest.fn().mockResolvedValue([
         {
           address: 'ak_batch_refresh',
-          public_name: '',
-          display_source: 'x',
           x_username: null,
         } as ProfileCache,
       ]),
@@ -168,7 +160,6 @@ describe('ProfileReadService', () => {
         username: null,
         x_username: 'x_batch_fresh',
         chain_name: null,
-        display_source: 'x',
         chain_expires_at: null,
       }),
     } as unknown as ProfileContractService;
@@ -182,7 +173,7 @@ describe('ProfileReadService', () => {
       includeOnChain: true,
     });
 
-    expect(result[0].public_name).toBe('');
+    expect(result[0].public_name).toBe('ak_batch_refresh');
   });
 
   it('returns batch profiles in requested order', async () => {
@@ -192,12 +183,10 @@ describe('ProfileReadService', () => {
         {
           address: 'ak_2',
           username: 'second',
-          display_source: 'custom',
         } as ProfileCache,
         {
           address: 'ak_1',
           username: 'first',
-          display_source: 'custom',
         } as ProfileCache,
       ]),
     } as any;
@@ -229,7 +218,6 @@ describe('ProfileReadService', () => {
           address: 'ak_1',
           username: 'user1',
           bio: 'bio1',
-          display_source: 'custom',
           public_name: 'user1',
         } as ProfileCache,
       ]),

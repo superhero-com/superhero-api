@@ -8,9 +8,13 @@ import {
 } from 'typeorm';
 
 @Entity({
-  name: 'profile_x_verification_rewards',
+  name: 'profile_x_posting_rewards',
 })
-export class ProfileXVerificationReward {
+@Index('ux_profile_x_posting_rewards_x_user_id', ['x_user_id'], {
+  unique: true,
+  where: 'x_user_id IS NOT NULL',
+})
+export class ProfileXPostingReward {
   @PrimaryColumn()
   address: string;
 
@@ -24,24 +28,36 @@ export class ProfileXVerificationReward {
   @Column({
     nullable: true,
   })
+  x_user_id: string | null;
+
+  @Column({
+    type: 'int',
+    default: 0,
+  })
+  qualified_posts_count: number;
+
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+  })
+  verified_at: Date | null;
+
+  @Column({
+    nullable: true,
+  })
+  last_scanned_tweet_id: string | null;
+
+  @Index()
+  @Column({
+    nullable: true,
+  })
   tx_hash: string | null;
 
   @Column({
-    enum: [
-      'pending',
-      'paid',
-      'failed',
-      'ineligible_followers',
-      'blocked_username_conflict',
-    ],
+    enum: ['pending', 'paid', 'failed', 'blocked_x_identity_conflict'],
     default: 'pending',
   })
-  status:
-    | 'pending'
-    | 'paid'
-    | 'failed'
-    | 'ineligible_followers'
-    | 'blocked_username_conflict';
+  status: 'pending' | 'paid' | 'failed' | 'blocked_x_identity_conflict';
 
   @Column({
     type: 'text',
