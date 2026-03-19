@@ -15,8 +15,8 @@ on:
         required: false
         type: string
 jobs:
-  deploy:
-    name: superhero
+  deploy_mainnet:
+    name: api-mainnet
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
       VERSION: ${{ inputs.VERSION }}
@@ -39,4 +39,27 @@ jobs:
       PROFILE_REGISTRY_CONTRACT_ADDRESS: ${{ secrets.DEV_PROFILE_REGISTRY_CONTRACT_ADDRESS }}
       PROFILE_ATTESTATION_SIGNER_ADDRESS: ${{ secrets.DEV_PROFILE_ATTESTATION_SIGNER_ADDRESS }}
       PROFILE_ATTESTATION_PRIVATE_KEY: ${{ secrets.DEV_PROFILE_ATTESTATION_PRIVATE_KEY }}
-  
+  deploy_testnet:
+    name: api-testnet
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION }}
+      CONTAINER_NAME: "develop-superhero-api-testnet"
+    secrets:
+      AE_NETWORK_ID: "ae_uat"
+      API_HOST_PORT: "3044"
+      DB_DATABASE: "api"
+      DEPLOY_HOST: ${{ secrets.DEV_DEPLOY_HOST }}
+      DEPLOY_KEY: ${{ secrets.DEV_DEPLOY_KEY }}
+      DEPLOY_USERNAME: ${{ secrets.DEV_DEPLOY_USERNAME }}
+      DB_USER: ${{ secrets.DEV_DB_USER }}
+      DB_PASSWORD: ${{ secrets.DEV_DB_PASSWORD }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+      TRENDING_TAGS_API_KEY: ${{ secrets.TESTNET_TRENDING_TAGS_API_KEY }}
+      X_CLIENT_ID: ${{ secrets.TESTNET_X_CLIENT_ID }}
+      X_CLIENT_SECRET: ${{ secrets.TESTNET_X_CLIENT_SECRET }}
+      PROFILE_REGISTRY_CONTRACT_ADDRESS: ${{ secrets.TESTNET_PROFILE_REGISTRY_CONTRACT_ADDRESS }}
+      PROFILE_ATTESTATION_SIGNER_ADDRESS: ${{ secrets.TESTNET_PROFILE_ATTESTATION_SIGNER_ADDRESS }}
+      PROFILE_ATTESTATION_PRIVATE_KEY: ${{ secrets.TESTNET_PROFILE_ATTESTATION_PRIVATE_KEY }}
