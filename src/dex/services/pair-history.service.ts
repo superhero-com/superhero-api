@@ -390,10 +390,11 @@ export class PairHistoryService {
 
     try {
       // Create dynamic truncation based on the interval unit and size
+      const parentUnit = unit === 'minute' ? 'hour' : 'day';
       const truncationQuery =
         size > 1
-          ? `DATE_TRUNC('${unit}', created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM created_at) / ${size})`
-          : `DATE_TRUNC('${unit}', created_at)`; // For single units like '1 day'
+          ? `DATE_TRUNC('${parentUnit}', created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM created_at) / ${size})`
+          : `DATE_TRUNC('${unit}', created_at)`;
 
       const data = await queryRunner.query(
         `
