@@ -409,10 +409,9 @@ export class TransactionHistoryService {
 
     const { interval, unit, size, timeframe, intervalMs } = types[intervalType];
 
-    const parentUnit = unit === 'minute' ? 'hour' : 'day';
     const bucketExpr =
       size > 1
-        ? `DATE_TRUNC('${parentUnit}', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
+        ? `DATE_TRUNC('${unit}', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
         : `DATE_TRUNC('${unit}', t.created_at)`;
 
     // Select the closing (latest) transaction price per bucket via DISTINCT ON
