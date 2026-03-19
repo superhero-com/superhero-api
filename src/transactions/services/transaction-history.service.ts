@@ -3,7 +3,7 @@ import { Token } from '@/tokens/entities/token.entity';
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import moment, { Moment } from 'moment';
+import type { Moment } from 'moment';
 import { DataSource, Repository } from 'typeorm';
 import { HistoricalDataDto } from '../dto/historical-data.dto';
 import { Transaction } from '../entities/transaction.entity';
@@ -368,98 +368,99 @@ export class TransactionHistoryService {
     intervalType: '1d' | '7d' | '30d' | '90d' | '180d',
   ): Promise<ITransactionPreview> {
     if (!token) return { result: [], timeframe: '' };
+
     const types = {
       '1d': {
         interval: '20 minutes',
         unit: 'minute',
         size: 20,
         timeframe: '1 day',
+        intervalMs: 20 * 60 * 1000,
       },
       '7d': {
         interval: '1 hour',
         unit: 'hour',
         size: 1,
         timeframe: '7 days',
+        intervalMs: 60 * 60 * 1000,
       },
       '30d': {
         interval: '4 hours',
         unit: 'hour',
         size: 4,
         timeframe: '30 days',
+        intervalMs: 4 * 60 * 60 * 1000,
       },
       '90d': {
         interval: '4 hours',
         unit: 'hour',
         size: 4,
         timeframe: '90 days',
+        intervalMs: 4 * 60 * 60 * 1000,
       },
       '180d': {
         interval: '4 hours',
         unit: 'hour',
         size: 4,
         timeframe: '180 days',
+        intervalMs: 4 * 60 * 60 * 1000,
       },
     };
-    const { interval, unit, size, timeframe } = types[intervalType];
 
-    // Create dynamic truncation based on the interval unit and size
-    const truncationQuery =
+    const { interval, unit, size, timeframe, intervalMs } = types[intervalType];
+
+    const bucketExpr =
       size > 1
-        ? `DATE_TRUNC('${unit}', transactions.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM transactions.created_at) / ${size})`
-        : `DATE_TRUNC('${unit}', transactions.created_at)`; // For single units like '1 day'
+        ? `DATE_TRUNC('${unit}', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
+        : `DATE_TRUNC('${unit}', t.created_at)`;
 
-    const data = await this.transactionsRepository
-      .createQueryBuilder('transactions')
-      .where('')
-      .select([
-        `${truncationQuery} AS truncated_time`,
-        "MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-      ])
-      .where('transactions.sale_address = :sale_address', {
-        sale_address: token.sale_address,
-      })
-      .andWhere(`transactions.created_at >= NOW() - INTERVAL '${timeframe}'`)
-      .andWhere(`transactions.buy_price->>'ae' != 'NaN'`) // Exclude NaN values
-      .groupBy('truncated_time')
-      .orderBy('truncated_time', 'DESC')
-      .getRawMany();
+    // Select the closing (latest) transaction price per bucket via DISTINCT ON
+    const sparseData: Array<{ truncated_time: Date; last_price: number }> =
+      await this.dataSource.query(
+        `
+        SELECT DISTINCT ON (bucket)
+          bucket AS truncated_time,
+          price AS last_price
+        FROM (
+          SELECT
+            ${bucketExpr} AS bucket,
+            t.created_at,
+            CAST(t.buy_price->>'ae' AS FLOAT) AS price
+          FROM transactions t
+          WHERE t.sale_address = $1
+            AND t.created_at >= NOW() - INTERVAL '${timeframe}'
+            AND t.buy_price->>'ae' != 'NaN'
+        ) sub
+        ORDER BY bucket, created_at DESC
+        `,
+        [token.sale_address],
+      );
 
-    let result;
-    if (data.length <= 1) {
-      // If no transactions found for interval, get latest 4 transactions
-      const latestTransactions = await this.transactionsRepository
-        .createQueryBuilder('transactions')
-        .select([
-          'transactions.created_at as truncated_time',
-          "CAST(transactions.buy_price->>'ae' AS FLOAT) as max_buy_price",
-        ])
-        .where('transactions.sale_address = :sale_address', {
-          sale_address: token.sale_address,
-        })
-        .andWhere(`transactions.buy_price->>'ae' != 'NaN'`)
-        .orderBy('transactions.created_at', 'DESC')
-        .limit(4)
-        .getRawMany();
+    let result: ITransactionPreviewPrice[];
 
-      result = latestTransactions.map((item) => ({
-        last_price: item.max_buy_price,
+    if (sparseData.length <= 1) {
+      const fallback: Array<{ truncated_time: Date; last_price: number }> =
+        await this.dataSource.query(
+          `
+          SELECT
+            t.created_at AS truncated_time,
+            CAST(t.buy_price->>'ae' AS FLOAT) AS last_price
+          FROM transactions t
+          WHERE t.sale_address = $1
+            AND t.buy_price->>'ae' != 'NaN'
+          ORDER BY t.created_at DESC
+          LIMIT 4
+          `,
+          [token.sale_address],
+        );
+
+      result = fallback.reverse().map((item) => ({
+        last_price: String(item.last_price),
         end_time: item.truncated_time,
       }));
     } else {
-      result = data.map((item) => ({
-        last_price: item.max_buy_price,
-        end_time: item.truncated_time,
-      }));
+      result = this.fillMissingBuckets(sparseData, intervalMs);
     }
-
-    // prevent duplicate with same end_time
-    result = result.filter(
-      (item, index) =>
-        index ==
-        result.findIndex((t) =>
-          moment(t.end_time).isSame(moment(item.end_time)),
-        ),
-    );
 
     return {
       result,
@@ -468,5 +469,42 @@ export class TransactionHistoryService {
       interval,
       token,
     } as ITransactionPreview;
+  }
+
+  /**
+   * Fills gaps between sparse bucket data by carrying forward the last known
+   * price, producing a continuous series suitable for sparkline rendering.
+   */
+  private fillMissingBuckets(
+    sparseData: Array<{ truncated_time: Date; last_price: number }>,
+    intervalMs: number,
+  ): ITransactionPreviewPrice[] {
+    const priceMap = new Map<number, number>();
+    for (const row of sparseData) {
+      priceMap.set(new Date(row.truncated_time).getTime(), row.last_price);
+    }
+
+    const firstBucket = new Date(sparseData[0].truncated_time).getTime();
+    const lastBucket = new Date(
+      sparseData[sparseData.length - 1].truncated_time,
+    ).getTime();
+
+    const result: ITransactionPreviewPrice[] = [];
+    let carriedPrice: number | null = null;
+
+    for (let ts = firstBucket; ts <= lastBucket; ts += intervalMs) {
+      const price = priceMap.get(ts);
+      if (price !== undefined) {
+        carriedPrice = price;
+      }
+      if (carriedPrice !== null) {
+        result.push({
+          end_time: new Date(ts),
+          last_price: String(carriedPrice),
+        });
+      }
+    }
+
+    return result;
   }
 }
