@@ -462,6 +462,25 @@ export class TransactionHistoryService {
       result = this.fillMissingBuckets(sparseData, intervalMs);
     }
 
+    if (token.created_at) {
+      const timeframeDays = {
+        '1d': 1,
+        '7d': 7,
+        '30d': 30,
+        '90d': 90,
+        '180d': 180,
+      };
+      const windowStart = Date.now() - timeframeDays[intervalType] * 86_400_000;
+      const createdAt = new Date(token.created_at).getTime();
+
+      if (createdAt >= windowStart) {
+        result.unshift({
+          end_time: token.created_at,
+          last_price: '0.0000001',
+        });
+      }
+    }
+
     return {
       result,
       count: result.length,
