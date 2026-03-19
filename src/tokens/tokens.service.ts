@@ -176,16 +176,20 @@ export class TokensService {
         FROM token
         WHERE factory_address = '${token.factory_address}'
       )
-      SELECT rank
+      SELECT
+        ranked_tokens.rank,
+        row_to_json(token_performance_view.*) as performance
       FROM ranked_tokens
-      WHERE sale_address = '${token.sale_address}'
+      LEFT JOIN token_performance_view ON ranked_tokens.sale_address = token_performance_view.sale_address
+      WHERE ranked_tokens.sale_address = '${token.sale_address}'
     `;
 
     const [rankResult] = await this.tokensRepository.query(rankedQuery);
     return {
       ...token,
       rank: rankResult?.rank,
-    } as Token & { rank: number };
+      performance: rankResult?.performance ?? null,
+    } as Token & { rank: number; performance: unknown };
   }
 
   findOne(sale_address: string): Promise<Token | null> {
