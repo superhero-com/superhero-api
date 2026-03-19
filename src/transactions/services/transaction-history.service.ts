@@ -363,7 +363,10 @@ export class TransactionHistoryService {
     return tokenHistory;
   }
 
-  async getForPreview(token: Token, intervalType: '1d' | '7d' | '30d') {
+  async getForPreview(
+    token: Token,
+    intervalType: '1d' | '7d' | '30d' | '90d' | '180d',
+  ): Promise<ITransactionPreview> {
     if (!token) return { result: [], timeframe: '' };
     const types = {
       '1d': {
@@ -383,6 +386,18 @@ export class TransactionHistoryService {
         unit: 'hour',
         size: 4,
         timeframe: '30 days',
+      },
+      '90d': {
+        interval: '4 hours',
+        unit: 'hour',
+        size: 4,
+        timeframe: '90 days',
+      },
+      '180d': {
+        interval: '4 hours',
+        unit: 'hour',
+        size: 4,
+        timeframe: '180 days',
       },
     };
     const { interval, unit, size, timeframe } = types[intervalType];

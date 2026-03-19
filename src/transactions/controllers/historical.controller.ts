@@ -124,7 +124,7 @@ export class HistoricalController {
   })
   @ApiQuery({
     name: 'interval',
-    enum: ['1d', '7d', '30d'],
+    enum: ['1d', '7d', '30d', '90d', '180d'],
     required: false,
     example: '7d',
   })
@@ -132,7 +132,7 @@ export class HistoricalController {
   @Get('/preview/:address')
   async getForPreview(
     @Param('address') address: string,
-    @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
+    @Query('interval') interval: '1d' | '7d' | '30d' | '90d' | '180d' = '7d',
   ): Promise<ITransactionPreview> {
     if (!address || address == 'null') {
       throw new BadRequestException('Address is required');
