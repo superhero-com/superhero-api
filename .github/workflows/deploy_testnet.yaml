@@ -1,0 +1,41 @@
+name: Testnet deploy
+on:
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: "Version to deploy to testnet"
+        default: "develop"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      VERSION:
+        description: "Version to deploy to testnet"
+        default: "develop"
+        required: false
+        type: string
+jobs:
+  deploy:
+    name: superhero-testnet
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION }}
+      CONTAINER_NAME: "develop-superhero-api-testnet"
+    secrets:
+      AE_NETWORK_ID: "ae_uat"
+      API_HOST_PORT: "3044"
+      DB_DATABASE: "api_testnet"
+      DEPLOY_HOST: ${{ secrets.TESTNET_DEPLOY_HOST }}
+      DEPLOY_KEY: ${{ secrets.TESTNET_DEPLOY_KEY }}
+      DEPLOY_USERNAME: ${{ secrets.TESTNET_DEPLOY_USERNAME }}
+      DB_USER: ${{ secrets.TESTNET_DB_USER }}
+      DB_PASSWORD: ${{ secrets.TESTNET_DB_PASSWORD }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_REPO: ${{ secrets.DOCKERHUB_REPO }}
+      TRENDING_TAGS_API_KEY: ${{ secrets.TESTNET_TRENDING_TAGS_API_KEY }}
+      X_CLIENT_ID: ${{ secrets.TESTNET_X_CLIENT_ID }}
+      X_CLIENT_SECRET: ${{ secrets.TESTNET_X_CLIENT_SECRET }}
+      PROFILE_REGISTRY_CONTRACT_ADDRESS: ${{ secrets.TESTNET_PROFILE_REGISTRY_CONTRACT_ADDRESS }}
+      PROFILE_ATTESTATION_SIGNER_ADDRESS: ${{ secrets.TESTNET_PROFILE_ATTESTATION_SIGNER_ADDRESS }}
+      PROFILE_ATTESTATION_PRIVATE_KEY: ${{ secrets.TESTNET_PROFILE_ATTESTATION_PRIVATE_KEY }}

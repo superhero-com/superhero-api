@@ -50,11 +50,13 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     }
 
     if (
-      [
-        GOVERNANCE_CONTRACT.FUNCTIONS.add_poll,
-        GOVERNANCE_CONTRACT.FUNCTIONS.delegate,
-        GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
-      ].includes(tx.function)
+      (
+        [
+          GOVERNANCE_CONTRACT.FUNCTIONS.add_poll,
+          GOVERNANCE_CONTRACT.FUNCTIONS.delegate,
+          GOVERNANCE_CONTRACT.FUNCTIONS.revoke_delegation,
+        ] as readonly string[]
+      ).includes(tx.function)
     ) {
       try {
         const contract = await this.getContract(
@@ -86,10 +88,12 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     }
 
     if (
-      [
-        GOVERNANCE_CONTRACT.FUNCTIONS.vote,
-        GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote,
-      ].includes(tx.function)
+      (
+        [
+          GOVERNANCE_CONTRACT.FUNCTIONS.vote,
+          GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote,
+        ] as readonly string[]
+      ).includes(tx.function)
     ) {
       try {
         const contract = await this.getContract(

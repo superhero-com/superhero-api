@@ -1,0 +1,81 @@
+# Second testnet stack: separate API, Postgres, and Redis.
+# Use when you want an isolated testnet instance (e.g. different DB, different config).
+#
+# Run: docker compose -f docker-compose-testnet.yml up -d
+# API: http://localhost:3001
+# Stop: docker compose -f docker-compose-testnet.yml down
+
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: superhero-api-testnet2
+    ports:
+      - "${TESTNET_APP_PORT:-3001}:3000"
+    environment:
+      - NODE_ENV=production
+      - APP_PORT=3000
+      - AE_NETWORK_ID=ae_uat
+      - DB_TYPE=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${TESTNET_DB_USER:-testnet}
+      - DB_PASSWORD=${TESTNET_DB_PASSWORD:-testnet}
+      - DB_DATABASE=${TESTNET_DB_DATABASE:-api_testnet2}
+      # Sync schema on startup (volume starts empty; no migration step for this stack)
+      - DB_SYNC=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TRENDING_TAGS_API_KEY=${TESTNET_TRENDING_TAGS_API_KEY:-}
+      - PROFILE_REGISTRY_CONTRACT_ADDRESS=${TESTNET_PROFILE_REGISTRY_CONTRACT_ADDRESS:-}
+      - PROFILE_ATTESTATION_SIGNER_ADDRESS=${TESTNET_PROFILE_ATTESTATION_SIGNER_ADDRESS:-}
+      - PROFILE_ATTESTATION_PRIVATE_KEY=${TESTNET_PROFILE_ATTESTATION_PRIVATE_KEY:-}
+      - X_CLIENT_ID=${TESTNET_X_CLIENT_ID:-}
+      - X_CLIENT_SECRET=${TESTNET_X_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - testnet2
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: superhero-api-testnet2-db
+    environment:
+      - POSTGRES_USER=${TESTNET_DB_USER:-testnet}
+      - POSTGRES_PASSWORD=${TESTNET_DB_PASSWORD:-testnet}
+      - POSTGRES_DB=${TESTNET_DB_DATABASE:-api_testnet2}
+    ports:
+      - "${TESTNET_DB_PORT:-5437}:5432"
+    volumes:
+      - postgres_testnet2_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - testnet2
+
+  redis:
+    image: redis:alpine
+    container_name: superhero-api-testnet2-redis
+    ports:
+      - "${TESTNET_REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_testnet2_data:/data
+    networks:
+      - testnet2
+
+networks:
+  testnet2:
+    driver: bridge
+
+volumes:
+  postgres_testnet2_data:
+  redis_testnet2_data:
