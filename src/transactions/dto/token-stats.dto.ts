@@ -37,6 +37,9 @@ export class PriceMovementDto {
 
   @ApiProperty()
   last_updated: Date;
+
+  @ApiProperty({ nullable: true })
+  volume: string | null;
 }
 
 export class TokenPriceMovementDto {

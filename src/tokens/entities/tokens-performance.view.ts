@@ -86,6 +86,19 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
           LIMIT 1
         ) x
       ) as past_24h_latest,
+      -- Volume sums
+      (
+        SELECT SUM(tx.volume)
+        FROM transactions tx
+        WHERE tx.sale_address = t.sale_address
+          AND tx.created_at > NOW() - INTERVAL '24 hours'
+      ) as volume_24h,
+      (
+        SELECT SUM(tx.volume)
+        FROM transactions tx
+        WHERE tx.sale_address = t.sale_address
+          AND tx.created_at > NOW() - INTERVAL '7 days'
+      ) as volume_7d,
       -- Past 7d
       (
         SELECT row_to_json(x)
@@ -273,7 +286,8 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
         'high_date', past_24h_high->>'created_at',
         'low', past_24h_low->'buy_price',
         'low_date', past_24h_low->>'created_at',
-        'last_updated', past_24h_latest->>'created_at'
+        'last_updated', past_24h_latest->>'created_at',
+        'volume', volume_24h
       ) as past_24h,
       -- Grouped past_7d object
       json_build_object(
@@ -310,7 +324,8 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
         'high_date', past_7d_high->>'created_at',
         'low', past_7d_low->'buy_price',
         'low_date', past_7d_low->>'created_at',
-        'last_updated', past_7d_latest->>'created_at'
+        'last_updated', past_7d_latest->>'created_at',
+        'volume', volume_7d
       ) as past_7d,
       -- Grouped past_30d object
       json_build_object(
@@ -378,6 +393,7 @@ export class TokenPerformanceView {
     low: any;
     low_date: Date;
     last_updated: Date;
+    volume: string | null;
   } | null;
 
   @ViewColumn()
@@ -392,6 +408,7 @@ export class TokenPerformanceView {
     low: any;
     low_date: Date;
     last_updated: Date;
+    volume: string | null;
   } | null;
 
   @ViewColumn()
