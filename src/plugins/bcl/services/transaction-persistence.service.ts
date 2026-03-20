@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+import { Token } from '@/tokens/entities/token.entity';
 import { BCL_FUNCTIONS } from '@/configs';
 import { TransactionData } from './transaction-data.service';
 
@@ -44,6 +45,7 @@ export class TransactionPersistenceService {
     manager: EntityManager,
   ): Promise<Transaction> {
     const transactionRepository = manager.getRepository(Transaction);
+    const tokenRepository = manager.getRepository(Token);
     // Use upsert to handle race conditions where transaction might be created concurrently
     // Note: skipUpdateIfNoValuesChanged is removed because it causes PostgreSQL errors
     // when comparing JSON columns (operator does not exist: json = json)
@@ -59,6 +61,16 @@ export class TransactionPersistenceService {
         `Failed to create or retrieve transaction ${txData.tx_hash}`,
       );
     }
+
+    const txCount = await transactionRepository.count({
+      where: { sale_address: txData.sale_address },
+    });
+
+    await tokenRepository.update(txData.sale_address, {
+      tx_count: txCount,
+      last_sync_tx_count: txCount,
+    });
+
     return transaction;
   }
 }

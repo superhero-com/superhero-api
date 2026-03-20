@@ -169,6 +169,18 @@ export class TokensController {
     );
   }
 
+  @ApiOperation({ operationId: 'getTrendingEligibility' })
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token address or name',
+  })
+  @Get(':address/trending-eligibility')
+  @CacheTTL(3)
+  async getTrendingEligibility(@Param('address') address: string) {
+    return this.tokensService.getTrendingEligibilityBreakdown(address);
+  }
+
   @ApiOperation({ operationId: 'findByAddress' })
   @ApiParam({
     name: 'address',

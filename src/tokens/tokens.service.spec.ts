@@ -15,6 +15,7 @@ describe('TokensService', () => {
     tokensRepository = {
       createQueryBuilder: jest.fn(),
       update: jest.fn(),
+      query: jest.fn(),
     };
     transactionsRepository = {
       query: jest.fn(),
@@ -197,7 +198,8 @@ describe('TokensService', () => {
     expect(leftJoin).toHaveBeenCalledTimes(2);
     expect(postCountsAlias).toBe('eligibility_post_counts');
     expect(postCountsSql).toContain('jsonb_array_elements_text');
-    expect(postCountsSql).toContain('COUNT(DISTINCT post.id) AS post_count');
+    expect(postCountsSql).toContain('regexp_matches');
+    expect(postCountsSql).toContain('COUNT(DISTINCT matched.post_id) AS post_count');
     expect(postCountsCondition).toBe(
       'eligibility_post_counts.symbol = UPPER(token.symbol)',
     );
@@ -225,6 +227,51 @@ describe('TokensService', () => {
           TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
       }),
     );
+  });
+
+  it('returns a trending eligibility breakdown for a token', async () => {
+    jest.spyOn(service, 'findByAddress').mockResolvedValue({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+    } as any);
+    tokensRepository.query.mockResolvedValue([
+      {
+        sale_address: 'ct_sale',
+        symbol: 'TEST',
+        holders_count: '6',
+        post_count: '3',
+        stored_post_count: '1',
+        content_post_count: '2',
+        trade_count: '4',
+      },
+    ]);
+
+    const breakdown = await service.getTrendingEligibilityBreakdown('ct_sale');
+
+    expect(tokensRepository.query).toHaveBeenCalledWith(
+      expect.stringContaining('content_post_count'),
+      ['ct_sale'],
+    );
+    expect(breakdown).toEqual({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+      holders_count: 6,
+      post_count: 3,
+      stored_post_count: 1,
+      content_post_count: 2,
+      trade_count: 4,
+      thresholds: {
+        min_holders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
+        min_posts: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
+        min_trades: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
+      },
+      passes: {
+        holders: true,
+        posts: true,
+        trades: true,
+        eligible: true,
+      },
+    });
   });
 
   it('falls back cleanly when sale contract lookup returns undefined', async () => {

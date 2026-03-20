@@ -105,6 +105,10 @@ describe('TokensController', () => {
               metrics: { trending_score: { result: 0.5 } },
               token: { sale_address: 'ct_123', trending_score: 0.5 },
             }),
+            getTrendingEligibilityBreakdown: jest.fn().mockResolvedValue({
+              sale_address: 'ct_123',
+              eligible: true,
+            }),
           },
         },
         {
@@ -164,6 +168,18 @@ describe('TokensController', () => {
       rank: 5,
       total_supply: { toNumber: expect.any(Function) },
       factory_address: 'ct_123',
+    });
+  });
+
+  it('should return trending eligibility breakdown for a token', async () => {
+    const result = await controller.getTrendingEligibility('ct_123');
+
+    expect(tokensService.getTrendingEligibilityBreakdown).toHaveBeenCalledWith(
+      'ct_123',
+    );
+    expect(result).toEqual({
+      sale_address: 'ct_123',
+      eligible: true,
     });
   });
 
