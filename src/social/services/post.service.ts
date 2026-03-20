@@ -28,7 +28,7 @@ import {
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
-import { resolveTrendingSymbolsForPost } from '../utils/token-mentions.util';
+import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { TokensService } from '@/tokens/tokens.service';
 
 @Injectable()
@@ -47,14 +47,6 @@ export class PostService {
     private readonly tokensService: TokensService,
   ) {
     this.logger.log('PostService initialized');
-  }
-
-  private async getAffectedSymbolsForPost(post: Post | null): Promise<string[]> {
-    return resolveTrendingSymbolsForPost(post, (postId) =>
-      this.postRepository.findOne({
-        where: { id: postId },
-      }),
-    );
   }
 
   async onModuleInit(): Promise<void> {
@@ -393,13 +385,20 @@ export class PostService {
         );
 
         if (result.success) {
-          const affectedSymbols = await this.getAffectedSymbolsForPost({
-            ...existingPost,
-            post_id: postTypeInfo.parentPostId,
-          } as Post);
-          await this.tokensService.updateTrendingScoresForSymbols(
-            affectedSymbols,
-          );
+          await refreshTrendingScoresForPostSafely({
+            post: {
+              ...existingPost,
+              post_id: postTypeInfo.parentPostId,
+            } as Post,
+          loadParentPost: (postId) =>
+            this.postRepository.findOne({
+              where: { id: postId },
+            }),
+          updateTrendingScoresForSymbols: (symbols) =>
+            this.tokensService.updateTrendingScoresForSymbols(symbols),
+          logError: (message, trace) => this.logger.error(message, trace),
+          errorMessage: 'Failed to refresh trending scores after saving post',
+        });
           return existingPost;
         } else {
           this.logger.warn('Failed to process existing post as comment', {
@@ -521,8 +520,17 @@ export class PostService {
         await this.updatePostCommentCount(postTypeInfo.parentPostId);
       }
 
-      const affectedSymbols = await this.getAffectedSymbolsForPost(post);
-      await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
+      await refreshTrendingScoresForPostSafely({
+        post,
+        loadParentPost: (postId) =>
+          this.postRepository.findOne({
+            where: { id: postId },
+          }),
+        updateTrendingScoresForSymbols: (symbols) =>
+          this.tokensService.updateTrendingScoresForSymbols(symbols),
+        logError: (message, trace) => this.logger.error(message, trace),
+        errorMessage: 'Failed to refresh trending scores after saving post',
+      });
 
       this.logger.log('Post saved successfully', {
         txHash,

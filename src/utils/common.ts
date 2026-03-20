@@ -13,6 +13,16 @@ const FETCH_JSON_TIMEOUT_MS =
     ? rawTimeout
     : DEFAULT_FETCH_JSON_TIMEOUT_MS;
 
+class FetchJsonHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'FetchJsonHttpError';
+  }
+}
+
 function formatResponseDetails(
   url: string,
   response: Response,
@@ -22,6 +32,17 @@ function formatResponseDetails(
     ? ` Body preview: ${bodyText.trim().slice(0, 200)}`
     : '';
   return `Request to ${url} failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.${bodyPreview}`;
+}
+
+function shouldRetryFetchJsonError(error: unknown): boolean {
+  if (error instanceof FetchJsonHttpError) {
+    if (error.status === 408 || error.status === 429) {
+      return true;
+    }
+    return error.status >= 500;
+  }
+
+  return true;
 }
 
 /**
@@ -61,7 +82,10 @@ export async function fetchJson<T = any>(
     const responseText = await response.text();
 
     if (!response.ok) {
-      throw new Error(formatResponseDetails(url, response, responseText));
+      throw new FetchJsonHttpError(
+        formatResponseDetails(url, response, responseText),
+        response.status,
+      );
     }
 
     if (!responseText.trim()) {
@@ -86,7 +110,11 @@ export async function fetchJson<T = any>(
       }
       incrementFetchTimeout();
     }
-    if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED && !shouldNotRetry) {
+    if (
+      totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED &&
+      !shouldNotRetry &&
+      shouldRetryFetchJsonError(error)
+    ) {
       totalRetries++;
       await new Promise((resolve) =>
         setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),

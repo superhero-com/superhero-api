@@ -9,7 +9,7 @@ import { PostTypeDetectionService } from './post-type-detection.service';
 import { TopicManagementService } from './topic-management.service';
 import { PostPersistenceService } from './post-persistence.service';
 import { TokensService } from '@/tokens/tokens.service';
-import { resolveTrendingSymbolsForPost } from '@/social/utils/token-mentions.util';
+import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 
 export interface ProcessPostTransactionResult {
   post: Post | null;
@@ -31,14 +31,6 @@ export class PostTransactionProcessorService {
     private readonly persistenceService: PostPersistenceService,
     private readonly tokensService: TokensService,
   ) {}
-
-  private async getAffectedSymbolsForPost(post: Post | null): Promise<string[]> {
-    return resolveTrendingSymbolsForPost(post, (postId) =>
-      this.postRepository.findOne({
-        where: { id: postId },
-      }),
-    );
-  }
 
   /**
    * Process a transaction end-to-end
@@ -91,13 +83,21 @@ export class PostTransactionProcessorService {
           );
 
         if (result.success) {
-          const affectedSymbols = await this.getAffectedSymbolsForPost({
-            ...existingPost,
-            post_id: postTypeInfo.parentPostId,
-          } as Post);
-          await this.tokensService.updateTrendingScoresForSymbols(
-            affectedSymbols,
-          );
+          await refreshTrendingScoresForPostSafely({
+            post: {
+              ...existingPost,
+              post_id: postTypeInfo.parentPostId,
+            } as Post,
+          loadParentPost: (postId) =>
+            this.postRepository.findOne({
+              where: { id: postId },
+            }),
+          updateTrendingScoresForSymbols: (symbols) =>
+            this.tokensService.updateTrendingScoresForSymbols(symbols),
+          logError: (message, trace) => this.logger.error(message, trace),
+          errorMessage:
+            'Failed to refresh trending scores after processing post transaction',
+        });
           return {
             post: existingPost,
             success: true,
@@ -217,8 +217,18 @@ export class PostTransactionProcessorService {
         );
       }
 
-      const affectedSymbols = await this.getAffectedSymbolsForPost(post);
-      await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
+      await refreshTrendingScoresForPostSafely({
+        post,
+        loadParentPost: (postId) =>
+          this.postRepository.findOne({
+            where: { id: postId },
+          }),
+        updateTrendingScoresForSymbols: (symbols) =>
+          this.tokensService.updateTrendingScoresForSymbols(symbols),
+        logError: (message, trace) => this.logger.error(message, trace),
+        errorMessage:
+          'Failed to refresh trending scores after processing post transaction',
+      });
 
       return {
         post,

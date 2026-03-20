@@ -7,7 +7,7 @@ import { ITransaction } from '@/utils/types';
 import { decode, toAe } from '@aeternity/aepp-sdk';
 import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
-import { resolveTrendingSymbolsForPost } from '@/social/utils/token-mentions.util';
+import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 
 @Injectable()
 export class TipService {
@@ -27,14 +27,6 @@ export class TipService {
     private readonly tokensService: TokensService,
   ) {
     this.logger.log('TipService initialized');
-  }
-
-  private async getAffectedSymbolsFromPost(post: Post | null): Promise<string[]> {
-    return resolveTrendingSymbolsForPost(post, (postId) =>
-      this.postRepository.findOne({
-        where: { id: postId },
-      }),
-    );
   }
 
   // async onModuleInit(): Promise<void> {
@@ -128,8 +120,17 @@ export class TipService {
       post,
     });
 
-    const affectedSymbols = await this.getAffectedSymbolsFromPost(post);
-    await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
+    await refreshTrendingScoresForPostSafely({
+      post,
+      loadParentPost: (postId) =>
+        this.postRepository.findOne({
+          where: { id: postId },
+        }),
+      updateTrendingScoresForSymbols: (symbols) =>
+        this.tokensService.updateTrendingScoresForSymbols(symbols),
+      logError: (message, trace) => this.logger.error(message, trace),
+      errorMessage: 'Failed to refresh trending scores after saving tip',
+    });
 
     return savedTip;
   }

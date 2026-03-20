@@ -672,21 +672,41 @@ export class TokensService {
   applyListEligibilityFilters(
     queryBuilder: SelectQueryBuilder<Token>,
   ): SelectQueryBuilder<Token> {
+    queryBuilder.leftJoin(
+      `(
+        SELECT
+          UPPER(mention.symbol) AS symbol,
+          COUNT(DISTINCT post.id) AS post_count
+        FROM posts post
+        CROSS JOIN LATERAL jsonb_array_elements_text(
+          COALESCE(post.token_mentions, '[]'::jsonb)
+        ) AS mention(symbol)
+        WHERE post.is_hidden = false
+          AND mention.symbol <> ''
+        GROUP BY UPPER(mention.symbol)
+      )`,
+      'eligibility_post_counts',
+      'eligibility_post_counts.symbol = UPPER(token.symbol)',
+    );
+
+    queryBuilder.leftJoin(
+      `(
+        SELECT
+          tx.sale_address,
+          COUNT(*) AS trade_count
+        FROM transactions tx
+        WHERE tx.tx_type IN ('buy', 'sell')
+        GROUP BY tx.sale_address
+      )`,
+      'eligibility_trade_counts',
+      'eligibility_trade_counts.sale_address = token.sale_address',
+    );
+
     return queryBuilder.andWhere(
       `(
         token.holders_count >= :eligibilityMinHolders
-        AND (
-          SELECT COUNT(*)
-          FROM posts post
-          WHERE post.is_hidden = false
-            AND COALESCE(post.token_mentions, '[]'::jsonb) ? UPPER(token.symbol)
-        ) >= :eligibilityMinPosts
-        AND (
-          SELECT COUNT(*)
-          FROM transactions tx
-          WHERE tx.sale_address = token.sale_address
-            AND tx.tx_type IN ('buy', 'sell')
-        ) >= :eligibilityMinTrades
+        AND COALESCE(eligibility_post_counts.post_count, 0) >= :eligibilityMinPosts
+        AND COALESCE(eligibility_trade_counts.trade_count, 0) >= :eligibilityMinTrades
       )`,
       {
         eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,

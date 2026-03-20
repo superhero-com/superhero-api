@@ -182,18 +182,40 @@ describe('TokensService', () => {
   });
 
   it('applies token list eligibility thresholds to the query builder', () => {
+    const leftJoin = jest.fn().mockReturnThis();
     const andWhere = jest.fn().mockReturnThis();
-    const queryBuilder = { andWhere } as any;
+    const queryBuilder = { leftJoin, andWhere } as any;
 
     const result = service.applyListEligibilityFilters(queryBuilder);
+    const [postCountsSql, postCountsAlias, postCountsCondition] =
+      leftJoin.mock.calls[0];
+    const [tradeCountsSql, tradeCountsAlias, tradeCountsCondition] =
+      leftJoin.mock.calls[1];
     const [eligibilitySql, eligibilityParams] = andWhere.mock.calls[0];
 
     expect(result).toBe(queryBuilder);
+    expect(leftJoin).toHaveBeenCalledTimes(2);
+    expect(postCountsAlias).toBe('eligibility_post_counts');
+    expect(postCountsSql).toContain('jsonb_array_elements_text');
+    expect(postCountsSql).toContain('COUNT(DISTINCT post.id) AS post_count');
+    expect(postCountsCondition).toBe(
+      'eligibility_post_counts.symbol = UPPER(token.symbol)',
+    );
+    expect(tradeCountsAlias).toBe('eligibility_trade_counts');
+    expect(tradeCountsSql).toContain('COUNT(*) AS trade_count');
+    expect(tradeCountsCondition).toBe(
+      'eligibility_trade_counts.sale_address = token.sale_address',
+    );
     expect(eligibilitySql).toContain(
       'token.holders_count >= :eligibilityMinHolders',
     );
-    expect(eligibilitySql).toContain('AND (');
-    expect(eligibilitySql).not.toContain('OR (');
+    expect(eligibilitySql).toContain(
+      'COALESCE(eligibility_post_counts.post_count, 0) >= :eligibilityMinPosts',
+    );
+    expect(eligibilitySql).toContain(
+      'COALESCE(eligibility_trade_counts.trade_count, 0) >= :eligibilityMinTrades',
+    );
+    expect(eligibilitySql).not.toContain('SELECT COUNT(*)');
     expect(eligibilityParams).toEqual(
       expect.objectContaining({
         eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,

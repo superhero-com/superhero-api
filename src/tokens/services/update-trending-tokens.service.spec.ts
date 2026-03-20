@@ -100,4 +100,27 @@ describe('UpdateTrendingTokensService', () => {
       { sale_address: 'ct_never_scored' },
     ]);
   });
+
+  it('does not reject startup when refresh tasks fail', async () => {
+    const loggerError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    jest
+      .spyOn(service, 'fixAllNanTrendingTokens')
+      .mockRejectedValueOnce(new Error('nan failed'));
+    jest
+      .spyOn(service, 'updateTrendingTokens')
+      .mockRejectedValueOnce(new Error('active failed'));
+    jest
+      .spyOn(service, 'fixOldTrendingTokens')
+      .mockRejectedValueOnce(new Error('stale failed'));
+
+    await expect(service.onModuleInit()).resolves.toBeUndefined();
+
+    expect(service.fixAllNanTrendingTokens).toHaveBeenCalledTimes(1);
+    expect(service.updateTrendingTokens).toHaveBeenCalledTimes(1);
+    expect(service.fixOldTrendingTokens).toHaveBeenCalledTimes(1);
+    expect(loggerError).toHaveBeenCalledTimes(3);
+  });
 });

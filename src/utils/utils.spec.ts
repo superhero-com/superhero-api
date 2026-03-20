@@ -127,6 +127,50 @@ describe('fetchJson', () => {
 
     jest.useRealTimers();
   });
+
+  it('should not retry deterministic client errors like 404', async () => {
+    jest.useFakeTimers();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      status: 404,
+      statusText: 'Not Found',
+      ok: false,
+      text: jest.fn().mockResolvedValue('{"error":"missing"}'),
+    });
+
+    const request = fetchJson('https://api.example.com/missing');
+    const expectation = expect(request).rejects.toThrow('status 404');
+    await jest.runAllTimersAsync();
+
+    await expectation;
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    jest.useRealTimers();
+  });
+
+  it('should still retry retryable server errors like 500', async () => {
+    jest.useFakeTimers();
+    const mockData = { message: 'Recovered' };
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        status: 500,
+        statusText: 'Internal Server Error',
+        ok: false,
+        text: jest.fn().mockResolvedValue('{"error":"temporary"}'),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: jest.fn().mockResolvedValue(JSON.stringify(mockData)),
+      });
+
+    const request = fetchJson('https://api.example.com/retry-500');
+    await jest.runAllTimersAsync();
+
+    await expect(request).resolves.toEqual(mockData);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+
+    jest.useRealTimers();
+  });
 });
 
 describe('BigNumberTransformer', () => {

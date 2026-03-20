@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 
 import { Token } from '../entities/token.entity';
 import { TokensService } from '../tokens.service';
@@ -28,9 +28,32 @@ export class UpdateTrendingTokensService {
   }
 
   async onModuleInit() {
-    await this.fixAllNanTrendingTokens();
-    await this.updateTrendingTokens();
-    await this.fixOldTrendingTokens();
+    await this.runStartupTaskSafely(
+      'fix NaN trending scores',
+      this.fixAllNanTrendingTokens.bind(this),
+    );
+    await this.runStartupTaskSafely(
+      'refresh active trending tokens',
+      this.updateTrendingTokens.bind(this),
+    );
+    await this.runStartupTaskSafely(
+      'backfill stale trending tokens',
+      this.fixOldTrendingTokens.bind(this),
+    );
+  }
+
+  private async runStartupTaskSafely(
+    taskName: string,
+    task: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await task();
+    } catch (error) {
+      this.logger.error(
+        `Failed to ${taskName} during startup`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   isUpdatingTrendingTokens = false;
@@ -139,7 +162,9 @@ export class UpdateTrendingTokensService {
           })
           .getRawMany<{ sale_address: string }>();
 
-        symbolTokens.forEach((row) => uniqueSaleAddresses.add(row.sale_address));
+        symbolTokens.forEach((row) =>
+          uniqueSaleAddresses.add(row.sale_address),
+        );
       }
 
       if (!uniqueSaleAddresses.size) {

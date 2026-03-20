@@ -8,7 +8,7 @@ import { Tip } from '@/tipping/entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
-import { resolveTrendingSymbolsForPost } from '@/social/utils/token-mentions.util';
+import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 
 @Injectable()
 export class SocialTippingTransactionProcessorService {
@@ -25,14 +25,6 @@ export class SocialTippingTransactionProcessorService {
     private readonly postRepository: Repository<Post>,
     private readonly tokensService: TokensService,
   ) {}
-
-  private async getAffectedSymbolsFromPost(post: Post | null): Promise<string[]> {
-    return resolveTrendingSymbolsForPost(post, (postId) =>
-      this.postRepository.findOne({
-        where: { id: postId },
-      }),
-    );
-  }
 
   /**
    * Process a tip transaction
@@ -59,10 +51,18 @@ export class SocialTippingTransactionProcessorService {
         },
       );
 
-      const affectedSymbols = await this.getAffectedSymbolsFromPost(
-        savedTipResult.post,
-      );
-      await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
+      await refreshTrendingScoresForPostSafely({
+        post: savedTipResult.post,
+        loadParentPost: (postId) =>
+          this.postRepository.findOne({
+            where: { id: postId },
+          }),
+        updateTrendingScoresForSymbols: (symbols) =>
+          this.tokensService.updateTrendingScoresForSymbols(symbols),
+        logError: (message, trace) => this.logger.error(message, trace),
+        errorMessage:
+          'Failed to refresh trending scores after processing tip transaction',
+      });
 
       return savedTipResult.tip;
     } catch (error: any) {

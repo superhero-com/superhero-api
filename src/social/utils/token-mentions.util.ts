@@ -23,3 +23,34 @@ export async function resolveTrendingSymbolsForPost(
 
   return [...symbols];
 }
+
+export async function refreshTrendingScoresForPostSafely(options: {
+  post: Pick<Post, 'post_id' | 'token_mentions'> | null | undefined;
+  loadParentPost: (
+    postId: string,
+  ) => Promise<Pick<Post, 'token_mentions'> | null | undefined>;
+  updateTrendingScoresForSymbols: (symbols: string[]) => Promise<void>;
+  logError: (message: string, trace?: string) => void;
+  errorMessage: string;
+}): Promise<void> {
+  const {
+    post,
+    loadParentPost,
+    updateTrendingScoresForSymbols,
+    logError,
+    errorMessage,
+  } = options;
+
+  try {
+    const affectedSymbols = await resolveTrendingSymbolsForPost(
+      post,
+      loadParentPost,
+    );
+    await updateTrendingScoresForSymbols(affectedSymbols);
+  } catch (error) {
+    logError(
+      errorMessage,
+      error instanceof Error ? error.stack : String(error),
+    );
+  }
+}

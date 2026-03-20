@@ -68,4 +68,30 @@ describe('SocialTippingTransactionProcessorService', () => {
     ]);
     expect(result).toEqual({ tx_hash: 'th_tip' });
   });
+
+  it('keeps the saved tip when trending refresh fails', async () => {
+    jest
+      .spyOn(service as any, 'validateTransaction')
+      .mockReturnValue('TIP_POST:post-1');
+    jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue({
+      tip: { tx_hash: 'th_tip' },
+      post: { token_mentions: ['ALPHA'] },
+    });
+    tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
+      new Error('refresh failed'),
+    );
+    tipRepository.manager.transaction.mockImplementation(async (handler: any) =>
+      handler({}),
+    );
+
+    const result = await service.processTransaction(
+      { hash: 'th_tip' } as any,
+      'live' as any,
+    );
+
+    expect(result).toEqual({ tx_hash: 'th_tip' });
+    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+      'ALPHA',
+    ]);
+  });
 });
