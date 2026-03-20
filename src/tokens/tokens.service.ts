@@ -1002,10 +1002,18 @@ export class TokensService {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const { tokenContractInstance } =
-          await this.getTokenContractsBySaleAddress(
-            token.sale_address as Encoded.ContractAddress,
+        const contracts = await this.getTokenContractsBySaleAddress(
+          token.sale_address as Encoded.ContractAddress,
+        );
+        const tokenContractInstance = contracts?.tokenContractInstance;
+
+        if (!tokenContractInstance) {
+          this.logger.warn(
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: contract instance unavailable for ${aex9Address}, switching to middleware`,
           );
+          return [];
+        }
+
         const holderBalances = await this.withTimeout<any>(
           tokenContractInstance.balances(),
           this.contractCallTimeoutMs,

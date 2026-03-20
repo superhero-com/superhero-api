@@ -177,4 +177,20 @@ describe('TokensService', () => {
       TRENDING_SCORE_CONFIG.MAX_CONCURRENT_UPDATES,
     );
   });
+
+  it('falls back cleanly when sale contract lookup returns undefined', async () => {
+    jest
+      .spyOn(service, 'getTokenContractsBySaleAddress')
+      .mockResolvedValue(undefined);
+
+    const holders = await service._loadHoldersFromContract(
+      {
+        sale_address: 'ct_missing',
+      } as any,
+      'ct_aex9',
+    );
+
+    expect(holders).toEqual([]);
+    expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(1);
+  });
 });
