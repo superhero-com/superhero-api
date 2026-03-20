@@ -735,7 +735,7 @@ export class TokensService {
         ) matched
         GROUP BY matched.symbol
       )
-    `;
+    `.trim();
   }
 
   private buildEligibilityTradeCountsSubquery(): string {
@@ -748,7 +748,7 @@ export class TokensService {
         WHERE tx.tx_type IN ('buy', 'sell')
         GROUP BY tx.sale_address
       )
-    `;
+    `.trim();
   }
 
   private buildEligibilityPostCountsForSymbolSubquery(
@@ -792,7 +792,7 @@ export class TokensService {
             AND UPPER(content_match[1]) = ${normalizedSymbolSql}
         ) matched
       )
-    `;
+    `.trim();
   }
 
   private buildEligibilityTradeCountForTokenSubquery(
@@ -805,7 +805,7 @@ export class TokensService {
         WHERE tx.sale_address = ${saleAddressSql}
           AND tx.tx_type IN ('buy', 'sell')
       )
-    `;
+    `.trim();
   }
 
   applyListEligibilityFilters(

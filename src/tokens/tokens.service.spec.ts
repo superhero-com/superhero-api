@@ -197,6 +197,7 @@ describe('TokensService', () => {
     expect(result).toBe(queryBuilder);
     expect(leftJoin).toHaveBeenCalledTimes(2);
     expect(postCountsAlias).toBe('eligibility_post_counts');
+    expect(postCountsSql.startsWith('(')).toBe(true);
     expect(postCountsSql).toContain('jsonb_array_elements_text');
     expect(postCountsSql).toContain('regexp_matches');
     expect(postCountsSql).toContain('COUNT(DISTINCT matched.post_id) AS post_count');
@@ -204,6 +205,7 @@ describe('TokensService', () => {
       'eligibility_post_counts.symbol = UPPER(token.symbol)',
     );
     expect(tradeCountsAlias).toBe('eligibility_trade_counts');
+    expect(tradeCountsSql.startsWith('(')).toBe(true);
     expect(tradeCountsSql).toContain('COUNT(*) AS trade_count');
     expect(tradeCountsCondition).toBe(
       'eligibility_trade_counts.sale_address = token.sale_address',
