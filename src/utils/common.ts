@@ -13,6 +13,17 @@ const FETCH_JSON_TIMEOUT_MS =
     ? rawTimeout
     : DEFAULT_FETCH_JSON_TIMEOUT_MS;
 
+function formatResponseDetails(
+  url: string,
+  response: Response,
+  bodyText?: string,
+): string {
+  const bodyPreview = bodyText?.trim()
+    ? ` Body preview: ${bodyText.trim().slice(0, 200)}`
+    : '';
+  return `Request to ${url} failed with status ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.${bodyPreview}`;
+}
+
 /**
  * Fetches JSON data from the specified URL.
  *
@@ -46,7 +57,27 @@ export async function fetchJson<T = any>(
     if (response.status === 204) {
       return null;
     }
-    return response.json() as Promise<T>;
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      throw new Error(formatResponseDetails(url, response, responseText));
+    }
+
+    if (!responseText.trim()) {
+      throw new SyntaxError(
+        `Received an empty JSON response from ${url} with status ${response.status}.`,
+      );
+    }
+
+    try {
+      return JSON.parse(responseText) as T;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new SyntaxError(
+        `Failed to parse JSON from ${url} with status ${response.status}: ${reason}`,
+      );
+    }
   } catch (error: any) {
     if (error?.name === 'AbortError') {
       // Respect caller cancellation: do not retry when the parent signal aborted.
