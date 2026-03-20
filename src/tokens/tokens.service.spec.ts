@@ -233,12 +233,10 @@ describe('TokensService', () => {
     jest.spyOn(service, 'findByAddress').mockResolvedValue({
       sale_address: 'ct_sale',
       symbol: 'TEST',
+      holders_count: 6,
     } as any);
     tokensRepository.query.mockResolvedValue([
       {
-        sale_address: 'ct_sale',
-        symbol: 'TEST',
-        holders_count: '6',
         post_count: '3',
         stored_post_count: '1',
         content_post_count: '2',
@@ -248,10 +246,13 @@ describe('TokensService', () => {
 
     const breakdown = await service.getTrendingEligibilityBreakdown('ct_sale');
 
-    expect(tokensRepository.query).toHaveBeenCalledWith(
-      expect.stringContaining('content_post_count'),
-      ['ct_sale'],
-    );
+    const [eligibilityQuery, eligibilityParams] = tokensRepository.query.mock.calls[0];
+    expect(eligibilityQuery).toContain('content_post_count');
+    expect(eligibilityQuery).toContain('UPPER(mention.symbol) = $1');
+    expect(eligibilityQuery).toContain('UPPER(content_match[1]) = $1');
+    expect(eligibilityQuery).toContain('tx.sale_address = $2');
+    expect(eligibilityQuery).not.toContain('GROUP BY matched.symbol');
+    expect(eligibilityParams).toEqual(['TEST', 'ct_sale']);
     expect(breakdown).toEqual({
       sale_address: 'ct_sale',
       symbol: 'TEST',

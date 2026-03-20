@@ -107,7 +107,23 @@ describe('TokensController', () => {
             }),
             getTrendingEligibilityBreakdown: jest.fn().mockResolvedValue({
               sale_address: 'ct_123',
-              eligible: true,
+              symbol: 'TEST',
+              holders_count: 6,
+              post_count: 3,
+              stored_post_count: 1,
+              content_post_count: 2,
+              trade_count: 4,
+              thresholds: {
+                min_holders: 5,
+                min_posts: 2,
+                min_trades: 3,
+              },
+              passes: {
+                holders: true,
+                posts: true,
+                trades: true,
+                eligible: true,
+              },
             }),
           },
         },
@@ -179,7 +195,23 @@ describe('TokensController', () => {
     );
     expect(result).toEqual({
       sale_address: 'ct_123',
-      eligible: true,
+      symbol: 'TEST',
+      holders_count: 6,
+      post_count: 3,
+      stored_post_count: 1,
+      content_post_count: 2,
+      trade_count: 4,
+      thresholds: {
+        min_holders: 5,
+        min_posts: 2,
+        min_trades: 3,
+      },
+      passes: {
+        holders: true,
+        posts: true,
+        trades: true,
+        eligible: true,
+      },
     });
   });
 

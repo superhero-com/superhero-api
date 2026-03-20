@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
@@ -7,6 +7,8 @@ import { TransactionData } from './transaction-data.service';
 
 @Injectable()
 export class TransactionPersistenceService {
+  private readonly logger = new Logger(TransactionPersistenceService.name);
+
   /**
    * Cleanup old create_community transactions for the same sale address
    * @param saleAddress - Sale address
@@ -62,14 +64,23 @@ export class TransactionPersistenceService {
       );
     }
 
-    const txCount = await transactionRepository.count({
-      where: { sale_address: txData.sale_address },
-    });
+    if (txData.sale_address) {
+      try {
+        const txCount = await transactionRepository.count({
+          where: { sale_address: txData.sale_address },
+        });
 
-    await tokenRepository.update(txData.sale_address, {
-      tx_count: txCount,
-      last_sync_tx_count: txCount,
-    });
+        await tokenRepository.update(txData.sale_address, {
+          tx_count: txCount,
+          last_sync_tx_count: txCount,
+        });
+      } catch (error) {
+        this.logger.error(
+          `Failed to refresh transaction counters for ${txData.sale_address}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     return transaction;
   }
