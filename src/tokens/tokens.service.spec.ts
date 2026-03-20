@@ -1,0 +1,180 @@
+import { NotFoundException } from '@nestjs/common';
+import { TRENDING_SCORE_CONFIG } from '@/configs/constants';
+import { TokensService } from './tokens.service';
+
+describe('TokensService', () => {
+  let service: TokensService;
+  let tokensRepository: any;
+  let transactionsRepository: any;
+  let postsRepository: any;
+
+  beforeEach(() => {
+    tokensRepository = {
+      createQueryBuilder: jest.fn(),
+      update: jest.fn(),
+    };
+    transactionsRepository = {
+      query: jest.fn(),
+    };
+    postsRepository = {
+      query: jest.fn(),
+    };
+
+    service = new TokensService(
+      tokensRepository as any,
+      {} as any,
+      transactionsRepository as any,
+      postsRepository as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  it('calculates zero score cleanly when all signals are zero', async () => {
+    transactionsRepository.query.mockResolvedValue([
+      {
+        active_wallets: '0',
+        buy_count: '0',
+        sell_count: '0',
+        volume_ae: '0',
+        last_trade_at: null,
+      },
+    ]);
+    postsRepository.query.mockResolvedValue([
+      {
+        mention_posts: '0',
+        mention_comments: '0',
+        unique_authors: '0',
+        tips_count: '0',
+        tips_amount_ae: '0',
+        reads: '0',
+        last_social_activity_at: null,
+      },
+    ]);
+
+    const metrics = await service.calculateTokenTrendingMetrics({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+    } as any);
+
+    expect(metrics.component_scores.pre_decay).toBe(0);
+    expect(metrics.decay_multiplier).toBe(0);
+    expect(metrics.trending_score.result).toBe(0);
+    expect(metrics.age_hours_since_last_activity).toBe(
+      TRENDING_SCORE_CONFIG.WINDOW_HOURS,
+    );
+  });
+
+  it('uses the latest social activity timestamp for decay', async () => {
+    const olderTrade = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+    const newerSocial = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    transactionsRepository.query.mockResolvedValue([
+      {
+        active_wallets: '3',
+        buy_count: '2',
+        sell_count: '1',
+        volume_ae: '20',
+        last_trade_at: olderTrade,
+      },
+    ]);
+    postsRepository.query.mockResolvedValue([
+      {
+        mention_posts: '2',
+        mention_comments: '1',
+        unique_authors: '2',
+        tips_count: '1',
+        tips_amount_ae: '5',
+        reads: '10',
+        last_social_activity_at: newerSocial,
+      },
+    ]);
+
+    const metrics = await service.calculateTokenTrendingMetrics({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+    } as any);
+
+    expect(metrics.last_activity_at?.toISOString()).toBe(newerSocial);
+    expect(metrics.age_hours_since_last_activity).toBeLessThan(2);
+    expect(metrics.trending_score.result).toBeGreaterThan(0);
+  });
+
+  it('throws a not found error when updating a missing token', async () => {
+    await expect(service.updateTokenTrendingScore(null as any)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('persists zero when the calculated score is non-finite', async () => {
+    jest
+      .spyOn(service, 'calculateTokenTrendingMetrics')
+      .mockResolvedValue({
+        trending_score: {
+          result: Number.NaN,
+        },
+      } as any);
+
+    const result = await service.updateTokenTrendingScore({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+    } as any);
+
+    expect(tokensRepository.update).toHaveBeenCalledWith('ct_sale', {
+      trending_score: 0,
+      trending_score_update_at: expect.any(Date),
+    });
+    expect(result.token.trending_score).toBe(0);
+  });
+
+  it('normalizes symbols before refreshing scores by symbol', async () => {
+    const getMany = jest.fn().mockResolvedValue([{ sale_address: 'ct_sale' }]);
+    const andWhere = jest.fn().mockReturnValue({ getMany });
+    tokensRepository.createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnValue({
+        andWhere,
+      }),
+    });
+    jest
+      .spyOn(service, 'updateMultipleTokensTrendingScores')
+      .mockResolvedValue(undefined);
+
+    await service.updateTrendingScoresForSymbols([' test ', 'TEST', '', 'alpha']);
+
+    expect(andWhere).toHaveBeenCalledWith('UPPER(token.symbol) IN (:...symbols)', {
+      symbols: ['TEST', 'ALPHA'],
+    });
+    expect(service.updateMultipleTokensTrendingScores).toHaveBeenCalledWith([
+      { sale_address: 'ct_sale' },
+    ]);
+  });
+
+  it('limits concurrent batch updates', async () => {
+    let active = 0;
+    let maxActive = 0;
+
+    jest.spyOn(service, 'updateTokenTrendingScore').mockImplementation(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return {
+        metrics: {} as any,
+        token: {} as any,
+      };
+    });
+
+    await service.updateMultipleTokensTrendingScores(
+      Array.from({ length: 20 }, (_, index) => ({
+        sale_address: `ct_${index}`,
+      })) as any,
+    );
+
+    expect(maxActive).toBeLessThanOrEqual(
+      TRENDING_SCORE_CONFIG.MAX_CONCURRENT_UPDATES,
+    );
+  });
+});

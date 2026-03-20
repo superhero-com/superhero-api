@@ -2,6 +2,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Query,
@@ -57,7 +58,15 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
     name: 'order_by',
-    enum: ['name', 'price', 'market_cap', 'created_at', 'holders_count'],
+    enum: [
+      'name',
+      'price',
+      'market_cap',
+      'created_at',
+      'holders_count',
+      'rank',
+      'trending_score',
+    ],
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
@@ -322,6 +331,9 @@ export class TokensController {
   @Get(':address/score')
   async getTokenScore(@Param('address') address: string): Promise<any> {
     const token = await this.tokensService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
 
     return this.tokensService.updateTokenTrendingScore(token);
   }

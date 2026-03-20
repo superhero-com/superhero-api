@@ -15,12 +15,14 @@ import { PostTypeDetectionService } from './services/post-type-detection.service
 import { TopicManagementService } from './services/topic-management.service';
 import { PostPersistenceService } from './services/post-persistence.service';
 import { PostTransactionProcessorService } from './services/post-transaction-processor.service';
+import { TokensModule } from '@/tokens/tokens.module';
 
 @Module({
   imports: [
     ConfigModule.forFeature(socialConfig),
     TypeOrmModule.forFeature([Tx, PluginSyncState, Post, Topic, Account]),
     AeModule,
+    TokensModule,
   ],
   providers: [
     PostTransactionValidationService,

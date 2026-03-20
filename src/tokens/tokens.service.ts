@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { In, IsNull, Repository } from 'typeorm';
@@ -20,6 +20,7 @@ import { Token } from './entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+import { Post } from '@/social/entities/post.entity';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -28,34 +29,42 @@ type TokenContracts = {
   lastUsedAt?: number;
 };
 
+interface TrendingSignalMetric {
+  raw: number;
+  cap: number;
+  normalized: number;
+}
+
 interface TrendingMetrics {
-  uniqueTransactions: number;
-  minUniqueTransactions: number;
-  maxUniqueTransactions: number;
-  investmentVolume: number;
-  minInvestmentVolume: number;
-  maxInvestmentVolume: number;
-  lifetimeMinutes: number;
-  minLifetimeMinutes: number;
-  maxLifetimeMinutes: number;
-
-  tx_normalization: {
-    formula: string;
-    result: number;
+  window_hours: number;
+  last_activity_at: Date | null;
+  last_trade_at: Date | null;
+  last_social_activity_at: Date | null;
+  age_hours_since_last_activity: number;
+  decay_multiplier: number;
+  trading_signals: {
+    active_wallets: TrendingSignalMetric;
+    buy_count: TrendingSignalMetric;
+    sell_count: TrendingSignalMetric;
+    volume_ae: TrendingSignalMetric;
   };
-  volume_normalization: {
-    formula: string;
-    result: number;
+  social_signals: {
+    mention_posts: TrendingSignalMetric;
+    mention_comments: TrendingSignalMetric;
+    unique_authors: TrendingSignalMetric;
+    tips_count: TrendingSignalMetric;
+    tips_amount_ae: TrendingSignalMetric;
+    reads: TrendingSignalMetric;
   };
-
-  volume_step_2_normalization: {
-    formula: string;
-    result: number;
+  component_scores: {
+    trading: number;
+    social: number;
+    pre_decay: number;
   };
-
   trending_score: {
     formula: string;
     result: number;
+    pre_decay: number;
   };
 }
 
@@ -85,6 +94,9 @@ export class TokensService {
 
     @InjectRepository(Transaction)
     private transactionsRepository: Repository<Transaction>,
+
+    @InjectRepository(Post)
+    private postsRepository: Repository<Post>,
 
     private aeSdkService: AeSdkService,
 
@@ -600,6 +612,16 @@ export class TokensService {
     const [{ total }] = await this.tokensRepository.query(countQuery);
     const totalItems = parseInt(total, 10);
     const totalPages = Math.ceil(totalItems / limit);
+    const orderClause =
+      orderBy === 'trending_score'
+        ? `all_ranked_tokens.trending_score ${orderDirection},
+           CASE
+             WHEN all_ranked_tokens.trending_score = 0
+               THEN all_ranked_tokens.created_at
+             ELSE NULL
+           END DESC,
+           all_ranked_tokens.created_at DESC`
+        : `all_ranked_tokens.${orderBy} ${orderDirection}`;
 
     // Create a new query that includes the rank
     const rankedQuery = `
@@ -624,7 +646,7 @@ export class TokensService {
       FROM all_ranked_tokens
       INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
       LEFT JOIN token_performance_view ON all_ranked_tokens.sale_address = token_performance_view.sale_address
-      ORDER BY all_ranked_tokens.${orderBy} ${orderDirection}
+      ORDER BY ${orderClause}
       LIMIT ${limit}
       OFFSET ${(page - 1) * limit}
     `;
@@ -1068,162 +1090,308 @@ export class TokensService {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  private normalizeCappedValue(raw: number, cap: number): number {
+    if (!Number.isFinite(raw) || raw <= 0 || cap <= 0) {
+      return 0;
+    }
+
+    return Math.log1p(Math.min(raw, cap)) / Math.log1p(cap);
+  }
+
+  private buildTrendingMetric(raw: number, cap: number): TrendingSignalMetric {
+    return {
+      raw,
+      cap,
+      normalized: this.normalizeCappedValue(raw, cap),
+    };
+  }
+
+  private getLatestDate(
+    ...dates: Array<Date | string | null | undefined>
+  ): Date | null {
+    const validDates = dates
+      .filter(Boolean)
+      .map((value) => new Date(value as Date | string))
+      .filter((value) => !Number.isNaN(value.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime());
+
+    return validDates[0] ?? null;
+  }
+
+  async updateTrendingScoresForSymbols(symbols: string[]): Promise<void> {
+    const normalizedSymbols = [
+      ...new Set(
+        symbols
+          .map((symbol) => (symbol || '').trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (!normalizedSymbols.length) {
+      return;
+    }
+
+    const tokens = await this.tokensRepository
+      .createQueryBuilder('token')
+      .where('token.unlisted = false')
+      .andWhere('UPPER(token.symbol) IN (:...symbols)', {
+        symbols: normalizedSymbols,
+      })
+      .getMany();
+
+    if (!tokens.length) {
+      return;
+    }
+
+    await this.updateMultipleTokensTrendingScores(tokens);
+  }
+
   /**
    * Calculate 24-hour trending metrics for a token
    */
   async calculateTokenTrendingMetrics(token: Token): Promise<TrendingMetrics> {
-    const twentyFourHoursAgo = moment().subtract(
-      TRENDING_SCORE_CONFIG.TIME_WINDOW_HOURS,
-      'hours',
-    );
+    const windowStart = moment()
+      .subtract(TRENDING_SCORE_CONFIG.WINDOW_HOURS, 'hours')
+      .toDate();
+    const windowStartDate = moment(windowStart).format('YYYY-MM-DD');
+    const normalizedSymbol = (token.symbol || '').trim().toUpperCase();
 
-    const [
-      uniqueTransactionsResult,
-      transactionCountsPerToken,
-      volumePerToken,
-      investmentVolumeResult,
-    ] = await Promise.all([
-      // Calculate unique transactions in 24h
-      this.transactionsRepository
-        .createQueryBuilder('transactions')
-        .select('COUNT(DISTINCT transactions.address)', 'count')
-        .where('transactions.sale_address = :sale_address', {
-          sale_address: token.sale_address,
-        })
-        .andWhere('transactions.created_at >= :start_date', {
-          start_date: twentyFourHoursAgo.toDate(),
-        })
-        .getRawOne(),
-      // Calculate min/max transactions per unique address
-
-      this.transactionsRepository
-        .createQueryBuilder('transactions')
-        .select([
-          'MIN(address_counts.transaction_count) as min_transactions',
-          'MAX(address_counts.transaction_count) as max_transactions',
-        ])
-        .from((subQuery) => {
-          return subQuery
-            .addSelect('COUNT(*)', 'transaction_count')
-            .from(Transaction, 'transactions')
-            .where('transactions.created_at >= :start_date', {
-              start_date: twentyFourHoursAgo.toDate(),
-            })
-            .groupBy('transactions.sale_address');
-        }, 'address_counts')
-        .getRawOne(),
-
-      this.transactionsRepository
-        .createQueryBuilder('transactions')
-        .select([
-          'MIN(address_counts.volume) as min_volume',
-          'MAX(address_counts.volume) as max_volume',
-        ])
-        .from((subQuery) => {
-          return subQuery
-            .addSelect(
-              "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
-              'volume',
-            )
-            .from(Transaction, 'transactions')
-            .where('transactions.created_at >= :start_date', {
-              start_date: twentyFourHoursAgo.toDate(),
-            })
-            .groupBy('transactions.sale_address');
-        }, 'address_counts')
-        .getRawOne(),
-
-      this.transactionsRepository
-        .createQueryBuilder('transactions')
-        .select(
-          "COALESCE(SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL)), 0)",
-          'volume',
-        )
-        .where('transactions.sale_address = :sale_address', {
-          sale_address: token.sale_address,
-        })
-        .andWhere('transactions.created_at >= :start_date', {
-          start_date: twentyFourHoursAgo.toDate(),
-        })
-        .andWhere('transactions.tx_type IN (:...tx_types)', {
-          tx_types: ['buy', 'create_community'],
-        })
-        .getRawOne(),
+    const [tradeRows, socialRows] = await Promise.all([
+      this.transactionsRepository.query(
+        `
+          SELECT
+            COUNT(DISTINCT t.address) AS active_wallets,
+            COUNT(*) FILTER (WHERE t.tx_type = 'buy') AS buy_count,
+            COUNT(*) FILTER (WHERE t.tx_type = 'sell') AS sell_count,
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN t.tx_type IN ('buy', 'sell', 'create_community')
+                    THEN CAST(NULLIF(t.amount->>'ae', 'NaN') AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS volume_ae,
+            MAX(t.created_at) AS last_trade_at
+          FROM transactions t
+          WHERE t.sale_address = $1
+            AND t.created_at >= $2
+        `,
+        [token.sale_address, windowStart],
+      ),
+      this.postsRepository.query(
+        `
+          WITH RECURSIVE mentioned_root_posts AS (
+            SELECT post.id, post.post_id, post.sender_address, post.created_at
+            FROM posts post
+            WHERE post.is_hidden = false
+              AND post.created_at >= $1
+              AND post.post_id IS NULL
+              AND COALESCE(post.token_mentions, '[]'::jsonb) ? $2
+          ),
+          directly_mentioned_comments AS (
+            SELECT post.id, post.post_id, post.sender_address, post.created_at
+            FROM posts post
+            WHERE post.is_hidden = false
+              AND post.created_at >= $1
+              AND post.post_id IS NOT NULL
+              AND COALESCE(post.token_mentions, '[]'::jsonb) ? $2
+          ),
+          seed_posts AS (
+            SELECT * FROM mentioned_root_posts
+            UNION
+            SELECT * FROM directly_mentioned_comments
+          ),
+          thread_comments AS (
+            SELECT comment.id, comment.post_id, comment.sender_address, comment.created_at
+            FROM posts comment
+            INNER JOIN seed_posts seed ON comment.post_id = seed.id
+            WHERE comment.is_hidden = false
+              AND comment.created_at >= $1
+            UNION
+            SELECT child.id, child.post_id, child.sender_address, child.created_at
+            FROM posts child
+            INNER JOIN thread_comments thread ON child.post_id = thread.id
+            WHERE child.is_hidden = false
+              AND child.created_at >= $1
+          ),
+          matched_posts AS (
+            SELECT * FROM seed_posts
+            UNION
+            SELECT * FROM thread_comments
+          ),
+          matched_post_ids AS (
+            SELECT DISTINCT id FROM matched_posts
+          ),
+          social_activity AS (
+            SELECT created_at FROM matched_posts
+            UNION ALL
+            SELECT tip.created_at
+            FROM tips tip
+            WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+              AND tip.created_at >= $1
+            UNION ALL
+            SELECT reads.date::timestamp
+            FROM post_reads_daily reads
+            WHERE reads.post_id IN (SELECT id FROM matched_post_ids)
+              AND reads.date >= $3::date
+          )
+          SELECT
+            (SELECT COUNT(*) FROM mentioned_root_posts) AS mention_posts,
+            (SELECT COUNT(*) FROM matched_posts WHERE post_id IS NOT NULL) AS mention_comments,
+            (SELECT COUNT(DISTINCT sender_address) FROM matched_posts) AS unique_authors,
+            (
+              SELECT COUNT(*)
+              FROM tips tip
+              WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+                AND tip.created_at >= $1
+            ) AS tips_count,
+            (
+              SELECT COALESCE(SUM(CAST(NULLIF(tip.amount, '') AS DECIMAL)), 0)
+              FROM tips tip
+              WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+                AND tip.created_at >= $1
+            ) AS tips_amount_ae,
+            (
+              SELECT COALESCE(SUM(reads.reads), 0)
+              FROM post_reads_daily reads
+              WHERE reads.post_id IN (SELECT id FROM matched_post_ids)
+                AND reads.date >= $3::date
+            ) AS reads,
+            (SELECT MAX(created_at) FROM social_activity) AS last_social_activity_at
+        `,
+        [windowStart, normalizedSymbol, windowStartDate],
+      ),
     ]);
 
-    // Calculate lifetime minutes (within last 24 hours, max 1440)
-    const tokenCreatedAt = moment(token.created_at);
-    const now = moment();
-    let lifetimeMinutes = Math.min(
-      now.diff(tokenCreatedAt, 'minutes'),
-      TRENDING_SCORE_CONFIG.MAX_LIFETIME_MINUTES,
-    );
+    const trade = tradeRows[0] ?? {};
+    const social = socialRows[0] ?? {};
 
-    const uniqueTransactions = parseInt(
-      uniqueTransactionsResult?.count || '0',
-      10,
-    );
-    const minUniqueTransactions = parseInt(
-      transactionCountsPerToken?.min_transactions || '0',
-      10,
-    );
-    const maxUniqueTransactions = parseInt(
-      transactionCountsPerToken?.max_transactions || '0',
-      10,
-    );
-    const investmentVolume = parseFloat(investmentVolumeResult.volume || '0');
-    const minInvestmentVolume = parseFloat(volumePerToken?.min_volume || '0');
-    const maxInvestmentVolume = parseFloat(volumePerToken?.max_volume || '0');
-    lifetimeMinutes = Math.max(lifetimeMinutes, 1); // Prevent division by zero
-    const minLifetimeMinutes = 1; // Minimum possible lifetime
-    const maxLifetimeMinutes = TRENDING_SCORE_CONFIG.MAX_LIFETIME_MINUTES;
+    const tradingSignals = {
+      active_wallets: this.buildTrendingMetric(
+        Number(trade.active_wallets || 0),
+        TRENDING_SCORE_CONFIG.CAPS.activeWallets,
+      ),
+      buy_count: this.buildTrendingMetric(
+        Number(trade.buy_count || 0),
+        TRENDING_SCORE_CONFIG.CAPS.buyCount,
+      ),
+      sell_count: this.buildTrendingMetric(
+        Number(trade.sell_count || 0),
+        TRENDING_SCORE_CONFIG.CAPS.sellCount,
+      ),
+      volume_ae: this.buildTrendingMetric(
+        Number(trade.volume_ae || 0),
+        TRENDING_SCORE_CONFIG.CAPS.volumeAe,
+      ),
+    };
 
-    const volume_normalization_result =
-      (investmentVolume - minInvestmentVolume) /
-      (maxInvestmentVolume - minInvestmentVolume);
-    const tx_normalization_result =
-      (uniqueTransactions - minUniqueTransactions) /
-      (maxUniqueTransactions - minUniqueTransactions);
+    const socialSignals = {
+      mention_posts: this.buildTrendingMetric(
+        Number(social.mention_posts || 0),
+        TRENDING_SCORE_CONFIG.CAPS.mentionPosts,
+      ),
+      mention_comments: this.buildTrendingMetric(
+        Number(social.mention_comments || 0),
+        TRENDING_SCORE_CONFIG.CAPS.mentionComments,
+      ),
+      unique_authors: this.buildTrendingMetric(
+        Number(social.unique_authors || 0),
+        TRENDING_SCORE_CONFIG.CAPS.uniqueAuthors,
+      ),
+      tips_count: this.buildTrendingMetric(
+        Number(social.tips_count || 0),
+        TRENDING_SCORE_CONFIG.CAPS.tipsCount,
+      ),
+      tips_amount_ae: this.buildTrendingMetric(
+        Number(social.tips_amount_ae || 0),
+        TRENDING_SCORE_CONFIG.CAPS.tipsAmountAe,
+      ),
+      reads: this.buildTrendingMetric(
+        Number(social.reads || 0),
+        TRENDING_SCORE_CONFIG.CAPS.reads,
+      ),
+    };
 
-    const calculated_trending_score =
-      TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT * tx_normalization_result +
-      TRENDING_SCORE_CONFIG.VOLUME_WEIGHT *
-        (volume_normalization_result / lifetimeMinutes);
+    const tradingScore =
+      TRENDING_SCORE_CONFIG.TRADING_WEIGHTS.activeWallets *
+        tradingSignals.active_wallets.normalized +
+      TRENDING_SCORE_CONFIG.TRADING_WEIGHTS.buyCount *
+        tradingSignals.buy_count.normalized +
+      TRENDING_SCORE_CONFIG.TRADING_WEIGHTS.sellCount *
+        tradingSignals.sell_count.normalized +
+      TRENDING_SCORE_CONFIG.TRADING_WEIGHTS.volumeAe *
+        tradingSignals.volume_ae.normalized;
 
-    let final_trending_score_result = calculated_trending_score;
-    if (calculated_trending_score < 0) {
-      final_trending_score_result = 0;
-    }
+    const socialScore =
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.mentionPosts *
+        socialSignals.mention_posts.normalized +
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.mentionComments *
+        socialSignals.mention_comments.normalized +
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.uniqueAuthors *
+        socialSignals.unique_authors.normalized +
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.tipsCount *
+        socialSignals.tips_count.normalized +
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.tipsAmountAe *
+        socialSignals.tips_amount_ae.normalized +
+      TRENDING_SCORE_CONFIG.SOCIAL_WEIGHTS.reads *
+        socialSignals.reads.normalized;
+
+    const preDecayScore =
+      TRENDING_SCORE_CONFIG.GROUP_WEIGHTS.trading * tradingScore +
+      TRENDING_SCORE_CONFIG.GROUP_WEIGHTS.social * socialScore;
+
+    const lastTradeAt = trade.last_trade_at
+      ? new Date(trade.last_trade_at)
+      : null;
+    const lastSocialActivityAt = social.last_social_activity_at
+      ? new Date(social.last_social_activity_at)
+      : null;
+    const lastActivityAt = this.getLatestDate(lastTradeAt, lastSocialActivityAt);
+    const ageHoursSinceLastActivity = lastActivityAt
+      ? Math.max(
+          0,
+          (Date.now() - lastActivityAt.getTime()) / (1000 * 60 * 60),
+        )
+      : TRENDING_SCORE_CONFIG.WINDOW_HOURS;
+
+    const decayMultiplier =
+      preDecayScore > 0
+        ? 1 /
+          Math.pow(
+            1 +
+              ageHoursSinceLastActivity /
+                TRENDING_SCORE_CONFIG.DECAY.biasHours,
+            TRENDING_SCORE_CONFIG.DECAY.gravity,
+          )
+        : 0;
+
+    const finalScore = Number((preDecayScore * decayMultiplier).toFixed(6));
 
     return {
-      uniqueTransactions,
-      minUniqueTransactions,
-      maxUniqueTransactions,
-      investmentVolume,
-      minInvestmentVolume,
-      maxInvestmentVolume,
-      lifetimeMinutes,
-      minLifetimeMinutes,
-      maxLifetimeMinutes,
-
-      tx_normalization: {
-        formula: `(${uniqueTransactions} - ${minUniqueTransactions}) / (${maxUniqueTransactions} - ${minUniqueTransactions})`,
-        result: tx_normalization_result,
-      },
-      volume_normalization: {
-        formula: `(${investmentVolume} - ${minInvestmentVolume}) / (${maxInvestmentVolume} - ${minInvestmentVolume})`,
-        result: volume_normalization_result,
-      },
-      volume_step_2_normalization: {
-        formula: `(${volume_normalization_result} / ${lifetimeMinutes})`,
-        result: volume_normalization_result / lifetimeMinutes,
+      window_hours: TRENDING_SCORE_CONFIG.WINDOW_HOURS,
+      last_activity_at: lastActivityAt,
+      last_trade_at: lastTradeAt,
+      last_social_activity_at: lastSocialActivityAt,
+      age_hours_since_last_activity: Number(
+        ageHoursSinceLastActivity.toFixed(4),
+      ),
+      decay_multiplier: Number(decayMultiplier.toFixed(6)),
+      trading_signals: tradingSignals,
+      social_signals: socialSignals,
+      component_scores: {
+        trading: Number(tradingScore.toFixed(6)),
+        social: Number(socialScore.toFixed(6)),
+        pre_decay: Number(preDecayScore.toFixed(6)),
       },
       trending_score: {
-        formula: `${TRENDING_SCORE_CONFIG.TRANSACTION_WEIGHT} * ${tx_normalization_result} + ${TRENDING_SCORE_CONFIG.VOLUME_WEIGHT} * (${volume_normalization_result} / ${lifetimeMinutes})`,
-        result: final_trending_score_result,
-        calculated_trending_score,
+        formula:
+          '((trading_weight * trading_score) + (social_weight * social_score)) * freshness_decay',
+        result: finalScore,
+        pre_decay: Number(preDecayScore.toFixed(6)),
       },
-    } as any;
+    };
   }
 
   /**
@@ -1233,12 +1401,19 @@ export class TokensService {
     metrics: TrendingMetrics;
     token: Token;
   }> {
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
+
     try {
       const metrics = await this.calculateTokenTrendingMetrics(token);
+      const safeScore = Number.isFinite(metrics.trending_score.result)
+        ? metrics.trending_score.result
+        : 0;
 
       // Update the token's trending score in the database
       await this.tokensRepository.update(token.sale_address, {
-        trending_score: metrics.trending_score.result, // Ensure non-negative
+        trending_score: safeScore,
         trending_score_update_at: new Date(),
       });
 
@@ -1246,7 +1421,7 @@ export class TokensService {
         metrics,
         token: {
           ...token,
-          trending_score: metrics.trending_score.result,
+          trending_score: safeScore,
           trending_score_update_at: new Date(),
         },
       };
@@ -1256,6 +1431,7 @@ export class TokensService {
         error,
         error instanceof Error ? error.stack : undefined,
       );
+      throw error;
     }
   }
 
@@ -1263,10 +1439,21 @@ export class TokensService {
    * Calculate and update trending scores for multiple tokens
    */
   async updateMultipleTokensTrendingScores(tokens: Token[]): Promise<void> {
-    const updatePromises = tokens.map((token) =>
-      this.updateTokenTrendingScore(token),
+    if (!tokens.length) {
+      return;
+    }
+
+    const concurrency = Math.max(
+      1,
+      TRENDING_SCORE_CONFIG.MAX_CONCURRENT_UPDATES,
     );
-    await Promise.allSettled(updatePromises);
+
+    for (let index = 0; index < tokens.length; index += concurrency) {
+      const batch = tokens.slice(index, index + concurrency);
+      await Promise.allSettled(
+        batch.map((token) => this.updateTokenTrendingScore(token)),
+      );
+    }
   }
 
   async deleteTokensWhereDaoAddressIsNull(): Promise<void> {

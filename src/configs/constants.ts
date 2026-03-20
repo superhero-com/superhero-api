@@ -137,7 +137,7 @@ export const MAX_TOKENS_TO_CHECK_WITHOUT_HOLDERS = 20;
 // PULL_DEX_PAIRS_ENABLED - unused
 
 // Analytics/calculation jobs (not transaction syncing):
-export const UPDATE_TRENDING_TOKENS_ENABLED = false;
+export const UPDATE_TRENDING_TOKENS_ENABLED = true;
 export const PULL_ACCOUNTS_ENABLED = false;
 export const PULL_TRENDING_TAGS_ENABLED = false;
 
@@ -151,13 +151,53 @@ export const TRENDING_TAGS_API_KEY =
  * Trending Score Configuration
  */
 export const TRENDING_SCORE_CONFIG = {
-  // Weights for trending score calculation
-  TRANSACTION_WEIGHT: 0.6, // w1 - weight for unique transactions in 24h
-  VOLUME_WEIGHT: 0.4, // w2 - weight for investment velocity
+  WINDOW_HOURS: 24,
+  REFRESH_CRON: '*/2 * * * *',
+  ACTIVITY_LOOKBACK_MINUTES: 15,
+  MAX_ACTIVE_BATCH: 250,
+  MAX_STALE_BATCH: 150,
+  MAX_CONCURRENT_UPDATES: 8,
+  STALE_AFTER_MINUTES: 30,
 
-  // Time window for trending calculations
-  TIME_WINDOW_HOURS: 24,
-  MAX_LIFETIME_MINUTES: 1440, // 24 hours in minutes
+  // Trading remains important, but community activity should dominate ranking.
+  GROUP_WEIGHTS: {
+    trading: 0.35,
+    social: 0.65,
+  },
+
+  TRADING_WEIGHTS: {
+    activeWallets: 0.4,
+    buyCount: 0.2,
+    sellCount: 0.2,
+    volumeAe: 0.2,
+  },
+
+  SOCIAL_WEIGHTS: {
+    mentionPosts: 0.32,
+    mentionComments: 0.32,
+    uniqueAuthors: 0.22,
+    tipsCount: 0.05,
+    tipsAmountAe: 0.03,
+    reads: 0.06,
+  },
+
+  CAPS: {
+    activeWallets: 25,
+    buyCount: 40,
+    sellCount: 40,
+    volumeAe: 5000,
+    mentionPosts: 15,
+    mentionComments: 50,
+    uniqueAuthors: 20,
+    tipsCount: 15,
+    tipsAmountAe: 250,
+    reads: 200,
+  },
+
+  DECAY: {
+    biasHours: 2,
+    gravity: 1.15,
+  },
 } as const;
 
 /**

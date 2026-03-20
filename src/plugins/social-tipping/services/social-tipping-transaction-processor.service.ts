@@ -7,6 +7,8 @@ import { decode, toAe } from '@aeternity/aepp-sdk';
 import { Tip } from '@/tipping/entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { Post } from '@/social/entities/post.entity';
+import { TokensService } from '@/tokens/tokens.service';
+import { resolveTrendingSymbolsForPost } from '@/social/utils/token-mentions.util';
 
 @Injectable()
 export class SocialTippingTransactionProcessorService {
@@ -21,7 +23,16 @@ export class SocialTippingTransactionProcessorService {
     private readonly accountRepository: Repository<Account>,
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    private readonly tokensService: TokensService,
   ) {}
+
+  private async getAffectedSymbolsFromPost(post: Post | null): Promise<string[]> {
+    return resolveTrendingSymbolsForPost(post, (postId) =>
+      this.postRepository.findOne({
+        where: { id: postId },
+      }),
+    );
+  }
 
   /**
    * Process a tip transaction
@@ -41,10 +52,19 @@ export class SocialTippingTransactionProcessorService {
         return null;
       }
 
-      // Wrap operations in a transaction for consistency
-      return await this.tipRepository.manager.transaction(async (manager) => {
-        return await this.saveTipFromTransaction(tx, tipType, manager);
-      });
+      // Wrap persistence in a transaction, then recalculate after commit.
+      const savedTipResult = await this.tipRepository.manager.transaction(
+        async (manager) => {
+          return await this.saveTipFromTransaction(tx, tipType, manager);
+        },
+      );
+
+      const affectedSymbols = await this.getAffectedSymbolsFromPost(
+        savedTipResult.post,
+      );
+      await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
+
+      return savedTipResult.tip;
     } catch (error: any) {
       this.logger.error(
         `Failed to process tip transaction ${tx.hash}`,
@@ -85,7 +105,7 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     tipType: 'TIP_PROFILE' | 'TIP_POST',
     manager: EntityManager,
-  ): Promise<Tip> {
+  ): Promise<{ tip: Tip; post: Post | null }> {
     const tipRepository = manager.getRepository(Tip);
 
     const amount = tx?.raw?.amount ? toAe(tx.raw.amount) : '0';
@@ -139,9 +159,12 @@ export class SocialTippingTransactionProcessorService {
     );
 
     // Fetch and return the tip (either newly created or existing)
-    return await tipRepository.findOneOrFail({
-      where: { tx_hash: tx.hash },
-    });
+    return {
+      tip: await tipRepository.findOneOrFail({
+        where: { tx_hash: tx.hash },
+      }),
+      post,
+    };
   }
 
   /**

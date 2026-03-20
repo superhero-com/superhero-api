@@ -132,4 +132,50 @@ describe('TransactionProcessorService', () => {
     expect(dataService.calculatePrices).not.toHaveBeenCalled();
     expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
   });
+
+  it('updates the trending score after a successful live transaction', async () => {
+    const rawTransaction = {
+      hash: 'th_live_success',
+      function: BCL_FUNCTIONS.buy,
+      block_height: 123,
+      caller_id: 'ak_test',
+      raw: { log: [] },
+    };
+    const token = {
+      sale_address: 'ct_sale',
+      factory_address: 'ct_factory',
+    };
+
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      saleAddress: 'ct_sale',
+    });
+    tokenService.getToken.mockResolvedValue(token);
+    transactionsService.decodeTxEvents.mockResolvedValue(rawTransaction);
+    transactionsService.parseTransactionData.mockResolvedValue({
+      amount: new BigNumber(10),
+      volume: new BigNumber(2),
+      total_supply: new BigNumber(100),
+      protocol_reward: new BigNumber(1),
+    });
+    dataService.calculatePrices.mockReturnValue({
+      unitPriceData: { ae: 1 },
+      marketCapData: { ae: 10 },
+      buyPriceData: { ae: 1 },
+      previousBuyPriceData: { ae: 1 },
+    });
+    dataService.prepareTransactionData.mockResolvedValue({
+      tx_hash: rawTransaction.hash,
+    });
+    persistenceService.saveTransaction.mockResolvedValue({ id: 1 });
+    tokenService.update.mockResolvedValue(token);
+    transactionsService.isTokenSupportedCollection.mockResolvedValue(true);
+    tokenService.syncTokenPrice.mockResolvedValue(undefined);
+    tokenHolderService.updateTokenHolder.mockResolvedValue(undefined);
+    tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
+
+    await service.processTransaction(rawTransaction as any, SyncDirectionEnum.Live);
+
+    expect(tokenService.updateTokenTrendingScore).toHaveBeenCalledWith(token);
+  });
 });

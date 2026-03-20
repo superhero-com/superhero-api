@@ -28,6 +28,8 @@ import {
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
+import { resolveTrendingSymbolsForPost } from '../utils/token-mentions.util';
+import { TokensService } from '@/tokens/tokens.service';
 
 @Injectable()
 export class PostService {
@@ -41,8 +43,18 @@ export class PostService {
 
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
+
+    private readonly tokensService: TokensService,
   ) {
     this.logger.log('PostService initialized');
+  }
+
+  private async getAffectedSymbolsForPost(post: Post | null): Promise<string[]> {
+    return resolveTrendingSymbolsForPost(post, (postId) =>
+      this.postRepository.findOne({
+        where: { id: postId },
+      }),
+    );
   }
 
   async onModuleInit(): Promise<void> {
@@ -381,6 +393,13 @@ export class PostService {
         );
 
         if (result.success) {
+          const affectedSymbols = await this.getAffectedSymbolsForPost({
+            ...existingPost,
+            post_id: postTypeInfo.parentPostId,
+          } as Post);
+          await this.tokensService.updateTrendingScoresForSymbols(
+            affectedSymbols,
+          );
           return existingPost;
         } else {
           this.logger.warn('Failed to process existing post as comment', {
@@ -452,6 +471,7 @@ export class PostService {
         sender_address: transaction.tx.callerId,
         contract_address: transaction.tx.contractId,
         content: parsedContent.content,
+        token_mentions: parsedContent.trendMentions,
         topics: topics,
         media: parsedContent.media,
         total_comments: 0,
@@ -500,6 +520,9 @@ export class PostService {
       if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
         await this.updatePostCommentCount(postTypeInfo.parentPostId);
       }
+
+      const affectedSymbols = await this.getAffectedSymbolsForPost(post);
+      await this.tokensService.updateTrendingScoresForSymbols(affectedSymbols);
 
       this.logger.log('Post saved successfully', {
         txHash,
