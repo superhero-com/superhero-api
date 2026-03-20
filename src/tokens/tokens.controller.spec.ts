@@ -84,6 +84,7 @@ describe('TokensController', () => {
         {
           provide: TokensService,
           useValue: {
+            applyListEligibilityFilters: jest.fn(),
             getToken: jest.fn().mockResolvedValue({
               id: 1,
               rank: 5,
@@ -134,8 +135,25 @@ describe('TokensController', () => {
 
   it('should return paginated list of tokens', async () => {
     const result = await controller.listAll();
+    expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
     expect(tokensService.queryTokensWithRanks).toHaveBeenCalled();
     expect(result).toEqual({ items: [], meta: {} });
+  });
+
+  it('should apply eligibility filters only for trending score ordering', async () => {
+    await controller.listAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+
+    expect(tokensService.applyListEligibilityFilters).toHaveBeenCalled();
   });
 
   it('should return token details by address', async () => {

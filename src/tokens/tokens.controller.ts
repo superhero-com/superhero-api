@@ -114,6 +114,10 @@ export class TokensController {
       .select('token.*')
       .where('token.unlisted = false');
 
+    if (orderBy === 'trending_score') {
+      this.tokensService.applyListEligibilityFilters(queryBuilder);
+    }
+
     if (search) {
       queryBuilder.andWhere('token.name ILIKE :search', {
         search: `%${search}%`,

@@ -1,5 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
-import { TRENDING_SCORE_CONFIG } from '@/configs/constants';
+import {
+  TOKEN_LIST_ELIGIBILITY_CONFIG,
+  TRENDING_SCORE_CONFIG,
+} from '@/configs/constants';
 import { TokensService } from './tokens.service';
 
 describe('TokensService', () => {
@@ -175,6 +178,30 @@ describe('TokensService', () => {
 
     expect(maxActive).toBeLessThanOrEqual(
       TRENDING_SCORE_CONFIG.MAX_CONCURRENT_UPDATES,
+    );
+  });
+
+  it('applies token list eligibility thresholds to the query builder', () => {
+    const andWhere = jest.fn().mockReturnThis();
+    const queryBuilder = { andWhere } as any;
+
+    const result = service.applyListEligibilityFilters(queryBuilder);
+    const [eligibilitySql, eligibilityParams] = andWhere.mock.calls[0];
+
+    expect(result).toBe(queryBuilder);
+    expect(eligibilitySql).toContain(
+      'token.holders_count >= :eligibilityMinHolders',
+    );
+    expect(eligibilitySql).toContain('AND (');
+    expect(eligibilitySql).not.toContain('OR (');
+    expect(eligibilityParams).toEqual(
+      expect.objectContaining({
+        eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
+        eligibilityMinPosts:
+          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
+        eligibilityMinTrades:
+          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
+      }),
     );
   });
 

@@ -1,12 +1,16 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { In, IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { ACTIVE_NETWORK, TRENDING_SCORE_CONFIG } from '@/configs';
+import {
+  ACTIVE_NETWORK,
+  TOKEN_LIST_ELIGIBILITY_CONFIG,
+  TRENDING_SCORE_CONFIG,
+} from '@/configs';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
@@ -663,6 +667,35 @@ export class TokensService {
         totalPages,
       },
     };
+  }
+
+  applyListEligibilityFilters(
+    queryBuilder: SelectQueryBuilder<Token>,
+  ): SelectQueryBuilder<Token> {
+    return queryBuilder.andWhere(
+      `(
+        token.holders_count >= :eligibilityMinHolders
+        AND (
+          SELECT COUNT(*)
+          FROM posts post
+          WHERE post.is_hidden = false
+            AND COALESCE(post.token_mentions, '[]'::jsonb) ? UPPER(token.symbol)
+        ) >= :eligibilityMinPosts
+        AND (
+          SELECT COUNT(*)
+          FROM transactions tx
+          WHERE tx.sale_address = token.sale_address
+            AND tx.tx_type IN ('buy', 'sell')
+        ) >= :eligibilityMinTrades
+      )`,
+      {
+        eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
+        eligibilityMinPosts:
+          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
+        eligibilityMinTrades:
+          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
+      },
+    );
   }
 
   async getTokenRanks(tokenIds: string[]): Promise<Map<string, number>> {

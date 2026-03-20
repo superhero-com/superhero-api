@@ -200,6 +200,12 @@ export const TRENDING_SCORE_CONFIG = {
   },
 } as const;
 
+export const TOKEN_LIST_ELIGIBILITY_CONFIG = {
+  MIN_HOLDERS: 5,
+  MIN_TOKEN_POSTS_ALL_TIME: 2,
+  MIN_TRADES_ALL_TIME: 3,
+} as const;
+
 /**
  * Popular posts ranking configuration (v1)
  */
