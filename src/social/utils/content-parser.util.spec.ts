@@ -1,6 +1,7 @@
 import {
   parsePostContent,
   extractTopics,
+  extractTrendMentions,
   extractMedia,
   sanitizeContent,
   isValidMediaUrl,
@@ -18,7 +19,8 @@ describe('Content Parser Utilities', () => {
       const result = parsePostContent(content, mediaArguments);
 
       expect(result.content).toBe(content);
-      expect(result.topics).toEqual(['#world', '#test']);
+      expect(result.topics).toEqual(['WORLD', 'TEST']);
+      expect(result.trendMentions).toEqual(['WORLD', 'TEST']);
       expect(result.media).toEqual([
         'https://example.com/image.jpg',
         'https://example.com/video.mp4',
@@ -30,6 +32,7 @@ describe('Content Parser Utilities', () => {
 
       expect(result.content).toBe('');
       expect(result.topics).toEqual([]);
+      expect(result.trendMentions).toEqual([]);
       expect(result.media).toEqual([]);
     });
 
@@ -48,28 +51,28 @@ describe('Content Parser Utilities', () => {
       const content = 'Check out this #awesome #blockchain #dapp';
       const topics = extractTopics(content);
 
-      expect(topics).toEqual(['#awesome', '#blockchain', '#dapp']);
+      expect(topics).toEqual(['AWESOME', 'BLOCKCHAIN', 'DAPP']);
     });
 
-    it('should handle mixed case and convert to lowercase', () => {
+    it('should handle mixed case and normalize topics', () => {
       const content = 'Testing #CamelCase #UPPERCASE #lowercase';
       const topics = extractTopics(content);
 
-      expect(topics).toEqual(['#camelcase', '#uppercase', '#lowercase']);
+      expect(topics).toEqual(['CAMEL-CASE', 'UPPERCASE', 'LOWERCASE']);
     });
 
     it('should filter out invalid hashtags', () => {
       const content = '# #valid_tag #123 #';
       const topics = extractTopics(content);
 
-      expect(topics).toEqual(['#valid_tag', '#123']);
+      expect(topics).toEqual(['VALID_TAG', '123']);
     });
 
     it('should remove duplicates while preserving order', () => {
       const content = '#first #second #first #third #second';
       const topics = extractTopics(content);
 
-      expect(topics).toEqual(['#first', '#second', '#third']);
+      expect(topics).toEqual(['FIRST', 'SECOND', 'THIRD']);
     });
 
     it('should respect maxTopics limit', () => {
@@ -77,7 +80,7 @@ describe('Content Parser Utilities', () => {
       const topics = extractTopics(content, 3);
 
       expect(topics).toHaveLength(3);
-      expect(topics).toEqual(['#one', '#two', '#three']);
+      expect(topics).toEqual(['ONE', 'TWO', 'THREE']);
     });
 
     it('should handle empty or invalid input', () => {
@@ -94,7 +97,24 @@ describe('Content Parser Utilities', () => {
 
       const topics = extractTopics(content);
 
-      expect(topics).toEqual(['#valid']);
+      expect(topics).toEqual(['VALID']);
+    });
+  });
+
+  describe('extractTrendMentions', () => {
+    it('extracts token-style mentions and preserves first occurrence order', () => {
+      const mentions = extractTrendMentions(
+        'Talking about #alpha #MyToken #alpha #my-token #beta_1',
+      );
+
+      expect(mentions).toEqual(['ALPHA', 'MYTOKEN', 'MY-TOKEN', 'BETA_1']);
+    });
+
+    it('uses different normalization than topics for camel case hashtags', () => {
+      expect(extractTopics('Discussing #CamelCase')).toEqual(['CAMEL-CASE']);
+      expect(extractTrendMentions('Discussing #CamelCase')).toEqual([
+        'CAMELCASE',
+      ]);
     });
   });
 

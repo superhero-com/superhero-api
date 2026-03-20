@@ -8,6 +8,8 @@ import { PostTransactionValidationService } from './post-transaction-validation.
 import { PostTypeDetectionService } from './post-type-detection.service';
 import { TopicManagementService } from './topic-management.service';
 import { PostPersistenceService } from './post-persistence.service';
+import { TokensService } from '@/tokens/tokens.service';
+import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 
 export interface ProcessPostTransactionResult {
   post: Post | null;
@@ -27,6 +29,7 @@ export class PostTransactionProcessorService {
     private readonly typeDetectionService: PostTypeDetectionService,
     private readonly topicManagementService: TopicManagementService,
     private readonly persistenceService: PostPersistenceService,
+    private readonly tokensService: TokensService,
   ) {}
 
   /**
@@ -80,6 +83,21 @@ export class PostTransactionProcessorService {
           );
 
         if (result.success) {
+          await refreshTrendingScoresForPostSafely({
+            post: {
+              ...existingPost,
+              post_id: postTypeInfo.parentPostId,
+            } as Post,
+          loadParentPost: (postId) =>
+            this.postRepository.findOne({
+              where: { id: postId },
+            }),
+          updateTrendingScoresForSymbols: (symbols) =>
+            this.tokensService.updateTrendingScoresForSymbols(symbols),
+          logError: (message, trace) => this.logger.error(message, trace),
+          errorMessage:
+            'Failed to refresh trending scores after processing post transaction',
+        });
           return {
             post: existingPost,
             success: true,
@@ -198,6 +216,19 @@ export class PostTransactionProcessorService {
           postTypeInfo.parentPostId,
         );
       }
+
+      await refreshTrendingScoresForPostSafely({
+        post,
+        loadParentPost: (postId) =>
+          this.postRepository.findOne({
+            where: { id: postId },
+          }),
+        updateTrendingScoresForSymbols: (symbols) =>
+          this.tokensService.updateTrendingScoresForSymbols(symbols),
+        logError: (message, trace) => this.logger.error(message, trace),
+        errorMessage:
+          'Failed to refresh trending scores after processing post transaction',
+      });
 
       return {
         post,

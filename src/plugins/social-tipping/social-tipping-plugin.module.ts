@@ -10,12 +10,14 @@ import { Post } from '@/social/entities/post.entity';
 import { SocialTippingPlugin } from './social-tipping.plugin';
 import { SocialTippingPluginSyncService } from './social-tipping-plugin-sync.service';
 import { SocialTippingTransactionProcessorService } from './services/social-tipping-transaction-processor.service';
+import { TokensModule } from '@/tokens/tokens.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Tx, PluginSyncState, Tip, Account, Post]),
     AeModule,
     AccountModule,
+    TokensModule,
   ],
   providers: [
     SocialTippingTransactionProcessorService,

@@ -6,6 +6,8 @@ import { Tip } from '../entities/tip.entity';
 import { ITransaction } from '@/utils/types';
 import { decode, toAe } from '@aeternity/aepp-sdk';
 import { Post } from '@/social/entities/post.entity';
+import { TokensService } from '@/tokens/tokens.service';
+import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 
 @Injectable()
 export class TipService {
@@ -21,6 +23,8 @@ export class TipService {
 
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+
+    private readonly tokensService: TokensService,
   ) {
     this.logger.log('TipService initialized');
   }
@@ -107,7 +111,7 @@ export class TipService {
       }
     }
 
-    return await this.tipRepository.save({
+    const savedTip = await this.tipRepository.save({
       tx_hash: transaction.hash,
       sender: senderAccount,
       receiver: receiverAccount,
@@ -115,6 +119,20 @@ export class TipService {
       type,
       post,
     });
+
+    await refreshTrendingScoresForPostSafely({
+      post,
+      loadParentPost: (postId) =>
+        this.postRepository.findOne({
+          where: { id: postId },
+        }),
+      updateTrendingScoresForSymbols: (symbols) =>
+        this.tokensService.updateTrendingScoresForSymbols(symbols),
+      logError: (message, trace) => this.logger.error(message, trace),
+      errorMessage: 'Failed to refresh trending scores after saving tip',
+    });
+
+    return savedTip;
   }
 
   /**

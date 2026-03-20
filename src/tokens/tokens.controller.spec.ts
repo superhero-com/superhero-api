@@ -10,6 +10,9 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Reflector } from '@nestjs/core';
+import { NotFoundException } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bull';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
 
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn().mockResolvedValue({ items: [], meta: {} }),
@@ -24,12 +27,14 @@ describe('TokensController', () => {
 
   beforeEach(async () => {
     const tokensRepositoryMock = {
+      query: jest.fn().mockResolvedValue([]),
       createQueryBuilder: jest.fn(() => ({
         select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         andWhereInIds: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(2),
         getMany: jest.fn().mockResolvedValue([]),
       })),
     };
@@ -41,6 +46,7 @@ describe('TokensController', () => {
         select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         distinct: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(2),
         getRawMany: jest.fn().mockResolvedValue([]),
       })),
     };
@@ -70,8 +76,15 @@ describe('TokensController', () => {
           useValue: tokenHolderRepositoryMock,
         },
         {
+          provide: getQueueToken(SYNC_TOKEN_HOLDERS_QUEUE),
+          useValue: {
+            add: jest.fn(),
+          },
+        },
+        {
           provide: TokensService,
           useValue: {
+            applyListEligibilityFilters: jest.fn(),
             getToken: jest.fn().mockResolvedValue({
               id: 1,
               rank: 5,
@@ -84,6 +97,13 @@ describe('TokensController', () => {
               rank: 5,
               total_supply: { toNumber: () => 1000000 },
               factory_address: 'ct_123',
+            }),
+            queryTokensWithRanks: jest
+              .fn()
+              .mockResolvedValue({ items: [], meta: {} }),
+            updateTokenTrendingScore: jest.fn().mockResolvedValue({
+              metrics: { trending_score: { result: 0.5 } },
+              token: { sale_address: 'ct_123', trending_score: 0.5 },
             }),
           },
         },
@@ -115,8 +135,25 @@ describe('TokensController', () => {
 
   it('should return paginated list of tokens', async () => {
     const result = await controller.listAll();
-    expect(paginate).toHaveBeenCalled();
+    expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
+    expect(tokensService.queryTokensWithRanks).toHaveBeenCalled();
     expect(result).toEqual({ items: [], meta: {} });
+  });
+
+  it('should apply eligibility filters only for trending score ordering', async () => {
+    await controller.listAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+
+    expect(tokensService.applyListEligibilityFilters).toHaveBeenCalled();
   });
 
   it('should return token details by address', async () => {
@@ -140,7 +177,42 @@ describe('TokensController', () => {
   it('should return paginated token rankings', async () => {
     const result = await controller.listTokenRankings('ct_123');
     expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');
-    expect(paginate).toHaveBeenCalled();
-    expect(result).toEqual({ items: [], meta: {} });
+    expect(tokensRepository.query).toHaveBeenCalled();
+    expect(result).toEqual({
+      items: [],
+      meta: {
+        currentPage: 1,
+        itemCount: 0,
+        itemsPerPage: 5,
+        totalItems: 0,
+        totalPages: 1,
+      },
+    });
+  });
+
+  it('should return an updated token score breakdown', async () => {
+    const result = await controller.getTokenScore('ct_123');
+
+    expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');
+    expect(tokensService.updateTokenTrendingScore).toHaveBeenCalledWith({
+      id: 1,
+      address: 'ct_123',
+      rank: 5,
+      total_supply: { toNumber: expect.any(Function) },
+      factory_address: 'ct_123',
+    });
+    expect(result).toEqual({
+      metrics: { trending_score: { result: 0.5 } },
+      token: { sale_address: 'ct_123', trending_score: 0.5 },
+    });
+  });
+
+  it('should throw when requesting score for an unknown token', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue(null);
+
+    await expect(controller.getTokenScore('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(tokensService.updateTokenTrendingScore).not.toHaveBeenCalled();
   });
 });

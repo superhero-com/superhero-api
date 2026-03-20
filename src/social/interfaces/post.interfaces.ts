@@ -17,6 +17,7 @@ export interface IParsedPostContent {
   content: string;
   topics: string[];
   media: string[];
+  trendMentions: string[];
 }
 
 /**
@@ -30,6 +31,7 @@ export interface ICreatePostData {
   sender_address: string;
   contract_address: string;
   content: string;
+  token_mentions: string[];
   topics: Topic[];
   media: string[];
   total_comments: number;

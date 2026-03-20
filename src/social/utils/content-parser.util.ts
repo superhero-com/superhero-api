@@ -29,6 +29,7 @@ export function parsePostContent(
 
   // Extract topics (hashtags)
   const topics = extractTopics(sanitizedContent, config.maxTopics);
+  const trendMentions = extractTrendMentions(sanitizedContent, config.maxTopics);
 
   // Extract media URLs
   const media = extractMedia(mediaArguments, config.maxMediaItems);
@@ -37,6 +38,7 @@ export function parsePostContent(
     content: sanitizedContent,
     topics,
     media,
+    trendMentions,
   };
 }
 

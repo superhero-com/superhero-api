@@ -24,6 +24,7 @@ import { TokenPerformanceController } from './controllers/token-performance.cont
 import { TokenPerformanceView } from './entities/tokens-performance.view';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 import { TokenHoldersLockService } from './services/token-holders-lock.service';
+import { Post } from '@/social/entities/post.entity';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { TokenHoldersLockService } from './services/token-holders-lock.service';
       TokenHolder,
       TokenPerformanceView,
       Transaction,
+      Post,
     ]),
     AeModule,
     AePricingModule,
