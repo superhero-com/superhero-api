@@ -11,6 +11,7 @@ import {
   TRENDING_SCORE_CONFIG,
   UPDATE_TRENDING_TOKENS_ENABLED,
 } from '@/configs';
+import { buildNormalizedTokenMentionSelectSql } from '@/social/utils/token-mentions-sql.util';
 
 @Injectable()
 export class UpdateTrendingTokensService {
@@ -86,18 +87,23 @@ export class UpdateTrendingTokensService {
           `
             SELECT DISTINCT symbol
             FROM (
-              SELECT jsonb_array_elements_text(COALESCE(post.token_mentions, '[]'::jsonb)) AS symbol
+              SELECT mention.symbol
               FROM posts post
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
               WHERE post.is_hidden = false
                 AND post.created_at >= $1
-              UNION ALL
-              SELECT jsonb_array_elements_text(COALESCE(parent.token_mentions, '[]'::jsonb)) AS symbol
+              UNION
+              SELECT mention.symbol
               FROM posts post
               INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
               WHERE post.is_hidden = false
                 AND post.created_at >= $1
             ) symbols
-            WHERE symbol <> ''
           `,
           [recentSince],
         ),
@@ -105,18 +111,23 @@ export class UpdateTrendingTokensService {
           `
             SELECT DISTINCT symbol
             FROM (
-              SELECT jsonb_array_elements_text(COALESCE(post.token_mentions, '[]'::jsonb)) AS symbol
+              SELECT mention.symbol
               FROM tips tip
               INNER JOIN posts post ON post.id = tip.post_id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
               WHERE tip.created_at >= $1
-              UNION ALL
-              SELECT jsonb_array_elements_text(COALESCE(parent.token_mentions, '[]'::jsonb)) AS symbol
+              UNION
+              SELECT mention.symbol
               FROM tips tip
               INNER JOIN posts post ON post.id = tip.post_id
               INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
               WHERE tip.created_at >= $1
             ) symbols
-            WHERE symbol <> ''
           `,
           [recentSince],
         ),
@@ -124,18 +135,23 @@ export class UpdateTrendingTokensService {
           `
             SELECT DISTINCT symbol
             FROM (
-              SELECT jsonb_array_elements_text(COALESCE(post.token_mentions, '[]'::jsonb)) AS symbol
+              SELECT mention.symbol
               FROM post_reads_daily reads
               INNER JOIN posts post ON post.id = reads.post_id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
               WHERE reads.date >= $1::date
-              UNION ALL
-              SELECT jsonb_array_elements_text(COALESCE(parent.token_mentions, '[]'::jsonb)) AS symbol
+              UNION
+              SELECT mention.symbol
               FROM post_reads_daily reads
               INNER JOIN posts post ON post.id = reads.post_id
               INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
               WHERE reads.date >= $1::date
             ) symbols
-            WHERE symbol <> ''
           `,
           [recentSinceDate],
         ),

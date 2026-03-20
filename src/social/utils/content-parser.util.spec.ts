@@ -110,6 +110,14 @@ describe('Content Parser Utilities', () => {
       expect(mentions).toEqual(['ALPHA', 'MYTOKEN', 'MY-TOKEN', 'BETA_1']);
     });
 
+    it('matches hashtags case-insensitively but requires the hash prefix', () => {
+      const mentions = extractTrendMentions(
+        'alpha #alpha #AlPhA plainToken #plainToken',
+      );
+
+      expect(mentions).toEqual(['ALPHA', 'PLAINTOKEN']);
+    });
+
     it('uses different normalization than topics for camel case hashtags', () => {
       expect(extractTopics('Discussing #CamelCase')).toEqual(['CAMEL-CASE']);
       expect(extractTrendMentions('Discussing #CamelCase')).toEqual([

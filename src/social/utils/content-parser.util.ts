@@ -2,6 +2,7 @@ import {
   IParsedPostContent,
   IContentParsingOptions,
 } from '../interfaces/post.interfaces';
+import { TOKEN_HASHTAG_REGEX_SOURCE } from './token-mentions-sql.util';
 
 /**
  * Default options for content parsing
@@ -121,7 +122,7 @@ export function extractTrendMentions(
     return [];
   }
 
-  const tokenMentionPattern = /#([A-Za-z0-9_][A-Za-z0-9_-]{0,49})/g;
+  const tokenMentionPattern = new RegExp(TOKEN_HASHTAG_REGEX_SOURCE, 'g');
   const mentions: string[] = [];
   const seen = new Set<string>();
   let match: RegExpExecArray | null;
