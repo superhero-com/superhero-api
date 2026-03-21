@@ -411,7 +411,7 @@ export class TransactionHistoryService {
 
     const bucketExpr =
       size > 1
-        ? `DATE_TRUNC('${unit}', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
+        ? `DATE_TRUNC('day', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
         : `DATE_TRUNC('${unit}', t.created_at)`;
 
     // Select the closing (latest) transaction price per bucket via DISTINCT ON
@@ -473,10 +473,10 @@ export class TransactionHistoryService {
       const windowStart = Date.now() - timeframeDays[intervalType] * 86_400_000;
       const createdAt = new Date(token.created_at).getTime();
 
-      if (createdAt >= windowStart) {
+      if (createdAt >= windowStart && result.length > 0) {
         result.unshift({
           end_time: token.created_at,
-          last_price: '0.0000001',
+          last_price: result[0].last_price,
         });
       }
     }
