@@ -365,9 +365,13 @@ export class TransactionHistoryService {
 
   async getForPreview(
     token: Token,
-    intervalType: '1d' | '7d' | '30d' | '90d' | '180d',
+    intervalType: '1d' | '7d' | '30d' | '90d' | '180d' | 'all-time',
   ): Promise<ITransactionPreview> {
     if (!token) return { result: [], timeframe: '' };
+
+    if (intervalType === 'all-time') {
+      return this.getForPreviewAllTime(token);
+    }
 
     const types = {
       '1d': {
@@ -385,11 +389,11 @@ export class TransactionHistoryService {
         intervalMs: 60 * 60 * 1000,
       },
       '30d': {
-        interval: '4 hours',
+        interval: '1 hours',
         unit: 'hour',
-        size: 4,
+        size: 1,
         timeframe: '30 days',
-        intervalMs: 4 * 60 * 60 * 1000,
+        intervalMs: 60 * 60 * 1000,
       },
       '90d': {
         interval: '4 hours',
@@ -459,7 +463,10 @@ export class TransactionHistoryService {
         end_time: item.truncated_time,
       }));
     } else {
-      result = this.fillMissingBuckets(sparseData, intervalMs);
+      result = sparseData.map((item) => ({
+        last_price: String(item.last_price),
+        end_time: item.truncated_time,
+      }));
     }
 
     if (token.created_at) {
@@ -491,39 +498,88 @@ export class TransactionHistoryService {
   }
 
   /**
-   * Fills gaps between sparse bucket data by carrying forward the last known
-   * price, producing a continuous series suitable for sparkline rendering.
+   * All-time preview: dynamically computes a bucket size targeting ~50 data
+   * points across the token's full lifespan (min 1-hour buckets), then returns
+   * only buckets that contain actual transactions — no gap-filling.
    */
-  private fillMissingBuckets(
-    sparseData: Array<{ truncated_time: Date; last_price: number }>,
-    intervalMs: number,
-  ): ITransactionPreviewPrice[] {
-    const priceMap = new Map<number, number>();
-    for (const row of sparseData) {
-      priceMap.set(new Date(row.truncated_time).getTime(), row.last_price);
+  private async getForPreviewAllTime(
+    token: Token,
+  ): Promise<ITransactionPreview> {
+    const sparseData: Array<{ truncated_time: Date; last_price: number }> =
+      await this.dataSource.query(
+        `
+        WITH span AS (
+          SELECT
+            GREATEST(
+              EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) / 50,
+              3600
+            ) AS bucket_secs
+          FROM transactions
+          WHERE sale_address = $1
+            AND buy_price->>'ae' != 'NaN'
+        ),
+        bucketed AS (
+          SELECT
+            t.created_at,
+            CAST(t.buy_price->>'ae' AS FLOAT) AS price,
+            to_timestamp(
+              FLOOR(EXTRACT(EPOCH FROM t.created_at) / s.bucket_secs) * s.bucket_secs
+            ) AS bucket
+          FROM transactions t, span s
+          WHERE t.sale_address = $1
+            AND t.buy_price->>'ae' != 'NaN'
+        )
+        SELECT DISTINCT ON (bucket)
+          bucket AS truncated_time,
+          price AS last_price
+        FROM bucketed
+        ORDER BY bucket, created_at DESC
+        `,
+        [token.sale_address],
+      );
+
+    let result: ITransactionPreviewPrice[];
+
+    if (sparseData.length <= 1) {
+      const fallback: Array<{ truncated_time: Date; last_price: number }> =
+        await this.dataSource.query(
+          `
+          SELECT
+            t.created_at AS truncated_time,
+            CAST(t.buy_price->>'ae' AS FLOAT) AS last_price
+          FROM transactions t
+          WHERE t.sale_address = $1
+            AND t.buy_price->>'ae' != 'NaN'
+          ORDER BY t.created_at DESC
+          LIMIT 4
+          `,
+          [token.sale_address],
+        );
+
+      result = fallback.reverse().map((item) => ({
+        last_price: String(item.last_price),
+        end_time: item.truncated_time,
+      }));
+    } else {
+      result = sparseData.map((item) => ({
+        last_price: String(item.last_price),
+        end_time: item.truncated_time,
+      }));
     }
 
-    const firstBucket = new Date(sparseData[0].truncated_time).getTime();
-    const lastBucket = new Date(
-      sparseData[sparseData.length - 1].truncated_time,
-    ).getTime();
-
-    const result: ITransactionPreviewPrice[] = [];
-    let carriedPrice: number | null = null;
-
-    for (let ts = firstBucket; ts <= lastBucket; ts += intervalMs) {
-      const price = priceMap.get(ts);
-      if (price !== undefined) {
-        carriedPrice = price;
-      }
-      if (carriedPrice !== null) {
-        result.push({
-          end_time: new Date(ts),
-          last_price: String(carriedPrice),
-        });
-      }
+    if (token.created_at && result.length > 0) {
+      result.unshift({
+        end_time: token.created_at,
+        last_price: result[0].last_price,
+      });
     }
 
-    return result;
+    return {
+      result,
+      count: result.length,
+      timeframe: 'all time',
+      interval: 'dynamic',
+      token,
+    } as ITransactionPreview;
   }
 }
