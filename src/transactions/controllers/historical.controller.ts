@@ -194,19 +194,37 @@ export class HistoricalController {
       values.length >= 2 && values[values.length - 1] >= values[0]
         ? COLOR_UP
         : COLOR_DOWN;
+    const safeBackground = this.sanitizeSvgFill(background);
 
     const svg = this.buildSparklineSvg(
       values,
       Number(width),
       Number(height),
       stroke,
-      background,
+      safeBackground,
     );
 
     return new StreamableFile(Buffer.from(svg), {
       type: 'image/svg+xml',
       disposition: 'inline; filename="sparkline.svg"',
     });
+  }
+
+  private sanitizeSvgFill(value: string): string {
+    const normalized = value?.trim() || 'none';
+    if (normalized === 'none') {
+      return normalized;
+    }
+
+    if (/^#[0-9a-fA-F]{3,8}$/.test(normalized)) {
+      return normalized;
+    }
+
+    if (/^[a-zA-Z]+$/.test(normalized)) {
+      return normalized;
+    }
+
+    return 'none';
   }
 
   private buildSparklineSvg(
@@ -236,7 +254,9 @@ export class HistoricalController {
     });
 
     const d = points
-      .map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+      .map(
+        ([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`,
+      )
       .join(' ');
 
     const bg =

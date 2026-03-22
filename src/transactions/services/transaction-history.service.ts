@@ -379,43 +379,39 @@ export class TransactionHistoryService {
         unit: 'minute',
         size: 20,
         timeframe: '1 day',
-        intervalMs: 20 * 60 * 1000,
       },
       '7d': {
         interval: '1 hour',
         unit: 'hour',
         size: 1,
         timeframe: '7 days',
-        intervalMs: 60 * 60 * 1000,
       },
       '30d': {
         interval: '1 hours',
         unit: 'hour',
         size: 1,
         timeframe: '30 days',
-        intervalMs: 60 * 60 * 1000,
       },
       '90d': {
         interval: '4 hours',
         unit: 'hour',
         size: 4,
         timeframe: '90 days',
-        intervalMs: 4 * 60 * 60 * 1000,
       },
       '180d': {
         interval: '4 hours',
         unit: 'hour',
         size: 4,
         timeframe: '180 days',
-        intervalMs: 4 * 60 * 60 * 1000,
       },
     };
 
-    const { interval, unit, size, timeframe, intervalMs } = types[intervalType];
+    const { interval, unit, size, timeframe } = types[intervalType];
+    const bucketBase = unit === 'minute' ? 'hour' : 'day';
 
     const bucketExpr =
       size > 1
-        ? `DATE_TRUNC('day', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
+        ? `DATE_TRUNC('${bucketBase}', t.created_at) + INTERVAL '${size} ${unit}' * FLOOR(EXTRACT('${unit}' FROM t.created_at) / ${size})`
         : `DATE_TRUNC('${unit}', t.created_at)`;
 
     // Select the closing (latest) transaction price per bucket via DISTINCT ON
