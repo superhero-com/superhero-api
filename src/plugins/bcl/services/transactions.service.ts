@@ -27,7 +27,15 @@ export class TransactionsService {
   /**
    * Decode transaction events from a Tx entity
    */
-  async decodeTxEvents(token: Token, tx: Tx, retries = 0): Promise<Tx> {
+  async decodeTxEvents(
+    token: Token | null | undefined,
+    tx: Tx,
+    retries = 0,
+  ): Promise<Tx> {
+    if (!token?.factory_address) {
+      return tx;
+    }
+
     try {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
@@ -250,7 +258,13 @@ export class TransactionsService {
   /**
    * Checks if the given token is part of a supported collection.
    */
-  async isTokenSupportedCollection(token: Token): Promise<boolean> {
+  async isTokenSupportedCollection(
+    token: Token | null | undefined,
+  ): Promise<boolean> {
+    if (!token) {
+      return false;
+    }
+
     const factory = await this.communityFactoryService.getCurrentFactory();
 
     if (

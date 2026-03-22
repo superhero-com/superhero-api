@@ -22,6 +22,10 @@ jest.mock('ws', () => {
     ping: jest.fn(),
     readyState: 1, // Simulate an "open" WebSocket
   }));
+  (WebSocketMock as any).OPEN = 1;
+  (WebSocketMock as any).CONNECTING = 0;
+  (WebSocketMock as any).CLOSING = 2;
+  (WebSocketMock as any).CLOSED = 3;
 
   return { WebSocket: WebSocketMock };
 });
@@ -53,6 +57,8 @@ describe('WebSocketService', () => {
   });
 
   afterEach(() => {
+    clearInterval(service.reconnectInterval);
+    service.disconnect();
     jest.clearAllMocks();
   });
 
@@ -65,14 +71,14 @@ describe('WebSocketService', () => {
     expect(mockWsClient.on).toHaveBeenCalledWith('open', expect.any(Function));
   });
 
-  it('should handle WebSocket open event and send queued subscriptions', () => {
+  it('should handle WebSocket open event and send queued subscriptions', async () => {
     service.isWsConnected = false;
     service.subscribersQueue.push({
       op: 'Subscribe',
       payload: 'test',
     } as IMiddlewareWebSocketSubscriptionMessage);
 
-    service.handleWebsocketOpen();
+    await service.handleWebsocketOpen();
 
     expect(service.isWsConnected).toBe(true);
     expect(mockWsClient.send).toHaveBeenCalledWith(

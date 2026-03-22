@@ -7,12 +7,14 @@ import { TransactionsModule } from '@/transactions/transactions.module';
 import { TipsController } from './controllers/tips.controller';
 import { AccountModule } from '@/account/account.module';
 import { PostModule } from '@/social/post.module';
+import { TokensModule } from '@/tokens/tokens.module';
 
 @Module({
   imports: [
     AeModule,
     AccountModule,
     PostModule,
+    TokensModule,
     TransactionsModule,
     TypeOrmModule.forFeature([Tip]),
   ],

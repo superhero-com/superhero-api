@@ -5,12 +5,24 @@ import { TransactionValidationService } from './transaction-validation.service';
 describe('TransactionValidationService', () => {
   let service: TransactionValidationService;
   let createQueryBuilder: jest.Mock;
+  let tokenRepository: { exist: jest.Mock };
+  let communityFactoryService: { getCurrentFactory: jest.Mock };
 
   beforeEach(() => {
     createQueryBuilder = jest.fn();
-    service = new TransactionValidationService({
-      createQueryBuilder,
-    } as any);
+    tokenRepository = {
+      exist: jest.fn(),
+    };
+    communityFactoryService = {
+      getCurrentFactory: jest.fn(),
+    };
+    service = new TransactionValidationService(
+      {
+        createQueryBuilder,
+      } as any,
+      tokenRepository as any,
+      communityFactoryService as any,
+    );
   });
 
   it('allows reprocessing previously broken buy transactions', async () => {
@@ -30,6 +42,7 @@ describe('TransactionValidationService', () => {
       where: jest.fn().mockReturnThis(),
       getOne,
     });
+    tokenRepository.exist.mockResolvedValueOnce(true);
 
     await expect(
       service.validateTransaction({
@@ -41,6 +54,9 @@ describe('TransactionValidationService', () => {
     ).resolves.toEqual({
       isValid: true,
       saleAddress: 'ct_sale',
+    });
+    expect(tokenRepository.exist).toHaveBeenCalledWith({
+      where: { sale_address: 'ct_sale' },
     });
   });
 
@@ -73,6 +89,7 @@ describe('TransactionValidationService', () => {
       isValid: false,
       saleAddress: null,
     });
+    expect(tokenRepository.exist).not.toHaveBeenCalled();
   });
 
   it('skips transactions whose return type is not ok', async () => {
@@ -106,5 +123,6 @@ describe('TransactionValidationService', () => {
       isValid: false,
       saleAddress: null,
     });
+    expect(tokenRepository.exist).not.toHaveBeenCalled();
   });
 });

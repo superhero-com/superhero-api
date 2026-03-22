@@ -236,7 +236,12 @@ export class PostPersistenceService {
   createPostData(
     tx: Tx,
     contract: IPostContract,
-    parsedContent: { content: string; topics: string[]; media: string[] },
+    parsedContent: {
+      content: string;
+      topics: string[];
+      media: string[];
+      trendMentions: string[];
+    },
     topics: Topic[],
     postTypeInfo: IPostTypeInfo,
   ): ICreatePostData {
@@ -251,6 +256,7 @@ export class PostPersistenceService {
       sender_address: tx.caller_id || tx.raw?.callerId || '',
       contract_address: tx.contract_id || tx.raw?.contractId || '',
       content: parsedContent.content,
+      token_mentions: parsedContent.trendMentions,
       topics: topics,
       media: parsedContent.media,
       total_comments: 0,

@@ -50,6 +50,11 @@ export class Post {
   @Column()
   content: string;
 
+  @Column('jsonb', {
+    default: () => "'[]'",
+  })
+  token_mentions: string[];
+
   @ManyToMany(() => Topic, (topic) => topic.posts, {
     cascade: true,
     eager: false,

@@ -296,19 +296,46 @@ docker compose logs -f
 docker compose up --build
 ```
 
+### 🐳 Second testnet stack (isolated DB & Redis)
+
+To run another testnet instance in Docker with its own database and Redis (e.g. for a separate test environment):
+
+```bash
+# Optional: set env for DB credentials and ports (defaults: user testnet, DB api_testnet2, API port 3001, Postgres 5437, Redis 6380)
+export TESTNET_DB_USER=testnet
+export TESTNET_DB_PASSWORD=testnet
+export TESTNET_DB_DATABASE=api_testnet2
+export TESTNET_APP_PORT=3001
+export TESTNET_DB_PORT=5437
+export TESTNET_REDIS_PORT=6380
+
+# Start the second testnet stack
+docker compose -f docker-compose-testnet.yml up -d
+
+# API: http://localhost:3001 (or TESTNET_APP_PORT)
+# Stop: docker compose -f docker-compose-testnet.yml down
+```
+
+The stack uses `AE_NETWORK_ID=ae_uat`, separate volumes (`postgres_testnet2_data`, `redis_testnet2_data`), and container names `superhero-api-testnet2`, `superhero-api-testnet2-db`, `superhero-api-testnet2-redis` so it does not conflict with the default compose or another testnet deploy.
+
+**If you run the app on the host** (`npm run start:prod`) it uses your `.env` (e.g. `DB_HOST=127.0.0.1`, `DB_PORT=5436`). That points at your local/dev DB and Redis, not the testnet containers—so you get `ECONNREFUSED` if nothing is listening on those ports. Either use the API in Docker at http://localhost:3001, or run the app on the host against the testnet DB/Redis by copying `.env.testnet.example` to `.env` (it uses `DB_PORT=5437`, `REDIS_PORT=6380` and user `testnet`/DB `api_testnet2` to match the testnet stack).
+
 ### 🗄️ Database Management
 
 The database automatically syncs schema changes in development (`DB_SYNC=true`). For production, you should manage database migrations manually.
+
+For the X invite and verification reward schema added in this codebase, apply `docs/profile-x-invites-manual-migration.sql` before deploying with `DB_SYNC=false`.
 
 ## 🚀 Production Deployment
 
 For production deployment:
 
 1. Set appropriate environment variables
-2. Disable `DB_SYNC`
-3. Use proper secrets management
-4. Configure proper network settings
-5. Enable SSL/TLS
+2. Apply the required manual SQL migration files
+3. Disable `DB_SYNC`
+4. Use proper secrets management
+5. Configure proper network settings
+6. Enable SSL/TLS
 
 ## 🤝 Contributing
 

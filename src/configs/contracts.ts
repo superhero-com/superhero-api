@@ -41,10 +41,10 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
     bctsl_aex9_address: 'ct_2cyV58CrBwi2k4kvP3mN517C1NH21zfxxYmaAyb41GXdXSsRvN',
     deployed_at_block_height: 1097291,
     affiliation_address:
-      'ct_2GG42rs2FDPTXuUCWHMn98bu5Ab6mgNxY7KdGAKUNsrLqutNxZ',
+      'ct_2QmAcPxY4TBbFmkSUhxU4UTwoRot8SMmZzaAKL6oyHmQqRL1rK',
     collections: {
-      'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
-        id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
+      'WORDS-ak_BrJErWKWYUNqGcXzDniXf13saPV6H1dsh1NaDsm913vbPGAH6': {
+        id: 'WORDS-ak_BrJErWKWYUNqGcXzDniXf13saPV6H1dsh1NaDsm913vbPGAH6',
         name: 'WORDS',
         allowed_name_length: '20',
         allowed_name_chars: [
@@ -60,17 +60,6 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
         ],
         description: 'Tokenize a unique name with up to 20.',
       },
-      // 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi': {
-      //   id: 'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi',
-      //   name: 'WORDS',
-      //   allowed_name_length: '20',
-      //   allowed_name_chars: [
-      //     {
-      //       CharRangeFromTo: [19968, 40959],
-      //     },
-      //   ],
-      //   description: 'Tokenize a unique name with up to 20.',
-      // },
     },
   },
 };

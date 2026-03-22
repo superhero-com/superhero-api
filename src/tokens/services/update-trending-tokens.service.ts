@@ -1,17 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 
 import { Token } from '../entities/token.entity';
 import { TokensService } from '../tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import moment from 'moment';
-import { CronExpression } from '@nestjs/schedule';
 import { Cron } from '@nestjs/schedule';
 import {
   TRENDING_SCORE_CONFIG,
   UPDATE_TRENDING_TOKENS_ENABLED,
 } from '@/configs';
+import { buildNormalizedTokenMentionSelectSql } from '@/social/utils/token-mentions-sql.util';
 
 @Injectable()
 export class UpdateTrendingTokensService {
@@ -28,106 +28,220 @@ export class UpdateTrendingTokensService {
     //
   }
 
-  onModuleInit() {
-    this.fixAllNanTrendingTokens();
-    this.updateTrendingTokens();
-    this.fixOldTrendingTokens();
+  async onModuleInit() {
+    await this.runStartupTaskSafely(
+      'fix NaN trending scores',
+      this.fixAllNanTrendingTokens.bind(this),
+    );
+    await this.runStartupTaskSafely(
+      'refresh active trending tokens',
+      this.updateTrendingTokens.bind(this),
+    );
+    await this.runStartupTaskSafely(
+      'backfill stale trending tokens',
+      this.fixOldTrendingTokens.bind(this),
+    );
+  }
+
+  private async runStartupTaskSafely(
+    taskName: string,
+    task: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await task();
+    } catch (error) {
+      this.logger.error(
+        `Failed to ${taskName} during startup`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   isUpdatingTrendingTokens = false;
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Cron(TRENDING_SCORE_CONFIG.REFRESH_CRON)
   async updateTrendingTokens() {
     if (this.isUpdatingTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
       return;
     }
     this.isUpdatingTrendingTokens = true;
-    // query only tokens that has some transactions in the last 48 hours
-    const latestUniqueTransactions = await this.transactionsRepository
-      .createQueryBuilder('transaction')
-      .select('DISTINCT transaction.sale_address', 'sale_address')
-      .where('transaction.created_at > :date', {
-        date: moment()
-          .subtract(TRENDING_SCORE_CONFIG.TIME_WINDOW_HOURS, 'hours')
-          .toDate(),
-      })
-      .getRawMany();
+    try {
+      const recentSince = moment()
+        .subtract(TRENDING_SCORE_CONFIG.ACTIVITY_LOOKBACK_MINUTES, 'minutes')
+        .toDate();
+      const recentSinceDate = moment(recentSince).format('YYYY-MM-DD');
 
-    // Extract sale_addresses from the result
-    const uniqueSaleAddresses = latestUniqueTransactions.map(
-      (row) => row.sale_address,
-    );
+      const [
+        latestUniqueTransactions,
+        recentPostSymbols,
+        recentTipSymbols,
+        recentReadSymbols,
+      ] = await Promise.all([
+        this.transactionsRepository
+          .createQueryBuilder('transaction')
+          .select('DISTINCT transaction.sale_address', 'sale_address')
+          .where('transaction.created_at > :date', {
+            date: recentSince,
+          })
+          .getRawMany<{ sale_address: string }>(),
+        this.tokensRepository.query(
+          `
+            SELECT DISTINCT symbol
+            FROM (
+              SELECT mention.symbol
+              FROM posts post
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
+              WHERE post.is_hidden = false
+                AND post.created_at >= $1
+              UNION
+              SELECT mention.symbol
+              FROM posts post
+              INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
+              WHERE post.is_hidden = false
+                AND post.created_at >= $1
+            ) symbols
+          `,
+          [recentSince],
+        ),
+        this.tokensRepository.query(
+          `
+            SELECT DISTINCT symbol
+            FROM (
+              SELECT mention.symbol
+              FROM tips tip
+              INNER JOIN posts post ON post.id = tip.post_id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
+              WHERE tip.created_at >= $1
+              UNION
+              SELECT mention.symbol
+              FROM tips tip
+              INNER JOIN posts post ON post.id = tip.post_id
+              INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
+              WHERE tip.created_at >= $1
+            ) symbols
+          `,
+          [recentSince],
+        ),
+        this.tokensRepository.query(
+          `
+            SELECT DISTINCT symbol
+            FROM (
+              SELECT mention.symbol
+              FROM post_reads_daily reads
+              INNER JOIN posts post ON post.id = reads.post_id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('post')}
+              ) mention
+              WHERE reads.date >= $1::date
+              UNION
+              SELECT mention.symbol
+              FROM post_reads_daily reads
+              INNER JOIN posts post ON post.id = reads.post_id
+              INNER JOIN posts parent ON post.post_id = parent.id
+              CROSS JOIN LATERAL (
+                ${buildNormalizedTokenMentionSelectSql('parent')}
+              ) mention
+              WHERE reads.date >= $1::date
+            ) symbols
+          `,
+          [recentSinceDate],
+        ),
+      ]);
 
-    const tokens = await this.tokensRepository.find({
-      where: {
-        unlisted: false,
-        sale_address: In(uniqueSaleAddresses),
-      },
-      order: {
-        market_cap: 'DESC',
-      },
-      take: 1000,
-    });
+      const uniqueSaleAddresses = new Set<string>(
+        latestUniqueTransactions.map((row) => row.sale_address),
+      );
+      const activeSymbols = [
+        ...new Set(
+          [...recentPostSymbols, ...recentTipSymbols, ...recentReadSymbols]
+            .map((row: { symbol: string }) => (row.symbol || '').toUpperCase())
+            .filter(Boolean),
+        ),
+      ];
 
-    for (const token of tokens) {
-      try {
-        await this.tokensService.updateTokenTrendingScore(token);
-      } catch (error: any) {
-        this.logger.error(
-          `Failed to update trending score for token ${token.sale_address}`,
-          error,
-          error.stack,
+      if (activeSymbols.length) {
+        const symbolTokens = await this.tokensRepository
+          .createQueryBuilder('token')
+          .select('token.sale_address', 'sale_address')
+          .where('token.unlisted = false')
+          .andWhere('UPPER(token.symbol) IN (:...symbols)', {
+            symbols: activeSymbols,
+          })
+          .getRawMany<{ sale_address: string }>();
+
+        symbolTokens.forEach((row) =>
+          uniqueSaleAddresses.add(row.sale_address),
         );
       }
+
+      if (!uniqueSaleAddresses.size) {
+        return;
+      }
+
+      const tokens = await this.tokensRepository
+        .createQueryBuilder('token')
+        .where('token.unlisted = false')
+        .andWhere('token.sale_address IN (:...saleAddresses)', {
+          saleAddresses: [...uniqueSaleAddresses],
+        })
+        .orderBy('token.trending_score_update_at', 'ASC', 'NULLS FIRST')
+        .addOrderBy('token.created_at', 'DESC')
+        .limit(TRENDING_SCORE_CONFIG.MAX_ACTIVE_BATCH)
+        .getMany();
+
+      await this.tokensService.updateMultipleTokensTrendingScores(tokens);
+    } finally {
+      this.isUpdatingTrendingTokens = false;
     }
-    this.isUpdatingTrendingTokens = false;
   }
 
   isFixingOldTrendingTokens = false;
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  @Cron(TRENDING_SCORE_CONFIG.REFRESH_CRON)
   async fixOldTrendingTokens() {
     if (this.isFixingOldTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
       return;
     }
     this.isFixingOldTrendingTokens = true;
-    const tokens = await this.tokensRepository.find({
-      where: {
-        trending_score_update_at: LessThan(
-          moment()
-            .subtract(TRENDING_SCORE_CONFIG.TIME_WINDOW_HOURS, 'hours')
-            .toDate(),
-        ),
-      },
-      order: {
-        trending_score_update_at: 'ASC',
-      },
-      take: 100,
-    });
+    try {
+      const staleBefore = moment()
+        .subtract(TRENDING_SCORE_CONFIG.STALE_AFTER_MINUTES, 'minutes')
+        .toDate();
+      const tokens = await this.tokensRepository
+        .createQueryBuilder('token')
+        .where('token.unlisted = false')
+        .andWhere(
+          new Brackets((queryBuilder) => {
+            queryBuilder
+              .where('token.trending_score_update_at IS NULL')
+              .orWhere('token.trending_score_update_at < :staleBefore', {
+                staleBefore,
+              });
+          }),
+        )
+        .orderBy('token.trending_score_update_at', 'ASC', 'NULLS FIRST')
+        .limit(TRENDING_SCORE_CONFIG.MAX_STALE_BATCH)
+        .getMany();
 
-    for (const token of tokens) {
-      try {
-        await this.tokensService.updateTokenTrendingScore(token);
-      } catch (error: any) {
-        this.logger.error(
-          `Failed to update trending score for token ${token.sale_address}`,
-          error,
-          error.stack,
-        );
-      }
+      await this.tokensService.updateMultipleTokensTrendingScores(tokens);
+    } finally {
+      this.isFixingOldTrendingTokens = false;
     }
-    this.isFixingOldTrendingTokens = false;
   }
 
   async fixAllNanTrendingTokens() {
-    const tokens = await this.tokensRepository.find({
-      where: {
-        trending_score: 'Nan' as any,
-      },
-    });
-
-    for (const token of tokens) {
-      this.tokensRepository.update(token.sale_address, {
-        trending_score: 0,
-      });
-    }
+    await this.tokensRepository.query(`
+      UPDATE token
+      SET trending_score = 0
+      WHERE trending_score::text = 'NaN'
+    `);
   }
 }

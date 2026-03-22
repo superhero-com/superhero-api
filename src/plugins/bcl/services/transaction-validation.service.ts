@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+import { Token } from '@/tokens/entities/token.entity';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { BCL_FUNCTIONS } from '@/configs';
 
 @Injectable()
@@ -12,6 +14,9 @@ export class TransactionValidationService {
   constructor(
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
+    @InjectRepository(Token)
+    private tokenRepository: Repository<Token>,
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {}
 
   /**
@@ -21,12 +26,19 @@ export class TransactionValidationService {
    */
   determineSaleAddress(tx: Tx): string | null {
     if (tx.function === BCL_FUNCTIONS.create_community) {
-      if (!tx.raw?.return?.value?.length) {
+      if (!tx.raw?.return?.value?.length || tx.raw.return.value.length < 2) {
         return null;
       }
-      return tx.raw.return.value[1].value;
+      return tx.raw.return.value[1]?.value || null;
     }
-    return tx.contract_id || null;
+    if (tx.contract_id?.startsWith('ct_')) {
+      return tx.contract_id;
+    }
+    const firstArgValue = tx.raw?.arguments?.[0]?.value;
+    if (typeof firstArgValue === 'string' && firstArgValue.startsWith('ct_')) {
+      return firstArgValue;
+    }
+    return null;
   }
 
   private hasSuccessfulReturn(tx: Tx): boolean {
@@ -114,7 +126,25 @@ export class TransactionValidationService {
 
     // Determine sale address
     const saleAddress = this.determineSaleAddress(tx);
-    if (!saleAddress) {
+    if (!saleAddress || !saleAddress.startsWith('ct_')) {
+      return { isValid: false, saleAddress: null };
+    }
+
+    // create_community must come from current factory contract
+    if (tx.function === BCL_FUNCTIONS.create_community) {
+      const currentFactory = await this.communityFactoryService.getCurrentFactory();
+      if (tx.contract_id !== currentFactory.address) {
+        return { isValid: false, saleAddress: null };
+      }
+      return { isValid: true, saleAddress };
+    }
+
+    // buy/sell must target an already known sale address
+    // (prevents processing unrelated contracts that happen to expose same methods)
+    const knownToken = await this.tokenRepository.exist({
+      where: { sale_address: saleAddress },
+    });
+    if (!knownToken) {
       return { isValid: false, saleAddress: null };
     }
 

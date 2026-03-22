@@ -3,6 +3,8 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PostService } from './post.service';
 import { Post } from '../entities/post.entity';
+import { Topic } from '../entities/topic.entity';
+import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Logger } from '@nestjs/common';
 
@@ -24,12 +26,24 @@ describe('PostService', () => {
       transaction: jest.fn(),
     },
   };
+  const mockTopicRepository = {
+    findOne: jest.fn(),
+    create: jest.fn(),
+    save: jest.fn(),
+    update: jest.fn(),
+  };
+  const mockTokensService = {
+    updateTrendingScoresForSymbols: jest.fn(),
+  };
 
   const createMockTransaction = (
     overrides: Partial<ITransaction> = {},
   ): ITransaction => ({
     blockHeight: 123456,
+    blockHash: 'bx_testBlockHash123' as any,
     claim: null,
+    signatures: [],
+    encodedTx: 'tx_encoded_payload',
     hash: 'th_testHash123',
     microIndex: 1,
     microTime: Date.now(),
@@ -58,6 +72,8 @@ describe('PostService', () => {
       returnType: 'ok',
       type: 'ContractCallTx' as const,
       VSN: '1',
+      function: 'create_community' as any,
+      log: [],
     },
     ...overrides,
   });
@@ -69,6 +85,14 @@ describe('PostService', () => {
         {
           provide: getRepositoryToken(Post),
           useValue: mockRepository,
+        },
+        {
+          provide: getRepositoryToken(Topic),
+          useValue: mockTopicRepository,
+        },
+        {
+          provide: TokensService,
+          useValue: mockTokensService,
         },
       ],
     }).compile();
@@ -231,6 +255,7 @@ describe('PostService', () => {
 
     it('should return existing post if already exists', async () => {
       jest.spyOn(service as any, 'validateTransaction').mockReturnValue(true);
+      jest.spyOn(service as any, 'detectPostType').mockReturnValue({});
 
       const existingPost = { id: 'existing-post', tx_hash: 'th_testHash' };
       repository.findOne.mockResolvedValue(existingPost as Post);
@@ -253,6 +278,7 @@ describe('PostService', () => {
 
     it('should create new post for valid transaction', async () => {
       jest.spyOn(service as any, 'validateTransaction').mockReturnValue(true);
+      jest.spyOn(service as any, 'detectPostType').mockReturnValue({});
       jest
         .spyOn(service as any, 'generatePostId')
         .mockReturnValue('new-post-id');
@@ -261,16 +287,26 @@ describe('PostService', () => {
       const { parsePostContent } = require('../utils/content-parser.util');
       parsePostContent.mockReturnValue({
         content: 'parsed content',
-        topics: ['#test'],
+        topics: [],
         media: [],
+        trendMentions: [],
       });
 
       repository.findOne.mockResolvedValue(null);
 
       const newPost = { id: 'new-post-id', tx_hash: 'th_testHash' };
+      const mockQueryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+      };
       const mockManager = {
         create: jest.fn().mockReturnValue(newPost),
         save: jest.fn().mockResolvedValue(newPost),
+        getRepository: jest.fn().mockReturnValue({
+          createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
+          update: jest.fn().mockResolvedValue(undefined),
+        }),
       };
       (repository.manager.transaction as jest.Mock).mockImplementation(
         (callback) => callback(mockManager),

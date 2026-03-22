@@ -1,15 +1,16 @@
 import { Controller, Post, Body, Param, Get, Render } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CreateAffiliationDto } from '../dto/create-affiliation.dto';
 import { Affiliation } from '../entities/affiliation.entity';
 import { AffiliationCode } from '../entities/affiliation-code.entity';
 import { OAuthService } from '../services/oauth.service';
-
-class CreateAffiliationDto {
-  sender_address: string;
-  codes: string[];
-}
 
 @Controller('affiliations')
 @ApiTags('Affiliations')

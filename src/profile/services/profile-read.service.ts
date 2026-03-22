@@ -54,9 +54,7 @@ export class ProfileReadService {
       : null;
     const profile = this.mergeProfile(cache, onChainProfile, account);
 
-    const publicName = onChainProfile
-      ? this.resolvePublicName(profile)
-      : (cache?.public_name ?? this.resolvePublicName(profile));
+    const publicName = this.resolvePublicName(profile, address);
     if (onChainProfile) {
       await this.saveProfileCacheSnapshot(address, profile, publicName);
     }
@@ -74,14 +72,14 @@ export class ProfileReadService {
       return {
         address,
         profile: null,
-        public_name: null,
+        public_name: address,
       };
     }
 
     return {
       address,
       profile: onChainProfile,
-      public_name: this.resolvePublicName(onChainProfile),
+      public_name: this.resolvePublicName(onChainProfile, address),
     };
   }
 
@@ -149,7 +147,6 @@ export class ProfileReadService {
           username: string | null;
           x_username: string | null;
           chain_name: string | null;
-          display_source: string;
           chain_expires_at: string | null;
         };
         public_name: string;
@@ -192,7 +189,7 @@ export class ProfileReadService {
       return {
         address: cache.address,
         profile: merged,
-        public_name: cache.public_name ?? this.resolvePublicName(merged),
+        public_name: this.resolvePublicName(merged, cache.address),
       };
     });
 
@@ -240,9 +237,7 @@ export class ProfileReadService {
     return {
       address,
       profile,
-      public_name: onChainProfile
-        ? this.resolvePublicName(profile)
-        : (cache?.public_name ?? this.resolvePublicName(profile)),
+      public_name: this.resolvePublicName(profile, address),
     };
   }
 
@@ -251,9 +246,6 @@ export class ProfileReadService {
     onChain: OnChainProfile | null,
     account: Account | null,
   ) {
-    const normalizedDisplaySource = this.normalizeDisplaySource(
-      onChain?.display_source ?? cache?.display_source ?? null,
-    );
     return {
       fullname: onChain?.fullname ?? cache?.fullname ?? '',
       bio: onChain?.bio ?? cache?.bio ?? '',
@@ -262,24 +254,23 @@ export class ProfileReadService {
       x_username: onChain?.x_username ?? cache?.x_username ?? null,
       chain_name:
         onChain?.chain_name ?? cache?.chain_name ?? account?.chain_name ?? null,
-      display_source: normalizedDisplaySource || 'custom',
       chain_expires_at:
         onChain?.chain_expires_at ?? cache?.chain_expires_at ?? null,
     };
   }
 
-  private resolvePublicName(profile: {
-    username?: string | null;
-    x_username?: string | null;
-    chain_name?: string | null;
-    display_source?: string | null;
-  }): string {
-    // Business rule: only custom and chain names are user-selectable.
-    // If chain name exists, it must be the public name.
+  private resolvePublicName(
+    profile: {
+      username?: string | null;
+      x_username?: string | null;
+      chain_name?: string | null;
+    },
+    address: string,
+  ): string {
     if (profile.chain_name) {
       return profile.chain_name;
     }
-    return profile.username || '';
+    return profile.username || address;
   }
 
   private isCacheEffectivelyEmpty(cache: ProfileCache): boolean {
@@ -291,23 +282,6 @@ export class ProfileReadService {
       !cache.x_username &&
       !cache.chain_name
     );
-  }
-
-  private normalizeDisplaySource(
-    value: string | null | undefined,
-  ): string | null {
-    if (!value) {
-      return null;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (
-      normalized === 'custom' ||
-      normalized === 'chain' ||
-      normalized === 'x'
-    ) {
-      return normalized;
-    }
-    return null;
   }
 
   private async buildFeedFromOnChainFallback(
@@ -343,7 +317,6 @@ export class ProfileReadService {
           username: string | null;
           x_username: string | null;
           chain_name: string | null;
-          display_source: string;
           chain_expires_at: string | null;
         };
         public_name: string;
@@ -386,7 +359,7 @@ export class ProfileReadService {
         }
 
         const merged = this.mergeProfile(null, onChain, account);
-        const publicName = this.resolvePublicName(merged);
+        const publicName = this.resolvePublicName(merged, address);
         collectedCount += 1;
         itemsWithIndex.push({
           index: candidateIndex,
@@ -415,7 +388,6 @@ export class ProfileReadService {
         username: string | null;
         x_username: string | null;
         chain_name: string | null;
-        display_source: string;
         chain_expires_at: string | null;
       };
       public_name: string;
@@ -584,7 +556,6 @@ export class ProfileReadService {
       username: string | null;
       x_username: string | null;
       chain_name: string | null;
-      display_source: string;
       chain_expires_at: string | null;
     },
     publicName: string,
@@ -597,7 +568,6 @@ export class ProfileReadService {
       username: merged.username,
       x_username: merged.x_username,
       chain_name: merged.chain_name,
-      display_source: merged.display_source,
       chain_expires_at: merged.chain_expires_at,
       public_name: publicName,
       last_seen_micro_time: null,
@@ -613,7 +583,6 @@ export class ProfileReadService {
       username: string | null;
       x_username: string | null;
       chain_name: string | null;
-      display_source: string;
       chain_expires_at: string | null;
     },
     publicName: string,

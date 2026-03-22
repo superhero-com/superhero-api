@@ -73,7 +73,8 @@ export class TransactionProcessorService {
           );
         }
 
-        // Get or create token within transaction
+        // Resolve token first. For buy/sell this may lazily create token by sale
+        // address via TokensService.getToken().
         try {
           transactionToken = await this.tokenService.getToken(saleAddress);
         } catch (error) {
@@ -81,13 +82,22 @@ export class TransactionProcessorService {
         }
 
         if (!transactionToken) {
-          transactionToken =
-            await this.tokenService.createTokenFromRawTransaction(
-              rawTransaction,
-              manager,
+          if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
+            this.logger.warn(
+              `Skipping ${rawTransaction.function} tx ${rawTransaction.hash}: token unavailable for ${saleAddress}`,
             );
+            return null;
+          }
+
+          transactionToken = await this.tokenService.createTokenFromRawTransaction(
+            rawTransaction,
+            manager,
+          );
           if (!transactionToken) {
-            throw new Error('Failed to create token');
+            this.logger.warn(
+              `Skipping create_community tx ${rawTransaction.hash}: failed to create token for ${saleAddress}`,
+            );
+            return null;
           }
         }
 
@@ -127,6 +137,12 @@ export class TransactionProcessorService {
             false,
             manager,
           );
+          if (!transactionToken) {
+            this.logger.warn(
+              `Skipping create_community tx ${rawTransaction.hash}: token disappeared after metadata update for ${saleAddress}`,
+            );
+            return null;
+          }
         }
 
         // Calculate prices
@@ -151,7 +167,7 @@ export class TransactionProcessorService {
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
         if (syncDirection === SyncDirectionEnum.Live) {
-          transactionToken = await this.tokenService.update(
+          const updatedToken = await this.tokenService.update(
             transactionToken,
             {
               last_tx_hash: decodedTx.hash,
@@ -159,6 +175,13 @@ export class TransactionProcessorService {
             },
             manager,
           );
+          if (updatedToken) {
+            transactionToken = updatedToken;
+          } else {
+            this.logger.warn(
+              `Token update returned null for ${saleAddress}; continuing with in-memory token`,
+            );
+          }
         }
 
         // Check if token is supported collection
