@@ -7,6 +7,12 @@ export class TrendPerformanceSummaryDto {
 
   @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
   past_7d: PerformancePeriodDto | null;
+
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  past_30d: PerformancePeriodDto | null;
+
+  @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
+  all_time: PerformancePeriodDto | null;
 }
 
 export class PostTrendMentionDto {
