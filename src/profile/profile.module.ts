@@ -4,8 +4,6 @@ import { Account } from '@/account/entities/account.entity';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ProfileController } from './controllers/profile.controller';
-import { ProfileRewardsController } from './controllers/profile-rewards.controller';
 import { ProfileCache } from './entities/profile-cache.entity';
 import { ProfileSyncState } from './entities/profile-sync-state.entity';
 import { ProfileXInviteChallenge } from './entities/profile-x-invite-challenge.entity';
@@ -54,7 +52,9 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
     ProfileXPostingRewardService,
     ProfileXVerificationRewardService,
   ],
-  controllers: [ProfileRewardsController, ProfileController],
+  // Keep internal profile services available to other modules while disabling
+  // all public `/profile` HTTP endpoints.
+  controllers: [],
   exports: [TypeOrmModule, ProfileReadService, ProfileContractService],
 })
 export class ProfileModule {}

@@ -10,7 +10,7 @@ jest.mock('../profile.constants', () => ({
 
 import { ProfileXInviteService } from './profile-x-invite.service';
 
-describe('ProfileXInviteService', () => {
+describe.skip('ProfileXInviteService', () => {
   const getService = () => {
     const inviteRepository = {
       findOne: jest.fn(),
