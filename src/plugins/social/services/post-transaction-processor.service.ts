@@ -88,16 +88,16 @@ export class PostTransactionProcessorService {
               ...existingPost,
               post_id: postTypeInfo.parentPostId,
             } as Post,
-          loadParentPost: (postId) =>
-            this.postRepository.findOne({
-              where: { id: postId },
-            }),
-          updateTrendingScoresForSymbols: (symbols) =>
-            this.tokensService.updateTrendingScoresForSymbols(symbols),
-          logError: (message, trace) => this.logger.error(message, trace),
-          errorMessage:
-            'Failed to refresh trending scores after processing post transaction',
-        });
+            loadParentPost: (postId) =>
+              this.postRepository.findOne({
+                where: { id: postId },
+              }),
+            updateTrendingScoresForSymbols: (symbols) =>
+              this.tokensService.updateTrendingScoresForSymbols(symbols),
+            logError: (message, trace) => this.logger.error(message, trace),
+            errorMessage:
+              'Failed to refresh trending scores after processing post transaction',
+          });
           return {
             post: existingPost,
             success: true,
