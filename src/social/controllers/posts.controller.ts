@@ -112,12 +112,7 @@ export class PostsController {
         return {
           name,
           sale_address: token?.sale_address ?? null,
-          performance: token?.performance
-            ? {
-                past_24h: token.performance.past_24h ?? null,
-                past_7d: token.performance.past_7d ?? null,
-              }
-            : null,
+          performance: token?.performance ?? null,
         };
       });
     }
