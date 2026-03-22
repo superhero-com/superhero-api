@@ -34,9 +34,6 @@ export class ProfileCache {
   @Column({ nullable: true })
   public_name: string;
 
-  @Column({ nullable: true })
-  display_source: string;
-
   @Column({ nullable: true, type: 'bigint' })
   chain_expires_at: string;
 
