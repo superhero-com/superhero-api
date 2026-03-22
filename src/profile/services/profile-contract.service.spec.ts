@@ -1,15 +1,27 @@
 import fs from 'fs';
 import path from 'path';
+import { Contract } from '@aeternity/aepp-sdk';
 import { ProfileContractService } from './profile-contract.service';
+
+jest.mock('@aeternity/aepp-sdk', () => {
+  const actual = jest.requireActual('@aeternity/aepp-sdk');
+  return {
+    ...actual,
+    Contract: {
+      ...actual.Contract,
+      initialize: jest.fn(),
+    },
+  };
+});
 
 describe('ProfileContractService', () => {
   const setup = () => {
-    const initializeContract = jest.fn().mockResolvedValue({
+    const initializeContract = (Contract.initialize as jest.Mock).mockResolvedValue({
       get_profile: jest.fn().mockResolvedValue({ decodedResult: null }),
-    });
+    } as any);
     const aeSdkService = {
       sdk: {
-        initializeContract,
+        getContext: jest.fn().mockReturnValue({ onCompiler: {}, onNode: {} }),
       },
     } as any;
 
@@ -19,6 +31,7 @@ describe('ProfileContractService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    jest.clearAllMocks();
   });
 
   it('loads ACI from default relative path when available', async () => {

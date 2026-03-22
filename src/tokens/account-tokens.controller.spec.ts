@@ -2,11 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AccountTokensController } from './account-tokens.controller';
 import { Repository } from 'typeorm';
 import { TokenHolder } from './entities/token-holders.entity';
+import { Token } from './entities/token.entity';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { paginate, Pagination } from 'nestjs-typeorm-paginate';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Reflector } from '@nestjs/core';
+import { TokensService } from './tokens.service';
 
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn(),
@@ -16,13 +18,23 @@ describe('AccountTokensController', () => {
   let controller: AccountTokensController;
   let tokenHolderRepository: Repository<TokenHolder>;
   let communityFactoryService: CommunityFactoryService;
+  let tokensService: jest.Mocked<TokensService>;
 
   beforeEach(async () => {
+    tokensService = {
+      getTokenRanksByAex9Address: jest.fn().mockResolvedValue(new Map()),
+      getTokensByAex9Address: jest.fn().mockResolvedValue([]),
+    } as any;
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AccountTokensController],
       providers: [
         {
           provide: getRepositoryToken(TokenHolder),
+          useClass: Repository,
+        },
+        {
+          provide: getRepositoryToken(Token),
           useClass: Repository,
         },
         {
@@ -40,6 +52,10 @@ describe('AccountTokensController', () => {
             set: jest.fn(),
           },
         },
+        {
+          provide: TokensService,
+          useValue: tokensService,
+        },
         Reflector,
       ],
     }).compile();
@@ -51,6 +67,7 @@ describe('AccountTokensController', () => {
     communityFactoryService = module.get<CommunityFactoryService>(
       CommunityFactoryService,
     );
+    tokensService = module.get(TokensService);
   });
 
   it('should be defined', () => {
@@ -60,7 +77,12 @@ describe('AccountTokensController', () => {
   describe('listAccountTokens', () => {
     it('should return paginated token holders', async () => {
       const mockPagination: Pagination<TokenHolder> = {
-        items: [{ address: 'test_address' } as TokenHolder],
+        items: [
+          {
+            address: 'test_address',
+            aex9_address: 'ct_token_1',
+          } as TokenHolder,
+        ],
         meta: {
           totalItems: 1,
           itemCount: 1,
@@ -76,11 +98,29 @@ describe('AccountTokensController', () => {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         leftJoinAndSelect: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([mockPagination.items, 1]),
       } as any);
+      tokensService.getTokenRanksByAex9Address.mockResolvedValue(
+        new Map([['ct_token_1', 7]]),
+      );
+      tokensService.getTokensByAex9Address.mockResolvedValue([
+        { address: 'ct_token_1', name: 'Token 1' } as any,
+      ]);
 
       const result = await controller.listAccountTokens('test_address');
-      expect(result).toEqual(mockPagination);
+      expect(result).toEqual({
+        ...mockPagination,
+        items: [
+          expect.objectContaining({
+            address: 'test_address',
+            aex9_address: 'ct_token_1',
+            token: expect.objectContaining({
+              address: 'ct_token_1',
+              name: 'Token 1',
+              rank: 7,
+            }),
+          }),
+        ],
+      });
       expect(paginate).toHaveBeenCalled();
     });
 

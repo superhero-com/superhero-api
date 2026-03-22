@@ -7,13 +7,11 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Queue } from 'bull';
 import { Token } from '@/tokens/entities/token.entity';
-import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
-import { TX_FUNCTIONS } from '@/configs';
+import { TokenHolder } from '@/tokens/entities/token-holders.entity';
+import { BCL_FUNCTIONS } from '@/configs';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
-import { getQueueToken } from '@nestjs/bull';
 
 jest.mock('@/tokens/tokens.service');
 jest.mock('@/ae-pricing/ae-pricing.service');
@@ -27,7 +25,7 @@ describe('TransactionService', () => {
   let aePricingService: jest.Mocked<AePricingService>;
   let communityFactoryService: jest.Mocked<CommunityFactoryService>;
   let tokenWebsocketGateway: jest.Mocked<TokenWebsocketGateway>;
-  let syncTokenHoldersQueue: jest.Mocked<Queue>;
+  let tokenHolderRepository: any | jest.Mocked<Repository<TokenHolder>>;
 
   beforeEach(async () => {
     transactionRepository = {
@@ -39,11 +37,26 @@ describe('TransactionService', () => {
       update: jest.fn(),
     } as any;
 
+    tokenHolderRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(0),
+        getOne: jest.fn().mockResolvedValue(null),
+      }),
+      save: jest.fn(),
+      update: jest.fn(),
+    } as any;
+
     tokenService = {
       getToken: jest.fn(),
-      findOne: jest.fn(),
+      findByAddress: jest.fn(),
+      createTokenFromRawTransaction: jest.fn(),
       syncTokenPrice: jest.fn(),
       updateTokenMetaDataFromCreateTx: jest.fn(),
+      update: jest.fn(),
+      loadAndSaveTokenHoldersFromMdw: jest.fn(),
+      updateTokenTrendingScore: jest.fn(),
     } as any;
 
     aePricingService = {
@@ -56,14 +69,15 @@ describe('TransactionService', () => {
         .mockResolvedValue({ contract: { $decodeEvents: jest.fn() } }),
       getCurrentFactory: jest
         .fn()
-        .mockResolvedValue({ address: 'test_factory' }),
+        .mockResolvedValue({
+          address: 'test_factory',
+          collections: { default: {} },
+        }),
     } as any;
 
     tokenWebsocketGateway = {
       handleTokenHistory: jest.fn(),
     } as any;
-
-    syncTokenHoldersQueue = { add: jest.fn() } as any;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -77,8 +91,8 @@ describe('TransactionService', () => {
         { provide: CommunityFactoryService, useValue: communityFactoryService },
         { provide: TokenWebsocketGateway, useValue: tokenWebsocketGateway },
         {
-          provide: getQueueToken(SYNC_TOKEN_HOLDERS_QUEUE),
-          useValue: syncTokenHoldersQueue,
+          provide: getRepositoryToken(TokenHolder),
+          useValue: tokenHolderRepository,
         },
       ],
     }).compile();
@@ -97,18 +111,35 @@ describe('TransactionService', () => {
   });
 
   it('should save a new transaction when valid', async () => {
-    transactionRepository.getOne = jest.fn().mockResolvedValue(null);
-    tokenService.getToken = jest.fn().mockResolvedValue(new Token());
-    tokenService.findOne = jest.fn().mockResolvedValue(new Token());
+    const deleteOldCreateCommunityQuery = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const existingTxQuery = {
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    transactionRepository.createQueryBuilder.mockImplementation((alias: string) =>
+      alias === 'transactions' ? deleteOldCreateCommunityQuery : existingTxQuery,
+    );
+    tokenService.getToken = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      factory_address: 'test_factory',
+      collection: 'default',
+    } as Token);
     service.parseTransactionData = jest.fn().mockResolvedValue({
       volume: new BigNumber(10),
       amount: new BigNumber(100),
       total_supply: new BigNumber(1000),
+      protocol_reward: new BigNumber(1),
+      _should_revalidate: false,
     });
     const transactions = [
       {
         tx: {
-          function: TX_FUNCTIONS.buy,
+          function: BCL_FUNCTIONS.buy,
           contractId: 'ct_123',
           callerId: 'ak_123',
           decodedData: [
@@ -123,7 +154,7 @@ describe('TransactionService', () => {
       },
       {
         tx: {
-          function: TX_FUNCTIONS.create_community,
+          function: BCL_FUNCTIONS.create_community,
           contractId: 'ct_123',
           callerId: 'ak_123',
           decodedData: [
@@ -131,7 +162,7 @@ describe('TransactionService', () => {
             { name: 'PriceChange', args: [1, 2] },
           ],
           return: {
-            value: [{ value: 'ct_123' }, { value: ['ct_123', 'ct_456'] }],
+            value: [{ value: 'ct_123' }, { value: 'ct_456' }],
           },
         },
         hash: 'tx_123',
@@ -158,8 +189,14 @@ describe('TransactionService', () => {
   it('should handle parseTransactionData correctly', async () => {
     const rawTransaction: any = {
       tx: {
-        function: TX_FUNCTIONS.buy,
-        decodedData: [{ name: 'Mint', args: [null, '100'] }],
+        function: BCL_FUNCTIONS.buy,
+        decodedData: [
+          { name: 'Mint', args: [null, '1000000000000000000'] },
+          {
+            name: 'Buy',
+            args: ['2000000000000000000', null, '3000000000000000000'],
+          },
+        ],
       },
     };
 
