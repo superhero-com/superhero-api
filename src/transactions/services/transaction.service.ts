@@ -391,6 +391,7 @@ export class TransactionService {
         .where('token_holders.aex9_address = :aex9_address', {
           aex9_address: token.address,
         })
+        .andWhere('token_holders.balance > 0')
         .getCount();
 
       const tokenHolder = await this.tokenHolderRepository
@@ -408,41 +409,54 @@ export class TransactionService {
         if (tokenHolderBalance.isNegative()) {
           tokenHolderBalance = new BigNumber(0);
         }
+        const wasHolder = tokenHolderBalance.gt(0);
+        let newBalance = tokenHolderBalance;
         // if is buy
         if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
-          await this.tokenHolderRepository.update(tokenHolder.id, {
-            balance: tokenHolderBalance.plus(bigNumberVolume),
-            last_tx_hash: rawTransaction.hash,
-            block_number: rawTransaction.blockHeight,
-          });
+          newBalance = tokenHolderBalance.plus(bigNumberVolume);
         }
         // if is sell
         if (rawTransaction.tx.function === BCL_FUNCTIONS.sell) {
-          await this.tokenHolderRepository.update(tokenHolder.id, {
-            balance: tokenHolderBalance.minus(bigNumberVolume),
-            last_tx_hash: rawTransaction.hash,
-            block_number: rawTransaction.blockHeight,
-          });
+          newBalance = tokenHolderBalance.minus(bigNumberVolume);
+          if (newBalance.isNegative()) {
+            newBalance = new BigNumber(0);
+          }
         }
-        if (token.holders_count == 0) {
-          await this.tokenService.update(token, {
-            holders_count: 1,
-          });
-        }
-      } else {
-        // create token holder
-        await this.tokenHolderRepository.save({
-          id: `${rawTransaction.tx.callerId}_${token.address}`,
-          aex9_address: token.address,
-          address: rawTransaction.tx.callerId,
-          balance: bigNumberVolume,
+        await this.tokenHolderRepository.update(tokenHolder.id, {
+          balance: newBalance,
           last_tx_hash: rawTransaction.hash,
           block_number: rawTransaction.blockHeight,
         });
-        // increment token holders count
-        await this.tokenService.update(token, {
-          holders_count: tokenHolderCount + 1,
-        });
+
+        const isHolder = newBalance.gt(0);
+        if (wasHolder !== isHolder || (isHolder && token.holders_count == 0)) {
+          const currentHolderCount = await this.tokenHolderRepository
+            .createQueryBuilder('token_holders')
+            .where('token_holders.aex9_address = :aex9_address', {
+              aex9_address: token.address,
+            })
+            .andWhere('token_holders.balance > 0')
+            .getCount();
+          await this.tokenService.update(token, {
+            holders_count: currentHolderCount,
+          });
+        }
+      } else {
+        if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
+          // create token holder
+          await this.tokenHolderRepository.save({
+            id: `${rawTransaction.tx.callerId}_${token.address}`,
+            aex9_address: token.address,
+            address: rawTransaction.tx.callerId,
+            balance: bigNumberVolume,
+            last_tx_hash: rawTransaction.hash,
+            block_number: rawTransaction.blockHeight,
+          });
+          // increment token holders count
+          await this.tokenService.update(token, {
+            holders_count: tokenHolderCount + 1,
+          });
+        }
       }
     } catch (error) {
       this.logger.error('Error updating token holder', error);

@@ -24,6 +24,15 @@ describe('TokensController', () => {
   let communityFactoryService: CommunityFactoryService;
   let tokensRepository: Repository<Token>;
   let tokenHolderRepository: Repository<TokenHolder>;
+  let tokenHolderQueryBuilder: {
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    select: jest.Mock;
+    orderBy: jest.Mock;
+    distinct: jest.Mock;
+    getCount: jest.Mock;
+    getRawMany: jest.Mock;
+  };
 
   beforeEach(async () => {
     const tokensRepositoryMock = {
@@ -39,16 +48,18 @@ describe('TokensController', () => {
       })),
     };
 
+    tokenHolderQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      distinct: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(2),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+
     const tokenHolderRepositoryMock = {
-      createQueryBuilder: jest.fn(() => ({
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        distinct: jest.fn().mockReturnThis(),
-        getCount: jest.fn().mockResolvedValue(2),
-        getRawMany: jest.fn().mockResolvedValue([]),
-      })),
+      createQueryBuilder: jest.fn(() => tokenHolderQueryBuilder),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -218,6 +229,9 @@ describe('TokensController', () => {
   it('should return paginated list of token holders', async () => {
     const result = await controller.listTokenHolders('ct_123');
     expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');
+    expect(tokenHolderQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'token_holder.balance > 0',
+    );
     expect(paginate).toHaveBeenCalled();
     expect(result).toEqual({ items: [], meta: {} });
   });
