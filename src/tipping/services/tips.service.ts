@@ -8,6 +8,7 @@ import { decode, toAe } from '@aeternity/aepp-sdk';
 import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
+import { isSelfTip } from '../utils/is-self-tip.util';
 
 @Injectable()
 export class TipService {
@@ -50,6 +51,13 @@ export class TipService {
     }
     try {
       const tip = await this.saveTipFromTransaction(transaction, type);
+      if (!tip) {
+        return {
+          success: false,
+          skipped: true,
+          reason: 'Self tip ignored',
+        };
+      }
       return {
         success: true,
         tip,
@@ -74,7 +82,7 @@ export class TipService {
   async saveTipFromTransaction(
     transaction: ITransaction,
     type: 'TIP_PROFILE' | 'TIP_POST',
-  ) {
+  ): Promise<Tip | null> {
     const existingTip = await this.tipRepository.findOne({
       where: {
         tx_hash: transaction.hash,
@@ -88,12 +96,6 @@ export class TipService {
     const senderAddress = transaction.tx.senderId;
     const receiverAddress = transaction.tx.recipientId;
     const amount = toAe(transaction.tx.amount);
-
-    // Ensure sender and receiver accounts exist
-    const [senderAccount, receiverAccount] = await Promise.all([
-      this.ensureAccountExists(senderAddress),
-      this.ensureAccountExists(receiverAddress),
-    ]);
 
     let post = null;
 
@@ -110,6 +112,16 @@ export class TipService {
         });
       }
     }
+
+    if (isSelfTip(senderAddress, receiverAddress, post)) {
+      return null;
+    }
+
+    // Ensure sender and receiver accounts exist
+    const [senderAccount, receiverAccount] = await Promise.all([
+      this.ensureAccountExists(senderAddress),
+      this.ensureAccountExists(receiverAddress),
+    ]);
 
     const savedTip = await this.tipRepository.save({
       tx_hash: transaction.hash,

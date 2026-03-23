@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 
 export interface TokenPnlResult {
@@ -27,7 +27,6 @@ export class BclPnlService {
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionRepository: Repository<Transaction>,
-    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -42,274 +41,169 @@ export class BclPnlService {
     blockHeight: number,
     fromBlockHeight?: number,
   ): Promise<TokenPnlResult> {
-    const tokenPnlsQuery = this.transactionRepository
-      .createQueryBuilder('tx')
-      .select('tx.sale_address', 'sale_address')
-      .addSelect(
-        // IMPORTANT: current_holdings must always be cumulative (all transactions up to blockHeight)
-        // Holdings represent actual token balance at blockHeight, not net change within range
-        // Only cost basis fields (total_volume_bought, total_amount_spent_*) should be filtered by fromBlockHeight
-        `COALESCE(
-          SUM(
-            CASE 
-              WHEN tx.tx_type IN ('buy', 'create_community') 
-              THEN CAST(tx.volume AS DECIMAL)
-              ELSE 0
-            END
-          ) - 
+    const tokenPnls = await this.transactionRepository.query(
+      this.buildTokenPnlsQuery(fromBlockHeight),
+      this.buildQueryParameters(address, blockHeight, fromBlockHeight),
+    );
+    return this.mapTokenPnls(tokenPnls, fromBlockHeight);
+  }
+
+  private buildTokenPnlsQuery(fromBlockHeight?: number): string {
+    const hasRange = fromBlockHeight !== undefined && fromBlockHeight !== null;
+    const rangeCondition = hasRange ? ' AND tx.block_height >= $3' : '';
+
+    return `
+      WITH aggregated_holdings AS (
+        SELECT
+          tx.sale_address AS sale_address,
           COALESCE(
             SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(tx.volume AS DECIMAL)
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ) -
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN tx.tx_type = 'sell'
+                    THEN CAST(tx.volume AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            ),
+            0
+          ) AS current_holdings,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
                 ELSE 0
               END
             ),
             0
-          ),
-          0
-        )`,
-        'current_holdings',
-      )
-      .addSelect(
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_volume_bought',
-      )
-      .addSelect(
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_amount_spent_ae',
-      )
-      .addSelect(
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type IN ('buy', 'create_community') 
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_amount_spent_usd',
-      )
-      .addSelect(
-        // Track sale proceeds for range-based PNL
-        // This is needed to calculate accurate PNL when tokens are bought and sold within the range
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_amount_received_ae',
-      )
-      .addSelect(
-        // Track sale proceeds in USD for range-based PNL
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_amount_received_usd',
-      )
-      .addSelect(
-        // Track volume sold for range-based PNL
-        fromBlockHeight !== undefined && fromBlockHeight !== null
-          ? `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                    AND tx.block_height >= :fromBlockHeight
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`
-          : `COALESCE(
-              SUM(
-                CASE 
-                  WHEN tx.tx_type = 'sell' 
-                  THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            )`,
-        'total_volume_sold',
-      )
-      .addSelect(
-        `(
-          SELECT CAST(NULLIF(tx2.buy_price->>'ae', 'NaN') AS DECIMAL)
-          FROM transactions tx2
-          WHERE tx2.sale_address = tx.sale_address
-            AND tx2.block_height <= :blockHeight
-            AND tx2.buy_price->>'ae' IS NOT NULL
-            AND tx2.buy_price->>'ae' != 'NaN'
-            AND tx2.buy_price->>'ae' != 'null'
-            AND tx2.buy_price->>'ae' != ''
-          ORDER BY tx2.block_height DESC, tx2.created_at DESC
-          LIMIT 1
-        )`,
-        'current_unit_price_ae',
-      )
-      .addSelect(
-        `(
-          SELECT CAST(NULLIF(tx2.buy_price->>'usd', 'NaN') AS DECIMAL)
-          FROM transactions tx2
-          WHERE tx2.sale_address = tx.sale_address
-            AND tx2.block_height <= :blockHeight
-            AND tx2.buy_price->>'usd' IS NOT NULL
-            AND tx2.buy_price->>'usd' != 'NaN'
-            AND tx2.buy_price->>'usd' != 'null'
-            AND tx2.buy_price->>'usd' != ''
-          ORDER BY tx2.block_height DESC, tx2.created_at DESC
-          LIMIT 1
-        )`,
-        'current_unit_price_usd',
-      )
-      .where('tx.address = :address', { address })
-      .andWhere('tx.block_height < :blockHeight', { blockHeight });
-
-    // If fromBlockHeight is provided, we need to calculate range-based PNL:
-    // - Calculate holdings cumulatively (all transactions up to blockHeight) - represents actual token balance
-    // - Calculate cost basis only for tokens bought in the range (>= fromBlockHeight)
-    // - This ensures holdings reflect actual balance while PNL reflects range performance
-
-    tokenPnlsQuery
-      .groupBy('tx.sale_address')
-      .having(
-        // HAVING clause should check for actual holdings (cumulative) at blockHeight
-        // This ensures tokens with holdings are included even if bought before the range
-        // For range-based PNL, cost basis will be calculated only from range transactions,
-        // but holdings must reflect actual balance at blockHeight
-        `COALESCE(
-          SUM(
-            CASE 
-              WHEN tx.tx_type IN ('buy', 'create_community') 
-              THEN CAST(tx.volume AS DECIMAL)
-              ELSE 0
-            END
-          ) - 
+          ) AS total_volume_bought,
           COALESCE(
             SUM(
-              CASE 
-                WHEN tx.tx_type = 'sell' 
-                THEN CAST(tx.volume AS DECIMAL)
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
                 ELSE 0
               END
             ),
             0
-          ),
-          0
-        ) > 0`,
+          ) AS total_amount_spent_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_spent_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_volume_sold
+        FROM transactions tx
+        WHERE tx.address = $1
+          AND tx.block_height < $2
+        GROUP BY tx.sale_address
+      ),
+      latest_price_ae AS (
+        SELECT DISTINCT ON (tx.sale_address)
+          tx.sale_address,
+          CAST(NULLIF(tx.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
+        FROM transactions tx
+        INNER JOIN aggregated_holdings agg
+          ON agg.sale_address = tx.sale_address
+        WHERE tx.block_height <= $2
+          AND tx.buy_price->>'ae' IS NOT NULL
+          AND tx.buy_price->>'ae' != 'NaN'
+          AND tx.buy_price->>'ae' != 'null'
+          AND tx.buy_price->>'ae' != ''
+        ORDER BY tx.sale_address, tx.block_height DESC, tx.created_at DESC
+      ),
+      latest_price_usd AS (
+        SELECT DISTINCT ON (tx.sale_address)
+          tx.sale_address,
+          CAST(NULLIF(tx.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
+        FROM transactions tx
+        INNER JOIN aggregated_holdings agg
+          ON agg.sale_address = tx.sale_address
+        WHERE tx.block_height <= $2
+          AND tx.buy_price->>'usd' IS NOT NULL
+          AND tx.buy_price->>'usd' != 'NaN'
+          AND tx.buy_price->>'usd' != 'null'
+          AND tx.buy_price->>'usd' != ''
+        ORDER BY tx.sale_address, tx.block_height DESC, tx.created_at DESC
       )
-      .setParameter('blockHeight', blockHeight);
+      SELECT
+        agg.sale_address,
+        agg.current_holdings,
+        agg.total_volume_bought,
+        agg.total_amount_spent_ae,
+        agg.total_amount_spent_usd,
+        agg.total_amount_received_ae,
+        agg.total_amount_received_usd,
+        agg.total_volume_sold,
+        latest_price_ae.current_unit_price_ae,
+        latest_price_usd.current_unit_price_usd
+      FROM aggregated_holdings agg
+      LEFT JOIN latest_price_ae
+        ON latest_price_ae.sale_address = agg.sale_address
+      LEFT JOIN latest_price_usd
+        ON latest_price_usd.sale_address = agg.sale_address
+      WHERE agg.current_holdings > 0
+    `;
+  }
 
-    // Set fromBlockHeight parameter if provided (needed for range-based PNL calculations)
-    if (fromBlockHeight !== undefined && fromBlockHeight !== null) {
-      tokenPnlsQuery.setParameter('fromBlockHeight', fromBlockHeight);
-    }
+  private buildQueryParameters(
+    address: string,
+    blockHeight: number,
+    fromBlockHeight?: number,
+  ): Array<string | number> {
+    return fromBlockHeight !== undefined && fromBlockHeight !== null
+      ? [address, blockHeight, fromBlockHeight]
+      : [address, blockHeight];
+  }
 
-    const tokenPnls = await tokenPnlsQuery.getRawMany();
-
-    const result: Record<
-      string,
-      {
-        current_unit_price: { ae: number; usd: number };
-        percentage: number;
-        invested: { ae: number; usd: number };
-        current_value: { ae: number; usd: number };
-        gain: { ae: number; usd: number };
-      }
-    > = {};
+  private mapTokenPnls(
+    tokenPnls: Array<Record<string, any>>,
+    fromBlockHeight?: number,
+  ): TokenPnlResult {
+    const result: TokenPnlResult['pnls'] = {};
     let totalCostBasisAe = 0;
     let totalCostBasisUsd = 0;
     let totalCurrentValueAe = 0;

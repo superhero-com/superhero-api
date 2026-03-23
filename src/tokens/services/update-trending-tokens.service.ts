@@ -118,6 +118,7 @@ export class UpdateTrendingTokensService {
                 ${buildNormalizedTokenMentionSelectSql('post')}
               ) mention
               WHERE tip.created_at >= $1
+                AND tip.sender_address != post.sender_address
               UNION
               SELECT mention.symbol
               FROM tips tip
@@ -127,6 +128,7 @@ export class UpdateTrendingTokensService {
                 ${buildNormalizedTokenMentionSelectSql('parent')}
               ) mention
               WHERE tip.created_at >= $1
+                AND tip.sender_address != post.sender_address
             ) symbols
           `,
           [recentSince],

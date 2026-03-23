@@ -101,6 +101,43 @@ describe('UpdateTrendingTokensService', () => {
     ]);
   });
 
+  it('ignores self-tips when collecting recently tipped symbols', async () => {
+    const getRawManyTransactions = jest.fn().mockResolvedValue([]);
+    transactionsRepository.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getRawMany: getRawManyTransactions,
+    });
+
+    tokensRepository.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const activeTokenQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+
+    tokensRepository.createQueryBuilder.mockReturnValue(activeTokenQb);
+
+    await service.updateTrendingTokens();
+
+    const recentTipSymbolsQuery = tokensRepository.query.mock.calls[1][0];
+
+    expect(
+      (
+        recentTipSymbolsQuery.match(
+          /tip\.sender_address != post\.sender_address/g,
+        ) || []
+      ).length,
+    ).toBe(2);
+  });
+
   it('does not reject startup when refresh tasks fail', async () => {
     const loggerError = jest
       .spyOn((service as any).logger, 'error')

@@ -38,9 +38,11 @@ export class LeaderboardSnapshotService {
     }
     this.isRunning = true;
     try {
-      await this.refreshWindow('7d');
-      await this.refreshWindow('30d');
-      await this.refreshWindow('all');
+      const referenceEnd = new Date();
+      const pnlCache = new Map<string, Promise<TokenPnlResult>>();
+      await this.refreshWindow('7d', referenceEnd, pnlCache);
+      await this.refreshWindow('30d', referenceEnd, pnlCache);
+      await this.refreshWindow('all', referenceEnd, pnlCache);
     } catch (e) {
       this.logger.error(
         `Failed to refresh leaderboard snapshots: ${(e as Error).message}`,
@@ -51,9 +53,13 @@ export class LeaderboardSnapshotService {
     }
   }
 
-  private async refreshWindow(window: LeaderboardWindow): Promise<void> {
+  private async refreshWindow(
+    window: LeaderboardWindow,
+    referenceEnd: Date,
+    pnlCache: Map<string, Promise<TokenPnlResult>>,
+  ): Promise<void> {
     this.logger.log(`Recomputing leaderboard snapshots for window=${window}`);
-    const items = await this.computeWindow(window, 100);
+    const items = await this.computeWindow(window, 100, referenceEnd, pnlCache);
 
     await this.snapshotRepository.manager.transaction(async (manager) => {
       const repo = manager.getRepository(AccountLeaderboardSnapshot);
@@ -81,11 +87,14 @@ export class LeaderboardSnapshotService {
     });
   }
 
-  private getWindowRange(window: LeaderboardWindow): {
+  private getWindowRange(
+    window: LeaderboardWindow,
+    referenceEnd: Date,
+  ): {
     start?: Date;
     end: Date;
   } {
-    const end = new Date();
+    const end = new Date(referenceEnd);
     if (window === 'all') {
       // Treat "all" as last 365 days for window-based metrics
       const start = new Date(end.getTime() - 365 * 24 * 3600 * 1000);
@@ -105,8 +114,10 @@ export class LeaderboardSnapshotService {
   private async computeWindow(
     window: LeaderboardWindow,
     maxCandidates: number,
+    referenceEnd: Date,
+    pnlCache: Map<string, Promise<TokenPnlResult>>,
   ): Promise<LeaderboardItem[]> {
-    const { start, end } = this.getWindowRange(window);
+    const { start, end } = this.getWindowRange(window, referenceEnd);
 
     // Top candidate addresses by all-time USD volume
     const txTop = await this.transactionsRepository
@@ -215,8 +226,7 @@ export class LeaderboardSnapshotService {
         for (let i = 0; i < sampleHeights.length; i++) {
           const h = sampleHeights[i];
           const ts = sampleTimestamps[i];
-          const pnl: TokenPnlResult =
-            await this.bclPnlService.calculateTokenPnls(address, h);
+          const pnl = await this.getCachedTokenPnl(pnlCache, address, h);
           lastPnl = pnl;
           const aumUsd = pnl.totalCurrentValueUsd;
           spark.push([ts, Math.max(aumUsd, 0)]);
@@ -314,5 +324,21 @@ export class LeaderboardSnapshotService {
     });
 
     return items;
+  }
+
+  private getCachedTokenPnl(
+    cache: Map<string, Promise<TokenPnlResult>>,
+    address: string,
+    blockHeight: number,
+  ): Promise<TokenPnlResult> {
+    const key = `${address}:${blockHeight}`;
+    const cached = cache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.bclPnlService.calculateTokenPnls(address, blockHeight);
+    cache.set(key, promise);
+    return promise;
   }
 }

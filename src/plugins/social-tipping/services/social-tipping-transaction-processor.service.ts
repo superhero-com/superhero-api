@@ -9,6 +9,7 @@ import { Account } from '@/account/entities/account.entity';
 import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
+import { isSelfTip } from '@/tipping/utils/is-self-tip.util';
 
 @Injectable()
 export class SocialTippingTransactionProcessorService {
@@ -50,6 +51,10 @@ export class SocialTippingTransactionProcessorService {
           return await this.saveTipFromTransaction(tx, tipType, manager);
         },
       );
+
+      if (!savedTipResult) {
+        return null;
+      }
 
       await refreshTrendingScoresForPostSafely({
         post: savedTipResult.post,
@@ -105,7 +110,7 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     tipType: 'TIP_PROFILE' | 'TIP_POST',
     manager: EntityManager,
-  ): Promise<{ tip: Tip; post: Post | null }> {
+  ): Promise<{ tip: Tip; post: Post | null } | null> {
     const tipRepository = manager.getRepository(Tip);
 
     const amount = tx?.raw?.amount ? toAe(tx.raw.amount) : '0';
@@ -114,16 +119,6 @@ export class SocialTippingTransactionProcessorService {
       throw new Error(
         `Missing sender or receiver address for transaction ${tx.hash}`,
       );
-    }
-
-    // Ensure sender and receiver accounts exist
-    const [senderAccount, receiverAccount] = await Promise.all([
-      this.ensureAccountExists(tx.sender_id, manager),
-      this.ensureAccountExists(tx.recipient_id, manager),
-    ]);
-
-    if (!senderAccount || !receiverAccount) {
-      throw new Error(`Failed to create accounts for transaction ${tx.hash}`);
     }
 
     // Handle post tip
@@ -140,6 +135,20 @@ export class SocialTippingTransactionProcessorService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+
+    if (isSelfTip(tx.sender_id, tx.recipient_id, post)) {
+      return null;
+    }
+
+    // Ensure sender and receiver accounts exist
+    const [senderAccount, receiverAccount] = await Promise.all([
+      this.ensureAccountExists(tx.sender_id, manager),
+      this.ensureAccountExists(tx.recipient_id, manager),
+    ]);
+
+    if (!senderAccount || !receiverAccount) {
+      throw new Error(`Failed to create accounts for transaction ${tx.hash}`);
     }
 
     // Use upsert to handle duplicate key violations gracefully during parallel processing

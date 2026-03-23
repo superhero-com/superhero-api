@@ -222,6 +222,7 @@ export class TokensController {
     queryBuilder.where('token_holder.aex9_address = :aex9_address', {
       aex9_address: token.address,
     });
+    queryBuilder.andWhere('token_holder.balance > 0');
 
     // check if count is 0
     const count = await queryBuilder.getCount();

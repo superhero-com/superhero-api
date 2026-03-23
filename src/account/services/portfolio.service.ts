@@ -11,7 +11,7 @@ import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
 import { timestampToAeHeight } from '@/utils/getBlochHeight';
-import { BclPnlService } from './bcl-pnl.service';
+import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
@@ -88,6 +88,7 @@ export interface GetPortfolioHistoryOptions {
 @Injectable()
 export class PortfolioService {
   private readonly logger = new Logger(PortfolioService.name);
+  private readonly snapshotConcurrency = 6;
 
   constructor(
     @InjectRepository(TokenHolder)
@@ -208,66 +209,49 @@ export class PortfolioService {
           )
         : undefined;
 
-    const data = await Promise.all(
-      timestamps.map(async (timestamp, index) => {
-        // the aePriceHistory is an array of [timestamp_ms, price] pairs
-        // we need to find the closest price to the timestamp
-        const closestPrice = aePriceHistory.find(([priceTimeMs]) => {
-          return priceTimeMs <= timestamp.valueOf();
-        });
-        const price = closestPrice ? closestPrice[1] : currentAePrice?.usd || 0;
+    const balanceCache = new Map<number, Promise<string>>();
+    const pnlCache = new Map<string, Promise<TokenPnlResult>>();
+    const data = await this.mapWithConcurrency(
+      timestamps,
+      this.snapshotConcurrency,
+      async (timestamp, index) => {
+        const price = this.findClosestHistoricalPrice(
+          aePriceHistory,
+          timestamp.valueOf(),
+          currentAePrice?.usd || 0,
+        );
         const blockHeight = blockHeights[index];
-        // Prepare promises for parallel execution
-        const promises: [
-          Promise<string>,
-          Promise<
-            Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
-          >,
-          ...Array<
-            Promise<
-              Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
-            >
-          >,
-        ] = [
-          this.aeSdkService.sdk.getBalance(
-            address as any,
-            {
-              height: blockHeight,
-            } as any,
-          ),
-          // Always call without fromBlockHeight to get cumulative token values (all tokens owned)
-          this.bclPnlService.calculateTokenPnls(
-            address,
-            blockHeight,
-            undefined,
-          ),
-        ];
 
-        // If range-based PNL is requested, calculate it separately for PNL fields only
-        // Note: For index === 0, we use cumulative PNL (same as tokensPnl), so no need to call again
-        let rangeBasedPnl:
-          | Awaited<ReturnType<typeof this.bclPnlService.calculateTokenPnls>>
-          | undefined = undefined;
-        if (useRangeBasedPnl && includePnl && index > 0) {
-          // For snapshots after the first: PNL from startDate to this timestamp
-          // This allows hover to use PNL data directly from the snapshot
-          // Calculate range-based PNL separately (will be used only for PNL fields)
-          promises.push(
-            this.bclPnlService.calculateTokenPnls(
-              address,
-              blockHeight,
-              startBlockHeight,
-            ),
-          );
-        }
+        // Keep repeated block-height lookups inside a request deduplicated.
+        const aeBalancePromise = this.getCachedBalance(
+          balanceCache,
+          address,
+          blockHeight,
+        );
+        const tokensPnlPromise = this.getCachedTokenPnl(
+          pnlCache,
+          address,
+          blockHeight,
+          undefined,
+        );
 
-        const results = await Promise.all(promises);
-        const aeBalance = results[0];
-        const tokensPnl = results[1]; // Cumulative token values (all tokens owned)
-        if (useRangeBasedPnl && includePnl && results.length > 2) {
-          rangeBasedPnl = results[2]; // Range-based PNL (only for PNL fields)
-        }
+        // If range-based PNL is requested, calculate it separately for PNL fields only.
+        // For index 0 we reuse the cumulative value to preserve existing semantics.
+        const rangeBasedPnlPromise =
+          useRangeBasedPnl && includePnl && index > 0
+            ? this.getCachedTokenPnl(
+                pnlCache,
+                address,
+                blockHeight,
+                startBlockHeight,
+              )
+            : undefined;
 
+        const [aeBalance, tokensPnl, rangeBasedPnl] = await Promise.all([
+          aeBalancePromise,
+          tokensPnlPromise,
+          rangeBasedPnlPromise,
+        ]);
         const balance = Number(toAe(aeBalance));
 
         // Use current value of tokens owned (from cumulative PNL service call)
@@ -337,9 +321,99 @@ export class PortfolioService {
         }
 
         return result;
-      }),
+      },
     );
 
     return data;
+  }
+
+  private getCachedBalance(
+    cache: Map<number, Promise<string>>,
+    address: string,
+    blockHeight: number,
+  ): Promise<string> {
+    const cached = cache.get(blockHeight);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.aeSdkService.sdk.getBalance(address as any, {
+      height: blockHeight,
+    } as any);
+    cache.set(blockHeight, promise);
+    return promise;
+  }
+
+  private getCachedTokenPnl(
+    cache: Map<string, Promise<TokenPnlResult>>,
+    address: string,
+    blockHeight: number,
+    fromBlockHeight?: number,
+  ): Promise<TokenPnlResult> {
+    const key = `${address}:${blockHeight}:${fromBlockHeight ?? 'all'}`;
+    const cached = cache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.bclPnlService.calculateTokenPnls(
+      address,
+      blockHeight,
+      fromBlockHeight,
+    );
+    cache.set(key, promise);
+    return promise;
+  }
+
+  private findClosestHistoricalPrice(
+    priceHistory: Array<[number, number]>,
+    targetTimestampMs: number,
+    fallbackPrice: number,
+  ): number {
+    let left = 0;
+    let right = priceHistory.length - 1;
+    let closestPrice = fallbackPrice;
+
+    // CoinGecko history is sorted descending by timestamp, so we binary search
+    // for the newest sample that is still at or before the target timestamp.
+    while (left <= right) {
+      const middle = Math.floor((left + right) / 2);
+      const [priceTimeMs, price] = priceHistory[middle];
+      if (priceTimeMs <= targetTimestampMs) {
+        closestPrice = price;
+        right = middle - 1;
+      } else {
+        left = middle + 1;
+      }
+    }
+
+    return closestPrice;
+  }
+
+  private async mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    mapper: (item: T, index: number) => Promise<R>,
+  ): Promise<R[]> {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const results = new Array<R>(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(Math.max(concurrency, 1), items.length);
+
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const currentIndex = nextIndex++;
+        if (currentIndex >= items.length) {
+          return;
+        }
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
   }
 }

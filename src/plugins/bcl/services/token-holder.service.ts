@@ -40,9 +40,23 @@ export class TokenHolderService {
     const normalizedBalance = currentBalance.isNegative()
       ? new BigNumber(0)
       : currentBalance;
-    return isBuy
+    const nextBalance = isBuy
       ? normalizedBalance.plus(volume)
       : normalizedBalance.minus(volume);
+    return nextBalance.isNegative() ? new BigNumber(0) : nextBalance;
+  }
+
+  private async getPositiveHolderCount(
+    aex9Address: string,
+    repository: Repository<TokenHolder>,
+  ): Promise<number> {
+    return repository
+      .createQueryBuilder('token_holders')
+      .where('token_holders.aex9_address = :aex9_address', {
+        aex9_address: aex9Address,
+      })
+      .andWhere('token_holders.balance > 0')
+      .getCount();
   }
 
   /**
@@ -97,11 +111,13 @@ export class TokenHolderService {
 
       if (tokenHolder) {
         // Update existing holder
+        const wasHolder = tokenHolder.balance.gt(0);
         const newBalance = this.calculateNewBalance(
           tokenHolder.balance,
           bigNumberVolume,
           isBuy,
         );
+        const isHolder = newBalance.gt(0);
 
         await repository.update(tokenHolder.id, {
           balance: newBalance,
@@ -109,9 +125,12 @@ export class TokenHolderService {
           block_number: tx.block_height,
         });
 
-        // Fix holders_count if it's incorrectly set to 0
-        if (token.holders_count === 0) {
-          await this.updateTokenHoldersCount(token, 1, manager);
+        if (wasHolder !== isHolder || (isHolder && token.holders_count === 0)) {
+          const tokenHolderCount = await this.getPositiveHolderCount(
+            token.address,
+            repository,
+          );
+          await this.updateTokenHoldersCount(token, tokenHolderCount, manager);
         }
       } else {
         // Create new holder (only for buy transactions)
@@ -130,12 +149,10 @@ export class TokenHolderService {
         });
 
         // Get current holders count only when creating new holder
-        const tokenHolderCount = await repository
-          .createQueryBuilder('token_holders')
-          .where('token_holders.aex9_address = :aex9_address', {
-            aex9_address: token.address,
-          })
-          .getCount();
+        const tokenHolderCount = await this.getPositiveHolderCount(
+          token.address,
+          repository,
+        );
 
         await this.updateTokenHoldersCount(token, tokenHolderCount, manager);
       }

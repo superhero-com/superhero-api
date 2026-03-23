@@ -205,4 +205,47 @@ describe('TransactionService', () => {
     expect(result.amount).toBeInstanceOf(BigNumber);
     expect(result.total_supply).toBeInstanceOf(BigNumber);
   });
+
+  it('should not create a holder row for a sell with no existing holder', async () => {
+    const holderCountQuery = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
+    };
+    const existingHolderQuery = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+
+    tokenHolderRepository.createQueryBuilder
+      .mockReturnValueOnce(holderCountQuery)
+      .mockReturnValueOnce(existingHolderQuery);
+
+    await service.updateTokenHolder(
+      {
+        address: 'ct_token',
+        sale_address: 'ct_sale',
+        holders_count: 0,
+      } as Token,
+      {
+        tx: {
+          function: BCL_FUNCTIONS.sell,
+          callerId: 'ak_user',
+        },
+        hash: 'th_sell',
+        blockHeight: 42,
+      } as any,
+      new BigNumber(1),
+    );
+
+    expect(tokenHolderRepository.save).not.toHaveBeenCalled();
+    expect(tokenService.update).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ holders_count: expect.any(Number) }),
+    );
+    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledWith(
+      'ct_sale',
+    );
+  });
 });
