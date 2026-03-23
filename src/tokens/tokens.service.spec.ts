@@ -107,6 +107,41 @@ describe('TokensService', () => {
     expect(metrics.trending_score.result).toBeGreaterThan(0);
   });
 
+  it('excludes self-tips from token social tip inputs', async () => {
+    transactionsRepository.query.mockResolvedValue([
+      {
+        active_wallets: '0',
+        buy_count: '0',
+        sell_count: '0',
+        volume_ae: '0',
+        last_trade_at: null,
+      },
+    ]);
+    postsRepository.query.mockResolvedValue([
+      {
+        mention_posts: '0',
+        mention_comments: '0',
+        unique_authors: '0',
+        tips_count: '0',
+        tips_amount_ae: '0',
+        reads: '0',
+        last_social_activity_at: null,
+      },
+    ]);
+
+    await service.calculateTokenTrendingMetrics({
+      sale_address: 'ct_sale',
+      symbol: 'TEST',
+    } as any);
+
+    const [socialQuery] = postsRepository.query.mock.calls[0];
+
+    expect(socialQuery).toContain(
+      'INNER JOIN posts tipped_post ON tipped_post.id = tip.post_id',
+    );
+    expect((socialQuery.match(/tip\.sender_address != tipped_post\.sender_address/g) || []).length).toBe(3);
+  });
+
   it('throws a not found error when updating a missing token', async () => {
     await expect(service.updateTokenTrendingScore(null as any)).rejects.toBeInstanceOf(
       NotFoundException,

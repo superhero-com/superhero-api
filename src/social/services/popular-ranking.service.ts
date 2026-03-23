@@ -420,10 +420,12 @@ export class PopularRankingService {
     const tipsRaw = await this.tipRepository
       .createQueryBuilder('tip')
       .select('tip.post_id', 'post_id')
+      .innerJoin(Post, 'post', 'post.id = tip.post_id')
       .addSelect('COALESCE(SUM(CAST(tip.amount AS numeric)), 0)', 'amount_sum')
       .addSelect('COUNT(*)', 'count')
       .addSelect('COUNT(DISTINCT tip.sender_address)', 'unique_tippers')
       .where('tip.post_id IN (:...ids)', { ids })
+      .andWhere('tip.sender_address != post.sender_address')
       .groupBy('tip.post_id')
       .getRawMany<{
         post_id: string;

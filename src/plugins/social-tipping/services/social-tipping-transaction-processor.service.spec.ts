@@ -35,7 +35,11 @@ describe('SocialTippingTransactionProcessorService', () => {
       .mockReturnValue('TIP_POST:post-1');
     jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue({
       tip: { tx_hash: 'th_tip' },
-      post: { token_mentions: ['ALPHA'], post_id: 'parent-1' },
+      post: {
+        sender_address: 'ak_receiver',
+        token_mentions: ['ALPHA'],
+        post_id: 'parent-1',
+      },
     });
 
     postRepository.findOne.mockResolvedValue({
@@ -53,7 +57,11 @@ describe('SocialTippingTransactionProcessorService', () => {
     });
 
     const result = await service.processTransaction(
-      { hash: 'th_tip' } as any,
+      {
+        hash: 'th_tip',
+        sender_id: 'ak_sender',
+        recipient_id: 'ak_receiver',
+      } as any,
       'live' as any,
     );
 
@@ -75,7 +83,7 @@ describe('SocialTippingTransactionProcessorService', () => {
       .mockReturnValue('TIP_POST:post-1');
     jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue({
       tip: { tx_hash: 'th_tip' },
-      post: { token_mentions: ['ALPHA'] },
+      post: { sender_address: 'ak_receiver', token_mentions: ['ALPHA'] },
     });
     tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
       new Error('refresh failed'),
@@ -85,7 +93,11 @@ describe('SocialTippingTransactionProcessorService', () => {
     );
 
     const result = await service.processTransaction(
-      { hash: 'th_tip' } as any,
+      {
+        hash: 'th_tip',
+        sender_id: 'ak_sender',
+        recipient_id: 'ak_receiver',
+      } as any,
       'live' as any,
     );
 
@@ -93,5 +105,118 @@ describe('SocialTippingTransactionProcessorService', () => {
     expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
     ]);
+  });
+
+  it('skips persisting self-tips on a post', async () => {
+    jest
+      .spyOn(service as any, 'validateTransaction')
+      .mockReturnValue('TIP_POST:post-1');
+    jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue(null);
+    tipRepository.manager.transaction.mockImplementation(async (handler: any) =>
+      handler({}),
+    );
+
+    const result = await service.processTransaction(
+      {
+        hash: 'th_tip',
+        sender_id: 'ak_sender',
+        recipient_id: 'ak_sender',
+      } as any,
+      'live' as any,
+    );
+
+    expect(result).toBeNull();
+    expect(tokensService.updateTrendingScoresForSymbols).not.toHaveBeenCalled();
+  });
+
+  it('does not persist self-tips on a profile', async () => {
+    const tipRepositoryMock = {
+      upsert: jest.fn(),
+      findOneOrFail: jest.fn(),
+    };
+    const accountRepositoryMock = {
+      upsert: jest.fn(),
+      findOne: jest.fn(),
+    };
+    const manager = {
+      getRepository: jest.fn((entity: any) => {
+        if (entity.name === 'Tip') {
+          return tipRepositoryMock;
+        }
+        if (entity.name === 'Account') {
+          return accountRepositoryMock;
+        }
+        return {
+          findOne: jest.fn(),
+        };
+      }),
+    };
+
+    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+
+    const result = await (service as any).saveTipFromTransaction(
+      {
+        hash: 'th_tip',
+        sender_id: 'ak_sender',
+        recipient_id: 'ak_sender',
+        raw: { amount: '1000000000000000000' },
+      },
+      'TIP_PROFILE',
+      manager,
+    );
+
+    expect(result).toBeNull();
+    expect(ensureAccountExists).not.toHaveBeenCalled();
+    expect(tipRepositoryMock.upsert).not.toHaveBeenCalled();
+    expect(tipRepositoryMock.findOneOrFail).not.toHaveBeenCalled();
+  });
+
+  it('does not persist self-tips on a post', async () => {
+    const tipRepositoryMock = {
+      upsert: jest.fn(),
+      findOneOrFail: jest.fn(),
+    };
+    const accountRepositoryMock = {
+      upsert: jest.fn(),
+      findOne: jest.fn(),
+    };
+    const postRepositoryMock = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'post-1',
+        sender_address: 'ak_sender',
+      }),
+    };
+    const manager = {
+      getRepository: jest.fn((entity: any) => {
+        if (entity.name === 'Tip') {
+          return tipRepositoryMock;
+        }
+        if (entity.name === 'Account') {
+          return accountRepositoryMock;
+        }
+        return postRepositoryMock;
+      }),
+    };
+
+    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+
+    const result = await (service as any).saveTipFromTransaction(
+      {
+        hash: 'th_tip',
+        sender_id: 'ak_sender',
+        recipient_id: 'ak_sender',
+        raw: { amount: '1000000000000000000' },
+      },
+      'TIP_POST:post-1',
+      manager,
+    );
+
+    expect(result).toBeNull();
+    expect(postRepositoryMock.findOne).toHaveBeenCalledWith({
+      where: { id: 'post-1' },
+    });
+    expect(ensureAccountExists).not.toHaveBeenCalled();
+    expect(tipRepositoryMock.upsert).not.toHaveBeenCalled();
+    expect(tipRepositoryMock.findOneOrFail).not.toHaveBeenCalled();
   });
 });
