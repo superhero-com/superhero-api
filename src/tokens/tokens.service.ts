@@ -1467,7 +1467,9 @@ export class TokensService {
             UNION ALL
             SELECT tip.created_at
             FROM tips tip
+            INNER JOIN posts tipped_post ON tipped_post.id = tip.post_id
             WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+              AND tip.sender_address != tipped_post.sender_address
               AND tip.created_at >= $1
             UNION ALL
             SELECT reads.date::timestamp
@@ -1482,13 +1484,17 @@ export class TokensService {
             (
               SELECT COUNT(*)
               FROM tips tip
+              INNER JOIN posts tipped_post ON tipped_post.id = tip.post_id
               WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+                AND tip.sender_address != tipped_post.sender_address
                 AND tip.created_at >= $1
             ) AS tips_count,
             (
               SELECT COALESCE(SUM(CAST(NULLIF(tip.amount, '') AS DECIMAL)), 0)
               FROM tips tip
+              INNER JOIN posts tipped_post ON tipped_post.id = tip.post_id
               WHERE tip.post_id IN (SELECT id FROM matched_post_ids)
+                AND tip.sender_address != tipped_post.sender_address
                 AND tip.created_at >= $1
             ) AS tips_amount_ae,
             (

@@ -105,10 +105,10 @@ export class TipsController {
     const totals = await this.tipRepository
       .createQueryBuilder('tip')
       .select(
-        `COALESCE(SUM(CASE WHEN tip.sender_address = :address THEN CAST(tip.amount AS numeric) ELSE 0 END), 0) as total_sent`,
+        `COALESCE(SUM(CASE WHEN tip.sender_address = :address AND tip.sender_address != tip.receiver_address THEN CAST(tip.amount AS numeric) ELSE 0 END), 0) as total_sent`,
       )
       .addSelect(
-        `COALESCE(SUM(CASE WHEN tip.receiver_address = :address THEN CAST(tip.amount AS numeric) ELSE 0 END), 0) as total_received`,
+        `COALESCE(SUM(CASE WHEN tip.receiver_address = :address AND tip.sender_address != tip.receiver_address THEN CAST(tip.amount AS numeric) ELSE 0 END), 0) as total_received`,
       )
       .setParameters({ address })
       .getRawOne<{ total_sent: string; total_received: string }>();
