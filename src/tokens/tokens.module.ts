@@ -21,7 +21,9 @@ import { TokensService } from './tokens.service';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
+import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenPerformanceView } from './entities/tokens-performance.view';
+import { RefreshTokenEligibilityCountsService } from './services/refresh-token-eligibility-counts.service';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
 import { TokenHoldersLockService } from './services/token-holders-lock.service';
 import { Post } from '@/social/entities/post.entity';
@@ -31,6 +33,7 @@ import { Post } from '@/social/entities/post.entity';
     TypeOrmModule.forFeature([
       Token,
       TokenHolder,
+      TokenEligibilityCounts,
       TokenPerformanceView,
       Transaction,
       Post,
@@ -63,6 +66,7 @@ import { Post } from '@/social/entities/post.entity';
     RemoveOldTokensQueue,
     TokenHoldersLockService,
     UpdateTrendingTokensService,
+    RefreshTokenEligibilityCountsService,
     RefreshPerformanceViewService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],

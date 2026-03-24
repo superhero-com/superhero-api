@@ -10,6 +10,7 @@ describe('TokensService', () => {
   let tokensRepository: any;
   let transactionsRepository: any;
   let postsRepository: any;
+  let tokenEligibilityCountsRepository: any;
 
   beforeEach(() => {
     tokensRepository = {
@@ -23,12 +24,16 @@ describe('TokensService', () => {
     postsRepository = {
       query: jest.fn(),
     };
+    tokenEligibilityCountsRepository = {
+      findOne: jest.fn(),
+    };
 
     service = new TokensService(
       tokensRepository as any,
       {} as any,
       transactionsRepository as any,
       postsRepository as any,
+      tokenEligibilityCountsRepository as any,
       {} as any,
       {} as any,
       {} as any,
@@ -232,10 +237,7 @@ describe('TokensService', () => {
     expect(result).toBe(queryBuilder);
     expect(leftJoin).toHaveBeenCalledTimes(2);
     expect(postCountsAlias).toBe('eligibility_post_counts');
-    expect(postCountsSql.startsWith('(')).toBe(true);
-    expect(postCountsSql).toContain('jsonb_array_elements_text');
-    expect(postCountsSql).toContain('regexp_matches');
-    expect(postCountsSql).toContain('COUNT(DISTINCT matched.post_id) AS post_count');
+    expect(postCountsSql.name).toBe('TokenEligibilityCounts');
     expect(postCountsCondition).toBe(
       'eligibility_post_counts.symbol = UPPER(token.symbol)',
     );
@@ -272,11 +274,13 @@ describe('TokensService', () => {
       symbol: 'TEST',
       holders_count: 6,
     } as any);
+    tokenEligibilityCountsRepository.findOne.mockResolvedValue({
+      post_count: 3,
+      stored_post_count: 1,
+      content_post_count: 2,
+    });
     tokensRepository.query.mockResolvedValue([
       {
-        post_count: '3',
-        stored_post_count: '1',
-        content_post_count: '2',
         trade_count: '4',
       },
     ]);
@@ -284,12 +288,12 @@ describe('TokensService', () => {
     const breakdown = await service.getTrendingEligibilityBreakdown('ct_sale');
 
     const [eligibilityQuery, eligibilityParams] = tokensRepository.query.mock.calls[0];
-    expect(eligibilityQuery).toContain('content_post_count');
-    expect(eligibilityQuery).toContain('UPPER(mention.symbol) = $1');
-    expect(eligibilityQuery).toContain('UPPER(content_match[1]) = $1');
-    expect(eligibilityQuery).toContain('tx.sale_address = $2');
-    expect(eligibilityQuery).not.toContain('GROUP BY matched.symbol');
-    expect(eligibilityParams).toEqual(['TEST', 'ct_sale']);
+    expect(tokenEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
+      where: { symbol: 'TEST' },
+    });
+    expect(eligibilityQuery).toContain('COUNT(*) AS trade_count');
+    expect(eligibilityQuery).toContain('tx.sale_address = $1');
+    expect(eligibilityParams).toEqual(['ct_sale']);
     expect(breakdown).toEqual({
       sale_address: 'ct_sale',
       symbol: 'TEST',

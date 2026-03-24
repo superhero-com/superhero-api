@@ -152,8 +152,12 @@ export const TRENDING_TAGS_API_KEY =
  */
 export const TRENDING_SCORE_CONFIG = {
   WINDOW_HOURS: 24,
-  REFRESH_CRON: '*/2 * * * *',
-  ACTIVITY_LOOKBACK_MINUTES: 15,
+  ACTIVE_REFRESH_CRON: '0 */2 * * *',
+  STALE_BACKFILL_CRON: '30 */6 * * *',
+  ELIGIBILITY_COUNTS_REFRESH_CRON: '15 */2 * * *',
+  // Keep the active lookback aligned with the 2-hour refresh cadence so
+  // scheduled runs do not skip most of the activity window.
+  ACTIVITY_LOOKBACK_MINUTES: 120,
   MAX_ACTIVE_BATCH: 250,
   MAX_STALE_BATCH: 150,
   MAX_CONCURRENT_UPDATES: 8,
