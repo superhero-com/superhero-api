@@ -83,6 +83,16 @@ export class BclPnlService {
       WITH heights AS (
         SELECT unnest($2::int[]) AS snapshot_height
       ),
+      -- Scan the address's transactions exactly once and materialise the result.
+      -- Without MATERIALIZED PostgreSQL 12+ may inline this CTE, re-executing
+      -- the index scan for every row in heights (N × index-scan instead of 1).
+      -- With MATERIALIZED the planner builds a hash table once in work_mem and
+      -- probes it for each snapshot height, avoiding repeated I/O.
+      address_txs AS MATERIALIZED (
+        SELECT sale_address, block_height, tx_type, volume, amount
+        FROM transactions
+        WHERE address = $1
+      ),
       aggregated_holdings AS (
         SELECT
           h.snapshot_height,
@@ -168,9 +178,7 @@ export class BclPnlService {
             0
           ) AS total_volume_sold
         FROM heights h
-        JOIN transactions tx
-          ON tx.address = $1
-          AND tx.block_height < h.snapshot_height
+        JOIN address_txs tx ON tx.block_height < h.snapshot_height
         GROUP BY h.snapshot_height, tx.sale_address
       )
       SELECT

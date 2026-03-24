@@ -136,9 +136,12 @@ describe('BclPnlService', () => {
     expect(transactionRepository.query).toHaveBeenCalledTimes(1);
     const [sql, params] = transactionRepository.query.mock.calls[0];
 
-    // Batch query uses UNNEST, snapshot_height grouping, and LATERAL price lookups
+    // Batch query uses UNNEST, a MATERIALIZED CTE (single tx scan), and LATERAL price lookups
     expect(sql).toContain('unnest($2::int[])');
     expect(sql).toContain('snapshot_height');
+    expect(sql).toContain('AS MATERIALIZED');
+    expect(sql).toContain('address_txs');
+    expect(sql).not.toContain('JOIN transactions tx'); // no repeated scan of transactions
     expect(sql).toContain('LEFT JOIN LATERAL');
     expect(sql).toContain('LIMIT 1');
     expect(sql).not.toContain('DISTINCT ON (agg.snapshot_height, agg.sale_address)');
