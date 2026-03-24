@@ -12,6 +12,7 @@ import {
   TRENDING_SCORE_CONFIG,
 } from '@/configs';
 import { fetchJson } from '@/utils/common';
+import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
@@ -1020,16 +1021,46 @@ export class TokensService {
     );
 
     if (uniqueHolders.length > 0) {
-      await this.tokenHoldersRepository.delete({
-        aex9_address: aex9Address,
+      await runWithDatabaseIssueLogging({
+        logger: this.logger,
+        stage: 'token holders delete before sync',
+        context: {
+          saleAddress,
+          aex9Address,
+          holderCount: uniqueHolders.length,
+        },
+        operation: () =>
+          this.tokenHoldersRepository.delete({
+            aex9_address: aex9Address,
+          }),
       });
-      await this.tokenHoldersRepository.upsert(uniqueHolders, {
-        conflictPaths: ['id'],
-        skipUpdateIfNoValuesChanged: true,
+      await runWithDatabaseIssueLogging({
+        logger: this.logger,
+        stage: 'token holders upsert',
+        context: {
+          saleAddress,
+          aex9Address,
+          holderCount: uniqueHolders.length,
+        },
+        operation: () =>
+          this.tokenHoldersRepository.upsert(uniqueHolders, {
+            conflictPaths: ['id'],
+            skipUpdateIfNoValuesChanged: true,
+          }),
       });
     }
-    await this.tokensRepository.update(token.sale_address, {
-      holders_count: uniqueHolders.length,
+    await runWithDatabaseIssueLogging({
+      logger: this.logger,
+      stage: 'token holders count update',
+      context: {
+        saleAddress,
+        aex9Address,
+        holderCount: uniqueHolders.length,
+      },
+      operation: () =>
+        this.tokensRepository.update(token.sale_address, {
+          holders_count: uniqueHolders.length,
+        }),
     });
   }
 
@@ -1147,7 +1178,7 @@ export class TokensService {
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
-    const maxAttempts = 3;
+    const maxAttempts = this.contractNotPresentMaxAttempts;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -1193,7 +1224,7 @@ export class TokensService {
 
         if (isContractNotReadyError) {
           if (attempt < maxAttempts) {
-            const waitMs = 500 * attempt;
+            const waitMs = this.contractNotPresentRetryDelayMs * attempt;
             this.logger.warn(
               `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address} (attempt ${attempt}/${maxAttempts}), retrying in ${waitMs}ms`,
             );
@@ -1202,7 +1233,8 @@ export class TokensService {
           }
 
           throw new RetryableTokenHoldersSyncError(
-            `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address}, retrying in 60000ms`,
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address}, retrying in ${this.contractNotPresentRetryDelayMs}ms`,
+            this.contractNotPresentRetryDelayMs,
           );
         }
 

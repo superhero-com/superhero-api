@@ -192,6 +192,33 @@ describe('RefreshTokenEligibilityCountsService', () => {
     expect((service as any).isRefreshing).toBe(false);
   });
 
+  it('adds structured database context for pool timeouts during refresh', async () => {
+    const loggerError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    dataSource.query.mockRejectedValueOnce(
+      new Error('timeout exceeded when trying to connect'),
+    );
+
+    await expect(service.manualRefresh()).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Database connectivity/pool issue during token eligibility ensure counts table: timeout exceeded when trying to connect.',
+      ),
+      expect.any(String),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('"issueKind":"pool_timeout"'),
+      expect.any(String),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      'Failed to refresh token eligibility counts via manual',
+      expect.stringContaining('timeout exceeded when trying to connect'),
+    );
+  });
+
   it('skips the startup refresh when no watermark exists yet', async () => {
     const loggerWarn = jest
       .spyOn((service as any).logger, 'warn')

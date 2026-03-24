@@ -177,8 +177,18 @@ describe('BlockSyncService', () => {
     expect(txRepository.save).not.toHaveBeenCalled();
     expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
     expect(loggerError).toHaveBeenCalledWith(
-      'Bulk insert failed for page due to database connectivity/pool pressure; skipping repository.save fallback',
-      expect.any(Error),
+      expect.stringContaining(
+        'Database connectivity/pool issue during transaction bulk upsert batch: timeout exceeded when trying to connect.',
+      ),
+      expect.any(String),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('"issueKind":"pool_timeout"'),
+      expect.any(String),
+    );
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('"dbPoolMax":40'),
+      expect.any(String),
     );
   });
 

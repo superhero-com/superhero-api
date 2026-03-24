@@ -3,7 +3,7 @@ import {
   TOKEN_LIST_ELIGIBILITY_CONFIG,
   TRENDING_SCORE_CONFIG,
 } from '@/configs/constants';
-import { TokensService } from './tokens.service';
+import { RetryableTokenHoldersSyncError, TokensService } from './tokens.service';
 
 describe('TokensService', () => {
   let service: TokensService;
@@ -342,6 +342,30 @@ describe('TokensService', () => {
 
     expect(holders).toEqual([]);
     expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses configured contract-not-present retry settings for holder sync retries', async () => {
+    (service as any).contractNotPresentMaxAttempts = 2;
+    (service as any).contractNotPresentRetryDelayMs = 1234;
+
+    jest
+      .spyOn(service, 'getTokenContractsBySaleAddress')
+      .mockRejectedValue(new Error('contract_does_not_exist'));
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+    await expect(
+      service._loadHoldersFromContract(
+        {
+          sale_address: 'ct_missing',
+        } as any,
+        'ct_aex9',
+      ),
+    ).rejects.toMatchObject<Partial<RetryableTokenHoldersSyncError>>({
+      retryDelayMs: 1234,
+    });
+
+    expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(2);
+    expect((service as any).sleep).toHaveBeenCalledWith(1234);
   });
 
   it('uses upsert and reload when creating a token from a raw transaction', async () => {
