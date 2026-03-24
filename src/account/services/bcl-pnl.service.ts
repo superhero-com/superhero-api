@@ -48,6 +48,212 @@ export class BclPnlService {
     return this.mapTokenPnls(tokenPnls, fromBlockHeight);
   }
 
+  /**
+   * Calculate PNL for each token across multiple block heights in a single SQL query.
+   * Deduplicates heights before querying to avoid redundant work.
+   *
+   * @param address - Account address
+   * @param blockHeights - Array of block heights to calculate PNL at
+   * @param fromBlockHeight - Optional: If provided, restrict cost-basis aggregates to this range
+   * @returns Map from block height to its TokenPnlResult
+   */
+  async calculateTokenPnlsBatch(
+    address: string,
+    blockHeights: number[],
+    fromBlockHeight?: number,
+  ): Promise<Map<number, TokenPnlResult>> {
+    const uniqueHeights = [...new Set(blockHeights)];
+    if (uniqueHeights.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.transactionRepository.query(
+      this.buildBatchTokenPnlsQuery(fromBlockHeight),
+      this.buildBatchQueryParameters(address, uniqueHeights, fromBlockHeight),
+    );
+
+    return this.mapTokenPnlsBatch(rows, uniqueHeights, fromBlockHeight);
+  }
+
+  private buildBatchTokenPnlsQuery(fromBlockHeight?: number): string {
+    const hasRange = fromBlockHeight !== undefined && fromBlockHeight !== null;
+    const rangeCondition = hasRange ? ' AND tx.block_height >= $3' : '';
+
+    return `
+      WITH heights AS (
+        SELECT unnest($2::int[]) AS snapshot_height
+      ),
+      -- Scan the address's transactions exactly once and materialise the result.
+      -- Without MATERIALIZED PostgreSQL 12+ may inline this CTE, re-executing
+      -- the index scan for every row in heights (N × index-scan instead of 1).
+      -- With MATERIALIZED the planner builds a hash table once in work_mem and
+      -- probes it for each snapshot height, avoiding repeated I/O.
+      address_txs AS MATERIALIZED (
+        SELECT sale_address, block_height, tx_type, volume, amount
+        FROM transactions
+        WHERE address = $1
+      ),
+      aggregated_holdings AS (
+        SELECT
+          h.snapshot_height,
+          tx.sale_address AS sale_address,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ) -
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN tx.tx_type = 'sell'
+                    THEN CAST(tx.volume AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            ),
+            0
+          ) AS current_holdings,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_volume_bought,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_spent_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_spent_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_volume_sold
+        FROM heights h
+        JOIN address_txs tx ON tx.block_height < h.snapshot_height
+        GROUP BY h.snapshot_height, tx.sale_address
+      )
+      SELECT
+        agg.snapshot_height,
+        agg.sale_address,
+        agg.current_holdings,
+        agg.total_volume_bought,
+        agg.total_amount_spent_ae,
+        agg.total_amount_spent_usd,
+        agg.total_amount_received_ae,
+        agg.total_amount_received_usd,
+        agg.total_volume_sold,
+        ae_price.current_unit_price_ae,
+        usd_price.current_unit_price_usd
+      FROM aggregated_holdings agg
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= agg.snapshot_height
+          AND p.buy_price->>'ae' IS NOT NULL
+          AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) ae_price ON true
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= agg.snapshot_height
+          AND p.buy_price->>'usd' IS NOT NULL
+          AND p.buy_price->>'usd' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) usd_price ON true
+      WHERE agg.current_holdings > 0
+    `;
+  }
+
+  private buildBatchQueryParameters(
+    address: string,
+    blockHeights: number[],
+    fromBlockHeight?: number,
+  ): Array<string | number | number[]> {
+    return fromBlockHeight !== undefined && fromBlockHeight !== null
+      ? [address, blockHeights, fromBlockHeight]
+      : [address, blockHeights];
+  }
+
+  private mapTokenPnlsBatch(
+    rows: Array<Record<string, any>>,
+    uniqueHeights: number[],
+    fromBlockHeight?: number,
+  ): Map<number, TokenPnlResult> {
+    // Group rows by snapshot_height
+    const rowsByHeight = new Map<number, Array<Record<string, any>>>();
+    for (const height of uniqueHeights) {
+      rowsByHeight.set(height, []);
+    }
+    for (const row of rows) {
+      const height = Number(row.snapshot_height);
+      const group = rowsByHeight.get(height);
+      if (group) {
+        group.push(row);
+      }
+    }
+
+    // Map each height's rows using the existing single-height mapper
+    const result = new Map<number, TokenPnlResult>();
+    for (const [height, heightRows] of rowsByHeight.entries()) {
+      result.set(height, this.mapTokenPnls(heightRows, fromBlockHeight));
+    }
+    return result;
+  }
+
   private buildTokenPnlsQuery(fromBlockHeight?: number): string {
     const hasRange = fromBlockHeight !== undefined && fromBlockHeight !== null;
     const rangeCondition = hasRange ? ' AND tx.block_height >= $3' : '';
@@ -140,34 +346,6 @@ export class BclPnlService {
         WHERE tx.address = $1
           AND tx.block_height < $2
         GROUP BY tx.sale_address
-      ),
-      latest_price_ae AS (
-        SELECT DISTINCT ON (tx.sale_address)
-          tx.sale_address,
-          CAST(NULLIF(tx.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
-        FROM transactions tx
-        INNER JOIN aggregated_holdings agg
-          ON agg.sale_address = tx.sale_address
-        WHERE tx.block_height <= $2
-          AND tx.buy_price->>'ae' IS NOT NULL
-          AND tx.buy_price->>'ae' != 'NaN'
-          AND tx.buy_price->>'ae' != 'null'
-          AND tx.buy_price->>'ae' != ''
-        ORDER BY tx.sale_address, tx.block_height DESC, tx.created_at DESC
-      ),
-      latest_price_usd AS (
-        SELECT DISTINCT ON (tx.sale_address)
-          tx.sale_address,
-          CAST(NULLIF(tx.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
-        FROM transactions tx
-        INNER JOIN aggregated_holdings agg
-          ON agg.sale_address = tx.sale_address
-        WHERE tx.block_height <= $2
-          AND tx.buy_price->>'usd' IS NOT NULL
-          AND tx.buy_price->>'usd' != 'NaN'
-          AND tx.buy_price->>'usd' != 'null'
-          AND tx.buy_price->>'usd' != ''
-        ORDER BY tx.sale_address, tx.block_height DESC, tx.created_at DESC
       )
       SELECT
         agg.sale_address,
@@ -178,13 +356,29 @@ export class BclPnlService {
         agg.total_amount_received_ae,
         agg.total_amount_received_usd,
         agg.total_volume_sold,
-        latest_price_ae.current_unit_price_ae,
-        latest_price_usd.current_unit_price_usd
+        ae_price.current_unit_price_ae,
+        usd_price.current_unit_price_usd
       FROM aggregated_holdings agg
-      LEFT JOIN latest_price_ae
-        ON latest_price_ae.sale_address = agg.sale_address
-      LEFT JOIN latest_price_usd
-        ON latest_price_usd.sale_address = agg.sale_address
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= $2
+          AND p.buy_price->>'ae' IS NOT NULL
+          AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) ae_price ON true
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= $2
+          AND p.buy_price->>'usd' IS NOT NULL
+          AND p.buy_price->>'usd' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) usd_price ON true
       WHERE agg.current_holdings > 0
     `;
   }
