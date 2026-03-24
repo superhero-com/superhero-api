@@ -2,6 +2,7 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Inject,
   NotFoundException,
   Param,
   ParseIntPipe,
@@ -26,9 +27,17 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
-import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import {
+  CACHE_MANAGER,
+  CacheInterceptor,
+  CacheTTL,
+} from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { Queue } from 'bull';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+
+const TOKENS_LIST_CACHE_TTL_MS = 60 * 1000;
+const TRENDING_TOKENS_LIST_CACHE_TTL_MS = 15 * 60 * 1000;
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -46,8 +55,33 @@ export class TokensController {
 
     private readonly tokensService: TokensService,
     private readonly communityFactoryService: CommunityFactoryService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {
     //
+  }
+
+  private buildTrendingListCacheKey(params: {
+    search?: string;
+    factory_address?: string;
+    creator_address?: string;
+    owner_address?: string;
+    page: number;
+    limit: number;
+    orderBy: string;
+    orderDirection: 'ASC' | 'DESC';
+    collection: 'all' | 'word' | 'number';
+  }): string {
+    return `tokens:list:trending:${JSON.stringify({
+      orderBy: params.orderBy,
+      orderDirection: params.orderDirection,
+      page: params.page,
+      limit: params.limit,
+      collection: params.collection,
+      search: params.search || '',
+      factory_address: params.factory_address || '',
+      creator_address: params.creator_address || '',
+      owner_address: params.owner_address || '',
+    })}`;
   }
 
   @ApiQuery({ name: 'search', type: 'string', required: false })
@@ -77,7 +111,7 @@ export class TokensController {
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
-  @CacheTTL(10)
+  @CacheTTL(TOKENS_LIST_CACHE_TTL_MS)
   @Get()
   async listAll(
     @Query('search') search = undefined,
@@ -107,6 +141,26 @@ export class TokensController {
     const allowedOrderDirections = ['ASC', 'DESC'];
     if (!allowedOrderDirections.includes(orderDirection)) {
       orderDirection = 'DESC';
+    }
+
+    let trendingCacheKey: string | null = null;
+    if (orderBy === 'trending_score') {
+      trendingCacheKey = this.buildTrendingListCacheKey({
+        search,
+        factory_address,
+        creator_address,
+        owner_address,
+        page,
+        limit,
+        orderBy,
+        orderDirection,
+        collection,
+      });
+      const cached =
+        await this.cacheManager.get<Pagination<Token>>(trendingCacheKey);
+      if (cached) {
+        return cached;
+      }
     }
 
     const queryBuilder = this.tokensRepository
@@ -160,13 +214,23 @@ export class TokensController {
       });
     }
 
-    return this.tokensService.queryTokensWithRanks(
+    const result = await this.tokensService.queryTokensWithRanks(
       queryBuilder,
       limit,
       page,
       orderBy,
       orderDirection,
     );
+
+    if (trendingCacheKey) {
+      await this.cacheManager.set(
+        trendingCacheKey,
+        result,
+        TRENDING_TOKENS_LIST_CACHE_TTL_MS,
+      );
+    }
+
+    return result;
   }
 
   @ApiOperation({ operationId: 'getTrendingEligibility' })

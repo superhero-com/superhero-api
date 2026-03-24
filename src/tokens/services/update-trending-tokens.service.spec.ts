@@ -101,6 +101,15 @@ describe('UpdateTrendingTokensService', () => {
     ]);
   });
 
+  it('skips stale backfill when another trending refresh is already running', async () => {
+    (service as any).isTrendingRefreshRunning = true;
+
+    await service.fixOldTrendingTokens();
+
+    expect(tokensRepository.createQueryBuilder).not.toHaveBeenCalled();
+    expect(tokensService.updateMultipleTokensTrendingScores).not.toHaveBeenCalled();
+  });
+
   it('ignores self-tips when collecting recently tipped symbols', async () => {
     const getRawManyTransactions = jest.fn().mockResolvedValue([]);
     transactionsRepository.createQueryBuilder.mockReturnValue({

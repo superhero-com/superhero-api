@@ -20,15 +20,13 @@ import BigNumber from 'bignumber.js';
 import { Queue } from 'bull';
 import moment from 'moment';
 import { TokenHolder } from './entities/token-holders.entity';
+import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { Token } from './entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Post } from '@/social/entities/post.entity';
-import {
-  buildTokenMentionExistsSql,
-  TOKEN_HASHTAG_REGEX_SOURCE,
-} from '@/social/utils/token-mentions-sql.util';
+import { buildTokenMentionExistsSql } from '@/social/utils/token-mentions-sql.util';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -126,6 +124,9 @@ export class TokensService {
 
     @InjectRepository(Post)
     private postsRepository: Repository<Post>,
+
+    @InjectRepository(TokenEligibilityCounts)
+    private tokenEligibilityCountsRepository: Repository<TokenEligibilityCounts>,
 
     private aeSdkService: AeSdkService,
 
@@ -698,50 +699,6 @@ export class TokensService {
     };
   }
 
-  private buildEligibilityPostCountsSubquery(): string {
-    return `
-      (
-        SELECT
-          matched.symbol,
-          COUNT(DISTINCT matched.post_id) AS post_count,
-          COUNT(DISTINCT matched.post_id) FILTER (
-            WHERE matched.match_source = 'stored'
-          ) AS stored_post_count,
-          COUNT(DISTINCT matched.post_id) FILTER (
-            WHERE matched.match_source = 'content'
-          ) AS content_post_count
-        FROM (
-          SELECT
-            post.id AS post_id,
-            UPPER(mention.symbol) AS symbol,
-            'stored' AS match_source
-          FROM posts post
-          CROSS JOIN LATERAL jsonb_array_elements_text(
-            COALESCE(post.token_mentions, '[]'::jsonb)
-          ) AS mention(symbol)
-          WHERE post.is_hidden = false
-            AND mention.symbol <> ''
-
-          UNION ALL
-
-          SELECT
-            post.id AS post_id,
-            UPPER(content_match[1]) AS symbol,
-            'content' AS match_source
-          FROM posts post
-          CROSS JOIN LATERAL regexp_matches(
-            COALESCE(post.content, ''),
-            '${TOKEN_HASHTAG_REGEX_SOURCE}',
-            'g'
-          ) AS content_match
-          WHERE post.is_hidden = false
-            AND jsonb_array_length(COALESCE(post.token_mentions, '[]'::jsonb)) = 0
-        ) matched
-        GROUP BY matched.symbol
-      )
-    `.trim();
-  }
-
   private buildEligibilityTradeCountsSubquery(): string {
     return `
       (
@@ -755,68 +712,11 @@ export class TokensService {
     `.trim();
   }
 
-  private buildEligibilityPostCountsForSymbolSubquery(
-    normalizedSymbolSql: string,
-  ): string {
-    return `
-      (
-        SELECT
-          COUNT(DISTINCT matched.post_id) AS post_count,
-          COUNT(DISTINCT matched.post_id) FILTER (
-            WHERE matched.match_source = 'stored'
-          ) AS stored_post_count,
-          COUNT(DISTINCT matched.post_id) FILTER (
-            WHERE matched.match_source = 'content'
-          ) AS content_post_count
-        FROM (
-          SELECT
-            post.id AS post_id,
-            'stored' AS match_source
-          FROM posts post
-          CROSS JOIN LATERAL jsonb_array_elements_text(
-            COALESCE(post.token_mentions, '[]'::jsonb)
-          ) AS mention(symbol)
-          WHERE post.is_hidden = false
-            AND mention.symbol <> ''
-            AND UPPER(mention.symbol) = ${normalizedSymbolSql}
-
-          UNION ALL
-
-          SELECT
-            post.id AS post_id,
-            'content' AS match_source
-          FROM posts post
-          CROSS JOIN LATERAL regexp_matches(
-            COALESCE(post.content, ''),
-            '${TOKEN_HASHTAG_REGEX_SOURCE}',
-            'g'
-          ) AS content_match
-          WHERE post.is_hidden = false
-            AND jsonb_array_length(COALESCE(post.token_mentions, '[]'::jsonb)) = 0
-            AND UPPER(content_match[1]) = ${normalizedSymbolSql}
-        ) matched
-      )
-    `.trim();
-  }
-
-  private buildEligibilityTradeCountForTokenSubquery(
-    saleAddressSql: string,
-  ): string {
-    return `
-      (
-        SELECT COUNT(*) AS trade_count
-        FROM transactions tx
-        WHERE tx.sale_address = ${saleAddressSql}
-          AND tx.tx_type IN ('buy', 'sell')
-      )
-    `.trim();
-  }
-
   applyListEligibilityFilters(
     queryBuilder: SelectQueryBuilder<Token>,
   ): SelectQueryBuilder<Token> {
     queryBuilder.leftJoin(
-      this.buildEligibilityPostCountsSubquery(),
+      TokenEligibilityCounts,
       'eligibility_post_counts',
       'eligibility_post_counts.symbol = UPPER(token.symbol)',
     );
@@ -853,21 +753,25 @@ export class TokensService {
     }
 
     const normalizedSymbol = (token.symbol || '').trim().toUpperCase();
-    const [rawBreakdown] = await this.tokensRepository.query(
-      `
-        SELECT
-          COALESCE(eligibility_post_counts.post_count, 0) AS post_count,
-          COALESCE(eligibility_post_counts.stored_post_count, 0) AS stored_post_count,
-          COALESCE(eligibility_post_counts.content_post_count, 0) AS content_post_count,
-          COALESCE(eligibility_trade_counts.trade_count, 0) AS trade_count
-        FROM ${this.buildEligibilityPostCountsForSymbolSubquery('$1')} eligibility_post_counts
-        CROSS JOIN ${this.buildEligibilityTradeCountForTokenSubquery('$2')} eligibility_trade_counts
-      `,
-      [normalizedSymbol, token.sale_address],
-    );
+    const [counts, tradeCounts] = await Promise.all([
+      this.tokenEligibilityCountsRepository.findOne({
+        where: { symbol: normalizedSymbol },
+      }),
+      this.tokensRepository.query(
+        `
+          SELECT COUNT(*) AS trade_count
+          FROM transactions tx
+          WHERE tx.sale_address = $1
+            AND tx.tx_type IN ('buy', 'sell')
+        `,
+        [token.sale_address],
+      ),
+    ]);
+
+    const rawBreakdown = tradeCounts[0] ?? {};
 
     const holdersCount = Number(token.holders_count || 0);
-    const postCount = Number(rawBreakdown?.post_count || 0);
+    const postCount = Number(counts?.post_count || 0);
     const tradeCount = Number(rawBreakdown?.trade_count || 0);
 
     const passes = {
@@ -883,8 +787,8 @@ export class TokensService {
       symbol: token.symbol,
       holders_count: holdersCount,
       post_count: postCount,
-      stored_post_count: Number(rawBreakdown?.stored_post_count || 0),
-      content_post_count: Number(rawBreakdown?.content_post_count || 0),
+      stored_post_count: Number(counts?.stored_post_count || 0),
+      content_post_count: Number(counts?.content_post_count || 0),
       trade_count: tradeCount,
       thresholds: {
         min_holders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,

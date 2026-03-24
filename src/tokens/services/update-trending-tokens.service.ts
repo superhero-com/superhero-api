@@ -16,6 +16,8 @@ import { buildNormalizedTokenMentionSelectSql } from '@/social/utils/token-menti
 @Injectable()
 export class UpdateTrendingTokensService {
   private readonly logger = new Logger(UpdateTrendingTokensService.name);
+  private isTrendingRefreshRunning = false;
+
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
@@ -58,12 +60,17 @@ export class UpdateTrendingTokensService {
   }
 
   isUpdatingTrendingTokens = false;
-  @Cron(TRENDING_SCORE_CONFIG.REFRESH_CRON)
+  @Cron(TRENDING_SCORE_CONFIG.ACTIVE_REFRESH_CRON)
   async updateTrendingTokens() {
-    if (this.isUpdatingTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
+    if (
+      this.isUpdatingTrendingTokens ||
+      this.isTrendingRefreshRunning ||
+      !UPDATE_TRENDING_TOKENS_ENABLED
+    ) {
       return;
     }
     this.isUpdatingTrendingTokens = true;
+    this.isTrendingRefreshRunning = true;
     try {
       const recentSince = moment()
         .subtract(TRENDING_SCORE_CONFIG.ACTIVITY_LOOKBACK_MINUTES, 'minutes')
@@ -202,17 +209,23 @@ export class UpdateTrendingTokensService {
 
       await this.tokensService.updateMultipleTokensTrendingScores(tokens);
     } finally {
+      this.isTrendingRefreshRunning = false;
       this.isUpdatingTrendingTokens = false;
     }
   }
 
   isFixingOldTrendingTokens = false;
-  @Cron(TRENDING_SCORE_CONFIG.REFRESH_CRON)
+  @Cron(TRENDING_SCORE_CONFIG.STALE_BACKFILL_CRON)
   async fixOldTrendingTokens() {
-    if (this.isFixingOldTrendingTokens || !UPDATE_TRENDING_TOKENS_ENABLED) {
+    if (
+      this.isFixingOldTrendingTokens ||
+      this.isTrendingRefreshRunning ||
+      !UPDATE_TRENDING_TOKENS_ENABLED
+    ) {
       return;
     }
     this.isFixingOldTrendingTokens = true;
+    this.isTrendingRefreshRunning = true;
     try {
       const staleBefore = moment()
         .subtract(TRENDING_SCORE_CONFIG.STALE_AFTER_MINUTES, 'minutes')
@@ -235,6 +248,7 @@ export class UpdateTrendingTokensService {
 
       await this.tokensService.updateMultipleTokensTrendingScores(tokens);
     } finally {
+      this.isTrendingRefreshRunning = false;
       this.isFixingOldTrendingTokens = false;
     }
   }
