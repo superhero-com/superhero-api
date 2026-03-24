@@ -95,6 +95,16 @@ export interface TokenTrendingEligibilityBreakdown {
   };
 }
 
+export class RetryableTokenHoldersSyncError extends Error {
+  constructor(
+    message: string,
+    readonly retryDelayMs = 60_000,
+  ) {
+    super(message);
+    this.name = 'RetryableTokenHoldersSyncError';
+  }
+}
+
 @Injectable()
 export class TokensService {
   private readonly logger = new Logger(TokensService.name);
@@ -1171,6 +1181,7 @@ export class TokensService {
         return holders || [];
       } catch (error: any) {
         const isOutOfGasError = this.isOutOfGasError(error);
+        const isContractNotReadyError = this.isContractNotReadyError(error);
         const isTimeoutError = error?.message?.includes('timeout');
 
         if (isOutOfGasError) {
@@ -1178,6 +1189,21 @@ export class TokensService {
             `SyncTokenHoldersQueue->_loadHoldersFromContract: out of gas for ${aex9Address}, switching to middleware`,
           );
           return [];
+        }
+
+        if (isContractNotReadyError) {
+          if (attempt < maxAttempts) {
+            const waitMs = 500 * attempt;
+            this.logger.warn(
+              `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address} (attempt ${attempt}/${maxAttempts}), retrying in ${waitMs}ms`,
+            );
+            await this.sleep(waitMs);
+            continue;
+          }
+
+          throw new RetryableTokenHoldersSyncError(
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address}, retrying in 60000ms`,
+          );
         }
 
         if (attempt < maxAttempts) {
@@ -1199,6 +1225,11 @@ export class TokensService {
     }
 
     return [];
+  }
+
+  private isContractNotReadyError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('contract_does_not_exist');
   }
 
   private async withTimeout<T>(
