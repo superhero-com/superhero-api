@@ -11,12 +11,18 @@ describe('TokensService', () => {
   let transactionsRepository: any;
   let postsRepository: any;
   let tokenEligibilityCountsRepository: any;
+  let communityFactoryService: any;
+  let pullTokenInfoQueue: any;
 
   beforeEach(() => {
     tokensRepository = {
       createQueryBuilder: jest.fn(),
       update: jest.fn(),
       query: jest.fn(),
+      upsert: jest.fn(),
+      save: jest.fn(),
+      delete: jest.fn(),
+      findOneBy: jest.fn(),
     };
     transactionsRepository = {
       query: jest.fn(),
@@ -26,6 +32,12 @@ describe('TokensService', () => {
     };
     tokenEligibilityCountsRepository = {
       findOne: jest.fn(),
+    };
+    communityFactoryService = {
+      getCurrentFactory: jest.fn(),
+    };
+    pullTokenInfoQueue = {
+      add: jest.fn(),
     };
 
     service = new TokensService(
@@ -37,8 +49,8 @@ describe('TokensService', () => {
       {} as any,
       {} as any,
       {} as any,
-      {} as any,
-      {} as any,
+      communityFactoryService as any,
+      pullTokenInfoQueue as any,
     );
   });
 
@@ -330,5 +342,62 @@ describe('TokensService', () => {
 
     expect(holders).toEqual([]);
     expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses upsert and reload when creating a token from a raw transaction', async () => {
+    communityFactoryService.getCurrentFactory.mockResolvedValue({
+      address: 'ct_factory',
+      collections: { word: true },
+    });
+    jest.spyOn(service, 'findByNameOrSymbol').mockResolvedValue(null);
+    tokensRepository.findOneBy
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        sale_address: 'ct_sale',
+        name: 'BLA',
+      });
+
+    const token = await service.createTokenFromRawTransaction({
+      hash: 'th_hash',
+      microTime: '2026-03-24T11:49:27.106Z',
+      tx: {
+        function: 'create_community',
+        return_type: 'ok',
+        return: {
+          value: [{ value: 'ct_dao' }, { value: 'ct_sale' }],
+        },
+        arguments: [{ value: 'word' }, { value: 'BLA' }],
+        callerId: 'ak_creator',
+      },
+    });
+
+    expect(tokensRepository.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dao_address: 'ct_dao',
+        sale_address: 'ct_sale',
+        factory_address: 'ct_factory',
+        creator_address: 'ak_creator',
+        name: 'BLA',
+        symbol: 'BLA',
+        create_tx_hash: 'th_hash',
+      }),
+      {
+        conflictPaths: ['sale_address'],
+        skipUpdateIfNoValuesChanged: true,
+      },
+    );
+    expect(tokensRepository.save).not.toHaveBeenCalled();
+    expect(pullTokenInfoQueue.add).toHaveBeenCalledWith(
+      { saleAddress: 'ct_sale' },
+      expect.objectContaining({
+        jobId: 'pullTokenInfo-ct_sale',
+        lifo: true,
+        removeOnComplete: true,
+      }),
+    );
+    expect(token).toEqual({
+      sale_address: 'ct_sale',
+      name: 'BLA',
+    });
   });
 });

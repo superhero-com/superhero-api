@@ -913,15 +913,20 @@ export class TokensService {
       create_tx_hash: rawTransaction?.hash,
     };
 
-    let token;
-    let isNewToken = false;
-    // TODO: should only update if the data is different
-    if (tokenExists?.sale_address) {
-      await this.tokensRepository.update(tokenExists.sale_address, tokenData);
-      token = await this.findByAddress(tokenExists.sale_address);
-    } else {
-      token = await this.tokensRepository.save(tokenData);
-      isNewToken = true;
+    const existingTokenBySaleAddress = await this.findOne(saleAddress);
+    const isNewToken = !existingTokenBySaleAddress;
+
+    // Mirror createToken() so concurrent requests converge instead of surfacing
+    // duplicate-key errors when they race to create the same row.
+    await this.tokensRepository.upsert(tokenData, {
+      conflictPaths: ['sale_address'],
+      skipUpdateIfNoValuesChanged: true,
+    });
+    const token = await this.findOne(saleAddress);
+    if (!token) {
+      throw new Error(
+        `Failed to create or retrieve token for sale address: ${saleAddress}`,
+      );
     }
 
     await this.pullTokenInfoQueue.add(
