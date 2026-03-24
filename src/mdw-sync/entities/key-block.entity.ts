@@ -17,6 +17,7 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
 @Index(['hash'])
 @Index(['prev_hash'])
 @Index(['prev_key_hash'])
+@Index(['time'])
 @ObjectType()
 export class KeyBlock {
   @PrimaryColumn()

@@ -17,10 +17,12 @@ import { LeaderboardController } from './controllers/leaderboard.controller';
 import { AccountLeaderboardSnapshot } from './entities/account-leaderboard-snapshot.entity';
 import { LeaderboardSnapshotService } from './services/leaderboard-snapshot.service';
 import { ProfileModule } from '@/profile/profile.module';
+import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
 
 @Module({
   imports: [
     AeModule, // Includes CoinGeckoService
+    AePricingModule, // Provides CoinHistoricalPriceService for DB-cached prices
     ProfileModule,
     TransactionsModule,
     TokensModule,

@@ -353,3 +353,113 @@ export async function timestampToAeHeight(
 
   return low;
 }
+
+/**
+ * Resolves multiple timestamps to block heights in a single SQL query against the local
+ * key_blocks table. For any timestamps not covered by the local table (sync gaps),
+ * falls back to the individual timestampToAeHeight function.
+ *
+ * @param targetTimestamps - Array of timestamps in milliseconds
+ * @param dataSource - TypeORM DataSource for database queries
+ * @returns Map from each input timestamp (ms) to its resolved block height
+ */
+export async function batchTimestampToAeHeight(
+  targetTimestamps: number[],
+  dataSource: DataSource,
+): Promise<Map<number, number>> {
+  if (targetTimestamps.length === 0) {
+    return new Map();
+  }
+
+  const result = new Map<number, number>();
+
+  // ── Tier 1: key_blocks ────────────────────────────────────────────────────
+  // key_blocks.time is numeric (milliseconds). Comparing directly (no CAST)
+  // lets PostgreSQL use the btree index via an index scan backward, reducing
+  // this from a full seq-scan (~450 k rows × N iterations) to O(log N) per
+  // timestamp.
+  let rows: Array<{ target_ms: string; height: number | null }> = [];
+  try {
+    rows = await dataSource.query(
+      `
+      SELECT t.target_ms, kb.height
+      FROM unnest($1::bigint[]) AS t(target_ms)
+      LEFT JOIN LATERAL (
+        SELECT height
+        FROM key_blocks
+        WHERE time <= t.target_ms
+        ORDER BY time DESC
+        LIMIT 1
+      ) kb ON true
+      `,
+      [targetTimestamps],
+    );
+  } catch (error) {
+    console.warn(
+      '[batchTimestampToAeHeight] key_blocks query failed, will try transactions fallback:',
+      error,
+    );
+  }
+
+  // Build a map of resolved timestamps from the key_blocks result
+  const resolvedFromDb = new Map<number, number>();
+  for (const row of rows) {
+    const ts = Number(row.target_ms);
+    if (row.height !== null && row.height !== undefined) {
+      resolvedFromDb.set(ts, Number(row.height));
+    }
+  }
+
+  // ── Tier 2: transactions table ────────────────────────────────────────────
+  // For timestamps that key_blocks could not resolve (sync gaps, future dates,
+  // etc.) we fall back to the transactions table.  The `created_at` index lets
+  // PostgreSQL do a single index scan backward per timestamp — no HTTP calls,
+  // no guessing, no binary search against the Middleware.
+  const fallbackTimestamps = targetTimestamps.filter(
+    (ts) => !resolvedFromDb.has(ts),
+  );
+
+  if (fallbackTimestamps.length > 0) {
+    let txRows: Array<{ target_ms: string; block_height: number | null }> = [];
+    try {
+      txRows = await dataSource.query(
+        `
+        SELECT t.target_ms, tx.block_height
+        FROM unnest($1::bigint[]) AS t(target_ms)
+        LEFT JOIN LATERAL (
+          SELECT block_height
+          FROM transactions
+          WHERE created_at <= to_timestamp(t.target_ms::float8 / 1000)
+            AND block_height IS NOT NULL
+            AND block_height > 0
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) tx ON true
+        `,
+        [fallbackTimestamps],
+      );
+    } catch (error) {
+      console.warn(
+        '[batchTimestampToAeHeight] transactions fallback query failed:',
+        error,
+      );
+    }
+
+    for (const row of txRows) {
+      const ts = Number(row.target_ms);
+      if (row.block_height !== null && row.block_height !== undefined) {
+        resolvedFromDb.set(ts, Number(row.block_height));
+      }
+    }
+  }
+
+  // Merge into the final result map
+  for (const ts of targetTimestamps) {
+    const height = resolvedFromDb.get(ts);
+    if (height !== undefined) {
+      result.set(ts, height);
+    }
+  }
+
+  return result;
+}
