@@ -77,7 +77,6 @@ export class BlockSyncService {
           operation: () =>
             this.blockRepository.upsert(batch, {
               conflictPaths: ['height'],
-              skipUpdateIfNoValuesChanged: true,
             }),
         });
       }

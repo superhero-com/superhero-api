@@ -167,10 +167,11 @@ export class TokenService {
         manager,
       );
     } else {
-      // Use upsert to handle race conditions where token might be created concurrently
+      // Use upsert to handle race conditions where token might be created concurrently.
+      // Do not use skipUpdateIfNoValuesChanged because Token has json columns and
+      // PostgreSQL cannot compare json values with "=" during that optimization.
       await repository.upsert(tokenData, {
         conflictPaths: ['sale_address'],
-        skipUpdateIfNoValuesChanged: true,
       });
       token = await this.findByAddress(saleAddress, false, manager);
       isNewToken = true;
