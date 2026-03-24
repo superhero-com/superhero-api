@@ -175,18 +175,10 @@ export class PortfolioService {
       }
     }
 
-    const t0 = Date.now();
-    const perfLog = (label: string, since = t0) =>
-      this.logger.log(
-        `[perf] ${label}: ${Date.now() - since}ms (total: ${Date.now() - t0}ms) | addr=${address.slice(0, 12)} snapshots=${timestamps.length}`,
-      );
-
     // Fetch price history and current price in parallel.
     // For historical prices, query the local coin_historical_prices table first
     // (populated by the background CoinGecko sync). Only fall back to the live
     // CoinGecko API when the DB has no data for the needed range.
-    const tCG = Date.now();
-
     // Extend start backward a few days so the first snapshot always has a price
     // data point at or before it, even when the range starts close to midnight.
     const priceRangeStartMs = start.clone().subtract(3, 'days').valueOf();
@@ -207,9 +199,6 @@ export class PortfolioService {
       // DB data sorted ascending — reverse to match the descending order
       // expected by findClosestHistoricalPrice.
       aePriceHistory = dbPriceRows.reverse();
-      this.logger.debug(
-        `[perf] prices from DB: ${dbPriceRows.length} points`,
-      );
     } else {
       // DB has no data for this range; fall back to live CoinGecko fetch.
       const daysNeeded = Math.ceil(now.diff(start, 'days', true)) + 3;
@@ -218,12 +207,9 @@ export class PortfolioService {
         .fetchHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
         .then((prices) => prices.sort((a, b) => b[0] - a[0]));
     }
-    perfLog('coingecko/prices', tCG);
-
     // Resolve all block heights in a single batch query against the local key_blocks table.
     // Any timestamps not covered by the table (sync gaps) fall back to individual resolution.
     const targetTimestamps = timestamps.map((t) => t.valueOf());
-    const tHeights = Date.now();
     const heightMap = await batchTimestampToAeHeight(
       targetTimestamps,
       this.dataSource,
@@ -246,8 +232,6 @@ export class PortfolioService {
       );
       return lastKnownHeight;
     });
-    perfLog(`batchTimestampToAeHeight → [${blockHeights.join(',')}]`, tHeights);
-
     // startBlockHeight is the block at the beginning of the requested range.
     // timestamps[0] === start (same millisecond value), so blockHeights[0] is
     // already the correct answer — no extra DB or API call needed.
@@ -258,7 +242,6 @@ export class PortfolioService {
 
     // Pre-compute PNL for all unique block heights in a single batch query.
     // This replaces the previous per-snapshot SQL calls (N queries → 1 query).
-    const tPnl = Date.now();
     const [pnlMap, rangePnlMap] = await Promise.all([
       this.bclPnlService.calculateTokenPnlsBatch(
         address,
@@ -273,8 +256,6 @@ export class PortfolioService {
           )
         : Promise.resolve(undefined as Map<number, TokenPnlResult> | undefined),
     ]);
-    perfLog('calculateTokenPnlsBatch', tPnl);
-
     const emptyPnl: TokenPnlResult = {
       pnls: {},
       totalCostBasisAe: 0,
@@ -286,7 +267,6 @@ export class PortfolioService {
     };
 
     const balanceCache = new Map<number, Promise<string>>();
-    const tBalance = Date.now();
     const data = await this.mapWithConcurrency(
       timestamps,
       this.snapshotConcurrency,
@@ -386,8 +366,6 @@ export class PortfolioService {
       },
     );
 
-    perfLog('getBalance + snapshot assembly', tBalance);
-    perfLog('TOTAL');
     return data;
   }
 
