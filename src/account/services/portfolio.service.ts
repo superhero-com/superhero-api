@@ -9,10 +9,11 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CoinGeckoService } from '@/ae/coin-gecko.service';
 import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
-import { AETERNITY_COIN_ID } from '@/configs';
+import { ACTIVE_NETWORK, AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
 import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
+import { fetchJson } from '@/utils/common';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
@@ -98,6 +99,7 @@ export class PortfolioService {
    * separate slow historical-state request.
    */
   private readonly BALANCE_BUCKET_SIZE = 300;
+  private readonly accountPubkeyPointerKey = 'account_pubkey';
 
   constructor(
     @InjectRepository(TokenHolder)
@@ -175,6 +177,8 @@ export class PortfolioService {
       }
     }
 
+    const resolvedAddress = await this.resolveAccountAddress(address);
+
     // Fetch price history and current price in parallel.
     // For historical prices, query the local coin_historical_prices table first
     // (populated by the background CoinGecko sync). Only fall back to the live
@@ -244,13 +248,13 @@ export class PortfolioService {
     // This replaces the previous per-snapshot SQL calls (N queries → 1 query).
     const [pnlMap, rangePnlMap] = await Promise.all([
       this.bclPnlService.calculateTokenPnlsBatch(
-        address,
+        resolvedAddress,
         uniqueBlockHeights,
         undefined,
       ),
       includePnl && useRangeBasedPnl && startBlockHeight !== undefined
         ? this.bclPnlService.calculateTokenPnlsBatch(
-            address,
+            resolvedAddress,
             uniqueBlockHeights,
             startBlockHeight,
           )
@@ -281,7 +285,7 @@ export class PortfolioService {
         // Balance still requires an external AE node call per unique block height
         const aeBalancePromise = this.getCachedBalance(
           balanceCache,
-          address,
+          resolvedAddress,
           blockHeight,
         );
 
@@ -369,6 +373,45 @@ export class PortfolioService {
     return data;
   }
 
+  private async resolveAccountAddress(address: string): Promise<string> {
+    if (!address || address.startsWith('ak_') || !address.includes('.')) {
+      return address;
+    }
+
+    try {
+      const response = await fetchJson<{
+        owner?: string;
+        pointers?: Array<{
+          key?: string;
+          encoded_key?: string;
+          id?: string;
+        }>;
+      }>(`${ACTIVE_NETWORK.url}/v3/names/${encodeURIComponent(address)}`);
+
+      const accountPointer = response?.pointers?.find(
+        (pointer) =>
+          pointer?.key === this.accountPubkeyPointerKey &&
+          typeof pointer.id === 'string' &&
+          pointer.id.startsWith('ak_'),
+      )?.id;
+
+      if (accountPointer) {
+        return accountPointer;
+      }
+
+      if (response?.owner?.startsWith('ak_')) {
+        return response.owner;
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve account reference ${address}, falling back to raw value`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    return address;
+  }
+
   private getCachedBalance(
     cache: Map<number, Promise<string>>,
     address: string,
@@ -387,9 +430,12 @@ export class PortfolioService {
       return cached;
     }
 
-    const promise = this.aeSdkService.sdk.getBalance(address as any, {
-      height: bucketHeight,
-    } as any);
+    const promise = this.aeSdkService.sdk.getBalance(
+      address as any,
+      {
+        height: bucketHeight,
+      } as any,
+    );
     cache.set(bucketHeight, promise);
     return promise;
   }

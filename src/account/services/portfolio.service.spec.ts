@@ -2,9 +2,14 @@ import moment from 'moment';
 import { PortfolioService } from './portfolio.service';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
 import { TokenPnlResult } from './bcl-pnl.service';
+import { fetchJson } from '@/utils/common';
 
 jest.mock('@/utils/getBlochHeight', () => ({
   batchTimestampToAeHeight: jest.fn(),
+}));
+
+jest.mock('@/utils/common', () => ({
+  fetchJson: jest.fn(),
 }));
 
 describe('PortfolioService', () => {
@@ -29,7 +34,7 @@ describe('PortfolioService', () => {
       getPriceData: jest.fn(),
     };
     const coinHistoricalPriceService = {
-      // Default: no DB data → falls back to coinGeckoService.fetchHistoricalPrice
+      // Default: no DB data -> falls back to coinGeckoService.fetchHistoricalPrice
       getHistoricalPriceData: jest.fn().mockResolvedValue([]),
     };
     const bclPnlService = {
@@ -59,6 +64,7 @@ describe('PortfolioService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (fetchJson as jest.Mock).mockResolvedValue(null);
   });
 
   it('limits concurrent balance fetches to snapshotConcurrency', async () => {
@@ -110,11 +116,8 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(10);
-    // PNL is pre-computed in a single batch call
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(1);
-    // All 10 heights land in different 300-block buckets, so 10 balance calls
     expect(aeSdkService.sdk.getBalance).toHaveBeenCalledTimes(10);
-    // Balance concurrency cap is 15
     expect(maxInFlight).toBeLessThanOrEqual(15);
   });
 
@@ -122,7 +125,6 @@ describe('PortfolioService', () => {
     const { service, aeSdkService, coinGeckoService, bclPnlService } =
       createService();
 
-    // All timestamps map to the same block height
     (batchTimestampToAeHeight as jest.Mock).mockImplementation(
       async (timestamps: number[]) => {
         const map = new Map<number, number>();
@@ -150,16 +152,13 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(3);
-    // All 3 timestamps share height 123, so balance is fetched once
     expect(aeSdkService.sdk.getBalance).toHaveBeenCalledTimes(1);
-    // Batch PNL is called once with deduplicated heights
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(1);
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
       'ak_test',
       [123],
       undefined,
     );
-    // Per-snapshot price is still resolved per timestamp, not per block height
     expect(snapshots.map((snapshot) => snapshot.ae_price)).toEqual([1, 2, 3]);
   });
 
@@ -167,8 +166,6 @@ describe('PortfolioService', () => {
     const { service, aeSdkService, coinGeckoService, bclPnlService } =
       createService();
 
-    // 4 timestamps that map to 3 distinct exact heights, but only 2 distinct
-    // 300-block buckets:  100 → bucket 0,  250 → bucket 0,  350 → bucket 300,  599 → bucket 300
     (batchTimestampToAeHeight as jest.Mock).mockImplementation(
       async (timestamps: number[]) => {
         const heights = [100, 250, 350, 599];
@@ -202,10 +199,7 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(4);
-    // Heights 100 and 250 → bucket 0; heights 350 and 599 → bucket 300.
-    // Only 2 unique buckets → exactly 2 getBalance calls.
     expect(aeSdkService.sdk.getBalance).toHaveBeenCalledTimes(2);
-    // getBalance is called with the bucket boundaries, not the raw heights
     const calledHeights = aeSdkService.sdk.getBalance.mock.calls.map(
       ([, opts]: [any, any]) => opts.height,
     );
@@ -248,12 +242,10 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(3);
-    // Called twice: once for cumulative, once for range-based
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(2);
-    // startBlockHeight = blockHeights[0] = 100 (timestamps[0] maps to 100+0)
     const calls = bclPnlService.calculateTokenPnlsBatch.mock.calls;
-    expect(calls[0][2]).toBeUndefined(); // cumulative: no fromBlockHeight
-    expect(calls[1][2]).toBe(100); // range: fromBlockHeight = blockHeights[0]
+    expect(calls[0][2]).toBeUndefined();
+    expect(calls[1][2]).toBe(100);
   });
 
   it('uses coin_historical_prices DB table when available, skipping CoinGecko', async () => {
@@ -273,7 +265,6 @@ describe('PortfolioService', () => {
       },
     );
 
-    // DB returns prices in ascending order (as the repository does)
     coinHistoricalPriceService.getHistoricalPriceData.mockResolvedValue([
       [Date.UTC(2026, 0, 1), 1],
       [Date.UTC(2026, 0, 2), 2],
@@ -297,13 +288,61 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(3);
-    // Prices come from DB — CoinGecko historical endpoint is never called
     expect(coinGeckoService.fetchHistoricalPrice).not.toHaveBeenCalled();
-    // DB service was queried for the needed range
     expect(
       coinHistoricalPriceService.getHistoricalPriceData,
     ).toHaveBeenCalledTimes(1);
-    // Correct prices are assigned to each snapshot
     expect(snapshots.map((s) => s.ae_price)).toEqual([1, 2, 3]);
+  });
+
+  it('resolves chain names to account pubkeys before balance and pnl lookups', async () => {
+    const {
+      service,
+      aeSdkService,
+      coinGeckoService,
+      coinHistoricalPriceService,
+      bclPnlService,
+    } = createService();
+
+    (batchTimestampToAeHeight as jest.Mock).mockImplementation(
+      async (timestamps: number[]) => {
+        const map = new Map<number, number>();
+        timestamps.forEach((ts) => map.set(ts, 300));
+        return map;
+      },
+    );
+    (fetchJson as jest.Mock).mockResolvedValue({
+      owner: 'ak_owner',
+      pointers: [{ key: 'account_pubkey', id: 'ak_resolved' }],
+    });
+    coinGeckoService.getPriceData.mockResolvedValue({ usd: 99 });
+    coinHistoricalPriceService.getHistoricalPriceData.mockResolvedValue([
+      [Date.UTC(2026, 0, 1), 1],
+    ]);
+    aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000');
+    bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
+      new Map([[300, basePnlResult]]),
+    );
+
+    await service.getPortfolioHistory('mybtc.chain', {
+      startDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      endDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      interval: 86400,
+    });
+
+    expect(fetchJson).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'https://mainnet.aeternity.io/v3/names/mybtc.chain',
+      ),
+    );
+    expect(aeSdkService.sdk.getBalance).toHaveBeenCalledWith(
+      'ak_resolved',
+      expect.objectContaining({ height: 300 }),
+    );
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      'ak_resolved',
+      [300],
+      undefined,
+    );
   });
 });
