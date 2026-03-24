@@ -192,20 +192,63 @@ describe('RefreshTokenEligibilityCountsService', () => {
     expect((service as any).isRefreshing).toBe(false);
   });
 
-  it('refreshes on module init', async () => {
+  it('skips the startup refresh when no watermark exists yet', async () => {
+    const loggerWarn = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+
     dataSource.query
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([]);
+
+    await service.onModuleInit();
+
+    expect(dataSource.query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('CREATE TABLE IF NOT EXISTS token_eligibility_counts'),
+    );
+    expect(dataSource.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(
+        'CREATE TABLE IF NOT EXISTS token_eligibility_refresh_state',
+      ),
+    );
+    expect(dataSource.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('FROM token_eligibility_refresh_state'),
+      ['default'],
+    );
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping startup token eligibility refresh'),
+    );
+  });
+
+  it('refreshes on module init when a watermark already exists', async () => {
+    dataSource.query
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([
+        {
+          last_processed_created_at: '2026-03-24T00:00:00.000Z',
+          last_processed_post_id: 'post-3',
+        },
+      ])
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce([{ count: 3 }]);
     manager.query.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM token_eligibility_refresh_state')) {
-        return [];
+        return [
+          {
+            last_processed_created_at: '2026-03-24T00:00:00.000Z',
+            last_processed_post_id: 'post-3',
+          },
+        ];
       }
       if (sql.includes('ORDER BY post.created_at DESC')) {
-        return [{ created_at: '2026-03-24T00:00:00.000Z', id: 'post-3' }];
-      }
-      if (sql.includes('SELECT COUNT(*)::int AS total_posts')) {
-        return [{ total_posts: 3 }];
+        return [];
       }
       return [];
     });

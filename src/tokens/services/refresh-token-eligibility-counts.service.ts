@@ -43,6 +43,16 @@ export class RefreshTokenEligibilityCountsService {
   ) {}
 
   async onModuleInit() {
+    await this.ensureTableExists();
+
+    const state = await this.loadRefreshState();
+    if (!state?.last_processed_created_at) {
+      this.logger.warn(
+        'Skipping startup token eligibility refresh because no watermark exists yet; run a manual refresh off-peak to backfill historical counts.',
+      );
+      return;
+    }
+
     await this.refreshSafely('startup');
   }
 
@@ -67,14 +77,7 @@ export class RefreshTokenEligibilityCountsService {
     try {
       await this.ensureTableExists();
       await this.dataSource.transaction(async (manager) => {
-        const [state] = await manager.query(
-          `
-            SELECT last_processed_created_at, last_processed_post_id
-            FROM token_eligibility_refresh_state
-            WHERE id = $1
-          `,
-          [TOKEN_ELIGIBILITY_REFRESH_STATE_ID],
-        );
+        const state = await this.loadRefreshState(manager);
 
         if (!state?.last_processed_created_at) {
           processedPosts = await this.rebuildAllCounts(manager);
@@ -232,6 +235,27 @@ export class RefreshTokenEligibilityCountsService {
     await this.dataSource.query(
       RefreshTokenEligibilityCountsService.ENSURE_STATE_TABLE_SQL,
     );
+  }
+
+  private async loadRefreshState(
+    executor: QueryExecutor = this.dataSource,
+  ): Promise<
+    | {
+        last_processed_created_at: string | Date | null;
+        last_processed_post_id: string | null;
+      }
+    | undefined
+  > {
+    const [state] = await executor.query(
+      `
+        SELECT last_processed_created_at, last_processed_post_id
+        FROM token_eligibility_refresh_state
+        WHERE id = $1
+      `,
+      [TOKEN_ELIGIBILITY_REFRESH_STATE_ID],
+    );
+
+    return state;
   }
 
   private async rebuildAllCounts(manager: QueryExecutor): Promise<number> {
