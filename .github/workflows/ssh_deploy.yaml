@@ -50,6 +50,9 @@ on:
       TRENDING_TAGS_API_KEY:
         description: "Trending tags API key"
         required: true
+      GIPHY_API_KEY:
+        description: "Giphy API key"
+        required: true
       X_CLIENT_ID:
         description: "X-Client-Id for API requests"
         required: false
@@ -87,6 +90,7 @@ jobs:
           PROFILE_REGISTRY_CONTRACT_ADDRESS: "${{ secrets.PROFILE_REGISTRY_CONTRACT_ADDRESS }}"
           PROFILE_ATTESTATION_SIGNER_ADDRESS: "${{ secrets.PROFILE_ATTESTATION_SIGNER_ADDRESS }}"
           PROFILE_ATTESTATION_PRIVATE_KEY: "${{ secrets.PROFILE_ATTESTATION_PRIVATE_KEY }}"
+          GIPHY_API_KEY: "${{ secrets.GIPHY_API_KEY }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
           username: "${{ secrets.DEPLOY_USERNAME }}"
@@ -104,6 +108,7 @@ jobs:
             PROFILE_REGISTRY_CONTRACT_ADDRESS,
             PROFILE_ATTESTATION_SIGNER_ADDRESS,
             PROFILE_ATTESTATION_PRIVATE_KEY,
+            GIPHY_API_KEY,
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
@@ -128,6 +133,7 @@ jobs:
               -e PROFILE_REGISTRY_CONTRACT_ADDRESS \
               -e PROFILE_ATTESTATION_SIGNER_ADDRESS \
               -e PROFILE_ATTESTATION_PRIVATE_KEY \
+              -e GIPHY_API_KEY \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
               -e REDIS_PORT=6379 \

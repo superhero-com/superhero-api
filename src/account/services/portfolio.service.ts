@@ -8,9 +8,10 @@ import { Token } from '@/tokens/entities/token.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CoinGeckoService } from '@/ae/coin-gecko.service';
+import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
 import { AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
-import { timestampToAeHeight } from '@/utils/getBlochHeight';
+import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
 import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
 
 export interface PortfolioHistorySnapshot {
@@ -88,7 +89,15 @@ export interface GetPortfolioHistoryOptions {
 @Injectable()
 export class PortfolioService {
   private readonly logger = new Logger(PortfolioService.name);
-  private readonly snapshotConcurrency = 6;
+  private readonly snapshotConcurrency = 15;
+  /**
+   * Balance granularity bucket size in key blocks.
+   * Block heights are floored to the nearest multiple of this value before
+   * calling getBalance, so that snapshots within the same 300-block window
+   * (~15 hours) share a single AE node lookup instead of each making a
+   * separate slow historical-state request.
+   */
+  private readonly BALANCE_BUCKET_SIZE = 300;
 
   constructor(
     @InjectRepository(TokenHolder)
@@ -100,6 +109,7 @@ export class PortfolioService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly aeSdkService: AeSdkService,
     private readonly coinGeckoService: CoinGeckoService,
+    private readonly coinHistoricalPriceService: CoinHistoricalPriceService,
     private readonly bclPnlService: BclPnlService,
   ) {}
 
@@ -165,52 +175,98 @@ export class PortfolioService {
       }
     }
 
-    let previousHeight: number | undefined = undefined;
-    // CoinGecko supports: 1, 7, 14, 30, 90, 180, 365, max
-    // Request 365 days to ensure we get historical data (it will include our date range if it's within the last year)
-    const days = 365;
-    // Always use 'daily' interval from CoinGecko - hourly data is not reliably available
-    // We'll use the closest daily price for any timestamp (including hourly requests)
-    const priceInterval: 'daily' | 'hourly' = 'daily';
-    const aePriceHistory = (
-      await this.coinGeckoService.fetchHistoricalPrice(
+    // Fetch price history and current price in parallel.
+    // For historical prices, query the local coin_historical_prices table first
+    // (populated by the background CoinGecko sync). Only fall back to the live
+    // CoinGecko API when the DB has no data for the needed range.
+    // Extend start backward a few days so the first snapshot always has a price
+    // data point at or before it, even when the range starts close to midnight.
+    const priceRangeStartMs = start.clone().subtract(3, 'days').valueOf();
+    const priceRangeEndMs = end.valueOf();
+
+    const [dbPriceRows, currentAePrice] = await Promise.all([
+      this.coinHistoricalPriceService.getHistoricalPriceData(
         AETERNITY_COIN_ID,
-        'usd', // force to usd
-        days,
-        priceInterval,
-      )
-    ).sort((a, b) => b[0] - a[0]);
-    const currentAePrice = await this.coinGeckoService.getPriceData(
-      new BigNumber(1),
-    );
+        'usd',
+        priceRangeStartMs,
+        priceRangeEndMs,
+      ),
+      this.coinGeckoService.getPriceData(new BigNumber(1)),
+    ]);
 
-    // First, calculate all block heights sequentially (since previousHeight is used as a hint)
-    const blockHeights: number[] = [];
-    for (const timestamp of timestamps) {
-      const blockHeight = await timestampToAeHeight(
-        timestamp.valueOf(),
-        previousHeight,
-        this.dataSource,
-      );
-      blockHeights.push(blockHeight);
-      previousHeight = blockHeight;
+    let aePriceHistory: Array<[number, number]>;
+    if (dbPriceRows.length > 0) {
+      // DB data sorted ascending — reverse to match the descending order
+      // expected by findClosestHistoricalPrice.
+      aePriceHistory = dbPriceRows.reverse();
+    } else {
+      // DB has no data for this range; fall back to live CoinGecko fetch.
+      const daysNeeded = Math.ceil(now.diff(start, 'days', true)) + 3;
+      const days = Math.min(365, Math.max(7, daysNeeded));
+      aePriceHistory = await this.coinGeckoService
+        .fetchHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
+        .then((prices) => prices.sort((a, b) => b[0] - a[0]));
     }
-
-    // Store the actual startDate for range-based PNL calculations
-    const actualStartDate = start;
-
-    // Calculate block height for startDate once (for range-based PNL last snapshot)
+    // Resolve all block heights in a single batch query against the local key_blocks table.
+    // Any timestamps not covered by the table (sync gaps) fall back to individual resolution.
+    const targetTimestamps = timestamps.map((t) => t.valueOf());
+    const heightMap = await batchTimestampToAeHeight(
+      targetTimestamps,
+      this.dataSource,
+    );
+    // Build the ordered block-height array.  If a timestamp was not resolved by
+    // either key_blocks or transactions (extremely rare — would require a gap in
+    // both tables), propagate the nearest already-resolved height rather than
+    // silently falling back to 0 (genesis block), which would produce wrong
+    // balances and PNL for that snapshot.
+    let lastKnownHeight = 0;
+    const blockHeights = targetTimestamps.map((ts) => {
+      const h = heightMap.get(ts);
+      if (h !== undefined) {
+        lastKnownHeight = h;
+        return h;
+      }
+      this.logger.warn(
+        `[batchTimestampToAeHeight] Could not resolve block height for ts=${ts}; ` +
+          `using nearest known height ${lastKnownHeight}`,
+      );
+      return lastKnownHeight;
+    });
+    // startBlockHeight is the block at the beginning of the requested range.
+    // timestamps[0] === start (same millisecond value), so blockHeights[0] is
+    // already the correct answer — no extra DB or API call needed.
     const startBlockHeight =
-      useRangeBasedPnl && includePnl
-        ? await timestampToAeHeight(
-            actualStartDate.valueOf(),
-            undefined,
-            this.dataSource,
+      useRangeBasedPnl && includePnl ? blockHeights[0] : undefined;
+
+    const uniqueBlockHeights = [...new Set(blockHeights)];
+
+    // Pre-compute PNL for all unique block heights in a single batch query.
+    // This replaces the previous per-snapshot SQL calls (N queries → 1 query).
+    const [pnlMap, rangePnlMap] = await Promise.all([
+      this.bclPnlService.calculateTokenPnlsBatch(
+        address,
+        uniqueBlockHeights,
+        undefined,
+      ),
+      includePnl && useRangeBasedPnl && startBlockHeight !== undefined
+        ? this.bclPnlService.calculateTokenPnlsBatch(
+            address,
+            uniqueBlockHeights,
+            startBlockHeight,
           )
-        : undefined;
+        : Promise.resolve(undefined as Map<number, TokenPnlResult> | undefined),
+    ]);
+    const emptyPnl: TokenPnlResult = {
+      pnls: {},
+      totalCostBasisAe: 0,
+      totalCostBasisUsd: 0,
+      totalCurrentValueAe: 0,
+      totalCurrentValueUsd: 0,
+      totalGainAe: 0,
+      totalGainUsd: 0,
+    };
 
     const balanceCache = new Map<number, Promise<string>>();
-    const pnlCache = new Map<string, Promise<TokenPnlResult>>();
     const data = await this.mapWithConcurrency(
       timestamps,
       this.snapshotConcurrency,
@@ -222,36 +278,22 @@ export class PortfolioService {
         );
         const blockHeight = blockHeights[index];
 
-        // Keep repeated block-height lookups inside a request deduplicated.
+        // Balance still requires an external AE node call per unique block height
         const aeBalancePromise = this.getCachedBalance(
           balanceCache,
           address,
           blockHeight,
         );
-        const tokensPnlPromise = this.getCachedTokenPnl(
-          pnlCache,
-          address,
-          blockHeight,
-          undefined,
-        );
 
-        // If range-based PNL is requested, calculate it separately for PNL fields only.
-        // For index 0 we reuse the cumulative value to preserve existing semantics.
-        const rangeBasedPnlPromise =
+        const tokensPnl = pnlMap.get(blockHeight) ?? emptyPnl;
+
+        // For range-based PNL, index 0 reuses the cumulative result (existing semantics)
+        const rangeBasedPnl =
           useRangeBasedPnl && includePnl && index > 0
-            ? this.getCachedTokenPnl(
-                pnlCache,
-                address,
-                blockHeight,
-                startBlockHeight,
-              )
+            ? (rangePnlMap?.get(blockHeight) ?? undefined)
             : undefined;
 
-        const [aeBalance, tokensPnl, rangeBasedPnl] = await Promise.all([
-          aeBalancePromise,
-          tokensPnlPromise,
-          rangeBasedPnlPromise,
-        ]);
+        const aeBalance = await aeBalancePromise;
         const balance = Number(toAe(aeBalance));
 
         // Use current value of tokens owned (from cumulative PNL service call)
@@ -308,7 +350,7 @@ export class PortfolioService {
             // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
             // First snapshot: cumulative from start (null) to current timestamp
             // All other snapshots: from startDate to current timestamp
-            const rangeFrom = index === 0 ? null : actualStartDate;
+            const rangeFrom = index === 0 ? null : start;
             const rangeTo = timestamp;
             result.total_pnl.range = {
               from: rangeFrom,
@@ -332,36 +374,23 @@ export class PortfolioService {
     address: string,
     blockHeight: number,
   ): Promise<string> {
-    const cached = cache.get(blockHeight);
+    // Snap to the nearest lower multiple of BALANCE_BUCKET_SIZE so that
+    // all block heights within the same 300-block window share one AE node
+    // call instead of each issuing a slow historical-state lookup.
+    // e.g. heights 900–1199 all use height 900; heights 1200–1499 use 1200.
+    const bucketHeight =
+      Math.floor(blockHeight / this.BALANCE_BUCKET_SIZE) *
+      this.BALANCE_BUCKET_SIZE;
+
+    const cached = cache.get(bucketHeight);
     if (cached) {
       return cached;
     }
 
     const promise = this.aeSdkService.sdk.getBalance(address as any, {
-      height: blockHeight,
+      height: bucketHeight,
     } as any);
-    cache.set(blockHeight, promise);
-    return promise;
-  }
-
-  private getCachedTokenPnl(
-    cache: Map<string, Promise<TokenPnlResult>>,
-    address: string,
-    blockHeight: number,
-    fromBlockHeight?: number,
-  ): Promise<TokenPnlResult> {
-    const key = `${address}:${blockHeight}:${fromBlockHeight ?? 'all'}`;
-    const cached = cache.get(key);
-    if (cached) {
-      return cached;
-    }
-
-    const promise = this.bclPnlService.calculateTokenPnls(
-      address,
-      blockHeight,
-      fromBlockHeight,
-    );
-    cache.set(key, promise);
+    cache.set(bucketHeight, promise);
     return promise;
   }
 
