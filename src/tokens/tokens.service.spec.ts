@@ -429,7 +429,6 @@ describe('TokensService', () => {
       }),
       {
         conflictPaths: ['sale_address'],
-        skipUpdateIfNoValuesChanged: true,
       },
     );
     expect(tokensRepository.save).not.toHaveBeenCalled();

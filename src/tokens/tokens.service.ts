@@ -358,10 +358,11 @@ export class TokensService {
       });
     }
 
-    // Use upsert to handle race conditions where token might be created concurrently
+    // Use upsert to handle race conditions where token might be created concurrently.
+    // Do not use skipUpdateIfNoValuesChanged because Token has json columns and
+    // PostgreSQL cannot compare json values with "=" during that optimization.
     await this.tokensRepository.upsert(tokenData, {
       conflictPaths: ['sale_address'],
-      skipUpdateIfNoValuesChanged: true,
     });
     const newToken = await this.findByAddress(saleAddress);
     if (!newToken) {
@@ -930,9 +931,10 @@ export class TokensService {
 
     // Mirror createToken() so concurrent requests converge instead of surfacing
     // duplicate-key errors when they race to create the same row.
+    // Do not use skipUpdateIfNoValuesChanged here because Token has json columns
+    // and PostgreSQL cannot compare json values with "=" during that optimization.
     await this.tokensRepository.upsert(tokenData, {
       conflictPaths: ['sale_address'],
-      skipUpdateIfNoValuesChanged: true,
     });
     const token = await this.findOne(saleAddress);
     if (!token) {
