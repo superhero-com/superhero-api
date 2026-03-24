@@ -8,6 +8,22 @@ jest.mock('@/utils/common', () => ({
 }));
 
 describe('BlockSyncService', () => {
+  const buildMiddlewareTransaction = () => ({
+    hash: 'th_test_1',
+    block_height: 123,
+    block_hash: 'mh_test_1',
+    micro_index: 1,
+    micro_time: 1700000000000,
+    signatures: [],
+    encoded_tx: 'tx_test_1',
+    tx: {
+      type: 'ContractCallTx',
+      contract_id: 'ct_test_1',
+      function: 'transfer',
+      caller_id: 'ak_caller_1',
+    },
+  });
+
   const setup = () => {
     const txRepository = {
       save: jest.fn(),
@@ -53,6 +69,8 @@ describe('BlockSyncService', () => {
 
     return {
       service,
+      txRepository,
+      pluginBatchProcessor,
       blockRepository,
     };
   };
@@ -136,5 +154,56 @@ describe('BlockSyncService', () => {
         pow: [10, 11, 12],
       }),
     );
+  });
+
+  it('fails fast on pool timeouts instead of falling back to repository.save', async () => {
+    const { service, txRepository, pluginBatchProcessor } = setup();
+    const loggerError = jest
+      .spyOn((service as any).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [buildMiddlewareTransaction()],
+      next: null,
+    });
+    txRepository.upsert.mockRejectedValueOnce(
+      new Error('timeout exceeded when trying to connect'),
+    );
+
+    await expect(service.syncTransactions(123, 123, true, true)).rejects.toThrow(
+      'timeout exceeded when trying to connect',
+    );
+
+    expect(txRepository.save).not.toHaveBeenCalled();
+    expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
+    expect(loggerError).toHaveBeenCalledWith(
+      'Bulk insert failed for page due to database connectivity/pool pressure; skipping repository.save fallback',
+      expect.any(Error),
+    );
+  });
+
+  it('still falls back to repository.save for non-connectivity bulk insert errors', async () => {
+    const { service, txRepository, pluginBatchProcessor } = setup();
+
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [buildMiddlewareTransaction()],
+      next: null,
+    });
+    txRepository.upsert.mockRejectedValueOnce(
+      new Error('duplicate key value violates unique constraint'),
+    );
+    txRepository.save.mockResolvedValueOnce({
+      hash: 'th_test_1',
+      block_height: 123,
+    });
+
+    const result = await service.syncTransactions(123, 123, true, true);
+
+    expect(txRepository.save).toHaveBeenCalledTimes(1);
+    expect(pluginBatchProcessor.processBatch).toHaveBeenCalledWith(
+      [{ hash: 'th_test_1', block_height: 123 }],
+      'backward',
+    );
+    expect(result.get(123)).toEqual(['th_test_1']);
   });
 });

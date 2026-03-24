@@ -184,6 +184,14 @@ export class BlockSyncService {
         try {
           savedTxs = await this.bulkInsertTransactions(mdwTxs);
         } catch (error: any) {
+          if (this.isConnectionOrPoolError(error)) {
+            this.logger.error(
+              'Bulk insert failed for page due to database connectivity/pool pressure; skipping repository.save fallback',
+              error,
+            );
+            throw error;
+          }
+
           this.logger.error(
             `Bulk insert failed for page, trying repository.save as fallback`,
             error,
@@ -393,5 +401,27 @@ export class BlockSyncService {
       version: 1, // Explicitly set default value
       created_at: new Date(tx.microTime), // Explicitly set timestamp
     };
+  }
+
+  private isConnectionOrPoolError(error: unknown): boolean {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+    const normalized = message.toLowerCase();
+
+    return [
+      'timeout exceeded when trying to connect',
+      'too many clients already',
+      'remaining connection slots are reserved',
+      'connection terminated unexpectedly',
+      'connection ended unexpectedly',
+      'connection refused',
+      'econnrefused',
+      'etimedout',
+      'connection error',
+    ].some((fragment) => normalized.includes(fragment));
   }
 }
