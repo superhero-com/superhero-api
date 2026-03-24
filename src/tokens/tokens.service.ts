@@ -12,6 +12,7 @@ import {
   TRENDING_SCORE_CONFIG,
 } from '@/configs';
 import { fetchJson } from '@/utils/common';
+import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
@@ -95,9 +96,20 @@ export interface TokenTrendingEligibilityBreakdown {
   };
 }
 
+export class RetryableTokenHoldersSyncError extends Error {
+  constructor(
+    message: string,
+    readonly retryDelayMs = 60_000,
+  ) {
+    super(message);
+    this.name = 'RetryableTokenHoldersSyncError';
+  }
+}
+
 @Injectable()
 export class TokensService {
   private readonly logger = new Logger(TokensService.name);
+  private readonly holderLoadRetryMaxAttempts = 3;
   private readonly contractCallTimeoutMs = Number(
     process.env.TOKEN_CONTRACT_CALL_TIMEOUT_MS || 30_000,
   );
@@ -913,15 +925,20 @@ export class TokensService {
       create_tx_hash: rawTransaction?.hash,
     };
 
-    let token;
-    let isNewToken = false;
-    // TODO: should only update if the data is different
-    if (tokenExists?.sale_address) {
-      await this.tokensRepository.update(tokenExists.sale_address, tokenData);
-      token = await this.findByAddress(tokenExists.sale_address);
-    } else {
-      token = await this.tokensRepository.save(tokenData);
-      isNewToken = true;
+    const existingTokenBySaleAddress = await this.findOne(saleAddress);
+    const isNewToken = !existingTokenBySaleAddress;
+
+    // Mirror createToken() so concurrent requests converge instead of surfacing
+    // duplicate-key errors when they race to create the same row.
+    await this.tokensRepository.upsert(tokenData, {
+      conflictPaths: ['sale_address'],
+      skipUpdateIfNoValuesChanged: true,
+    });
+    const token = await this.findOne(saleAddress);
+    if (!token) {
+      throw new Error(
+        `Failed to create or retrieve token for sale address: ${saleAddress}`,
+      );
     }
 
     await this.pullTokenInfoQueue.add(
@@ -1005,16 +1022,46 @@ export class TokensService {
     );
 
     if (uniqueHolders.length > 0) {
-      await this.tokenHoldersRepository.delete({
-        aex9_address: aex9Address,
+      await runWithDatabaseIssueLogging({
+        logger: this.logger,
+        stage: 'token holders delete before sync',
+        context: {
+          saleAddress,
+          aex9Address,
+          holderCount: uniqueHolders.length,
+        },
+        operation: () =>
+          this.tokenHoldersRepository.delete({
+            aex9_address: aex9Address,
+          }),
       });
-      await this.tokenHoldersRepository.upsert(uniqueHolders, {
-        conflictPaths: ['id'],
-        skipUpdateIfNoValuesChanged: true,
+      await runWithDatabaseIssueLogging({
+        logger: this.logger,
+        stage: 'token holders upsert',
+        context: {
+          saleAddress,
+          aex9Address,
+          holderCount: uniqueHolders.length,
+        },
+        operation: () =>
+          this.tokenHoldersRepository.upsert(uniqueHolders, {
+            conflictPaths: ['id'],
+            skipUpdateIfNoValuesChanged: true,
+          }),
       });
     }
-    await this.tokensRepository.update(token.sale_address, {
-      holders_count: uniqueHolders.length,
+    await runWithDatabaseIssueLogging({
+      logger: this.logger,
+      stage: 'token holders count update',
+      context: {
+        saleAddress,
+        aex9Address,
+        holderCount: uniqueHolders.length,
+      },
+      operation: () =>
+        this.tokensRepository.update(token.sale_address, {
+          holders_count: uniqueHolders.length,
+        }),
     });
   }
 
@@ -1132,9 +1179,13 @@ export class TokensService {
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
-    const maxAttempts = 3;
+    const contractNotReadyMaxAttempts = this.contractNotPresentMaxAttempts;
+    const totalRetryAttempts = Math.max(
+      contractNotReadyMaxAttempts,
+      this.holderLoadRetryMaxAttempts,
+    );
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= totalRetryAttempts; attempt++) {
       try {
         const contracts = await this.getTokenContractsBySaleAddress(
           token.sale_address as Encoded.ContractAddress,
@@ -1166,6 +1217,7 @@ export class TokensService {
         return holders || [];
       } catch (error: any) {
         const isOutOfGasError = this.isOutOfGasError(error);
+        const isContractNotReadyError = this.isContractNotReadyError(error);
         const isTimeoutError = error?.message?.includes('timeout');
 
         if (isOutOfGasError) {
@@ -1175,10 +1227,26 @@ export class TokensService {
           return [];
         }
 
-        if (attempt < maxAttempts) {
+        if (isContractNotReadyError) {
+          if (attempt < contractNotReadyMaxAttempts) {
+            const waitMs = this.contractNotPresentRetryDelayMs * attempt;
+            this.logger.warn(
+              `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address} (attempt ${attempt}/${contractNotReadyMaxAttempts}), retrying in ${waitMs}ms`,
+            );
+            await this.sleep(waitMs);
+            continue;
+          }
+
+          throw new RetryableTokenHoldersSyncError(
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address}, retrying in ${this.contractNotPresentRetryDelayMs}ms`,
+            this.contractNotPresentRetryDelayMs,
+          );
+        }
+
+        if (attempt < this.holderLoadRetryMaxAttempts) {
           const waitMs = 500 * attempt;
           this.logger.warn(
-            `SyncTokenHoldersQueue->_loadHoldersFromContract: attempt ${attempt}/${maxAttempts} failed for ${aex9Address}${isTimeoutError ? ' (timeout)' : ''}, retrying in ${waitMs}ms`,
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: attempt ${attempt}/${this.holderLoadRetryMaxAttempts} failed for ${aex9Address}${isTimeoutError ? ' (timeout)' : ''}, retrying in ${waitMs}ms`,
           );
           await this.sleep(waitMs);
           continue;
@@ -1194,6 +1262,11 @@ export class TokensService {
     }
 
     return [];
+  }
+
+  private isContractNotReadyError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('contract_does_not_exist');
   }
 
   private async withTimeout<T>(
