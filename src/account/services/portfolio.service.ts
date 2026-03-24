@@ -176,22 +176,10 @@ export class PortfolioService {
     }
 
     const t0 = Date.now();
-    const _perfLines: string[] = [];
-    const perfLog = (label: string, since = t0) => {
-      const line = `[perf] ${label}: ${Date.now() - since}ms (total: ${Date.now() - t0}ms) | addr=${address.slice(0, 12)} snapshots=${timestamps.length}`;
-      this.logger.log(line);
-      _perfLines.push(line);
-    };
-    // Write accumulated perf lines to a temp file so they can be read even
-    // when the server stdout is not directly accessible.
-    const _flushPerf = () => {
-      try {
-        require('fs').writeFileSync(
-          '/tmp/portfolio-perf.log',
-          _perfLines.join('\n') + '\n',
-        );
-      } catch {}
-    };
+    const perfLog = (label: string, since = t0) =>
+      this.logger.log(
+        `[perf] ${label}: ${Date.now() - since}ms (total: ${Date.now() - t0}ms) | addr=${address.slice(0, 12)} snapshots=${timestamps.length}`,
+      );
 
     // Fetch price history and current price in parallel.
     // For historical prices, query the local coin_historical_prices table first
@@ -240,7 +228,24 @@ export class PortfolioService {
       targetTimestamps,
       this.dataSource,
     );
-    const blockHeights = targetTimestamps.map((ts) => heightMap.get(ts) ?? 0);
+    // Build the ordered block-height array.  If a timestamp was not resolved by
+    // either key_blocks or transactions (extremely rare — would require a gap in
+    // both tables), propagate the nearest already-resolved height rather than
+    // silently falling back to 0 (genesis block), which would produce wrong
+    // balances and PNL for that snapshot.
+    let lastKnownHeight = 0;
+    const blockHeights = targetTimestamps.map((ts) => {
+      const h = heightMap.get(ts);
+      if (h !== undefined) {
+        lastKnownHeight = h;
+        return h;
+      }
+      this.logger.warn(
+        `[batchTimestampToAeHeight] Could not resolve block height for ts=${ts}; ` +
+          `using nearest known height ${lastKnownHeight}`,
+      );
+      return lastKnownHeight;
+    });
     perfLog(`batchTimestampToAeHeight → [${blockHeights.join(',')}]`, tHeights);
 
     // startBlockHeight is the block at the beginning of the requested range.
@@ -383,7 +388,6 @@ export class PortfolioService {
 
     perfLog('getBalance + snapshot assembly', tBalance);
     perfLog('TOTAL');
-    _flushPerf();
     return data;
   }
 
