@@ -109,6 +109,7 @@ export class RetryableTokenHoldersSyncError extends Error {
 @Injectable()
 export class TokensService {
   private readonly logger = new Logger(TokensService.name);
+  private readonly holderLoadRetryMaxAttempts = 3;
   private readonly contractCallTimeoutMs = Number(
     process.env.TOKEN_CONTRACT_CALL_TIMEOUT_MS || 30_000,
   );
@@ -1178,9 +1179,13 @@ export class TokensService {
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {
-    const maxAttempts = this.contractNotPresentMaxAttempts;
+    const contractNotReadyMaxAttempts = this.contractNotPresentMaxAttempts;
+    const totalRetryAttempts = Math.max(
+      contractNotReadyMaxAttempts,
+      this.holderLoadRetryMaxAttempts,
+    );
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= totalRetryAttempts; attempt++) {
       try {
         const contracts = await this.getTokenContractsBySaleAddress(
           token.sale_address as Encoded.ContractAddress,
@@ -1223,10 +1228,10 @@ export class TokensService {
         }
 
         if (isContractNotReadyError) {
-          if (attempt < maxAttempts) {
+          if (attempt < contractNotReadyMaxAttempts) {
             const waitMs = this.contractNotPresentRetryDelayMs * attempt;
             this.logger.warn(
-              `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address} (attempt ${attempt}/${maxAttempts}), retrying in ${waitMs}ms`,
+              `SyncTokenHoldersQueue->_loadHoldersFromContract: contract not ready for ${aex9Address} (attempt ${attempt}/${contractNotReadyMaxAttempts}), retrying in ${waitMs}ms`,
             );
             await this.sleep(waitMs);
             continue;
@@ -1238,10 +1243,10 @@ export class TokensService {
           );
         }
 
-        if (attempt < maxAttempts) {
+        if (attempt < this.holderLoadRetryMaxAttempts) {
           const waitMs = 500 * attempt;
           this.logger.warn(
-            `SyncTokenHoldersQueue->_loadHoldersFromContract: attempt ${attempt}/${maxAttempts} failed for ${aex9Address}${isTimeoutError ? ' (timeout)' : ''}, retrying in ${waitMs}ms`,
+            `SyncTokenHoldersQueue->_loadHoldersFromContract: attempt ${attempt}/${this.holderLoadRetryMaxAttempts} failed for ${aex9Address}${isTimeoutError ? ' (timeout)' : ''}, retrying in ${waitMs}ms`,
           );
           await this.sleep(waitMs);
           continue;

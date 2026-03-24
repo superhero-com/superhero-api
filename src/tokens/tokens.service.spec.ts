@@ -368,6 +368,28 @@ describe('TokensService', () => {
     expect((service as any).sleep).toHaveBeenCalledWith(1234);
   });
 
+  it('keeps generic holder sync failures at three attempts when contract-not-ready retries are lower', async () => {
+    (service as any).contractNotPresentMaxAttempts = 2;
+
+    jest
+      .spyOn(service, 'getTokenContractsBySaleAddress')
+      .mockRejectedValue(new Error('timeout exceeded'));
+    jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+    await expect(
+      service._loadHoldersFromContract(
+        {
+          sale_address: 'ct_timeout',
+        } as any,
+        'ct_aex9',
+      ),
+    ).resolves.toEqual([]);
+
+    expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(3);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(1, 500);
+    expect((service as any).sleep).toHaveBeenNthCalledWith(2, 1000);
+  });
+
   it('uses upsert and reload when creating a token from a raw transaction', async () => {
     communityFactoryService.getCurrentFactory.mockResolvedValue({
       address: 'ct_factory',
