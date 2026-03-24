@@ -15,6 +15,7 @@ import { PopularRankingService } from './services/popular-ranking.service';
 import { TransactionsModule } from '@/transactions/transactions.module';
 import { PostsController } from './controllers/posts.controller';
 import { TopicsController } from './controllers/topics.controller';
+import { GiphyController } from './controllers/giphy.controller';
 import { AccountModule } from '@/account/account.module';
 import { GovernancePluginModule } from '@/plugins/governance/governance-plugin.module';
 import { getPopularRankingContributorProvider } from '@/plugins';
@@ -47,7 +48,7 @@ import { TokensModule } from '@/tokens/tokens.module';
     getPopularRankingContributorProvider(),
   ],
   exports: [PostService, PopularRankingService, ReadsService, TypeOrmModule],
-  controllers: [PostsController, TopicsController],
+  controllers: [PostsController, TopicsController, GiphyController],
 })
 export class PostModule {
   //
