@@ -24,6 +24,10 @@ describe('TokensController', () => {
   let communityFactoryService: CommunityFactoryService;
   let tokensRepository: Repository<Token>;
   let tokenHolderRepository: Repository<TokenHolder>;
+  let cacheManager: {
+    get: jest.Mock;
+    set: jest.Mock;
+  };
   let tokenHolderQueryBuilder: {
     where: jest.Mock;
     andWhere: jest.Mock;
@@ -61,16 +65,17 @@ describe('TokensController', () => {
     const tokenHolderRepositoryMock = {
       createQueryBuilder: jest.fn(() => tokenHolderQueryBuilder),
     };
+    cacheManager = {
+      get: jest.fn(),
+      set: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TokensController],
       providers: [
         {
           provide: CACHE_MANAGER,
-          useValue: {
-            get: jest.fn(),
-            set: jest.fn(),
-          },
+          useValue: cacheManager,
         },
         {
           provide: Reflector,
@@ -185,6 +190,63 @@ describe('TokensController', () => {
     );
 
     expect(tokensService.applyListEligibilityFilters).toHaveBeenCalled();
+    expect(cacheManager.get).toHaveBeenCalled();
+    expect(cacheManager.set).toHaveBeenCalled();
+  });
+
+  it('should return cached trending-score token lists', async () => {
+    cacheManager.get.mockResolvedValueOnce({ items: ['cached'], meta: {} });
+
+    const result = await controller.listAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+
+    expect(result).toEqual({ items: ['cached'], meta: {} });
+    expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
+    expect(tokensService.queryTokensWithRanks).not.toHaveBeenCalled();
+  });
+
+  it('should not collide trending cache keys when filter values contain separators', async () => {
+    await controller.listAll(
+      'a:b',
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+    await controller.listAll(
+      'a',
+      'b',
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+
+    expect(cacheManager.get).toHaveBeenCalledTimes(2);
+    const firstKey = cacheManager.get.mock.calls[0][0];
+    const secondKey = cacheManager.get.mock.calls[1][0];
+
+    expect(firstKey).not.toBe(secondKey);
+    expect(firstKey).toContain('"search":"a:b"');
+    expect(firstKey).toContain('"factory_address":""');
+    expect(secondKey).toContain('"search":"a"');
+    expect(secondKey).toContain('"factory_address":"b"');
   });
 
   it('should return token details by address', async () => {
