@@ -1,5 +1,6 @@
 import { recordSyncTokenHoldersDuration } from '@/utils/stabilization-metrics';
 import { SyncTokenHoldersQueue } from './sync-token-holders.queue';
+import { RetryableTokenHoldersSyncError } from '../tokens.service';
 
 jest.mock('@/utils/stabilization-metrics', () => ({
   recordSyncTokenHoldersDuration: jest.fn(),
@@ -151,6 +152,31 @@ describe('SyncTokenHoldersQueue', () => {
       'sync failed',
     );
 
+    expect(tokenHoldersLockService.releaseLock).toHaveBeenCalledWith(
+      saleAddress,
+      'lock-owner',
+    );
+  });
+
+  it('schedules a delayed retry for contract-not-ready sync failures', async () => {
+    const add = jest.fn().mockResolvedValue(undefined);
+    tokenService.loadAndSaveTokenHoldersFromMdw.mockRejectedValue(
+      new RetryableTokenHoldersSyncError('contract not ready', 60_000),
+    );
+
+    await queue.process({
+      data: { saleAddress },
+      queue: { add },
+    } as any);
+
+    expect(add).toHaveBeenCalledWith(
+      { saleAddress },
+      expect.objectContaining({
+        jobId: `syncTokenHolders-retry-${saleAddress}`,
+        delay: 60_000,
+        attempts: 1,
+      }),
+    );
     expect(tokenHoldersLockService.releaseLock).toHaveBeenCalledWith(
       saleAddress,
       'lock-owner',

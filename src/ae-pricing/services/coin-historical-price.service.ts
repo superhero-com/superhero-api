@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
+import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { CoinHistoricalPrice } from '../entities/coin-historical-price.entity';
 
 @Injectable()
@@ -130,16 +131,28 @@ export class CoinHistoricalPriceService {
     try {
       // Check for existing records to avoid duplicates
       const timestamps = priceData.map(([timestamp]) => timestamp);
-      const existing = await this.repository.find({
-        where: {
-          coin_id: coinId,
-          currency: currency,
-          timestamp_ms: Between(
-            Math.min(...timestamps),
-            Math.max(...timestamps),
-          ),
+      const existing = await runWithDatabaseIssueLogging({
+        logger: this.logger,
+        stage: 'historical price duplicate lookup',
+        context: {
+          coinId,
+          currency,
+          requestedPoints: priceData.length,
+          minTimestamp: Math.min(...timestamps),
+          maxTimestamp: Math.max(...timestamps),
         },
-        select: ['timestamp_ms'],
+        operation: () =>
+          this.repository.find({
+            where: {
+              coin_id: coinId,
+              currency: currency,
+              timestamp_ms: Between(
+                Math.min(...timestamps),
+                Math.max(...timestamps),
+              ),
+            },
+            select: ['timestamp_ms'],
+          }),
       });
 
       // TypeORM returns bigint as string, so convert to string for Set comparison
@@ -173,7 +186,18 @@ export class CoinHistoricalPriceService {
       const chunkSize = 1000;
       for (let i = 0; i < entities.length; i += chunkSize) {
         const chunk = entities.slice(i, i + chunkSize);
-        await this.repository.save(chunk);
+        await runWithDatabaseIssueLogging({
+          logger: this.logger,
+          stage: 'historical price chunk save',
+          context: {
+            coinId,
+            currency,
+            chunkStart: i,
+            chunkSize: chunk.length,
+            totalNewPoints: entities.length,
+          },
+          operation: () => this.repository.save(chunk),
+        });
       }
 
       this.logger.log(

@@ -298,6 +298,19 @@ describe('TokensController', () => {
     expect(result).toEqual({ items: [], meta: {} });
   });
 
+  it('should throw when listing holders for an unknown token', async () => {
+    const createQueryBuilderSpy = jest.spyOn(
+      tokenHolderRepository,
+      'createQueryBuilder',
+    );
+    tokensService.findByAddress = jest.fn().mockResolvedValue(null);
+
+    await expect(controller.listTokenHolders('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(createQueryBuilderSpy).not.toHaveBeenCalled();
+  });
+
   it('should return paginated token rankings', async () => {
     const result = await controller.listTokenRankings('ct_123');
     expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');

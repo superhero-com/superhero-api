@@ -20,6 +20,7 @@ import { CurrencyRates } from '@/utils/types';
 import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
+const DEFAULT_MARKET_DATA_MAX_AGE_MS = 3 * 60 * 1000;
 
 export interface CoinGeckoMarketResponse {
   ath: number;
@@ -400,7 +401,7 @@ export class CoinGeckoService {
   async getCoinMarketData(
     coinId: string,
     currencyCode: string,
-    maxAgeMs: number = 60_000,
+    maxAgeMs: number = DEFAULT_MARKET_DATA_MAX_AGE_MS,
   ): Promise<CoinGeckoMarketResponse> {
     const cacheKey = `${this.marketCacheKeyPrefix}:${coinId}:${currencyCode}`;
 

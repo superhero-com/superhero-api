@@ -1,4 +1,9 @@
 import { fetchJson, sanitizeJsonForPostgres } from '@/utils/common';
+import {
+  isDatabaseConnectionOrPoolError,
+  logDatabaseIssue,
+  runWithDatabaseIssueLogging,
+} from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
 import { decode } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
@@ -60,9 +65,19 @@ export class BlockSyncService {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < blocksToSave.length; i += saveBatchSize) {
         const batch = blocksToSave.slice(i, i + saveBatchSize);
-        await this.blockRepository.upsert(batch, {
-          conflictPaths: ['height'],
-          skipUpdateIfNoValuesChanged: true,
+        await runWithDatabaseIssueLogging({
+          logger: this.logger,
+          stage: 'key-block upsert',
+          context: {
+            startHeight,
+            endHeight,
+            batchStart: i,
+            batchSize: batch.length,
+          },
+          operation: () =>
+            this.blockRepository.upsert(batch, {
+              conflictPaths: ['height'],
+            }),
         });
       }
       this.logger.debug(
@@ -73,10 +88,19 @@ export class BlockSyncService {
 
   async syncMicroBlocks(startHeight: number, endHeight: number): Promise<void> {
     // Get all key-blocks in the height range
-    const keyBlocks = await this.blockRepository.find({
-      where: {
-        height: Between(startHeight, endHeight) as any,
+    const keyBlocks = await runWithDatabaseIssueLogging({
+      logger: this.logger,
+      stage: 'key-block lookup for micro-block sync',
+      context: {
+        startHeight,
+        endHeight,
       },
+      operation: () =>
+        this.blockRepository.find({
+          where: {
+            height: Between(startHeight, endHeight) as any,
+          },
+        }),
     });
 
     if (keyBlocks.length === 0) {
@@ -113,9 +137,21 @@ export class BlockSyncService {
       const saveBatchSize = 1000; // Safe batch size for PostgreSQL
       for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
         const batch = microBlocksToSave.slice(i, i + saveBatchSize);
-        await this.microBlockRepository.upsert(batch, {
-          conflictPaths: ['hash'],
-          skipUpdateIfNoValuesChanged: true,
+        await runWithDatabaseIssueLogging({
+          logger: this.logger,
+          stage: 'micro-block upsert',
+          context: {
+            startHeight,
+            endHeight,
+            keyBlockCount: keyBlocks.length,
+            batchStart: i,
+            batchSize: batch.length,
+          },
+          operation: () =>
+            this.microBlockRepository.upsert(batch, {
+              conflictPaths: ['hash'],
+              skipUpdateIfNoValuesChanged: true,
+            }),
         });
       }
       this.logger.debug(
@@ -184,6 +220,20 @@ export class BlockSyncService {
         try {
           savedTxs = await this.bulkInsertTransactions(mdwTxs);
         } catch (error: any) {
+          if (isDatabaseConnectionOrPoolError(error)) {
+            logDatabaseIssue({
+              logger: this.logger,
+              stage: 'transaction bulk upsert',
+              error,
+              context: {
+                url,
+                transactionCount: mdwTxs.length,
+                useBulkMode,
+              },
+            });
+            throw error;
+          }
+
           this.logger.error(
             `Bulk insert failed for page, trying repository.save as fallback`,
             error,
@@ -201,7 +251,16 @@ export class BlockSyncService {
         }
       } else {
         // Save transactions
-        const saved = await this.txRepository.save(mdwTxs);
+        const saved = await runWithDatabaseIssueLogging({
+          logger: this.logger,
+          stage: 'transaction save',
+          context: {
+            url,
+            transactionCount: mdwTxs.length,
+            useBulkMode,
+          },
+          operation: () => this.txRepository.save(mdwTxs),
+        });
         savedTxs = Array.isArray(saved) ? saved : [saved];
         // Process batch for plugins immediately
         if (savedTxs.length > 0) {
@@ -281,8 +340,18 @@ export class BlockSyncService {
 
         // Fetch this batch immediately after upsert to verify they exist
         if (batchHashes.length > 0) {
-          const savedBatchTxs = await this.txRepository.find({
-            where: { hash: In(batchHashes) },
+          const savedBatchTxs = await runWithDatabaseIssueLogging({
+            logger: this.logger,
+            stage: 'transaction reload after bulk upsert',
+            context: {
+              batchStart: i,
+              batchSize: batch.length,
+              hashCount: batchHashes.length,
+            },
+            operation: () =>
+              this.txRepository.find({
+                where: { hash: In(batchHashes) },
+              }),
           });
 
           // Log warning if some transactions weren't found after upsert
@@ -310,6 +379,19 @@ export class BlockSyncService {
           }
         }
       } catch (error: any) {
+        if (isDatabaseConnectionOrPoolError(error)) {
+          logDatabaseIssue({
+            logger: this.logger,
+            stage: 'transaction bulk upsert batch',
+            error,
+            context: {
+              batchStart: i,
+              batchEnd: Math.min(i + batchSize, txs.length),
+              batchSize: batch.length,
+            },
+          });
+          throw error;
+        }
         this.logger.error(
           `Failed to bulk upsert batch ${i + 1}-${Math.min(i + batchSize, txs.length)}: ${error.message}`,
           error.stack || error,
@@ -394,4 +476,5 @@ export class BlockSyncService {
       created_at: new Date(tx.microTime), // Explicitly set timestamp
     };
   }
+
 }

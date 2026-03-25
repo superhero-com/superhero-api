@@ -3,7 +3,7 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-import { TokensService } from '../tokens.service';
+import { RetryableTokenHoldersSyncError, TokensService } from '../tokens.service';
 import { TokenHoldersLockService } from '../services/token-holders-lock.service';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 
@@ -115,6 +115,25 @@ export class SyncTokenHoldersQueue {
       if (this.inFlightSyncs.get(saleAddress) === syncPromise) {
         this.inFlightSyncs.delete(saleAddress);
         this.inFlightStartedAt.delete(saleAddress);
+      }
+      if (error instanceof RetryableTokenHoldersSyncError) {
+        this.logger.warn(
+          `SyncTokenHoldersQueue->retry-scheduled:${saleAddress} in ${error.retryDelayMs}ms`,
+        );
+        await job.queue.add(
+          {
+            saleAddress,
+          },
+          {
+            jobId: `syncTokenHolders-retry-${saleAddress}`,
+            delay: error.retryDelayMs,
+            removeOnComplete: true,
+            removeOnFail: true,
+            attempts: 1,
+            timeout: this.jobTimeoutMs,
+          },
+        );
+        return;
       }
       this.logger.error(
         `SyncTokenHoldersQueue->error:${saleAddress} (${Date.now() - startedAt}ms)`,

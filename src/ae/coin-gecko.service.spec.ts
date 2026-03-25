@@ -112,4 +112,20 @@ describe('CoinGeckoService', () => {
     );
     expect(result).toEqual({ data: 'mockData' });
   });
+
+  it('should reuse cached market data for three minutes by default', async () => {
+    const cachedMarket = {
+      data: {
+        id: AETERNITY_COIN_ID,
+        currentPrice: 0.1,
+      },
+      fetchedAt: Date.now() - 2 * 60 * 1000,
+    };
+    (cacheManager.get as jest.Mock).mockResolvedValue(cachedMarket);
+
+    const result = await service.getCoinMarketData(AETERNITY_COIN_ID, 'usd');
+
+    expect(result).toEqual(cachedMarket.data);
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
 });
