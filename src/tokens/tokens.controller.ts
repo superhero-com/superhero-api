@@ -279,6 +279,10 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<TokenHolder>> {
     const token = await this.tokensService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
+
     const queryBuilder =
       this.tokenHolderRepository.createQueryBuilder('token_holder');
 
