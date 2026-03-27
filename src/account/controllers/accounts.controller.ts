@@ -20,13 +20,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
 import { AccountService } from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
+import { ProfileCache } from '@/profile/entities/profile-cache.entity';
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -47,6 +48,12 @@ export class AccountsController {
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiQuery({
+    name: 'search',
+    type: 'string',
+    required: false,
+    description: 'Search accounts by address or name',
+  })
+  @ApiQuery({
     name: 'order_by',
     enum: [
       'total_volume',
@@ -65,12 +72,45 @@ export class AccountsController {
   @ApiOperation({ operationId: 'listAll' })
   @Get()
   async listAll(
+    @Query('search') search: string | undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'total_volume',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
     const query = this.accountRepository.createQueryBuilder('account');
+
+    if (search?.trim()) {
+      const normalizedSearch = `%${search.trim()}%`;
+      query.leftJoin(
+        ProfileCache,
+        'profile_cache',
+        'profile_cache.address = account.address',
+      );
+      query.andWhere(
+        new Brackets((qb) => {
+          qb.where('account.address ILIKE :search', {
+            search: normalizedSearch,
+          })
+            .orWhere('account.chain_name ILIKE :search', {
+              search: normalizedSearch,
+            })
+            .orWhere('profile_cache.public_name ILIKE :search', {
+              search: normalizedSearch,
+            })
+            .orWhere('profile_cache.chain_name ILIKE :search', {
+              search: normalizedSearch,
+            })
+            .orWhere('profile_cache.username ILIKE :search', {
+              search: normalizedSearch,
+            })
+            .orWhere('profile_cache.fullname ILIKE :search', {
+              search: normalizedSearch,
+            });
+        }),
+      );
+    }
+
     if (orderBy) {
       query.orderBy(`account.${orderBy}`, orderDirection);
     }

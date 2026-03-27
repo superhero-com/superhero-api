@@ -37,19 +37,30 @@ describe('TokensController', () => {
     getCount: jest.Mock;
     getRawMany: jest.Mock;
   };
+  let tokensQueryBuilder: {
+    select: jest.Mock;
+    orderBy: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    andWhereInIds: jest.Mock;
+    getCount: jest.Mock;
+    getMany: jest.Mock;
+  };
 
   beforeEach(async () => {
+    tokensQueryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      andWhereInIds: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(2),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+
     const tokensRepositoryMock = {
       query: jest.fn().mockResolvedValue([]),
-      createQueryBuilder: jest.fn(() => ({
-        select: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        andWhereInIds: jest.fn().mockReturnThis(),
-        getCount: jest.fn().mockResolvedValue(2),
-        getMany: jest.fn().mockResolvedValue([]),
-      })),
+      createQueryBuilder: jest.fn(() => tokensQueryBuilder),
     };
 
     tokenHolderQueryBuilder = {
@@ -174,6 +185,22 @@ describe('TokensController', () => {
     expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
     expect(tokensService.queryTokensWithRanks).toHaveBeenCalled();
     expect(result).toEqual({ items: [], meta: {} });
+  });
+
+  it('should apply search to token names', async () => {
+    await controller.listAll('alice');
+
+    expect(tokensQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'token.name ILIKE :search',
+      { search: '%alice%' },
+    );
+    expect(tokensService.queryTokensWithRanks).toHaveBeenCalledWith(
+      tokensQueryBuilder,
+      100,
+      1,
+      'market_cap',
+      'DESC',
+    );
   });
 
   it('should apply eligibility filters only for trending score ordering', async () => {

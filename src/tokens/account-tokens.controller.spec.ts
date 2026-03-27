@@ -19,12 +19,25 @@ describe('AccountTokensController', () => {
   let tokenHolderRepository: Repository<TokenHolder>;
   let communityFactoryService: CommunityFactoryService;
   let tokensService: jest.Mocked<TokensService>;
+  let tokenHolderQueryBuilder: {
+    orderBy: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    leftJoinAndSelect: jest.Mock;
+  };
 
   beforeEach(async () => {
     tokensService = {
       getTokenRanksByAex9Address: jest.fn().mockResolvedValue(new Map()),
       getTokensByAex9Address: jest.fn().mockResolvedValue([]),
     } as any;
+
+    tokenHolderQueryBuilder = {
+      orderBy: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AccountTokensController],
@@ -93,12 +106,9 @@ describe('AccountTokensController', () => {
       };
 
       (paginate as jest.Mock).mockResolvedValue(mockPagination);
-      jest.spyOn(tokenHolderRepository, 'createQueryBuilder').mockReturnValue({
-        orderBy: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-      } as any);
+      jest
+        .spyOn(tokenHolderRepository, 'createQueryBuilder')
+        .mockReturnValue(tokenHolderQueryBuilder as any);
       tokensService.getTokenRanksByAex9Address.mockResolvedValue(
         new Map([['ct_token_1', 7]]),
       );
@@ -122,6 +132,33 @@ describe('AccountTokensController', () => {
         ],
       });
       expect(paginate).toHaveBeenCalled();
+    });
+
+    it('should apply search to token names', async () => {
+      (paginate as jest.Mock).mockResolvedValue({
+        items: [],
+        meta: {
+          totalItems: 0,
+          itemCount: 0,
+          itemsPerPage: 10,
+          totalPages: 0,
+          currentPage: 1,
+        },
+      });
+      jest
+        .spyOn(tokenHolderRepository, 'createQueryBuilder')
+        .mockReturnValue(tokenHolderQueryBuilder as any);
+
+      await controller.listAccountTokens('test_address', 'alice');
+
+      expect(tokenHolderQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'token.name ILIKE :search',
+        { search: '%alice%' },
+      );
+      expect(paginate).toHaveBeenCalledWith(tokenHolderQueryBuilder, {
+        page: 1,
+        limit: 100,
+      });
     });
 
     it('should use the factory address if factory_address is not provided', async () => {
