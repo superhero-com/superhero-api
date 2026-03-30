@@ -26,6 +26,10 @@ docker cp $BACKUP_FILE $CONTAINER_NAME:/tmp/latest.sql.gz
 echo "🗄️  Importing backup into database '$DB_NAME'..."
 docker exec -i $CONTAINER_NAME bash -c "gunzip -c /tmp/latest.sql.gz | psql -U $DB_USER -d $DB_NAME"
 
+# === RESET LOCAL PASSWORD (dumps may contain ALTER ROLE that overwrite it) ===
+echo "🔑 Resetting local password for '$DB_USER'..."
+docker exec -i $CONTAINER_NAME psql -U $DB_USER -d $DB_NAME -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';"
+
 # === CLEANUP ===
 echo "🧹 Cleaning up..."
 docker exec -i $CONTAINER_NAME rm /tmp/latest.sql.gz
