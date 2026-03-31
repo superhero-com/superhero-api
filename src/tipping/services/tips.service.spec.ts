@@ -70,7 +70,10 @@ describe('TipService', () => {
       sender_address: 'ak_sender',
       token_mentions: ['ALPHA'],
     });
-    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+    const ensureAccountExists = jest.spyOn(
+      service as any,
+      'ensureAccountExists',
+    );
 
     const result = await service.saveTipFromTransaction(
       {
@@ -92,7 +95,10 @@ describe('TipService', () => {
 
   it('does not persist self-tips on a profile', async () => {
     tipRepository.findOne.mockResolvedValue(null);
-    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+    const ensureAccountExists = jest.spyOn(
+      service as any,
+      'ensureAccountExists',
+    );
 
     const result = await service.saveTipFromTransaction(
       {
@@ -114,23 +120,23 @@ describe('TipService', () => {
   });
 
   it('marks self-tips as skipped during live handling', async () => {
-    jest.spyOn(service as any, 'validateTransaction').mockReturnValue('TIP_POST:post-1');
+    jest
+      .spyOn(service as any, 'validateTransaction')
+      .mockReturnValue('TIP_POST:post-1');
     postRepository.findOne.mockResolvedValue({
       id: 'post-1',
       sender_address: 'ak_sender',
       token_mentions: ['ALPHA'],
     });
 
-    const result = await service.handleLiveTransaction(
-      {
-        hash: 'th_self_tip',
-        tx: {
-          senderId: 'ak_sender',
-          recipientId: 'ak_sender',
-          amount: '1000000000000000000',
-        },
-      } as any,
-    );
+    const result = await service.handleLiveTransaction({
+      hash: 'th_self_tip',
+      tx: {
+        senderId: 'ak_sender',
+        recipientId: 'ak_sender',
+        amount: '1000000000000000000',
+      },
+    } as any);
 
     expect(result).toEqual({
       success: false,

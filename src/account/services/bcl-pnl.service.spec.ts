@@ -127,10 +127,7 @@ describe('BclPnlService', () => {
       },
     ]);
 
-    const result = await service.calculateTokenPnlsBatch(
-      'ak_test',
-      [200, 300],
-    );
+    const result = await service.calculateTokenPnlsBatch('ak_test', [200, 300]);
 
     // Single DB round-trip regardless of number of heights
     expect(transactionRepository.query).toHaveBeenCalledTimes(1);
@@ -144,7 +141,9 @@ describe('BclPnlService', () => {
     expect(sql).not.toContain('JOIN transactions tx'); // no repeated scan of transactions
     expect(sql).toContain('LEFT JOIN LATERAL');
     expect(sql).toContain('LIMIT 1');
-    expect(sql).not.toContain('DISTINCT ON (agg.snapshot_height, agg.sale_address)');
+    expect(sql).not.toContain(
+      'DISTINCT ON (agg.snapshot_height, agg.sale_address)',
+    );
     expect(params).toEqual(['ak_test', [200, 300]]);
 
     expect(result).toBeInstanceOf(Map);

@@ -8,7 +8,7 @@ import {
   Parent,
 } from '@nestjs/graphql';
 import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
-import { Inject, Optional } from '@nestjs/common';
+import { Inject, Optional, Type } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { PaginatedResponse } from '../types/pagination.type';
@@ -25,7 +25,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
   @Resolver(() => config.entity)
   class BaseResolver {
     public readonly repository: Repository<T>;
-    public readonly relatedRepositories: Map<Function, Repository<any>>;
+    public readonly relatedRepositories: Map<Type<any>, Repository<any>>;
 
     constructor(
       repository: Repository<T>,
@@ -36,7 +36,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
       @Optional() repo4?: Repository<any>,
     ) {
       this.repository = repository;
-      this.relatedRepositories = new Map<Function, Repository<any>>();
+      this.relatedRepositories = new Map<Type<any>, Repository<any>>();
 
       // Map related repositories by entity type (only use the ones that exist)
       const repos = [repo0, repo1, repo2, repo3, repo4];

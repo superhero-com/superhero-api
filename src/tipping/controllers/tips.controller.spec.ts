@@ -23,7 +23,10 @@ describe('TipsController', () => {
       findOne: jest.fn(),
     };
 
-    controller = new TipsController(tipRepository as any, postRepository as any);
+    controller = new TipsController(
+      tipRepository as any,
+      postRepository as any,
+    );
   });
 
   it('excludes self-tips from account summary totals', async () => {

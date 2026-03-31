@@ -8,7 +8,10 @@ export class ProfileSpendQueueService {
   private readonly accountsByKey = new Map<string, MemoryAccount>();
   private readonly accountInitErrorsByKey = new Map<string, Error>();
 
-  async enqueueSpend(privateKey: string, work: () => Promise<void>): Promise<void> {
+  async enqueueSpend(
+    privateKey: string,
+    work: () => Promise<void>,
+  ): Promise<void> {
     const currentQueue = this.queuesByKey.get(privateKey) || Promise.resolve();
     const current = currentQueue.then(work, work);
     this.queuesByKey.set(
@@ -21,7 +24,10 @@ export class ProfileSpendQueueService {
     return current;
   }
 
-  getRewardAccount(privateKey: string, privateKeyEnvName: string): MemoryAccount {
+  getRewardAccount(
+    privateKey: string,
+    privateKeyEnvName: string,
+  ): MemoryAccount {
     const cached = this.accountsByKey.get(privateKey);
     if (cached) {
       return cached;
@@ -32,7 +38,10 @@ export class ProfileSpendQueueService {
     }
 
     try {
-      const normalized = this.normalizePrivateKey(privateKey, privateKeyEnvName);
+      const normalized = this.normalizePrivateKey(
+        privateKey,
+        privateKeyEnvName,
+      );
       const account = new MemoryAccount(normalized);
       this.accountsByKey.set(privateKey, account);
       return account;

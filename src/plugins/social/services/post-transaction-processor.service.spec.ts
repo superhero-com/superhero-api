@@ -79,7 +79,9 @@ describe('PostTransactionProcessorService', () => {
       topics: [],
       media: [],
     });
-    persistenceService.validatePostData.mockImplementation((postData: any) => postData);
+    persistenceService.validatePostData.mockImplementation(
+      (postData: any) => postData,
+    );
     persistenceService.savePost.mockResolvedValue(savedPost);
     topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
     tokensService.updateTrendingScoresForSymbols.mockRejectedValue(

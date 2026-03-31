@@ -32,7 +32,9 @@ describe('resolveTrendingSymbolsForPost', () => {
     const loadParentPost = jest.fn().mockResolvedValue({
       token_mentions: ['BETA'],
     });
-    const updateTrendingScoresForSymbols = jest.fn().mockResolvedValue(undefined);
+    const updateTrendingScoresForSymbols = jest
+      .fn()
+      .mockResolvedValue(undefined);
     const logError = jest.fn();
 
     await refreshTrendingScoresForPostSafely({

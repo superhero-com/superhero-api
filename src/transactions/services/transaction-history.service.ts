@@ -411,7 +411,7 @@ export class TransactionHistoryService {
       },
     };
 
-    const { interval, unit, size, timeframe, intervalMs } = types[intervalType];
+    const { interval, unit, size, timeframe } = types[intervalType];
 
     const bucketExpr =
       size > 1

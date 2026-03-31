@@ -1,10 +1,5 @@
 import { Controller, Post, Body, Param, Get, Render } from '@nestjs/common';
-import {
-  ApiBody,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateAffiliationDto } from '../dto/create-affiliation.dto';

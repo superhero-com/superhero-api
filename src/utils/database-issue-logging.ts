@@ -15,7 +15,9 @@ const defaultExtra = (DATABASE_CONFIG as any)?.extra ?? {};
 export const DEFAULT_DATABASE_ISSUE_POOL_CONFIG: DatabaseIssuePoolConfig = {
   max: Number(defaultExtra.max ?? 40),
   min: Number(defaultExtra.min ?? 5),
-  connectionTimeoutMillis: Number(defaultExtra.connectionTimeoutMillis ?? 10_000),
+  connectionTimeoutMillis: Number(
+    defaultExtra.connectionTimeoutMillis ?? 10_000,
+  ),
 };
 
 export function isDatabaseConnectionOrPoolError(error: unknown): boolean {

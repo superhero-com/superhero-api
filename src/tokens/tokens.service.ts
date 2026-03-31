@@ -750,8 +750,7 @@ export class TokensService {
         eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
         eligibilityMinPosts:
           TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
-        eligibilityMinTrades:
-          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
+        eligibilityMinTrades: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
       },
     );
   }
@@ -789,7 +788,8 @@ export class TokensService {
 
     const passes = {
       holders: holdersCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
-      posts: postCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
+      posts:
+        postCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
       trades: tradeCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
       eligible: false,
     };
@@ -1299,8 +1299,11 @@ export class TokensService {
   }
 
   private isContractNotPresentError(error: any): boolean {
-    const message = `${error?.message || ''} ${error?.reason || ''}`.toLowerCase();
-    return message.includes('contract not found') || message.includes('not_present');
+    const message =
+      `${error?.message || ''} ${error?.reason || ''}`.toLowerCase();
+    return (
+      message.includes('contract not found') || message.includes('not_present')
+    );
   }
 
   private sleep(ms: number): Promise<void> {
@@ -1571,12 +1574,12 @@ export class TokensService {
     const lastSocialActivityAt = social.last_social_activity_at
       ? new Date(social.last_social_activity_at)
       : null;
-    const lastActivityAt = this.getLatestDate(lastTradeAt, lastSocialActivityAt);
+    const lastActivityAt = this.getLatestDate(
+      lastTradeAt,
+      lastSocialActivityAt,
+    );
     const ageHoursSinceLastActivity = lastActivityAt
-      ? Math.max(
-          0,
-          (Date.now() - lastActivityAt.getTime()) / (1000 * 60 * 60),
-        )
+      ? Math.max(0, (Date.now() - lastActivityAt.getTime()) / (1000 * 60 * 60))
       : TRENDING_SCORE_CONFIG.WINDOW_HOURS;
 
     const decayMultiplier =
@@ -1584,8 +1587,7 @@ export class TokensService {
         ? 1 /
           Math.pow(
             1 +
-              ageHoursSinceLastActivity /
-                TRENDING_SCORE_CONFIG.DECAY.biasHours,
+              ageHoursSinceLastActivity / TRENDING_SCORE_CONFIG.DECAY.biasHours,
             TRENDING_SCORE_CONFIG.DECAY.gravity,
           )
         : 0;

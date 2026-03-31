@@ -16,7 +16,9 @@ jest.mock('@aeternity/aepp-sdk', () => {
 
 describe('ProfileContractService', () => {
   const setup = () => {
-    const initializeContract = (Contract.initialize as jest.Mock).mockResolvedValue({
+    const initializeContract = (
+      Contract.initialize as jest.Mock
+    ).mockResolvedValue({
       get_profile: jest.fn().mockResolvedValue({ decodedResult: null }),
     } as any);
     const aeSdkService = {

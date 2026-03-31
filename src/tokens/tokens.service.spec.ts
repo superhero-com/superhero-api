@@ -3,7 +3,10 @@ import {
   TOKEN_LIST_ELIGIBILITY_CONFIG,
   TRENDING_SCORE_CONFIG,
 } from '@/configs/constants';
-import { RetryableTokenHoldersSyncError, TokensService } from './tokens.service';
+import {
+  RetryableTokenHoldersSyncError,
+  TokensService,
+} from './tokens.service';
 
 describe('TokensService', () => {
   let service: TokensService;
@@ -156,23 +159,27 @@ describe('TokensService', () => {
     expect(socialQuery).toContain(
       'INNER JOIN posts tipped_post ON tipped_post.id = tip.post_id',
     );
-    expect((socialQuery.match(/tip\.sender_address != tipped_post\.sender_address/g) || []).length).toBe(3);
+    expect(
+      (
+        socialQuery.match(
+          /tip\.sender_address != tipped_post\.sender_address/g,
+        ) || []
+      ).length,
+    ).toBe(3);
   });
 
   it('throws a not found error when updating a missing token', async () => {
-    await expect(service.updateTokenTrendingScore(null as any)).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      service.updateTokenTrendingScore(null as any),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('persists zero when the calculated score is non-finite', async () => {
-    jest
-      .spyOn(service, 'calculateTokenTrendingMetrics')
-      .mockResolvedValue({
-        trending_score: {
-          result: Number.NaN,
-        },
-      } as any);
+    jest.spyOn(service, 'calculateTokenTrendingMetrics').mockResolvedValue({
+      trending_score: {
+        result: Number.NaN,
+      },
+    } as any);
 
     const result = await service.updateTokenTrendingScore({
       sale_address: 'ct_sale',
@@ -198,11 +205,19 @@ describe('TokensService', () => {
       .spyOn(service, 'updateMultipleTokensTrendingScores')
       .mockResolvedValue(undefined);
 
-    await service.updateTrendingScoresForSymbols([' test ', 'TEST', '', 'alpha']);
+    await service.updateTrendingScoresForSymbols([
+      ' test ',
+      'TEST',
+      '',
+      'alpha',
+    ]);
 
-    expect(andWhere).toHaveBeenCalledWith('UPPER(token.symbol) IN (:...symbols)', {
-      symbols: ['TEST', 'ALPHA'],
-    });
+    expect(andWhere).toHaveBeenCalledWith(
+      'UPPER(token.symbol) IN (:...symbols)',
+      {
+        symbols: ['TEST', 'ALPHA'],
+      },
+    );
     expect(service.updateMultipleTokensTrendingScores).toHaveBeenCalledWith([
       { sale_address: 'ct_sale' },
     ]);
@@ -212,16 +227,18 @@ describe('TokensService', () => {
     let active = 0;
     let maxActive = 0;
 
-    jest.spyOn(service, 'updateTokenTrendingScore').mockImplementation(async () => {
-      active += 1;
-      maxActive = Math.max(maxActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active -= 1;
-      return {
-        metrics: {} as any,
-        token: {} as any,
-      };
-    });
+    jest
+      .spyOn(service, 'updateTokenTrendingScore')
+      .mockImplementation(async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return {
+          metrics: {} as any,
+          token: {} as any,
+        };
+      });
 
     await service.updateMultipleTokensTrendingScores(
       Array.from({ length: 20 }, (_, index) => ({
@@ -274,8 +291,7 @@ describe('TokensService', () => {
         eligibilityMinHolders: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
         eligibilityMinPosts:
           TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TOKEN_POSTS_ALL_TIME,
-        eligibilityMinTrades:
-          TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
+        eligibilityMinTrades: TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_TRADES_ALL_TIME,
       }),
     );
   });
@@ -299,7 +315,8 @@ describe('TokensService', () => {
 
     const breakdown = await service.getTrendingEligibilityBreakdown('ct_sale');
 
-    const [eligibilityQuery, eligibilityParams] = tokensRepository.query.mock.calls[0];
+    const [eligibilityQuery, eligibilityParams] =
+      tokensRepository.query.mock.calls[0];
     expect(tokenEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
       where: { symbol: 'TEST' },
     });
