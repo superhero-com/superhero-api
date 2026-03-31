@@ -23,9 +23,12 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Brackets, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { PortfolioService } from '../services/portfolio.service';
+import { BclPnlService } from '../services/bcl-pnl.service';
 import { AccountService } from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
+import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
+import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
 
@@ -39,6 +42,7 @@ export class AccountsController {
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
     private readonly portfolioService: PortfolioService,
+    private readonly bclPnlService: BclPnlService,
     private readonly accountService: AccountService,
     private readonly profileReadService: ProfileReadService,
   ) {
@@ -188,6 +192,37 @@ export class AccountsController {
       includePnl,
       useRangeBasedPnl,
     });
+  }
+
+  // Portfolio stats endpoint - MUST come before :address route to avoid route conflict
+  @ApiOperation({ operationId: 'getPortfolioStats' })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiOkResponse({ type: TradingStatsResponseDto })
+  @CacheTTL(60 * 10) // 10 minutes
+  @Get(':address/portfolio/stats')
+  async getPortfolioStats(
+    @Param('address') address: string,
+    @Query() query: TradingStatsQueryDto,
+  ): Promise<TradingStatsResponseDto> {
+    const start = query.startDate
+      ? moment(query.startDate).toDate()
+      : moment().subtract(30, 'days').toDate();
+    const end = query.endDate ? moment(query.endDate).toDate() : new Date();
+
+    const stats = await this.bclPnlService.calculateTradingStats(
+      address,
+      start,
+      end,
+    );
+
+    return {
+      top_win: stats.topWin,
+      unrealized_profit: stats.unrealizedProfit,
+      win_rate: stats.winRate,
+      avg_duration_seconds: stats.avgDurationSeconds,
+      total_trades: stats.totalTrades,
+      winning_trades: stats.winningTrades,
+    };
   }
 
   // single account - MUST come after more specific routes

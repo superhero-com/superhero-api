@@ -29,9 +29,18 @@ export class AePricingService {
       });
       return this.latestRates;
     }
-    this.latestRates = await this.coinPriceRepository.save({
-      rates,
-    });
+    try {
+      this.latestRates = await this.coinPriceRepository.save({
+        rates,
+      });
+    } catch (error) {
+      this.latestRates = await this.coinPriceRepository.findOne({
+        where: {},
+        order: {
+          created_at: 'DESC',
+        },
+      });
+    }
     return this.latestRates;
   }
 

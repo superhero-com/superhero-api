@@ -12,7 +12,11 @@ import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historica
 import { ACTIVE_NETWORK, AETERNITY_COIN_ID } from '@/configs';
 import { toAe } from '@aeternity/aepp-sdk';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
-import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
+import {
+  BclPnlService,
+  DailyPnlWindow,
+  TokenPnlResult,
+} from './bcl-pnl.service';
 import { fetchJson } from '@/utils/common';
 
 export interface PortfolioHistorySnapshot {
@@ -236,27 +240,29 @@ export class PortfolioService {
       );
       return lastKnownHeight;
     });
-    // startBlockHeight is the block at the beginning of the requested range.
-    // timestamps[0] === start (same millisecond value), so blockHeights[0] is
-    // already the correct answer — no extra DB or API call needed.
-    const startBlockHeight =
-      useRangeBasedPnl && includePnl ? blockHeights[0] : undefined;
-
     const uniqueBlockHeights = [...new Set(blockHeights)];
+
+    // Build per-day windows for the daily PnL calendar.
+    // Each snapshot's window covers [previousTimestamp, currentTimestamp).
+    // The first snapshot gets a zero-width window (dayStart === snapshotTs)
+    // so it naturally returns 0 gain since no sells can fall in an empty range.
+    const dailyWindows: DailyPnlWindow[] = timestamps.map((ts, i) => ({
+      snapshotTs: ts.valueOf(),
+      dayStartTs: i > 0 ? timestamps[i - 1].valueOf() : ts.valueOf(),
+    }));
 
     // Pre-compute PNL for all unique block heights in a single batch query.
     // This replaces the previous per-snapshot SQL calls (N queries → 1 query).
-    const [pnlMap, rangePnlMap] = await Promise.all([
+    const [pnlMap, dailyPnlMap] = await Promise.all([
       this.bclPnlService.calculateTokenPnlsBatch(
         resolvedAddress,
         uniqueBlockHeights,
         undefined,
       ),
-      includePnl && useRangeBasedPnl && startBlockHeight !== undefined
-        ? this.bclPnlService.calculateTokenPnlsBatch(
+      includePnl && useRangeBasedPnl
+        ? this.bclPnlService.calculateDailyPnlBatch(
             resolvedAddress,
-            uniqueBlockHeights,
-            startBlockHeight,
+            dailyWindows,
           )
         : Promise.resolve(undefined as Map<number, TokenPnlResult> | undefined),
     ]);
@@ -291,10 +297,11 @@ export class PortfolioService {
 
         const tokensPnl = pnlMap.get(blockHeight) ?? emptyPnl;
 
-        // For range-based PNL, index 0 reuses the cumulative result (existing semantics)
+        // Daily PnL is keyed by snapshot timestamp (ms), giving each day its
+        // own isolated sell window regardless of block height deduplication.
         const rangeBasedPnl =
-          useRangeBasedPnl && includePnl && index > 0
-            ? (rangePnlMap?.get(blockHeight) ?? undefined)
+          useRangeBasedPnl && includePnl
+            ? (dailyPnlMap?.get(timestamp.valueOf()) ?? undefined)
             : undefined;
 
         const aeBalance = await aeBalancePromise;
@@ -350,11 +357,9 @@ export class PortfolioService {
 
           // Only include range information when using range-based PnL
           if (useRangeBasedPnl) {
-            // Determine the range for this PnL calculation
-            // For range-based PNL with hover support: each snapshot shows PNL from startDate to that timestamp
-            // First snapshot: cumulative from start (null) to current timestamp
-            // All other snapshots: from startDate to current timestamp
-            const rangeFrom = index === 0 ? null : start;
+            // Each snapshot shows PnL for its own day window:
+            // from the previous snapshot timestamp (or null for the first) to this snapshot.
+            const rangeFrom = index === 0 ? null : timestamps[index - 1];
             const rangeTo = timestamp;
             result.total_pnl.range = {
               from: rangeFrom,

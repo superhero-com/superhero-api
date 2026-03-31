@@ -1,7 +1,7 @@
 import moment from 'moment';
 import { PortfolioService } from './portfolio.service';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
-import { TokenPnlResult } from './bcl-pnl.service';
+import { DailyPnlWindow, TokenPnlResult } from './bcl-pnl.service';
 import { fetchJson } from '@/utils/common';
 
 jest.mock('@/utils/getBlochHeight', () => ({
@@ -40,6 +40,7 @@ describe('PortfolioService', () => {
     const bclPnlService = {
       calculateTokenPnls: jest.fn(),
       calculateTokenPnlsBatch: jest.fn(),
+      calculateDailyPnlBatch: jest.fn(),
     };
 
     const service = new PortfolioService(
@@ -206,9 +207,13 @@ describe('PortfolioService', () => {
     expect(calledHeights).toEqual(expect.arrayContaining([0, 300]));
   });
 
-  it('pre-computes both cumulative and range PNL maps when range PNL is requested', async () => {
+  it('calls calculateDailyPnlBatch with per-day windows when range PNL is requested', async () => {
     const { service, aeSdkService, coinGeckoService, bclPnlService } =
       createService();
+
+    const ts1 = moment.utc('2026-01-01T00:00:00.000Z');
+    const ts2 = moment.utc('2026-01-02T00:00:00.000Z');
+    const ts3 = moment.utc('2026-01-03T00:00:00.000Z');
 
     (batchTimestampToAeHeight as jest.Mock).mockImplementation(
       async (timestamps: number[]) => {
@@ -233,19 +238,48 @@ describe('PortfolioService', () => {
       },
     );
 
+    bclPnlService.calculateDailyPnlBatch.mockImplementation(
+      async (_addr: string, windows: DailyPnlWindow[]) => {
+        const map = new Map<number, TokenPnlResult>();
+        windows.forEach((w) => map.set(w.snapshotTs, basePnlResult));
+        return map;
+      },
+    );
+
     const snapshots = await service.getPortfolioHistory('ak_test', {
-      startDate: moment.utc('2026-01-01T00:00:00.000Z'),
-      endDate: moment.utc('2026-01-03T00:00:00.000Z'),
+      startDate: ts1,
+      endDate: ts3,
       interval: 86400,
       includePnl: true,
       useRangeBasedPnl: true,
     });
 
     expect(snapshots).toHaveLength(3);
-    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(2);
-    const calls = bclPnlService.calculateTokenPnlsBatch.mock.calls;
-    expect(calls[0][2]).toBeUndefined();
-    expect(calls[1][2]).toBe(100);
+
+    // Cumulative map still uses calculateTokenPnlsBatch (once, no fromBlockHeight)
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(1);
+    expect(bclPnlService.calculateTokenPnlsBatch.mock.calls[0][2]).toBeUndefined();
+
+    // Daily PnL now uses calculateDailyPnlBatch
+    expect(bclPnlService.calculateDailyPnlBatch).toHaveBeenCalledTimes(1);
+    const [, windows] =
+      bclPnlService.calculateDailyPnlBatch.mock.calls[0] as [
+        string,
+        DailyPnlWindow[],
+      ];
+    expect(windows).toHaveLength(3);
+
+    // First window: zero-width (dayStart === snapshotTs)
+    expect(windows[0].snapshotTs).toBe(ts1.valueOf());
+    expect(windows[0].dayStartTs).toBe(ts1.valueOf());
+
+    // Second window: [ts1, ts2)
+    expect(windows[1].snapshotTs).toBe(ts2.valueOf());
+    expect(windows[1].dayStartTs).toBe(ts1.valueOf());
+
+    // Third window: [ts2, ts3)
+    expect(windows[2].snapshotTs).toBe(ts3.valueOf());
+    expect(windows[2].dayStartTs).toBe(ts2.valueOf());
   });
 
   it('uses coin_historical_prices DB table when available, skipping CoinGecko', async () => {
