@@ -26,6 +26,12 @@ describe('AccountsController', () => {
   let profileReadService: {
     getProfile: jest.Mock;
   };
+  let portfolioService: {
+    resolveAccountAddress: jest.Mock;
+  };
+  let bclPnlService: {
+    calculateTradingStats: jest.Mock;
+  };
 
   beforeEach(() => {
     queryBuilder = createQueryBuilder();
@@ -40,10 +46,17 @@ describe('AccountsController', () => {
     profileReadService = {
       getProfile: jest.fn(),
     };
+    portfolioService = {
+      resolveAccountAddress: jest.fn().mockImplementation((a) => a),
+    };
+    bclPnlService = {
+      calculateTradingStats: jest.fn(),
+    };
 
     controller = new AccountsController(
       accountRepository as any,
-      {} as any,
+      portfolioService as any,
+      bclPnlService as any,
       accountService as any,
       profileReadService as any,
     );
