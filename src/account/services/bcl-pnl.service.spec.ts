@@ -290,7 +290,7 @@ describe('BclPnlService', () => {
       {
         sale_address: 'ct_pre_bought',
         current_holdings: '0',
-        total_volume_bought: '0',   // no buys in range
+        total_volume_bought: '0', // no buys in range
         total_amount_spent_ae: '0', // no buys in range
         total_amount_spent_usd: '0',
         total_amount_received_ae: '80',

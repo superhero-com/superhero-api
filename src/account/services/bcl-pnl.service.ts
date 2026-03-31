@@ -276,7 +276,9 @@ export class BclPnlService {
     `;
   }
 
-  private mapTradingStats(row: Record<string, any> | undefined): TradingStatsResult {
+  private mapTradingStats(
+    row: Record<string, any> | undefined,
+  ): TradingStatsResult {
     if (!row) {
       return {
         topWin: { ae: 0, usd: 0 },
@@ -905,7 +907,6 @@ export class BclPnlService {
     tokenPnls: Array<Record<string, any>>,
     isRangeBased: boolean,
   ): TokenPnlResult {
-
     const result: TokenPnlResult['pnls'] = {};
     let totalCostBasisAe = 0;
     let totalCostBasisUsd = 0;
@@ -985,7 +986,8 @@ export class BclPnlService {
         costBasisUsd = totalAmountSpentUsd;
 
         gainAe = totalAmountReceivedAe + currentValueAe - totalAmountSpentAe;
-        gainUsd = totalAmountReceivedUsd + currentValueUsd - totalAmountSpentUsd;
+        gainUsd =
+          totalAmountReceivedUsd + currentValueUsd - totalAmountSpentUsd;
       }
 
       totalCostBasisAe += costBasisAe;
