@@ -91,6 +91,18 @@ export interface GetPortfolioHistoryOptions {
   useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
 }
 
+export interface PnlDataPoint {
+  timestamp: Moment;
+  gain: { ae: number; usd: number };
+}
+
+export interface GetPnlTimeSeriesOptions {
+  startDate?: Moment;
+  endDate?: Moment;
+  /** Seconds between data points. Defaults to 86400 (daily). */
+  interval?: number;
+}
+
 @Injectable()
 export class PortfolioService {
   private readonly logger = new Logger(PortfolioService.name);
@@ -376,6 +388,66 @@ export class PortfolioService {
     );
 
     return data;
+  }
+
+  /**
+   * Lightweight PnL time-series for charting.
+   *
+   * Only runs `calculateDailyPnlBatch` (one SQL query). Skips block-height
+   * resolution, cumulative PnL, and AE-node balance calls — making it
+   * significantly faster than `getPortfolioHistory` for sparkline use-cases.
+   *
+   * Each data point contains the realized gain for its own isolated window
+   * [previousTimestamp, currentTimestamp), keyed by `created_at` on the
+   * transactions (same as the daily PnL calendar).
+   */
+  async getPnlTimeSeries(
+    address: string,
+    options: GetPnlTimeSeriesOptions = {},
+  ): Promise<PnlDataPoint[]> {
+    const { startDate, endDate, interval = 86400 } = options;
+
+    const now = moment();
+    const start = startDate ?? moment().subtract(30, 'days');
+    const end = endDate ? moment(endDate) : now;
+    const cappedEnd = moment.min(end, now);
+    const safeInterval = interval > 0 ? interval : 86400;
+
+    const timestamps: Moment[] = [];
+    const current = moment(start);
+    const endMs = cappedEnd.valueOf();
+    while (current.valueOf() <= endMs && timestamps.length < 10000) {
+      if (current.valueOf() > now.valueOf()) break;
+      timestamps.push(moment(current));
+      const prev = current.valueOf();
+      current.add(safeInterval, 'seconds');
+      if (current.valueOf() <= prev) break;
+    }
+
+    if (timestamps.length === 0) return [];
+
+    const resolvedAddress = await this.resolveAccountAddress(address);
+
+    const windows: DailyPnlWindow[] = timestamps.map((ts, i) => ({
+      snapshotTs: ts.valueOf(),
+      dayStartTs: i > 0 ? timestamps[i - 1].valueOf() : ts.valueOf(),
+    }));
+
+    const pnlMap = await this.bclPnlService.calculateDailyPnlBatch(
+      resolvedAddress,
+      windows,
+    );
+
+    return timestamps.map((ts) => {
+      const pnl = pnlMap.get(ts.valueOf());
+      return {
+        timestamp: ts,
+        gain: {
+          ae: pnl?.totalGainAe ?? 0,
+          usd: pnl?.totalGainUsd ?? 0,
+        },
+      };
+    });
   }
 
   async resolveAccountAddress(address: string): Promise<string> {
