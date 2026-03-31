@@ -3,11 +3,13 @@ import {
   Controller,
   DefaultValuePipe,
   Get,
+  Header,
   Logger,
   NotFoundException,
   Param,
   ParseIntPipe,
   Query,
+  StreamableFile,
   UseInterceptors,
 } from '@nestjs/common';
 import {
@@ -31,6 +33,7 @@ import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
+import { buildSparklineSvg, sparklineStroke } from '@/utils/sparkline.util';
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -164,6 +167,7 @@ export class AccountsController {
   @CacheTTL(60 * 10) // 10 minutes
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
+    //
     @Param('address') address: string,
     @Query() query: GetPortfolioHistoryQueryDto,
   ) {
@@ -191,6 +195,76 @@ export class AccountsController {
       convertTo: query.convertTo || 'ae',
       includePnl,
       useRangeBasedPnl,
+    });
+  }
+
+  // Portfolio PnL sparkline — MUST come before :address route to avoid route conflict
+  @ApiOperation({
+    operationId: 'getPortfolioPnlChart',
+    summary:
+      'SVG sparkline of daily (or hourly for a single-day range) realized PnL',
+  })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiQuery({ name: 'startDate', type: 'string', required: false })
+  @ApiQuery({ name: 'endDate', type: 'string', required: false })
+  @ApiQuery({
+    name: 'convertTo',
+    enum: ['ae', 'usd'],
+    required: false,
+    example: 'ae',
+  })
+  @ApiQuery({ name: 'width', type: 'number', required: false, example: 160 })
+  @ApiQuery({ name: 'height', type: 'number', required: false, example: 60 })
+  @ApiQuery({
+    name: 'background',
+    type: 'string',
+    required: false,
+    example: 'none',
+    description: 'CSS fill for background rect, e.g. "#1a1a2e" or "none"',
+  })
+  @Header('Content-Type', 'image/svg+xml')
+  @Header('Content-Disposition', 'inline; filename="pnl-chart.svg"')
+  @CacheTTL(60 * 10)
+  @Get(':address/portfolio/pnl-chart.svg')
+  async getPortfolioPnlChart(
+    @Param('address') address: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('convertTo') convertTo: 'ae' | 'usd' = 'ae',
+    @Query('width') width = '160',
+    @Query('height') height = '60',
+    @Query('background') background = 'none',
+  ): Promise<StreamableFile> {
+    const start = startDate ? moment(startDate) : moment().subtract(30, 'days');
+    const end = endDate ? moment(endDate) : moment();
+
+    // Use hourly points for a single-day range, daily otherwise
+    const rangeHours = end.diff(start, 'hours', true);
+    const interval = rangeHours <= 24 ? 3600 : 86400;
+
+    // Use the lightweight PnL-only series instead of the full portfolio history.
+    // This skips AE-node balance calls, block-height resolution, and cumulative
+    // PnL queries — only calculateDailyPnlBatch (one SQL query) runs.
+    // resolveAccountAddress is handled inside getPnlTimeSeries.
+    const points = await this.portfolioService.getPnlTimeSeries(address, {
+      startDate: start,
+      endDate: end,
+      interval,
+    });
+
+    const values = points.map((p) => p.gain[convertTo]);
+
+    const svg = buildSparklineSvg(
+      values,
+      Number(width),
+      Number(height),
+      sparklineStroke(values),
+      background,
+    );
+
+    return new StreamableFile(Buffer.from(svg), {
+      type: 'image/svg+xml',
+      disposition: 'inline; filename="pnl-chart.svg"',
     });
   }
 
