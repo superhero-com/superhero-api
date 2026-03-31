@@ -475,6 +475,11 @@ describe('BclPnlService', () => {
     expect(sql).toContain('range_sells');
     expect(sql).toContain('unrealized');
     expect(sql).toContain('CROSS JOIN unrealized');
+    // top_win must come from a single trade via top_trade CTE (not independent MAX)
+    expect(sql).toContain('top_trade');
+    expect(sql).toContain('ORDER BY gain_ae DESC');
+    expect(sql).not.toContain('MAX(gain_ae)');
+    expect(sql).not.toContain('MAX(gain_usd)');
     expect(params[0]).toBe('ak_test');
     expect(params[1]).toBe(start);
     expect(params[2]).toBe(end);
@@ -484,8 +489,8 @@ describe('BclPnlService', () => {
     const { service, transactionRepository } = createService();
 
     // Scenario:
-    // - 3 sells in range: 2 winning (gains 5 AE, 3 AE), 1 losing (gain -2 AE)
-    // - top win = 5 AE
+    // - 3 sells in range: 2 winning (gains 5 AE / 10 USD, and 3 AE / 12 USD), 1 losing
+    // - top win should be the 5 AE / 10 USD trade (best by AE), not 3 AE / 12 USD
     // - win rate = 2/3 * 100 = 66.67%
     // - avg hold = 86400s (1 day)
     // - unrealized = 10 AE
@@ -507,12 +512,41 @@ describe('BclPnlService', () => {
       new Date('2026-01-31'),
     );
 
+    // Both AE and USD values come from the same best-AE trade
     expect(result.topWin).toEqual({ ae: 5, usd: 10 });
     expect(result.unrealizedProfit).toEqual({ ae: 10, usd: 20 });
     expect(result.winRate).toBeCloseTo((2 / 3) * 100);
     expect(result.avgDurationSeconds).toBe(86400);
     expect(result.totalTrades).toBe(3);
     expect(result.winningTrades).toBe(2);
+  });
+
+  it('calculateTradingStats top_win ae/usd come from the same trade, not independent MAX', async () => {
+    const { service, transactionRepository } = createService();
+
+    // Trade A: gain_ae = 5, gain_usd = 8  (best by AE — should be top_win)
+    // Trade B: gain_ae = 3, gain_usd = 15 (best by USD — must NOT be used for top_win_usd)
+    // Independent MAX would give { ae: 5, usd: 15 } — wrong.
+    // Correct result: { ae: 5, usd: 8 } (both from Trade A).
+    transactionRepository.query.mockResolvedValue([
+      {
+        top_win_ae: '5',
+        top_win_usd: '8', // paired with the 5 AE trade, not 15
+        winning_sells: '2',
+        total_sells: '2',
+        avg_hold_secs: '3600',
+        unrealized_ae: '0',
+        unrealized_usd: '0',
+      },
+    ]);
+
+    const result = await service.calculateTradingStats(
+      'ak_test',
+      new Date('2026-01-01'),
+      new Date('2026-01-31'),
+    );
+
+    expect(result.topWin).toEqual({ ae: 5, usd: 8 });
   });
 
   it('calculateTradingStats returns zero win_rate when no sells in range', async () => {

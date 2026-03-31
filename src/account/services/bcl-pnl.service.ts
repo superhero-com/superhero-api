@@ -222,11 +222,21 @@ export class BclPnlService {
           hold_secs
         FROM range_sells
       ),
+      -- The single best sell transaction by AE gain (both AE and USD come from the same row).
+      -- Using a dedicated CTE instead of independent MAX() aggregations avoids mixing
+      -- AE/USD values from different trades when exchange rates differ.
+      top_trade AS (
+        SELECT gain_ae AS top_win_ae, gain_usd AS top_win_usd
+        FROM range_sells_with_gain
+        WHERE gain_ae > 0
+        ORDER BY gain_ae DESC
+        LIMIT 1
+      ),
       -- Aggregate sell stats over the range
       sell_stats AS (
         SELECT
-          COALESCE(MAX(gain_ae) FILTER (WHERE gain_ae > 0), 0) AS top_win_ae,
-          COALESCE(MAX(gain_usd) FILTER (WHERE gain_usd > 0), 0) AS top_win_usd,
+          COALESCE((SELECT top_win_ae FROM top_trade), 0) AS top_win_ae,
+          COALESCE((SELECT top_win_usd FROM top_trade), 0) AS top_win_usd,
           COUNT(*) FILTER (WHERE gain_ae > 0) AS winning_sells,
           COUNT(*) AS total_sells,
           COALESCE(AVG(hold_secs) FILTER (WHERE hold_secs IS NOT NULL AND hold_secs >= 0), 0) AS avg_hold_secs
