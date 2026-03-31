@@ -148,9 +148,9 @@ describe('SyncTokenHoldersQueue', () => {
       new Error('sync failed'),
     );
 
-    await expect(queue.process({ data: { saleAddress } } as any)).rejects.toThrow(
-      'sync failed',
-    );
+    await expect(
+      queue.process({ data: { saleAddress } } as any),
+    ).rejects.toThrow('sync failed');
 
     expect(tokenHoldersLockService.releaseLock).toHaveBeenCalledWith(
       saleAddress,

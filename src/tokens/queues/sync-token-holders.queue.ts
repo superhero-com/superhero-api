@@ -3,7 +3,10 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bull';
-import { RetryableTokenHoldersSyncError, TokensService } from '../tokens.service';
+import {
+  RetryableTokenHoldersSyncError,
+  TokensService,
+} from '../tokens.service';
 import { TokenHoldersLockService } from '../services/token-holders-lock.service';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './constants';
 

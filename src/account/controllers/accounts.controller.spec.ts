@@ -50,15 +50,26 @@ describe('AccountsController', () => {
   });
 
   it('returns paginated accounts', async () => {
-    const result = await controller.listAll(undefined, 1, 100, 'total_volume', 'DESC');
+    const result = await controller.listAll(
+      undefined,
+      1,
+      100,
+      'total_volume',
+      'DESC',
+    );
 
-    expect(accountRepository.createQueryBuilder).toHaveBeenCalledWith('account');
+    expect(accountRepository.createQueryBuilder).toHaveBeenCalledWith(
+      'account',
+    );
     expect(queryBuilder.leftJoin).not.toHaveBeenCalled();
     expect(queryBuilder.orderBy).toHaveBeenCalledWith(
       'account.total_volume',
       'DESC',
     );
-    expect(paginate).toHaveBeenCalledWith(queryBuilder, { page: 1, limit: 100 });
+    expect(paginate).toHaveBeenCalledWith(queryBuilder, {
+      page: 1,
+      limit: 100,
+    });
     expect(result).toEqual({ items: [], meta: {} });
   });
 

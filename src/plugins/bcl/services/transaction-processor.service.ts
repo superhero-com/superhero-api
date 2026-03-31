@@ -89,10 +89,11 @@ export class TransactionProcessorService {
             return null;
           }
 
-          transactionToken = await this.tokenService.createTokenFromRawTransaction(
-            rawTransaction,
-            manager,
-          );
+          transactionToken =
+            await this.tokenService.createTokenFromRawTransaction(
+              rawTransaction,
+              manager,
+            );
           if (!transactionToken) {
             this.logger.warn(
               `Skipping create_community tx ${rawTransaction.hash}: failed to create token for ${saleAddress}`,

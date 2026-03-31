@@ -8,7 +8,12 @@ import {
   Query,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { fetchJson } from '@/utils/common';
@@ -62,9 +67,24 @@ export class GiphyController {
 
   constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
 
-  @ApiQuery({ name: 'q', type: 'string', required: false, description: 'Search query. Omit for trending GIFs.' })
-  @ApiQuery({ name: 'limit', type: 'number', required: false, description: 'Number of results (max 50)' })
-  @ApiQuery({ name: 'offset', type: 'number', required: false, description: 'Pagination offset' })
+  @ApiQuery({
+    name: 'q',
+    type: 'string',
+    required: false,
+    description: 'Search query. Omit for trending GIFs.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    type: 'number',
+    required: false,
+    description: 'Number of results (max 50)',
+  })
+  @ApiQuery({
+    name: 'offset',
+    type: 'number',
+    required: false,
+    description: 'Pagination offset',
+  })
   @ApiOperation({
     operationId: 'giphySearch',
     summary: 'Search or list trending GIFs',
@@ -83,7 +103,8 @@ export class GiphyController {
     const endpoint = q ? 'search' : 'trending';
     const cacheKey = `gif:${endpoint}:${q || ''}:${safeLimit}:${safeOffset}`;
 
-    const cached = await this.cacheManager.get<GiphySearchResponseDto>(cacheKey);
+    const cached =
+      await this.cacheManager.get<GiphySearchResponseDto>(cacheKey);
     if (cached) return cached;
 
     const apiKey = process.env.GIPHY_API_KEY;
@@ -98,7 +119,9 @@ export class GiphyController {
     }
 
     if (!result) {
-      throw new ServiceUnavailableException('All GIF providers are currently unavailable');
+      throw new ServiceUnavailableException(
+        'All GIF providers are currently unavailable',
+      );
     }
 
     await this.cacheManager.set(cacheKey, result, CACHE_TTL_MS);
@@ -119,7 +142,9 @@ export class GiphyController {
     url.searchParams.set('offset', String(offset));
 
     try {
-      const { data: responseData, pagination } = await fetchJson(url.toString());
+      const { data: responseData, pagination } = await fetchJson(
+        url.toString(),
+      );
       return {
         results: (responseData as any[]).map(mapGiphyGif),
         totalCount: pagination.total_count,
@@ -127,7 +152,10 @@ export class GiphyController {
         hasMore: pagination.offset + pagination.count < pagination.total_count,
       };
     } catch (error) {
-      this.logger.warn('Giphy API request failed, falling back to InfiniteGIF', error);
+      this.logger.warn(
+        'Giphy API request failed, falling back to InfiniteGIF',
+        error,
+      );
       return null;
     }
   }
@@ -148,7 +176,9 @@ export class GiphyController {
 
         const data = await fetchJson(url.toString());
         const raw: any[] = data.gifs ?? data.results ?? [];
-        const results = raw.map(mapInfiniteGif).filter(Boolean) as GiphyGifDto[];
+        const results = raw
+          .map(mapInfiniteGif)
+          .filter(Boolean) as GiphyGifDto[];
 
         return {
           results,

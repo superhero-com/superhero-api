@@ -35,13 +35,11 @@ describe('TransactionsController', () => {
         {
           provide: TokensService,
           useValue: {
-            getToken: jest
-              .fn()
-              .mockResolvedValue({
-                id: 1,
-                address: 'test_token',
-                sale_address: 'test_sale_address',
-              }),
+            getToken: jest.fn().mockResolvedValue({
+              id: 1,
+              address: 'test_token',
+              sale_address: 'test_sale_address',
+            }),
           },
         },
         {

@@ -38,12 +38,10 @@ describe('AppController', () => {
         {
           provide: CommunityFactoryService,
           useValue: {
-            getCurrentFactory: jest
-              .fn()
-              .mockResolvedValue({
-                address: 'ct_123',
-                deployed_at_block_height: 123,
-              }),
+            getCurrentFactory: jest.fn().mockResolvedValue({
+              address: 'ct_123',
+              deployed_at_block_height: 123,
+            }),
           },
         },
         {
@@ -115,7 +113,10 @@ describe('AppController', () => {
     const result = await appController.getFactory();
     expect(communityFactoryService.getCurrentFactory).toHaveBeenCalled();
     expect(result).toEqual(
-      expect.objectContaining({ address: 'ct_123', deployed_at_block_height: 123 }),
+      expect.objectContaining({
+        address: 'ct_123',
+        deployed_at_block_height: 123,
+      }),
     );
   });
 });

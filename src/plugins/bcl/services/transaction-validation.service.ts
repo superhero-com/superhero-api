@@ -73,8 +73,7 @@ export class TransactionValidationService {
 
     const amountAe = transaction.amount?.ae?.toString();
     const unitPriceAe = transaction.unit_price?.ae?.toString();
-    const previousBuyPriceAe =
-      transaction.previous_buy_price?.ae?.toString();
+    const previousBuyPriceAe = transaction.previous_buy_price?.ae?.toString();
     const buyPriceAe = transaction.buy_price?.ae?.toString();
     const marketCapAe = transaction.market_cap?.ae?.toString();
 
@@ -85,10 +84,9 @@ export class TransactionValidationService {
       marketCapAe,
     ].some((value) => value === 'NaN');
 
-    return !transaction.verified && (
-      hasZeroVolume ||
-      amountAe === '0' ||
-      hasInvalidPriceData
+    return (
+      !transaction.verified &&
+      (hasZeroVolume || amountAe === '0' || hasInvalidPriceData)
     );
   }
 
@@ -132,7 +130,8 @@ export class TransactionValidationService {
 
     // create_community must come from current factory contract
     if (tx.function === BCL_FUNCTIONS.create_community) {
-      const currentFactory = await this.communityFactoryService.getCurrentFactory();
+      const currentFactory =
+        await this.communityFactoryService.getCurrentFactory();
       if (tx.contract_id !== currentFactory.address) {
         return { isValid: false, saleAddress: null };
       }

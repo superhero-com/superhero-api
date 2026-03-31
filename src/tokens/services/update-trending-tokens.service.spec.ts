@@ -16,7 +16,9 @@ describe('UpdateTrendingTokensService', () => {
       createQueryBuilder: jest.fn(),
     };
     tokensService = {
-      updateMultipleTokensTrendingScores: jest.fn().mockResolvedValue(undefined),
+      updateMultipleTokensTrendingScores: jest
+        .fn()
+        .mockResolvedValue(undefined),
     };
 
     service = new UpdateTrendingTokensService(
@@ -31,9 +33,9 @@ describe('UpdateTrendingTokensService', () => {
   });
 
   it('refreshes active tokens by oldest score update first instead of market cap', async () => {
-    const getRawManyTransactions = jest.fn().mockResolvedValue([
-      { sale_address: 'ct_trade' },
-    ]);
+    const getRawManyTransactions = jest
+      .fn()
+      .mockResolvedValue([{ sale_address: 'ct_trade' }]);
     transactionsRepository.createQueryBuilder.mockReturnValue({
       select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -74,9 +76,9 @@ describe('UpdateTrendingTokensService', () => {
     expect(activeTokenQb.limit).toHaveBeenCalledWith(
       TRENDING_SCORE_CONFIG.MAX_ACTIVE_BATCH,
     );
-    expect(tokensService.updateMultipleTokensTrendingScores).toHaveBeenCalledWith([
-      { sale_address: 'ct_trade' },
-    ]);
+    expect(
+      tokensService.updateMultipleTokensTrendingScores,
+    ).toHaveBeenCalledWith([{ sale_address: 'ct_trade' }]);
   });
 
   it('uses a lookback window that covers the full active refresh cadence', async () => {
@@ -124,7 +126,9 @@ describe('UpdateTrendingTokensService', () => {
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([{ sale_address: 'ct_never_scored' }]),
+      getMany: jest
+        .fn()
+        .mockResolvedValue([{ sale_address: 'ct_never_scored' }]),
     };
     tokensRepository.createQueryBuilder.mockReturnValue(staleQb);
 
@@ -139,9 +143,9 @@ describe('UpdateTrendingTokensService', () => {
     expect(staleQb.limit).toHaveBeenCalledWith(
       TRENDING_SCORE_CONFIG.MAX_STALE_BATCH,
     );
-    expect(tokensService.updateMultipleTokensTrendingScores).toHaveBeenCalledWith([
-      { sale_address: 'ct_never_scored' },
-    ]);
+    expect(
+      tokensService.updateMultipleTokensTrendingScores,
+    ).toHaveBeenCalledWith([{ sale_address: 'ct_never_scored' }]);
   });
 
   it('skips stale backfill when another trending refresh is already running', async () => {
@@ -150,7 +154,9 @@ describe('UpdateTrendingTokensService', () => {
     await service.fixOldTrendingTokens();
 
     expect(tokensRepository.createQueryBuilder).not.toHaveBeenCalled();
-    expect(tokensService.updateMultipleTokensTrendingScores).not.toHaveBeenCalled();
+    expect(
+      tokensService.updateMultipleTokensTrendingScores,
+    ).not.toHaveBeenCalled();
   });
 
   it('ignores self-tips when collecting recently tipped symbols', async () => {

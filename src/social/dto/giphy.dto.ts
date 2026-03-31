@@ -4,16 +4,28 @@ export class GiphyGifDto {
   @ApiProperty({ example: 'xT4uQulxzV39haRFjG' })
   id: string;
 
-  @ApiProperty({ example: 'https://media.giphy.com/media/xT4u/200w_s.gif', nullable: true })
+  @ApiProperty({
+    example: 'https://media.giphy.com/media/xT4u/200w_s.gif',
+    nullable: true,
+  })
   still: string | null;
 
-  @ApiProperty({ example: 'https://media.giphy.com/media/xT4u/200w.gif', nullable: true })
+  @ApiProperty({
+    example: 'https://media.giphy.com/media/xT4u/200w.gif',
+    nullable: true,
+  })
   animated: string | null;
 
-  @ApiProperty({ example: 'https://media.giphy.com/media/xT4u/200w.mp4', nullable: true })
+  @ApiProperty({
+    example: 'https://media.giphy.com/media/xT4u/200w.mp4',
+    nullable: true,
+  })
   mp4: string | null;
 
-  @ApiProperty({ example: 'https://media.giphy.com/media/xT4u/giphy.gif', nullable: true })
+  @ApiProperty({
+    example: 'https://media.giphy.com/media/xT4u/giphy.gif',
+    nullable: true,
+  })
   original: string | null;
 
   @ApiProperty({ example: 480, description: 'Original width in pixels' })

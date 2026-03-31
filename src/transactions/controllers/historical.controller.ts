@@ -236,7 +236,9 @@ export class HistoricalController {
     });
 
     const d = points
-      .map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`)
+      .map(
+        ([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`,
+      )
       .join(' ');
 
     const bg =

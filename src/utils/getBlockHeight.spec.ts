@@ -47,7 +47,10 @@ describe('batchTimestampToAeHeight', () => {
       { target_ms: String(ts2), height: 200 },
     ]);
 
-    const result = await batchTimestampToAeHeight([ts1, ts2], dataSource as any);
+    const result = await batchTimestampToAeHeight(
+      [ts1, ts2],
+      dataSource as any,
+    );
 
     // Only one SQL round-trip when key_blocks resolves everything
     expect(dataSource.query).toHaveBeenCalledTimes(1);
@@ -76,7 +79,10 @@ describe('batchTimestampToAeHeight', () => {
       [{ target_ms: String(ts2), block_height: 205 }],
     );
 
-    const result = await batchTimestampToAeHeight([ts1, ts2], dataSource as any);
+    const result = await batchTimestampToAeHeight(
+      [ts1, ts2],
+      dataSource as any,
+    );
 
     // Two DB round-trips: key_blocks + transactions (no HTTP/guessing calls)
     expect(dataSource.query).toHaveBeenCalledTimes(2);
@@ -115,7 +121,10 @@ describe('batchTimestampToAeHeight', () => {
       timestamps.map((ts, i) => ({ target_ms: String(ts), height: i + 1 })),
     );
 
-    const result = await batchTimestampToAeHeight(timestamps, dataSource as any);
+    const result = await batchTimestampToAeHeight(
+      timestamps,
+      dataSource as any,
+    );
 
     const [, params] = dataSource.query.mock.calls[0];
     expect(params[0]).toEqual(timestamps);

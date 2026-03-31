@@ -41,7 +41,8 @@ export class ProfileRewardsController {
   @UseGuards(RateLimitGuard)
   @ApiOperation({
     operationId: 'recheckXPostingReward',
-    summary: 'Verify wallet ownership and run an on-demand X posting reward recheck',
+    summary:
+      'Verify wallet ownership and run an on-demand X posting reward recheck',
   })
   async recheckXPostingReward(
     @Param('address') address: string,

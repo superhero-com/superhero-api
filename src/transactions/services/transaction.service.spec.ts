@@ -67,12 +67,10 @@ describe('TransactionService', () => {
       loadFactory: jest
         .fn()
         .mockResolvedValue({ contract: { $decodeEvents: jest.fn() } }),
-      getCurrentFactory: jest
-        .fn()
-        .mockResolvedValue({
-          address: 'test_factory',
-          collections: { default: {} },
-        }),
+      getCurrentFactory: jest.fn().mockResolvedValue({
+        address: 'test_factory',
+        collections: { default: {} },
+      }),
     } as any;
 
     tokenWebsocketGateway = {
@@ -121,8 +119,11 @@ describe('TransactionService', () => {
       where: jest.fn().mockReturnThis(),
       getOne: jest.fn().mockResolvedValue(null),
     };
-    transactionRepository.createQueryBuilder.mockImplementation((alias: string) =>
-      alias === 'transactions' ? deleteOldCreateCommunityQuery : existingTxQuery,
+    transactionRepository.createQueryBuilder.mockImplementation(
+      (alias: string) =>
+        alias === 'transactions'
+          ? deleteOldCreateCommunityQuery
+          : existingTxQuery,
     );
     tokenService.getToken = jest.fn().mockResolvedValue({
       sale_address: 'ct_123',

@@ -1,7 +1,8 @@
-export const TOKEN_HASHTAG_REGEX_SOURCE =
-  '#([A-Za-z0-9_][A-Za-z0-9_-]{0,49})';
+export const TOKEN_HASHTAG_REGEX_SOURCE = '#([A-Za-z0-9_][A-Za-z0-9_-]{0,49})';
 
-export function buildNormalizedTokenMentionSelectSql(postAlias: string): string {
+export function buildNormalizedTokenMentionSelectSql(
+  postAlias: string,
+): string {
   return `
     SELECT DISTINCT UPPER(mention.symbol) AS symbol
     FROM (

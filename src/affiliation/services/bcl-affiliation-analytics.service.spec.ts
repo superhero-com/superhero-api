@@ -12,12 +12,10 @@ describe('BclAffiliationAnalyticsService', () => {
       releaseFirstBatch = resolve;
     });
 
-    jest
-      .spyOn(service as any, 'parseDateRange')
-      .mockReturnValue({
-        startDate: new Date('2026-03-01T00:00:00.000Z'),
-        endDate: new Date('2026-03-04T00:00:00.000Z'),
-      });
+    jest.spyOn(service as any, 'parseDateRange').mockReturnValue({
+      startDate: new Date('2026-03-01T00:00:00.000Z'),
+      endDate: new Date('2026-03-04T00:00:00.000Z'),
+    });
     jest
       .spyOn(service as any, 'getDailyRegisteredCounts')
       .mockImplementation(async () => {
@@ -36,7 +34,10 @@ describe('BclAffiliationAnalyticsService', () => {
         await firstBatchGate;
         return {};
       });
-    const getXVerificationData = jest.spyOn(service as any, 'getXVerificationData');
+    const getXVerificationData = jest.spyOn(
+      service as any,
+      'getXVerificationData',
+    );
     getXVerificationData.mockResolvedValue({
       series: [],
       summary: { total_verified_users: 0 },

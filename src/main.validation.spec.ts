@@ -164,11 +164,10 @@ describe('global ValidationPipe request DTO coverage', () => {
   });
 
   it.each(cases)('rejects unexpected fields for $name', async (testCase) => {
-    const payload =
-      testCase.extraPayload ?? {
-        ...testCase.validPayload,
-        unexpected_field: 'boom',
-      };
+    const payload = testCase.extraPayload ?? {
+      ...testCase.validPayload,
+      unexpected_field: 'boom',
+    };
 
     await expect(
       pipe
@@ -181,7 +180,9 @@ describe('global ValidationPipe request DTO coverage', () => {
           throw error.getResponse?.() ?? error;
         }),
     ).rejects.toMatchObject({
-      message: expect.arrayContaining([expect.stringMatching(/should not exist/)]),
+      message: expect.arrayContaining([
+        expect.stringMatching(/should not exist/),
+      ]),
     });
   });
 });
