@@ -258,15 +258,16 @@ describe('PortfolioService', () => {
 
     // Cumulative map still uses calculateTokenPnlsBatch (once, no fromBlockHeight)
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(1);
-    expect(bclPnlService.calculateTokenPnlsBatch.mock.calls[0][2]).toBeUndefined();
+    expect(
+      bclPnlService.calculateTokenPnlsBatch.mock.calls[0][2],
+    ).toBeUndefined();
 
     // Daily PnL now uses calculateDailyPnlBatch
     expect(bclPnlService.calculateDailyPnlBatch).toHaveBeenCalledTimes(1);
-    const [, windows] =
-      bclPnlService.calculateDailyPnlBatch.mock.calls[0] as [
-        string,
-        DailyPnlWindow[],
-      ];
+    const [, windows] = bclPnlService.calculateDailyPnlBatch.mock.calls[0] as [
+      string,
+      DailyPnlWindow[],
+    ];
     expect(windows).toHaveLength(3);
 
     // First window: zero-width (dayStart === snapshotTs)
