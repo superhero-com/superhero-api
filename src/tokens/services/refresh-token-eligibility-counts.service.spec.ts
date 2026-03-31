@@ -46,7 +46,9 @@ describe('RefreshTokenEligibilityCountsService', () => {
 
     expect(dataSource.query).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining('CREATE TABLE IF NOT EXISTS token_eligibility_counts'),
+      expect.stringContaining(
+        'CREATE TABLE IF NOT EXISTS token_eligibility_counts',
+      ),
     );
     expect(dataSource.query).toHaveBeenNthCalledWith(
       2,
@@ -233,7 +235,9 @@ describe('RefreshTokenEligibilityCountsService', () => {
 
     expect(dataSource.query).toHaveBeenNthCalledWith(
       1,
-      expect.stringContaining('CREATE TABLE IF NOT EXISTS token_eligibility_counts'),
+      expect.stringContaining(
+        'CREATE TABLE IF NOT EXISTS token_eligibility_counts',
+      ),
     );
     expect(dataSource.query).toHaveBeenNthCalledWith(
       2,

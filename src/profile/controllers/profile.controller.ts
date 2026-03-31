@@ -214,7 +214,9 @@ export class ProfileController {
         claimed_invitations: totalClaimedAsInviter,
         revoked_invitations: totalRevokedAsInviter,
         pending_invitations:
-          totalInvitationsAsInviter - totalClaimedAsInviter - totalRevokedAsInviter,
+          totalInvitationsAsInviter -
+          totalClaimedAsInviter -
+          totalRevokedAsInviter,
         total_amount_ae: Number(amountAgg?.total || 0),
       },
       as_invitee: {

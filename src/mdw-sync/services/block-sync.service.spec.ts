@@ -170,9 +170,9 @@ describe('BlockSyncService', () => {
       new Error('timeout exceeded when trying to connect'),
     );
 
-    await expect(service.syncTransactions(123, 123, true, true)).rejects.toThrow(
-      'timeout exceeded when trying to connect',
-    );
+    await expect(
+      service.syncTransactions(123, 123, true, true),
+    ).rejects.toThrow('timeout exceeded when trying to connect');
 
     expect(txRepository.save).not.toHaveBeenCalled();
     expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();

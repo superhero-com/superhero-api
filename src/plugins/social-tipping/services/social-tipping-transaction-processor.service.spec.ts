@@ -45,16 +45,20 @@ describe('SocialTippingTransactionProcessorService', () => {
     postRepository.findOne.mockResolvedValue({
       token_mentions: ['BETA'],
     });
-    tokensService.updateTrendingScoresForSymbols.mockImplementation(async () => {
-      callOrder.push('recalculate');
-    });
+    tokensService.updateTrendingScoresForSymbols.mockImplementation(
+      async () => {
+        callOrder.push('recalculate');
+      },
+    );
 
-    tipRepository.manager.transaction.mockImplementation(async (handler: any) => {
-      callOrder.push('transaction-start');
-      const result = await handler({});
-      callOrder.push('transaction-commit');
-      return result;
-    });
+    tipRepository.manager.transaction.mockImplementation(
+      async (handler: any) => {
+        callOrder.push('transaction-start');
+        const result = await handler({});
+        callOrder.push('transaction-commit');
+        return result;
+      },
+    );
 
     const result = await service.processTransaction(
       {
@@ -111,7 +115,9 @@ describe('SocialTippingTransactionProcessorService', () => {
     jest
       .spyOn(service as any, 'validateTransaction')
       .mockReturnValue('TIP_POST:post-1');
-    jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue(null);
+    jest
+      .spyOn(service as any, 'saveTipFromTransaction')
+      .mockResolvedValue(null);
     tipRepository.manager.transaction.mockImplementation(async (handler: any) =>
       handler({}),
     );
@@ -152,7 +158,10 @@ describe('SocialTippingTransactionProcessorService', () => {
       }),
     };
 
-    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+    const ensureAccountExists = jest.spyOn(
+      service as any,
+      'ensureAccountExists',
+    );
 
     const result = await (service as any).saveTipFromTransaction(
       {
@@ -198,7 +207,10 @@ describe('SocialTippingTransactionProcessorService', () => {
       }),
     };
 
-    const ensureAccountExists = jest.spyOn(service as any, 'ensureAccountExists');
+    const ensureAccountExists = jest.spyOn(
+      service as any,
+      'ensureAccountExists',
+    );
 
     const result = await (service as any).saveTipFromTransaction(
       {

@@ -174,7 +174,10 @@ describe('TransactionProcessorService', () => {
     tokenHolderService.updateTokenHolder.mockResolvedValue(undefined);
     tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
 
-    await service.processTransaction(rawTransaction as any, SyncDirectionEnum.Live);
+    await service.processTransaction(
+      rawTransaction as any,
+      SyncDirectionEnum.Live,
+    );
 
     expect(tokenService.updateTokenTrendingScore).toHaveBeenCalledWith(token);
   });

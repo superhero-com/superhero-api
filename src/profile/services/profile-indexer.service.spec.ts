@@ -135,7 +135,12 @@ describe('ProfileIndexerService', () => {
     ).toHaveBeenCalledTimes(1);
     expect(
       profileXPostingRewardService.upsertVerifiedCandidateFromTx,
-    ).toHaveBeenCalledWith('ak_verified', 'verified', '201', 'th_pending_then_confirmed');
+    ).toHaveBeenCalledWith(
+      'ak_verified',
+      'verified',
+      '201',
+      'th_pending_then_confirmed',
+    );
     expect(
       profileXVerificationRewardService.sendRewardIfEligible,
     ).toHaveBeenCalledTimes(1);

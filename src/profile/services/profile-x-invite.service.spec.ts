@@ -33,7 +33,9 @@ describe.skip('ProfileXInviteService', () => {
       createQueryBuilder: jest.fn().mockReturnValue(inviteCreditInsertBuilder),
     } as any;
     const milestoneRewardRepository = {
-      findOne: jest.fn().mockResolvedValue({ status: 'pending', tx_hash: null }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ status: 'pending', tx_hash: null }),
       save: jest.fn().mockImplementation(async (v) => v),
       create: jest.fn().mockImplementation((v) => v),
     } as any;
@@ -179,8 +181,12 @@ describe.skip('ProfileXInviteService', () => {
   });
 
   it('creates one credit and triggers milestone reward spend once', async () => {
-    const { service, inviteRepository, inviteCreditInsertBuilder, aeSdkService } =
-      getService();
+    const {
+      service,
+      inviteRepository,
+      inviteCreditInsertBuilder,
+      aeSdkService,
+    } = getService();
     inviteRepository.findOne.mockResolvedValue({
       code: 'abc123def456',
       inviter_address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
@@ -191,7 +197,9 @@ describe.skip('ProfileXInviteService', () => {
     await service.processInviteeXVerified(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
     );
-    inviteCreditInsertBuilder.execute.mockResolvedValueOnce({ identifiers: [] });
+    inviteCreditInsertBuilder.execute.mockResolvedValueOnce({
+      identifiers: [],
+    });
     await service.processInviteeXVerified(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
     );
@@ -200,8 +208,13 @@ describe.skip('ProfileXInviteService', () => {
   });
 
   it('does not enqueue milestone payout when a fresh pending reward already exists', async () => {
-    const { service, inviteRepository, inviteCreditInsertBuilder, aeSdkService, manager } =
-      getService();
+    const {
+      service,
+      inviteRepository,
+      inviteCreditInsertBuilder,
+      aeSdkService,
+      manager,
+    } = getService();
     inviteRepository.findOne.mockResolvedValue({
       code: 'abc123def456',
       inviter_address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
@@ -214,7 +227,8 @@ describe.skip('ProfileXInviteService', () => {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue({
-          inviter_address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
+          inviter_address:
+            'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
           threshold: 10,
           status: 'pending',
           tx_hash: null,

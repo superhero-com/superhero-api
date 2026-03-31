@@ -48,7 +48,9 @@ describe('ProfileRewardsController', () => {
 
   it('verifies challenge proof before running manual recheck', async () => {
     const profileXInviteService = {
-      verifyPostingRewardRecheckChallenge: jest.fn().mockResolvedValue(undefined),
+      verifyPostingRewardRecheckChallenge: jest
+        .fn()
+        .mockResolvedValue(undefined),
     } as any;
     const profileXPostingRewardService = {
       requestManualRecheck: jest.fn().mockResolvedValue({ status: 'pending' }),
@@ -72,8 +74,8 @@ describe('ProfileRewardsController', () => {
       expiresAt: 123,
       signatureHex: 'b'.repeat(128),
     });
-    expect(profileXPostingRewardService.requestManualRecheck).toHaveBeenCalledWith(
-      'ak_1',
-    );
+    expect(
+      profileXPostingRewardService.requestManualRecheck,
+    ).toHaveBeenCalledWith('ak_1');
   });
 });

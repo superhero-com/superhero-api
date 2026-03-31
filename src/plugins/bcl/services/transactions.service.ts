@@ -154,8 +154,9 @@ export class TransactionsService {
       await this.communityFactoryService.getCurrentFactory();
     const mintLogs = logs.filter((log) => log?.topics?.[0] === this.MINT_TOPIC);
     const protocolRewardMintLog =
-      mintLogs.find((log) => log?.address === currentFactory.bctsl_aex9_address) ||
-      mintLogs.find((log) => log?.topics?.[2]?.toString() !== volumeRaw);
+      mintLogs.find(
+        (log) => log?.address === currentFactory.bctsl_aex9_address,
+      ) || mintLogs.find((log) => log?.topics?.[2]?.toString() !== volumeRaw);
     const protocolRewardRaw = protocolRewardMintLog?.topics?.[2]?.toString();
 
     if (!protocolRewardRaw) {

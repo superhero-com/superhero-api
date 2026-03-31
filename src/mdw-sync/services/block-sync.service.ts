@@ -476,5 +476,4 @@ export class BlockSyncService {
       created_at: new Date(tx.microTime), // Explicitly set timestamp
     };
   }
-
 }

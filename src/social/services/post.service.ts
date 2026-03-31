@@ -390,15 +390,15 @@ export class PostService {
               ...existingPost,
               post_id: postTypeInfo.parentPostId,
             } as Post,
-          loadParentPost: (postId) =>
-            this.postRepository.findOne({
-              where: { id: postId },
-            }),
-          updateTrendingScoresForSymbols: (symbols) =>
-            this.tokensService.updateTrendingScoresForSymbols(symbols),
-          logError: (message, trace) => this.logger.error(message, trace),
-          errorMessage: 'Failed to refresh trending scores after saving post',
-        });
+            loadParentPost: (postId) =>
+              this.postRepository.findOne({
+                where: { id: postId },
+              }),
+            updateTrendingScoresForSymbols: (symbols) =>
+              this.tokensService.updateTrendingScoresForSymbols(symbols),
+            logError: (message, trace) => this.logger.error(message, trace),
+            errorMessage: 'Failed to refresh trending scores after saving post',
+          });
           return existingPost;
         } else {
           this.logger.warn('Failed to process existing post as comment', {

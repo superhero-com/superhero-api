@@ -40,6 +40,9 @@ describe('TrendingTagsController', () => {
       'trending_tag.tag ILIKE :search',
       { search: '%hero%' },
     );
-    expect(paginate).toHaveBeenCalledWith(queryBuilder, { page: 1, limit: 100 });
+    expect(paginate).toHaveBeenCalledWith(queryBuilder, {
+      page: 1,
+      limit: 100,
+    });
   });
 });

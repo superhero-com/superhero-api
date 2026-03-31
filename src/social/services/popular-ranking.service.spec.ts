@@ -113,7 +113,8 @@ describe('PopularRankingService', () => {
   it('excludes self-tips from popular ranking tip aggregates', async () => {
     await service.recompute('24h', 10);
 
-    const tipQueryBuilder = tipRepository.createQueryBuilder.mock.results[0].value;
+    const tipQueryBuilder =
+      tipRepository.createQueryBuilder.mock.results[0].value;
 
     expect(tipQueryBuilder.innerJoin).toHaveBeenCalledWith(
       expect.any(Function),

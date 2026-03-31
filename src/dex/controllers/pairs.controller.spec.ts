@@ -17,11 +17,7 @@ describe('PairsController', () => {
       findSwapPaths: jest.fn(),
     };
 
-    controller = new PairsController(
-      pairService as any,
-      {} as any,
-      {} as any,
-    );
+    controller = new PairsController(pairService as any, {} as any, {} as any);
   });
 
   it('forwards search params to pairService.findAll', async () => {

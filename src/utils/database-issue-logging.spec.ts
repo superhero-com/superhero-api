@@ -21,7 +21,9 @@ describe('database issue logging helpers', () => {
 
   it('classifies common database connectivity issue kinds', () => {
     expect(
-      getDatabaseIssueKind(new Error('timeout exceeded when trying to connect')),
+      getDatabaseIssueKind(
+        new Error('timeout exceeded when trying to connect'),
+      ),
     ).toBe('pool_timeout');
     expect(getDatabaseIssueKind(new Error('too many clients already'))).toBe(
       'pool_exhausted',
