@@ -209,8 +209,11 @@ export class AccountsController {
       : moment().subtract(30, 'days').toDate();
     const end = query.endDate ? moment(query.endDate).toDate() : new Date();
 
+    const resolvedAddress =
+      await this.portfolioService.resolveAccountAddress(address);
+
     const stats = await this.bclPnlService.calculateTradingStats(
-      address,
+      resolvedAddress,
       start,
       end,
     );
