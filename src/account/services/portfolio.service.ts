@@ -378,7 +378,7 @@ export class PortfolioService {
     return data;
   }
 
-  private async resolveAccountAddress(address: string): Promise<string> {
+  async resolveAccountAddress(address: string): Promise<string> {
     if (!address || address.startsWith('ak_') || !address.includes('.')) {
       return address;
     }
