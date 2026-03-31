@@ -380,4 +380,72 @@ describe('PortfolioService', () => {
       undefined,
     );
   });
+
+  describe('getPnlTimeSeries', () => {
+    it('calls calculateDailyPnlBatch and maps gain values', async () => {
+      const { service, bclPnlService } = createService();
+
+      const ts0 = moment('2026-01-01T00:00:00Z');
+      const ts1 = moment('2026-01-02T00:00:00Z');
+      const ts2 = moment('2026-01-03T00:00:00Z');
+
+      const pnlMap = new Map([
+        [ts1.valueOf(), { ...basePnlResult, totalGainAe: 5, totalGainUsd: 10 }],
+        [ts2.valueOf(), { ...basePnlResult, totalGainAe: 3, totalGainUsd: 6 }],
+      ]);
+      bclPnlService.calculateDailyPnlBatch.mockResolvedValue(pnlMap);
+
+      const result = await service.getPnlTimeSeries('ak_test', {
+        startDate: ts0,
+        endDate: ts2,
+        interval: 86400,
+      });
+
+      expect(bclPnlService.calculateDailyPnlBatch).toHaveBeenCalledTimes(1);
+      // Should NOT call any balance or block-height resolution
+      expect(bclPnlService.calculateTokenPnlsBatch).not.toHaveBeenCalled();
+
+      // ts0 has no entry in map → gain 0
+      expect(result[0].gain).toEqual({ ae: 0, usd: 0 });
+      expect(result[1].gain).toEqual({ ae: 5, usd: 10 });
+      expect(result[2].gain).toEqual({ ae: 3, usd: 6 });
+    });
+
+    it('builds correct daily windows from timestamps', async () => {
+      const { service, bclPnlService } = createService();
+      bclPnlService.calculateDailyPnlBatch.mockResolvedValue(new Map());
+
+      const start = moment('2026-01-01T00:00:00Z');
+      const end = moment('2026-01-03T00:00:00Z');
+
+      await service.getPnlTimeSeries('ak_test', {
+        startDate: start,
+        endDate: end,
+        interval: 86400,
+      });
+
+      const [, windows]: [string, DailyPnlWindow[]] =
+        bclPnlService.calculateDailyPnlBatch.mock.calls[0];
+
+      // First window: zero-width (no sells can fall in an empty range)
+      expect(windows[0].dayStartTs).toBe(windows[0].snapshotTs);
+      // Second window: covers [day0, day1)
+      expect(windows[1].dayStartTs).toBe(windows[0].snapshotTs);
+      expect(windows[1].snapshotTs).toBe(windows[1].dayStartTs + 86400 * 1000);
+    });
+
+    it('returns empty array when start is after end', async () => {
+      const { service, bclPnlService } = createService();
+      bclPnlService.calculateDailyPnlBatch.mockResolvedValue(new Map());
+
+      const result = await service.getPnlTimeSeries('ak_test', {
+        startDate: moment('2026-01-10T00:00:00Z'),
+        endDate: moment('2026-01-01T00:00:00Z'),
+        interval: 86400,
+      });
+
+      expect(result).toEqual([]);
+      expect(bclPnlService.calculateDailyPnlBatch).not.toHaveBeenCalled();
+    });
+  });
 });
