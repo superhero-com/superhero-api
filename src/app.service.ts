@@ -34,8 +34,6 @@ export class AppService {
     await this.coinGeckoService.syncAllFromApi();
     // Persist latest rates to the coin_prices DB table
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
-
-   
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
