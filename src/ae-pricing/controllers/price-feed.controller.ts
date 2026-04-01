@@ -268,8 +268,8 @@ export class PriceFeedController {
       }
     }
 
-    // Fetch data from CoinGecko
-    const data = await this.coinGeckoService.fetchHistoricalPrice(
+    // Serve from DB / Redis cache — never triggers a live CoinGecko API call
+    const data = await this.coinGeckoService.getHistoricalPrice(
       coinId,
       currency,
       finalDays,

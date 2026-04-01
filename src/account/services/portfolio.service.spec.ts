@@ -30,11 +30,11 @@ describe('PortfolioService', () => {
       },
     };
     const coinGeckoService = {
-      fetchHistoricalPrice: jest.fn(),
+      getHistoricalPrice: jest.fn(),
       getPriceData: jest.fn(),
     };
     const coinHistoricalPriceService = {
-      // Default: no DB data -> falls back to coinGeckoService.fetchHistoricalPrice
+      // Default: no DB data -> falls back to coinGeckoService.getHistoricalPrice
       getHistoricalPriceData: jest.fn().mockResolvedValue([]),
     };
     const bclPnlService = {
@@ -82,7 +82,7 @@ describe('PortfolioService', () => {
       },
     );
 
-    coinGeckoService.fetchHistoricalPrice.mockResolvedValue([
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
       [Date.UTC(2026, 0, 10), 10],
       [Date.UTC(2026, 0, 1), 1],
     ]);
@@ -134,7 +134,7 @@ describe('PortfolioService', () => {
       },
     );
 
-    coinGeckoService.fetchHistoricalPrice.mockResolvedValue([
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
       [Date.UTC(2026, 0, 3), 3],
       [Date.UTC(2026, 0, 1), 1],
       [Date.UTC(2026, 0, 2), 2],
@@ -176,7 +176,7 @@ describe('PortfolioService', () => {
       },
     );
 
-    coinGeckoService.fetchHistoricalPrice.mockResolvedValue([
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
       [Date.UTC(2026, 0, 4), 4],
       [Date.UTC(2026, 0, 1), 1],
       [Date.UTC(2026, 0, 2), 2],
@@ -222,7 +222,7 @@ describe('PortfolioService', () => {
         return map;
       },
     );
-    coinGeckoService.fetchHistoricalPrice.mockResolvedValue([
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
       [Date.UTC(2026, 0, 3), 3],
       [Date.UTC(2026, 0, 1), 1],
       [Date.UTC(2026, 0, 2), 2],
@@ -323,7 +323,7 @@ describe('PortfolioService', () => {
     });
 
     expect(snapshots).toHaveLength(3);
-    expect(coinGeckoService.fetchHistoricalPrice).not.toHaveBeenCalled();
+    expect(coinGeckoService.getHistoricalPrice).not.toHaveBeenCalled();
     expect(
       coinHistoricalPriceService.getHistoricalPriceData,
     ).toHaveBeenCalledTimes(1);
