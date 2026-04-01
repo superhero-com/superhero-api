@@ -9,6 +9,19 @@ const COLOR_UP = '#2EB88A';
 const COLOR_DOWN = '#E14E4E';
 
 /**
+ * Accepts only well-formed CSS color values so that user-supplied strings
+ * cannot break out of SVG attribute context and inject arbitrary markup.
+ * Anything that does not match falls back to the supplied default.
+ */
+const CSS_COLOR_RE =
+  /^(none|transparent|[a-zA-Z]+|#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([\d\s,%.\/]+\))$/;
+
+export function sanitizeCssColor(value: string, fallback = 'none'): string {
+  const trimmed = value.trim();
+  return CSS_COLOR_RE.test(trimmed) ? trimmed : fallback;
+}
+
+/**
  * Derive stroke color from the direction of the series (first vs last value).
  */
 export function sparklineStroke(values: number[]): string {
@@ -27,12 +40,15 @@ export function buildSparklineSvg(
   stroke = COLOR_UP,
   background = 'none',
 ): string {
+  const safeStroke = sanitizeCssColor(stroke, COLOR_UP);
+  const safeBg = sanitizeCssColor(background, 'none');
+
   const pad = 4;
   const w = width;
   const h = height;
 
   if (!values.length) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="${safeBg}"></svg>`;
   }
 
   const min = Math.min(...values);
@@ -53,9 +69,9 @@ export function buildSparklineSvg(
     .join(' ');
 
   const bg =
-    background !== 'none'
-      ? `<rect width="${w}" height="${h}" fill="${background}" />`
+    safeBg !== 'none'
+      ? `<rect width="${w}" height="${h}" fill="${safeBg}" />`
       : '';
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none">${bg}<path d="${d}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none">${bg}<path d="${d}" fill="none" stroke="${safeStroke}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
