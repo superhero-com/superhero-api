@@ -173,12 +173,14 @@ export class CoinGeckoService {
   /**
    * Retrieves the price data for a given amount of AE tokens.
    * Reads rates from memory / Redis / fallback — never triggers a live API call.
+   * The cron (syncAllFromApi) keeps rates fresh; here we only warm up if rates are null.
    * @param price - The amount of AE tokens.
    * @returns An object containing the price data for AE and other currencies.
    */
   async getPriceData(price: BigNumber): Promise<IPriceDto> {
-    // Ensure we have rates from memory, Redis cache, or fallback
-    if (this.rates === null || this.isPullTimeExpired()) {
+    // Only try to warm up when rates have never been populated yet.
+    // If rates exist but are stale the cron will refresh them shortly — use what we have.
+    if (this.rates === null) {
       try {
         const cachedRates =
           await this.cacheManager.get<CurrencyRates>('coingecko:rates');
