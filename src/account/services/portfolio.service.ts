@@ -220,11 +220,11 @@ export class PortfolioService {
       // expected by findClosestHistoricalPrice.
       aePriceHistory = dbPriceRows.reverse();
     } else {
-      // DB has no data for this range; fall back to live CoinGecko fetch.
+      // DB has no data for this range; serve from cache / DB / fallback JSON.
       const daysNeeded = Math.ceil(now.diff(start, 'days', true)) + 3;
       const days = Math.min(365, Math.max(7, daysNeeded));
       aePriceHistory = await this.coinGeckoService
-        .fetchHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
+        .getHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
         .then((prices) => prices.sort((a, b) => b[0] - a[0]));
     }
     // Resolve all block heights in a single batch query against the local key_blocks table.
