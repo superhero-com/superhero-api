@@ -84,11 +84,20 @@ export class CoinGeckoService {
 
     // 2. Fetch market data (/coins/markets) → Redis
     try {
-      const marketData = await this.fetchCoinMarketData(AETERNITY_COIN_ID, 'usd');
+      const marketData = await this.fetchCoinMarketData(
+        AETERNITY_COIN_ID,
+        'usd',
+      );
       if (marketData) {
-        type CachedMarket = { data: CoinGeckoMarketResponse; fetchedAt: number };
+        type CachedMarket = {
+          data: CoinGeckoMarketResponse;
+          fetchedAt: number;
+        };
         const cacheKey = `${this.marketCacheKeyPrefix}:${AETERNITY_COIN_ID}:usd`;
-        const payload: CachedMarket = { data: marketData, fetchedAt: Date.now() };
+        const payload: CachedMarket = {
+          data: marketData,
+          fetchedAt: Date.now(),
+        };
         await this.cacheManager.set(cacheKey, payload, 24 * 60 * 60 * 1000);
         this.logger.debug('Synced market data from CoinGecko');
       }
@@ -101,14 +110,20 @@ export class CoinGeckoService {
       await this.refreshHistoricalPrice(AETERNITY_COIN_ID, 'usd', 365, 'daily');
       this.logger.debug('Synced 365d daily historical prices from CoinGecko');
     } catch (error) {
-      this.logger.error('Failed to sync 365d historical prices from CoinGecko:', error);
+      this.logger.error(
+        'Failed to sync 365d historical prices from CoinGecko:',
+        error,
+      );
     }
 
     try {
       await this.refreshHistoricalPrice(AETERNITY_COIN_ID, 'usd', 7, 'daily');
       this.logger.debug('Synced 7d daily historical prices from CoinGecko');
     } catch (error) {
-      this.logger.error('Failed to sync 7d historical prices from CoinGecko:', error);
+      this.logger.error(
+        'Failed to sync 7d historical prices from CoinGecko:',
+        error,
+      );
     }
   }
 
@@ -136,7 +151,10 @@ export class CoinGeckoService {
         return cachedRates;
       }
     } catch (error) {
-      this.logger.warn('Failed to read cached rates in getAeternityRates:', error);
+      this.logger.warn(
+        'Failed to read cached rates in getAeternityRates:',
+        error,
+      );
     }
 
     // Try fallback JSON
@@ -401,7 +419,9 @@ export class CoinGeckoService {
    * Obtain all the coin rates for the currencies used in the app.
    * Private — only called from pullData() → syncAllFromApi().
    */
-  private async fetchCoinCurrencyRates(coinId: string): Promise<CurrencyRates | null> {
+  private async fetchCoinCurrencyRates(
+    coinId: string,
+  ): Promise<CurrencyRates | null> {
     try {
       const response = (await this.fetchFromApi('/simple/price', {
         ids: coinId,

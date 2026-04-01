@@ -56,7 +56,9 @@ describe('CoinGeckoService', () => {
       [AETERNITY_COIN_ID]: mockRates,
     });
 
-    const rates = await (service as any).fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    const rates = await (service as any).fetchCoinCurrencyRates(
+      AETERNITY_COIN_ID,
+    );
     expect(fetchJson).toHaveBeenCalledWith(
       expect.stringContaining('/simple/price'),
     );
@@ -65,7 +67,9 @@ describe('CoinGeckoService', () => {
 
   it('should return null when fetching coin currency rates fails', async () => {
     (fetchJson as jest.Mock).mockRejectedValue(new Error('API Error'));
-    const rates = await (service as any).fetchCoinCurrencyRates(AETERNITY_COIN_ID);
+    const rates = await (service as any).fetchCoinCurrencyRates(
+      AETERNITY_COIN_ID,
+    );
     expect(rates).toBeNull();
   });
 
@@ -102,7 +106,9 @@ describe('CoinGeckoService', () => {
   it('should fetch data from API correctly', async () => {
     (fetchJson as jest.Mock).mockResolvedValue({ data: 'mockData' });
 
-    const result = await (service as any).fetchFromApi('/market', { ids: 'ae' });
+    const result = await (service as any).fetchFromApi('/market', {
+      ids: 'ae',
+    });
     expect(fetchJson).toHaveBeenCalledWith(
       expect.stringContaining('/market?ids=ae'),
     );
