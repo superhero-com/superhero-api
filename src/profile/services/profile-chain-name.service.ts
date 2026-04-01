@@ -12,15 +12,25 @@ import {
   Name,
   MemoryAccount,
   Encoding,
+  buildTx,
   buildTxAsync,
-  decode,
+  commitmentHash,
+  getExecutionCost,
+  getMinimumNameFee,
   isEncoded,
+  produceNameId,
   sendTransaction,
   Tag,
-  verifyMessageSignature,
 } from '@aeternity/aepp-sdk';
 import { randomBytes } from 'crypto';
-import { DataSource, In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  LessThanOrEqual,
+  Repository,
+} from 'typeorm';
 import {
   ChainNameClaimStatus,
   ProfileChainNameClaim,
@@ -33,6 +43,7 @@ import {
   PROFILE_CHAIN_NAME_RETRY_BASE_SECONDS,
   PROFILE_CHAIN_NAME_RETRY_MAX_SECONDS,
 } from '../profile.constants';
+import { verifyAeAddressSignature } from './profile-signature.util';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
 
 const RETRYABLE_STATUSES: ChainNameClaimStatus[] = [
@@ -42,6 +53,9 @@ const RETRYABLE_STATUSES: ChainNameClaimStatus[] = [
 ];
 const BATCH_SIZE = 50;
 const MAX_PRECLAIM_AGE_BLOCKS = 250;
+const STUB_ADDRESS: `ak_${string}` =
+  'ak_11111111111111111111111111111111273Yts';
+const STUB_NONCE = 1;
 
 @Injectable()
 export class ProfileChainNameService {
@@ -104,13 +118,6 @@ export class ProfileChainNameService {
     }
 
     this.assertValidAddress(params.address);
-    await this.verifyAndConsumeChallenge({
-      address: params.address,
-      nonce: params.challengeNonce,
-      expiresAt: params.challengeExpiresAt,
-      signatureHex: params.signatureHex,
-    });
-
     const fullName = `${params.name}.chain`;
     const existing = await this.claimRepository.findOne({
       where: { address: params.address },
@@ -158,6 +165,7 @@ export class ProfileChainNameService {
     const sponsorAddress = this.getSponsorAccount().address;
     const ownedByThisFlow =
       existing?.address === params.address &&
+      existing?.name === fullName &&
       (onChainState?.owner === sponsorAddress ||
         onChainState?.owner === params.address);
     if (onChainState && !ownedByThisFlow) {
@@ -182,12 +190,26 @@ export class ProfileChainNameService {
     claim.transfer_tx_hash = null;
 
     try {
-      if (failedNameClaimToReplace) {
-        await this.claimRepository.delete({
-          address: failedNameClaimToReplace.address,
-        });
-      }
-      await this.claimRepository.save(claim);
+      await this.dataSource.transaction(async (manager) => {
+        await this.verifyAndConsumeChallenge(
+          {
+            address: params.address,
+            nonce: params.challengeNonce,
+            expiresAt: params.challengeExpiresAt,
+            signatureHex: params.signatureHex,
+          },
+          manager,
+        );
+        const claimRepo = manager.getRepository(ProfileChainNameClaim);
+        if (failedNameClaimToReplace) {
+          await claimRepo.delete({
+            address: failedNameClaimToReplace.address,
+            name: failedNameClaimToReplace.name,
+            status: 'failed',
+          });
+        }
+        await claimRepo.save(claim);
+      });
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
         throw new ConflictException(
@@ -299,6 +321,13 @@ export class ProfileChainNameService {
       return entry;
     });
     if (!claim) return;
+
+    try {
+      await this.assertSponsorHasFunds(claim.name);
+    } catch {
+      await this.markRetry(address, 'Sponsor account has insufficient funds');
+      return;
+    }
 
     switch (claim.status) {
       case 'pending':
@@ -601,12 +630,15 @@ export class ProfileChainNameService {
     });
   }
 
-  private async verifyAndConsumeChallenge(params: {
-    address: string;
-    nonce: string;
-    expiresAt: number;
-    signatureHex: string;
-  }): Promise<void> {
+  private async verifyAndConsumeChallenge(
+    params: {
+      address: string;
+      nonce: string;
+      expiresAt: number;
+      signatureHex: string;
+    },
+    manager?: EntityManager,
+  ): Promise<void> {
     if (!params.nonce || !params.signatureHex || !params.expiresAt) {
       throw new BadRequestException('Challenge proof is required');
     }
@@ -615,8 +647,8 @@ export class ProfileChainNameService {
       throw new BadRequestException('Challenge has expired');
     }
 
-    await this.dataSource.transaction(async (manager) => {
-      const challengeRepo = manager.getRepository(ProfileChainNameChallenge);
+    const work = async (txManager: EntityManager) => {
+      const challengeRepo = txManager.getRepository(ProfileChainNameChallenge);
       const challenge = await challengeRepo
         .createQueryBuilder('challenge')
         .setLock('pessimistic_write')
@@ -640,43 +672,23 @@ export class ProfileChainNameService {
         params.expiresAt,
       );
       if (
-        !this.verifyAddressSignature(
-          params.address,
-          message,
-          params.signatureHex,
-        )
+        !verifyAeAddressSignature(params.address, message, params.signatureHex)
       ) {
         throw new BadRequestException('Invalid challenge signature');
       }
 
       challenge.consumed_at = new Date();
       await challengeRepo.save(challenge);
-    });
-  }
+    };
 
-  private verifyAddressSignature(
-    address: string,
-    message: string,
-    signatureHex: string,
-  ): boolean {
-    try {
-      let signatureBytes: Uint8Array;
-      if (signatureHex.startsWith('sg_')) {
-        signatureBytes = Uint8Array.from(decode(signatureHex as any));
-      } else {
-        signatureBytes = Uint8Array.from(Buffer.from(signatureHex, 'hex'));
-      }
-      if (signatureBytes.length !== 64) {
-        return false;
-      }
-      return verifyMessageSignature(
-        message,
-        signatureBytes,
-        address as `ak_${string}`,
-      );
-    } catch {
-      return false;
+    if (manager) {
+      await work(manager);
+      return;
     }
+
+    await this.dataSource.transaction(async (txManager) => {
+      await work(txManager);
+    });
   }
 
   private createChallengeMessage(
@@ -685,6 +697,80 @@ export class ProfileChainNameService {
     expiresAt: number,
   ): string {
     return `profile_chain_name_claim:${address}:${nonce}:${expiresAt}`;
+  }
+
+  private async assertSponsorHasFunds(fullName: string): Promise<void> {
+    const sponsor = this.getSponsorAccount();
+    try {
+      const balance = await this.aeSdkService.sdk.getBalance(
+        sponsor.address as `ak_${string}`,
+      );
+      const requiredBalance = this.estimateTotalClaimCost(fullName);
+      if (BigInt(balance) < requiredBalance) {
+        this.logger.error(
+          `Sponsor account ${sponsor.address} balance too low: ${balance} aettos, need ${requiredBalance}`,
+        );
+        throw new ServiceUnavailableException(
+          'Chain name claiming is temporarily unavailable due to insufficient sponsor funds',
+        );
+      }
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      this.logger.error(
+        'Failed to check sponsor balance',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        'Chain name claiming is temporarily unavailable',
+      );
+    }
+  }
+
+  private estimateTotalClaimCost(fullName: string): bigint {
+    const nameTyped = fullName as `${string}.chain`;
+    const nameId = produceNameId(nameTyped);
+
+    const preclaimCost = getExecutionCost(
+      buildTx({
+        tag: Tag.NamePreclaimTx,
+        accountId: STUB_ADDRESS,
+        nonce: STUB_NONCE,
+        commitmentId: commitmentHash(nameTyped, STUB_NONCE),
+      }),
+    );
+
+    const claimCost = getExecutionCost(
+      buildTx({
+        tag: Tag.NameClaimTx,
+        accountId: STUB_ADDRESS,
+        nonce: STUB_NONCE,
+        name: nameTyped,
+        nameSalt: 0,
+        nameFee: getMinimumNameFee(nameTyped),
+      }),
+    );
+
+    const updateCost = getExecutionCost(
+      buildTx({
+        tag: Tag.NameUpdateTx,
+        accountId: STUB_ADDRESS,
+        nonce: STUB_NONCE,
+        nameId,
+        pointers: [{ key: 'account_pubkey', id: STUB_ADDRESS }],
+      }),
+    );
+
+    const transferCost = getExecutionCost(
+      buildTx({
+        tag: Tag.NameTransferTx,
+        accountId: STUB_ADDRESS,
+        nonce: STUB_NONCE,
+        nameId,
+        recipientId: STUB_ADDRESS,
+      }),
+    );
+
+    return preclaimCost + claimCost + updateCost + transferCost;
   }
 
   private assertValidAddress(address: string): void {

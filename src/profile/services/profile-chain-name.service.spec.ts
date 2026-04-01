@@ -19,7 +19,11 @@ jest.mock('@aeternity/aepp-sdk', () => {
   };
 });
 
-import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import {
   buildTxAsync,
   sendTransaction,
@@ -27,6 +31,7 @@ import {
   verifyMessageSignature,
 } from '@aeternity/aepp-sdk';
 import { ProfileChainNameService } from './profile-chain-name.service';
+import * as profileSignatureUtil from './profile-signature.util';
 import { ProfileChainNameClaim } from '../entities/profile-chain-name-claim.entity';
 import { ProfileChainNameChallenge } from '../entities/profile-chain-name-challenge.entity';
 
@@ -50,6 +55,7 @@ describe('ProfileChainNameService', () => {
         where: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue(null),
       }),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
       save: jest.fn().mockImplementation(async (value) => value),
     } as any;
     const lockedChallengeRepository = {
@@ -178,9 +184,7 @@ describe('ProfileChainNameService', () => {
 
   it('rejects a second completed sponsored name for the same address', async () => {
     const { service, claimRepository } = getService();
-    jest
-      .spyOn(service as any, 'verifyAndConsumeChallenge')
-      .mockResolvedValue(undefined);
+    const verifySpy = jest.spyOn(service as any, 'verifyAndConsumeChallenge');
     jest
       .spyOn(service as any, 'assertSponsorHasFunds')
       .mockResolvedValue(undefined);
@@ -199,6 +203,8 @@ describe('ProfileChainNameService', () => {
         signatureHex: 'b'.repeat(128),
       }),
     ).rejects.toThrow(ConflictException);
+
+    expect(verifySpy).not.toHaveBeenCalled();
   });
 
   it('rejects a different in-progress name for the same address', async () => {
@@ -228,9 +234,7 @@ describe('ProfileChainNameService', () => {
 
   it('rejects a name already being actively claimed by another address', async () => {
     const { service, claimRepository } = getService();
-    jest
-      .spyOn(service as any, 'verifyAndConsumeChallenge')
-      .mockResolvedValue(undefined);
+    const verifySpy = jest.spyOn(service as any, 'verifyAndConsumeChallenge');
     jest
       .spyOn(service as any, 'assertSponsorHasFunds')
       .mockResolvedValue(undefined);
@@ -249,13 +253,18 @@ describe('ProfileChainNameService', () => {
         signatureHex: 'b'.repeat(128),
       }),
     ).rejects.toThrow('This name is already being claimed by another address');
+
+    expect(verifySpy).not.toHaveBeenCalled();
   });
 
   it('allows reusing a name from another address when its old claim failed', async () => {
-    const { service, claimRepository } = getService();
-    jest
-      .spyOn(service as any, 'verifyAndConsumeChallenge')
-      .mockResolvedValue(undefined);
+    const {
+      service,
+      claimRepository,
+      lockedClaimRepository,
+      lockedChallengeRepository,
+      dataSource,
+    } = getService();
     jest
       .spyOn(service as any, 'assertSponsorHasFunds')
       .mockResolvedValue(undefined);
@@ -263,10 +272,23 @@ describe('ProfileChainNameService', () => {
     jest
       .spyOn(service as any, 'processClaimWithGuard')
       .mockResolvedValue(undefined);
-    claimRepository.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
-      address: 'ak_other',
-      name: 'myuniquename123.chain',
-      status: 'failed',
+    (service as any).claimRepository.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        address: 'ak_other',
+        name: 'myuniquename123.chain',
+        status: 'failed',
+      });
+    lockedChallengeRepository.createQueryBuilder.mockReturnValue({
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        nonce: 'a'.repeat(24),
+        address: validAddress,
+        expires_at: new Date(Date.now() + 10_000),
+        consumed_at: null,
+      }),
     });
 
     const result = await service.requestChainName({
@@ -278,17 +300,69 @@ describe('ProfileChainNameService', () => {
     });
 
     expect(result.status).toBe('ok');
-    expect(claimRepository.delete).toHaveBeenCalledWith({
+    expect(lockedClaimRepository.delete).toHaveBeenCalledWith({
       address: 'ak_other',
+      name: 'myuniquename123.chain',
+      status: 'failed',
     });
-    expect(claimRepository.save).toHaveBeenCalled();
+    expect(lockedClaimRepository.save).toHaveBeenCalled();
+    expect(claimRepository.delete).not.toHaveBeenCalled();
+    expect(claimRepository.save).not.toHaveBeenCalled();
+    expect(dataSource.transaction).toHaveBeenCalled();
+  });
+
+  it('does not delete another address revived in-progress claim during failed-claim replacement race', async () => {
+    const {
+      service,
+      claimRepository,
+      lockedClaimRepository,
+      lockedChallengeRepository,
+    } = getService();
+    jest
+      .spyOn(service as any, 'assertSponsorHasFunds')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'getNameStateIfPresent').mockResolvedValue(null);
+    claimRepository.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      address: 'ak_other',
+      name: 'myuniquename123.chain',
+      status: 'failed',
+    });
+    lockedChallengeRepository.createQueryBuilder.mockReturnValue({
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        nonce: 'a'.repeat(24),
+        address: validAddress,
+        expires_at: new Date(Date.now() + 10_000),
+        consumed_at: null,
+      }),
+    });
+    lockedClaimRepository.delete.mockResolvedValueOnce({ affected: 0 });
+    lockedClaimRepository.save.mockRejectedValueOnce({
+      driverError: { code: '23505' },
+    });
+
+    await expect(
+      service.requestChainName({
+        address: validAddress,
+        name: 'myuniquename123',
+        challengeNonce: 'a'.repeat(24),
+        challengeExpiresAt: Date.now() + 10_000,
+        signatureHex: 'b'.repeat(128),
+      }),
+    ).rejects.toThrow('This name is already being claimed by another address');
+
+    expect(lockedClaimRepository.delete).toHaveBeenCalledWith({
+      address: 'ak_other',
+      name: 'myuniquename123.chain',
+      status: 'failed',
+    });
   });
 
   it('rejects a name already taken on-chain by someone else', async () => {
     const { service, claimRepository } = getService();
-    jest
-      .spyOn(service as any, 'verifyAndConsumeChallenge')
-      .mockResolvedValue(undefined);
+    const verifySpy = jest.spyOn(service as any, 'verifyAndConsumeChallenge');
     jest
       .spyOn(service as any, 'assertSponsorHasFunds')
       .mockResolvedValue(undefined);
@@ -308,10 +382,45 @@ describe('ProfileChainNameService', () => {
         signatureHex: 'b'.repeat(128),
       }),
     ).rejects.toThrow('This name is already taken on-chain');
+
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a sponsor-owned on-chain name as this flow when the existing failed claim is for another name', async () => {
+    const { service, claimRepository } = getService();
+    const verifySpy = jest.spyOn(service as any, 'verifyAndConsumeChallenge');
+    jest
+      .spyOn(service as any, 'assertSponsorHasFunds')
+      .mockResolvedValue(undefined);
+    claimRepository.findOne
+      .mockResolvedValueOnce({
+        address: validAddress,
+        name: 'differentfailedname123.chain',
+        status: 'failed',
+      })
+      .mockResolvedValueOnce(null);
+    jest
+      .spyOn(service as any, 'getNameStateIfPresent')
+      .mockResolvedValue({ owner: validAddress });
+    jest
+      .spyOn(service as any, 'getSponsorAccount')
+      .mockReturnValue({ address: validAddress });
+
+    await expect(
+      service.requestChainName({
+        address: validAddress,
+        name: 'myuniquename123',
+        challengeNonce: 'a'.repeat(24),
+        challengeExpiresAt: Date.now() + 10_000,
+        signatureHex: 'b'.repeat(128),
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(verifySpy).not.toHaveBeenCalled();
   });
 
   it('converts unique constraint races into a conflict error', async () => {
-    const { service, claimRepository } = getService();
+    const { service, claimRepository, lockedClaimRepository } = getService();
     jest
       .spyOn(service as any, 'verifyAndConsumeChallenge')
       .mockResolvedValue(undefined);
@@ -322,7 +431,7 @@ describe('ProfileChainNameService', () => {
     claimRepository.findOne
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
-    claimRepository.save.mockRejectedValueOnce({
+    lockedClaimRepository.save.mockRejectedValueOnce({
       driverError: { code: '23505' },
     });
 
@@ -506,7 +615,9 @@ describe('ProfileChainNameService', () => {
         getRepository: jest.fn().mockReturnValue(challengeRepo),
       }),
     );
-    jest.spyOn(service as any, 'verifyAddressSignature').mockReturnValue(false);
+    jest
+      .spyOn(profileSignatureUtil, 'verifyAeAddressSignature')
+      .mockReturnValue(false);
 
     await expect(
       (service as any).verifyAndConsumeChallenge({
