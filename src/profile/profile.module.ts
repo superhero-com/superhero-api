@@ -12,6 +12,7 @@ import { ProfileXInviteCredit } from './entities/profile-x-invite-credit.entity'
 import { ProfileXInviteMilestoneReward } from './entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from './entities/profile-x-posting-reward.entity';
 import { ProfileXVerificationReward } from './entities/profile-x-verification-reward.entity';
+import { ProfileChainNameController } from './controllers/profile-chain-name.controller';
 import { ProfileAttestationService } from './services/profile-attestation.service';
 import { ProfileContractService } from './services/profile-contract.service';
 import { ProfileIndexerService } from './services/profile-indexer.service';
@@ -22,6 +23,9 @@ import { ProfileXApiClientService } from './services/profile-x-api-client.servic
 import { ProfileXInviteService } from './services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from './services/profile-x-posting-reward.service';
 import { ProfileXVerificationRewardService } from './services/profile-x-verification-reward.service';
+import { ProfileChainNameChallenge } from './entities/profile-chain-name-challenge.entity';
+import { ProfileChainNameClaim } from './entities/profile-chain-name-claim.entity';
+import { ProfileChainNameService } from './services/profile-chain-name.service';
 
 @Module({
   imports: [
@@ -36,6 +40,8 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
       ProfileXInvite,
       ProfileXInviteCredit,
       ProfileXInviteMilestoneReward,
+      ProfileChainNameChallenge,
+      ProfileChainNameClaim,
       Account,
       Invitation,
     ]),
@@ -51,10 +57,9 @@ import { ProfileXVerificationRewardService } from './services/profile-x-verifica
     ProfileXInviteService,
     ProfileXPostingRewardService,
     ProfileXVerificationRewardService,
+    ProfileChainNameService,
   ],
-  // Keep internal profile services available to other modules while disabling
-  // all public `/profile` HTTP endpoints.
-  controllers: [],
+  controllers: [ProfileChainNameController],
   exports: [TypeOrmModule, ProfileReadService, ProfileContractService],
 })
 export class ProfileModule {}

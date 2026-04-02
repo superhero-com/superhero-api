@@ -122,6 +122,29 @@ export const PROFILE_X_INVITE_PENDING_TIMEOUT_SECONDS = parseInt(
   10,
 );
 
+export const PROFILE_CHAIN_NAME_PRIVATE_KEY =
+  process.env.PROFILE_CHAIN_NAME_PRIVATE_KEY || '';
+
+export const PROFILE_CHAIN_NAME_CHALLENGE_TTL_SECONDS = parseInt(
+  process.env.PROFILE_CHAIN_NAME_CHALLENGE_TTL_SECONDS || '300',
+  10,
+);
+
+export const PROFILE_CHAIN_NAME_RETRY_BASE_SECONDS = parseInt(
+  process.env.PROFILE_CHAIN_NAME_RETRY_BASE_SECONDS || '30',
+  10,
+);
+
+export const PROFILE_CHAIN_NAME_RETRY_MAX_SECONDS = parseInt(
+  process.env.PROFILE_CHAIN_NAME_RETRY_MAX_SECONDS || '3600',
+  10,
+);
+
+export const PROFILE_CHAIN_NAME_MAX_RETRIES = parseInt(
+  process.env.PROFILE_CHAIN_NAME_MAX_RETRIES || '10',
+  10,
+);
+
 export const PROFILE_MUTATION_FUNCTIONS = [
   'set_profile',
   'set_profile_full',

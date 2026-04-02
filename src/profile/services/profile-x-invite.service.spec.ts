@@ -9,6 +9,7 @@ jest.mock('../profile.constants', () => ({
 }));
 
 import { ProfileXInviteService } from './profile-x-invite.service';
+import * as profileSignatureUtil from './profile-signature.util';
 
 describe.skip('ProfileXInviteService', () => {
   const getService = () => {
@@ -268,7 +269,7 @@ describe.skip('ProfileXInviteService', () => {
       save,
     });
     const verifyAddressSignature = jest
-      .spyOn(service as any, 'verifyAddressSignature')
+      .spyOn(profileSignatureUtil, 'verifyAeAddressSignature')
       .mockReturnValue(true);
 
     const signatureHex = 'sg_AbCdEfGhJkLmNoPqRsTuVwXyZ123456789';

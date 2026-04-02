@@ -1,6 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { decode, verifyMessageSignature } from '@aeternity/aepp-sdk';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
@@ -17,6 +16,7 @@ import { ProfileXInvite } from '../entities/profile-x-invite.entity';
 import { ProfileXInviteCredit } from '../entities/profile-x-invite-credit.entity';
 import { ProfileXInviteMilestoneReward } from '../entities/profile-x-invite-milestone-reward.entity';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
+import { verifyAeAddressSignature } from './profile-signature.util';
 import {
   getRewardAmountAettos,
   isValidAeAmount,
@@ -548,11 +548,7 @@ export class ProfileXInviteService {
         params.expiresAt,
       );
       if (
-        !this.verifyAddressSignature(
-          params.address,
-          message,
-          params.signatureHex,
-        )
+        !verifyAeAddressSignature(params.address, message, params.signatureHex)
       ) {
         throw new BadRequestException('Invalid challenge signature');
       }
@@ -560,30 +556,5 @@ export class ProfileXInviteService {
       challenge.consumed_at = new Date();
       await challengeRepo.save(challenge);
     });
-  }
-
-  private verifyAddressSignature(
-    address: string,
-    message: string,
-    signatureHex: string,
-  ): boolean {
-    try {
-      let signatureBytes: Uint8Array;
-      if (signatureHex.startsWith('sg_')) {
-        signatureBytes = Uint8Array.from(decode(signatureHex as any));
-      } else {
-        signatureBytes = Uint8Array.from(Buffer.from(signatureHex, 'hex'));
-      }
-      if (signatureBytes.length !== 64) {
-        return false;
-      }
-      return verifyMessageSignature(
-        message,
-        signatureBytes,
-        address as `ak_${string}`,
-      );
-    } catch {
-      return false;
-    }
   }
 }

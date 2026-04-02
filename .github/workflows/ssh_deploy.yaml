@@ -68,6 +68,9 @@ on:
       PROFILE_ATTESTATION_PRIVATE_KEY:
         description: "Profile attestation signer private key"
         required: false
+      PROFILE_CHAIN_NAME_PRIVATE_KEY:
+        description: "Private key used to sponsor chain name claims"
+        required: false
 jobs:
   deploy:
     name: Deploy via ssh
@@ -90,6 +93,7 @@ jobs:
           PROFILE_REGISTRY_CONTRACT_ADDRESS: "${{ secrets.PROFILE_REGISTRY_CONTRACT_ADDRESS }}"
           PROFILE_ATTESTATION_SIGNER_ADDRESS: "${{ secrets.PROFILE_ATTESTATION_SIGNER_ADDRESS }}"
           PROFILE_ATTESTATION_PRIVATE_KEY: "${{ secrets.PROFILE_ATTESTATION_PRIVATE_KEY }}"
+          PROFILE_CHAIN_NAME_PRIVATE_KEY: "${{ secrets.PROFILE_CHAIN_NAME_PRIVATE_KEY }}"
           GIPHY_API_KEY: "${{ secrets.GIPHY_API_KEY }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
@@ -108,6 +112,7 @@ jobs:
             PROFILE_REGISTRY_CONTRACT_ADDRESS,
             PROFILE_ATTESTATION_SIGNER_ADDRESS,
             PROFILE_ATTESTATION_PRIVATE_KEY,
+            PROFILE_CHAIN_NAME_PRIVATE_KEY,
             GIPHY_API_KEY,
             SHA
           script: |
@@ -133,6 +138,7 @@ jobs:
               -e PROFILE_REGISTRY_CONTRACT_ADDRESS \
               -e PROFILE_ATTESTATION_SIGNER_ADDRESS \
               -e PROFILE_ATTESTATION_PRIVATE_KEY \
+              -e PROFILE_CHAIN_NAME_PRIVATE_KEY \
               -e GIPHY_API_KEY \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
