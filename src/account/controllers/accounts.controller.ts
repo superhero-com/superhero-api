@@ -161,7 +161,14 @@ export class AccountsController {
   }
 
   // Portfolio history endpoint - MUST come before :address route to avoid route conflict
-  @ApiOperation({ operationId: 'getPortfolioHistory' })
+  @ApiOperation({
+    operationId: 'getPortfolioHistory',
+    summary: 'Portfolio value history snapshots',
+    description:
+      'Returns portfolio value over time (AE balance, token values, total value). ' +
+      'Pass include=pnl or include=pnl-range to add aggregate total_pnl data. ' +
+      'Per-token PnL breakdown (tokens_pnl) is available via the dedicated :address/portfolio/tokens/history endpoint.',
+  })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
   @CacheTTL(60 * 10) // 10 minutes
@@ -198,7 +205,13 @@ export class AccountsController {
     });
   }
 
-  @ApiOperation({ operationId: 'getTokensPnlHistory' })
+  @ApiOperation({
+    operationId: 'getTokensPnlHistory',
+    summary: 'Per-token PnL history snapshots',
+    description:
+      'Returns portfolio history snapshots that include the per-token PnL breakdown (tokens_pnl). ' +
+      'PnL data is always included; pass include=pnl-range to use range-based (daily window) PnL instead of cumulative.',
+  })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
   @CacheTTL(60 * 10)
@@ -217,8 +230,6 @@ export class AccountsController {
     const requestedInterval = query.interval || 86400;
     const finalInterval = Math.max(requestedInterval, minimumInterval);
 
-    const includePnl =
-      includeFields.includes('pnl') || includeFields.includes('pnl-range');
     const useRangeBasedPnl = includeFields.includes('pnl-range');
 
     return await this.portfolioService.getPortfolioHistory(address, {
@@ -226,7 +237,7 @@ export class AccountsController {
       endDate: end,
       interval: finalInterval,
       convertTo: query.convertTo || 'ae',
-      includePnl,
+      includePnl: true,
       useRangeBasedPnl,
       includeTokensPnl: true,
     });
