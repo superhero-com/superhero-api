@@ -73,7 +73,8 @@ export class PortfolioHistorySnapshotDto {
 
   @ApiProperty({
     description:
-      'PNL breakdown per token (included if requested), keyed by token sale_address',
+      'PNL breakdown per token, keyed by token sale_address. ' +
+      'Only returned by the dedicated /portfolio/tokens/history endpoint.',
     type: Object,
     required: false,
   })
