@@ -198,6 +198,40 @@ export class AccountsController {
     });
   }
 
+  @ApiOperation({ operationId: 'getTokensPnlHistory' })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
+  @CacheTTL(60 * 10)
+  @Get(':address/portfolio/tokens/history')
+  async getTokensPnlHistory(
+    @Param('address') address: string,
+    @Query() query: GetPortfolioHistoryQueryDto,
+  ) {
+    const start = query.startDate ? moment(query.startDate) : undefined;
+    const end = query.endDate ? moment(query.endDate) : undefined;
+    const includeFields = query.include
+      ? query.include.split(',').map((f) => f.trim())
+      : [];
+
+    const minimumInterval = this.getMinimumInterval(start, end);
+    const requestedInterval = query.interval || 86400;
+    const finalInterval = Math.max(requestedInterval, minimumInterval);
+
+    const includePnl =
+      includeFields.includes('pnl') || includeFields.includes('pnl-range');
+    const useRangeBasedPnl = includeFields.includes('pnl-range');
+
+    return await this.portfolioService.getPortfolioHistory(address, {
+      startDate: start,
+      endDate: end,
+      interval: finalInterval,
+      convertTo: query.convertTo || 'ae',
+      includePnl,
+      useRangeBasedPnl,
+      includeTokensPnl: true,
+    });
+  }
+
   // Portfolio PnL sparkline — MUST come before :address route to avoid route conflict
   @ApiOperation({
     operationId: 'getPortfolioPnlChart',
