@@ -125,6 +125,16 @@ export class CoinGeckoService {
         error,
       );
     }
+
+    try {
+      await this.refreshHistoricalPrice(AETERNITY_COIN_ID, 'usd', 1, 'hourly');
+      this.logger.debug('Synced 1d hourly historical prices from CoinGecko');
+    } catch (error) {
+      this.logger.error(
+        'Failed to sync 1d hourly historical prices from CoinGecko:',
+        error,
+      );
+    }
   }
 
   isPullTimeExpired() {
@@ -549,7 +559,7 @@ export class CoinGeckoService {
   ): Promise<Array<[number, number]>> {
     const cacheKey = `coingecko:historical:${coinId}:${vsCurrency}:${days}:${interval || 'none'}`;
 
-    // Try to get from Redis cache first (for very recent requests, 1 hour TTL)
+    // Try to get from Redis cache first (1 hour TTL)
     try {
       const cached =
         await this.cacheManager.get<Array<[number, number]>>(cacheKey);
