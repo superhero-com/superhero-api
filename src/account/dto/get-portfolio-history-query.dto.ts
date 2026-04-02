@@ -62,7 +62,10 @@ export class GetPortfolioHistoryQueryDto {
     name: 'include',
     type: 'string',
     required: false,
-    description: 'Comma-separated list of fields to include (e.g., "pnl")',
+    description:
+      'Comma-separated list of fields to include. ' +
+      '"pnl" adds aggregate total_pnl, "pnl-range" uses daily-window PnL instead of cumulative. ' +
+      'Per-token breakdown (tokens_pnl) is only available via the /portfolio/tokens/history endpoint.',
     example: 'pnl',
   })
   @IsOptional()
