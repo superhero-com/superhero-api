@@ -89,6 +89,7 @@ export interface GetPortfolioHistoryOptions {
     | 'xau';
   includePnl?: boolean; // Whether to include PNL data
   useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
+  includeTokensPnl?: boolean; // Whether to include per-token PNL breakdown (large payload)
 }
 
 export interface PnlDataPoint {
@@ -141,6 +142,7 @@ export class PortfolioService {
       interval = 86400, // Default daily (24 hours)
       includePnl = false,
       useRangeBasedPnl = false,
+      includeTokensPnl = false,
     } = options;
 
     // Calculate date range
@@ -379,8 +381,9 @@ export class PortfolioService {
             };
           }
 
-          // Include individual token PNL data (use range-based if available, otherwise cumulative)
-          result.tokens_pnl = pnlData.pnls;
+          if (includeTokensPnl) {
+            result.tokens_pnl = pnlData.pnls;
+          }
         }
 
         return result;
