@@ -71,6 +71,21 @@ on:
       PROFILE_CHAIN_NAME_PRIVATE_KEY:
         description: "Private key used to sponsor chain name claims"
         required: false
+      PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY:
+        description: "Private key used for verification rewards"
+        required: false
+      PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY:
+        description: "Private key used for invite milestone rewards"
+        required: false
+      PROFILE_X_INVITE_LINK_BASE_URL:
+        description: "Base URL for invite links (e.g. https://superhero.com/invite)"
+        required: false
+      ADDRESS_LINK_SECRET_KEY:
+        description: "Secret key for address link"
+        required: false
+      ADDRESS_LINK_CONTRACT_ADDRESS:
+        description: "Contract address for address link"
+        required: false
 jobs:
   deploy:
     name: Deploy via ssh
@@ -94,6 +109,11 @@ jobs:
           PROFILE_ATTESTATION_SIGNER_ADDRESS: "${{ secrets.PROFILE_ATTESTATION_SIGNER_ADDRESS }}"
           PROFILE_ATTESTATION_PRIVATE_KEY: "${{ secrets.PROFILE_ATTESTATION_PRIVATE_KEY }}"
           PROFILE_CHAIN_NAME_PRIVATE_KEY: "${{ secrets.PROFILE_CHAIN_NAME_PRIVATE_KEY }}"
+          PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY: "${{ secrets.PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY }}"
+          PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY: "${{ secrets.PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY }}"
+          PROFILE_X_INVITE_LINK_BASE_URL: "${{ secrets.PROFILE_X_INVITE_LINK_BASE_URL }}"
+          ADDRESS_LINK_SECRET_KEY: "${{ secrets.ADDRESS_LINK_SECRET_KEY }}"
+          ADDRESS_LINK_CONTRACT_ADDRESS: "${{ secrets.ADDRESS_LINK_CONTRACT_ADDRESS }}"
           GIPHY_API_KEY: "${{ secrets.GIPHY_API_KEY }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
@@ -113,6 +133,11 @@ jobs:
             PROFILE_ATTESTATION_SIGNER_ADDRESS,
             PROFILE_ATTESTATION_PRIVATE_KEY,
             PROFILE_CHAIN_NAME_PRIVATE_KEY,
+            PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
+            PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY,
+            PROFILE_X_INVITE_LINK_BASE_URL,
+            ADDRESS_LINK_SECRET_KEY,
+            ADDRESS_LINK_CONTRACT_ADDRESS,
             GIPHY_API_KEY,
             SHA
           script: |
@@ -139,6 +164,11 @@ jobs:
               -e PROFILE_ATTESTATION_SIGNER_ADDRESS \
               -e PROFILE_ATTESTATION_PRIVATE_KEY \
               -e PROFILE_CHAIN_NAME_PRIVATE_KEY \
+              -e PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY \
+              -e PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY \
+              -e PROFILE_X_INVITE_LINK_BASE_URL \
+              -e ADDRESS_LINK_SECRET_KEY \
+              -e ADDRESS_LINK_CONTRACT_ADDRESS \
               -e GIPHY_API_KEY \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
