@@ -78,6 +78,9 @@ export class Account {
   total_revoked_invitation_count: number;
   //////////
 
+  @Column({ type: 'jsonb', default: {} })
+  links: Record<string, string>;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
