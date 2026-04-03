@@ -33,6 +33,7 @@ import { MdwModule } from './mdw-sync/mdw.module';
 import { SyncState } from './mdw-sync/entities/sync-state.entity';
 import { ProfileModule } from './profile/profile.module';
 import { StabilizationModule } from './stabilization/stabilization.module';
+import { AddressLinksModule } from './address-links/address-links.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { StabilizationModule } from './stabilization/stabilization.module';
     TipModule,
     ProfileModule,
     StabilizationModule,
+    AddressLinksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

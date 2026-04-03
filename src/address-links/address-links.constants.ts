@@ -1,0 +1,15 @@
+export const ADDRESS_LINK_SECRET_KEY =
+  process.env.ADDRESS_LINK_SECRET_KEY || '';
+
+export const ADDRESS_LINK_CONTRACT_ADDRESS =
+  process.env.ADDRESS_LINK_CONTRACT_ADDRESS || '';
+
+export const ADDRESS_LINK_VERIFICATION_TTL_SECONDS = parseInt(
+  process.env.ADDRESS_LINK_VERIFICATION_TTL_SECONDS || '300',
+  10,
+);
+
+export const ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS = parseInt(
+  process.env.ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS || '300',
+  10,
+);
