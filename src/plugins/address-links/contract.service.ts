@@ -1,6 +1,12 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Contract, MemoryAccount } from '@aeternity/aepp-sdk';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -65,14 +71,23 @@ export class AddressLinksContractService implements OnModuleInit {
     signature: string,
   ) {
     const contract = await this.getContractInstance();
-    const sigBuffer = Buffer.from(signature, 'hex');
+    const sigBuffer = this.decodeSignature(signature);
 
-    const tx = await contract.link(address, provider, value, nonce, sigBuffer, {
-      onAccount: this.providerAccount!,
-    });
+    try {
+      const tx = await contract.link(
+        address,
+        provider,
+        value,
+        nonce,
+        sigBuffer,
+        { onAccount: this.providerAccount! },
+      );
 
-    this.logger.log(`Link tx: ${tx.hash}`);
-    return tx;
+      this.logger.log(`Link tx: ${tx.hash}`);
+      return tx;
+    } catch (error) {
+      throw this.mapContractError(error, 'link');
+    }
   }
 
   async unlink(
@@ -82,14 +97,22 @@ export class AddressLinksContractService implements OnModuleInit {
     signature: string,
   ) {
     const contract = await this.getContractInstance();
-    const sigBuffer = Buffer.from(signature, 'hex');
+    const sigBuffer = this.decodeSignature(signature);
 
-    const tx = await contract.unlink(address, provider, nonce, sigBuffer, {
-      onAccount: this.providerAccount!,
-    });
+    try {
+      const tx = await contract.unlink(
+        address,
+        provider,
+        nonce,
+        sigBuffer,
+        { onAccount: this.providerAccount! },
+      );
 
-    this.logger.log(`Unlink tx: ${tx.hash}`);
-    return tx;
+      this.logger.log(`Unlink tx: ${tx.hash}`);
+      return tx;
+    } catch (error) {
+      throw this.mapContractError(error, 'unlink');
+    }
   }
 
   async getLinks(address: string): Promise<Record<string, string>> {
@@ -105,7 +128,47 @@ export class AddressLinksContractService implements OnModuleInit {
     return links;
   }
 
+  private static readonly KNOWN_CONTRACT_ERRORS: Record<string, string> = {
+    INVALID_SIGNATURE:
+      'Wallet signature verification failed. Ensure the message was signed with the correct AE account using the signed-message format.',
+    INVALID_NONCE:
+      'Nonce mismatch. The nonce may have changed — request a new claim and try again.',
+    ALREADY_CLAIMED:
+      'This provider is already linked to a different value for this address.',
+    NOT_LINKED: 'No link exists for this provider and address.',
+    NOT_PROVIDER_OWNER:
+      'The backend wallet is not the registered owner for this provider on the contract.',
+  };
+
+  private decodeSignature(hex: string): Buffer {
+    if (!/^[0-9a-fA-F]{128}$/.test(hex)) {
+      throw new BadRequestException(
+        `Invalid signature: expected 128-character hex string (64 bytes), got ${hex.length} characters`,
+      );
+    }
+    return Buffer.from(hex, 'hex');
+  }
+
+  private mapContractError(error: any, operation: string): Error {
+    const message: string = error?.message || String(error);
+    for (const [code, description] of Object.entries(
+      AddressLinksContractService.KNOWN_CONTRACT_ERRORS,
+    )) {
+      if (message.includes(code)) {
+        this.logger.warn(`Contract ${operation} rejected: ${code}`);
+        return new BadRequestException(description);
+      }
+    }
+    this.logger.error(`Contract ${operation} failed unexpectedly`, message);
+    return error;
+  }
+
   private async getContractInstance(): Promise<any> {
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'AddressLink contract is not configured',
+      );
+    }
     if (this.cachedContract) {
       return this.cachedContract;
     }
@@ -124,11 +187,10 @@ export class AddressLinksContractService implements OnModuleInit {
   private resolveAciPath(): string {
     const fileName = this.aciFileName;
     const candidatePaths = [
-      path.join(__dirname, '..', 'address-links', 'aci', fileName),
       path.join(__dirname, 'aci', fileName),
-      path.join(process.cwd(), 'dist', 'src', 'address-links', 'aci', fileName),
-      path.join(process.cwd(), 'dist', 'address-links', 'aci', fileName),
-      path.join(process.cwd(), 'src', 'address-links', 'aci', fileName),
+      path.join(process.cwd(), 'dist', 'src', 'plugins', 'address-links', 'aci', fileName),
+      path.join(process.cwd(), 'dist', 'plugins', 'address-links', 'aci', fileName),
+      path.join(process.cwd(), 'src', 'plugins', 'address-links', 'aci', fileName),
     ];
 
     const existingPath = candidatePaths.find((candidatePath) =>

@@ -1,13 +1,13 @@
 import { OAuthService } from '@/affiliation/services/oauth.service';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import crypto from 'crypto';
-import { ClaimLinkDto } from '../dto/claim-link.dto';
-import { SubmitLinkDto } from '../dto/submit-link.dto';
+import { ClaimXLinkDto } from '../dto/x/claim-x-link.dto';
+import { SubmitXLinkDto } from '../dto/x/submit-x-link.dto';
 import {
   ADDRESS_LINK_SECRET_KEY,
   ADDRESS_LINK_VERIFICATION_TTL_SECONDS,
 } from '../address-links.constants';
-import { LinkVerifier, VerifiedClaim } from './link-verifier.interface';
+import { VerifiedClaim } from './link-verifier.interface';
 
 interface VerificationTokenPayload {
   address: string;
@@ -17,15 +17,21 @@ interface VerificationTokenPayload {
 }
 
 @Injectable()
-export class XLinkVerifierService implements LinkVerifier {
+export class XLinkVerifierService {
   private readonly logger = new Logger(XLinkVerifierService.name);
 
   constructor(private readonly oauthService: OAuthService) {}
 
-  async verifyClaim(address: string, dto: ClaimLinkDto): Promise<VerifiedClaim> {
+  async verifyClaim(
+    address: string,
+    dto: ClaimXLinkDto,
+  ): Promise<VerifiedClaim> {
     const accessToken = await this.resolveAccessToken(dto);
 
-    const oauthUser = await this.oauthService.verifyAccessToken('x', accessToken);
+    const oauthUser = await this.oauthService.verifyAccessToken(
+      'x',
+      accessToken,
+    );
     const xUsername = oauthUser.username || oauthUser.name;
     if (!xUsername) {
       throw new BadRequestException(
@@ -45,13 +51,7 @@ export class XLinkVerifierService implements LinkVerifier {
     return { value, verificationToken };
   }
 
-  async verifySubmit(dto: SubmitLinkDto, _expectedMessage: string): Promise<void> {
-    if (!dto.verification_token) {
-      throw new BadRequestException(
-        'verification_token is required for X link submission',
-      );
-    }
-
+  async verifySubmit(dto: SubmitXLinkDto): Promise<void> {
     const payload = this.parseVerificationToken(dto.verification_token);
 
     if (Date.now() > payload.expiry) {
@@ -60,7 +60,7 @@ export class XLinkVerifierService implements LinkVerifier {
     if (payload.address !== dto.address) {
       throw new BadRequestException('Verification token address mismatch');
     }
-    if (payload.provider !== dto.provider) {
+    if (payload.provider !== 'x') {
       throw new BadRequestException('Verification token provider mismatch');
     }
     if (payload.value !== dto.value) {
@@ -68,7 +68,7 @@ export class XLinkVerifierService implements LinkVerifier {
     }
   }
 
-  private async resolveAccessToken(dto: ClaimLinkDto): Promise<string> {
+  private async resolveAccessToken(dto: ClaimXLinkDto): Promise<string> {
     if (dto.x_access_token) {
       return dto.x_access_token;
     }

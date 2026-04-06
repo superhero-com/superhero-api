@@ -14,6 +14,8 @@ import { GovernancePlugin } from './governance/governance.plugin';
 import { GovernancePluginModule } from './governance/governance-plugin.module';
 import { GovernancePopularRankingService } from './governance/services/governance-popular-ranking.service';
 import { PopularRankingContributor } from './popular-ranking.interface';
+import { AddressLinksPlugin } from './address-links/address-links.plugin';
+import { AddressLinksPluginModule } from './address-links/address-links-plugin.module';
 
 /**
  * Export all plugin modules
@@ -26,6 +28,7 @@ export const PLUGIN_MODULES: Type[] = [
   SocialTippingPluginModule,
   BclAffiliationPluginModule,
   GovernancePluginModule,
+  AddressLinksPluginModule,
 ];
 
 /**
@@ -42,6 +45,7 @@ export const getPluginProvider = (): Provider => ({
     socialTippingPlugin: SocialTippingPlugin,
     bclAffiliationPlugin: BclAffiliationPlugin,
     governancePlugin: GovernancePlugin,
+    addressLinksPlugin: AddressLinksPlugin,
   ) => {
     return [
       bclPlugin,
@@ -50,6 +54,7 @@ export const getPluginProvider = (): Provider => ({
       socialTippingPlugin,
       bclAffiliationPlugin,
       governancePlugin,
+      addressLinksPlugin,
     ];
   },
   inject: [
@@ -59,6 +64,7 @@ export const getPluginProvider = (): Provider => ({
     SocialTippingPlugin,
     BclAffiliationPlugin,
     GovernancePlugin,
+    AddressLinksPlugin,
   ],
 });
 

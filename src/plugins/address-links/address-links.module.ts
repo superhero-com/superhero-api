@@ -3,10 +3,10 @@ import { AffiliationModule } from '@/affiliation/affiliation.module';
 import { Account } from '@/account/entities/account.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AddressLinksController } from './address-links.controller';
+import { NostrLinkController } from './nostr-link.controller';
+import { XLinkController } from './x-link.controller';
 import { AddressLinksService } from './address-links.service';
 import { AddressLinksContractService } from './contract.service';
-import { AddressLinksEventListenerService } from './event-listener.service';
 import { XLinkVerifierService } from './verification/x-link-verifier.service';
 import { NostrLinkVerifierService } from './verification/nostr-link-verifier.service';
 
@@ -16,11 +16,10 @@ import { NostrLinkVerifierService } from './verification/nostr-link-verifier.ser
     forwardRef(() => AffiliationModule),
     TypeOrmModule.forFeature([Account]),
   ],
-  controllers: [AddressLinksController],
+  controllers: [NostrLinkController, XLinkController],
   providers: [
     AddressLinksService,
     AddressLinksContractService,
-    AddressLinksEventListenerService,
     XLinkVerifierService,
     NostrLinkVerifierService,
   ],
