@@ -17,8 +17,8 @@ export class NostrLinkController {
 
   @Post('claim')
   async claim(@Body() dto: ClaimNostrLinkDto) {
-    await this.verifier.verifyClaim(dto);
-    return this.service.claimLink(dto.address, this.provider, dto.value);
+    const verified = await this.verifier.verifyClaim(dto);
+    return this.service.claimLink(dto.address, this.provider, verified.value);
   }
 
   @Post('submit')
