@@ -100,12 +100,23 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     }
   }
 
+  private isValidProvider(provider: string): boolean {
+    return /^[a-z]{1,10}$/.test(provider);
+  }
+
   private async handleLinkEvent(address: string, payload: string) {
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) return;
 
     const provider = payload.substring(0, colonIdx);
     const value = payload.substring(colonIdx + 1);
+
+    if (!this.isValidProvider(provider)) {
+      this.logger.warn(
+        `Ignoring link event with invalid provider: ${provider}`,
+      );
+      return;
+    }
 
     this.logger.log(`Link: ${address} -> ${provider}:${value}`);
 
@@ -116,8 +127,10 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .update(Account)
       .set({
         links: () =>
-          `jsonb_set(COALESCE(links, '{}'), '{${provider}}', '"${value}"')`,
+          `jsonb_set(COALESCE(links, '{}'), ARRAY[:provider]::text[], to_jsonb(:value::text))`,
       })
+      .setParameter('provider', provider)
+      .setParameter('value', value)
       .where('address = :address', { address })
       .execute();
   }
@@ -128,6 +141,13 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
 
     const provider = payload.substring(0, colonIdx);
 
+    if (!this.isValidProvider(provider)) {
+      this.logger.warn(
+        `Ignoring unlink event with invalid provider: ${provider}`,
+      );
+      return;
+    }
+
     this.logger.log(`Unlink: ${address} -> ${provider}`);
 
     await this.ensureAccount(address);
@@ -136,8 +156,9 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .createQueryBuilder()
       .update(Account)
       .set({
-        links: () => `links - '${provider}'`,
+        links: () => `links - :provider`,
       })
+      .setParameter('provider', provider)
       .where('address = :address', { address })
       .execute();
   }
