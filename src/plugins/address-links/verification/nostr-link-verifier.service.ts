@@ -1,39 +1,25 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { verifyEvent, nip19, type Event as NostrEvent } from 'nostr-tools';
-import { ClaimLinkDto } from '../dto/claim-link.dto';
-import { SubmitLinkDto } from '../dto/submit-link.dto';
+import { ClaimNostrLinkDto } from '../dto/nostr/claim-nostr-link.dto';
+import { SubmitNostrLinkDto } from '../dto/nostr/submit-nostr-link.dto';
 import { ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS } from '../address-links.constants';
-import { LinkVerifier, VerifiedClaim } from './link-verifier.interface';
+import { VerifiedClaim } from './link-verifier.interface';
 
 const AUTH_EVENT_KIND = 22242;
 
 @Injectable()
-export class NostrLinkVerifierService implements LinkVerifier {
+export class NostrLinkVerifierService {
   private readonly logger = new Logger(NostrLinkVerifierService.name);
 
-  async verifyClaim(
-    _address: string,
-    dto: ClaimLinkDto,
-  ): Promise<VerifiedClaim> {
-    if (!dto.value) {
-      throw new BadRequestException(
-        'value (npub) is required for nostr link claim',
-      );
-    }
+  async verifyClaim(dto: ClaimNostrLinkDto): Promise<VerifiedClaim> {
     this.decodeNpub(dto.value);
     return { value: dto.value };
   }
 
   async verifySubmit(
-    dto: SubmitLinkDto,
+    dto: SubmitNostrLinkDto,
     expectedMessage: string,
   ): Promise<void> {
-    if (!dto.nostr_event) {
-      throw new BadRequestException(
-        'nostr_event is required for nostr link submission',
-      );
-    }
-
     let event: NostrEvent;
     try {
       event = JSON.parse(dto.nostr_event);
