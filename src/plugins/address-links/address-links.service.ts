@@ -5,9 +5,7 @@ import { AddressLinksContractService } from './contract.service';
 export class AddressLinksService {
   private readonly logger = new Logger(AddressLinksService.name);
 
-  constructor(
-    private readonly contractService: AddressLinksContractService,
-  ) {}
+  constructor(private readonly contractService: AddressLinksContractService) {}
 
   buildLinkMessage(
     address: string,
@@ -15,7 +13,12 @@ export class AddressLinksService {
     value: string,
     nonce: number,
   ): string {
-    return this.contractService.buildLinkMessage(address, provider, value, nonce);
+    return this.contractService.buildLinkMessage(
+      address,
+      provider,
+      value,
+      nonce,
+    );
   }
 
   async claimLink(address: string, provider: string, value: string) {

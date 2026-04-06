@@ -33,7 +33,9 @@ export class AddressLinksContractService implements OnModuleInit {
       return;
     }
     this.providerAccount = new MemoryAccount(ADDRESS_LINK_SECRET_KEY as any);
-    this.logger.log(`AddressLink contract configured at ${this.contractAddress}`);
+    this.logger.log(
+      `AddressLink contract configured at ${this.contractAddress}`,
+    );
   }
 
   isConfigured(): boolean {
@@ -55,11 +57,7 @@ export class AddressLinksContractService implements OnModuleInit {
     return `link:${address}:${provider}:${value}:${nonce}`;
   }
 
-  buildUnlinkMessage(
-    address: string,
-    provider: string,
-    nonce: number,
-  ): string {
+  buildUnlinkMessage(address: string, provider: string, nonce: number): string {
     return `unlink:${address}:${provider}:${nonce}`;
   }
 
@@ -100,13 +98,9 @@ export class AddressLinksContractService implements OnModuleInit {
     const sigBuffer = this.decodeSignature(signature);
 
     try {
-      const tx = await contract.unlink(
-        address,
-        provider,
-        nonce,
-        sigBuffer,
-        { onAccount: this.providerAccount! },
-      );
+      const tx = await contract.unlink(address, provider, nonce, sigBuffer, {
+        onAccount: this.providerAccount!,
+      });
 
       this.logger.log(`Unlink tx: ${tx.hash}`);
       return tx;
@@ -188,9 +182,31 @@ export class AddressLinksContractService implements OnModuleInit {
     const fileName = this.aciFileName;
     const candidatePaths = [
       path.join(__dirname, 'aci', fileName),
-      path.join(process.cwd(), 'dist', 'src', 'plugins', 'address-links', 'aci', fileName),
-      path.join(process.cwd(), 'dist', 'plugins', 'address-links', 'aci', fileName),
-      path.join(process.cwd(), 'src', 'plugins', 'address-links', 'aci', fileName),
+      path.join(
+        process.cwd(),
+        'dist',
+        'src',
+        'plugins',
+        'address-links',
+        'aci',
+        fileName,
+      ),
+      path.join(
+        process.cwd(),
+        'dist',
+        'plugins',
+        'address-links',
+        'aci',
+        fileName,
+      ),
+      path.join(
+        process.cwd(),
+        'src',
+        'plugins',
+        'address-links',
+        'aci',
+        fileName,
+      ),
     ];
 
     const existingPath = candidatePaths.find((candidatePath) =>

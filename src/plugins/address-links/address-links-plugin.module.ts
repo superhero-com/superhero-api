@@ -8,10 +8,7 @@ import { AddressLinksPlugin } from './address-links.plugin';
 import { AddressLinksPluginSyncService } from './address-links-plugin-sync.service';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, Account]),
-    AeModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Tx, PluginSyncState, Account]), AeModule],
   providers: [AddressLinksPluginSyncService, AddressLinksPlugin],
   exports: [AddressLinksPlugin],
 })
