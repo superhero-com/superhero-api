@@ -27,6 +27,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     super(aeSdkService);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async processTransaction(
     tx: Tx,
     _syncDirection: SyncDirection,

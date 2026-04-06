@@ -118,6 +118,7 @@ export class XLinkVerifierService {
       .digest('hex');
 
     if (
+      providedHmac.length !== expectedHmac.length ||
       !crypto.timingSafeEqual(
         Buffer.from(providedHmac, 'hex'),
         Buffer.from(expectedHmac, 'hex'),
