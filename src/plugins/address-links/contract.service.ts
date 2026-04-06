@@ -109,19 +109,6 @@ export class AddressLinksContractService implements OnModuleInit {
     }
   }
 
-  async getLinks(address: string): Promise<Record<string, string>> {
-    const contract = await this.getContractInstance();
-    const result: any = await contract.get_links(address);
-    const decoded = result?.decodedResult ?? result;
-    const links: Record<string, string> = {};
-    if (decoded instanceof Map) {
-      decoded.forEach((value: string, key: string) => {
-        links[key] = value;
-      });
-    }
-    return links;
-  }
-
   private static readonly KNOWN_CONTRACT_ERRORS: Record<string, string> = {
     INVALID_SIGNATURE:
       'Wallet signature verification failed. Ensure the message was signed with the correct AE account using the signed-message format.',
