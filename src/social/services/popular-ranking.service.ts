@@ -28,6 +28,7 @@ interface PopularScoreItem {
 export class PopularRankingService {
   private readonly logger = new Logger(PopularRankingService.name);
   private readonly redis = new Redis(REDIS_CONFIG);
+  private readonly recomputeInFlight = new Map<PopularWindow, Promise<void>>();
 
   constructor(
     @InjectRepository(Post)
@@ -92,39 +93,7 @@ export class PopularRankingService {
     }
 
     if (popularRanks.size === 0) {
-      const fallbackMax =
-        window === 'all'
-          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
-          : window === '7d'
-            ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
-            : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
-      try {
-        await this.recompute(window, maxCandidates ?? fallbackMax);
-        const totalPopular = await this.redis.zcard(key);
-        if (totalPopular > 0) {
-          const cached = await this.redis.zrevrange(
-            key,
-            0,
-            totalPopular - 1,
-            'WITHSCORES',
-          );
-          for (let i = 0; i < cached.length; i += 2) {
-            popularRanks.set(cached[i], parseFloat(cached[i + 1]));
-          }
-          this.logger.log(
-            `Recomputed popular posts for window ${window}: ${totalPopular} posts cached`,
-          );
-        } else {
-          this.logger.warn(
-            `Recompute completed but no posts cached for window ${window}`,
-          );
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to recompute popular posts for window ${window}:`,
-          error,
-        );
-      }
+      this.triggerBackgroundRecompute(window, maxCandidates);
     }
 
     if (popularRanks.size === 0) {
@@ -169,6 +138,40 @@ export class PopularRankingService {
     }
 
     return allPopularIds.filter((id) => existingIdsSet.has(id));
+  }
+
+  /**
+   * Fire-and-forget recompute with per-window mutex to prevent stampede.
+   * If a recompute for this window is already in flight, the call is a no-op.
+   */
+  private triggerBackgroundRecompute(
+    window: PopularWindow,
+    maxCandidates?: number,
+  ): void {
+    if (this.recomputeInFlight.has(window)) {
+      return;
+    }
+
+    const fallbackMax =
+      window === 'all'
+        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
+        : window === '7d'
+          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+          : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+
+    const task = this.recompute(window, maxCandidates ?? fallbackMax)
+      .then(() =>
+        this.logger.log(`Background recompute finished for window ${window}`),
+      )
+      .catch((error) =>
+        this.logger.error(
+          `Background recompute failed for window ${window}:`,
+          error,
+        ),
+      )
+      .finally(() => this.recomputeInFlight.delete(window));
+
+    this.recomputeInFlight.set(window, task);
   }
 
   async getPopularPosts(
