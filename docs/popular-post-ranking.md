@@ -96,7 +96,7 @@ Tipping is a rare action on this network. The weight for `tipsAmountAE` (2.0) is
 
 ### 1. Comments
 
-The score uses `post.total_comments`.
+The score counts comments (replies) on the post, excluding the post author's own replies. This prevents authors from inflating their ranking by replying to their own posts.
 
 More discussion helps a post rank higher, but through `log(1 + comments)`, so going from 0 to 5 comments matters more than going from 500 to 505.
 

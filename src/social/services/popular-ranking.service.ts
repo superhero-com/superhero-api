@@ -385,16 +385,24 @@ export class PopularRankingService {
       }>();
     const tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
 
-    // Trending tags map (tag -> score)
-    let trending = [] as TrendingTag[];
-    try {
-      trending = await this.trendingTagRepository.find();
-    } catch {
-      trending = [] as TrendingTag[];
-    }
-    const trendingByTag = new Map(
-      trending.map((t) => [t.tag.toLowerCase(), t.score] as const),
+    // Preload comment counts excluding the post author's own replies
+    const commentsRaw = await this.postRepository
+      .createQueryBuilder('comment')
+      .innerJoin(Post, 'parent', 'parent.id = comment.post_id')
+      .select('comment.post_id', 'parent_id')
+      .addSelect('COUNT(*)', 'count')
+      .where('comment.post_id IN (:...ids)', { ids })
+      .andWhere('comment.is_hidden = false')
+      .andWhere('comment.sender_address != parent.sender_address')
+      .groupBy('comment.post_id')
+      .getRawMany<{ parent_id: string; count: string }>();
+    const commentsByPost = new Map(
+      commentsRaw.map(
+        (r) => [r.parent_id, parseInt(r.count || '0', 10)] as const,
+      ),
     );
+
+    const trendingByTag = await this.loadTrendingByTagMap();
 
     // Preload reads over window per post
     const fromDate = new Date(Date.now() - hours * 3600 * 1000);
@@ -423,10 +431,8 @@ export class PopularRankingService {
         postId: post.id,
         score: this.computeScore(trendingByTag, {
           content: post.content,
-          comments: post.total_comments || 0,
-          tipsAmountAE: tipsAgg
-            ? parseFloat(tipsAgg.amount_sum || '0')
-            : 0,
+          comments: commentsByPost.get(post.id) || 0,
+          tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
           tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
           reads: readsByPost.get(post.id) || 0,
           topics: post.topics,
@@ -528,7 +534,9 @@ export class PopularRankingService {
     } catch {
       trending = [];
     }
-    return new Map(trending.map((t) => [t.tag.toLowerCase(), t.score] as const));
+    return new Map(
+      trending.map((t) => [t.tag.toLowerCase(), t.score] as const),
+    );
   }
 
   private computeScore(
