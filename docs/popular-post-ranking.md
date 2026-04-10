@@ -9,8 +9,7 @@ The current implementation rewards posts that attract:
 - unique tippers,
 - reads,
 - association with currently trending topics,
-- better-quality content,
-- stronger author reputation signals.
+- better-quality content.
 
 It does not simply sort by raw comment count or raw tip amount.
 
@@ -52,7 +51,7 @@ This means popularity is computed only within the newest candidate pool for that
 
 ## High-level formula
 
-Each candidate gets a weighted numerator from engagement and author signals:
+Each candidate gets a weighted numerator from engagement and content signals:
 
 ```text
 numerator =
@@ -62,11 +61,7 @@ numerator =
   w_interactions_per_hour * log(1 + interactionsPerHour) +
   w_reads * log(1 + readsPerHour) +
   w_trending * trendingBoost +
-  w_quality * contentQuality +
-  w_balance * accountBalanceFactor +
-  w_account_age * accountAgeFactor +
-  w_invites * invitesFactor +
-  w_owned_trends * ownedTrendsFactor
+  w_quality * contentQuality
 ```
 
 Then the score is decayed by age:
@@ -93,10 +88,6 @@ WEIGHTS: {
   interactionsPerHour: 0.2,
   trendingBoost: 0.4,
   contentQuality: 0.3,
-  accountBalance: 0.2,
-  accountAge: 0.02,
-  invites: 2,
-  ownedTrends: 1.5,
   reads: 1.0,
 }
 ```
@@ -106,9 +97,7 @@ WEIGHTS: {
 The biggest direct drivers are:
 
 - `tipsAmountAE`
-- `invites`
 - `comments`
-- `ownedTrends`
 - `reads`
 
 Because logarithms are used for the count- and amount-based signals, all of them have diminishing returns. Doubling activity helps, but not linearly forever.
@@ -187,45 +176,6 @@ It penalizes very short, emoji-heavy posts especially hard.
 
 In practice, this helps reduce spammy low-effort content from dominating on pure engagement tricks alone.
 
-### 8. Author account balance
-
-The author's AE balance is fetched and normalized against:
-
-```ts
-BALANCE_NORMALIZER_AE: 500_000
-```
-
-This becomes a small reputation-style factor in the range `[0..1]`.
-
-### 9. Author account age
-
-Older accounts receive a tiny boost via a sigmoid-style curve centered roughly around the first two weeks of account age.
-
-This is intentionally a very small factor.
-
-### 10. Invitations sent
-
-The algorithm counts invitations sent by the author and normalizes them logarithmically up to 100 invites:
-
-```text
-invitesFactor = log(1 + sentInvites) / log(1 + 100)
-```
-
-This acts as a reputation/community-building signal.
-
-### 11. Owned token portfolio value
-
-The service calculates the author's token holdings value and normalizes it into `[0..1]`.
-
-By default the normalization is based on AE value:
-
-```ts
-OWNED_TRENDS_VALUE_CURRENCY: 'ae'
-OWNED_TRENDS_VALUE_NORMALIZER_AE: 20000
-```
-
-So an account with roughly `20,000 AE` worth of tracked token holdings approaches the maximum contribution from this factor.
-
 ## Time decay by window
 
 The time-decay settings are:
@@ -267,7 +217,7 @@ For polls:
 - `votes_count` is used as the `comments`-equivalent engagement signal,
 - tips are currently treated as `0`,
 - reads are currently treated as `0`,
-- the same content-quality, author, and decay logic still applies.
+- the same content-quality and decay logic still applies.
 
 This is why the endpoint can return mixed item types while still ranking them with a comparable scoring model.
 
@@ -298,8 +248,7 @@ A post is most likely to rank highly when it is:
 - getting support from multiple unique tippers,
 - being read actively,
 - connected to a trending topic,
-- written with enough substance to avoid quality penalties,
-- authored by an account with stronger reputation-style signals.
+- written with enough substance to avoid quality penalties.
 
 ## Files involved
 
@@ -321,6 +270,6 @@ Most numeric signals use `log(1 + x)` so the ranking favors meaningful activity 
 
 The `24h` window is intended to surface active conversations now, not just the largest totals accumulated earlier in the day.
 
-### Why reputation signals exist
+### Why user wallet and reputation signals are excluded
 
-Account balance, account age, invites, and owned token value are all relatively small compared to direct engagement, but they help the feed lean toward established, credible participants when engagement is otherwise close.
+Popular ranking intentionally does not use author account balance, account age, invite counts, or owned-token portfolio value. The feed is driven by engagement on the content itself plus topic momentum and lightweight quality heuristics, so visibility does not depend on wealth or account metadata.

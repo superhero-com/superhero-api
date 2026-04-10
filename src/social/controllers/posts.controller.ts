@@ -380,8 +380,7 @@ export class PostsController {
   @ApiOperation({
     operationId: 'popular',
     summary: 'Popular posts',
-    description:
-      'Returns popular posts for selected time window. Views are ignored in v1.',
+    description: 'Returns popular posts for selected time window.',
   })
   @ApiOkResponsePaginated(PostDto)
   @Get('popular')

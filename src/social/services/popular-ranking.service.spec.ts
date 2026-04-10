@@ -18,9 +18,6 @@ describe('PopularRankingService', () => {
   let postRepository: any;
   let tipRepository: any;
   let trendingTagRepository: any;
-  let accountRepository: any;
-  let tokenHolderRepository: any;
-  let invitationRepository: any;
   let postReadsRepository: any;
 
   beforeEach(() => {
@@ -50,21 +47,6 @@ describe('PopularRankingService', () => {
       groupBy: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
     };
-    const holderQueryBuilder = {
-      leftJoin: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    const invitationQueryBuilder = {
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
     const readsQueryBuilder = {
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
@@ -83,15 +65,6 @@ describe('PopularRankingService', () => {
     trendingTagRepository = {
       find: jest.fn().mockResolvedValue([]),
     };
-    accountRepository = {
-      findBy: jest.fn().mockResolvedValue([]),
-    };
-    tokenHolderRepository = {
-      createQueryBuilder: jest.fn().mockReturnValue(holderQueryBuilder),
-    };
-    invitationRepository = {
-      createQueryBuilder: jest.fn().mockReturnValue(invitationQueryBuilder),
-    };
     postReadsRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(readsQueryBuilder),
     };
@@ -100,11 +73,6 @@ describe('PopularRankingService', () => {
       postRepository as any,
       tipRepository as any,
       trendingTagRepository as any,
-      accountRepository as any,
-      tokenHolderRepository as any,
-      {} as any,
-      { sdk: { getBalance: jest.fn() } } as any,
-      invitationRepository as any,
       postReadsRepository as any,
       [],
     );
