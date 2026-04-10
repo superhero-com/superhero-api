@@ -179,6 +179,8 @@ REDIS_TTL_SECONDS: 30
 
 So the feed is intentionally refreshed often.
 
+When the cache is empty (cold start or after TTL expiry with no cron), recompute is triggered in the background with a per-window mutex to prevent stampede. The current request falls back to recent posts while the cache is being rebuilt.
+
 ## Practical interpretation
 
 A post is most likely to rank highly when it is:
