@@ -1,9 +1,9 @@
 const pipelineMock = {
   zadd: jest.fn().mockReturnThis(),
   expire: jest.fn().mockReturnThis(),
-  exec: jest.fn().mockResolvedValue(
-    Array.from({ length: 64 }, () => [null, 1] as const),
-  ),
+  exec: jest
+    .fn()
+    .mockResolvedValue(Array.from({ length: 64 }, () => [null, 1] as const)),
 };
 
 const redisMock = {
@@ -56,6 +56,15 @@ describe('PopularRankingService', () => {
       groupBy: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
     };
+    const commentQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
     const readsQueryBuilder = {
       select: jest.fn().mockReturnThis(),
       addSelect: jest.fn().mockReturnThis(),
@@ -66,7 +75,10 @@ describe('PopularRankingService', () => {
     };
 
     postRepository = {
-      createQueryBuilder: jest.fn().mockReturnValue(candidateQueryBuilder),
+      createQueryBuilder: jest
+        .fn()
+        .mockReturnValueOnce(candidateQueryBuilder)
+        .mockReturnValueOnce(commentQueryBuilder),
     };
     tipRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(tipQueryBuilder),
@@ -100,6 +112,22 @@ describe('PopularRankingService', () => {
     );
     expect(tipQueryBuilder.andWhere).toHaveBeenCalledWith(
       'tip.sender_address != post.sender_address',
+    );
+  });
+
+  it('excludes self-comments from ranking comment count', async () => {
+    await service.recompute('7d', 10);
+
+    const commentQueryBuilder =
+      postRepository.createQueryBuilder.mock.results[1].value;
+
+    expect(commentQueryBuilder.innerJoin).toHaveBeenCalledWith(
+      expect.any(Function),
+      'parent',
+      'parent.id = comment.post_id',
+    );
+    expect(commentQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'comment.sender_address != parent.sender_address',
     );
   });
 });
