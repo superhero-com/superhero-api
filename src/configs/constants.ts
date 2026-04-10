@@ -211,28 +211,23 @@ export const TOKEN_LIST_ELIGIBILITY_CONFIG = {
 } as const;
 
 /**
- * Popular posts ranking configuration (v1)
+ * Popular posts ranking configuration — "Top" style (no time decay).
+ * Posts are ranked purely by accumulated engagement within the selected window.
  */
 export const POPULAR_RANKING_CONFIG = {
-  // default time windows (hours)
+  // time windows (hours)
   WINDOW_24H_HOURS: 24,
   WINDOW_7D_HOURS: 24 * 7,
 
-  // weights
+  // weights — tipping is rare so comments and reads lead
   WEIGHTS: {
-    comments: 1.7, // w_c (↑ more important)
-    tipsAmountAE: 4.0, // w_ta (↑ most important)
-    tipsCount: 1, // w_tc (supporting)
-    interactionsPerHour: 0.2, // w_it (minor)
-    trendingBoost: 0.4, // w_tr (minor)
-    contentQuality: 0.3, // w_q (minor, prevents spam)
-    reads: 1.0, // w_reads (modest influence)
+    comments: 2.5, // w_c (primary engagement signal)
+    tipsAmountAE: 2.0, // w_ta (meaningful but not dominant since tipping is rare)
+    tipsCount: 1.0, // w_tc (diversity of tippers)
+    trendingBoost: 0.5, // w_tr (topical relevance)
+    contentQuality: 0.3, // w_q (anti-spam)
+    reads: 1.5, // w_reads (common passive signal)
   },
-
-  // time decay
-  GRAVITY: 1.6, // 24h
-  GRAVITY_7D: 0.5, // Reduced from 1.0 to reduce time decay for weekly window
-  T_BIAS: 1.0,
 
   // content quality params
   CONTENT: {
@@ -251,7 +246,7 @@ export const POPULAR_RANKING_CONFIG = {
     popular7d: 'popular:7d',
     popularAll: 'popular:all',
   },
-  REDIS_TTL_SECONDS: 30, // 30 seconds - very fresh popular feed
+  REDIS_TTL_SECONDS: 30,
 
   // Bot UA denylist (lowercase substrings)
   BOT_UA_DENYLIST: [
@@ -263,10 +258,6 @@ export const POPULAR_RANKING_CONFIG = {
     'monitor',
     'curl',
   ],
-  // score floors to hide zero-signal posts
-  SCORE_FLOOR_DEFAULT: 0.01, // 24h
-  SCORE_FLOOR_7D: 0.008, // 7d
-  SCORE_FLOOR_ALL: 0.1, // all-time
 
   // candidate caps
   MAX_CANDIDATES_24H: 500,

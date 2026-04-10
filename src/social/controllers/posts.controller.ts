@@ -380,7 +380,8 @@ export class PostsController {
   @ApiOperation({
     operationId: 'popular',
     summary: 'Popular posts',
-    description: 'Returns popular posts for selected time window.',
+    description:
+      'Returns top posts for selected time window (24h, 7d, all). Ranked by accumulated engagement — no time decay.',
   })
   @ApiOkResponsePaginated(PostDto)
   @Get('popular')
