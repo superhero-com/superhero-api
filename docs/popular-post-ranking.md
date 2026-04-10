@@ -1,6 +1,6 @@
 ## Popular post ranking
 
-The popular post endpoint ranks content by a weighted engagement score, then applies time decay so newer activity stays visible.
+The popular post endpoint ranks content by accumulated engagement — a "Top" style ranking with no time decay. The time window itself acts as the freshness filter.
 
 The current implementation rewards posts that attract:
 
@@ -19,11 +19,9 @@ The ranking powers `GET /posts/popular`.
 
 Supported windows:
 
-- `24h`
+- `24h` (default)
 - `7d`
 - `all`
-
-The same scoring model is used for all windows, but the time decay and candidate pool differ per window.
 
 ## Which posts are even eligible
 
@@ -49,32 +47,21 @@ MAX_CANDIDATES_ALL: 10000,
 
 This means popularity is computed only within the newest candidate pool for that window, not across every post ever created.
 
-## High-level formula
+## Formula
 
-Each candidate gets a weighted numerator from engagement and content signals:
+Each candidate gets a score from accumulated engagement and content signals:
 
 ```text
-numerator =
+score =
   w_comments * log(1 + comments) +
   w_tips_amount * log(1 + tipsAmountAE) +
   w_tips_count * log(1 + tipsCount) +
-  w_interactions_per_hour * log(1 + interactionsPerHour) +
-  w_reads * log(1 + readsPerHour) +
+  w_reads * log(1 + reads) +
   w_trending * trendingBoost +
   w_quality * contentQuality
 ```
 
-Then the score is decayed by age:
-
-```text
-score = numerator / (ageHours + t_bias) ^ gravity
-```
-
-Where:
-
-- `ageHours` is the post age in hours,
-- `t_bias` prevents very new posts from exploding,
-- `gravity` controls how fast older posts fall.
+There is no time-decay divisor. The score is purely based on engagement within the selected window.
 
 ## Current weights
 
@@ -82,13 +69,12 @@ All weights live in `src/configs/constants.ts` under `POPULAR_RANKING_CONFIG`.
 
 ```ts
 WEIGHTS: {
-  comments: 1.7,
-  tipsAmountAE: 4.0,
-  tipsCount: 1,
-  interactionsPerHour: 0.2,
-  trendingBoost: 0.4,
+  comments: 2.5,
+  tipsAmountAE: 2.0,
+  tipsCount: 1.0,
+  trendingBoost: 0.5,
   contentQuality: 0.3,
-  reads: 1.0,
+  reads: 1.5,
 }
 ```
 
@@ -96,11 +82,15 @@ WEIGHTS: {
 
 The biggest direct drivers are:
 
-- `tipsAmountAE`
 - `comments`
+- `tipsAmountAE`
 - `reads`
 
-Because logarithms are used for the count- and amount-based signals, all of them have diminishing returns. Doubling activity helps, but not linearly forever.
+Because logarithms are used for all count- and amount-based signals, they have diminishing returns. Doubling activity helps, but not linearly forever.
+
+### Why tips are not the dominant signal
+
+Tipping is a rare action on this network. The weight for `tipsAmountAE` (2.0) is deliberately lower than `comments` (2.5) so that a single generous tip cannot vault a post above all others. Comments and reads — being the most common engagement signals — lead the ranking.
 
 ## Ranking signals
 
@@ -108,51 +98,33 @@ Because logarithms are used for the count- and amount-based signals, all of them
 
 The score uses `post.total_comments`.
 
-More discussion helps a post trend, but through `log(1 + comments)`, so going from 0 to 5 comments matters more than going from 500 to 505.
+More discussion helps a post rank higher, but through `log(1 + comments)`, so going from 0 to 5 comments matters more than going from 500 to 505.
 
 ### 2. Tip amount
 
-The total AE tipped on the post is summed and scored with:
+The total AE tipped on the post (excluding self-tips) is summed and scored with:
 
 ```text
 log(1 + tipsAmountAE)
 ```
 
-This is currently the strongest direct engagement signal in the formula.
-
 ### 3. Tip count
 
 The number of tips also contributes separately from total value. This helps distinguish one large tip from repeated support by multiple users.
 
-### 4. Interactions per hour
-
-The service calculates:
-
-```text
-interactionsPerHour = (comments + uniqueTippers) / ageHours
-```
-
-This rewards momentum. A post getting discussion and support quickly performs better than a post that accumulated the same totals much more slowly.
-
-### 5. Reads
+### 4. Reads
 
 Reads are pulled from `post_reads_daily` and summed across the selected window.
 
-The ranking uses:
+The ranking uses raw reads:
 
 ```text
-readsPerHour = reads / ageHours
+log(1 + reads)
 ```
 
-Then applies:
+Reads are not normalized by age — the window boundary handles freshness.
 
-```text
-log(1 + readsPerHour)
-```
-
-So reads do matter, but they are normalized by age and weighted more modestly than tip amount.
-
-### 6. Trending topic boost
+### 5. Trending topic boost
 
 If a post has topics, the system looks up the highest trending-tag score among them and normalizes it:
 
@@ -162,7 +134,7 @@ trendingBoost = min(1, maxTrendingTagScore / 100)
 
 A post with at least one strongly trending topic gets a modest boost. The algorithm uses the single strongest topic score, not the sum of all topic scores.
 
-### 7. Content quality
+### 6. Content quality
 
 The content-quality factor is a heuristic in the range `[0..1]`.
 
@@ -176,36 +148,6 @@ It penalizes very short, emoji-heavy posts especially hard.
 
 In practice, this helps reduce spammy low-effort content from dominating on pure engagement tricks alone.
 
-## Time decay by window
-
-The time-decay settings are:
-
-```ts
-GRAVITY: 1.6,
-GRAVITY_7D: 0.5,
-T_BIAS: 1.0,
-```
-
-How that behaves:
-
-- `24h` uses `gravity = 1.6`, so recency matters a lot.
-- `7d` uses `gravity = 0.5`, so good posts stay competitive longer.
-- `all` uses `gravity = 0.0`, so there is no age decay after a post enters the candidate pool.
-
-This means the `24h` feed is momentum-heavy, while the `all` feed behaves more like an all-time best-of list within the capped candidate set.
-
-## Score floors
-
-After scoring, low-signal items are filtered out entirely:
-
-```ts
-SCORE_FLOOR_DEFAULT: 0.01,
-SCORE_FLOOR_7D: 0.008,
-SCORE_FLOOR_ALL: 0.1,
-```
-
-If a post does not reach the floor for the selected window, it will not appear in the cached popular ranking at all.
-
 ## Governance polls and plugin content
 
 The popular feed can also include plugin-provided content items, not only regular posts.
@@ -217,7 +159,7 @@ For polls:
 - `votes_count` is used as the `comments`-equivalent engagement signal,
 - tips are currently treated as `0`,
 - reads are currently treated as `0`,
-- the same content-quality and decay logic still applies.
+- the same content-quality logic still applies.
 
 This is why the endpoint can return mixed item types while still ranking them with a comparable scoring model.
 
@@ -241,11 +183,9 @@ So the feed is intentionally refreshed often.
 
 A post is most likely to rank highly when it is:
 
-- recent,
 - top-level,
-- receiving comments quickly,
-- receiving meaningful AE tips,
-- getting support from multiple unique tippers,
+- receiving many comments,
+- receiving meaningful AE tips from multiple tippers,
 - being read actively,
 - connected to a trending topic,
 - written with enough substance to avoid quality penalties.
@@ -254,8 +194,8 @@ A post is most likely to rank highly when it is:
 
 | File | Purpose |
 |------|---------|
-| `src/social/services/popular-ranking.service.ts` | Main candidate selection, scoring, decay, and Redis caching |
-| `src/configs/constants.ts` | Ranking weights, decay, score floors, and candidate caps |
+| `src/social/services/popular-ranking.service.ts` | Main candidate selection, scoring, and Redis caching |
+| `src/configs/constants.ts` | Ranking weights and candidate caps |
 | `src/social/controllers/posts.controller.ts` | Exposes `GET /posts/popular` |
 | `src/plugins/popular-ranking.interface.ts` | Plugin contract for non-post content |
 | `src/plugins/governance/services/governance-popular-ranking.service.ts` | Governance poll contribution to popular ranking |
@@ -266,9 +206,13 @@ A post is most likely to rank highly when it is:
 
 Most numeric signals use `log(1 + x)` so the ranking favors meaningful activity without letting one giant raw number dominate forever.
 
-### Why recency still wins in 24h
+### Why there is no time decay
 
-The `24h` window is intended to surface active conversations now, not just the largest totals accumulated earlier in the day.
+This is a "Top" ranking, not a "Hot" ranking. The time window itself (24h, 7d, all) acts as the freshness filter. Within a window, posts compete purely on accumulated engagement. This is simpler, more transparent, and better suited for a low-activity network where posts need time to gather signals.
+
+### Why there are no score floors
+
+All posts within the candidate pool are included. On a low-activity network, filtering out low-signal posts would leave the feed empty. Zero-engagement posts simply sort to the bottom by their small content-quality score.
 
 ### Why user wallet and reputation signals are excluded
 
