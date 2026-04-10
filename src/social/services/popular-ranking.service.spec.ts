@@ -1,7 +1,16 @@
+const pipelineMock = {
+  zadd: jest.fn().mockReturnThis(),
+  expire: jest.fn().mockReturnThis(),
+  exec: jest.fn().mockResolvedValue(
+    Array.from({ length: 64 }, () => [null, 1] as const),
+  ),
+};
+
 const redisMock = {
   ping: jest.fn().mockResolvedValue('PONG'),
   del: jest.fn().mockResolvedValue(1),
-  pipeline: jest.fn(),
+  zcard: jest.fn().mockResolvedValue(1),
+  pipeline: jest.fn().mockReturnValue(pipelineMock),
 };
 
 jest.mock('ioredis', () => {
@@ -79,7 +88,7 @@ describe('PopularRankingService', () => {
   });
 
   it('excludes self-tips from popular ranking tip aggregates', async () => {
-    await service.recompute('24h', 10);
+    await service.recompute('7d', 10);
 
     const tipQueryBuilder =
       tipRepository.createQueryBuilder.mock.results[0].value;
