@@ -7,11 +7,6 @@ import { TrendingTag } from '@/trending-tags/entities/trending-tags.entity';
 import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
 import Redis from 'ioredis';
 import { REDIS_CONFIG } from '@/configs/redis';
-import { Account } from '@/account/entities/account.entity';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
-import { Token } from '@/tokens/entities/token.entity';
-import { AeSdkService } from '@/ae/ae-sdk.service';
-import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { PostReadsDaily } from '../entities/post-reads.entity';
 import {
   PopularRankingContributor,
@@ -41,15 +36,6 @@ export class PopularRankingService {
     private readonly tipRepository: Repository<Tip>,
     @InjectRepository(TrendingTag)
     private readonly trendingTagRepository: Repository<TrendingTag>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
-    @InjectRepository(TokenHolder)
-    private readonly tokenHolderRepository: Repository<TokenHolder>,
-    @InjectRepository(Token)
-    private readonly tokenRepository: Repository<Token>,
-    private readonly aeSdkService: AeSdkService,
-    @InjectRepository(Invitation)
-    private readonly invitationRepository: Repository<Invitation>,
     @InjectRepository(PostReadsDaily)
     private readonly postReadsRepository: Repository<PostReadsDaily>,
     @Optional()
@@ -446,65 +432,6 @@ export class PopularRankingService {
       trending.map((t) => [t.tag.toLowerCase(), t.score] as const),
     );
 
-    // Load authors accounts for signals
-    const authors = Array.from(
-      new Set(candidates.map((p) => p.sender_address)),
-    );
-    const accounts = await this.accountRepository.findBy({
-      address: In(authors),
-    });
-    const accountByAddress = new Map(
-      accounts.map((a) => [a.address, a] as const),
-    );
-
-    // Preload owned tokens portfolio value per author (without trending weight)
-    const aeValueField =
-      "COALESCE((token.price_data->>'ae')::numeric, token.price::numeric, 0)";
-    const usdValueField = "COALESCE((token.price_data->>'usd')::numeric, 0)";
-    const valueField =
-      POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
-        ? usdValueField
-        : aeValueField;
-
-    let tokenHoldings: { address: string; owned_value: string }[] = [];
-    try {
-      tokenHoldings = await this.tokenHolderRepository
-        .createQueryBuilder('holder')
-        .leftJoin(Token, 'token', 'token.address = holder.aex9_address')
-        .select('holder.address', 'address')
-        .addSelect(
-          `SUM((CAST(holder.balance AS numeric) / NULLIF(POWER(10, token.decimals::int), 0)) * ${valueField})`,
-          'owned_value',
-        )
-        .where('holder.address IN (:...authors)', { authors })
-        .groupBy('holder.address')
-        .getRawMany<{ address: string; owned_value: string }>();
-    } catch {
-      tokenHoldings = [];
-    }
-    const ownedValueByAddress = new Map(
-      tokenHoldings.map(
-        (r) => [r.address, parseFloat(r.owned_value || '0')] as const,
-      ),
-    );
-
-    // Preload invites sent per author from invitations
-    let invitesRows: { sender: string; sent: string }[] = [];
-    try {
-      invitesRows = await this.invitationRepository
-        .createQueryBuilder('inv')
-        .select('inv.sender_address', 'sender')
-        .addSelect('COUNT(*)', 'sent')
-        .where('inv.sender_address IN (:...authors)', { authors })
-        .groupBy('inv.sender_address')
-        .getRawMany<{ sender: string; sent: string }>();
-    } catch {
-      invitesRows = [];
-    }
-    const invitesByAddress = new Map(
-      invitesRows.map((r) => [r.sender, parseInt(r.sent || '0', 10)] as const),
-    );
-
     // Preload reads over window per post
     const fromDate = new Date(Date.now() - hours * 3600 * 1000);
     const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
@@ -560,71 +487,9 @@ export class PopularRankingService {
 
         const contentQuality = this.computeContentQuality(post.content || '');
 
-        // account signals
-        const account = accountByAddress.get(post.sender_address);
-        let accountBalanceFactor = 0;
-        let accountAgeFactor = 0;
-        let invitesFactor = 0;
-        if (account) {
-          // AE balance via Ae SDK with short Redis cache
-          const cacheKey = `accbal:${account.address}`;
-          let aeBalance = 0;
-          const cached = await this.redis.get(cacheKey);
-          if (cached) {
-            aeBalance = parseFloat(cached) || 0;
-          } else {
-            try {
-              const raw = await this.aeSdkService.sdk.getBalance(
-                account.address as `ak_${string}`,
-              );
-              aeBalance = Number(raw) / 1e18; // wei -> AE
-              await this.redis.setex(
-                cacheKey,
-                POPULAR_RANKING_CONFIG.BALANCE_CACHE_TTL_SECONDS,
-                aeBalance.toString(),
-              );
-            } catch {
-              aeBalance = 0;
-            }
-          }
-          accountBalanceFactor = Math.max(
-            0,
-            Math.min(
-              1,
-              aeBalance / POPULAR_RANKING_CONFIG.BALANCE_NORMALIZER_AE,
-            ),
-          );
-
-          const days =
-            (Date.now() - new Date(account.created_at).getTime()) / 86_400_000;
-          accountAgeFactor = Math.max(
-            0,
-            Math.min(1, 1 / (1 + Math.exp(-(days - 14) / 14))),
-          );
-
-          const sentInvites =
-            invitesByAddress.get(account.address) ??
-            account.total_invitation_count ??
-            0;
-          invitesFactor = Math.min(
-            1,
-            Math.log(1 + sentInvites) / Math.log(1 + 100),
-          );
-        }
-
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = readsByPost.get(post.id) || 0;
         const readsPerHour = reads / ageHours;
-        // owned trends factor: normalize value portfolio into [0..1]
-        const ownedRaw = ownedValueByAddress.get(post.sender_address) || 0;
-        const normalizer =
-          POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
-            ? POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_USD
-            : POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_AE;
-        const ownedNorm = Math.max(
-          0,
-          Math.min(1, ownedRaw / Math.max(1, normalizer)),
-        );
         const numerator =
           w.comments * Math.log(1 + comments) +
           w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
@@ -632,11 +497,7 @@ export class PopularRankingService {
           w.interactionsPerHour * Math.log(1 + interactionsPerHour) +
           w.reads * Math.log(1 + readsPerHour) +
           w.trendingBoost * trendingBoost +
-          w.contentQuality * contentQuality +
-          w.accountBalance * accountBalanceFactor +
-          w.accountAge * accountAgeFactor +
-          w.invites * invitesFactor +
-          w.ownedTrends * ownedNorm;
+          w.contentQuality * contentQuality;
 
         // Apply gravity based on window
         // For "all" window, no gravity (0.0) means all posts compete equally regardless of age
@@ -687,69 +548,9 @@ export class PopularRankingService {
 
         const contentQuality = this.computeContentQuality(item.content || '');
 
-        // Account signals
-        const account = accountByAddress.get(item.sender_address);
-        let accountBalanceFactor = 0;
-        let accountAgeFactor = 0;
-        let invitesFactor = 0;
-        if (account) {
-          const cacheKey = `accbal:${account.address}`;
-          let aeBalance = 0;
-          const cached = await this.redis.get(cacheKey);
-          if (cached) {
-            aeBalance = parseFloat(cached) || 0;
-          } else {
-            try {
-              const raw = await this.aeSdkService.sdk.getBalance(
-                account.address as `ak_${string}`,
-              );
-              aeBalance = Number(raw) / 1e18;
-              await this.redis.setex(
-                cacheKey,
-                POPULAR_RANKING_CONFIG.BALANCE_CACHE_TTL_SECONDS,
-                aeBalance.toString(),
-              );
-            } catch {
-              aeBalance = 0;
-            }
-          }
-          accountBalanceFactor = Math.max(
-            0,
-            Math.min(
-              1,
-              aeBalance / POPULAR_RANKING_CONFIG.BALANCE_NORMALIZER_AE,
-            ),
-          );
-
-          const days =
-            (Date.now() - new Date(account.created_at).getTime()) / 86_400_000;
-          accountAgeFactor = Math.max(
-            0,
-            Math.min(1, 1 / (1 + Math.exp(-(days - 14) / 14))),
-          );
-
-          const sentInvites =
-            invitesByAddress.get(account.address) ??
-            account.total_invitation_count ??
-            0;
-          invitesFactor = Math.min(
-            1,
-            Math.log(1 + sentInvites) / Math.log(1 + 100),
-          );
-        }
-
         const w = POPULAR_RANKING_CONFIG.WEIGHTS;
         const reads = 0; // Plugin items don't have reads tracking (for now)
         const readsPerHour = reads / ageHours;
-        const ownedRaw = ownedValueByAddress.get(item.sender_address) || 0;
-        const normalizer =
-          POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_CURRENCY === 'usd'
-            ? POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_USD
-            : POPULAR_RANKING_CONFIG.OWNED_TRENDS_VALUE_NORMALIZER_AE;
-        const ownedNorm = Math.max(
-          0,
-          Math.min(1, ownedRaw / Math.max(1, normalizer)),
-        );
         const numerator =
           w.comments * Math.log(1 + comments) +
           w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
@@ -757,11 +558,7 @@ export class PopularRankingService {
           w.interactionsPerHour * Math.log(1 + interactionsPerHour) +
           w.reads * Math.log(1 + readsPerHour) +
           w.trendingBoost * trendingBoost +
-          w.contentQuality * contentQuality +
-          w.accountBalance * accountBalanceFactor +
-          w.accountAge * accountAgeFactor +
-          w.invites * invitesFactor +
-          w.ownedTrends * ownedNorm;
+          w.contentQuality * contentQuality;
 
         let gravity = 0.0;
         if (window === '7d') {
