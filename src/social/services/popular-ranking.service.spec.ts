@@ -131,9 +131,11 @@ describe('PopularRankingService', () => {
     );
   });
 
-  it('falls back to recent posts when Redis cache is empty', async () => {
+  it('falls back to window-filtered recent posts when Redis cache is empty', async () => {
     jest.spyOn(service, 'recompute').mockResolvedValue(undefined);
-    redisMock.zcard.mockResolvedValueOnce(0);
+    redisMock.zcard
+      .mockResolvedValueOnce(0) // getVerifiedPopularIds — cache empty
+      .mockResolvedValueOnce(0); // after awaited recompute — still empty
 
     const fallbackPost = {
       id: 'fallback-1',
@@ -158,6 +160,10 @@ describe('PopularRankingService', () => {
     expect(fallbackQueryBuilder.orderBy).toHaveBeenCalledWith(
       'post.created_at',
       'DESC',
+    );
+    expect(fallbackQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'post.created_at >= :since',
+      expect.objectContaining({ since: expect.any(Date) }),
     );
   });
 });
