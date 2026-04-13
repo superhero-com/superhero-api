@@ -93,7 +93,24 @@ export class PopularRankingService {
     }
 
     if (popularRanks.size === 0) {
-      this.triggerBackgroundRecompute(window, maxCandidates);
+      await this.awaitOrTriggerRecompute(window, maxCandidates);
+
+      try {
+        const totalPopular = await this.redis.zcard(key);
+        if (totalPopular > 0) {
+          const cached = await this.redis.zrevrange(
+            key,
+            0,
+            totalPopular - 1,
+            'WITHSCORES',
+          );
+          for (let i = 0; i < cached.length; i += 2) {
+            popularRanks.set(cached[i], parseFloat(cached[i + 1]));
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Error loading from Redis after recompute:`, error);
+      }
     }
 
     if (popularRanks.size === 0) {
@@ -143,36 +160,57 @@ export class PopularRankingService {
   /**
    * Fallback when the ranked cache is empty (cold start / TTL expiry).
    * Returns the most recent top-level, visible posts so the feed is never blank.
+   * Respects the time window so each window returns different results.
    */
   private async fetchRecentFallback(
+    window: PopularWindow,
     limit: number,
     offset: number,
   ): Promise<Post[]> {
-    return this.postRepository
+    const qb = this.postRepository
       .createQueryBuilder('post')
       .where('post.is_hidden = false')
-      .andWhere('post.post_id IS NULL')
+      .andWhere('post.post_id IS NULL');
+
+    if (window !== 'all') {
+      const hours = this.getWindowHours(window);
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+      qb.andWhere('post.created_at >= :since', { since });
+    }
+
+    return qb
       .orderBy('post.created_at', 'DESC')
       .offset(offset)
       .limit(limit)
       .getMany();
   }
 
-  private async countRecentFallback(): Promise<number> {
-    return this.postRepository.count({
-      where: { is_hidden: false, post_id: null },
-    });
+  private async countRecentFallback(window: PopularWindow): Promise<number> {
+    const qb = this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL');
+
+    if (window !== 'all') {
+      const hours = this.getWindowHours(window);
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+      qb.andWhere('post.created_at >= :since', { since });
+    }
+
+    return qb.getCount();
   }
 
   /**
-   * Fire-and-forget recompute with per-window mutex to prevent stampede.
-   * If a recompute for this window is already in flight, the call is a no-op.
+   * Await an existing in-flight recompute or start one.
+   * Per-window mutex prevents stampede — concurrent callers share one promise.
    */
-  private triggerBackgroundRecompute(
+  private async awaitOrTriggerRecompute(
     window: PopularWindow,
     maxCandidates?: number,
-  ): void {
-    if (this.recomputeInFlight.has(window)) {
+  ): Promise<void> {
+    const existing = this.recomputeInFlight.get(window);
+    if (existing) {
+      await existing;
       return;
     }
 
@@ -184,18 +222,13 @@ export class PopularRankingService {
           : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
 
     const task = this.recompute(window, maxCandidates ?? fallbackMax)
-      .then(() =>
-        this.logger.log(`Background recompute finished for window ${window}`),
-      )
       .catch((error) =>
-        this.logger.error(
-          `Background recompute failed for window ${window}:`,
-          error,
-        ),
+        this.logger.error(`Recompute failed for window ${window}:`, error),
       )
       .finally(() => this.recomputeInFlight.delete(window));
 
     this.recomputeInFlight.set(window, task);
+    await task;
   }
 
   async getPopularPosts(
@@ -207,7 +240,7 @@ export class PopularRankingService {
     const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
 
     if (verifiedIds.length === 0) {
-      return this.fetchRecentFallback(limit, offset);
+      return this.fetchRecentFallback(window, limit, offset);
     }
 
     const paginatedIds = verifiedIds.slice(offset, offset + limit);
@@ -307,7 +340,7 @@ export class PopularRankingService {
       if (verifiedIds.length > 0) {
         return verifiedIds.length;
       }
-      return this.countRecentFallback();
+      return this.countRecentFallback(window);
     } catch (error) {
       this.logger.error(
         `Error in getTotalPostsCount for window ${window}:`,
