@@ -223,7 +223,8 @@ export const POPULAR_RANKING_CONFIG = {
   WEIGHTS: {
     comments: 2.5, // w_c (primary engagement signal)
     tipsAmountAE: 2.0, // w_ta (meaningful but not dominant since tipping is rare)
-    tipsCount: 1.0, // w_tc (diversity of tippers)
+    tipsCount: 1.0, // w_tc (total tip actions)
+    uniqueTippers: 1.5, // w_ut (breadth of support — many tippers > one whale)
     trendingBoost: 0.5, // w_tr (topical relevance)
     contentQuality: 0.3, // w_q (anti-spam)
     reads: 1.5, // w_reads (common passive signal)

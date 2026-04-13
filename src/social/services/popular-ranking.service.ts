@@ -461,6 +461,9 @@ export class PopularRankingService {
           comments: commentsByPost.get(post.id) || 0,
           tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
           tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
+          uniqueTippers: tipsAgg
+            ? parseInt(tipsAgg.unique_tippers || '0', 10)
+            : 0,
           reads: readsByPost.get(post.id) || 0,
           topics: post.topics,
         }),
@@ -477,6 +480,7 @@ export class PopularRankingService {
           comments: item.total_comments || 0,
           tipsAmountAE: 0,
           tipsCount: 0,
+          uniqueTippers: 0,
           reads: 0,
           topics: item.topics,
         }),
@@ -573,11 +577,12 @@ export class PopularRankingService {
       comments: number;
       tipsAmountAE: number;
       tipsCount: number;
+      uniqueTippers: number;
       reads: number;
       topics?: Array<{ name?: string }>;
     },
   ): number {
-    const { comments, tipsAmountAE, tipsCount, reads } = input;
+    const { comments, tipsAmountAE, tipsCount, uniqueTippers, reads } = input;
 
     let trendingBoost = 0;
     if (input.topics?.length) {
@@ -601,6 +606,7 @@ export class PopularRankingService {
       w.comments * Math.log(1 + comments) +
       w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
       w.tipsCount * Math.log(1 + tipsCount) +
+      w.uniqueTippers * Math.log(1 + uniqueTippers) +
       w.reads * Math.log(1 + reads) +
       w.trendingBoost * trendingBoost +
       w.contentQuality * contentQuality
