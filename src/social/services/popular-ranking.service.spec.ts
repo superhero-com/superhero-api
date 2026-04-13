@@ -130,4 +130,34 @@ describe('PopularRankingService', () => {
       'comment.sender_address != parent.sender_address',
     );
   });
+
+  it('falls back to recent posts when Redis cache is empty', async () => {
+    jest.spyOn(service, 'recompute').mockResolvedValue(undefined);
+    redisMock.zcard.mockResolvedValueOnce(0);
+
+    const fallbackPost = {
+      id: 'fallback-1',
+      created_at: new Date().toISOString(),
+      content: 'hello',
+    };
+    const fallbackQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([fallbackPost]),
+    };
+    postRepository.createQueryBuilder = jest
+      .fn()
+      .mockReturnValueOnce(fallbackQueryBuilder);
+
+    const result = await service.getPopularPosts('24h', 10, 0);
+
+    expect(result).toEqual([fallbackPost]);
+    expect(fallbackQueryBuilder.orderBy).toHaveBeenCalledWith(
+      'post.created_at',
+      'DESC',
+    );
+  });
 });
