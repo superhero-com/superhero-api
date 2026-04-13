@@ -141,6 +141,30 @@ export class PopularRankingService {
   }
 
   /**
+   * Fallback when the ranked cache is empty (cold start / TTL expiry).
+   * Returns the most recent top-level, visible posts so the feed is never blank.
+   */
+  private async fetchRecentFallback(
+    limit: number,
+    offset: number,
+  ): Promise<Post[]> {
+    return this.postRepository
+      .createQueryBuilder('post')
+      .where('post.is_hidden = false')
+      .andWhere('post.post_id IS NULL')
+      .orderBy('post.created_at', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getMany();
+  }
+
+  private async countRecentFallback(): Promise<number> {
+    return this.postRepository.count({
+      where: { is_hidden: false, post_id: null },
+    });
+  }
+
+  /**
    * Fire-and-forget recompute with per-window mutex to prevent stampede.
    * If a recompute for this window is already in flight, the call is a no-op.
    */
@@ -183,7 +207,7 @@ export class PopularRankingService {
     const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
 
     if (verifiedIds.length === 0) {
-      return [];
+      return this.fetchRecentFallback(limit, offset);
     }
 
     const paginatedIds = verifiedIds.slice(offset, offset + limit);
@@ -280,7 +304,10 @@ export class PopularRankingService {
   async getTotalPostsCount(window: PopularWindow): Promise<number> {
     try {
       const verifiedIds = await this.getVerifiedPopularIds(window);
-      return verifiedIds.length;
+      if (verifiedIds.length > 0) {
+        return verifiedIds.length;
+      }
+      return this.countRecentFallback();
     } catch (error) {
       this.logger.error(
         `Error in getTotalPostsCount for window ${window}:`,
