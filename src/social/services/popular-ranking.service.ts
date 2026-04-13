@@ -603,7 +603,7 @@ export class PopularRankingService {
     );
   }
 
-  private computeScore(
+  private resolveEngagementInputs(
     trendingByTag: Map<string, number>,
     input: {
       content: string;
@@ -614,9 +614,7 @@ export class PopularRankingService {
       reads: number;
       topics?: Array<{ name?: string }>;
     },
-  ): number {
-    const { comments, tipsAmountAE, tipsCount, uniqueTippers, reads } = input;
-
+  ) {
     let trendingBoost = 0;
     if (input.topics?.length) {
       let maxScore = 0;
@@ -631,38 +629,236 @@ export class PopularRankingService {
         maxScore / POPULAR_RANKING_CONFIG.TRENDING_MAX_SCORE,
       );
     }
-
     const contentQuality = this.computeContentQuality(input.content || '');
+    return { ...input, trendingBoost, contentQuality };
+  }
+
+  private computeScore(
+    trendingByTag: Map<string, number>,
+    input: {
+      content: string;
+      comments: number;
+      tipsAmountAE: number;
+      tipsCount: number;
+      uniqueTippers: number;
+      reads: number;
+      topics?: Array<{ name?: string }>;
+    },
+  ): number {
+    const resolved = this.resolveEngagementInputs(trendingByTag, input);
     const w = POPULAR_RANKING_CONFIG.WEIGHTS;
 
     return (
-      w.comments * Math.log(1 + comments) +
-      w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
-      w.tipsCount * Math.log(1 + tipsCount) +
-      w.uniqueTippers * Math.log(1 + uniqueTippers) +
-      w.reads * Math.log(1 + reads) +
-      w.trendingBoost * trendingBoost +
-      w.contentQuality * contentQuality
+      w.comments * Math.log(1 + resolved.comments) +
+      w.tipsAmountAE * Math.log(1 + resolved.tipsAmountAE) +
+      w.tipsCount * Math.log(1 + resolved.tipsCount) +
+      w.uniqueTippers * Math.log(1 + resolved.uniqueTippers) +
+      w.reads * Math.log(1 + resolved.reads) +
+      w.trendingBoost * resolved.trendingBoost +
+      w.contentQuality * resolved.contentQuality
     );
+  }
+
+  private computeScoreWithBreakdown(
+    trendingByTag: Map<string, number>,
+    input: {
+      content: string;
+      comments: number;
+      tipsAmountAE: number;
+      tipsCount: number;
+      uniqueTippers: number;
+      reads: number;
+      topics?: Array<{ name?: string }>;
+    },
+  ) {
+    const resolved = this.resolveEngagementInputs(trendingByTag, input);
+    const w = POPULAR_RANKING_CONFIG.WEIGHTS;
+
+    const components = {
+      comments: {
+        raw: resolved.comments,
+        weight: w.comments,
+        weighted: w.comments * Math.log(1 + resolved.comments),
+      },
+      tipsAmountAE: {
+        raw: resolved.tipsAmountAE,
+        weight: w.tipsAmountAE,
+        weighted: w.tipsAmountAE * Math.log(1 + resolved.tipsAmountAE),
+      },
+      tipsCount: {
+        raw: resolved.tipsCount,
+        weight: w.tipsCount,
+        weighted: w.tipsCount * Math.log(1 + resolved.tipsCount),
+      },
+      uniqueTippers: {
+        raw: resolved.uniqueTippers,
+        weight: w.uniqueTippers,
+        weighted: w.uniqueTippers * Math.log(1 + resolved.uniqueTippers),
+      },
+      reads: {
+        raw: resolved.reads,
+        weight: w.reads,
+        weighted: w.reads * Math.log(1 + resolved.reads),
+      },
+      trendingBoost: {
+        raw: resolved.trendingBoost,
+        weight: w.trendingBoost,
+        weighted: w.trendingBoost * resolved.trendingBoost,
+      },
+      contentQuality: {
+        raw: resolved.contentQuality,
+        weight: w.contentQuality,
+        weighted: w.contentQuality * resolved.contentQuality,
+      },
+    };
+
+    const score = Object.values(components).reduce((s, c) => s + c.weighted, 0);
+
+    return { score, components };
   }
 
   async explain(window: PopularWindow, limit = 20, offset = 0) {
     const key = this.getRedisKey(window);
-    const ids = await this.redis.zrevrange(key, offset, offset + limit - 1);
-    const posts = ids.length
-      ? await this.postRepository.findBy({ id: In(ids) })
-      : await this.postRepository
-          .createQueryBuilder('post')
-          .where('post.is_hidden = false')
-          .andWhere('post.post_id IS NULL')
-          .orderBy('post.created_at', 'DESC')
-          .limit(limit)
-          .getMany();
-    return posts.map((p) => ({
-      id: p.id,
-      tx: p.tx_hash,
-      author: p.sender_address,
-    }));
+    const hours = this.getWindowHours(window);
+
+    const cachedWithScores = await this.redis.zrevrange(
+      key,
+      offset,
+      offset + limit - 1,
+      'WITHSCORES',
+    );
+
+    const rankedEntries: Array<{ id: string; cachedScore: number }> = [];
+    for (let i = 0; i < cachedWithScores.length; i += 2) {
+      rankedEntries.push({
+        id: cachedWithScores[i],
+        cachedScore: parseFloat(cachedWithScores[i + 1]),
+      });
+    }
+
+    let source: 'ranked' | 'fallback';
+    let postIds: string[];
+
+    if (rankedEntries.length > 0) {
+      source = 'ranked';
+      postIds = rankedEntries
+        .map((r) => r.id)
+        .filter((id) => !id.includes(':'));
+    } else {
+      source = 'fallback';
+      const fallback = await this.fetchRecentFallback(window, limit, offset);
+      postIds = fallback.map((p) => p.id);
+    }
+
+    if (postIds.length === 0) {
+      return { source, window, totalCached: 0, items: [] };
+    }
+
+    const posts = await this.postRepository
+      .createQueryBuilder('post')
+      .leftJoinAndSelect('post.topics', 'topic')
+      .where('post.id IN (:...ids)', { ids: postIds })
+      .getMany();
+
+    const tipsRaw = await this.tipRepository
+      .createQueryBuilder('tip')
+      .select('tip.post_id', 'post_id')
+      .innerJoin(Post, 'post', 'post.id = tip.post_id')
+      .addSelect('COALESCE(SUM(CAST(tip.amount AS numeric)), 0)', 'amount_sum')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('COUNT(DISTINCT tip.sender_address)', 'unique_tippers')
+      .where('tip.post_id IN (:...ids)', { ids: postIds })
+      .andWhere('tip.sender_address != post.sender_address')
+      .groupBy('tip.post_id')
+      .getRawMany<{
+        post_id: string;
+        amount_sum: string;
+        count: string;
+        unique_tippers: string;
+      }>();
+    const tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
+
+    const commentsRaw = await this.postRepository
+      .createQueryBuilder('comment')
+      .innerJoin(Post, 'parent', 'parent.id = comment.post_id')
+      .select('comment.post_id', 'parent_id')
+      .addSelect('COUNT(*)', 'count')
+      .where('comment.post_id IN (:...ids)', { ids: postIds })
+      .andWhere('comment.is_hidden = false')
+      .andWhere('comment.sender_address != parent.sender_address')
+      .groupBy('comment.post_id')
+      .getRawMany<{ parent_id: string; count: string }>();
+    const commentsByPost = new Map(
+      commentsRaw.map(
+        (r) => [r.parent_id, parseInt(r.count || '0', 10)] as const,
+      ),
+    );
+
+    const trendingByTag = await this.loadTrendingByTagMap();
+
+    const fromDate = new Date(Date.now() - hours * 3600 * 1000);
+    const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
+      fromDate.getUTCMonth() + 1,
+    ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
+    const readsQB = this.postReadsRepository
+      .createQueryBuilder('r')
+      .select('r.post_id', 'post_id')
+      .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
+      .where('r.post_id IN (:...ids)', { ids: postIds });
+    if (window !== 'all') {
+      readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
+    }
+    const readsRows = await readsQB
+      .groupBy('r.post_id')
+      .getRawMany<{ post_id: string; reads: string }>();
+    const readsByPost = new Map(
+      readsRows.map((r) => [r.post_id, parseInt(r.reads || '0', 10)] as const),
+    );
+
+    const scoreMap = new Map(rankedEntries.map((r) => [r.id, r.cachedScore]));
+
+    const items = posts.map((post) => {
+      const tipsAgg = tipsByPost.get(post.id);
+      const breakdown = this.computeScoreWithBreakdown(trendingByTag, {
+        content: post.content,
+        comments: commentsByPost.get(post.id) || 0,
+        tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
+        tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
+        uniqueTippers: tipsAgg
+          ? parseInt(tipsAgg.unique_tippers || '0', 10)
+          : 0,
+        reads: readsByPost.get(post.id) || 0,
+        topics: post.topics,
+      });
+
+      return {
+        id: post.id,
+        author: post.sender_address,
+        created_at: post.created_at,
+        content_preview: (post.content || '').slice(0, 120),
+        cachedScore: scoreMap.get(post.id) ?? null,
+        ...breakdown,
+      };
+    });
+
+    if (source === 'ranked') {
+      const orderMap = new Map(rankedEntries.map((r, i) => [r.id, i]));
+      items.sort(
+        (a, b) =>
+          (orderMap.get(a.id) ?? Infinity) - (orderMap.get(b.id) ?? Infinity),
+      );
+    }
+
+    const totalCached = (await this.getTotalCached(window)) ?? 0;
+
+    return {
+      source,
+      window,
+      totalCached,
+      redisTtlSeconds: POPULAR_RANKING_CONFIG.REDIS_TTL_SECONDS,
+      weights: POPULAR_RANKING_CONFIG.WEIGHTS,
+      items,
+    };
   }
 
   private computeContentQuality(content: string): number {
