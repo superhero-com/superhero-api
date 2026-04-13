@@ -459,10 +459,17 @@ export class PostsController {
       }
       return response;
     } catch (error) {
-      const fallbackBasePosts = await this.postRepository
+      const windowHoursMap = { '24h': 24, '7d': 24 * 7, all: 0 } as const;
+      const windowHours = windowHoursMap[window] || 0;
+      const fallbackQb = this.postRepository
         .createQueryBuilder('post')
         .where('post.is_hidden = false')
-        .andWhere('post.post_id IS NULL')
+        .andWhere('post.post_id IS NULL');
+      if (windowHours > 0) {
+        const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
+        fallbackQb.andWhere('post.created_at >= :since', { since });
+      }
+      const fallbackBasePosts = await fallbackQb
         .orderBy('post.created_at', 'DESC')
         .offset(offset)
         .limit(limit)
