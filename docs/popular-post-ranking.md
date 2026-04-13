@@ -56,6 +56,7 @@ score =
   w_comments * log(1 + comments) +
   w_tips_amount * log(1 + tipsAmountAE) +
   w_tips_count * log(1 + tipsCount) +
+  w_unique_tippers * log(1 + uniqueTippers) +
   w_reads * log(1 + reads) +
   w_trending * trendingBoost +
   w_quality * contentQuality
@@ -72,6 +73,7 @@ WEIGHTS: {
   comments: 2.5,
   tipsAmountAE: 2.0,
   tipsCount: 1.0,
+  uniqueTippers: 1.5,
   trendingBoost: 0.5,
   contentQuality: 0.3,
   reads: 1.5,
@@ -84,13 +86,14 @@ The biggest direct drivers are:
 
 - `comments`
 - `tipsAmountAE`
+- `uniqueTippers`
 - `reads`
 
 Because logarithms are used for all count- and amount-based signals, they have diminishing returns. Doubling activity helps, but not linearly forever.
 
 ### Why tips are not the dominant signal
 
-Tipping is a rare action on this network. The weight for `tipsAmountAE` (2.0) is deliberately lower than `comments` (2.5) so that a single generous tip cannot vault a post above all others. Comments and reads — being the most common engagement signals — lead the ranking.
+Tipping is a rare action on this network. The weight for `tipsAmountAE` (2.0) is deliberately lower than `comments` (2.5) so that a single generous tip cannot vault a post above all others. The separate `uniqueTippers` signal (1.5) ensures that broad community support outweighs a single large tip — five people each tipping a small amount scores higher than one whale tipping the same total.
 
 ## Ranking signals
 
@@ -110,9 +113,13 @@ log(1 + tipsAmountAE)
 
 ### 3. Tip count
 
-The number of tips also contributes separately from total value. This helps distinguish one large tip from repeated support by multiple users.
+The number of tips also contributes separately from total value.
 
-### 4. Reads
+### 4. Unique tippers
+
+The number of distinct addresses that tipped a post (excluding self-tips). This rewards breadth of support — a post tipped by five different users ranks higher than one tipped five times by the same person, even if the total AE is the same.
+
+### 5. Reads
 
 Reads are pulled from `post_reads_daily` and summed across the selected window.
 
@@ -124,7 +131,7 @@ log(1 + reads)
 
 Reads are not normalized by age — the window boundary handles freshness.
 
-### 5. Trending topic boost
+### 6. Trending topic boost
 
 If a post has topics, the system looks up the highest trending-tag score among them and normalizes it:
 
@@ -134,7 +141,7 @@ trendingBoost = min(1, maxTrendingTagScore / 100)
 
 A post with at least one strongly trending topic gets a modest boost. The algorithm uses the single strongest topic score, not the sum of all topic scores.
 
-### 6. Content quality
+### 7. Content quality
 
 The content-quality factor is a heuristic in the range `[0..1]`.
 
