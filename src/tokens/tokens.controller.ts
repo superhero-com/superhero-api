@@ -198,20 +198,14 @@ export class TokensController {
     }
 
     if (owner_address) {
-      const ownedTokens = await this.tokenHolderRepository
-        .createQueryBuilder('token_holder')
-        .where('token_holder.address = :owner_address', { owner_address })
-        .andWhere('token_holder.balance > 0')
-        .select('token_holder."aex9_address"')
-        .distinct(true)
-        .getRawMany()
-        .then((res) => res.map((r) => r.aex9_address));
-
-      // queryBuilder.andWhereInIds(ownedTokens);
-
-      queryBuilder.andWhere('token.address IN (:...aex9_addresses)', {
-        aex9_addresses: ownedTokens,
-      });
+      queryBuilder.andWhere(
+        `token.address IN (
+          SELECT DISTINCT "aex9_address"
+          FROM token_holder
+          WHERE address = :owner_address AND balance > 0
+        )`,
+        { owner_address },
+      );
     }
 
     const result = await this.tokensService.queryTokensWithRanks(
