@@ -195,47 +195,16 @@ export class PortfolioService {
       }
     }
 
-    const resolvedAddress = await this.resolveAccountAddress(address);
-
-    // Fetch price history and current price in parallel.
-    // For historical prices, query the local coin_historical_prices table first
-    // (populated by the background CoinGecko sync). Only fall back to the live
-    // CoinGecko API when the DB has no data for the needed range.
-    // Extend start backward a few days so the first snapshot always has a price
-    // data point at or before it, even when the range starts close to midnight.
-    const priceRangeStartMs = start.clone().subtract(3, 'days').valueOf();
-    const priceRangeEndMs = end.valueOf();
-
-    const [dbPriceRows, currentAePrice] = await Promise.all([
-      this.coinHistoricalPriceService.getHistoricalPriceData(
-        AETERNITY_COIN_ID,
-        'usd',
-        priceRangeStartMs,
-        priceRangeEndMs,
-      ),
-      this.coinGeckoService.getPriceData(new BigNumber(1)),
-    ]);
-
-    let aePriceHistory: Array<[number, number]>;
-    if (dbPriceRows.length > 0) {
-      // DB data sorted ascending — reverse to match the descending order
-      // expected by findClosestHistoricalPrice.
-      aePriceHistory = dbPriceRows.reverse();
-    } else {
-      // DB has no data for this range; serve from cache / DB / fallback JSON.
-      const daysNeeded = Math.ceil(now.diff(start, 'days', true)) + 3;
-      const days = Math.min(365, Math.max(7, daysNeeded));
-      aePriceHistory = await this.coinGeckoService
-        .getHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
-        .then((prices) => prices.sort((a, b) => b[0] - a[0]));
-    }
-    // Resolve all block heights in a single batch query against the local key_blocks table.
-    // Any timestamps not covered by the table (sync gaps) fall back to individual resolution.
     const targetTimestamps = timestamps.map((t) => t.valueOf());
-    const heightMap = await batchTimestampToAeHeight(
-      targetTimestamps,
-      this.dataSource,
-    );
+    const [{ aePriceHistory, currentAePrice }, resolvedAddress, heightMap] =
+      await Promise.all([
+        this.loadAePriceHistory(start, end, now),
+        this.resolveAccountAddress(address),
+        // Resolve all block heights in a single batch query against the local
+        // key_blocks table. Any timestamps not covered by the table (sync gaps)
+        // fall back to individual resolution.
+        batchTimestampToAeHeight(targetTimestamps, this.dataSource),
+      ]);
     // Build the ordered block-height array.  If a timestamp was not resolved by
     // either key_blocks or transactions (extremely rare — would require a gap in
     // both tables), propagate the nearest already-resolved height rather than
@@ -490,6 +459,48 @@ export class PortfolioService {
     }
 
     return address;
+  }
+
+  private async loadAePriceHistory(
+    start: Moment,
+    end: Moment,
+    now: Moment,
+  ): Promise<{
+    aePriceHistory: Array<[number, number]>;
+    currentAePrice: Awaited<ReturnType<CoinGeckoService['getPriceData']>>;
+  }> {
+    // Query the local coin_historical_prices table first (populated by the
+    // background CoinGecko sync). Only fall back to the live CoinGecko API
+    // when the DB has no data for the needed range.
+    // Extend start backward a few days so the first snapshot always has a price
+    // data point at or before it, even when the range starts close to midnight.
+    const priceRangeStartMs = start.clone().subtract(3, 'days').valueOf();
+    const priceRangeEndMs = end.valueOf();
+
+    const [dbPriceRows, currentAePrice] = await Promise.all([
+      this.coinHistoricalPriceService.getHistoricalPriceData(
+        AETERNITY_COIN_ID,
+        'usd',
+        priceRangeStartMs,
+        priceRangeEndMs,
+      ),
+      this.coinGeckoService.getPriceData(new BigNumber(1)),
+    ]);
+
+    let aePriceHistory: Array<[number, number]>;
+    if (dbPriceRows.length > 0) {
+      // DB data sorted ascending — reverse to match the descending order
+      // expected by findClosestHistoricalPrice.
+      aePriceHistory = dbPriceRows.reverse();
+    } else {
+      const daysNeeded = Math.ceil(now.diff(start, 'days', true)) + 3;
+      const days = Math.min(365, Math.max(7, daysNeeded));
+      aePriceHistory = await this.coinGeckoService
+        .getHistoricalPrice(AETERNITY_COIN_ID, 'usd', days, 'daily')
+        .then((prices) => prices.sort((a, b) => b[0] - a[0]));
+    }
+
+    return { aePriceHistory, currentAePrice };
   }
 
   private getCachedBalance(

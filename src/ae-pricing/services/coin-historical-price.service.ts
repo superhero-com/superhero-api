@@ -37,6 +37,7 @@ export class CoinHistoricalPriceService {
         order: {
           timestamp_ms: 'ASC',
         },
+        select: ['timestamp_ms', 'price'],
       });
 
       // TypeORM returns bigint as string, convert to number
