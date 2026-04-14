@@ -199,10 +199,12 @@ export class TokensController {
 
     if (owner_address) {
       queryBuilder.andWhere(
-        `token.address IN (
-          SELECT DISTINCT "aex9_address"
+        `EXISTS (
+          SELECT 1
           FROM token_holder
-          WHERE address = :owner_address AND balance > 0
+          WHERE token_holder.aex9_address = token.address
+            AND token_holder.address = :owner_address
+            AND token_holder.balance > 0
         )`,
         { owner_address },
       );
