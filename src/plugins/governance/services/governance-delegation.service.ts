@@ -5,7 +5,7 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   GovernanceDelegationHistoryItemDto,
   GovernanceDelegationWithRevokedDto,
@@ -32,10 +32,16 @@ export class GovernanceDelegationService {
 
     const paginatedResult = await paginate(query, options);
 
-    // Get all revoked delegations for efficient lookup
-    const revokedDelegations = await this.revokedDelegationRepository.find({
-      order: { created_at: 'ASC' },
-    });
+    const delegatorAddresses = [
+      ...new Set(paginatedResult.items.map((d) => d.delegator).filter(Boolean)),
+    ];
+
+    const revokedDelegations = delegatorAddresses.length
+      ? await this.revokedDelegationRepository.find({
+          where: { delegator: In(delegatorAddresses) },
+          order: { created_at: 'ASC' },
+        })
+      : [];
 
     // Map delegations and attach revocation info
     const items: GovernanceDelegationWithRevokedDto[] = paginatedResult.items
