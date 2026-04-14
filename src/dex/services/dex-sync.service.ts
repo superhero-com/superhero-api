@@ -6,7 +6,7 @@ import { IMiddlewareRequestConfig } from '@/social/interfaces/post.interfaces';
 import { fetchJson } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Contract } from '@aeternity/aepp-sdk';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { Repository } from 'typeorm';
@@ -26,6 +26,7 @@ type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
 @Injectable()
 export class DexSyncService {
+  private readonly logger = new Logger(DexSyncService.name);
   routerContract: ContractInstance;
   factoryContract: ContractInstance;
   constructor(
@@ -88,40 +89,63 @@ export class DexSyncService {
     await this.pairService.pullPairData(pairInfo);
   }
 
+  private static readonly SYNC_BATCH_SIZE = 100;
+
   async syncTokenPrices() {
-    const pairs = await this.dexPairRepository
-      .createQueryBuilder('pair')
-      .leftJoinAndSelect('pair.token0', 'token0')
-      .leftJoinAndSelect('pair.token1', 'token1')
-      .getMany();
-    const tokens = await this.dexTokenRepository.find();
-    for (const token of tokens) {
-      try {
-        const priceAnalysis =
-          await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
-            token.address,
-            DEX_CONTRACTS.wae,
+    const batchSize = DexSyncService.SYNC_BATCH_SIZE;
+
+    let tokenSkip = 0;
+    while (true) {
+      const tokens = await this.dexTokenRepository.find({
+        order: { address: 'ASC' },
+        take: batchSize,
+        skip: tokenSkip,
+      });
+      if (!tokens.length) break;
+
+      for (const token of tokens) {
+        try {
+          const priceAnalysis =
+            await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
+              token.address,
+              DEX_CONTRACTS.wae,
+            );
+
+          if (!priceAnalysis || !priceAnalysis.medianPrice) {
+            continue;
+          }
+
+          const price_data = await this.aePricingService.getPriceData(
+            new BigNumber(priceAnalysis.medianPrice),
           );
-
-        if (!priceAnalysis || !priceAnalysis.medianPrice) {
-          continue; // Skip tokens without price analysis
+          await this.dexTokenRepository.update(token.address, {
+            price: price_data,
+          });
+          await this.tokenSummaryService.createOrUpdateSummary(token.address);
+        } catch (error) {
+          this.logger.error(`Error syncing token ${token.address}:`, error);
+          continue;
         }
-
-        const price_data = await this.aePricingService.getPriceData(
-          new BigNumber(priceAnalysis.medianPrice),
-        );
-        await this.dexTokenRepository.update(token.address, {
-          price: price_data,
-        });
-        await this.tokenSummaryService.createOrUpdateSummary(token.address);
-      } catch (error) {
-        // Log error but continue processing other tokens
-        console.error(`Error syncing token ${token.address}:`, error);
-        continue;
       }
+      tokenSkip += batchSize;
     }
-    for (const pair of pairs) {
-      await this.pairSummaryService.createOrUpdateSummary(pair);
+
+    let pairSkip = 0;
+    while (true) {
+      const pairs = await this.dexPairRepository
+        .createQueryBuilder('pair')
+        .leftJoinAndSelect('pair.token0', 'token0')
+        .leftJoinAndSelect('pair.token1', 'token1')
+        .orderBy('pair.address', 'ASC')
+        .take(batchSize)
+        .skip(pairSkip)
+        .getMany();
+      if (!pairs.length) break;
+
+      for (const pair of pairs) {
+        await this.pairSummaryService.createOrUpdateSummary(pair);
+      }
+      pairSkip += batchSize;
     }
   }
 
@@ -145,24 +169,24 @@ export class DexSyncService {
   }
 
   async pullDexPairsFromMdw(url: string) {
-    const result = await fetchJson(url);
-    const data = result?.data ?? [];
-    for (const transaction of camelcaseKeysDeep(data)) {
-      if (
-        transaction.tx.result !== 'ok' ||
-        transaction.tx.return == 'invalid' ||
-        !transaction.tx.function
-      ) {
-        continue;
+    let nextUrl: string | null = url;
+    while (nextUrl) {
+      const result = await fetchJson(nextUrl);
+      const data = result?.data ?? [];
+      for (const transaction of camelcaseKeysDeep(data)) {
+        if (
+          transaction.tx.result !== 'ok' ||
+          transaction.tx.return == 'invalid' ||
+          !transaction.tx.function
+        ) {
+          continue;
+        }
+        await this.saveTransaction(transaction);
       }
-      await this.saveTransaction(transaction);
+      nextUrl = result.next
+        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
+        : null;
     }
-    if (result.next) {
-      return await this.pullDexPairsFromMdw(
-        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-      );
-    }
-    return result;
   }
 
   async saveTransaction(transaction: ITransaction): Promise<PairTransaction> {
