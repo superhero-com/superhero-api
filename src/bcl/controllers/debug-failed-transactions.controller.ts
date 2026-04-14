@@ -14,7 +14,10 @@ export class DebugFailedTransactionsController {
 
   @Get('failed-transactions')
   async getFailedTransactions() {
-    const failedTransactions = await this.failedTransactionsRepository.find();
+    const failedTransactions = await this.failedTransactionsRepository.find({
+      order: { created_at: 'DESC' },
+      take: 500,
+    });
     return failedTransactions;
   }
 }
