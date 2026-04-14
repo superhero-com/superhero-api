@@ -38,6 +38,7 @@ export class FixTokensService {
       order: {
         total_supply: 'DESC',
       },
+      take: 100,
     });
     for (const token of tokens) {
       try {
