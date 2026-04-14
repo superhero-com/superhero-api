@@ -94,6 +94,7 @@ export class ProfileXPostingRewardService {
   private static readonly MAX_RECENT_SOURCE_TX_HASHES = 5000;
   private static readonly PAYOUT_IN_PROGRESS_TX_HASH =
     '__posting_reward_payout_in_progress__';
+  private static readonly MAX_COOLDOWN_MAP_SIZE = 5000;
   private readonly processingByAddress = new Map<string, Promise<void>>();
   private readonly manualRecheckBlockedUntilByAddress = new Map<
     string,
@@ -300,9 +301,25 @@ export class ProfileXPostingRewardService {
         address,
         nextManualRecheckTime.getTime(),
       );
+      this.pruneExpiredCooldowns();
     }
     await this.processAddressWithGuard(address);
     return this.getRewardStatus(address);
+  }
+
+  private pruneExpiredCooldowns(): void {
+    if (
+      this.manualRecheckBlockedUntilByAddress.size <=
+      ProfileXPostingRewardService.MAX_COOLDOWN_MAP_SIZE
+    ) {
+      return;
+    }
+    const now = Date.now();
+    for (const [key, expiresAt] of this.manualRecheckBlockedUntilByAddress) {
+      if (expiresAt <= now) {
+        this.manualRecheckBlockedUntilByAddress.delete(key);
+      }
+    }
   }
 
   private async prepareManualRecheckCandidate(

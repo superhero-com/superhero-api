@@ -19,8 +19,8 @@ export class AppService {
     @InjectQueue(DELETE_OLD_TOKENS_QUEUE)
     private readonly deleteOldTokensQueue: Queue,
   ) {
-    this.init();
     this.startedAt = moment();
+    setTimeout(() => this.init(), 5_000);
   }
 
   async init() {

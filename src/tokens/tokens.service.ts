@@ -122,6 +122,7 @@ export class TokensService {
   private readonly maxHoldersPages = Number(
     process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
   );
+  private static readonly MAX_CACHED_CONTRACTS = 200;
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
   constructor(
@@ -432,6 +433,21 @@ export class TokensService {
     );
   }
 
+  private evictStalestContract(): void {
+    const keys = Object.keys(this.contracts);
+    if (keys.length <= TokensService.MAX_CACHED_CONTRACTS) return;
+    let oldestKey = keys[0];
+    let oldestTime = this.contracts[oldestKey]?.lastUsedAt ?? 0;
+    for (const key of keys) {
+      const t = this.contracts[key]?.lastUsedAt ?? 0;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = key;
+      }
+    }
+    delete this.contracts[oldestKey];
+  }
+
   async getTokenContractsBySaleAddress(
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts | undefined> {
@@ -458,6 +474,7 @@ export class TokensService {
           tokenContractInstance,
           lastUsedAt: Date.now(),
         };
+        this.evictStalestContract();
 
         return this.contracts[saleAddress];
       } catch (error: any) {
@@ -1106,13 +1123,6 @@ export class TokensService {
     token: Token,
     aex9Address: string,
     url: string,
-    totalHolders: Array<{
-      id: string;
-      aex9_address: string;
-      address: string;
-      balance: BigNumber;
-    }> = [],
-    page = 1,
   ): Promise<{
     holders: Array<{
       id: string;
@@ -1122,71 +1132,62 @@ export class TokensService {
     }>;
     truncated: boolean;
   }> {
-    try {
-      if (page > this.maxHoldersPages) {
-        this.logger.error(
-          `SyncTokenHoldersQueue:max pages reached for ${aex9Address} (${this.maxHoldersPages})`,
-        );
-        return { holders: totalHolders, truncated: true };
-      }
+    const totalHolders: Array<{
+      id: string;
+      aex9_address: string;
+      address: string;
+      balance: BigNumber;
+    }> = [];
+    let nextUrl: string | null = url;
+    let page = 1;
 
-      const response = await fetchJson(url);
-      if (!response.data) {
-        this.logger.error(
-          `SyncTokenHoldersQueue:failed to load data from url::${url}`,
-        );
-        this.logger.error(`SyncTokenHoldersQueue:response::`, response);
-        return { holders: totalHolders, truncated: totalHolders.length > 0 };
-      }
-      const holders = response.data.filter((item) => item.amount > 0);
-      this.logger.debug(
-        `SyncTokenHoldersQueue->holders:${holders.length}`,
-        url,
-      );
-
-      for (const holder of holders) {
-        try {
-          const holderUrl = `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}/balances/${holder.account_id}`;
-          const holderData = await fetchJson(holderUrl);
-          if (!holderData?.amount) {
-            this.logger.warn(
-              `SyncTokenHoldersQueue->holderData:${holderUrl}`,
-              holderData,
-            );
-          }
-          totalHolders.push({
-            id: `${holderData?.account || holder.account_id}_${aex9Address}`,
-            aex9_address: aex9Address,
-            address: holderData?.account || holder.account_id,
-            balance: new BigNumber(holderData?.amount || 0),
-          });
-        } catch (error: any) {
+    while (nextUrl) {
+      try {
+        if (page > this.maxHoldersPages) {
           this.logger.error(
-            `SyncTokenHoldersQueue->error:${error.message}`,
-            error,
-            error.stack,
+            `SyncTokenHoldersQueue:max pages reached for ${aex9Address} (${this.maxHoldersPages})`,
           );
+          return { holders: totalHolders, truncated: true };
         }
-      }
 
-      if (response.next) {
-        return this.loadData(
-          token,
-          aex9Address,
-          `${ACTIVE_NETWORK.middlewareUrl}${response.next}`,
-          totalHolders,
-          page + 1,
+        const response = await fetchJson(nextUrl);
+        if (!response.data) {
+          this.logger.error(
+            `SyncTokenHoldersQueue:failed to load data from url::${nextUrl}`,
+          );
+          this.logger.error(`SyncTokenHoldersQueue:response::`, response);
+          return { holders: totalHolders, truncated: totalHolders.length > 0 };
+        }
+
+        const holders = response.data.filter((item) => item.amount > 0);
+        this.logger.debug(
+          `SyncTokenHoldersQueue->holders:${holders.length}`,
+          nextUrl,
         );
-      }
 
-      return { holders: totalHolders, truncated: false };
-    } catch (error: any) {
-      this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
-      return {
-        holders: totalHolders,
-        truncated: totalHolders.length > 0,
-      };
+        for (const holder of holders) {
+          totalHolders.push({
+            id: `${holder.account_id}_${aex9Address}`,
+            aex9_address: aex9Address,
+            address: holder.account_id,
+            balance: new BigNumber(holder.amount || 0),
+          });
+        }
+
+        nextUrl = response.next
+          ? `${ACTIVE_NETWORK.middlewareUrl}${response.next}`
+          : null;
+        page++;
+      } catch (error: any) {
+        this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
+        return {
+          holders: totalHolders,
+          truncated: totalHolders.length > 0,
+        };
+      }
     }
+
+    return { holders: totalHolders, truncated: false };
   }
 
   async _loadHoldersFromContract(token: Token, aex9Address: string) {

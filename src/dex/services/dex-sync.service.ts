@@ -93,6 +93,8 @@ export class DexSyncService {
 
   async syncTokenPrices() {
     const batchSize = DexSyncService.SYNC_BATCH_SIZE;
+    const allPairs = await this.dexTokenService.getAllPairsWithTokens();
+    const priceCache = new Map<string, Promise<string | null>>();
 
     let tokenSkip = 0;
     while (true) {
@@ -109,6 +111,7 @@ export class DexSyncService {
             await this.dexTokenService.getTokenPriceWithLiquidityAnalysis(
               token.address,
               DEX_CONTRACTS.wae,
+              { allPairs },
             );
 
           if (!priceAnalysis || !priceAnalysis.medianPrice) {
@@ -121,7 +124,10 @@ export class DexSyncService {
           await this.dexTokenRepository.update(token.address, {
             price: price_data,
           });
-          await this.tokenSummaryService.createOrUpdateSummary(token.address);
+          await this.tokenSummaryService.createOrUpdateSummary(token.address, {
+            allPairs,
+            priceCache,
+          });
         } catch (error) {
           this.logger.error(`Error syncing token ${token.address}:`, error);
           continue;
@@ -173,7 +179,8 @@ export class DexSyncService {
     while (nextUrl) {
       const result = await fetchJson(nextUrl);
       const data = result?.data ?? [];
-      for (const transaction of camelcaseKeysDeep(data)) {
+      for (const rawTransaction of data) {
+        const transaction: any = camelcaseKeysDeep(rawTransaction);
         if (
           transaction.tx.result !== 'ok' ||
           transaction.tx.return == 'invalid' ||

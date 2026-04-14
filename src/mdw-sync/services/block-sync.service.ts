@@ -10,7 +10,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Between, Repository, In } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { Tx } from '../entities/tx.entity';
@@ -165,14 +165,13 @@ export class BlockSyncService {
     endHeight: number,
     useBulkMode = false,
     backward = false,
+    collectHashes = true,
   ): Promise<Map<number, string[]>> {
-    // MDW has a hard limit of 100 transactions per request, regardless of mode
     const pageLimit = Math.min(
       this.configService.get<number>('mdw.pageLimit', 100),
-      100, // Hard limit enforced by MDW
+      100,
     );
 
-    // sync & save all transactions from startHeight to endHeight
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
     const queryParams = new URLSearchParams({
@@ -182,202 +181,164 @@ export class BlockSyncService {
     });
 
     const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
-    const txHashesByBlock = new Map<number, string[]>();
+    const txHashesByBlock = collectHashes ? new Map<number, string[]>() : null;
     return this.processTransactionPage(url, useBulkMode, txHashesByBlock);
   }
 
   private async processTransactionPage(
     url: string,
     useBulkMode = false,
-    txHashesByBlock: Map<number, string[]> = new Map(),
+    txHashesByBlock: Map<number, string[]> | null = new Map(),
   ): Promise<Map<number, string[]>> {
-    const response = await fetchJson(url);
-    const transactions = response?.data || [];
+    let nextUrl: string | null = url;
+    const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
 
-    if (transactions.length === 0) {
-      return;
-    }
+    while (nextUrl) {
+      const response = await fetchJson(nextUrl);
+      const transactions = response?.data || [];
 
-    // Convert transactions
-    const mdwTxs: Partial<Tx>[] = [];
-
-    for (const tx of transactions) {
-      const camelTx = camelcaseKeysDeep(tx) as ITransaction;
-      const mdwTx = this.convertToMdwTx(camelTx);
-      // ignore self transfer transactions
-      if (isSelfTransferTx(camelTx)) {
-        continue;
+      if (transactions.length === 0) {
+        break;
       }
-      mdwTxs.push(mdwTx);
-    }
 
-    if (mdwTxs.length > 0) {
-      let savedTxs: Tx[] = [];
+      const mdwTxs: Partial<Tx>[] = [];
+      for (const tx of transactions) {
+        const camelTx = camelcaseKeysDeep(tx) as ITransaction;
+        if (isSelfTransferTx(camelTx)) {
+          continue;
+        }
+        mdwTxs.push(this.convertToMdwTx(camelTx));
+      }
 
-      if (useBulkMode) {
-        // Use bulk insert for better performance
-        // Note: bulkInsertTransactions processes batches internally as they're inserted
-        try {
-          savedTxs = await this.bulkInsertTransactions(mdwTxs);
-        } catch (error: any) {
-          if (isDatabaseConnectionOrPoolError(error)) {
-            logDatabaseIssue({
-              logger: this.logger,
-              stage: 'transaction bulk upsert',
+      if (mdwTxs.length > 0) {
+        let savedTxs: Partial<Tx>[] = [];
+
+        if (useBulkMode) {
+          try {
+            savedTxs = await this.bulkInsertTransactions(mdwTxs);
+          } catch (error: any) {
+            if (isDatabaseConnectionOrPoolError(error)) {
+              logDatabaseIssue({
+                logger: this.logger,
+                stage: 'transaction bulk upsert',
+                error,
+                context: {
+                  url: nextUrl,
+                  transactionCount: mdwTxs.length,
+                  useBulkMode,
+                },
+              });
+              throw error;
+            }
+
+            this.logger.error(
+              `Bulk insert failed for page, trying repository.save as fallback`,
               error,
-              context: {
-                url,
-                transactionCount: mdwTxs.length,
-                useBulkMode,
-              },
-            });
-            throw error;
+            );
+            const saved = await this.txRepository.save(mdwTxs);
+            const savedArr = Array.isArray(saved) ? saved : [saved];
+            if (savedArr.length > 0) {
+              await this.pluginBatchProcessor.processBatch(
+                savedArr,
+                SyncDirectionEnum.Backward,
+              );
+            }
+            savedTxs = savedArr;
           }
-
-          this.logger.error(
-            `Bulk insert failed for page, trying repository.save as fallback`,
-            error,
-          );
-          // Fallback to repository.save if bulk insert fails
-          const saved = await this.txRepository.save(mdwTxs);
-          savedTxs = Array.isArray(saved) ? saved : [saved];
-          // Process batch for plugins (fallback case)
-          if (savedTxs.length > 0) {
+        } else {
+          const saved = await runWithDatabaseIssueLogging({
+            logger: this.logger,
+            stage: 'transaction save',
+            context: {
+              url: nextUrl,
+              transactionCount: mdwTxs.length,
+              useBulkMode,
+            },
+            operation: () => this.txRepository.save(mdwTxs),
+          });
+          const savedArr = Array.isArray(saved) ? saved : [saved];
+          if (savedArr.length > 0) {
             await this.pluginBatchProcessor.processBatch(
-              savedTxs,
+              savedArr,
               SyncDirectionEnum.Backward,
             );
           }
+          savedTxs = savedArr;
         }
-      } else {
-        // Save transactions
-        const saved = await runWithDatabaseIssueLogging({
-          logger: this.logger,
-          stage: 'transaction save',
-          context: {
-            url,
-            transactionCount: mdwTxs.length,
-            useBulkMode,
-          },
-          operation: () => this.txRepository.save(mdwTxs),
-        });
-        savedTxs = Array.isArray(saved) ? saved : [saved];
-        // Process batch for plugins immediately
-        if (savedTxs.length > 0) {
-          await this.pluginBatchProcessor.processBatch(
-            savedTxs,
-            SyncDirectionEnum.Backward,
-          );
-        }
-      }
 
-      // Collect transaction hashes ONLY after successful save
-      // This ensures we only track transactions that are actually in the database
-      for (const savedTx of savedTxs) {
-        if (savedTx.hash && savedTx.block_height !== undefined) {
-          const blockHeight = savedTx.block_height;
-          if (!txHashesByBlock.has(blockHeight)) {
-            txHashesByBlock.set(blockHeight, []);
+        if (txHashesByBlock) {
+          for (const savedTx of savedTxs) {
+            if (savedTx.hash && savedTx.block_height !== undefined) {
+              const blockHeight = savedTx.block_height;
+              if (!txHashesByBlock.has(blockHeight)) {
+                txHashesByBlock.set(blockHeight, []);
+              }
+              txHashesByBlock.get(blockHeight)!.push(savedTx.hash);
+            }
           }
-          txHashesByBlock.get(blockHeight)!.push(savedTx.hash);
         }
       }
 
-      // Log warning if some transactions failed to save
-      if (savedTxs.length < mdwTxs.length) {
-        const savedHashes = new Set(
-          savedTxs.map((tx) => tx.hash).filter(Boolean),
-        );
-        const failedTxs = mdwTxs.filter(
-          (tx) => tx.hash && !savedHashes.has(tx.hash),
-        );
-        this.logger.warn(
-          `Only ${savedTxs.length} of ${mdwTxs.length} transactions were saved. ` +
-            `Failed hashes: ${failedTxs.map((tx) => tx.hash).join(', ')}`,
-        );
-      }
+      nextUrl = response.next ? `${middlewareUrl}${response.next}` : null;
     }
 
-    // Process next page if available
-    if (response.next) {
-      const nextUrl = `${this.configService.get<string>('mdw.middlewareUrl')}${response.next}`;
-      await this.processTransactionPage(nextUrl, useBulkMode, txHashesByBlock);
-    }
-    return txHashesByBlock;
+    return txHashesByBlock ?? new Map();
   }
 
   /**
-   * Bulk insert transactions using repository.upsert() method
-   * Note: Using upsert to handle duplicates gracefully during parallel processing
-   * Processes each batch immediately after insertion for plugins
-   * Returns the saved transactions fetched from the database
+   * Bulk insert transactions using repository.upsert() method.
+   * Processes each batch immediately after insertion for plugins.
+   * Returns the successfully upserted partials (no DB re-read) so callers
+   * can extract hash/block_height without doubling heap usage.
    */
-  private async bulkInsertTransactions(txs: Partial<Tx>[]): Promise<Tx[]> {
+  private async bulkInsertTransactions(
+    txs: Partial<Tx>[],
+  ): Promise<Partial<Tx>[]> {
     if (txs.length === 0) {
       return [];
     }
 
-    // Split into batches to avoid SQL parameter limits
     const batchSize = 500;
-    const allSavedTxs: Tx[] = [];
+    const accepted: Partial<Tx>[] = [];
 
     for (let i = 0; i < txs.length; i += batchSize) {
       const batch = txs.slice(i, i + batchSize);
 
       try {
-        // Use upsert to handle duplicates gracefully during parallel processing
-        // This ensures transactions are inserted even if they already exist
-        // Note: skipUpdateIfNoValuesChanged is not used because it causes PostgreSQL errors
-        // when comparing JSONB columns (operator does not exist: jsonb = jsonb)
         await this.txRepository.upsert(batch, {
           conflictPaths: ['hash'],
         });
 
-        // Collect hashes of transactions to fetch
         const batchHashes = batch
           .map((tx) => tx.hash)
           .filter(Boolean) as string[];
 
-        // Fetch this batch immediately after upsert to verify they exist
         if (batchHashes.length > 0) {
-          const savedBatchTxs = await runWithDatabaseIssueLogging({
-            logger: this.logger,
-            stage: 'transaction reload after bulk upsert',
-            context: {
-              batchStart: i,
-              batchSize: batch.length,
-              hashCount: batchHashes.length,
-            },
-            operation: () =>
-              this.txRepository.find({
-                where: { hash: In(batchHashes) },
-              }),
+          const existing = await this.txRepository.find({
+            select: ['hash', 'logs', 'data'],
+            where: { hash: In(batchHashes) },
           });
+          const pluginDataByHash = new Map(
+            existing.map((t) => [t.hash, { logs: t.logs, data: t.data }]),
+          );
 
-          // Log warning if some transactions weren't found after upsert
-          if (savedBatchTxs.length < batchHashes.length) {
-            const savedHashes = new Set(savedBatchTxs.map((tx) => tx.hash));
-            const missingHashes = batchHashes.filter(
-              (hash) => !savedHashes.has(hash),
-            );
-            this.logger.warn(
-              `After upsert, only ${savedBatchTxs.length} of ${batchHashes.length} transactions found in database. ` +
-                `Missing hashes: ${missingHashes.slice(0, 10).join(', ')}${missingHashes.length > 10 ? '...' : ''}`,
-            );
+          for (const tx of batch) {
+            if (tx.hash) {
+              const dbFields = pluginDataByHash.get(tx.hash);
+              if (dbFields) {
+                tx.logs = dbFields.logs;
+                tx.data = dbFields.data;
+              }
+            }
           }
 
-          // Process batch for plugins immediately (don't wait for full run)
-          if (savedBatchTxs.length > 0) {
-            // Process immediately - await to ensure batch is processed before next batch
-            await this.pluginBatchProcessor.processBatch(
-              savedBatchTxs,
-              SyncDirectionEnum.Backward,
-            );
-
-            // Collect for return value
-            allSavedTxs.push(...savedBatchTxs);
-          }
+          await this.pluginBatchProcessor.processBatch(
+            batch.filter((tx) => tx.hash) as Tx[],
+            SyncDirectionEnum.Backward,
+          );
         }
+
+        accepted.push(...batch);
       } catch (error: any) {
         if (isDatabaseConnectionOrPoolError(error)) {
           logDatabaseIssue({
@@ -396,22 +357,15 @@ export class BlockSyncService {
           `Failed to bulk upsert batch ${i + 1}-${Math.min(i + batchSize, txs.length)}: ${error.message}`,
           error.stack || error,
         );
-        // Log sample data for debugging
-        if (batch.length > 0) {
-          this.logger.error(
-            `Sample transaction data: ${JSON.stringify(batch[0], null, 2)}`,
-          );
-        }
-        // Re-throw to trigger fallback in processTransactionPage
         throw error;
       }
     }
 
     this.logger.log(
-      `Bulk upserted ${txs.length} transactions, processed ${allSavedTxs.length} for plugins`,
+      `Bulk upserted ${txs.length} transactions, processed ${accepted.length} for plugins`,
     );
 
-    return allSavedTxs;
+    return accepted;
   }
 
   /**
@@ -422,16 +376,17 @@ export class BlockSyncService {
     startHeight: number,
     endHeight: number,
     backward = false,
+    collectHashes = !backward,
   ): Promise<Map<number, string[]>> {
     await this.syncBlocks(startHeight, endHeight);
     await this.syncMicroBlocks(startHeight, endHeight);
-    const txHashesByBlock = await this.syncTransactions(
+    return this.syncTransactions(
       startHeight,
       endHeight,
       true,
       backward,
-    ); // Use bulk mode
-    return txHashesByBlock;
+      collectHashes,
+    );
   }
 
   private normalizeKeyBlock(block: any): Partial<KeyBlock> {

@@ -167,7 +167,7 @@ export class TransactionHistoryService {
     });
   }
 
-  private static readonly MAX_HISTORICAL_ROWS = 50_000;
+  private static readonly MAX_HISTORICAL_ROWS = 10_000;
 
   async getHistoricalData(
     props: IGetHistoricalDataProps,
