@@ -173,14 +173,14 @@ export class PostService {
     }
   }
 
-  async pullLatestPosts(contract: IPostContract): Promise<any[]> {
+  async pullLatestPosts(contract: IPostContract): Promise<number> {
     const processingKey = `contract_${contract.contractAddress}`;
 
     if (this.isProcessing.get(processingKey)) {
       this.logger.warn(
         `Contract ${contract.contractAddress} already being processed, skipping...`,
       );
-      return [];
+      return 0;
     }
 
     this.isProcessing.set(processingKey, true);
@@ -202,13 +202,13 @@ export class PostService {
 
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-      const posts = await this.loadPostsFromMdw(url, contract);
+      const count = await this.loadPostsFromMdw(url, contract);
 
       this.logger.log(
-        `Successfully pulled ${posts.length} posts for contract ${contract.contractAddress}`,
+        `Successfully pulled ${count} posts for contract ${contract.contractAddress}`,
       );
 
-      return posts;
+      return count;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -230,98 +230,101 @@ export class PostService {
   async loadPostsFromMdw(
     url: string,
     contract: IPostContract,
-    posts: any[] = [],
-    totalRetries = 0,
-  ): Promise<any[]> {
-    let result: IMiddlewareResponse;
+  ): Promise<number> {
+    let nextUrl: string | null = url;
+    let totalCount = 0;
 
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
-        const nextRetry = totalRetries + 1;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+    while (nextUrl) {
+      let result: IMiddlewareResponse;
+      let retries = 0;
 
-        this.logger.warn(
-          `Middleware request failed, retrying (${nextRetry}/${MAX_RETRIES_WHEN_REQUEST_FAILED})`,
-          {
-            url,
-            error: errorMessage,
-            retryIn: WAIT_TIME_WHEN_REQUEST_FAILED,
-          },
-        );
+      while (true) {
+        try {
+          result = await fetchJson(nextUrl);
+          break;
+        } catch (error) {
+          if (retries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
+            retries++;
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
-        );
-        return this.loadPostsFromMdw(url, contract, posts, nextRetry);
-      }
+            this.logger.warn(
+              `Middleware request failed, retrying (${retries}/${MAX_RETRIES_WHEN_REQUEST_FAILED})`,
+              {
+                url: nextUrl,
+                error: errorMessage,
+                retryIn: WAIT_TIME_WHEN_REQUEST_FAILED,
+              },
+            );
 
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
+            await new Promise((resolve) =>
+              setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+            );
+            continue;
+          }
 
-      this.logger.error(
-        'Failed to load posts from middleware after all retries',
-        {
-          url,
-          error: errorMessage,
-          stack: errorStack,
-          totalRetries,
-        },
-      );
-      return posts;
-    }
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
 
-    if (!result?.data?.length) {
-      this.logger.debug('No data received from middleware', { url });
-      return posts;
-    }
-
-    // Process transactions sequentially to handle parent-child dependencies
-    // This ensures parent posts are created before their comments
-    const successfulPosts: any[] = [];
-    let failedCount = 0;
-
-    for (const transaction of result.data) {
-      try {
-        const camelCasedTransaction = camelcaseKeysDeep(
-          transaction,
-        ) as ITransaction;
-        const post = await this.savePostFromTransaction(
-          camelCasedTransaction,
-          contract,
-        );
-        if (post) {
-          successfulPosts.push(post);
+          this.logger.error(
+            'Failed to load posts from middleware after all retries',
+            {
+              url: nextUrl,
+              error: errorMessage,
+              stack: errorStack,
+              totalRetries: retries,
+            },
+          );
+          return totalCount;
         }
-      } catch (error) {
-        failedCount++;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        this.logger.warn('Failed to process individual transaction', {
-          txHash: transaction?.hash,
-          error: errorMessage,
-        });
       }
+
+      if (!result?.data?.length) {
+        this.logger.debug('No data received from middleware', { url: nextUrl });
+        return totalCount;
+      }
+
+      let failedCount = 0;
+      let pageCount = 0;
+
+      for (const transaction of result.data) {
+        try {
+          const camelCasedTransaction = camelcaseKeysDeep(
+            transaction,
+          ) as ITransaction;
+          const post = await this.savePostFromTransaction(
+            camelCasedTransaction,
+            contract,
+          );
+          if (post) {
+            pageCount++;
+          }
+        } catch (error) {
+          failedCount++;
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.warn('Failed to process individual transaction', {
+            txHash: transaction?.hash,
+            error: errorMessage,
+          });
+        }
+      }
+
+      totalCount += pageCount;
+
+      if (failedCount > 0) {
+        this.logger.warn(
+          `${failedCount} transactions failed to process in this batch`,
+        );
+      }
+
+      nextUrl = result.next
+        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
+        : null;
     }
 
-    posts.push(...successfulPosts);
-
-    if (failedCount > 0) {
-      this.logger.warn(
-        `${failedCount} transactions failed to process in this batch`,
-      );
-    }
-
-    // Continue with pagination if available
-    if (result.next) {
-      const nextUrl = `${ACTIVE_NETWORK.middlewareUrl}${result.next}`;
-      return this.loadPostsFromMdw(nextUrl, contract, posts, 0);
-    }
-
-    return posts;
+    return totalCount;
   }
 
   // 1
