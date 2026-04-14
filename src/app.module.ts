@@ -45,6 +45,10 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
     }),
     BullModule.forRoot({
       redis: REDIS_CONFIG,
+      defaultJobOptions: {
+        removeOnComplete: true,
+        removeOnFail: 100,
+      },
     }),
     BullModule.registerQueue(
       {
