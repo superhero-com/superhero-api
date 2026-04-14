@@ -31,7 +31,8 @@ export class FixFailedTransactionsService {
     this.fixingFailedTransactions = true;
     try {
       const failedTransactions = await this.failedTransactionsRepository.find({
-        where: {},
+        order: { retries: 'ASC', created_at: 'ASC' },
+        take: 100,
       });
       for (const failedTransaction of failedTransactions) {
         await this.fixFailedTransaction(failedTransaction);
