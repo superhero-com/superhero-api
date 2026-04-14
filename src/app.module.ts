@@ -41,6 +41,7 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
     ConfigModule.forRoot(),
     CacheModule.register({
       isGlobal: true,
+      ttl: 60_000,
     }),
     BullModule.forRoot({
       redis: REDIS_CONFIG,
