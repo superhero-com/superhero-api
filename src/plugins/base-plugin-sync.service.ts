@@ -6,10 +6,17 @@ import { AeSdkService } from '@/ae/ae-sdk.service';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
+type CachedContract = {
+  instance: ContractInstance;
+  lastUsedAt: number;
+};
+
 export abstract class BasePluginSyncService {
+  static readonly MAX_CACHED_CONTRACTS = 150;
+
   protected abstract readonly logger: Logger;
 
-  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
+  private contractCache: Record<Encoded.ContractAddress, CachedContract> = {};
 
   constructor(protected readonly aeSdkService: AeSdkService) {}
 
@@ -94,15 +101,40 @@ export abstract class BasePluginSyncService {
     contractAddress: Encoded.ContractAddress,
     aci: any,
   ): Promise<ContractInstance> {
-    if (this.contracts[contractAddress]) {
-      return this.contracts[contractAddress];
+    const cached = this.contractCache[contractAddress];
+    if (cached) {
+      cached.lastUsedAt = Date.now();
+      return cached.instance;
     }
     const contract = await Contract.initialize({
       ...this.aeSdkService.sdk.getContext(),
       aci,
       address: contractAddress as Encoded.ContractAddress,
     });
-    this.contracts[contractAddress] = contract;
+    this.contractCache[contractAddress] = {
+      instance: contract,
+      lastUsedAt: Date.now(),
+    };
+    this.evictStalestContract();
     return contract;
+  }
+
+  private evictStalestContract(): void {
+    const keys = Object.keys(this.contractCache);
+    if (keys.length <= BasePluginSyncService.MAX_CACHED_CONTRACTS) return;
+    let oldestKey = keys[0];
+    let oldestTime = this.contractCache[oldestKey]?.lastUsedAt ?? 0;
+    for (const key of keys) {
+      const t = this.contractCache[key]?.lastUsedAt ?? 0;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = key;
+      }
+    }
+    delete this.contractCache[oldestKey];
+  }
+
+  getCacheSize(): number {
+    return Object.keys(this.contractCache).length;
   }
 }
