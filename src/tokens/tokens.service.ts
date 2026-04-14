@@ -182,8 +182,8 @@ export class TokensService {
     }
   }
 
-  findAll(): Promise<Token[]> {
-    return this.tokensRepository.find();
+  findAll(limit = 1000, offset = 0): Promise<Token[]> {
+    return this.tokensRepository.find({ take: limit, skip: offset });
   }
 
   async update(token: Token, data): Promise<Token> {
