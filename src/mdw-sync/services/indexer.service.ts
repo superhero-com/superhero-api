@@ -241,7 +241,7 @@ export class IndexerService implements OnModuleInit {
   ): Promise<void> {
     const parallelWorkers = this.configService.get<number>(
       'mdw.parallelWorkers',
-      6,
+      2,
     );
     const batchSize = this.configService.get<number>(
       'mdw.bulkModeBatchBlocks',
