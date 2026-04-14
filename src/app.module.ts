@@ -9,6 +9,8 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { join } from 'path';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Keyv } from 'keyv';
+import { LRUCache } from 'lru-cache';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
 import { AppController } from './app.controller';
@@ -39,9 +41,15 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
   imports: [
     ScheduleModule.forRoot(),
     ConfigModule.forRoot(),
-    CacheModule.register({
+    CacheModule.registerAsync({
       isGlobal: true,
-      ttl: 60_000,
+      useFactory: () => ({
+        stores: [
+          new Keyv({
+            store: new LRUCache<string, any>({ max: 2000, ttl: 60_000 }),
+          }),
+        ],
+      }),
     }),
     BullModule.forRoot({
       redis: REDIS_CONFIG,
