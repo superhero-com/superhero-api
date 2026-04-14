@@ -13,6 +13,10 @@ import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 
 @Injectable()
 export class DexTokenService {
+  private cachedPairs: Pair[] | null = null;
+  private pairsCacheTime = 0;
+  private static readonly PAIRS_CACHE_TTL_MS = 30_000;
+
   constructor(
     @InjectRepository(DexToken)
     private readonly dexTokenRepository: Repository<DexToken>,
@@ -20,6 +24,23 @@ export class DexTokenService {
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
   ) {}
+
+  private async getAllPairsWithTokens(): Promise<Pair[]> {
+    const now = Date.now();
+    if (
+      this.cachedPairs &&
+      now - this.pairsCacheTime < DexTokenService.PAIRS_CACHE_TTL_MS
+    ) {
+      return this.cachedPairs;
+    }
+    this.cachedPairs = await this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .getMany();
+    this.pairsCacheTime = now;
+    return this.cachedPairs;
+  }
 
   async findAll(
     options: IPaginationOptions,
@@ -173,12 +194,7 @@ export class DexTokenService {
       };
     }
 
-    // Get all pairs to build the complete graph
-    const allPairs = await this.pairRepository
-      .createQueryBuilder('pair')
-      .leftJoinAndSelect('pair.token0', 'token0')
-      .leftJoinAndSelect('pair.token1', 'token1')
-      .getMany();
+    const allPairs = await this.getAllPairsWithTokens();
 
     // Build edges for path finding
     const edges = allPairs.map((pair) => ({
