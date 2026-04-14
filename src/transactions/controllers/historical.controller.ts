@@ -57,7 +57,7 @@ export class HistoricalController {
     type: 'string',
     description: 'Token address or name',
   })
-  @CacheTTL(1000)
+  @CacheTTL(60_000)
   @Get(':address/transactions')
   async findByAddress(
     @Param('address') address: string,
@@ -100,7 +100,7 @@ export class HistoricalController {
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
-  @CacheTTL(5)
+  @CacheTTL(5_000)
   @Get(':address/history')
   async getPaginatedHistory(
     @Param('address') address: string,
@@ -131,7 +131,7 @@ export class HistoricalController {
     required: false,
     example: '7d',
   })
-  @CacheTTL(5)
+  @CacheTTL(5_000)
   @Get('/preview/:address')
   async getForPreview(
     @Param('address') address: string,
@@ -168,7 +168,7 @@ export class HistoricalController {
   })
   @Header('Content-Type', 'image/svg+xml')
   @Header('Content-Disposition', 'inline; filename="sparkline.svg"')
-  @CacheTTL(60)
+  @CacheTTL(60_000)
   @Get('/preview/:address/sparkline.svg')
   async getSparklineSvg(
     @Param('address') address: string,
