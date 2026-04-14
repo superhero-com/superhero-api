@@ -85,7 +85,7 @@ export class LeaderboardController {
     example: 36,
     description: 'Upper bound of candidate addresses to evaluate',
   })
-  @CacheTTL(60) // cache 1 minute
+  @CacheTTL(60_000)
   @Get()
   async getLeaderboard(
     @Query('window') window: LeaderboardWindow = '7d',

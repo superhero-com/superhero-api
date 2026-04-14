@@ -194,7 +194,7 @@ export class AnalyticsTransactionsController {
     description: 'Returns the sum of market caps for all tokens per day',
     type: [DailyMarketCapSumDto],
   })
-  @CacheTTL(20)
+  @CacheTTL(20_000)
   @Get('daily-market-cap-sum')
   async listDailyMarketCapSum(
     @Query('start_date') start_date?: string,
