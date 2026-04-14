@@ -296,6 +296,85 @@ describe('TokensService', () => {
     );
   });
 
+  it('executes a single query for ranked token pages and preserves pagination metadata', async () => {
+    const queryBuilder = {
+      getQueryAndParameters: jest
+        .fn()
+        .mockReturnValue([
+          'SELECT token.* FROM token WHERE token.unlisted = false AND token.name ILIKE $1',
+          ['%alpha%'],
+        ]),
+    } as any;
+
+    tokensRepository.query.mockResolvedValue([
+      { sale_address: 'ct_1', name: 'Alpha', total_items: 2 },
+      { sale_address: 'ct_2', name: 'Beta', total_items: 2 },
+    ]);
+
+    const result = await service.queryTokensWithRanks(
+      queryBuilder,
+      2,
+      1,
+      'market_cap',
+      'DESC',
+    );
+
+    expect(tokensRepository.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = tokensRepository.query.mock.calls[0];
+    expect(sql).toContain('WITH all_ranked_tokens AS');
+    expect(sql).toContain('filtered_count AS');
+    expect(sql).toContain('RIGHT JOIN filtered_count ON TRUE');
+    expect(params).toEqual(['%alpha%', 2, 0]);
+    expect(result).toEqual({
+      items: [
+        { sale_address: 'ct_1', name: 'Alpha' },
+        { sale_address: 'ct_2', name: 'Beta' },
+      ],
+      meta: {
+        currentPage: 1,
+        itemCount: 2,
+        itemsPerPage: 2,
+        totalItems: 2,
+        totalPages: 1,
+      },
+    });
+  });
+
+  it('returns empty items with the correct total when a ranked page is out of range', async () => {
+    const queryBuilder = {
+      getQueryAndParameters: jest
+        .fn()
+        .mockReturnValue([
+          'SELECT token.* FROM token WHERE token.unlisted = false',
+          [],
+        ]),
+    } as any;
+
+    tokensRepository.query.mockResolvedValue([
+      { sale_address: null, total_items: 7 },
+    ]);
+
+    const result = await service.queryTokensWithRanks(
+      queryBuilder,
+      5,
+      3,
+      'rank',
+      'ASC',
+    );
+
+    expect(tokensRepository.query).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      items: [],
+      meta: {
+        currentPage: 3,
+        itemCount: 0,
+        itemsPerPage: 5,
+        totalItems: 7,
+        totalPages: 2,
+      },
+    });
+  });
+
   it('returns a trending eligibility breakdown for a token', async () => {
     jest.spyOn(service, 'findByAddress').mockResolvedValue({
       sale_address: 'ct_sale',

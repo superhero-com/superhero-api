@@ -611,36 +611,14 @@ export class TokensService {
   }
 
   async queryTokensWithRanks(
-    queryBuilder: any,
+    queryBuilder: SelectQueryBuilder<Token>,
     limit: number = 20,
     page: number = 1,
     orderBy: string = 'rank',
     orderDirection: 'ASC' | 'DESC' = 'ASC',
   ) {
-    // Get the base query and parameters
-    const subQuery = queryBuilder.getQuery();
-    const parameters = queryBuilder.getParameters();
-
-    // Replace all parameter placeholders with actual values
-    let finalSubQuery = subQuery;
-    Object.entries(parameters).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        // Handle array parameters by joining them with commas and wrapping in quotes
-        if (value.length === 0) {
-          // Handle empty arrays by replacing with a condition that always evaluates to false
-          finalSubQuery = finalSubQuery.replace(
-            `IN (:...${key})`,
-            "IN (SELECT '' WHERE 1 = 0)",
-          );
-          finalSubQuery = finalSubQuery.replace(`:...${key}`, 'NULL');
-        } else {
-          const arrayValues = value.map((v) => `'${v}'`).join(',');
-          finalSubQuery = finalSubQuery.replace(`:...${key}`, arrayValues);
-        }
-      } else {
-        finalSubQuery = finalSubQuery.replace(`:${key}`, `'${value}'`);
-      }
-    });
+    const [filteredTokensQuery, parameters] =
+      queryBuilder.getQueryAndParameters();
 
     if (orderBy === 'market_cap') {
       orderBy = 'rank';
@@ -648,29 +626,20 @@ export class TokensService {
       orderDirection = orderDirection === 'ASC' ? 'DESC' : 'ASC';
     }
 
-    // Get total count of filtered items
-    const countQuery = `
-      WITH filtered_tokens AS (
-        ${finalSubQuery}
-      )
-      SELECT COUNT(*) as total
-      FROM filtered_tokens
-    `;
-    const [{ total }] = await this.tokensRepository.query(countQuery);
-    const totalItems = parseInt(total, 10);
-    const totalPages = Math.ceil(totalItems / limit);
-    const orderClause =
-      orderBy === 'trending_score'
-        ? `all_ranked_tokens.trending_score ${orderDirection},
-           CASE
-             WHEN all_ranked_tokens.trending_score = 0
-               THEN all_ranked_tokens.created_at
-             ELSE NULL
-           END DESC,
-           all_ranked_tokens.created_at DESC`
-        : `all_ranked_tokens.${orderBy} ${orderDirection}`;
+    const offset = (page - 1) * limit;
+    const pagedOrderClause = this.buildTokensOrderClause(
+      'all_ranked_tokens',
+      orderBy,
+      orderDirection,
+    );
+    const resultOrderClause = this.buildTokensOrderClause(
+      'paged_tokens',
+      orderBy,
+      orderDirection,
+    );
+    const limitPlaceholder = `$${parameters.length + 1}`;
+    const offsetPlaceholder = `$${parameters.length + 2}`;
 
-    // Create a new query that includes the rank
     const rankedQuery = `
       WITH all_ranked_tokens AS (
         SELECT 
@@ -685,20 +654,42 @@ export class TokensService {
         WHERE token.unlisted = false
       ),
       filtered_tokens AS (
-        ${finalSubQuery}
+        ${filteredTokensQuery}
+      ),
+      filtered_count AS (
+        SELECT COUNT(*)::int AS total_items
+        FROM filtered_tokens
+      ),
+      paged_tokens AS (
+        SELECT 
+          all_ranked_tokens.*,
+          row_to_json(token_performance_view.*) as performance
+        FROM all_ranked_tokens
+        INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
+        LEFT JOIN token_performance_view ON all_ranked_tokens.sale_address = token_performance_view.sale_address
+        ORDER BY ${pagedOrderClause}
+        LIMIT ${limitPlaceholder}
+        OFFSET ${offsetPlaceholder}
       )
       SELECT 
-        all_ranked_tokens.*,
-        row_to_json(token_performance_view.*) as performance
-      FROM all_ranked_tokens
-      INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
-      LEFT JOIN token_performance_view ON all_ranked_tokens.sale_address = token_performance_view.sale_address
-      ORDER BY ${orderClause}
-      LIMIT ${limit}
-      OFFSET ${(page - 1) * limit}
+        paged_tokens.*,
+        filtered_count.total_items
+      FROM paged_tokens
+      RIGHT JOIN filtered_count ON TRUE
+      ORDER BY ${resultOrderClause}
     `;
 
-    const result = await this.tokensRepository.query(rankedQuery);
+    const rows = await this.tokensRepository.query(rankedQuery, [
+      ...parameters,
+      limit,
+      offset,
+    ]);
+    const totalItems = Number(rows[0]?.total_items ?? 0);
+    const totalPages = Math.ceil(totalItems / limit);
+    const result = rows
+      .filter((row) => row.sale_address !== null)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      .map(({ total_items, ...item }) => item);
 
     return {
       items: result,
@@ -710,6 +701,24 @@ export class TokensService {
         totalPages,
       },
     };
+  }
+
+  private buildTokensOrderClause(
+    alias: string,
+    orderBy: string,
+    orderDirection: 'ASC' | 'DESC',
+  ): string {
+    if (orderBy === 'trending_score') {
+      return `${alias}.trending_score ${orderDirection},
+         CASE
+           WHEN ${alias}.trending_score = 0
+             THEN ${alias}.created_at
+           ELSE NULL
+         END DESC,
+         ${alias}.created_at DESC`;
+    }
+
+    return `${alias}.${orderBy} ${orderDirection}`;
   }
 
   private buildEligibilityTradeCountsSubquery(): string {
