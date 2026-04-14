@@ -865,53 +865,65 @@ export class PostService {
     try {
       this.logger.log('Starting orphaned comments cleanup...');
 
-      // Find comments that have a post_id but the parent post doesn't exist
-      const orphanedComments = await this.postRepository
-        .createQueryBuilder('comment')
-        .leftJoin('posts', 'parent', 'parent.id = comment.post_id')
-        .where('comment.post_id IS NOT NULL')
-        .andWhere('parent.id IS NULL')
-        .getMany();
-
-      if (orphanedComments.length === 0) {
-        this.logger.log('No orphaned comments found');
-        return;
-      }
-
-      this.logger.log(`Found ${orphanedComments.length} orphaned comments`);
-
       let fixedCount = 0;
-      for (const comment of orphanedComments) {
-        try {
-          // Check if parent post now exists
-          const parentExists = await this.validateParentPost(
-            comment.post_id,
-            1,
-            0,
-          );
-          if (parentExists) {
-            // Update comment count for the parent
-            await this.updatePostCommentCount(comment.post_id);
-            fixedCount++;
-          } else {
-            // If parent still doesn't exist, remove the post_id to make it a regular post
-            await this.postRepository.update(comment.id, { post_id: null });
-            this.logger.warn('Converted orphaned comment to regular post', {
+      let batchNumber = 0;
+
+      while (true) {
+        const orphanedComments = await this.postRepository
+          .createQueryBuilder('comment')
+          .leftJoin('posts', 'parent', 'parent.id = comment.post_id')
+          .where('comment.post_id IS NOT NULL')
+          .andWhere('parent.id IS NULL')
+          .take(500)
+          .getMany();
+
+        if (orphanedComments.length === 0) {
+          break;
+        }
+
+        batchNumber++;
+        this.logger.log(
+          `Orphan cleanup batch ${batchNumber}: processing ${orphanedComments.length} comments`,
+        );
+
+        let batchProgress = 0;
+        for (const comment of orphanedComments) {
+          try {
+            const parentExists = await this.validateParentPost(
+              comment.post_id,
+              1,
+              0,
+            );
+            if (parentExists) {
+              await this.updatePostCommentCount(comment.post_id);
+              fixedCount++;
+            } else {
+              await this.postRepository.update(comment.id, { post_id: null });
+              this.logger.warn('Converted orphaned comment to regular post', {
+                commentId: comment.id,
+                originalParentId: comment.post_id,
+              });
+            }
+            batchProgress++;
+          } catch (error) {
+            this.logger.error('Failed to fix orphaned comment', {
               commentId: comment.id,
-              originalParentId: comment.post_id,
+              parentId: comment.post_id,
+              error: error instanceof Error ? error.message : String(error),
             });
           }
-        } catch (error) {
-          this.logger.error('Failed to fix orphaned comment', {
-            commentId: comment.id,
-            parentId: comment.post_id,
-            error: error instanceof Error ? error.message : String(error),
-          });
+        }
+
+        if (batchProgress === 0) {
+          this.logger.error(
+            `Orphan cleanup batch ${batchNumber}: no progress (all ${orphanedComments.length} comments failed), aborting to prevent infinite loop`,
+          );
+          break;
         }
       }
 
       this.logger.log(
-        `Orphaned comments cleanup completed: ${fixedCount} fixed`,
+        `Orphaned comments cleanup completed: ${fixedCount} fixed across ${batchNumber} batch(es)`,
       );
     } catch (error) {
       this.logger.error('Failed to run orphaned comments cleanup', {
