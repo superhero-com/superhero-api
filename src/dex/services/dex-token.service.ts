@@ -11,6 +11,10 @@ import { Pair } from '../entities/pair.entity';
 import { getPaths } from '../utils/paths';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 
+type PriceAnalysisOptions = {
+  allPairs?: Pair[];
+};
+
 @Injectable()
 export class DexTokenService {
   private cachedPairs: Pair[] | null = null;
@@ -25,7 +29,7 @@ export class DexTokenService {
     private readonly pairRepository: Repository<Pair>,
   ) {}
 
-  private async getAllPairsWithTokens(): Promise<Pair[]> {
+  async getAllPairsWithTokens(): Promise<Pair[]> {
     const now = Date.now();
     if (
       this.cachedPairs &&
@@ -169,7 +173,7 @@ export class DexTokenService {
   async getTokenPriceWithLiquidityAnalysis(
     address: string,
     baseToken: string = DEX_CONTRACTS.wae,
-    debug = false,
+    optionsOrLegacyDebug: boolean | PriceAnalysisOptions = {},
   ): Promise<{
     price: string;
     confidence: number;
@@ -194,7 +198,9 @@ export class DexTokenService {
       };
     }
 
-    const allPairs = await this.getAllPairsWithTokens();
+    const options =
+      typeof optionsOrLegacyDebug === 'boolean' ? {} : optionsOrLegacyDebug;
+    const allPairs = options.allPairs ?? (await this.getAllPairsWithTokens());
 
     // Build edges for path finding
     const edges = allPairs.map((pair) => ({
@@ -210,10 +216,23 @@ export class DexTokenService {
       return null;
     }
 
-    // Calculate price and liquidity for each path
-    const pathAnalysis = paths.map((path: Pair[]) => {
+    let bestPath: Pair[] = [];
+    let bestPrice = '1';
+    let bestLiquidity = -1;
+    let totalLiquidity = 0;
+    let weightedPriceSum = 0;
+    let confidenceSum = 0;
+    const prices: number[] = [];
+    const pathAnalysis: Array<{
+      path: Pair[];
+      price: string;
+      liquidity: number;
+      confidence: number;
+    }> = [];
+
+    for (const path of paths) {
       let price = '1';
-      let totalLiquidity = 0;
+      let pathLiquidity = 0;
       let confidence = 1;
 
       // Calculate price by multiplying ratios along the path
@@ -233,45 +252,42 @@ export class DexTokenService {
         const reserve0 = parseFloat(String(pair.reserve0 || '0'));
         const reserve1 = parseFloat(String(pair.reserve1 || '0'));
         const pairLiquidity = Math.min(reserve0, reserve1);
-        totalLiquidity += pairLiquidity;
+        pathLiquidity += pairLiquidity;
 
         // Reduce confidence for longer paths
         confidence *= 0.9;
       }
 
-      return {
+      if (pathLiquidity > bestLiquidity) {
+        bestLiquidity = pathLiquidity;
+        bestPath = path;
+        bestPrice = price;
+      }
+
+      totalLiquidity += pathLiquidity;
+      weightedPriceSum += parseFloat(price) * pathLiquidity;
+      confidenceSum += confidence;
+      prices.push(parseFloat(price));
+
+      pathAnalysis.push({
         path,
         price,
-        liquidity: totalLiquidity,
+        liquidity: pathLiquidity,
         confidence,
-      };
-    });
+      });
+    }
 
-    // Sort by liquidity (highest first)
     pathAnalysis.sort((a, b) => b.liquidity - a.liquidity);
 
-    const bestPath = pathAnalysis[0];
-    const bestPrice = bestPath.price;
-
-    // Calculate liquidity-weighted price
-    const totalLiquidity = pathAnalysis.reduce(
-      (sum, p) => sum + p.liquidity,
-      0,
-    );
     const liquidityWeightedPrice =
-      pathAnalysis.length > 0
-        ? pathAnalysis
-            .reduce((sum, p) => {
-              const weight = p.liquidity / totalLiquidity;
-              return sum + parseFloat(p.price) * weight;
-            }, 0)
-            .toString()
+      prices.length > 0
+        ? totalLiquidity > 0
+          ? (weightedPriceSum / totalLiquidity).toString()
+          : bestPrice
         : bestPrice;
 
     // Calculate median price
-    const prices = pathAnalysis
-      .map((p) => parseFloat(p.price))
-      .sort((a, b) => a - b);
+    prices.sort((a, b) => a - b);
     const medianPrice =
       prices.length > 0
         ? (prices.length % 2 === 0
@@ -281,29 +297,14 @@ export class DexTokenService {
         : bestPrice;
 
     // Calculate overall confidence based on liquidity and path quality
-    const avgConfidence =
-      pathAnalysis.reduce((sum, p) => sum + p.confidence, 0) /
-      pathAnalysis.length;
+    const avgConfidence = prices.length > 0 ? confidenceSum / prices.length : 0;
     const liquidityFactor = Math.min(totalLiquidity / 1000, 1); // Normalize liquidity
     const overallConfidence = avgConfidence * liquidityFactor;
-
-    const result = {
-      price: bestPrice,
-      confidence: overallConfidence,
-      bestPath: bestPath.path,
-      allPaths: pathAnalysis,
-      liquidityWeightedPrice,
-      medianPrice,
-    };
-
-    if (debug) {
-      return result;
-    }
 
     return {
       price: bestPrice,
       confidence: overallConfidence,
-      bestPath: bestPath.path,
+      bestPath,
       allPaths: pathAnalysis,
       liquidityWeightedPrice,
       medianPrice,

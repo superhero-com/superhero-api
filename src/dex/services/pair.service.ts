@@ -15,9 +15,15 @@ import { getPaths } from '../utils/paths';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
+type CachedContract = {
+  instance: ContractInstance;
+  lastUsedAt: number;
+};
+
 @Injectable()
 export class PairService {
-  contracts: Record<Encoded.ContractAddress, ContractInstance> = {};
+  private static readonly MAX_CACHED_CONTRACTS = 100;
+  private contractCache: Record<Encoded.ContractAddress, CachedContract> = {};
   constructor(
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
@@ -154,16 +160,37 @@ export class PairService {
       directPairs,
     };
   }
+  private evictStalestContract(): void {
+    const keys = Object.keys(this.contractCache);
+    if (keys.length <= PairService.MAX_CACHED_CONTRACTS) return;
+    let oldestKey = keys[0];
+    let oldestTime = this.contractCache[oldestKey]?.lastUsedAt ?? 0;
+    for (const key of keys) {
+      const t = this.contractCache[key]?.lastUsedAt ?? 0;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = key;
+      }
+    }
+    delete this.contractCache[oldestKey];
+  }
+
   async getPairContract(pair: Pair) {
-    if (this.contracts[pair.address]) {
-      return this.contracts[pair.address];
+    const cached = this.contractCache[pair.address];
+    if (cached) {
+      cached.lastUsedAt = Date.now();
+      return cached.instance;
     }
     const pairContract = await Contract.initialize({
       ...this.aeSdkService.sdk.getContext(),
       aci: pairInterface,
       address: pair.address as Encoded.ContractAddress,
     });
-    this.contracts[pair.address] = pairContract;
+    this.contractCache[pair.address] = {
+      instance: pairContract,
+      lastUsedAt: Date.now(),
+    };
+    this.evictStalestContract();
     return pairContract;
   }
 

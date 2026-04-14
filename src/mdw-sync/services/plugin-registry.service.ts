@@ -21,10 +21,8 @@ export class PluginRegistryService implements OnModuleInit {
   }
 
   async onModuleInit() {
-    // Initialize plugin sync states on module init to ensure they exist before any indexing starts
     await this.initializePluginSyncStates();
-    // Auto-update plugin data for all plugins
-    void this.autoUpdatePluginData();
+    setTimeout(() => this.autoUpdatePluginData(), 15_000);
   }
 
   getPlugins(): Plugin[] {

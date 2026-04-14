@@ -28,7 +28,7 @@ export class CacheDailyAnalyticsDataService {
   }
 
   onModuleInit() {
-    this.pullDailyAnalyticsData();
+    setTimeout(() => this.pullDailyAnalyticsData(), 20_000);
   }
 
   isPullingDailyAnalyticsData = false;

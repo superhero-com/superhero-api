@@ -10,6 +10,11 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DexTokenService } from './dex-token.service';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 
+type SummaryComputationOptions = {
+  allPairs?: Pair[];
+  priceCache?: Map<string, Promise<string | null>>;
+};
+
 @Injectable()
 export class DexTokenSummaryService {
   constructor(
@@ -28,15 +33,19 @@ export class DexTokenSummaryService {
     private readonly dexTokenService: DexTokenService,
   ) {}
 
-  /**
-   * Calculate the price of a token when both tokens in a pair are AEX-9 tokens (not WAE)
-   * This function finds the price through other pairs that connect to WAE
-   */
-  private async getAex9TokenPrice(
+  private async getPairsForToken(
     tokenAddress: string,
-  ): Promise<string | null> {
-    // Get all pairs for this token
-    const pairs = await this.pairRepository
+    allPairs?: Pair[],
+  ): Promise<Pair[]> {
+    if (allPairs) {
+      return allPairs.filter(
+        (pair) =>
+          pair.token0.address === tokenAddress ||
+          pair.token1.address === tokenAddress,
+      );
+    }
+
+    return this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
@@ -44,57 +53,39 @@ export class DexTokenSummaryService {
         addr: tokenAddress,
       })
       .getMany();
-
-    // Try to find a direct WAE pair first
-    const waePair = pairs.find((pair) => {
-      const isToken0 = pair.token0.address === tokenAddress;
-      const otherToken = isToken0 ? pair.token1.address : pair.token0.address;
-      return otherToken === DEX_CONTRACTS.wae;
-    });
-
-    if (waePair) {
-      const isToken0 = waePair.token0.address === tokenAddress;
-      const ratio = isToken0 ? waePair.ratio1 : waePair.ratio0;
-      return ratio ? String(ratio) : null;
-    }
-
-    // If no direct WAE pair, try to find price through other tokens
-    for (const pair of pairs) {
-      const isToken0 = pair.token0.address === tokenAddress;
-      const otherTokenAddress = isToken0
-        ? pair.token1.address
-        : pair.token0.address;
-
-      // Skip if the other token is also not WAE (we're looking for AEX-9 -> WAE connections)
-      if (otherTokenAddress === DEX_CONTRACTS.wae) {
-        continue;
-      }
-
-      // Get the ratio from this pair
-      const pairRatio = isToken0 ? pair.ratio1 : pair.ratio0;
-      if (!pairRatio) continue;
-
-      // Try to find the price of the other token through WAE
-      const otherTokenPrice = await this.dexTokenService
-        .getTokenPriceWithLiquidityAnalysis(
-          otherTokenAddress,
-          DEX_CONTRACTS.wae,
-        )
-        ?.then((analysis) => analysis?.medianPrice);
-
-      if (otherTokenPrice) {
-        // Calculate our token price: otherTokenPrice / pairRatio
-        const tokenPrice = new BigNumber(otherTokenPrice)
-          .dividedBy(new BigNumber(pairRatio))
-          .toString();
-        return tokenPrice;
-      }
-    }
-
-    return null;
   }
 
-  async createOrUpdateSummary(tokenAddress: string): Promise<DexTokenSummary> {
+  private async getMedianTokenPrice(
+    tokenAddress: string,
+    options: SummaryComputationOptions,
+  ): Promise<string | null> {
+    if (tokenAddress === DEX_CONTRACTS.wae) {
+      return '1';
+    }
+
+    const cachedPrice = options.priceCache?.get(tokenAddress);
+    if (cachedPrice) {
+      return cachedPrice;
+    }
+
+    const pricePromise = this.dexTokenService
+      .getTokenPriceWithLiquidityAnalysis(tokenAddress, DEX_CONTRACTS.wae, {
+        allPairs: options.allPairs,
+      })
+      .then((analysis) => analysis?.medianPrice ?? null)
+      .catch((error) => {
+        options.priceCache?.delete(tokenAddress);
+        throw error;
+      });
+
+    options.priceCache?.set(tokenAddress, pricePromise);
+    return pricePromise;
+  }
+
+  async createOrUpdateSummary(
+    tokenAddress: string,
+    options: SummaryComputationOptions = {},
+  ): Promise<DexTokenSummary> {
     const token = await this.dexTokenRepository.findOne({
       where: { address: tokenAddress },
     });
@@ -102,20 +93,25 @@ export class DexTokenSummaryService {
       return null;
     }
 
-    const pairs = await this.pairRepository
-      .createQueryBuilder('pair')
-      .leftJoinAndSelect('pair.token0', 'token0')
-      .leftJoinAndSelect('pair.token1', 'token1')
-      .where('token0.address = :addr OR token1.address = :addr', {
-        addr: tokenAddress,
-      })
-      .getMany();
+    const summaryOptions: SummaryComputationOptions = {
+      ...options,
+      priceCache:
+        options.priceCache ?? new Map<string, Promise<string | null>>(),
+    };
+    const pairs = await this.getPairsForToken(
+      tokenAddress,
+      summaryOptions.allPairs,
+    );
 
     const queryRunner = this.dataSource.createQueryRunner();
 
     try {
       // Total volume across all pairs involving the token, converted to AE
       let totalVolumeAE = new BigNumber(0);
+      const currentPrice = await this.getMedianTokenPrice(
+        tokenAddress,
+        summaryOptions,
+      );
 
       for (const pair of pairs) {
         const isToken0 = pair.token0.address === tokenAddress;
@@ -132,11 +128,7 @@ export class DexTokenSummaryService {
         let volumeResult;
 
         if (isBothAex9) {
-          // For AEX-9 to AEX-9 pairs, we need to calculate volume differently
-          // Get the price of our token to convert volume to AE equivalent
-          const tokenPrice = await this.getAex9TokenPrice(tokenAddress);
-
-          if (tokenPrice) {
+          if (currentPrice) {
             // Join with pairs and tokens to get decimals for proper volume conversion
             // Convert volumes from raw units to human-readable before multiplying by token price
             volumeResult = await queryRunner.query(
@@ -163,7 +155,7 @@ export class DexTokenSummaryService {
                     'swap_ae_for_exact_tokens'
                   )
               `,
-              [pair.address, pos, tokenPrice],
+              [pair.address, pos, currentPrice],
             );
           } else {
             // If we can't find a price, skip this pair
@@ -242,11 +234,7 @@ export class DexTokenSummaryService {
           let periodVolumeResult;
 
           if (isBothAex9) {
-            // For AEX-9 to AEX-9 pairs, we need to calculate volume differently
-            // Get the price of our token to convert volume to AE equivalent
-            const tokenPrice = await this.getAex9TokenPrice(tokenAddress);
-
-            if (tokenPrice) {
+            if (currentPrice) {
               // Join with pairs and tokens to get decimals for proper volume conversion
               // Convert volumes from raw units to human-readable before multiplying by token price
               periodVolumeResult = await queryRunner.query(
@@ -274,7 +262,7 @@ export class DexTokenSummaryService {
                       'swap_ae_for_exact_tokens'
                     )
                 `,
-                [pair.address, startDate.toDate(), pos, tokenPrice],
+                [pair.address, startDate.toDate(), pos, currentPrice],
               );
             } else {
               // If we can't find a price, skip this pair
@@ -326,11 +314,6 @@ export class DexTokenSummaryService {
 
         const periodVolumePriceData =
           await this.aePricingService.getPriceData(periodVolumeAE);
-
-        // Price change approximation: compare current routed price vs earliest price in period from any WAE pair if present
-        const currentPrice = await this.dexTokenService
-          .getTokenPriceWithLiquidityAnalysis(tokenAddress, DEX_CONTRACTS.wae)
-          .then((analysis) => analysis?.medianPrice);
 
         let startPrice: string | null = null;
         // Prefer WAE pairs for historical start price

@@ -57,10 +57,6 @@ export class CoinGeckoService {
   rates: CurrencyRates | null = null;
   last_pull_time: Moment;
   private ratesPullInFlight: Promise<void> | null = null;
-  private marketDataInFlight = new Map<
-    string,
-    Promise<CoinGeckoMarketResponse>
-  >();
   private readonly marketCacheKeyPrefix = 'coingecko:market:v1';
 
   constructor(

@@ -51,7 +51,7 @@ export class PostService {
 
   async onModuleInit(): Promise<void> {
     this.logger.log('PostService module initialized successfully');
-    this.sync();
+    setTimeout(() => this.sync(), 10_000);
   }
 
   async sync() {
@@ -173,14 +173,14 @@ export class PostService {
     }
   }
 
-  async pullLatestPosts(contract: IPostContract): Promise<any[]> {
+  async pullLatestPosts(contract: IPostContract): Promise<number> {
     const processingKey = `contract_${contract.contractAddress}`;
 
     if (this.isProcessing.get(processingKey)) {
       this.logger.warn(
         `Contract ${contract.contractAddress} already being processed, skipping...`,
       );
-      return [];
+      return 0;
     }
 
     this.isProcessing.set(processingKey, true);
@@ -202,13 +202,13 @@ export class PostService {
 
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-      const posts = await this.loadPostsFromMdw(url, contract);
+      const count = await this.loadPostsFromMdw(url, contract);
 
       this.logger.log(
-        `Successfully pulled ${posts.length} posts for contract ${contract.contractAddress}`,
+        `Successfully pulled ${count} posts for contract ${contract.contractAddress}`,
       );
 
-      return posts;
+      return count;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -230,98 +230,101 @@ export class PostService {
   async loadPostsFromMdw(
     url: string,
     contract: IPostContract,
-    posts: any[] = [],
-    totalRetries = 0,
-  ): Promise<any[]> {
-    let result: IMiddlewareResponse;
+  ): Promise<number> {
+    let nextUrl: string | null = url;
+    let totalCount = 0;
 
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
-        const nextRetry = totalRetries + 1;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
+    while (nextUrl) {
+      let result: IMiddlewareResponse;
+      let retries = 0;
 
-        this.logger.warn(
-          `Middleware request failed, retrying (${nextRetry}/${MAX_RETRIES_WHEN_REQUEST_FAILED})`,
-          {
-            url,
-            error: errorMessage,
-            retryIn: WAIT_TIME_WHEN_REQUEST_FAILED,
-          },
-        );
+      while (true) {
+        try {
+          result = await fetchJson(nextUrl);
+          break;
+        } catch (error) {
+          if (retries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
+            retries++;
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
 
-        await new Promise((resolve) =>
-          setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
-        );
-        return this.loadPostsFromMdw(url, contract, posts, nextRetry);
-      }
+            this.logger.warn(
+              `Middleware request failed, retrying (${retries}/${MAX_RETRIES_WHEN_REQUEST_FAILED})`,
+              {
+                url: nextUrl,
+                error: errorMessage,
+                retryIn: WAIT_TIME_WHEN_REQUEST_FAILED,
+              },
+            );
 
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : undefined;
+            await new Promise((resolve) =>
+              setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+            );
+            continue;
+          }
 
-      this.logger.error(
-        'Failed to load posts from middleware after all retries',
-        {
-          url,
-          error: errorMessage,
-          stack: errorStack,
-          totalRetries,
-        },
-      );
-      return posts;
-    }
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          const errorStack = error instanceof Error ? error.stack : undefined;
 
-    if (!result?.data?.length) {
-      this.logger.debug('No data received from middleware', { url });
-      return posts;
-    }
-
-    // Process transactions sequentially to handle parent-child dependencies
-    // This ensures parent posts are created before their comments
-    const successfulPosts: any[] = [];
-    let failedCount = 0;
-
-    for (const transaction of result.data) {
-      try {
-        const camelCasedTransaction = camelcaseKeysDeep(
-          transaction,
-        ) as ITransaction;
-        const post = await this.savePostFromTransaction(
-          camelCasedTransaction,
-          contract,
-        );
-        if (post) {
-          successfulPosts.push(post);
+          this.logger.error(
+            'Failed to load posts from middleware after all retries',
+            {
+              url: nextUrl,
+              error: errorMessage,
+              stack: errorStack,
+              totalRetries: retries,
+            },
+          );
+          return totalCount;
         }
-      } catch (error) {
-        failedCount++;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        this.logger.warn('Failed to process individual transaction', {
-          txHash: transaction?.hash,
-          error: errorMessage,
-        });
       }
+
+      if (!result?.data?.length) {
+        this.logger.debug('No data received from middleware', { url: nextUrl });
+        return totalCount;
+      }
+
+      let failedCount = 0;
+      let pageCount = 0;
+
+      for (const transaction of result.data) {
+        try {
+          const camelCasedTransaction = camelcaseKeysDeep(
+            transaction,
+          ) as ITransaction;
+          const post = await this.savePostFromTransaction(
+            camelCasedTransaction,
+            contract,
+          );
+          if (post) {
+            pageCount++;
+          }
+        } catch (error) {
+          failedCount++;
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.warn('Failed to process individual transaction', {
+            txHash: transaction?.hash,
+            error: errorMessage,
+          });
+        }
+      }
+
+      totalCount += pageCount;
+
+      if (failedCount > 0) {
+        this.logger.warn(
+          `${failedCount} transactions failed to process in this batch`,
+        );
+      }
+
+      nextUrl = result.next
+        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
+        : null;
     }
 
-    posts.push(...successfulPosts);
-
-    if (failedCount > 0) {
-      this.logger.warn(
-        `${failedCount} transactions failed to process in this batch`,
-      );
-    }
-
-    // Continue with pagination if available
-    if (result.next) {
-      const nextUrl = `${ACTIVE_NETWORK.middlewareUrl}${result.next}`;
-      return this.loadPostsFromMdw(nextUrl, contract, posts, 0);
-    }
-
-    return posts;
+    return totalCount;
   }
 
   // 1
@@ -862,53 +865,65 @@ export class PostService {
     try {
       this.logger.log('Starting orphaned comments cleanup...');
 
-      // Find comments that have a post_id but the parent post doesn't exist
-      const orphanedComments = await this.postRepository
-        .createQueryBuilder('comment')
-        .leftJoin('posts', 'parent', 'parent.id = comment.post_id')
-        .where('comment.post_id IS NOT NULL')
-        .andWhere('parent.id IS NULL')
-        .getMany();
-
-      if (orphanedComments.length === 0) {
-        this.logger.log('No orphaned comments found');
-        return;
-      }
-
-      this.logger.log(`Found ${orphanedComments.length} orphaned comments`);
-
       let fixedCount = 0;
-      for (const comment of orphanedComments) {
-        try {
-          // Check if parent post now exists
-          const parentExists = await this.validateParentPost(
-            comment.post_id,
-            1,
-            0,
-          );
-          if (parentExists) {
-            // Update comment count for the parent
-            await this.updatePostCommentCount(comment.post_id);
-            fixedCount++;
-          } else {
-            // If parent still doesn't exist, remove the post_id to make it a regular post
-            await this.postRepository.update(comment.id, { post_id: null });
-            this.logger.warn('Converted orphaned comment to regular post', {
+      let batchNumber = 0;
+
+      while (true) {
+        const orphanedComments = await this.postRepository
+          .createQueryBuilder('comment')
+          .leftJoin('posts', 'parent', 'parent.id = comment.post_id')
+          .where('comment.post_id IS NOT NULL')
+          .andWhere('parent.id IS NULL')
+          .take(500)
+          .getMany();
+
+        if (orphanedComments.length === 0) {
+          break;
+        }
+
+        batchNumber++;
+        this.logger.log(
+          `Orphan cleanup batch ${batchNumber}: processing ${orphanedComments.length} comments`,
+        );
+
+        let batchProgress = 0;
+        for (const comment of orphanedComments) {
+          try {
+            const parentExists = await this.validateParentPost(
+              comment.post_id,
+              1,
+              0,
+            );
+            if (parentExists) {
+              await this.updatePostCommentCount(comment.post_id);
+              fixedCount++;
+            } else {
+              await this.postRepository.update(comment.id, { post_id: null });
+              this.logger.warn('Converted orphaned comment to regular post', {
+                commentId: comment.id,
+                originalParentId: comment.post_id,
+              });
+            }
+            batchProgress++;
+          } catch (error) {
+            this.logger.error('Failed to fix orphaned comment', {
               commentId: comment.id,
-              originalParentId: comment.post_id,
+              parentId: comment.post_id,
+              error: error instanceof Error ? error.message : String(error),
             });
           }
-        } catch (error) {
-          this.logger.error('Failed to fix orphaned comment', {
-            commentId: comment.id,
-            parentId: comment.post_id,
-            error: error instanceof Error ? error.message : String(error),
-          });
+        }
+
+        if (batchProgress === 0) {
+          this.logger.error(
+            `Orphan cleanup batch ${batchNumber}: no progress (all ${orphanedComments.length} comments failed), aborting to prevent infinite loop`,
+          );
+          break;
         }
       }
 
       this.logger.log(
-        `Orphaned comments cleanup completed: ${fixedCount} fixed`,
+        `Orphaned comments cleanup completed: ${fixedCount} fixed across ${batchNumber} batch(es)`,
       );
     } catch (error) {
       this.logger.error('Failed to run orphaned comments cleanup', {
