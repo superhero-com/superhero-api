@@ -78,22 +78,25 @@ export class AccountTokensController {
         page,
         limit,
       });
-      // get the token holders for each token
-      const tokenHoldersQueryBuilder =
-        await this.tokenHolderRepository.createQueryBuilder('token_holder');
-      tokenHoldersQueryBuilder.where('token_holder.address = :address', {
-        address: owner_address || creator_address,
-      });
-
-      const tokenIds = tokensQueryResult.items
-        .map((holder) => holder.address)
-        .filter((address): address is string => address !== undefined);
+      const tokenAddresses = tokensQueryResult.items
+        .map((t) => t.address)
+        .filter((addr): addr is string => addr !== undefined);
 
       const tokenRanks = await this.tokensService.getTokenRanksByAex9Address(
-        tokenIds as any,
+        tokenAddresses as any,
       );
 
-      const holdings = await tokenHoldersQueryBuilder.getMany();
+      const holdings = tokenAddresses.length
+        ? await this.tokenHolderRepository
+            .createQueryBuilder('token_holder')
+            .where('token_holder.address = :address', {
+              address: owner_address || creator_address,
+            })
+            .andWhere('token_holder.aex9_address IN (:...tokenAddresses)', {
+              tokenAddresses,
+            })
+            .getMany()
+        : [];
       return {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
