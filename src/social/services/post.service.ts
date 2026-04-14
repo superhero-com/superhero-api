@@ -51,7 +51,7 @@ export class PostService {
 
   async onModuleInit(): Promise<void> {
     this.logger.log('PostService module initialized successfully');
-    this.sync();
+    setTimeout(() => this.sync(), 10_000);
   }
 
   async sync() {

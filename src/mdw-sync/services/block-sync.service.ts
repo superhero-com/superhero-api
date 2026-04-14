@@ -10,7 +10,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Between, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { Tx } from '../entities/tx.entity';
@@ -309,12 +309,31 @@ export class BlockSyncService {
           conflictPaths: ['hash'],
         });
 
-        // Pass the already-complete partials to plugins instead of
-        // re-loading full entities from DB (avoids doubling heap per batch).
-        const asTxEntities = batch.filter((tx) => tx.hash) as Tx[];
-        if (asTxEntities.length > 0) {
+        const batchHashes = batch
+          .map((tx) => tx.hash)
+          .filter(Boolean) as string[];
+
+        if (batchHashes.length > 0) {
+          const existing = await this.txRepository.find({
+            select: ['hash', 'logs', 'data'],
+            where: { hash: In(batchHashes) },
+          });
+          const pluginDataByHash = new Map(
+            existing.map((t) => [t.hash, { logs: t.logs, data: t.data }]),
+          );
+
+          for (const tx of batch) {
+            if (tx.hash) {
+              const dbFields = pluginDataByHash.get(tx.hash);
+              if (dbFields) {
+                tx.logs = dbFields.logs;
+                tx.data = dbFields.data;
+              }
+            }
+          }
+
           await this.pluginBatchProcessor.processBatch(
-            asTxEntities,
+            batch.filter((tx) => tx.hash) as Tx[],
             SyncDirectionEnum.Backward,
           );
         }
