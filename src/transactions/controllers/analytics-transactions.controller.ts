@@ -205,50 +205,53 @@ export class AnalyticsTransactionsController {
       token_sale_addresses = [token_sale_addresses];
     }
 
-    const startDate = start_date ? new Date(start_date) : new Date();
-    const endDate = end_date ? new Date(end_date) : new Date();
-    const dateRange = [];
-    const currentDate = new Date(startDate);
-    while (currentDate <= endDate) {
-      dateRange.push(new Date(currentDate));
-      currentDate.setDate(currentDate.getDate() + 1);
+    const endDate = end_date ? moment(end_date) : moment();
+    let startDate = start_date ? moment(start_date) : moment();
+
+    const maxDays = 365;
+    if (endDate.diff(startDate, 'days') > maxDays) {
+      startDate = endDate.clone().subtract(maxDays, 'days');
     }
 
-    const results = await Promise.all(
-      dateRange.map((date) =>
-        this.getMarketCapSum(date.toISOString().split('T')[0]),
-      ),
-    );
+    const dates: string[] = [];
+    const current = startDate.clone();
+    while (current.isSameOrBefore(endDate, 'day')) {
+      dates.push(current.format('YYYY-MM-DD'));
+      current.add(1, 'day');
+    }
+
+    const batchSize = 20;
+    const results: DailyMarketCapSumDto[] = [];
+    for (let i = 0; i < dates.length; i += batchSize) {
+      const batch = dates.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map((date) => this.getMarketCapSum(date)),
+      );
+      results.push(...batchResults);
+    }
 
     return results.sort((a, b) => a.date.localeCompare(b.date));
   }
 
-  private async getMarketCapSum(date: string) {
-    const $date = moment(date);
-    const smartTransactionQuery = this.transactionsRepository
-      .createQueryBuilder('transaction')
-      .select(
-        'DISTINCT ON (transaction.sale_address) transaction.sale_address',
-        'sale_address',
-      )
-      .addSelect("transaction.market_cap->>'ae'", 'market_cap')
-      .where("transaction.market_cap->>'ae' IS NOT NULL")
-      .andWhere('transaction.created_at <= :start_date', {
-        start_date: $date.toDate(),
-      })
-      .orderBy('transaction.sale_address')
-      .addOrderBy('transaction.created_at', 'DESC');
-    const smartTokens = await smartTransactionQuery.getRawMany();
+  private async getMarketCapSum(date: string): Promise<DailyMarketCapSumDto> {
+    const endOfDay = moment(date).endOf('day').toDate();
 
-    // Calculate total market cap sum
-    const totalMarketCapSum = smartTokens.reduce((sum, token) => {
-      const marketCap = parseFloat(token.market_cap);
-      return sum + (isNaN(marketCap) ? 0 : marketCap);
-    }, 0);
+    const [result] = await this.transactionsRepository.query(
+      `SELECT COALESCE(SUM(cap.market_cap), 0) AS total
+       FROM (
+         SELECT DISTINCT ON (sale_address)
+           CAST(NULLIF(market_cap->>'ae', 'NaN') AS decimal) AS market_cap
+         FROM transactions
+         WHERE market_cap->>'ae' IS NOT NULL
+           AND created_at <= $1
+         ORDER BY sale_address, created_at DESC
+       ) cap`,
+      [endOfDay],
+    );
 
     return {
-      date: $date.format('YYYY-MM-DD'),
-      sum: totalMarketCapSum,
+      date,
+      sum: parseFloat(result.total) || 0,
     } as any;
   }
 }
