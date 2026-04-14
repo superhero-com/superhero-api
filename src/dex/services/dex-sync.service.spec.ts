@@ -9,15 +9,35 @@ describe('DexSyncService', () => {
       update: jest.fn(),
       find: jest.fn(),
     } as any;
+    const pairQueryBuilder = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      getMany: jest.fn(),
+    };
     const dexPairRepository = {
       findOne: jest.fn(),
       save: jest.fn(),
-      createQueryBuilder: jest.fn(),
+      createQueryBuilder: jest.fn().mockReturnValue(pairQueryBuilder),
       find: jest.fn(),
     } as any;
     const dexPairTransactionRepository = {
       upsert: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn(),
+    } as any;
+    const dexTokenService = {
+      getAllPairsWithTokens: jest.fn(),
+      getTokenPriceWithLiquidityAnalysis: jest.fn(),
+    } as any;
+    const pairSummaryService = {
+      createOrUpdateSummary: jest.fn(),
+    } as any;
+    const tokenSummaryService = {
+      createOrUpdateSummary: jest.fn(),
+    } as any;
+    const aePricingService = {
+      getPriceData: jest.fn(),
     } as any;
 
     const service = new DexSyncService(
@@ -26,14 +46,24 @@ describe('DexSyncService', () => {
       dexPairTransactionRepository,
       { sdk: {} } as any,
       { findByAddress: jest.fn(), pullPairData: jest.fn() } as any,
+      dexTokenService,
+      pairSummaryService,
       {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
+      aePricingService,
+      tokenSummaryService,
     );
 
-    return { service, dexPairTransactionRepository };
+    return {
+      service,
+      dexTokenRepository,
+      dexPairRepository,
+      dexPairTransactionRepository,
+      dexTokenService,
+      pairQueryBuilder,
+      pairSummaryService,
+      tokenSummaryService,
+      aePricingService,
+    };
   };
 
   it('falls back to factory decode when router decode returns empty array', async () => {
@@ -93,5 +123,55 @@ describe('DexSyncService', () => {
       where: { tx_hash: 'th_1' },
       relations: { pair: true },
     });
+  });
+
+  it('reuses one pair snapshot and shared price cache during syncTokenPrices', async () => {
+    const {
+      service,
+      dexTokenRepository,
+      dexTokenService,
+      pairQueryBuilder,
+      tokenSummaryService,
+      aePricingService,
+    } = setup();
+    const allPairs = [{ address: 'ct_pair_a' }] as any;
+    const tokens = [{ address: 'ct_token_a' }, { address: 'ct_token_b' }];
+
+    dexTokenRepository.find
+      .mockResolvedValueOnce(tokens)
+      .mockResolvedValueOnce([]);
+    dexTokenService.getAllPairsWithTokens.mockResolvedValue(allPairs);
+    dexTokenService.getTokenPriceWithLiquidityAnalysis.mockResolvedValue({
+      medianPrice: '1.5',
+    });
+    aePricingService.getPriceData.mockResolvedValue({ ae: '1.5' });
+    tokenSummaryService.createOrUpdateSummary.mockResolvedValue(undefined);
+    pairQueryBuilder.getMany.mockResolvedValue([]);
+
+    await service.syncTokenPrices();
+
+    expect(dexTokenService.getAllPairsWithTokens).toHaveBeenCalledTimes(1);
+    expect(
+      dexTokenService.getTokenPriceWithLiquidityAnalysis,
+    ).toHaveBeenNthCalledWith(1, 'ct_token_a', expect.any(String), {
+      allPairs,
+    });
+    expect(
+      dexTokenService.getTokenPriceWithLiquidityAnalysis,
+    ).toHaveBeenNthCalledWith(2, 'ct_token_b', expect.any(String), {
+      allPairs,
+    });
+
+    const [firstToken, firstOptions] =
+      tokenSummaryService.createOrUpdateSummary.mock.calls[0];
+    const [secondToken, secondOptions] =
+      tokenSummaryService.createOrUpdateSummary.mock.calls[1];
+
+    expect(firstToken).toBe('ct_token_a');
+    expect(secondToken).toBe('ct_token_b');
+    expect(firstOptions.allPairs).toBe(allPairs);
+    expect(secondOptions.allPairs).toBe(allPairs);
+    expect(firstOptions.priceCache).toBe(secondOptions.priceCache);
+    expect(firstOptions.priceCache).toBeInstanceOf(Map);
   });
 });
