@@ -174,7 +174,7 @@ export class DexSyncService {
       const result = await fetchJson(nextUrl);
       const data = result?.data ?? [];
       for (const rawTransaction of data) {
-        const transaction = camelcaseKeysDeep(rawTransaction) as ITransaction;
+        const transaction: any = camelcaseKeysDeep(rawTransaction);
         if (
           transaction.tx.result !== 'ok' ||
           transaction.tx.return == 'invalid' ||
