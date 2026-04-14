@@ -198,20 +198,16 @@ export class TokensController {
     }
 
     if (owner_address) {
-      const ownedTokens = await this.tokenHolderRepository
-        .createQueryBuilder('token_holder')
-        .where('token_holder.address = :owner_address', { owner_address })
-        .andWhere('token_holder.balance > 0')
-        .select('token_holder."aex9_address"')
-        .distinct(true)
-        .getRawMany()
-        .then((res) => res.map((r) => r.aex9_address));
-
-      // queryBuilder.andWhereInIds(ownedTokens);
-
-      queryBuilder.andWhere('token.address IN (:...aex9_addresses)', {
-        aex9_addresses: ownedTokens,
-      });
+      queryBuilder.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM token_holder
+          WHERE token_holder.aex9_address = token.address
+            AND token_holder.address = :owner_address
+            AND token_holder.balance > 0
+        )`,
+        { owner_address },
+      );
     }
 
     const result = await this.tokensService.queryTokensWithRanks(
@@ -240,7 +236,7 @@ export class TokensController {
     description: 'Token address or name',
   })
   @Get(':address/trending-eligibility')
-  @CacheTTL(3)
+  @CacheTTL(3_000)
   async getTrendingEligibility(@Param('address') address: string) {
     return this.tokensService.getTrendingEligibilityBreakdown(address);
   }
@@ -252,7 +248,7 @@ export class TokensController {
     description: 'Token address or name',
   })
   @Get(':address')
-  @CacheTTL(3)
+  @CacheTTL(3_000)
   @ApiResponse({
     type: TokenDto,
   })
@@ -271,7 +267,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenHolders' })
   @ApiOkResponsePaginated(TokenHolderDto)
-  @CacheTTL(10)
+  @CacheTTL(10_000)
   @Get(':address/holders')
   async listTokenHolders(
     @Param('address') address: string,
@@ -327,7 +323,7 @@ export class TokensController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({ operationId: 'listTokenRankings' })
   @ApiOkResponsePaginated(TokenDto)
-  @CacheTTL(10)
+  @CacheTTL(10_000)
   @Get(':address/rankings')
   async listTokenRankings(
     @Param('address') address: string,
@@ -412,7 +408,7 @@ export class TokensController {
     description: 'Token address or name',
   })
   @ApiOperation({ operationId: 'getTokenScore' })
-  @CacheTTL(1)
+  @CacheTTL(1_000)
   @Get(':address/score')
   async getTokenScore(@Param('address') address: string): Promise<any> {
     const token = await this.tokensService.findByAddress(address);

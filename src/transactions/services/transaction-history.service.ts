@@ -1,6 +1,6 @@
 import { TX_FUNCTIONS } from '@/configs';
 import { Token } from '@/tokens/entities/token.entity';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import type { Moment } from 'moment';
@@ -41,6 +41,8 @@ export interface ITransactionPreview {
 
 @Injectable()
 export class TransactionHistoryService {
+  private readonly logger = new Logger(TransactionHistoryService.name);
+
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
@@ -165,6 +167,8 @@ export class TransactionHistoryService {
     });
   }
 
+  private static readonly MAX_HISTORICAL_ROWS = 50_000;
+
   async getHistoricalData(
     props: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
@@ -182,7 +186,14 @@ export class TransactionHistoryService {
         endDate: endDate.toDate(),
       })
       .orderBy('transactions.created_at', 'ASC')
+      .take(TransactionHistoryService.MAX_HISTORICAL_ROWS)
       .getMany();
+
+    if (data.length >= TransactionHistoryService.MAX_HISTORICAL_ROWS) {
+      this.logger.warn(
+        `Historical data for ${props.token.sale_address} truncated at ${TransactionHistoryService.MAX_HISTORICAL_ROWS} rows`,
+      );
+    }
 
     const firstBefore =
       props.mode === 'aggregated'
@@ -215,23 +226,41 @@ export class TransactionHistoryService {
   ): HistoricalDataDto[] {
     const { startDate, endDate, interval } = props;
 
+    // Pre-filter invalid records once (data is already sorted by created_at ASC)
+    const validData = data.filter(
+      (record) =>
+        record?.buy_price?.ae && (record?.buy_price?.ae as any) != 'NaN',
+    );
+
     const result: HistoricalDataDto[] = [];
     let intervalStart = startDate.toDate().getTime();
     const endTimestamp = endDate.toDate().getTime();
     const intervalDuration = interval * 1000;
-    // const intervalDuration = this.getIntervalDuration(interval);
 
     let previousData: Transaction | undefined = initialPreviousData;
+    let pointer = 0;
 
     while (intervalStart < endTimestamp) {
       const intervalEnd = intervalStart + intervalDuration;
-      const intervalData = data.filter((record) => {
-        if (!record?.buy_price?.ae || (record?.buy_price?.ae as any) == 'NaN') {
-          return false;
-        }
-        const recordTime = record.created_at.getTime();
-        return recordTime >= intervalStart && recordTime < intervalEnd;
-      });
+
+      // Advance pointer past records before the current interval
+      while (
+        pointer < validData.length &&
+        validData[pointer].created_at.getTime() < intervalStart
+      ) {
+        pointer++;
+      }
+
+      // Collect records within [intervalStart, intervalEnd)
+      const intervalData: Transaction[] = [];
+      let scan = pointer;
+      while (
+        scan < validData.length &&
+        validData[scan].created_at.getTime() < intervalEnd
+      ) {
+        intervalData.push(validData[scan]);
+        scan++;
+      }
 
       if (intervalData.length) {
         const aggregatedData = this.aggregateIntervalData(
@@ -253,9 +282,6 @@ export class TransactionHistoryService {
             props,
           ),
         );
-      } else {
-        // Handle the case where there's no previous data and no interval data.
-        // For example, set a default value or continue.
       }
 
       intervalStart = intervalEnd;
@@ -268,7 +294,6 @@ export class TransactionHistoryService {
       }
       return item;
     });
-    // return result;
   }
 
   private aggregateIntervalData(

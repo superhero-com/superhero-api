@@ -18,7 +18,7 @@ jest.mock('ws', () => {
     send: jest.fn(),
     close: jest.fn(),
     on: jest.fn(),
-    removeEventListener: jest.fn(),
+    removeAllListeners: jest.fn(),
     ping: jest.fn(),
     readyState: 1, // Simulate an "open" WebSocket
   }));
@@ -40,7 +40,7 @@ describe('WebSocketService', () => {
       send: jest.fn(),
       close: jest.fn(),
       ping: jest.fn(),
-      removeEventListener: jest.fn(),
+      removeAllListeners: jest.fn(),
       on: jest.fn((event, callback) => {
         eventListeners[event] = callback;
       }),

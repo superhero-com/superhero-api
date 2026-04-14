@@ -171,7 +171,7 @@ export class AccountsController {
   })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
-  @CacheTTL(60 * 10) // 10 minutes
+  @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
     //
@@ -214,7 +214,7 @@ export class AccountsController {
   })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
-  @CacheTTL(60 * 10)
+  @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/tokens/history')
   async getTokensPnlHistory(
     @Param('address') address: string,
@@ -269,7 +269,7 @@ export class AccountsController {
   })
   @Header('Content-Type', 'image/svg+xml')
   @Header('Content-Disposition', 'inline; filename="pnl-chart.svg"')
-  @CacheTTL(60 * 10)
+  @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/pnl-chart.svg')
   async getPortfolioPnlChart(
     @Param('address') address: string,
@@ -317,7 +317,7 @@ export class AccountsController {
   @ApiOperation({ operationId: 'getPortfolioStats' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: TradingStatsResponseDto })
-  @CacheTTL(60 * 10) // 10 minutes
+  @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/stats')
   async getPortfolioStats(
     @Param('address') address: string,
@@ -350,7 +350,7 @@ export class AccountsController {
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
-  @CacheTTL(60 * 10) // 10 minutes cache
+  @CacheTTL(10 * 60_000)
   @Get(':address')
   async getAccount(@Param('address') address: string) {
     const account = await this.accountRepository.findOne({

@@ -203,6 +203,19 @@ describe('TokensController', () => {
     );
   });
 
+  it('should filter owner holdings with EXISTS instead of a distinct IN subquery', async () => {
+    await controller.listAll(undefined, undefined, undefined, 'ak_owner');
+
+    expect(tokensQueryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('EXISTS ('),
+      { owner_address: 'ak_owner' },
+    );
+    expect(tokensQueryBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('token_holder.aex9_address = token.address'),
+      { owner_address: 'ak_owner' },
+    );
+  });
+
   it('should apply eligibility filters only for trending score ordering', async () => {
     await controller.listAll(
       undefined,

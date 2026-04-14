@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import {
   ACTIVE_NETWORK,
@@ -26,12 +26,16 @@ type PingI = {
 };
 
 @Injectable()
-export class WebSocketService {
+export class WebSocketService implements OnModuleDestroy {
   private readonly logger = new Logger(WebSocketService.name);
   wsClient: WebSocket;
   subscribersQueue: IMiddlewareWebSocketSubscriptionMessage[] = [];
   isWsConnected = false;
   reconnectInterval: NodeJS.Timeout;
+
+  private readonly boundOpen = this.handleWebsocketOpen.bind(this);
+  private readonly boundClose = this.handleWebsocketClose.bind(this);
+  private readonly boundMessage = this.handleWebsocketMessage.bind(this);
 
   pings = [];
 
@@ -251,12 +255,10 @@ export class WebSocketService {
           );
         });
       });
+      this.wsClient.removeAllListeners();
       this.wsClient.close();
-      this.wsClient.removeEventListener('open', this.handleWebsocketOpen);
-      this.wsClient.removeEventListener('close', this.handleWebsocketClose);
-      this.wsClient.removeEventListener('message', this.handleWebsocketClose);
     } catch (error) {
-      //
+      this.logger.debug('disconnect error (safe to ignore)', error);
     }
   }
 
@@ -266,10 +268,10 @@ export class WebSocketService {
     }
 
     this.wsClient = new WebSocket(url);
-    this.wsClient.on('error', console.error);
-    this.wsClient.on('open', this.handleWebsocketOpen.bind(this));
-    this.wsClient.on('close', this.handleWebsocketClose.bind(this));
-    this.wsClient.on('message', this.handleWebsocketMessage.bind(this));
+    this.wsClient.on('error', (err) => this.logger.error('ws error', err));
+    this.wsClient.on('open', this.boundOpen);
+    this.wsClient.on('close', this.boundClose);
+    this.wsClient.on('message', this.boundMessage);
     this.wsClient.on('pong', (data: any) => {
       const parsedData = JSON.parse(data.toString());
       const pingData = parsedData.payload;
@@ -278,14 +280,11 @@ export class WebSocketService {
     this.pings = [];
   }
 
-  /**
-   * Forces a reconnection to the WebSocket server.
-   * This method disconnects the current WebSocket connection,
-   * waits for 1 second to ensure complete disconnection,
-   * and then reconnects to the server.
-   *
-   * @returns {Promise<void>}
-   */
+  onModuleDestroy() {
+    clearInterval(this.reconnectInterval);
+    this.disconnect();
+  }
+
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async forceReconnect() {
     this.logger.log('forceReconnect');
