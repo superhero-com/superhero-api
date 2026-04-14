@@ -5,7 +5,6 @@ import {
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs/constants';
 import { ACTIVE_NETWORK } from '@/configs/network';
-import { Token } from '@/tokens/entities/token.entity';
 import {
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
@@ -14,7 +13,6 @@ import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { SyncState } from '@/mdw-sync/entities/sync-state.entity';
 import { fetchJson } from '@/utils/common';
-import { ICommunityFactorySchema } from '@/utils/types';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -91,7 +89,7 @@ export class FastPullTokensService {
       }).toString();
 
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
-      await this.loadCreatedCommunityFromMdw(url, factory);
+      await this.loadCreatedCommunityFromMdw(url);
     } finally {
       this.isPullingLatestCreatedTokens = false;
     }
@@ -122,7 +120,7 @@ export class FastPullTokensService {
       }).toString();
       const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
 
-      await this.loadCreatedCommunityFromMdw(url, factory);
+      await this.loadCreatedCommunityFromMdw(url);
     } catch (error: any) {
       this.logger.error(
         `FastPullTokensService->fastPullTokens: ${error.message}`,
@@ -133,72 +131,60 @@ export class FastPullTokensService {
     this.pullingTokens = false;
   }
 
-  /**
-   * @param url
-   * @param factory
-   * @param saleAddresses
-   * @returns
-   */
-  private async loadCreatedCommunityFromMdw(
-    url: string,
-    factory: ICommunityFactorySchema,
-    tokens: Token[] = [],
-    totalRetries = 0,
-  ): Promise<Token[]> {
-    this.logger.log('loadCreatedCommunityFromMdw->url::', url);
-    let result: any;
-    try {
-      result = await fetchJson(url);
-    } catch (error) {
-      if (totalRetries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
-        totalRetries++;
-        await new Promise((resolve) =>
-          setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
-        );
-        return this.loadCreatedCommunityFromMdw(
-          url,
-          factory,
-          tokens,
-          totalRetries,
-        );
-      }
-      this.logger.error('loadCreatedCommunityFromMdw->error::', error);
-      return tokens;
-    }
+  private async loadCreatedCommunityFromMdw(url: string): Promise<void> {
+    let nextUrl: string | null = url;
 
-    if (result?.data?.length) {
-      for (const transaction of result.data) {
+    while (nextUrl) {
+      this.logger.log('loadCreatedCommunityFromMdw->url::', nextUrl);
+
+      let result: any;
+      let retries = 0;
+      while (true) {
         try {
-          const token =
-            await this.tokensService.createTokenFromRawTransaction(transaction);
-          if (!token) {
-            continue;
+          result = await fetchJson(nextUrl);
+          break;
+        } catch (error) {
+          if (retries < MAX_RETRIES_WHEN_REQUEST_FAILED) {
+            retries++;
+            await new Promise((resolve) =>
+              setTimeout(resolve, WAIT_TIME_WHEN_REQUEST_FAILED),
+            );
+          } else {
+            this.logger.error('loadCreatedCommunityFromMdw->error::', error);
+            return;
           }
-          await this.transactionService.saveTransaction(
-            camelcaseKeysDeep(transaction),
-            token,
-          );
-          tokens.push(token);
-        } catch (error: any) {
-          this.logger.error(
-            `loadCreatedCommunityFromMdw->error:: for tx: ${transaction?.tx?.hash}`,
-            error?.message,
-            error?.stack,
-          );
         }
       }
-    } else {
-      this.logger.log('loadCreatedCommunityFromMdw->no data::', url);
-    }
 
-    if (result.next) {
-      return await this.loadCreatedCommunityFromMdw(
-        `${ACTIVE_NETWORK.middlewareUrl}${result.next}`,
-        factory,
-        tokens,
-        0,
-      );
+      if (result?.data?.length) {
+        for (const transaction of result.data) {
+          try {
+            const token =
+              await this.tokensService.createTokenFromRawTransaction(
+                transaction,
+              );
+            if (!token) {
+              continue;
+            }
+            await this.transactionService.saveTransaction(
+              camelcaseKeysDeep(transaction),
+              token,
+            );
+          } catch (error: any) {
+            this.logger.error(
+              `loadCreatedCommunityFromMdw->error:: for tx: ${transaction?.tx?.hash}`,
+              error?.message,
+              error?.stack,
+            );
+          }
+        }
+      } else {
+        this.logger.log('loadCreatedCommunityFromMdw->no data::', nextUrl);
+      }
+
+      nextUrl = result.next
+        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
+        : null;
     }
-    return tokens;
   }
 }
