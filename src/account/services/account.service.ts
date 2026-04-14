@@ -1,4 +1,4 @@
-import { TX_FUNCTIONS, ACTIVE_NETWORK } from '@/configs';
+import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { PULL_ACCOUNTS_ENABLED } from '@/configs/constants';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Injectable, Logger } from '@nestjs/common';
@@ -29,6 +29,8 @@ export class AccountService {
     }
   }
 
+  private static readonly ACCOUNT_BATCH_SIZE = 500;
+
   isPullingAccounts = false;
   async saveAllActiveAccounts() {
     if (this.isPullingAccounts) {
@@ -36,61 +38,49 @@ export class AccountService {
     }
     this.isPullingAccounts = true;
     try {
-      const uniqueAddresses = await this.transactionRepository
-        .createQueryBuilder('transaction')
-        .select(
-          'DISTINCT ON (transaction.address) transaction.address',
-          'address',
-        )
-        .getRawMany();
+      const aggregated: Array<{
+        address: string;
+        total_tx_count: number;
+        total_buy_tx_count: number;
+        total_sell_tx_count: number;
+        total_created_tokens: number;
+        total_volume: string;
+      }> = await this.transactionRepository.query(
+        `SELECT
+          address,
+          COUNT(*)::int                                    AS total_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $1)::int        AS total_buy_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $2)::int        AS total_sell_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $3)::int        AS total_created_tokens,
+          COALESCE(SUM(CAST(NULLIF(amount->>'ae','NaN') AS DECIMAL)), 0) AS total_volume
+        FROM transactions
+        GROUP BY address`,
+        [TX_FUNCTIONS.buy, TX_FUNCTIONS.sell, TX_FUNCTIONS.create_community],
+      );
 
-      for (const address of uniqueAddresses) {
-        const accountExists = await this.accountRepository.exists({
-          where: { address: address.address },
-        });
+      for (
+        let i = 0;
+        i < aggregated.length;
+        i += AccountService.ACCOUNT_BATCH_SIZE
+      ) {
+        const batch = aggregated
+          .slice(i, i + AccountService.ACCOUNT_BATCH_SIZE)
+          .map((row) => ({
+            address: row.address,
+            total_tx_count: row.total_tx_count,
+            total_buy_tx_count: row.total_buy_tx_count,
+            total_sell_tx_count: row.total_sell_tx_count,
+            total_created_tokens: row.total_created_tokens,
+            total_volume: new BigNumber(row.total_volume),
+          }));
 
-        if (accountExists) {
-          continue;
-        }
-
-        const totalTransactions = await this.transactionRepository.count({
-          where: { address: address.address },
-        });
-        const totalBuyTransactions = await this.transactionRepository.count({
-          where: { address: address.address, tx_type: TX_FUNCTIONS.buy },
-        });
-        const totalSellTransactions = await this.transactionRepository.count({
-          where: { address: address.address, tx_type: TX_FUNCTIONS.sell },
-        });
-        const totalCreatedTokens = await this.transactionRepository.count({
-          where: {
-            address: address.address,
-            tx_type: TX_FUNCTIONS.create_community,
-          },
-        });
-
-        // total volume sum of amount->ae
-        const totalVolume = await this.transactionRepository
-          .createQueryBuilder('transactions')
-          .select(
-            "SUM(CAST(NULLIF(transactions.amount->>'ae', 'NaN') AS DECIMAL))",
-            'total_volume',
-          )
-          .where('transactions.address = :address', {
-            address: address.address,
-          })
-          .getRawOne();
-
-        const accountData = {
-          address: address.address,
-          total_tx_count: totalTransactions,
-          total_buy_tx_count: totalBuyTransactions,
-          total_sell_tx_count: totalSellTransactions,
-          total_created_tokens: totalCreatedTokens,
-          total_volume: new BigNumber(totalVolume.total_volume),
-        };
-
-        await this.accountRepository.save(accountData);
+        await this.accountRepository
+          .createQueryBuilder()
+          .insert()
+          .into(Account)
+          .values(batch)
+          .orIgnore()
+          .execute();
       }
     } catch (error) {
       this.logger.error('Error pulling and saving accounts', error);
