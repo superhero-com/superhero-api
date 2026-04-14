@@ -122,6 +122,7 @@ export class TokensService {
   private readonly maxHoldersPages = Number(
     process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
   );
+  private static readonly MAX_CACHED_CONTRACTS = 200;
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
   constructor(
@@ -432,6 +433,21 @@ export class TokensService {
     );
   }
 
+  private evictStalestContract(): void {
+    const keys = Object.keys(this.contracts);
+    if (keys.length <= TokensService.MAX_CACHED_CONTRACTS) return;
+    let oldestKey = keys[0];
+    let oldestTime = this.contracts[oldestKey]?.lastUsedAt ?? 0;
+    for (const key of keys) {
+      const t = this.contracts[key]?.lastUsedAt ?? 0;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = key;
+      }
+    }
+    delete this.contracts[oldestKey];
+  }
+
   async getTokenContractsBySaleAddress(
     saleAddress: Encoded.ContractAddress,
   ): Promise<TokenContracts | undefined> {
@@ -458,6 +474,7 @@ export class TokensService {
           tokenContractInstance,
           lastUsedAt: Date.now(),
         };
+        this.evictStalestContract();
 
         return this.contracts[saleAddress];
       } catch (error: any) {
