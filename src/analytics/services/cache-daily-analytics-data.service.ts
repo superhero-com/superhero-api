@@ -5,7 +5,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BigNumber } from 'bignumber.js';
 import moment from 'moment';
-import { Between, LessThan, Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
 import { Token } from '@/tokens/entities/token.entity';
 
@@ -106,66 +106,53 @@ export class CacheDailyAnalyticsDataService {
   }
 
   async getDateAnalytics(startOfDay: Date, endOfDay: Date) {
-    const transactions = await this.transactionsRepository.find({
-      where: {
-        created_at: Between(startOfDay, endOfDay),
-      },
-    });
-    // total created tokens before end of day
+    const [txAgg] = await this.transactionsRepository.query(
+      `SELECT
+         COUNT(*)::int                              AS total_transactions,
+         COUNT(DISTINCT address)::int               AS total_active_accounts,
+         COALESCE(SUM(
+           CAST(NULLIF(amount->>'ae', 'NaN') AS decimal)
+         ), 0)                                      AS total_volume,
+         COUNT(*) FILTER (
+           WHERE tx_type = $3
+         )::int                                     AS total_created_tokens
+       FROM transactions
+       WHERE created_at BETWEEN $1 AND $2`,
+      [startOfDay, endOfDay, TX_FUNCTIONS.create_community],
+    );
+
     const totalTokens = await this.tokensRepository.count({
       where: {
         created_at: LessThan(endOfDay),
       },
     });
 
-    // total unique users
-    const totalUniqueUsers = new Set(
-      transactions.map((transaction) => transaction.address),
-    );
-
-    const totalTransactions = transactions.length;
     const totalMarketCap = await this.getMarketCapSum(endOfDay);
-    const totalVolume = transactions.reduce(
-      (acc, transaction) => acc.plus(transaction.amount?.ae ?? 0),
-      new BigNumber(0),
-    );
-    const totalCreatedTokens = transactions.filter(
-      (transaction) => transaction.tx_type === TX_FUNCTIONS.create_community,
-    ).length;
-    const totalActiveAccounts = totalUniqueUsers.size;
 
     return {
       date: moment(startOfDay).format('YYYY-MM-DD'),
       total_market_cap_sum: totalMarketCap,
-      total_volume_sum: totalVolume,
+      total_volume_sum: new BigNumber(txAgg.total_volume || 0),
       total_tokens: totalTokens,
-      total_transactions: totalTransactions,
-      total_created_tokens: totalCreatedTokens,
-      total_active_accounts: totalActiveAccounts,
+      total_transactions: txAgg.total_transactions,
+      total_created_tokens: txAgg.total_created_tokens,
+      total_active_accounts: txAgg.total_active_accounts,
     };
   }
 
-  private async getMarketCapSum(date: Date) {
-    const $date = moment(date);
-    const smartTransactionQuery = this.transactionsRepository
-      .createQueryBuilder('transaction')
-      .select(
-        'DISTINCT ON (transaction.sale_address) transaction.sale_address',
-        'sale_address',
-      )
-      .addSelect("transaction.market_cap->>'ae'", 'market_cap')
-      .where("transaction.market_cap->>'ae' IS NOT NULL")
-      .andWhere('transaction.created_at <= :start_date', {
-        start_date: $date.toDate(),
-      })
-      .orderBy('transaction.sale_address')
-      .addOrderBy('transaction.created_at', 'DESC');
-    const smartTokens = await smartTransactionQuery.getRawMany();
-
-    // Calculate total market cap sum
-    return smartTokens.reduce((sum, token) => {
-      const marketCap = parseFloat(token.market_cap);
-      return sum + (isNaN(marketCap) ? 0 : marketCap);
-    }, 0);
+  private async getMarketCapSum(date: Date): Promise<BigNumber> {
+    const [result] = await this.transactionsRepository.query(
+      `SELECT COALESCE(SUM(cap.market_cap), 0) AS total
+       FROM (
+         SELECT DISTINCT ON (sale_address)
+           CAST(NULLIF(market_cap->>'ae', 'NaN') AS decimal) AS market_cap
+         FROM transactions
+         WHERE market_cap->>'ae' IS NOT NULL
+           AND created_at <= $1
+         ORDER BY sale_address, created_at DESC
+       ) cap`,
+      [date],
+    );
+    return new BigNumber(result.total || 0);
   }
 }
