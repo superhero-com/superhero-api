@@ -77,6 +77,7 @@ export class AccountsController {
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiOperation({ operationId: 'listAll' })
+  @CacheTTL(60_000)
   @Get()
   async listAll(
     @Query('search') search: string | undefined,
