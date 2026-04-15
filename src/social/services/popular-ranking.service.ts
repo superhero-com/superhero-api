@@ -4,7 +4,10 @@ import { In, Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { Tip } from '@/tipping/entities/tip.entity';
 import { TrendingTag } from '@/trending-tags/entities/trending-tags.entity';
-import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
+import {
+  POPULAR_RANKING_CONFIG,
+  type PopularRankingWeightScale,
+} from '@/configs/constants';
 import Redis from 'ioredis';
 import { REDIS_CONFIG } from '@/configs/redis';
 import { PostReadsDaily } from '../entities/post-reads.entity';
@@ -24,11 +27,51 @@ interface PopularScoreItem {
   metadata?: Record<string, any>;
 }
 
+type PopularCustomizableWeightKey =
+  | 'comments'
+  | 'tipsAmountAE'
+  | 'tipsCount'
+  | 'uniqueTippers'
+  | 'trendingBoost'
+  | 'contentQuality'
+  | 'reads'
+  | 'interactionsPerHour';
+
+export type PopularRankingWeightOverrides = Partial<
+  Record<PopularCustomizableWeightKey, PopularRankingWeightScale | undefined>
+>;
+
+type Mutable<T> = {
+  -readonly [K in keyof T]: T[K];
+};
+
+type PopularRankingResolvedWeights = Mutable<
+  typeof POPULAR_RANKING_CONFIG.WEIGHTS
+> & {
+  interactionsPerHour: number;
+};
+
+interface PopularScoreInput {
+  content: string;
+  comments: number;
+  tipsAmountAE: number;
+  tipsCount: number;
+  uniqueTippers: number;
+  reads: number;
+  topics?: Array<{ name?: string }>;
+  createdAt?: Date | string;
+}
+
 @Injectable()
 export class PopularRankingService {
   private readonly logger = new Logger(PopularRankingService.name);
   private readonly redis = new Redis(REDIS_CONFIG);
   private readonly recomputeInFlight = new Map<PopularWindow, Promise<void>>();
+  private trendingTagCache: {
+    map: Map<string, number>;
+    expiresAt: number;
+  } | null = null;
+  private static readonly TRENDING_CACHE_TTL_MS = 30_000;
 
   constructor(
     @InjectRepository(Post)
@@ -52,6 +95,51 @@ export class PopularRankingService {
       return POPULAR_RANKING_CONFIG.WINDOW_7D_HOURS;
     }
     return Number.MAX_SAFE_INTEGER;
+  }
+
+  private getDefaultMaxCandidates(window: PopularWindow): number {
+    return window === 'all'
+      ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
+      : window === '7d'
+        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
+        : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+  }
+
+  private hasWeightOverrides(
+    overrides?: PopularRankingWeightOverrides,
+  ): overrides is PopularRankingWeightOverrides {
+    return !!overrides && Object.values(overrides).some((value) => !!value);
+  }
+
+  private resolveWeights(
+    overrides?: PopularRankingWeightOverrides,
+  ): PopularRankingResolvedWeights {
+    const resolved: PopularRankingResolvedWeights = {
+      ...POPULAR_RANKING_CONFIG.WEIGHTS,
+      interactionsPerHour: 0,
+    };
+
+    if (!this.hasWeightOverrides(overrides)) {
+      return resolved;
+    }
+
+    const multipliers = POPULAR_RANKING_CONFIG.CUSTOMIZATION.SCALE_MULTIPLIERS;
+    for (const [key, value] of Object.entries(overrides)) {
+      if (!value) {
+        continue;
+      }
+
+      const multiplier = multipliers[value];
+      if (key === 'interactionsPerHour') {
+        resolved.interactionsPerHour =
+          POPULAR_RANKING_CONFIG.CUSTOMIZATION.ADDITIONAL_SIGNAL_WEIGHTS
+            .interactionsPerHour * multiplier;
+      } else if (key in resolved) {
+        (resolved as Record<string, number>)[key] *= multiplier;
+      }
+    }
+
+    return resolved;
   }
 
   private getRedisKey(window: PopularWindow): string {
@@ -214,12 +302,7 @@ export class PopularRankingService {
       return;
     }
 
-    const fallbackMax =
-      window === 'all'
-        ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_ALL
-        : window === '7d'
-          ? POPULAR_RANKING_CONFIG.MAX_CANDIDATES_7D
-          : POPULAR_RANKING_CONFIG.MAX_CANDIDATES_24H;
+    const fallbackMax = this.getDefaultMaxCandidates(window);
 
     const task = this.recompute(window, maxCandidates ?? fallbackMax)
       .catch((error) =>
@@ -231,27 +314,17 @@ export class PopularRankingService {
     await task;
   }
 
-  async getPopularPosts(
+  private async hydrateRankedItems(
     window: PopularWindow,
-    limit = 50,
-    offset = 0,
-    maxCandidates?: number,
+    ids: string[],
   ): Promise<(Post | PopularRankingContentItem)[]> {
-    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
-
-    if (verifiedIds.length === 0) {
-      return this.fetchRecentFallback(window, limit, offset);
-    }
-
-    const paginatedIds = verifiedIds.slice(offset, offset + limit);
-
-    if (paginatedIds.length === 0) {
+    if (ids.length === 0) {
       return [];
     }
 
     const postIds: string[] = [];
     const pluginContentIds: string[] = [];
-    for (const id of paginatedIds) {
+    for (const id of ids) {
       if (id.includes(':')) {
         pluginContentIds.push(id);
       } else {
@@ -279,17 +352,18 @@ export class PopularRankingService {
         itemsByType.get(type)!.push(id);
       }
 
+      const since =
+        window === 'all'
+          ? null
+          : new Date(Date.now() - this.getWindowHours(window) * 60 * 60 * 1000);
+
       for (const contributor of this.rankingContributors) {
         const typeIds = itemsByType.get(contributor.name);
         if (typeIds && typeIds.length > 0) {
           try {
             const allItems = await contributor.getRankingCandidates(
               window,
-              window === 'all'
-                ? null
-                : new Date(
-                    Date.now() - this.getWindowHours(window) * 60 * 60 * 1000,
-                  ),
+              since,
               10000,
             );
             const requestedItems = allItems.filter((item) =>
@@ -308,21 +382,77 @@ export class PopularRankingService {
 
     const postsMap = new Map(posts.map((p) => [p.id, p]));
     const pluginItemsMap = new Map(pluginItems.map((item) => [item.id, item]));
-
     const result: (Post | PopularRankingContentItem)[] = [];
-    for (const id of paginatedIds) {
+    for (const id of ids) {
       const post = postsMap.get(id);
       if (post) {
         result.push(post);
-      } else {
-        const item = pluginItemsMap.get(id);
-        if (item) {
-          result.push(item);
-        }
+        continue;
+      }
+
+      const item = pluginItemsMap.get(id);
+      if (item) {
+        result.push(item);
       }
     }
 
     return result;
+  }
+
+  async getPopularPosts(
+    window: PopularWindow,
+    limit = 50,
+    offset = 0,
+    maxCandidates?: number,
+  ): Promise<(Post | PopularRankingContentItem)[]> {
+    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
+
+    if (verifiedIds.length === 0) {
+      return this.fetchRecentFallback(window, limit, offset);
+    }
+
+    return this.hydrateRankedItems(
+      window,
+      verifiedIds.slice(offset, offset + limit),
+    );
+  }
+
+  async getPopularPostsPage(
+    window: PopularWindow,
+    limit = 50,
+    offset = 0,
+    maxCandidates?: number,
+    weightOverrides?: PopularRankingWeightOverrides,
+  ): Promise<{
+    items: (Post | PopularRankingContentItem)[];
+    totalItems: number;
+    scoredItems?: PopularScoreItem[];
+  }> {
+    if (!this.hasWeightOverrides(weightOverrides)) {
+      const totalItems = await this.getTotalPostsCount(window);
+      const items = await this.getPopularPosts(
+        window,
+        limit,
+        offset,
+        maxCandidates,
+      );
+      return { items, totalItems };
+    }
+
+    const scored = await this.buildScoredItems(
+      window,
+      maxCandidates ?? this.getDefaultMaxCandidates(window),
+      weightOverrides,
+    );
+    const paginatedIds = scored
+      .slice(offset, offset + limit)
+      .map((item) => item.postId);
+
+    return {
+      items: await this.hydrateRankedItems(window, paginatedIds),
+      totalItems: scored.length,
+      scoredItems: scored,
+    };
   }
 
   async getTotalCached(window: PopularWindow): Promise<number | undefined> {
@@ -350,21 +480,13 @@ export class PopularRankingService {
     }
   }
 
-  async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
-    const key = this.getRedisKey(window);
+  private async buildScoredItems(
+    window: PopularWindow,
+    maxCandidates = 10000,
+    weightOverrides?: PopularRankingWeightOverrides,
+  ): Promise<PopularScoreItem[]> {
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-
-    this.logger.log(
-      `Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`,
-    );
-
-    try {
-      await this.redis.ping();
-    } catch (error) {
-      this.logger.error(`Redis connection error:`, error);
-      throw error;
-    }
 
     const candidates = await this.postRepository
       .createQueryBuilder('post')
@@ -408,14 +530,6 @@ export class PopularRankingService {
       `Found ${pluginContentItems.length} plugin content items for window ${window}`,
     );
 
-    if (candidates.length === 0 && pluginContentItems.length === 0) {
-      await this.redis.del(key);
-      this.logger.warn(
-        `No candidates found for window ${window}, deleted Redis key`,
-      );
-      return;
-    }
-
     if (candidates.length > 0) {
       this.logger.log(
         `First 5 candidate IDs: ${candidates
@@ -425,126 +539,163 @@ export class PopularRankingService {
       );
     }
 
-    // Preload tips per post
     const ids = candidates.map((c) => c.id);
-    const tipsRaw = await this.tipRepository
-      .createQueryBuilder('tip')
-      .select('tip.post_id', 'post_id')
-      .innerJoin(Post, 'post', 'post.id = tip.post_id')
-      .addSelect('COALESCE(SUM(CAST(tip.amount AS numeric)), 0)', 'amount_sum')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COUNT(DISTINCT tip.sender_address)', 'unique_tippers')
-      .where('tip.post_id IN (:...ids)', { ids })
-      .andWhere('tip.sender_address != post.sender_address')
-      .groupBy('tip.post_id')
-      .getRawMany<{
-        post_id: string;
-        amount_sum: string;
-        count: string;
-        unique_tippers: string;
-      }>();
-    const tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
+    let tipsByPost = new Map<string, any>();
+    let commentsByPost = new Map<string, number>();
+    let readsByPost = new Map<string, number>();
 
-    // Preload comment counts excluding the post author's own replies
-    const commentsRaw = await this.postRepository
-      .createQueryBuilder('comment')
-      .innerJoin(Post, 'parent', 'parent.id = comment.post_id')
-      .select('comment.post_id', 'parent_id')
-      .addSelect('COUNT(*)', 'count')
-      .where('comment.post_id IN (:...ids)', { ids })
-      .andWhere('comment.is_hidden = false')
-      .andWhere('comment.sender_address != parent.sender_address')
-      .groupBy('comment.post_id')
-      .getRawMany<{ parent_id: string; count: string }>();
-    const commentsByPost = new Map(
-      commentsRaw.map(
-        (r) => [r.parent_id, parseInt(r.count || '0', 10)] as const,
-      ),
-    );
+    if (ids.length > 0) {
+      const tipsRaw = await this.tipRepository
+        .createQueryBuilder('tip')
+        .select('tip.post_id', 'post_id')
+        .innerJoin(Post, 'post', 'post.id = tip.post_id')
+        .addSelect(
+          'COALESCE(SUM(CAST(tip.amount AS numeric)), 0)',
+          'amount_sum',
+        )
+        .addSelect('COUNT(*)', 'count')
+        .addSelect('COUNT(DISTINCT tip.sender_address)', 'unique_tippers')
+        .where('tip.post_id IN (:...ids)', { ids })
+        .andWhere('tip.sender_address != post.sender_address')
+        .groupBy('tip.post_id')
+        .getRawMany<{
+          post_id: string;
+          amount_sum: string;
+          count: string;
+          unique_tippers: string;
+        }>();
+      tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
+
+      const commentsRaw = await this.postRepository
+        .createQueryBuilder('comment')
+        .innerJoin(Post, 'parent', 'parent.id = comment.post_id')
+        .select('comment.post_id', 'parent_id')
+        .addSelect('COUNT(*)', 'count')
+        .where('comment.post_id IN (:...ids)', { ids })
+        .andWhere('comment.is_hidden = false')
+        .andWhere('comment.sender_address != parent.sender_address')
+        .groupBy('comment.post_id')
+        .getRawMany<{ parent_id: string; count: string }>();
+      commentsByPost = new Map(
+        commentsRaw.map(
+          (r) => [r.parent_id, parseInt(r.count || '0', 10)] as const,
+        ),
+      );
+
+      const fromDate = new Date(Date.now() - hours * 3600 * 1000);
+      const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
+        fromDate.getUTCMonth() + 1,
+      ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
+      const readsQB = this.postReadsRepository
+        .createQueryBuilder('r')
+        .select('r.post_id', 'post_id')
+        .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
+        .where('r.post_id IN (:...ids)', { ids });
+      if (window !== 'all') {
+        readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
+      }
+      const readsRows = await readsQB
+        .groupBy('r.post_id')
+        .getRawMany<{ post_id: string; reads: string }>();
+      readsByPost = new Map(
+        readsRows.map(
+          (r) => [r.post_id, parseInt(r.reads || '0', 10)] as const,
+        ),
+      );
+    }
 
     const trendingByTag = await this.loadTrendingByTagMap();
+    const resolvedWeights = this.resolveWeights(weightOverrides);
 
-    // Preload reads over window per post
-    const fromDate = new Date(Date.now() - hours * 3600 * 1000);
-    const fromDateOnly = `${fromDate.getUTCFullYear()}-${String(
-      fromDate.getUTCMonth() + 1,
-    ).padStart(2, '0')}-${String(fromDate.getUTCDate()).padStart(2, '0')}`;
-    const readsQB = this.postReadsRepository
-      .createQueryBuilder('r')
-      .select('r.post_id', 'post_id')
-      .addSelect('COALESCE(SUM(r.reads), 0)', 'reads')
-      .where('r.post_id IN (:...ids)', { ids });
-    if (window !== 'all') {
-      readsQB.andWhere('r.date >= :from', { from: fromDateOnly });
-    }
-    const readsRows = await readsQB
-      .groupBy('r.post_id')
-      .getRawMany<{ post_id: string; reads: string }>();
-    const readsByPost = new Map(
-      readsRows.map((r) => [r.post_id, parseInt(r.reads || '0', 10)] as const),
-    );
-
-    // Score posts
     const scoredPosts: PopularScoreItem[] = candidates.map((post) => {
       const tipsAgg = tipsByPost.get(post.id);
       return {
         postId: post.id,
-        score: this.computeScore(trendingByTag, {
-          content: post.content,
-          comments: commentsByPost.get(post.id) || 0,
-          tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
-          tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
-          uniqueTippers: tipsAgg
-            ? parseInt(tipsAgg.unique_tippers || '0', 10)
-            : 0,
-          reads: readsByPost.get(post.id) || 0,
-          topics: post.topics,
-        }),
+        score: this.computeScore(
+          trendingByTag,
+          {
+            content: post.content,
+            comments: commentsByPost.get(post.id) || 0,
+            tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
+            tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
+            uniqueTippers: tipsAgg
+              ? parseInt(tipsAgg.unique_tippers || '0', 10)
+              : 0,
+            reads: readsByPost.get(post.id) || 0,
+            topics: post.topics,
+            createdAt: post.created_at,
+          },
+          resolvedWeights,
+          window,
+        ),
         type: 'post',
       };
     });
 
-    // Score plugin content items
     const scoredPluginItems: PopularScoreItem[] = pluginContentItems.map(
       (item) => ({
         postId: item.id,
-        score: this.computeScore(trendingByTag, {
-          content: item.content,
-          comments: item.total_comments || 0,
-          tipsAmountAE: 0,
-          tipsCount: 0,
-          uniqueTippers: 0,
-          reads: 0,
-          topics: item.topics,
-        }),
+        score: this.computeScore(
+          trendingByTag,
+          {
+            content: item.content,
+            comments: item.total_comments || 0,
+            tipsAmountAE: 0,
+            tipsCount: 0,
+            uniqueTippers: 0,
+            reads: 0,
+            topics: item.topics,
+            createdAt: item.created_at,
+          },
+          resolvedWeights,
+          window,
+        ),
         type: item.type,
         metadata: item.metadata,
       }),
     );
 
-    const scored = [...scoredPosts, ...scoredPluginItems];
+    return [...scoredPosts, ...scoredPluginItems].sort(
+      (a, b) => b.score - a.score,
+    );
+  }
+
+  async recompute(window: PopularWindow, maxCandidates = 10000): Promise<void> {
+    const key = this.getRedisKey(window);
+
+    this.logger.log(
+      `Starting recompute for window ${window} with maxCandidates ${maxCandidates}, key=${key}`,
+    );
+
+    try {
+      await this.redis.ping();
+    } catch (error) {
+      this.logger.error(`Redis connection error:`, error);
+      throw error;
+    }
+
+    const scored = await this.buildScoredItems(window, maxCandidates);
+
+    if (scored.length === 0) {
+      await this.redis.del(key);
+      this.logger.warn(
+        `No candidates found for window ${window}, deleted Redis key`,
+      );
+      return;
+    }
 
     this.logger.log(
       `Window ${window}: ${scored.length} posts scored, all eligible (no score floor)`,
     );
 
-    if (scored.length > 0) {
-      const topScores = scored
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-        .map((s) => `${s.postId}:${s.score.toFixed(4)}`)
-        .join(', ');
-      this.logger.log(`Top 5 scores: ${topScores}`);
-    }
+    const topScores = scored
+      .slice(0, 5)
+      .map((s) => `${s.postId}:${s.score.toFixed(4)}`)
+      .join(', ');
+    this.logger.log(`Top 5 scores: ${topScores}`);
 
-    // Cache in Redis ZSET
     try {
       await this.redis.del(key);
-
-      if (scored.length === 0) {
-        this.logger.warn(`No posts to cache for window ${window}`);
-        return;
-      }
 
       const pipeline = this.redis.pipeline();
       for (const item of scored) {
@@ -592,28 +743,61 @@ export class PopularRankingService {
   }
 
   private async loadTrendingByTagMap(): Promise<Map<string, number>> {
+    if (this.trendingTagCache && Date.now() < this.trendingTagCache.expiresAt) {
+      return this.trendingTagCache.map;
+    }
+
     let trending: TrendingTag[] = [];
     try {
       trending = await this.trendingTagRepository.find();
     } catch {
       trending = [];
     }
-    return new Map(
+    const map = new Map(
       trending.map((t) => [t.tag.toLowerCase(), t.score] as const),
+    );
+    this.trendingTagCache = {
+      map,
+      expiresAt: Date.now() + PopularRankingService.TRENDING_CACHE_TTL_MS,
+    };
+    return map;
+  }
+
+  private computeInteractionsPerHour(
+    input: PopularScoreInput,
+    window: PopularWindow,
+  ): number {
+    const createdAt =
+      input.createdAt instanceof Date
+        ? input.createdAt
+        : input.createdAt
+          ? new Date(input.createdAt)
+          : null;
+
+    if (!createdAt || Number.isNaN(createdAt.getTime())) {
+      return 0;
+    }
+
+    const ageHours = Math.max(
+      1,
+      (Date.now() - createdAt.getTime()) / (60 * 60 * 1000),
+    );
+    const effectiveHours =
+      window === 'all'
+        ? ageHours
+        : Math.min(ageHours, this.getWindowHours(window));
+
+    return (
+      (input.comments + input.tipsCount + input.uniqueTippers) /
+      Math.max(1, effectiveHours)
     );
   }
 
   private computeScore(
     trendingByTag: Map<string, number>,
-    input: {
-      content: string;
-      comments: number;
-      tipsAmountAE: number;
-      tipsCount: number;
-      uniqueTippers: number;
-      reads: number;
-      topics?: Array<{ name?: string }>;
-    },
+    input: PopularScoreInput,
+    weights: PopularRankingResolvedWeights,
+    window: PopularWindow,
   ): number {
     const { comments, tipsAmountAE, tipsCount, uniqueTippers, reads } = input;
 
@@ -633,35 +817,66 @@ export class PopularRankingService {
     }
 
     const contentQuality = this.computeContentQuality(input.content || '');
-    const w = POPULAR_RANKING_CONFIG.WEIGHTS;
+    const interactionsPerHour = this.computeInteractionsPerHour(input, window);
 
     return (
-      w.comments * Math.log(1 + comments) +
-      w.tipsAmountAE * Math.log(1 + tipsAmountAE) +
-      w.tipsCount * Math.log(1 + tipsCount) +
-      w.uniqueTippers * Math.log(1 + uniqueTippers) +
-      w.reads * Math.log(1 + reads) +
-      w.trendingBoost * trendingBoost +
-      w.contentQuality * contentQuality
+      weights.comments * Math.log(1 + comments) +
+      weights.tipsAmountAE * Math.log(1 + tipsAmountAE) +
+      weights.tipsCount * Math.log(1 + tipsCount) +
+      weights.uniqueTippers * Math.log(1 + uniqueTippers) +
+      weights.reads * Math.log(1 + reads) +
+      weights.trendingBoost * trendingBoost +
+      weights.contentQuality * contentQuality +
+      weights.interactionsPerHour * Math.log(1 + interactionsPerHour)
     );
   }
 
-  async explain(window: PopularWindow, limit = 20, offset = 0) {
-    const key = this.getRedisKey(window);
-    const ids = await this.redis.zrevrange(key, offset, offset + limit - 1);
-    const posts = ids.length
-      ? await this.postRepository.findBy({ id: In(ids) })
-      : await this.postRepository
-          .createQueryBuilder('post')
-          .where('post.is_hidden = false')
-          .andWhere('post.post_id IS NULL')
-          .orderBy('post.created_at', 'DESC')
-          .limit(limit)
-          .getMany();
-    return posts.map((p) => ({
-      id: p.id,
-      tx: p.tx_hash,
-      author: p.sender_address,
+  async explain(
+    window: PopularWindow,
+    limit = 20,
+    offset = 0,
+    weightOverrides?: PopularRankingWeightOverrides,
+    precomputedScored?: PopularScoreItem[],
+  ) {
+    const personalized = this.hasWeightOverrides(weightOverrides);
+    const appliedWeights = personalized
+      ? this.resolveWeights(weightOverrides)
+      : this.resolveWeights();
+
+    let items: (Post | PopularRankingContentItem)[];
+
+    if (personalized) {
+      const scored =
+        precomputedScored ??
+        (await this.buildScoredItems(
+          window,
+          this.getDefaultMaxCandidates(window),
+          weightOverrides,
+        ));
+      const ids = scored
+        .slice(offset, offset + limit)
+        .map((item) => item.postId);
+      items = await this.hydrateRankedItems(window, ids);
+    } else {
+      const key = this.getRedisKey(window);
+      const ids = await this.redis.zrevrange(key, offset, offset + limit - 1);
+      items = ids.length
+        ? await this.postRepository.findBy({ id: In(ids) })
+        : await this.postRepository
+            .createQueryBuilder('post')
+            .where('post.is_hidden = false')
+            .andWhere('post.post_id IS NULL')
+            .orderBy('post.created_at', 'DESC')
+            .limit(limit)
+            .getMany();
+    }
+
+    return items.map((item) => ({
+      id: item.id,
+      tx: 'tx_hash' in item ? item.tx_hash : undefined,
+      author: item.sender_address,
+      personalized,
+      appliedWeights,
     }));
   }
 
