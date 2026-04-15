@@ -46,7 +46,7 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
       useFactory: () => ({
         stores: [
           new Keyv({
-            store: new LRUCache<string, any>({ max: 2000, ttl: 60_000 }),
+            store: new LRUCache<string, any>({ max: 2000 }),
           }),
         ],
       }),
