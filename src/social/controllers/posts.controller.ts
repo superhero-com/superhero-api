@@ -20,7 +20,7 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { PopularRankingService } from '../services/popular-ranking.service';
-import { PostDto } from '../dto';
+import { PopularPostsQueryDto, PostDto } from '../dto';
 import type { Request } from 'express';
 import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
@@ -368,41 +368,53 @@ export class PostsController {
     };
   }
 
-  @ApiQuery({ name: 'window', enum: ['24h', '7d', 'all'], required: false })
-  @ApiQuery({
-    name: 'debug',
-    type: 'number',
-    required: false,
-    description: 'Return feature breakdown when set to 1',
-  })
-  @ApiQuery({ name: 'page', type: 'number', required: false })
-  @ApiQuery({ name: 'limit', type: 'number', required: false })
   @ApiOperation({
     operationId: 'popular',
     summary: 'Popular posts',
     description:
-      'Returns top posts for selected time window (24h, 7d, all). Ranked by accumulated engagement — no time decay.',
+      'Returns top posts for selected time window (24h, 7d, all). Ranked by accumulated engagement — no time decay. Optional scale params let clients personalize signal importance.',
   })
   @ApiOkResponsePaginated(PostDto)
   @Get('popular')
-  async popular(
-    @Query('window') window: '24h' | '7d' | 'all' = '24h',
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
-    @Query('debug') debug?: number,
-  ) {
+  async popular(@Query() query: PopularPostsQueryDto) {
+    const {
+      window = '24h',
+      page = 1,
+      limit = 50,
+      debug,
+      comments,
+      tipsAmountAE,
+      tipsCount,
+      uniqueTippers,
+      trendingBoost,
+      contentQuality,
+      reads,
+      interactionsPerHour,
+    } = query;
     const offset = (page - 1) * limit;
+    const weightOverrides = {
+      comments,
+      tipsAmountAE,
+      tipsCount,
+      uniqueTippers,
+      trendingBoost,
+      contentQuality,
+      reads,
+      interactionsPerHour,
+    };
     try {
-      // Get total count of popular posts for the given window
-      const totalItems =
-        await this.popularRankingService.getTotalPostsCount(window);
-      const totalPages = Math.ceil(totalItems / limit);
-
-      const rankedItems = await this.popularRankingService.getPopularPosts(
+      const {
+        items: rankedItems,
+        totalItems,
+        scoredItems,
+      } = await this.popularRankingService.getPopularPostsPage(
         window,
         limit,
         offset,
+        undefined,
+        weightOverrides,
       );
+      const totalPages = Math.ceil(totalItems / limit);
 
       const rankedPostIds = rankedItems
         .filter((item) => !this.isPluginContentItem(item))
@@ -451,10 +463,12 @@ export class PostsController {
         },
       };
       if (debug === 1) {
-        response.debug = await (this.popularRankingService as any).explain(
+        response.debug = await this.popularRankingService.explain(
           window,
           limit,
           offset,
+          weightOverrides,
+          scoredItems,
         );
       }
       return response;
