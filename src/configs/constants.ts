@@ -144,8 +144,26 @@ export const PULL_TRENDING_TAGS_ENABLED = false;
 /**
  * API Keys and Security
  */
-export const TRENDING_TAGS_API_KEY =
-  process.env.TRENDING_TAGS_API_KEY || 'your-secret-key-here-xxrf8ca2929';
+// Intentionally no default value: a missing or empty key must not silently
+// grant access to the guarded POST /trending-tags endpoint. In production a
+// missing key causes the guard to always reject requests.
+export const TRENDING_TAGS_API_KEY: string =
+  process.env.TRENDING_TAGS_API_KEY ?? '';
+
+// The ApiKeyGuard rejects requests when the key is absent or shorter than
+// 16 chars. Use the same threshold here so the warning matches the actual
+// enforcement behaviour and operators know exactly what to fix.
+if (
+  process.env.NODE_ENV === 'production' &&
+  TRENDING_TAGS_API_KEY.length < 16
+) {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[security] TRENDING_TAGS_API_KEY is missing or too short in production' +
+      ' (min 16 chars required). POST /trending-tags will reject all' +
+      ' requests until a sufficiently long key is set.',
+  );
+}
 
 /**
  * Trending Score Configuration

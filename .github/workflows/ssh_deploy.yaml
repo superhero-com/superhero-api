@@ -176,6 +176,5 @@ jobs:
               -e DB_TYPE=postgres \
               -e DB_HOST=${{ inputs.CONTAINER_NAME }}-db \
               -e DB_PORT=5432 \
-              -e DB_SYNC=true \
               --network ${{ inputs.CONTAINER_NAME }}-db \
               ${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}

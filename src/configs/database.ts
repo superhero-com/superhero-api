@@ -24,6 +24,22 @@ const getValidLogger = (loggerValue: string | undefined): ValidLoggerType => {
     : 'advanced-console';
 };
 
+// `synchronize: true` auto-applies destructive DDL (DROP/ALTER) on startup
+// based on entity definitions and has caused silent data loss in real-world
+// projects. It must never be enabled in production, regardless of env vars.
+// We still allow it in non-production environments because the existing
+// dev/testnet workflows rely on it; migrations are the long-term fix.
+const DB_SYNC_ENABLED =
+  process.env.NODE_ENV !== 'production' && process.env.DB_SYNC === 'true';
+
+if (process.env.NODE_ENV === 'production' && process.env.DB_SYNC === 'true') {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[security] DB_SYNC=true was set in production and is being ignored.' +
+      ' Use migrations to evolve the schema.',
+  );
+}
+
 export const DATABASE_CONFIG: TypeOrmModuleOptions = {
   type: process.env.DB_TYPE as any,
   host: process.env.DB_HOST,
@@ -31,7 +47,7 @@ export const DATABASE_CONFIG: TypeOrmModuleOptions = {
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
-  synchronize: process.env.DB_SYNC === 'true',
+  synchronize: DB_SYNC_ENABLED,
   autoLoadEntities: true,
   logging: process.env.DB_LOGGING === 'true',
   logger: getValidLogger(process.env.DB_LOGGER),
