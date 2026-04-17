@@ -26,7 +26,9 @@ export class ApiKeyGuard implements CanActivate {
     // Reject outright if the server-side key is unset or too short so that a
     // misconfigured deployment cannot be bypassed by sending an empty key.
     if (!TRENDING_TAGS_API_KEY || TRENDING_TAGS_API_KEY.length < 16) {
-      throw new UnauthorizedException('API key authentication is not configured');
+      throw new UnauthorizedException(
+        'API key authentication is not configured',
+      );
     }
 
     // Constant-time comparison prevents timing side channels.

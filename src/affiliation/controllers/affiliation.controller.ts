@@ -88,14 +88,18 @@ export class AffiliationController {
       claimed_by: `${provider}@${userInfo.id}`,
     });
 
-    // Return the user info along with affiliation details
+    // Return only the minimum data the client needs to redeem the invite.
+    // Previously this leaked the full OAuth profile (including email) and
+    // the full AffiliationCode entity (including claimed_by), which was
+    // unnecessary PII exposure over an unauthenticated endpoint.
     return {
-      user: userInfo,
       affiliation: {
         code: affiliation.code,
         available_codes: availableCodes.length,
       },
-      invitationCode,
+      invitationCode: {
+        private_code: invitationCode.private_code,
+      },
     };
   }
 
