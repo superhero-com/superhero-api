@@ -5,13 +5,16 @@ import {
   Next,
   Request,
   Response,
+  UseGuards,
 } from '@nestjs/common';
 import { ApplicationConfig } from '@nestjs/core';
 import * as express from 'express';
+import { AdminApiKeyGuard } from '@/api-core/guards/admin-api-key.guard';
 import { MODULE_CONFIG_TOKEN } from './bull-board.constants';
 import { BullBoardModuleConfig } from './interfaces';
 
 @Controller('bull-board')
+@UseGuards(AdminApiKeyGuard)
 export class BullBoardController {
   constructor(
     @Inject(MODULE_CONFIG_TOKEN)
