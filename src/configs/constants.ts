@@ -210,6 +210,10 @@ export const TOKEN_LIST_ELIGIBILITY_CONFIG = {
   MIN_TRADES_ALL_TIME: 3,
 } as const;
 
+export const POPULAR_RANKING_WEIGHT_SCALES = ['low', 'med', 'high'] as const;
+export type PopularRankingWeightScale =
+  (typeof POPULAR_RANKING_WEIGHT_SCALES)[number];
+
 /**
  * Popular posts ranking configuration — "Top" style (no time decay).
  * Posts are ranked purely by accumulated engagement within the selected window.
@@ -228,6 +232,18 @@ export const POPULAR_RANKING_CONFIG = {
     trendingBoost: 0.5, // w_tr (topical relevance)
     contentQuality: 0.3, // w_q (anti-spam)
     reads: 1.5, // w_reads (common passive signal)
+  },
+
+  // user-facing scale controls tune relative importance instead of exposing raw weights
+  CUSTOMIZATION: {
+    SCALE_MULTIPLIERS: {
+      low: 0.6,
+      med: 1,
+      high: 1.5,
+    },
+    ADDITIONAL_SIGNAL_WEIGHTS: {
+      interactionsPerHour: 1.1,
+    },
   },
 
   // content quality params
