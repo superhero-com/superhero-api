@@ -210,12 +210,37 @@ export class BlockSyncService {
         mdwTxs.push(this.convertToMdwTx(camelTx));
       }
 
-      if (mdwTxs.length > 0) {
-        let savedTxs: Partial<Tx>[] = [];
+      // Track every transaction MDW reports for this block (minus self-
+      // transfers, which the indexer always drops). Block validation uses
+      // this "observed" set to detect reorgs: anything in the DB that is
+      // NOT in this set is considered reorged away.
+      //
+      // IMPORTANT: this must be populated BEFORE the plugin relevance filter.
+      // Otherwise a misconfigured plugin (e.g. `filters()` returns []) would
+      // shrink the observed set to empty and BlockValidationService would
+      // delete canonical, still-on-chain transactions from `txs`.
+      if (txHashesByBlock) {
+        for (const tx of mdwTxs) {
+          if (tx.hash && tx.block_height !== undefined) {
+            const blockHeight = tx.block_height;
+            if (!txHashesByBlock.has(blockHeight)) {
+              txHashesByBlock.set(blockHeight, []);
+            }
+            txHashesByBlock.get(blockHeight)!.push(tx.hash);
+          }
+        }
+      }
 
+      // Drop transactions that do not match any registered plugin filter.
+      // The indexer must only persist transactions the application actually
+      // cares about; everything else is noise and wastes storage.
+      const relevantTxs =
+        this.pluginBatchProcessor.filterRelevantTransactions(mdwTxs);
+
+      if (relevantTxs.length > 0) {
         if (useBulkMode) {
           try {
-            savedTxs = await this.bulkInsertTransactions(mdwTxs);
+            await this.bulkInsertTransactions(relevantTxs);
           } catch (error: any) {
             if (isDatabaseConnectionOrPoolError(error)) {
               logDatabaseIssue({
@@ -224,7 +249,7 @@ export class BlockSyncService {
                 error,
                 context: {
                   url: nextUrl,
-                  transactionCount: mdwTxs.length,
+                  transactionCount: relevantTxs.length,
                   useBulkMode,
                 },
               });
@@ -235,7 +260,7 @@ export class BlockSyncService {
               `Bulk insert failed for page, trying repository.save as fallback`,
               error,
             );
-            const saved = await this.txRepository.save(mdwTxs);
+            const saved = await this.txRepository.save(relevantTxs);
             const savedArr = Array.isArray(saved) ? saved : [saved];
             if (savedArr.length > 0) {
               await this.pluginBatchProcessor.processBatch(
@@ -243,7 +268,6 @@ export class BlockSyncService {
                 SyncDirectionEnum.Backward,
               );
             }
-            savedTxs = savedArr;
           }
         } else {
           const saved = await runWithDatabaseIssueLogging({
@@ -251,10 +275,10 @@ export class BlockSyncService {
             stage: 'transaction save',
             context: {
               url: nextUrl,
-              transactionCount: mdwTxs.length,
+              transactionCount: relevantTxs.length,
               useBulkMode,
             },
-            operation: () => this.txRepository.save(mdwTxs),
+            operation: () => this.txRepository.save(relevantTxs),
           });
           const savedArr = Array.isArray(saved) ? saved : [saved];
           if (savedArr.length > 0) {
@@ -262,19 +286,6 @@ export class BlockSyncService {
               savedArr,
               SyncDirectionEnum.Backward,
             );
-          }
-          savedTxs = savedArr;
-        }
-
-        if (txHashesByBlock) {
-          for (const savedTx of savedTxs) {
-            if (savedTx.hash && savedTx.block_height !== undefined) {
-              const blockHeight = savedTx.block_height;
-              if (!txHashesByBlock.has(blockHeight)) {
-                txHashesByBlock.set(blockHeight, []);
-              }
-              txHashesByBlock.get(blockHeight)!.push(savedTx.hash);
-            }
           }
         }
       }

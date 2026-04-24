@@ -83,6 +83,14 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
 
+      // Skip transactions that do not match any registered plugin filter.
+      // We only index transactions the application actually cares about
+      // (currently BCL and DEX); everything else is discarded before it
+      // ever reaches the database.
+      if (!this.pluginBatchProcessor.isRelevantTransaction(mdwTx)) {
+        return;
+      }
+
       // Save transaction
       const savedTx = await this.txRepository.save(mdwTx);
 

@@ -16,6 +16,7 @@ import { GovernanceRevokedDelegation } from './entities/governance-revoked-deleg
 import { GovernanceDelegationService } from './services/governance-delegation.service';
 import { GovernanceDelegationsController } from './controllers/governance-delegations.controller';
 import { GovernancePopularRankingService } from './services/governance-popular-ranking.service';
+import { GovernancePollRegistry } from './services/governance-poll-registry.service';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { GovernancePopularRankingService } from './services/governance-popular-r
     ]),
   ],
   providers: [
+    GovernancePollRegistry,
     GovernancePluginSyncService,
     GovernancePlugin,
     GovernanceVoteService,
