@@ -178,6 +178,59 @@ export class PluginBatchProcessorService {
   }
 
   /**
+   * Collect predicate functions from all registered plugins' filters.
+   * Predicates are used to decide whether a transaction should be indexed at all
+   * (i.e. saved to the database) during block/live sync.
+   */
+  private collectPluginPredicates(): Array<(tx: Partial<Tx>) => boolean> {
+    const predicates: Array<(tx: Partial<Tx>) => boolean> = [];
+
+    for (const plugin of this.pluginRegistryService.getPlugins()) {
+      for (const filter of plugin.filters()) {
+        if (filter.predicate) {
+          predicates.push(filter.predicate);
+        }
+      }
+    }
+
+    return predicates;
+  }
+
+  /**
+   * Return only the transactions that match at least one registered plugin's filter.
+   * Transactions that do not match any plugin are considered irrelevant and should
+   * not be persisted by the indexer.
+   *
+   * When there are no predicates registered, this returns an empty array so we do
+   * not accidentally index every transaction on the chain.
+   */
+  filterRelevantTransactions<T extends Partial<Tx>>(transactions: T[]): T[] {
+    if (transactions.length === 0) {
+      return [];
+    }
+
+    const predicates = this.collectPluginPredicates();
+    if (predicates.length === 0) {
+      return [];
+    }
+
+    return transactions.filter((tx) =>
+      predicates.some((predicate) => predicate(tx)),
+    );
+  }
+
+  /**
+   * Check whether a single transaction matches at least one registered plugin's filter.
+   */
+  isRelevantTransaction(tx: Partial<Tx>): boolean {
+    const predicates = this.collectPluginPredicates();
+    if (predicates.length === 0) {
+      return false;
+    }
+    return predicates.some((predicate) => predicate(tx));
+  }
+
+  /**
    * Handle reorg by notifying all plugins
    */
   async handleReorg(removedTxHashes: string[]): Promise<void> {

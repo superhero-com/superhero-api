@@ -53,6 +53,10 @@ describe('BlockSyncService', () => {
     } as unknown as ConfigService;
     const pluginBatchProcessor = {
       processBatch: jest.fn(),
+      // Default: treat every transaction as relevant so the existing
+      // persistence tests keep exercising the save/upsert paths.
+      filterRelevantTransactions: jest.fn((txs: any[]) => txs),
+      isRelevantTransaction: jest.fn(() => true),
     } as any;
     const microBlockService = {
       fetchMicroBlocksForKeyBlock: jest.fn().mockResolvedValue([]),
@@ -215,5 +219,92 @@ describe('BlockSyncService', () => {
       'backward',
     );
     expect(result.get(123)).toEqual(['th_test_1']);
+  });
+
+  it('does not persist filtered-out transactions but still records them as observed for validation', async () => {
+    // When every plugin rejects a transaction, nothing should be written to
+    // the DB. However, block validation MUST still see that MDW returned
+    // the transaction for this block; otherwise a misconfigured plugin
+    // could cause BlockValidationService to delete canonical rows.
+    const { service, txRepository, pluginBatchProcessor } = setup();
+
+    (
+      pluginBatchProcessor.filterRelevantTransactions as jest.Mock
+    ).mockImplementation(() => []);
+
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [buildMiddlewareTransaction()],
+      next: null,
+    });
+
+    const result = await service.syncTransactions(123, 123, true, true);
+
+    expect(
+      pluginBatchProcessor.filterRelevantTransactions,
+    ).toHaveBeenCalledTimes(1);
+    expect(txRepository.upsert).not.toHaveBeenCalled();
+    expect(txRepository.save).not.toHaveBeenCalled();
+    expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
+    // Observed hash is still tracked so validation compares against the full
+    // on-chain set, not the (possibly empty) filtered subset.
+    expect(result.get(123)).toEqual(['th_test_1']);
+  });
+
+  it('only persists transactions returned by filterRelevantTransactions', async () => {
+    const { service, txRepository, pluginBatchProcessor } = setup();
+
+    (
+      pluginBatchProcessor.filterRelevantTransactions as jest.Mock
+    ).mockImplementation((txs: any[]) =>
+      txs.filter((tx) => tx.hash === 'th_relevant'),
+    );
+
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [
+        {
+          ...buildMiddlewareTransaction(),
+          hash: 'th_relevant',
+          block_height: 200,
+          tx: {
+            type: 'ContractCallTx',
+            contract_id: 'ct_bcl',
+            function: 'buy',
+            caller_id: 'ak_caller_1',
+          },
+        },
+        {
+          ...buildMiddlewareTransaction(),
+          hash: 'th_irrelevant',
+          block_height: 200,
+          tx: {
+            type: 'ContractCallTx',
+            contract_id: 'ct_other',
+            function: 'something',
+            caller_id: 'ak_caller_2',
+          },
+        },
+      ],
+      next: null,
+    });
+    txRepository.upsert.mockResolvedValueOnce(undefined);
+    txRepository.find.mockResolvedValueOnce([]);
+
+    const result = await service.syncTransactions(200, 200, true, true);
+
+    expect(
+      pluginBatchProcessor.filterRelevantTransactions,
+    ).toHaveBeenCalledWith([
+      expect.objectContaining({ hash: 'th_relevant' }),
+      expect.objectContaining({ hash: 'th_irrelevant' }),
+    ]);
+    expect(txRepository.upsert).toHaveBeenCalledTimes(1);
+    const upsertedBatch = txRepository.upsert.mock.calls[0][0];
+    expect(upsertedBatch).toEqual([
+      expect.objectContaining({ hash: 'th_relevant' }),
+    ]);
+    expect(upsertedBatch).toHaveLength(1);
+    // Both hashes must be recorded as observed for validation, even though
+    // only the relevant one ends up in the DB.
+    expect(result.get(200)?.sort()).toEqual(['th_irrelevant', 'th_relevant']);
   });
 });
