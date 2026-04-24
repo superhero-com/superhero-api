@@ -1,6 +1,10 @@
 import { PrimaryColumn, ViewColumn, ViewEntity } from 'typeorm';
-import { GOVERNANCE_CONTRACT } from '../config/governance.config';
 
+// NOTE: no contract_id filter. The ingest filter
+// (GovernancePlugin.filters()) only persists delegate rows that target the
+// configured governance registry contract, so the `data->'governance' IS
+// NOT NULL` guard is sufficient and lets this view work identically on
+// mainnet, testnet, and any custom registry deployment.
 @ViewEntity({
   name: 'governance_delegation_view',
   materialized: false,
@@ -19,8 +23,7 @@ import { GOVERNANCE_CONTRACT } from '../config/governance.config';
       data->'governance'->'data'->>'delegator' as delegator,
       data->'governance'->'data'->>'delegatee' as delegatee
     FROM txs
-    WHERE contract_id = '${GOVERNANCE_CONTRACT.contractAddress}'
-      AND function = 'delegate'
+    WHERE function = 'delegate'
       AND data->'governance'->'data'->>'delegator' IS NOT NULL
       AND data->'governance'->'data'->>'delegatee' IS NOT NULL
       AND data->'governance' IS NOT NULL

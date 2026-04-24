@@ -96,10 +96,15 @@ import { ViewColumn, ViewEntity, PrimaryColumn } from 'typeorm';
           AND r.data->'governance' IS NOT NULL
       )::int as votes_revoked_count
     FROM txs
-    WHERE contract_id = 'ct_ouZib4wT9cNwgRA1pxgA63XEUd8eQRrG8PcePDEYogBc1VYTq'
-      AND function = 'add_poll'
+    WHERE function = 'add_poll'
       AND data->'governance' IS NOT NULL
+      AND data->'governance'->'data'->>'poll_address' IS NOT NULL
   `,
+  // NOTE: no contract_id filter. The ingest filter
+  // (GovernancePlugin.filters()) only persists add_poll rows that target
+  // the configured governance registry contract, so the `data->'governance'
+  // IS NOT NULL` guard is sufficient and lets this view work identically on
+  // mainnet, testnet, and any custom registry deployment.
 })
 export class GovernancePoll {
   @PrimaryColumn()

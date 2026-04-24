@@ -7,6 +7,7 @@ import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter } from '../plugin.interface';
 import { GovernancePluginSyncService } from './governance-plugin-sync.service';
+import { GovernancePollRegistry } from './services/governance-poll-registry.service';
 import {
   getContractAddress,
   getStartHeight,
@@ -26,6 +27,7 @@ export class GovernancePlugin extends BasePlugin {
     protected readonly pluginSyncStateRepository: Repository<PluginSyncState>,
     private governancePluginSyncService: GovernancePluginSyncService,
     private readonly configService: ConfigService,
+    private readonly pollRegistry: GovernancePollRegistry,
   ) {
     super();
   }
@@ -49,14 +51,54 @@ export class GovernancePlugin extends BasePlugin {
       return [];
     }
 
+    // Governance touches three classes of transactions. We match each class
+    // as narrowly as possible so we only persist governance-relevant rows:
+    //
+    //   1. ContractCallTx on the governance REGISTRY contract. This covers
+    //      add_poll / delegate / revoke_delegation and is identified by the
+    //      well-known registry contract_id.
+    //
+    //   2. ContractCallTx for vote / revoke_vote on a KNOWN poll contract.
+    //      Poll contract addresses are not fixed at build time — they are
+    //      discovered at runtime via `add_poll` events and tracked by
+    //      `GovernancePollRegistry`. Matching by function name alone would
+    //      over-index arbitrary contracts that expose a generic `vote` /
+    //      `revoke_vote` entrypoint, so contract_id must be a known poll.
+    //
+    //   3. ContractCreateTx for a KNOWN poll contract. In chain order the
+    //      deployment precedes its registry `add_poll` call, so this
+    //      predicate typically doesn't match at ingest time; the add_poll
+    //      handler backfills the deployment from MDW once the poll is
+    //      registered (see GovernancePluginSyncService). We still match
+    //      here so that replayed / re-ingested CreateTx rows for already-
+    //      known polls are accepted without a round-trip to MDW.
     return [
       {
         predicate: (tx: Partial<Tx>) => {
-          return (
+          if (!tx.contract_id) {
+            return false;
+          }
+          if (
             tx.type === 'ContractCallTx' &&
-            !!tx.contract_id &&
             tx.contract_id === contractAddress
-          );
+          ) {
+            return true;
+          }
+          if (
+            tx.type === 'ContractCallTx' &&
+            (tx.function === GOVERNANCE_CONTRACT.FUNCTIONS.vote ||
+              tx.function === GOVERNANCE_CONTRACT.FUNCTIONS.revoke_vote) &&
+            this.pollRegistry.has(tx.contract_id)
+          ) {
+            return true;
+          }
+          if (
+            tx.type === 'ContractCreateTx' &&
+            this.pollRegistry.has(tx.contract_id)
+          ) {
+            return true;
+          }
+          return false;
         },
       },
     ];
