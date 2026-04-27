@@ -17,10 +17,16 @@ import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { IPriceDto } from '@/tokens/dto/price.dto';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
+import {
+  getMissingCurrencyCodes,
+  isCompleteCurrencyRates,
+} from '@/utils/currency-rates.util';
 import { CoinHistoricalPriceService } from '@/ae-pricing/services/coin-historical-price.service';
 
 const COIN_GECKO_API_URL = 'https://api.coingecko.com/api/v3';
 const DEFAULT_MARKET_DATA_MAX_AGE_MS = 3 * 60 * 1000;
+const FALLBACK_MARKET_DATA_CACHE_TTL_MS = 60 * 60 * 1000;
+const RATES_CACHE_KEY = 'coingecko:rates';
 
 export interface CoinGeckoMarketResponse {
   ath: number;
@@ -49,6 +55,14 @@ export interface CoinGeckoMarketResponse {
   symbol: string;
   totalSupply: number;
   totalVolume: number;
+  dataSource?: 'coingecko' | 'fallback';
+  isFallback?: boolean;
+}
+
+interface FallbackPriceData {
+  prices?: Array<[number, number]>;
+  market_caps?: Array<[number, number]>;
+  total_volumes?: Array<[number, number]>;
 }
 
 @Injectable()
@@ -143,32 +157,33 @@ export class CoinGeckoService {
    * Never triggers a live CoinGecko API call — data is kept fresh by syncAllFromApi().
    */
   async getAeternityRates(): Promise<CurrencyRates> {
-    if (this.rates && !this.isPullTimeExpired()) {
+    if (
+      this.rates &&
+      !this.isPullTimeExpired() &&
+      isCompleteCurrencyRates(this.rates)
+    ) {
       return this.rates;
     }
 
     // Try Redis cache
     try {
       const cachedRates =
-        await this.cacheManager.get<CurrencyRates>('coingecko:rates');
-      if (cachedRates) {
+        await this.cacheManager.get<CurrencyRates>(RATES_CACHE_KEY);
+      if (isCompleteCurrencyRates(cachedRates)) {
         this.rates = cachedRates;
         this.last_pull_time = moment();
         return cachedRates;
+      }
+      if (cachedRates) {
+        this.logger.warn(
+          `Ignoring incomplete cached rates; missing: ${getMissingCurrencyCodes(cachedRates).join(', ')}`,
+        );
       }
     } catch (error) {
       this.logger.warn(
         'Failed to read cached rates in getAeternityRates:',
         error,
       );
-    }
-
-    // Try fallback JSON
-    const fallbackRates = this.getFallbackRates();
-    if (fallbackRates) {
-      this.rates = fallbackRates;
-      this.last_pull_time = moment();
-      return fallbackRates;
     }
 
     throw new ServiceUnavailableException(
@@ -178,7 +193,7 @@ export class CoinGeckoService {
 
   /**
    * Retrieves the price data for a given amount of AE tokens.
-   * Reads rates from memory / Redis / fallback — never triggers a live API call.
+   * Reads rates from memory / Redis — never triggers a live API call.
    * The cron (syncAllFromApi) keeps rates fresh; here we only warm up if rates are null.
    * @param price - The amount of AE tokens.
    * @returns An object containing the price data for AE and other currencies.
@@ -189,19 +204,17 @@ export class CoinGeckoService {
     if (this.rates === null) {
       try {
         const cachedRates =
-          await this.cacheManager.get<CurrencyRates>('coingecko:rates');
-        if (cachedRates) {
+          await this.cacheManager.get<CurrencyRates>(RATES_CACHE_KEY);
+        if (isCompleteCurrencyRates(cachedRates)) {
           this.rates = cachedRates;
           this.last_pull_time = moment();
-        } else {
-          const fallbackRates = this.getFallbackRates();
-          if (fallbackRates) {
-            this.rates = fallbackRates;
-            this.last_pull_time = moment();
-          }
+        } else if (cachedRates) {
+          this.logger.warn(
+            `Ignoring incomplete cached rates in getPriceData; missing: ${getMissingCurrencyCodes(cachedRates).join(', ')}`,
+          );
         }
       } catch (error) {
-        this.logger.warn('Failed to get cached or fallback rates:', error);
+        this.logger.warn('Failed to get cached rates:', error);
       }
     }
 
@@ -272,6 +285,26 @@ export class CoinGeckoService {
       }
     } catch (error) {
       this.logger.warn(`Failed to read market cache (${cacheKey}):`, error);
+    }
+
+    const fallbackMarketData = this.getFallbackMarketData(coinId, currencyCode);
+    if (fallbackMarketData) {
+      try {
+        await this.cacheManager.set(
+          cacheKey,
+          {
+            data: fallbackMarketData,
+            fetchedAt: Date.now(),
+          } satisfies CachedMarket,
+          FALLBACK_MARKET_DATA_CACHE_TTL_MS,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to cache fallback market data (${cacheKey}):`,
+          error,
+        );
+      }
+      return fallbackMarketData;
     }
 
     throw new ServiceUnavailableException(
@@ -349,11 +382,11 @@ export class CoinGeckoService {
    */
   private async pullData() {
     const rates = await this.fetchCoinCurrencyRates(AETERNITY_COIN_ID);
-    if (rates) {
+    if (isCompleteCurrencyRates(rates)) {
       this.rates = rates;
       this.last_pull_time = moment();
       try {
-        await this.cacheManager.set('coingecko:rates', rates, 600 * 1000);
+        await this.cacheManager.set(RATES_CACHE_KEY, rates, 600 * 1000);
         this.logger.debug('Cached currency rates');
       } catch (error) {
         this.logger.warn('Failed to cache currency rates:', error);
@@ -362,55 +395,131 @@ export class CoinGeckoService {
       // If API fails, try to use cached rates
       try {
         const cachedRates =
-          await this.cacheManager.get<CurrencyRates>('coingecko:rates');
-        if (cachedRates) {
+          await this.cacheManager.get<CurrencyRates>(RATES_CACHE_KEY);
+        if (isCompleteCurrencyRates(cachedRates)) {
           this.logger.log('Using cached currency rates due to API failure');
           this.rates = cachedRates;
           this.last_pull_time = moment();
         } else {
-          const fallbackRates = this.getFallbackRates();
-          if (fallbackRates) {
-            this.logger.log('Using fallback rates from JSON file');
-            this.rates = fallbackRates;
-            this.last_pull_time = moment();
+          if (cachedRates) {
+            this.logger.warn(
+              `Ignoring incomplete cached rates after API failure; missing: ${getMissingCurrencyCodes(cachedRates).join(', ')}`,
+            );
+          }
+          if (isCompleteCurrencyRates(this.rates)) {
+            this.logger.log(
+              'Keeping previous in-memory currency rates due to API failure',
+            );
           } else {
-            this.logger.warn('No rates available from API, cache, or fallback');
+            this.logger.warn('No complete rates available from API or cache');
           }
         }
       } catch (error) {
         this.logger.warn('Failed to read cached rates:', error);
-        const fallbackRates = this.getFallbackRates();
-        if (fallbackRates) {
-          this.logger.log('Using fallback rates from JSON file');
-          this.rates = fallbackRates;
-          this.last_pull_time = moment();
-        }
       }
     }
   }
 
-  /**
-   * Gets fallback rates from the JSON file (uses latest USD price).
-   * @returns CurrencyRates object with USD rate, or null if unavailable
-   */
-  private getFallbackRates(): CurrencyRates | null {
-    try {
-      const priceData = this.readFallbackPriceData();
-      if (priceData && priceData.length > 0) {
-        const sortedByTime = [...priceData].sort((a, b) => b[0] - a[0]);
-        const latestPrice = sortedByTime[0][1];
-        if (latestPrice && typeof latestPrice === 'number') {
-          this.logger.log(`Using fallback USD rate from JSON: ${latestPrice}`);
-          return {
-            usd: latestPrice,
-          } as CurrencyRates;
-        }
-      }
-      return null;
-    } catch (error) {
-      this.logger.error('Failed to get fallback rates:', error);
+  private getFallbackMarketData(
+    coinId: string,
+    currencyCode: string,
+  ): CoinGeckoMarketResponse | null {
+    if (coinId !== AETERNITY_COIN_ID || currencyCode !== 'usd') {
       return null;
     }
+
+    try {
+      const fallbackData = this.readFallbackPricingData();
+      const latestPrice = this.getLatestFallbackValue(fallbackData.prices);
+      if (!latestPrice) {
+        return null;
+      }
+
+      const previousPrice = this.getPreviousFallbackValue(fallbackData.prices);
+      const priceChange24h = previousPrice
+        ? latestPrice[1] - previousPrice[1]
+        : 0;
+      const priceChangePercentage24h =
+        previousPrice && previousPrice[1] !== 0
+          ? (priceChange24h / previousPrice[1]) * 100
+          : 0;
+      const latestMarketCap = this.getLatestFallbackValue(
+        fallbackData.market_caps,
+      );
+      const previousMarketCap = this.getPreviousFallbackValue(
+        fallbackData.market_caps,
+      );
+      const marketCapChange24h =
+        latestMarketCap && previousMarketCap
+          ? latestMarketCap[1] - previousMarketCap[1]
+          : 0;
+      const marketCapChangePercentage24h =
+        previousMarketCap && previousMarketCap[1] !== 0
+          ? (marketCapChange24h / previousMarketCap[1]) * 100
+          : 0;
+
+      this.logger.warn(
+        `Using fallback market data from JSON for ${coinId}/${currencyCode}`,
+      );
+
+      return {
+        ath: latestPrice[1],
+        athChangePercentage: 0,
+        athDate: new Date(latestPrice[0]).toISOString(),
+        atl: latestPrice[1],
+        atlChangePercentage: 0,
+        atlDate: new Date(latestPrice[0]).toISOString(),
+        circulatingSupply: 0,
+        currentPrice: latestPrice[1],
+        fullyDilutedValuation: null,
+        high24h: Math.max(latestPrice[1], previousPrice?.[1] ?? latestPrice[1]),
+        id: coinId,
+        image: '',
+        lastUpdated: new Date(latestPrice[0]).toISOString(),
+        low24h: Math.min(latestPrice[1], previousPrice?.[1] ?? latestPrice[1]),
+        marketCap: latestMarketCap?.[1] ?? 0,
+        marketCapChange24h,
+        marketCapChangePercentage24h,
+        marketCapRank: 0,
+        maxSupply: null,
+        name: 'Aeternity',
+        priceChange24h,
+        priceChangePercentage24h,
+        roi: null,
+        symbol: 'ae',
+        totalSupply: 0,
+        totalVolume:
+          this.getLatestFallbackValue(fallbackData.total_volumes)?.[1] ?? 0,
+        dataSource: 'fallback',
+        isFallback: true,
+      };
+    } catch (error) {
+      this.logger.error('Failed to get fallback market data:', error);
+      return null;
+    }
+  }
+
+  private getLatestFallbackValue(
+    values?: Array<[number, number]>,
+  ): [number, number] | null {
+    if (!values?.length) {
+      return null;
+    }
+
+    return values.reduce((latest, current) =>
+      current[0] > latest[0] ? current : latest,
+    );
+  }
+
+  private getPreviousFallbackValue(
+    values?: Array<[number, number]>,
+  ): [number, number] | null {
+    if (!values || values.length < 2) {
+      return null;
+    }
+
+    const sortedByTime = [...values].sort((a, b) => b[0] - a[0]);
+    return sortedByTime[1];
   }
 
   /**
@@ -444,12 +553,18 @@ export class CoinGeckoService {
       }
 
       const rates = response?.[coinId];
-      if (rates) {
+      if (isCompleteCurrencyRates(rates)) {
         this.logger.debug(
           `Fetched CoinGecko rates for ${coinId}:`,
           JSON.stringify(rates),
         );
         return rates;
+      }
+      if (rates) {
+        this.logger.warn(
+          `Incomplete CoinGecko rates for ${coinId}; missing: ${getMissingCurrencyCodes(rates).join(', ')}`,
+        );
+        return null;
       }
       this.logger.warn(`No rates found in CoinGecko response for ${coinId}`);
       return null;
@@ -514,9 +629,7 @@ export class CoinGeckoService {
    */
   private readFallbackPriceData(): Array<[number, number]> {
     try {
-      const filePath = join(process.cwd(), 'src', 'data', 'ae-pricing.json');
-      const fileContent = readFileSync(filePath, 'utf-8');
-      const data = JSON.parse(fileContent);
+      const data = this.readFallbackPricingData();
 
       if (data?.prices && Array.isArray(data.prices)) {
         this.logger.log(
@@ -536,6 +649,12 @@ export class CoinGeckoService {
       );
       return [];
     }
+  }
+
+  private readFallbackPricingData(): FallbackPriceData {
+    const filePath = join(process.cwd(), 'src', 'data', 'ae-pricing.json');
+    const fileContent = readFileSync(filePath, 'utf-8');
+    return JSON.parse(fileContent) as FallbackPriceData;
   }
 
   /**
