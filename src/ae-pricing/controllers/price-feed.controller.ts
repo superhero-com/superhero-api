@@ -9,13 +9,17 @@ import {
   CoinGeckoService,
   CoinGeckoMarketResponse,
 } from '@/ae/coin-gecko.service';
+import { AePricingService } from '../ae-pricing.service';
 import { CurrencyRates } from '@/utils/types';
 import { AETERNITY_COIN_ID } from '@/configs';
 
 @Controller('coins')
 @ApiTags('Coins')
 export class PriceFeedController {
-  constructor(private readonly coinGeckoService: CoinGeckoService) {}
+  constructor(
+    private readonly coinGeckoService: CoinGeckoService,
+    private readonly aePricingService: AePricingService,
+  ) {}
 
   @ApiOperation({
     operationId: 'getCurrencyRates',
@@ -43,7 +47,7 @@ export class PriceFeedController {
   @Get('aeternity/rates')
   async getCurrencyRates(): Promise<CurrencyRates> {
     // Serve best-available (cached/last-known-good) rates to avoid intermittent {}
-    return this.coinGeckoService.getAeternityRates();
+    return this.aePricingService.getCurrencyRates();
   }
 
   @ApiOperation({

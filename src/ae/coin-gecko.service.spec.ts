@@ -1,4 +1,4 @@
-import { AETERNITY_COIN_ID } from '@/configs';
+import { AETERNITY_COIN_ID, CURRENCIES } from '@/configs';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { fetchJson } from '@/utils/common';
 import { CurrencyRates } from '@/utils/types';
@@ -11,6 +11,16 @@ import { CoinGeckoService } from './coin-gecko.service';
 jest.mock('@/utils/common', () => ({
   fetchJson: jest.fn(),
 }));
+
+const buildCompleteRates = (
+  overrides: Partial<CurrencyRates> = {},
+): CurrencyRates =>
+  ({
+    ...Object.fromEntries(
+      CURRENCIES.map(({ code }, index) => [code, (index + 1) / 100]),
+    ),
+    ...overrides,
+  }) as CurrencyRates;
 
 describe('CoinGeckoService', () => {
   let service: CoinGeckoService;
@@ -51,7 +61,7 @@ describe('CoinGeckoService', () => {
   });
 
   it('should fetch coin currency rates correctly', async () => {
-    const mockRates: CurrencyRates = { usd: 0.1, eur: 0.09 } as any;
+    const mockRates = buildCompleteRates({ usd: 0.1, eur: 0.09 });
     (fetchJson as jest.Mock).mockResolvedValue({
       [AETERNITY_COIN_ID]: mockRates,
     });
@@ -63,6 +73,18 @@ describe('CoinGeckoService', () => {
       expect.stringContaining('/simple/price'),
     );
     expect(rates).toEqual(mockRates);
+  });
+
+  it('should reject incomplete coin currency rates', async () => {
+    (fetchJson as jest.Mock).mockResolvedValue({
+      [AETERNITY_COIN_ID]: { usd: 0.1 },
+    });
+
+    const rates = await (service as any).fetchCoinCurrencyRates(
+      AETERNITY_COIN_ID,
+    );
+
+    expect(rates).toBeNull();
   });
 
   it('should return null when fetching coin currency rates fails', async () => {
@@ -103,6 +125,21 @@ describe('CoinGeckoService', () => {
     expect(result.eur).toBeNull(); // Ensure unsupported currencies return null
   });
 
+  it('should return cached rates only when all supported currencies are present', async () => {
+    const cachedRates = buildCompleteRates({ usd: 0.1 });
+    (cacheManager.get as jest.Mock).mockResolvedValue(cachedRates);
+
+    await expect(service.getAeternityRates()).resolves.toEqual(cachedRates);
+  });
+
+  it('should not return incomplete cached rates', async () => {
+    (cacheManager.get as jest.Mock).mockResolvedValue({ usd: 0.1 });
+
+    await expect(service.getAeternityRates()).rejects.toThrow(
+      'Aeternity rates are temporarily unavailable',
+    );
+  });
+
   it('should fetch data from API correctly', async () => {
     (fetchJson as jest.Mock).mockResolvedValue({ data: 'mockData' });
 
@@ -128,6 +165,50 @@ describe('CoinGeckoService', () => {
     const result = await service.getCoinMarketData(AETERNITY_COIN_ID, 'usd');
 
     expect(result).toEqual(cachedMarket.data);
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it('should return fallback market data when market cache is empty', async () => {
+    (cacheManager.get as jest.Mock).mockResolvedValue(null);
+    jest.spyOn(service as any, 'readFallbackPricingData').mockReturnValue({
+      prices: [
+        [1000, 0.1],
+        [2000, 0.12],
+      ],
+      market_caps: [
+        [1000, 100],
+        [2000, 120],
+      ],
+      total_volumes: [
+        [1000, 10],
+        [2000, 12],
+      ],
+    });
+
+    const result = await service.getCoinMarketData(AETERNITY_COIN_ID, 'usd');
+
+    expect(result).toMatchObject({
+      id: AETERNITY_COIN_ID,
+      currentPrice: 0.12,
+      marketCap: 120,
+      totalVolume: 12,
+      marketCapChange24h: 20,
+      dataSource: 'fallback',
+      isFallback: true,
+    });
+    expect(result.priceChange24h).toBeCloseTo(0.02);
+    expect(cacheManager.set).toHaveBeenCalledWith(
+      `coingecko:market:v1:${AETERNITY_COIN_ID}:usd`,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          currentPrice: 0.12,
+          dataSource: 'fallback',
+          isFallback: true,
+        }),
+        fetchedAt: expect.any(Number),
+      }),
+      60 * 60 * 1000,
+    );
     expect(fetchJson).not.toHaveBeenCalled();
   });
 });
