@@ -203,6 +203,29 @@ describe('TokensController', () => {
     );
   });
 
+  it('should allow ordering tokens by treasury', async () => {
+    await controller.listAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'treasury',
+      'DESC',
+      'all',
+    );
+
+    expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
+    expect(tokensService.queryTokensWithRanks).toHaveBeenCalledWith(
+      tokensQueryBuilder,
+      100,
+      1,
+      'treasury',
+      'DESC',
+    );
+  });
+
   it('should filter owner holdings with EXISTS instead of a distinct IN subquery', async () => {
     await controller.listAll(undefined, undefined, undefined, 'ak_owner');
 
