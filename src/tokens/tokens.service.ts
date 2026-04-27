@@ -735,7 +735,9 @@ export class TokensService {
          ${alias}.created_at DESC`;
     }
 
-    return `${alias}.${orderBy} ${orderDirection}`;
+    const orderColumn = orderBy === 'treasury' ? 'dao_balance' : orderBy;
+
+    return `${alias}.${orderColumn} ${orderDirection}`;
   }
 
   private buildEligibilityTradeCountsSubquery(): string {

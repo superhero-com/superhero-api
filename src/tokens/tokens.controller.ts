@@ -99,6 +99,7 @@ export class TokensController {
       'created_at',
       'holders_count',
       'rank',
+      'treasury',
       'trending_score',
     ],
     required: false,
@@ -132,6 +133,7 @@ export class TokensController {
       'name',
       'price',
       'created_at',
+      'treasury',
       'trending_score',
       'holders_count',
     ];

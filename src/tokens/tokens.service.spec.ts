@@ -340,6 +340,25 @@ describe('TokensService', () => {
     });
   });
 
+  it('orders ranked token pages by treasury using dao balance', async () => {
+    const queryBuilder = {
+      getQueryAndParameters: jest
+        .fn()
+        .mockReturnValue([
+          'SELECT token.* FROM token WHERE token.unlisted = false',
+          [],
+        ]),
+    } as any;
+
+    tokensRepository.query.mockResolvedValue([]);
+
+    await service.queryTokensWithRanks(queryBuilder, 20, 1, 'treasury', 'DESC');
+
+    const [sql] = tokensRepository.query.mock.calls[0];
+    expect(sql).toContain('ORDER BY all_ranked_tokens.dao_balance DESC');
+    expect(sql).toContain('ORDER BY paged_tokens.dao_balance DESC');
+  });
+
   it('returns empty items with the correct total when a ranked page is out of range', async () => {
     const queryBuilder = {
       getQueryAndParameters: jest
