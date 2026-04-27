@@ -79,8 +79,10 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: false,
-      graphiql: true, // enables GraphiQL instead
-      introspection: true,
+      // Keep introspection + GraphiQL off in production so the full schema
+      // is not a reconnaissance aid for unauthenticated callers.
+      graphiql: process.env.NODE_ENV !== 'production',
+      introspection: process.env.NODE_ENV !== 'production',
       hideSchemaDetailsFromClientErrors: true,
     }),
     MdwModule,

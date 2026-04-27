@@ -10,4 +10,11 @@ RUN npm ci
 RUN npm run build
 RUN npm prune --omit=dev
 
+# Run as an unprivileged user so a compromise of the Node process does not
+# grant root inside the container (and does not make container-escape
+# trivial). `node` is the default unprivileged user shipped in the
+# official node images.
+RUN chown -R node:node /src
+USER node
+
 CMD ["npm", "run", "start:prod"]

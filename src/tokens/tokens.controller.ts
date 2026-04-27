@@ -348,7 +348,13 @@ export class TokensController {
 
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    // Get tokens with market cap around the target token
+    // All values below are bound as parameters rather than interpolated
+    // into the SQL string. Even though `factory.address` and
+    // `token.sale_address` come from our own DB today, string
+    // interpolation here would mean a single compromised upstream row
+    // becomes SQL injection. `Math.floor(limit / 2)` is numeric and still
+    // bound as a parameter for consistency.
+    const halfLimit = Math.floor(limit / 2);
     const rankedQuery = `
       WITH ranked_tokens AS (
         SELECT 
@@ -360,21 +366,21 @@ export class TokensController {
               t.created_at ASC
           ) AS INTEGER) as rank
         FROM token t
-        WHERE t.factory_address = '${factory.address}'
+        WHERE t.factory_address = $1
       ),
       target_rank AS (
         SELECT rank
         FROM ranked_tokens
-        WHERE sale_address = '${token.sale_address}'
+        WHERE sale_address = $2
       ),
       adjusted_limits AS (
-        SELECT 
-          CASE 
+        SELECT
+          CASE
             WHEN (SELECT rank FROM target_rank) <= 2
-            THEN ${Math.floor(limit / 2)} - (SELECT rank FROM target_rank) + 1
-            ELSE ${Math.floor(limit / 2)} 
+            THEN $3::int - (SELECT rank FROM target_rank) + 1
+            ELSE $3::int
           END as upper_limit,
-          ${Math.floor(limit / 2)} as lower_limit
+          $3::int as lower_limit
       )
       SELECT 
         ranked_tokens.*,
@@ -390,7 +396,11 @@ export class TokensController {
       ORDER BY market_cap DESC
     `;
 
-    const rankedTokens = await this.tokensRepository.query(rankedQuery);
+    const rankedTokens = await this.tokensRepository.query(rankedQuery, [
+      factory.address,
+      token.sale_address,
+      halfLimit,
+    ]);
 
     return {
       items: rankedTokens,
