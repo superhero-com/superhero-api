@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { CreateAffiliationDto } from './affiliation/dto/create-affiliation.dto';
+import { GetLeaderboardQueryDto } from './account/dto/get-leaderboard-query.dto';
 import { GetPnlQueryDto } from './account/dto/get-pnl-query.dto';
 import { GetPortfolioHistoryQueryDto } from './account/dto/get-portfolio-history-query.dto';
 import {
@@ -128,6 +129,28 @@ describe('global ValidationPipe request DTO coverage', () => {
       },
       assertTransformed(result: GetPortfolioHistoryQueryDto) {
         expect(result.interval).toBe(86400);
+      },
+    },
+    {
+      name: 'GetLeaderboardQueryDto',
+      metatype: GetLeaderboardQueryDto,
+      type: 'query' as const,
+      validPayload: {
+        window: '7d',
+        sortBy: 'pnl',
+        sortDir: 'desc',
+        page: '2',
+        limit: '20',
+        minAumUsd: '1',
+        timePeriod: '30',
+        timeUnit: 'minutes',
+      },
+      assertTransformed(result: GetLeaderboardQueryDto) {
+        expect(result.page).toBe(2);
+        expect(result.limit).toBe(20);
+        expect(result.minAumUsd).toBe(1);
+        expect(result.timePeriod).toBe(30);
+        expect(result.sortDir).toBe('DESC');
       },
     },
     {
