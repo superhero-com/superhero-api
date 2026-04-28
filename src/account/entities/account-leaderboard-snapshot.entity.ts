@@ -6,10 +6,17 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { LeaderboardWindow } from '../services/leaderboard.service';
+import { LeaderboardWindow } from '../services/leaderboard.types';
 
 @Entity({ name: 'account_leaderboard_snapshots' })
-@Index(['window', 'aum_usd'])
+@Index('IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_ADDRESS', [
+  'window',
+  'address',
+])
+@Index('IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_AUM', ['window', 'aum_usd'])
+@Index('IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_PNL', ['window', 'pnl_usd'])
+@Index('IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_ROI', ['window', 'roi_pct'])
+@Index('IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_MDD', ['window', 'mdd_pct'])
 export class AccountLeaderboardSnapshot {
   @PrimaryGeneratedColumn()
   id: number;

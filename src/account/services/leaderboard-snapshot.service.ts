@@ -6,7 +6,11 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Account } from '../entities/account.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
-import { LeaderboardItem, LeaderboardWindow } from './leaderboard.service';
+import {
+  LEADERBOARD_SNAPSHOT_MAX_CANDIDATES,
+  LeaderboardItem,
+  LeaderboardWindow,
+} from './leaderboard.types';
 import { AccountLeaderboardSnapshot } from '../entities/account-leaderboard-snapshot.entity';
 import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
 import { timestampToAeHeight } from '@/utils/getBlochHeight';
@@ -59,7 +63,12 @@ export class LeaderboardSnapshotService {
     pnlCache: Map<string, Promise<TokenPnlResult>>,
   ): Promise<void> {
     this.logger.log(`Recomputing leaderboard snapshots for window=${window}`);
-    const items = await this.computeWindow(window, 100, referenceEnd, pnlCache);
+    const items = await this.computeWindow(
+      window,
+      LEADERBOARD_SNAPSHOT_MAX_CANDIDATES,
+      referenceEnd,
+      pnlCache,
+    );
 
     await this.snapshotRepository.manager.transaction(async (manager) => {
       const repo = manager.getRepository(AccountLeaderboardSnapshot);
