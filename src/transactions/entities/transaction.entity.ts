@@ -22,6 +22,11 @@ import {
   'created_at',
 ])
 @Index('IDX_TRANSACTION_ADDRESS_BLOCK_HEIGHT', ['address', 'block_height'])
+@Index('IDX_TRANSACTION_CREATED_AT_ADDRESS_TYPE', [
+  'created_at',
+  'address',
+  'tx_type',
+])
 export class Transaction {
   @Index()
   @PrimaryColumn()

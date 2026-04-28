@@ -1,26 +1,15 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseInterceptors,
-  DefaultValuePipe,
-  ParseIntPipe,
-} from '@nestjs/common';
-import {
-  ApiOkResponse,
-  ApiOperation,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { Controller, Get, Query, UseInterceptors } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+import { LeaderboardService } from '../services/leaderboard.service';
 import {
-  GetLeadersParams,
   LeaderboardItem,
-  LeaderboardService,
   LeaderboardSortBy,
   LeaderboardSortDir,
+  LeaderboardTimeUnit,
   LeaderboardWindow,
-} from '../services/leaderboard.service';
+} from '../services/leaderboard.types';
+import { GetLeaderboardQueryDto } from '../dto/get-leaderboard-query.dto';
 
 class LeaderboardResponseDto {
   items!: LeaderboardItem[];
@@ -32,6 +21,12 @@ class LeaderboardResponseDto {
     window: LeaderboardWindow;
     sortBy: LeaderboardSortBy;
     sortDir: LeaderboardSortDir;
+    timeFilter?: {
+      value: number;
+      unit: LeaderboardTimeUnit;
+      start: string;
+      end: string;
+    };
   };
 }
 
@@ -44,87 +39,42 @@ export class LeaderboardController {
   @ApiOperation({
     operationId: 'getAccountsLeaderboard',
     description:
-      'Returns paginated trading leaders with metrics (AUM, PNL, ROI, MDD), activity counters, and portfolio sparkline.',
+      'Returns paginated trading leaders with metrics (AUM, PNL, ROI, MDD), activity counters, and a portfolio sparkline. ' +
+      'Without timePeriod + timeUnit, metrics are precomputed per window (7d / 30d / all). ' +
+      'When timePeriod + timeUnit are supplied, leaders are ranked by rolling-window performance among accounts that traded within that recent window. ' +
+      'In that mode, top-level metrics and buy/sell counts are scoped to the requested rolling window. ' +
+      'Note: responses are cached for up to 60 seconds, so `meta.timeFilter.start` and `meta.timeFilter.end` reflect the time the cache entry was filled, not strictly the time of the current request.',
   })
   @ApiOkResponse({ type: LeaderboardResponseDto })
-  @ApiQuery({
-    name: 'window',
-    required: false,
-    enum: ['7d', '30d', 'all'],
-    example: '7d',
-  })
-  @ApiQuery({
-    name: 'sortBy',
-    required: false,
-    enum: ['pnl', 'roi', 'mdd', 'aum'],
-    example: 'pnl',
-  })
-  @ApiQuery({
-    name: 'sortDir',
-    required: false,
-    enum: ['ASC', 'DESC'],
-    example: 'DESC',
-  })
-  @ApiQuery({ name: 'page', required: false, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, example: 18 })
-  @ApiQuery({
-    name: 'points',
-    required: false,
-    example: 30,
-    description: 'Approximate number of sparkline points',
-  })
-  @ApiQuery({
-    name: 'minAumUsd',
-    required: false,
-    example: 1,
-    description: 'Exclude leaders with AUM below this USD value',
-  })
-  @ApiQuery({
-    name: 'maxCandidates',
-    required: false,
-    example: 36,
-    description: 'Upper bound of candidate addresses to evaluate',
-  })
   @CacheTTL(60_000)
   @Get()
   async getLeaderboard(
-    @Query('window') window: LeaderboardWindow = '7d',
-    @Query('sortBy') sortBy: LeaderboardSortBy = 'pnl',
-    @Query('sortDir')
-    sortDir: LeaderboardSortDir = (sortBy === 'mdd'
-      ? 'ASC'
-      : 'DESC') as LeaderboardSortDir,
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(18), ParseIntPipe) limit = 18,
-    @Query('points', new DefaultValuePipe(30), ParseIntPipe) points = 30,
-    @Query('minAumUsd', new DefaultValuePipe(1), ParseIntPipe) minAumUsd = 1,
-    @Query('maxCandidates', new DefaultValuePipe(36), ParseIntPipe)
-    maxCandidates = 36,
+    @Query() query: GetLeaderboardQueryDto,
   ): Promise<LeaderboardResponseDto> {
-    const params: GetLeadersParams = {
-      window,
-      sortBy,
-      sortDir,
-      page,
-      limit,
-      points,
-      minAumUsd,
-      maxCandidates,
-    };
-    const result = await this.leaderboardService.getLeaders(params);
+    const result = await this.leaderboardService.getLeaders(query);
+    const totalPages =
+      result.totalCandidates === 0
+        ? 0
+        : Math.ceil(result.totalCandidates / result.limit);
+
     return {
       items: result.items,
       meta: {
         page: result.page,
         limit: result.limit,
         totalItems: result.totalCandidates,
-        totalPages: Math.max(
-          1,
-          Math.ceil(result.totalCandidates / result.limit),
-        ),
-        window,
-        sortBy,
-        sortDir,
+        totalPages,
+        window: result.window,
+        sortBy: result.sortBy,
+        sortDir: result.sortDir,
+        timeFilter: result.timeFilter
+          ? {
+              value: result.timeFilter.value,
+              unit: result.timeFilter.unit,
+              start: result.timeFilter.start.toISOString(),
+              end: result.timeFilter.end.toISOString(),
+            }
+          : undefined,
       },
     };
   }
