@@ -14,7 +14,6 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
 @Entity({
   name: 'txs',
 })
-@Index(['hash'])
 @Index(['block_height'])
 @Index(['type'])
 @Index(['contract_id'])

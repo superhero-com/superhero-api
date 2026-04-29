@@ -13,8 +13,6 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
 @Entity({
   name: 'key_blocks',
 })
-@Index(['height'])
-@Index(['hash'])
 @Index(['prev_hash'])
 @Index(['prev_key_hash'])
 @Index(['time'])
