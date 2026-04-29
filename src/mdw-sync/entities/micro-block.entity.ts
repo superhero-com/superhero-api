@@ -14,7 +14,6 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
   name: 'micro_blocks',
 })
 @Index(['height'])
-@Index(['hash'])
 @Index(['prev_hash'])
 @Index(['prev_key_hash'])
 @ObjectType()
