@@ -1,13 +1,13 @@
 import {
   IsString,
   Length,
-  Matches,
   ValidateIf,
   Validate,
   ValidationArguments,
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 @ValidatorConstraint({ name: 'xAttestationAuth', async: false })
 export class XAttestationAuthConstraint implements ValidatorConstraintInterface {
@@ -31,7 +31,7 @@ export class XAttestationAuthConstraint implements ValidatorConstraintInterface 
  */
 export class CreateXAttestationDto {
   @IsString()
-  @Matches(/^ak_[1-9A-HJ-NP-Za-km-z]+$/)
+  @IsAeAccountAddress()
   address: string;
 
   /** When using token flow: provide the X OAuth access token directly */

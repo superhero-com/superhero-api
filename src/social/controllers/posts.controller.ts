@@ -29,6 +29,10 @@ import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view'
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
+import {
+  OpaqueIdPipe,
+  OptionalAeAccountAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -214,7 +218,8 @@ export class PostsController {
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('search') search?: string,
-    @Query('account_address') account_address?: string,
+    @Query('account_address', OptionalAeAccountAddressPipe)
+    account_address?: string,
     @Query('topics') topics?: string,
   ) {
     // Build base query for filtering to get distinct post IDs
@@ -534,7 +539,7 @@ export class PostsController {
     description: 'Post retrieved successfully',
   })
   @Get(':id')
-  async getById(@Param('id') id: string, @Req() req: Request) {
+  async getById(@Param('id', OpaqueIdPipe) id: string, @Req() req: Request) {
     const post = await this.postRepository
       .createQueryBuilder('post')
       .where('(post.id = :id OR post.slug = :id)', { id })
@@ -562,7 +567,7 @@ export class PostsController {
   @ApiOkResponsePaginated(PostDto)
   @Get(':id/comments')
   async getComments(
-    @Param('id') id: string,
+    @Param('id', OpaqueIdPipe) id: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'ASC',

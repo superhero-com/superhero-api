@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   DefaultValuePipe,
@@ -21,6 +22,11 @@ import { CreateXInviteChallengeDto } from '../dto/create-x-invite-challenge.dto'
 import { ProfileXVerificationRewardService } from '../services/profile-x-verification-reward.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
+import {
+  AeAccountAddressPipe,
+  InviteCodePipe,
+  isAeAccountAddress,
+} from '@/common/validation/request-validation';
 
 @Controller('profile')
 @ApiTags('Profile')
@@ -87,7 +93,10 @@ export class ProfileController {
     operationId: 'bindXInviteLink',
     summary: 'Bind invite code to an invitee address',
   })
-  async bindXInvite(@Param('code') code: string, @Body() body: BindXInviteDto) {
+  async bindXInvite(
+    @Param('code', InviteCodePipe) code: string,
+    @Body() body: BindXInviteDto,
+  ) {
     return this.profileXInviteService.bindInvite({
       code,
       inviteeAddress: body.invitee_address,
@@ -134,6 +143,14 @@ export class ProfileController {
       .split(',')
       .map((it) => it.trim())
       .filter(Boolean);
+    const invalidAddress = parsed.find(
+      (address) => !isAeAccountAddress(address),
+    );
+    if (invalidAddress) {
+      throw new BadRequestException(
+        `addresses contains invalid account address ${invalidAddress}`,
+      );
+    }
     return this.profileReadService.getProfilesByAddresses(parsed, {
       includeOnChain: includeOnChain === 'true',
     });
@@ -144,7 +161,9 @@ export class ProfileController {
     operationId: 'getOnChainProfile',
     summary: 'Get profile directly from contract dry-run call',
   })
-  async getOnChainProfile(@Param('address') address: string) {
+  async getOnChainProfile(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     return this.profileReadService.getOnChainProfile(address);
   }
 
@@ -153,7 +172,9 @@ export class ProfileController {
     operationId: 'getXInviteProgress',
     summary: 'Get X invite progress for inviter',
   })
-  async getXInviteProgress(@Param('address') address: string) {
+  async getXInviteProgress(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     return this.profileXInviteService.getProgress(address);
   }
 
@@ -162,7 +183,9 @@ export class ProfileController {
     operationId: 'getRewardsProgress',
     summary: 'Get combined progress across all profile reward systems',
   })
-  async getRewardsProgress(@Param('address') address: string) {
+  async getRewardsProgress(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     const [xVerification, xPosting, xInvite] = await Promise.all([
       this.profileXVerificationRewardService.getRewardStatus(address),
       this.profileXPostingRewardService.getRewardStatus(address),
@@ -238,7 +261,7 @@ export class ProfileController {
       'When true, augments response with fresh on-chain contract read',
   })
   async getProfile(
-    @Param('address') address: string,
+    @Param('address', AeAccountAddressPipe) address: string,
     @Query('includeOnChain') includeOnChain?: string,
   ) {
     return this.profileReadService.getProfile(address, {

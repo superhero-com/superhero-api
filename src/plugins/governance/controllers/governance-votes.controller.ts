@@ -14,6 +14,7 @@ import {
 } from '../dto/governance-vote.dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Pagination } from 'nestjs-typeorm-paginate';
+import { AeContractAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('governance/votes')
 @ApiTags('Governance')
@@ -49,7 +50,7 @@ export class GovernanceVotesController {
   })
   @Get(':pollAddress')
   async findOne(
-    @Param('pollAddress') pollAddress: string,
+    @Param('pollAddress', AeContractAddressPipe) pollAddress: string,
   ): Promise<GovernanceVoteDto> {
     return this.governanceVoteService.findOne(pollAddress);
   }

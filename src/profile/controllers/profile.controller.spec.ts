@@ -1,6 +1,9 @@
 import { ProfileController } from './profile.controller';
 
 describe('ProfileController', () => {
+  const validAddress1 = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
+  const validAddress2 = 'ak_2maNN7AsevCiv546m1TLrSxCFSDeVHif7S7pSsdPS2VXEbkbG';
+
   const getController = (overrides?: {
     profileXInviteService?: any;
     profileXVerificationRewardService?: any;
@@ -41,10 +44,10 @@ describe('ProfileController', () => {
   it('parses addresses query for batch endpoint', async () => {
     const { controller, profileReadService } = getController();
 
-    await controller.getProfiles('ak_1, ak_2', 'false');
+    await controller.getProfiles(`${validAddress1}, ${validAddress2}`, 'false');
 
     expect(profileReadService.getProfilesByAddresses).toHaveBeenCalledWith(
-      ['ak_1', 'ak_2'],
+      [validAddress1, validAddress2],
       { includeOnChain: false },
     );
   });

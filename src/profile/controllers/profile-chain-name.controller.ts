@@ -4,6 +4,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CreateChainNameChallengeDto } from '../dto/create-chain-name-challenge.dto';
 import { RequestChainNameDto } from '../dto/request-chain-name.dto';
 import { ProfileChainNameService } from '../services/profile-chain-name.service';
+import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('profile')
 @ApiTags('ProfileChainName')
@@ -45,7 +46,9 @@ export class ProfileChainNameController {
     operationId: 'getChainNameClaimStatus',
     summary: 'Get the status of a sponsored chain name claim for an address',
   })
-  async getChainNameClaimStatus(@Param('address') address: string) {
+  async getChainNameClaimStatus(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     return this.profileChainNameService.getClaimStatus(address);
   }
 }

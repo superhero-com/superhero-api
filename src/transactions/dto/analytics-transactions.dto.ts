@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class DailyTradeVolumeQueryDto {
   @ApiProperty({
@@ -7,7 +8,7 @@ export class DailyTradeVolumeQueryDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   start_date?: string;
 
   @ApiProperty({
@@ -15,7 +16,7 @@ export class DailyTradeVolumeQueryDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   end_date?: string;
 
   @ApiProperty({
@@ -32,6 +33,7 @@ export class DailyTradeVolumeQueryDto {
   })
   @IsOptional()
   @IsString()
+  @IsAeAccountAddress()
   account_address?: string;
 }
 
@@ -61,7 +63,7 @@ export class DailyUniqueActiveUsersQueryDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   start_date?: string;
 
   @ApiProperty({
@@ -69,7 +71,7 @@ export class DailyUniqueActiveUsersQueryDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   end_date?: string;
 
   @ApiProperty({
