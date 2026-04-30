@@ -19,6 +19,7 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Topic } from '../entities/topic.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import { TopicParamPipe } from '@/common/validation/request-validation';
 
 @Controller('topics')
 @ApiTags('Topics')
@@ -87,7 +88,7 @@ export class TopicsController {
     description: 'Topic retrieved successfully',
   })
   @Get(':id')
-  async getById(@Param('id') id: string) {
+  async getById(@Param('id', TopicParamPipe) id: string) {
     // Check if the parameter is a valid UUID format
     const isUUID =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -117,7 +118,7 @@ export class TopicsController {
     description: 'Topic retrieved successfully',
   })
   @Get('name/:name')
-  async getByName(@Param('name') name: string) {
+  async getByName(@Param('name', TopicParamPipe) name: string) {
     const topic = await this.topicRepository.findOne({
       where: { name },
       relations: ['posts'],

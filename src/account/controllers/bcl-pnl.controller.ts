@@ -15,6 +15,7 @@ import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
 import { GetPnlQueryDto } from '../dto/get-pnl-query.dto';
 import { GetPnlResponseDto } from '../dto/pnl-response.dto';
+import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('accounts')
 @ApiTags('Accounts')
@@ -29,7 +30,7 @@ export class BclPnlController {
   @ApiOkResponse({ type: GetPnlResponseDto })
   @Get(':address/pnl')
   async getPnl(
-    @Param('address') address: string,
+    @Param('address', AeAccountAddressPipe) address: string,
     @Query() query: GetPnlQueryDto,
   ) {
     // If blockHeight is not provided, get the current block height

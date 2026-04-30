@@ -25,6 +25,7 @@ import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTagsService } from '../services/trending-tags.service';
 import { ApiKeyGuard } from '../guards/api-key.guard';
+import { TopicParamPipe } from '@/common/validation/request-validation';
 
 @Controller('trending-tags')
 @ApiTags('Trending Tags')
@@ -79,7 +80,7 @@ export class TrendingTagsController {
   @ApiOperation({ operationId: 'getTrendingTag' })
   @ApiParam({ name: 'tag', type: 'string' })
   @Get(':tag')
-  async getTrendingTag(@Param('tag') tag: string) {
+  async getTrendingTag(@Param('tag', TopicParamPipe) tag: string) {
     const trendingTag = await this.trendingTagRepository.findOne({
       where: { tag },
     });

@@ -6,6 +6,10 @@ import { CreateAffiliationDto } from '../dto/create-affiliation.dto';
 import { Affiliation } from '../entities/affiliation.entity';
 import { AffiliationCode } from '../entities/affiliation-code.entity';
 import { OAuthService } from '../services/oauth.service';
+import {
+  InviteCodePipe,
+  ProviderParamPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('affiliations')
 @ApiTags('Affiliations')
@@ -25,7 +29,7 @@ export class AffiliationController {
     operationId: 'getJoinInviteInfo',
     summary: 'Get invite link',
   })
-  async getJoinInviteInfo(@Param('code') code: string) {
+  async getJoinInviteInfo(@Param('code', InviteCodePipe) code: string) {
     return this.affiliationRepository.findOne({ where: { code } });
   }
 
@@ -35,8 +39,8 @@ export class AffiliationController {
     summary: 'Get reward code',
   })
   async getRewardCode(
-    @Param('code') code: string,
-    @Param('provider') provider: string,
+    @Param('code', InviteCodePipe) code: string,
+    @Param('provider', ProviderParamPipe) provider: string,
     @Param('access_code') access_code: string,
   ) {
     // Verify the access token with the OAuth provider

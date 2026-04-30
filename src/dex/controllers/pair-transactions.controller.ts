@@ -17,6 +17,12 @@ import {
 import { PairTransactionService } from '../services/pair-transaction.service';
 import { PairTransactionDto } from '../dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
+import {
+  AeContractAddressPipe,
+  AeTransactionHashPipe,
+  OptionalAeAccountAddressPipe,
+  OptionalAeContractAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('dex/transactions')
 @ApiTags('DEX')
@@ -70,10 +76,12 @@ export class PairTransactionsController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
-    @Query('pair_address') pairAddress?: string,
-    @Query('token_address') tokenAddress?: string,
+    @Query('pair_address', OptionalAeContractAddressPipe) pairAddress?: string,
+    @Query('token_address', OptionalAeContractAddressPipe)
+    tokenAddress?: string,
     @Query('tx_type') txType?: string,
-    @Query('account_address') account_address?: string,
+    @Query('account_address', OptionalAeAccountAddressPipe)
+    account_address?: string,
   ) {
     return this.pairTransactionService.findAll(
       { page, limit },
@@ -98,7 +106,7 @@ export class PairTransactionsController {
   })
   @ApiOkResponse({ type: PairTransactionDto })
   @Get(':txHash')
-  async getByTxHash(@Param('txHash') txHash: string) {
+  async getByTxHash(@Param('txHash', AeTransactionHashPipe) txHash: string) {
     const pairTransaction =
       await this.pairTransactionService.findByTxHash(txHash);
     if (!pairTransaction) {
@@ -130,7 +138,7 @@ export class PairTransactionsController {
   @ApiOkResponsePaginated(PairTransactionDto)
   @Get('pair/:pairAddress')
   async getByPairAddress(
-    @Param('pairAddress') pairAddress: string,
+    @Param('pairAddress', AeContractAddressPipe) pairAddress: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'created_at',

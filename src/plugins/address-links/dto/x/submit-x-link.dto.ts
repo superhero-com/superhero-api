@@ -1,8 +1,10 @@
 import { IsString, IsNotEmpty, IsNumber, MaxLength } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class SubmitXLinkDto {
   @IsString()
   @IsNotEmpty()
+  @IsAeAccountAddress()
   address: string;
 
   @IsString()

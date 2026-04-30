@@ -34,6 +34,10 @@ import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
 import { buildSparklineSvg, sparklineStroke } from '@/utils/sparkline.util';
+import {
+  AeAccountAddressPipe,
+  AeAccountReferencePipe,
+} from '@/common/validation/request-validation';
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -176,7 +180,7 @@ export class AccountsController {
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
     //
-    @Param('address') address: string,
+    @Param('address', AeAccountReferencePipe) address: string,
     @Query() query: GetPortfolioHistoryQueryDto,
   ) {
     const start = query.startDate ? moment(query.startDate) : undefined;
@@ -218,7 +222,7 @@ export class AccountsController {
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/tokens/history')
   async getTokensPnlHistory(
-    @Param('address') address: string,
+    @Param('address', AeAccountReferencePipe) address: string,
     @Query() query: GetPortfolioHistoryQueryDto,
   ) {
     const start = query.startDate ? moment(query.startDate) : undefined;
@@ -273,7 +277,7 @@ export class AccountsController {
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/pnl-chart.svg')
   async getPortfolioPnlChart(
-    @Param('address') address: string,
+    @Param('address', AeAccountReferencePipe) address: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('convertTo') convertTo: 'ae' | 'usd' = 'ae',
@@ -321,7 +325,7 @@ export class AccountsController {
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/stats')
   async getPortfolioStats(
-    @Param('address') address: string,
+    @Param('address', AeAccountReferencePipe) address: string,
     @Query() query: TradingStatsQueryDto,
   ): Promise<TradingStatsResponseDto> {
     const start = query.startDate
@@ -353,7 +357,7 @@ export class AccountsController {
   @ApiParam({ name: 'address', type: 'string' })
   @CacheTTL(10 * 60_000)
   @Get(':address')
-  async getAccount(@Param('address') address: string) {
+  async getAccount(@Param('address', AeAccountAddressPipe) address: string) {
     const account = await this.accountRepository.findOne({
       where: { address },
     });

@@ -23,6 +23,10 @@ import {
   ITransactionPreview,
 } from '../services/pair-history.service';
 import { PairSummaryService } from '../services/pair-summary.service';
+import {
+  AeContractAddressPipe,
+  OptionalAeContractAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('dex/pairs')
 @ApiTags('Dex Pair')
@@ -63,7 +67,8 @@ export class PairsController {
   @Get()
   async listAll(
     @Query('search') search = undefined,
-    @Query('token_address') token_address = undefined,
+    @Query('token_address', OptionalAeContractAddressPipe)
+    token_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'created_at',
@@ -90,7 +95,7 @@ export class PairsController {
   })
   @ApiOkResponse({ type: PairDto })
   @Get(':address')
-  async getByAddress(@Param('address') address: string) {
+  async getByAddress(@Param('address', AeContractAddressPipe) address: string) {
     const pair = await this.pairService.findByAddress(address);
     if (!pair) {
       throw new NotFoundException(`Pair with address ${address} not found`);
@@ -116,8 +121,8 @@ export class PairsController {
   @ApiOkResponse({ type: PairDto })
   @Get('from/:from_token/to/:to_token')
   async getPairByFromTokenAndToToken(
-    @Param('from_token') fromToken: string,
-    @Param('to_token') toToken: string,
+    @Param('from_token', AeContractAddressPipe) fromToken: string,
+    @Param('to_token', AeContractAddressPipe) toToken: string,
   ) {
     const pair = await this.pairService.findByFromTokenAndToToken(
       fromToken,
@@ -181,8 +186,8 @@ export class PairsController {
   })
   @Get('from/:from_token/to/:to_token/providers')
   async findPairsForTokens(
-    @Param('from_token') fromToken: string,
-    @Param('to_token') toToken: string,
+    @Param('from_token', AeContractAddressPipe) fromToken: string,
+    @Param('to_token', AeContractAddressPipe) toToken: string,
   ) {
     const result = await this.pairService.findSwapPaths(fromToken, toToken);
 
@@ -225,7 +230,7 @@ export class PairsController {
   @ApiQuery({ name: 'limit', type: 'number', required: false })
   @Get(':address/history')
   async getPaginatedHistory(
-    @Param('address') address: string,
+    @Param('address', AeContractAddressPipe) address: string,
     @Query('interval') interval: number = 3600,
     @Query('from_token') fromToken: string = 'token0',
     @Query('convertTo') convertTo: string = 'ae',
@@ -264,7 +269,7 @@ export class PairsController {
   @ApiOkResponse({ type: PairSummaryDto })
   @Get(':address/summary')
   async getPairSummary(
-    @Param('address') address: string,
+    @Param('address', AeContractAddressPipe) address: string,
     @Query('token') token?: string,
   ) {
     const pair = await this.pairService.findByAddress(address);
@@ -296,7 +301,7 @@ export class PairsController {
   @ApiOkResponse({ type: Object })
   @Get('/:address/preview')
   async getForPreview(
-    @Param('address') address: string,
+    @Param('address', AeContractAddressPipe) address: string,
     @Query('interval') interval: '1d' | '7d' | '30d' = '7d',
   ): Promise<ITransactionPreview> {
     if (!address || address == 'null') {

@@ -5,6 +5,7 @@ import { CreateXPostingRecheckChallengeDto } from '../dto/create-x-posting-reche
 import { SubmitXPostingRecheckDto } from '../dto/submit-x-posting-recheck.dto';
 import { ProfileXInviteService } from '../services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
+import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('profile')
 @ApiTags('ProfileRewards')
@@ -19,7 +20,9 @@ export class ProfileRewardsController {
     operationId: 'getXPostingRewardStatus',
     summary: 'Get X posting reward status for an address',
   })
-  async getXPostingRewardStatus(@Param('address') address: string) {
+  async getXPostingRewardStatus(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     return this.profileXPostingRewardService.getRewardStatus(address);
   }
 
@@ -45,7 +48,7 @@ export class ProfileRewardsController {
       'Verify wallet ownership and run an on-demand X posting reward recheck',
   })
   async recheckXPostingReward(
-    @Param('address') address: string,
+    @Param('address', AeAccountAddressPipe) address: string,
     @Body() body: SubmitXPostingRecheckDto,
   ) {
     await this.profileXInviteService.verifyPostingRewardRecheckChallenge({

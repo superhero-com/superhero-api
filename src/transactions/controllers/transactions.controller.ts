@@ -24,6 +24,10 @@ import { Repository } from 'typeorm';
 import { TransactionDto } from '../dto/transaction.dto';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
+import {
+  AeTransactionHashPipe,
+  OptionalAeAccountAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('transactions')
 @ApiTags('Transactions')
@@ -77,7 +81,8 @@ export class TransactionsController {
   @Get('')
   async listTransactions(
     @Query('token_address') token_address: string = undefined,
-    @Query('account_address') account_address: string = undefined,
+    @Query('account_address', OptionalAeAccountAddressPipe)
+    account_address: string = undefined,
     @Query('includes') includes: string = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
@@ -148,7 +153,7 @@ export class TransactionsController {
   @ApiOkResponse({ type: TransactionDto })
   @Get('by-hash')
   async getTransactionByHash(
-    @Query('tx_hash') tx_hash: string,
+    @Query('tx_hash', AeTransactionHashPipe) tx_hash: string,
   ): Promise<TransactionDto> {
     const transaction = await this.transactionsRepository
       .createQueryBuilder('transactions')

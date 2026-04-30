@@ -1,8 +1,9 @@
 import { IsIn, IsString, Matches, ValidateIf } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class CreateXInviteChallengeDto {
   @IsString()
-  @Matches(/^ak_[1-9A-HJ-NP-Za-km-z]+$/)
+  @IsAeAccountAddress()
   address: string;
 
   @IsString()

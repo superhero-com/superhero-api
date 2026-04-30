@@ -1,4 +1,4 @@
-import { Encoding, isEncoded } from '@aeternity/aepp-sdk';
+import { isAeAccountAddress } from '@/common/validation/request-validation';
 import {
   ValidationArguments,
   ValidatorConstraint,
@@ -8,9 +8,7 @@ import {
 @ValidatorConstraint({ name: 'isAeAccountAddress', async: false })
 export class AeAccountAddressConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
-    return (
-      typeof value === 'string' && isEncoded(value, Encoding.AccountAddress)
-    );
+    return isAeAccountAddress(value);
   }
 
   defaultMessage(args: ValidationArguments): string {

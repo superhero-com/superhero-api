@@ -15,6 +15,7 @@ import {
 } from '../dto/governance-delegation.dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Pagination } from 'nestjs-typeorm-paginate';
+import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('governance/delegations')
 @ApiTags('Governance')
@@ -64,7 +65,7 @@ export class GovernanceDelegationsController {
   })
   @Get(':accountAddress')
   async findHistoryByAccount(
-    @Param('accountAddress') accountAddress: string,
+    @Param('accountAddress', AeAccountAddressPipe) accountAddress: string,
   ): Promise<GovernanceDelegationHistoryItemDto[]> {
     return this.governanceDelegationService.findHistoryByAccount(
       accountAddress,

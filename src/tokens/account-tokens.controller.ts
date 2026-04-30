@@ -16,6 +16,11 @@ import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { TokensService } from './tokens.service';
+import {
+  AeAccountAddressPipe,
+  OptionalAeAccountAddressPipe,
+  OptionalAeContractAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('accounts')
 @ApiTags('Account Tokens')
@@ -51,11 +56,14 @@ export class AccountTokensController {
   @ApiOkResponsePaginated(TokenHolderDto)
   @Get(':address/tokens')
   async listAccountTokens(
-    @Param('address') address: string,
+    @Param('address', AeAccountAddressPipe) address: string,
     @Query('search') search = undefined,
-    @Query('factory_address') factory_address = undefined,
-    @Query('creator_address') creator_address = undefined,
-    @Query('owner_address') owner_address = undefined,
+    @Query('factory_address', OptionalAeContractAddressPipe)
+    factory_address = undefined,
+    @Query('creator_address', OptionalAeAccountAddressPipe)
+    creator_address = undefined,
+    @Query('owner_address', OptionalAeAccountAddressPipe)
+    owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'balance',

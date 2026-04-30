@@ -35,6 +35,10 @@ import {
 import { Cache } from 'cache-manager';
 import { Queue } from 'bull';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from './queues/constants';
+import {
+  OptionalAeAccountAddressPipe,
+  OptionalAeContractAddressPipe,
+} from '@/common/validation/request-validation';
 
 const TOKENS_LIST_CACHE_TTL_MS = 60 * 1000;
 const TRENDING_TOKENS_LIST_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -116,9 +120,12 @@ export class TokensController {
   @Get()
   async listAll(
     @Query('search') search = undefined,
-    @Query('factory_address') factory_address = undefined,
-    @Query('creator_address') creator_address = undefined,
-    @Query('owner_address') owner_address = undefined,
+    @Query('factory_address', OptionalAeContractAddressPipe)
+    factory_address = undefined,
+    @Query('creator_address', OptionalAeAccountAddressPipe)
+    creator_address = undefined,
+    @Query('owner_address', OptionalAeAccountAddressPipe)
+    owner_address = undefined,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
