@@ -152,6 +152,93 @@ export class PopularRankingService {
     return POPULAR_RANKING_CONFIG.REDIS_KEYS.popularAll;
   }
 
+  private getDiversityCandidateLimit(limit: number): number {
+    if (!POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.ENABLED) {
+      return limit;
+    }
+
+    return Math.max(
+      limit * POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.OVERSAMPLE_MULTIPLIER,
+      POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.MIN_OVERSAMPLE,
+    );
+  }
+
+  private getDiversityCandidateEnd(offset: number, limit: number): number {
+    if (!POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.ENABLED) {
+      return offset + limit;
+    }
+
+    return offset + this.getDiversityCandidateLimit(limit);
+  }
+
+  private getDiversityAuthorKey(
+    item: Post | PopularRankingContentItem,
+  ): string {
+    if (item.sender_address) {
+      return item.sender_address;
+    }
+
+    return `${'type' in item ? item.type : 'post'}:${item.id}`;
+  }
+
+  private diversifyRankedItems<T extends Post | PopularRankingContentItem>(
+    items: T[],
+    limit: number,
+  ): T[] {
+    if (!POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.ENABLED || limit <= 0) {
+      return items.slice(0, limit);
+    }
+
+    const selected: T[] = [];
+    const deferred: T[] = [];
+    const selectedAuthors = new Set<string>();
+
+    for (const item of items) {
+      const authorKey = this.getDiversityAuthorKey(item);
+      if (!selectedAuthors.has(authorKey)) {
+        selected.push(item);
+        selectedAuthors.add(authorKey);
+
+        if (selected.length === limit) {
+          return selected;
+        }
+        continue;
+      }
+
+      deferred.push(item);
+    }
+
+    return selected.concat(deferred.slice(0, limit - selected.length));
+  }
+
+  private paginateDiversifiedRankedItems<
+    T extends Post | PopularRankingContentItem,
+  >(items: T[], limit: number, offset: number): T[] {
+    if (!POPULAR_RANKING_CONFIG.AUTHOR_DIVERSITY.ENABLED || limit <= 0) {
+      return items.slice(offset, offset + limit);
+    }
+
+    const targetEnd = offset + limit;
+    const selectedItems: T[] = [];
+    let remainingItems = items;
+
+    while (selectedItems.length < targetEnd && remainingItems.length > 0) {
+      const pageItems = this.diversifyRankedItems(remainingItems, limit);
+      if (pageItems.length === 0) {
+        break;
+      }
+
+      selectedItems.push(...pageItems);
+
+      const selectedIds = new Set(pageItems.map((item) => item.id));
+      remainingItems = remainingItems.filter(
+        (item) => !selectedIds.has(item.id),
+      );
+    }
+
+    return selectedItems.slice(offset, targetEnd);
+  }
+
   /**
    * Get verified popular post IDs from Redis, ensuring they exist in DB
    */
@@ -411,10 +498,13 @@ export class PopularRankingService {
       return this.fetchRecentFallback(window, limit, offset);
     }
 
-    return this.hydrateRankedItems(
+    const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
+    const items = await this.hydrateRankedItems(
       window,
-      verifiedIds.slice(offset, offset + limit),
+      verifiedIds.slice(0, candidateEnd),
     );
+
+    return this.paginateDiversifiedRankedItems(items, limit, offset);
   }
 
   async getPopularPostsPage(
@@ -444,12 +534,14 @@ export class PopularRankingService {
       maxCandidates ?? this.getDefaultMaxCandidates(window),
       weightOverrides,
     );
+    const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
     const paginatedIds = scored
-      .slice(offset, offset + limit)
+      .slice(0, candidateEnd)
       .map((item) => item.postId);
+    const items = await this.hydrateRankedItems(window, paginatedIds);
 
     return {
-      items: await this.hydrateRankedItems(window, paginatedIds),
+      items: this.paginateDiversifiedRankedItems(items, limit, offset),
       totalItems: scored.length,
       scoredItems: scored,
     };
@@ -767,21 +859,11 @@ export class PopularRankingService {
     input: PopularScoreInput,
     window: PopularWindow,
   ): number {
-    const createdAt =
-      input.createdAt instanceof Date
-        ? input.createdAt
-        : input.createdAt
-          ? new Date(input.createdAt)
-          : null;
-
-    if (!createdAt || Number.isNaN(createdAt.getTime())) {
+    const ageHours = this.computeAgeHours(input.createdAt);
+    if (ageHours === null) {
       return 0;
     }
 
-    const ageHours = Math.max(
-      1,
-      (Date.now() - createdAt.getTime()) / (60 * 60 * 1000),
-    );
     const effectiveHours =
       window === 'all'
         ? ageHours
@@ -791,6 +873,41 @@ export class PopularRankingService {
       (input.comments + input.tipsCount + input.uniqueTippers) /
       Math.max(1, effectiveHours)
     );
+  }
+
+  private computeAgeHours(
+    createdAt?: Date | string,
+    minimumHours = 1,
+  ): number | null {
+    const date =
+      createdAt instanceof Date
+        ? createdAt
+        : createdAt
+          ? new Date(createdAt)
+          : null;
+
+    if (!date || Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return Math.max(
+      minimumHours,
+      (Date.now() - date.getTime()) / (60 * 60 * 1000),
+    );
+  }
+
+  private computeFreshnessFactor(input: PopularScoreInput): number {
+    const ageHours = this.computeAgeHours(input.createdAt, 0);
+    if (ageHours === null) {
+      return 0;
+    }
+
+    const boostHours = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS;
+    if (ageHours >= boostHours) {
+      return 0;
+    }
+
+    return Math.max(0, 1 - ageHours / boostHours);
   }
 
   private computeScore(
@@ -818,6 +935,7 @@ export class PopularRankingService {
 
     const contentQuality = this.computeContentQuality(input.content || '');
     const interactionsPerHour = this.computeInteractionsPerHour(input, window);
+    const freshnessFactor = this.computeFreshnessFactor(input);
 
     return (
       weights.comments * Math.log(1 + comments) +
@@ -827,6 +945,10 @@ export class PopularRankingService {
       weights.reads * Math.log(1 + reads) +
       weights.trendingBoost * trendingBoost +
       weights.contentQuality * contentQuality +
+      weights.freshnessBoost * freshnessFactor +
+      weights.velocityBoost *
+        Math.log(1 + interactionsPerHour) *
+        freshnessFactor +
       weights.interactionsPerHour * Math.log(1 + interactionsPerHour)
     );
   }
@@ -853,22 +975,34 @@ export class PopularRankingService {
           this.getDefaultMaxCandidates(window),
           weightOverrides,
         ));
-      const ids = scored
-        .slice(offset, offset + limit)
-        .map((item) => item.postId);
-      items = await this.hydrateRankedItems(window, ids);
+      const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
+      const ids = scored.slice(0, candidateEnd).map((item) => item.postId);
+      const candidateItems = await this.hydrateRankedItems(window, ids);
+      items = this.paginateDiversifiedRankedItems(
+        candidateItems,
+        limit,
+        offset,
+      );
     } else {
       const key = this.getRedisKey(window);
-      const ids = await this.redis.zrevrange(key, offset, offset + limit - 1);
-      items = ids.length
-        ? await this.postRepository.findBy({ id: In(ids) })
-        : await this.postRepository
-            .createQueryBuilder('post')
-            .where('post.is_hidden = false')
-            .andWhere('post.post_id IS NULL')
-            .orderBy('post.created_at', 'DESC')
-            .limit(limit)
-            .getMany();
+      const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
+      const ids = await this.redis.zrevrange(key, 0, candidateEnd - 1);
+      if (ids.length) {
+        const candidateItems = await this.hydrateRankedItems(window, ids);
+        items = this.paginateDiversifiedRankedItems(
+          candidateItems,
+          limit,
+          offset,
+        );
+      } else {
+        items = await this.postRepository
+          .createQueryBuilder('post')
+          .where('post.is_hidden = false')
+          .andWhere('post.post_id IS NULL')
+          .orderBy('post.created_at', 'DESC')
+          .limit(limit)
+          .getMany();
+      }
     }
 
     return items.map((item) => ({

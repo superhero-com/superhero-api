@@ -308,6 +308,64 @@ describe('PopularRankingService', () => {
 
       redisMock.zcard.mockResolvedValue(1);
     });
+
+    it('does not duplicate items across consecutive cached diversified pages', async () => {
+      const posts = [
+        {
+          id: 'post-a-strong',
+          sender_address: 'ak_author_a',
+          content: 'strong post',
+          is_hidden: false,
+          post_id: null,
+        },
+        {
+          id: 'post-a-second',
+          sender_address: 'ak_author_a',
+          content: 'second post',
+          is_hidden: false,
+          post_id: null,
+        },
+        {
+          id: 'post-b',
+          sender_address: 'ak_author_b',
+          content: 'other author post',
+          is_hidden: false,
+          post_id: null,
+        },
+        {
+          id: 'post-c',
+          sender_address: 'ak_author_c',
+          content: 'third author post',
+          is_hidden: false,
+          post_id: null,
+        },
+      ];
+
+      redisMock.zcard.mockResolvedValue(4);
+      (redisMock as any).zrevrange = jest
+        .fn()
+        .mockResolvedValue([
+          'post-a-strong',
+          '10',
+          'post-a-second',
+          '8',
+          'post-b',
+          '1',
+          'post-c',
+          '0',
+        ]);
+      postRepository.findBy = jest.fn().mockResolvedValue(posts);
+
+      const firstPage = await service.getPopularPostsPage('all', 2, 0);
+      const secondPage = await service.getPopularPostsPage('all', 2, 2);
+
+      const firstPageIds = firstPage.items.map((item) => item.id);
+      const secondPageIds = secondPage.items.map((item) => item.id);
+
+      expect(firstPageIds).toEqual(['post-a-strong', 'post-b']);
+      expect(secondPageIds).toEqual(['post-a-second', 'post-c']);
+      expect(firstPageIds.some((id) => secondPageIds.includes(id))).toBe(false);
+    });
   });
 
   describe('resolveWeights', () => {
@@ -627,6 +685,267 @@ describe('PopularRankingService', () => {
 
       expect(result.items).toEqual([]);
       expect(result.totalItems).toBe(1);
+    });
+  });
+
+  describe('live popular behavior', () => {
+    function buildScoredService(
+      posts: any[],
+      comments: Record<string, string>,
+    ) {
+      const candidateQB = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(posts),
+      };
+      const commentQB = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(
+          Object.entries(comments).map(([parent_id, count]) => ({
+            parent_id,
+            count,
+          })),
+        ),
+      };
+      const tipQB = {
+        select: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      const readsQB = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+
+      return new PopularRankingService(
+        {
+          createQueryBuilder: jest
+            .fn()
+            .mockReturnValueOnce(candidateQB)
+            .mockReturnValueOnce(commentQB),
+          findBy: jest.fn().mockResolvedValue(posts),
+        } as any,
+        { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any,
+        { createQueryBuilder: jest.fn().mockReturnValue(readsQB) } as any,
+        [],
+      );
+    }
+
+    it('boosts fresh posts and removes that boost after 24 hours', async () => {
+      const now = Date.now();
+      const freshPost = {
+        id: 'post-fresh',
+        sender_address: 'ak_fresh',
+        created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        content: 'same quality content',
+        topics: [],
+      };
+      const dayOldPost = {
+        id: 'post-day-old',
+        sender_address: 'ak_day_old',
+        created_at: new Date(now - 25 * 60 * 60 * 1000).toISOString(),
+        content: 'same quality content',
+        topics: [],
+      };
+      const olderPost = {
+        id: 'post-older',
+        sender_address: 'ak_older',
+        created_at: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
+        content: 'same quality content',
+        topics: [],
+      };
+      const svc = buildScoredService([dayOldPost, olderPost, freshPost], {});
+
+      const result = await svc.getPopularPostsPage('all', 10, 0, undefined, {
+        comments: 'med',
+      });
+      const scores = new Map(
+        result.scoredItems!.map((item) => [item.postId, item.score]),
+      );
+
+      expect(scores.get('post-fresh')).toBeGreaterThan(
+        scores.get('post-day-old')!,
+      );
+      expect(scores.get('post-day-old')).toBeCloseTo(scores.get('post-older')!);
+    });
+
+    it('avoids duplicate authors within a page when alternatives exist', async () => {
+      const now = Date.now();
+      const posts = [
+        {
+          id: 'post-a-strong',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'strong post',
+          topics: [],
+        },
+        {
+          id: 'post-a-second',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'second post',
+          topics: [],
+        },
+        {
+          id: 'post-b',
+          sender_address: 'ak_author_b',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'other author post',
+          topics: [],
+        },
+      ];
+      const svc = buildScoredService(posts, {
+        'post-a-strong': '10',
+        'post-a-second': '8',
+        'post-b': '1',
+      });
+
+      const result = await svc.getPopularPostsPage('all', 2, 0, undefined, {
+        comments: 'high',
+      });
+
+      expect(result.items.map((item) => item.id)).toEqual([
+        'post-a-strong',
+        'post-b',
+      ]);
+    });
+
+    it('does not duplicate items across consecutive diversified pages', async () => {
+      const now = Date.now();
+      const posts = [
+        {
+          id: 'post-a-strong',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'strong post',
+          topics: [],
+        },
+        {
+          id: 'post-a-second',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'second post',
+          topics: [],
+        },
+        {
+          id: 'post-b',
+          sender_address: 'ak_author_b',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'other author post',
+          topics: [],
+        },
+        {
+          id: 'post-c',
+          sender_address: 'ak_author_c',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'third author post',
+          topics: [],
+        },
+      ];
+
+      const firstPageService = buildScoredService(posts, {
+        'post-a-strong': '10',
+        'post-a-second': '8',
+        'post-b': '1',
+        'post-c': '0',
+      });
+      const secondPageService = buildScoredService(posts, {
+        'post-a-strong': '10',
+        'post-a-second': '8',
+        'post-b': '1',
+        'post-c': '0',
+      });
+
+      const firstPage = await firstPageService.getPopularPostsPage(
+        'all',
+        2,
+        0,
+        undefined,
+        { comments: 'high' },
+      );
+      const secondPage = await secondPageService.getPopularPostsPage(
+        'all',
+        2,
+        2,
+        undefined,
+        { comments: 'high' },
+      );
+
+      const firstPageIds = firstPage.items.map((item) => item.id);
+      const secondPageIds = secondPage.items.map((item) => item.id);
+
+      expect(firstPageIds).toEqual(['post-a-strong', 'post-b']);
+      expect(secondPageIds).toEqual(['post-a-second', 'post-c']);
+      expect(firstPageIds.some((id) => secondPageIds.includes(id))).toBe(false);
+    });
+
+    it('explains the same diversified items returned by personalized ranking', async () => {
+      const now = Date.now();
+      const posts = [
+        {
+          id: 'post-a-strong',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'strong post',
+          topics: [],
+        },
+        {
+          id: 'post-a-second',
+          sender_address: 'ak_author_a',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'second post',
+          topics: [],
+        },
+        {
+          id: 'post-b',
+          sender_address: 'ak_author_b',
+          created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+          content: 'other author post',
+          topics: [],
+        },
+      ];
+      const svc = buildScoredService(posts, {
+        'post-a-strong': '10',
+        'post-a-second': '8',
+        'post-b': '1',
+      });
+      const weightOverrides = { comments: 'high' as const };
+
+      const result = await svc.getPopularPostsPage(
+        'all',
+        2,
+        0,
+        undefined,
+        weightOverrides,
+      );
+      const explanation = await svc.explain(
+        'all',
+        2,
+        0,
+        weightOverrides,
+        result.scoredItems,
+      );
+
+      expect(explanation.map((item) => item.id)).toEqual(
+        result.items.map((item) => item.id),
+      );
     });
   });
 
