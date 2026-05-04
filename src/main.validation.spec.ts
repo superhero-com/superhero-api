@@ -14,6 +14,7 @@ import { BindXInviteDto } from './profile/dto/bind-x-invite.dto';
 import { CreateXPostingRecheckChallengeDto } from './profile/dto/create-x-posting-recheck-challenge.dto';
 import { SubmitXPostingRecheckDto } from './profile/dto/submit-x-posting-recheck.dto';
 import { CreateTrendingTagsDto } from './trending-tags/dto/create-trending-tags.dto';
+import { PopularPostsQueryDto } from './social/dto';
 
 describe('global ValidationPipe request DTO coverage', () => {
   const pipe = new ValidationPipe({
@@ -151,6 +152,21 @@ describe('global ValidationPipe request DTO coverage', () => {
         expect(result.minAumUsd).toBe(1);
         expect(result.timePeriod).toBe(30);
         expect(result.sortDir).toBe('DESC');
+      },
+    },
+    {
+      name: 'PopularPostsQueryDto',
+      metatype: PopularPostsQueryDto,
+      type: 'query' as const,
+      validPayload: {
+        window: '24h',
+        page: '2',
+        limit: '20',
+      },
+      assertTransformed(result: PopularPostsQueryDto) {
+        expect(result.window).toBe('24h');
+        expect(result.page).toBe(2);
+        expect(result.limit).toBe(20);
       },
     },
     {

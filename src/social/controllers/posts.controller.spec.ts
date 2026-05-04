@@ -71,4 +71,50 @@ describe('PostsController', () => {
       limit: 100,
     });
   });
+
+  it('uses all-time ranking for popular posts and ignores legacy window queries', async () => {
+    const popularPost = {
+      id: 'post-popular',
+      sender_address: 'ak_author',
+      created_at: new Date().toISOString(),
+      content: 'popular post',
+      total_comments: 0,
+    };
+    const popularRankingService = {
+      getPopularPostsPage: jest.fn().mockResolvedValue({
+        items: [popularPost],
+        totalItems: 1,
+      }),
+    };
+    const hydratedPostQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([popularPost]),
+    };
+    const popularController = new PostsController(
+      {
+        createQueryBuilder: jest.fn().mockReturnValue(hydratedPostQueryBuilder),
+      } as any,
+      {} as any,
+      popularRankingService as any,
+      {} as any,
+      {
+        getProfilesByAddresses: jest.fn().mockResolvedValue([]),
+      } as any,
+    );
+
+    await popularController.popular({
+      page: 1,
+      limit: 20,
+      window: '24h',
+    } as any);
+
+    expect(popularRankingService.getPopularPostsPage).toHaveBeenCalledWith(
+      'all',
+      20,
+      0,
+      undefined,
+      expect.any(Object),
+    );
+  });
 });

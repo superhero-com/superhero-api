@@ -1,6 +1,6 @@
 ## Popular post ranking
 
-The popular post endpoint ranks content by accumulated engagement — a "Top" style ranking with no time decay. The time window itself acts as the freshness filter.
+The popular post endpoint ranks content all-time, then adds a short-lived live boost so newer posts can surface in a low-activity network. The result is a "Top + fresh" feed: durable engagement still wins over time, but new posts get discovery room during their first day.
 
 The current implementation rewards posts that attract:
 
@@ -13,15 +13,11 @@ The current implementation rewards posts that attract:
 
 It does not simply sort by raw comment count or raw tip amount.
 
-## Endpoint and windows
+## Endpoint
 
 The ranking powers `GET /posts/popular`.
 
-Supported windows:
-
-- `24h` (default)
-- `7d`
-- `all`
+The endpoint no longer exposes timeframes. Clients receive the canonical live popular ranking.
 
 ## Which posts are even eligible
 
@@ -29,23 +25,21 @@ A regular post is considered for ranking only if it is:
 
 - not hidden,
 - a top-level post (`post_id IS NULL`),
-- inside the requested time window for `24h` and `7d`.
+- inside the all-time candidate pool.
 
 Comments are not ranked directly as standalone popular items. Their impact is counted through the parent post's `total_comments`.
 
-For the `all` window, the system does not filter by age, but it still only evaluates the newest candidate set up to the configured cap.
+The system does not filter by age, but it still only evaluates the newest candidate set up to the configured cap.
 
 ## Candidate caps
 
 Before scoring, the service limits how many recent items it evaluates:
 
 ```ts
-MAX_CANDIDATES_24H: 500,
-MAX_CANDIDATES_7D: 3000,
 MAX_CANDIDATES_ALL: 10000,
 ```
 
-This means popularity is computed only within the newest candidate pool for that window, not across every post ever created.
+This means popularity is computed within the newest all-time candidate pool, not across every post ever created.
 
 ## Formula
 
@@ -59,10 +53,20 @@ score =
   w_unique_tippers * log(1 + uniqueTippers) +
   w_reads * log(1 + reads) +
   w_trending * trendingBoost +
-  w_quality * contentQuality
+  w_quality * contentQuality +
+  w_fresh * freshnessFactor +
+  w_velocity * log(1 + interactionsPerHour) * freshnessFactor
 ```
 
-There is no time-decay divisor. The score is purely based on engagement within the selected window.
+There is no time-decay divisor. The live boost is additive and bounded, so it helps new content without permanently overriding all-time engagement.
+
+Freshness is linear over the first 24 hours:
+
+```text
+freshnessFactor = max(0, 1 - ageHours / 24)
+```
+
+After 24 hours, both `freshnessFactor` and the velocity boost are zero. The post then ranks by normal accumulated engagement.
 
 ## Current weights
 
@@ -71,12 +75,14 @@ All weights live in `src/configs/constants.ts` under `POPULAR_RANKING_CONFIG`.
 ```ts
 WEIGHTS: {
   comments: 2.5,
-  tipsAmountAE: 2.0,
+  tipsAmountAE: 1.5,
   tipsCount: 1.0,
   uniqueTippers: 1.5,
   trendingBoost: 0.5,
   contentQuality: 0.3,
   reads: 1.5,
+  freshnessBoost: 0.9,
+  velocityBoost: 0.6,
 }
 ```
 
@@ -85,9 +91,10 @@ WEIGHTS: {
 The biggest direct drivers are:
 
 - `comments`
-- `tipsAmountAE`
 - `uniqueTippers`
 - `reads`
+- `tipsAmountAE`
+- temporary freshness and velocity for posts less than 24 hours old
 
 Because logarithms are used for all count- and amount-based signals, they have diminishing returns. Doubling activity helps, but not linearly forever.
 
@@ -121,7 +128,7 @@ The number of distinct addresses that tipped a post (excluding self-tips). This 
 
 ### 5. Reads
 
-Reads are pulled from `post_reads_daily` and summed across the selected window.
+Reads are pulled from `post_reads_daily` and summed for all available candidate posts.
 
 The ranking uses raw reads:
 
@@ -129,7 +136,7 @@ The ranking uses raw reads:
 log(1 + reads)
 ```
 
-Reads are not normalized by age — the window boundary handles freshness.
+Reads are not normalized by age. Freshness is handled by the bounded new-post boost.
 
 ### 6. Trending topic boost
 
@@ -170,23 +177,31 @@ For polls:
 
 This is why the endpoint can return mixed item types while still ranking them with a comparable scoring model.
 
+## Author diversity
+
+After raw score sorting, each page is reranked to avoid showing the same author twice when there are enough alternatives.
+
+The service:
+
+- oversamples ranked candidates for the requested page,
+- selects the first item from each author,
+- backfills with duplicate authors only when there are not enough unique authors to fill the page.
+
+This keeps each page full while preventing one active user from dominating the popular tab.
+
 ## Caching behavior
 
-Computed rankings are stored in Redis sorted sets for:
-
-- `popular:24h`
-- `popular:7d`
-- `popular:all`
+Computed rankings are stored in the Redis sorted set `popular:all`.
 
 TTL is currently:
 
 ```ts
-REDIS_TTL_SECONDS: 30
+REDIS_TTL_SECONDS: 30;
 ```
 
 So the feed is intentionally refreshed often.
 
-When the cache is empty (cold start or after TTL expiry with no cron), recompute is triggered in the background with a per-window mutex to prevent stampede. The current request falls back to recent posts while the cache is being rebuilt.
+When the cache is empty (cold start or after TTL expiry with no cron), recompute is triggered with a mutex to prevent stampede. The current request falls back to recent posts while the cache is being rebuilt.
 
 ## Practical interpretation
 
@@ -197,17 +212,18 @@ A post is most likely to rank highly when it is:
 - receiving meaningful AE tips from multiple tippers,
 - being read actively,
 - connected to a trending topic,
-- written with enough substance to avoid quality penalties.
+- written with enough substance to avoid quality penalties,
+- less than 24 hours old or gaining early interaction velocity.
 
 ## Files involved
 
-| File | Purpose |
-|------|---------|
-| `src/social/services/popular-ranking.service.ts` | Main candidate selection, scoring, and Redis caching |
-| `src/configs/constants.ts` | Ranking weights and candidate caps |
-| `src/social/controllers/posts.controller.ts` | Exposes `GET /posts/popular` |
-| `src/plugins/popular-ranking.interface.ts` | Plugin contract for non-post content |
-| `src/plugins/governance/services/governance-popular-ranking.service.ts` | Governance poll contribution to popular ranking |
+| File                                                                    | Purpose                                              |
+| ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| `src/social/services/popular-ranking.service.ts`                        | Main candidate selection, scoring, and Redis caching |
+| `src/configs/constants.ts`                                              | Ranking weights and candidate caps                   |
+| `src/social/controllers/posts.controller.ts`                            | Exposes `GET /posts/popular`                         |
+| `src/plugins/popular-ranking.interface.ts`                              | Plugin contract for non-post content                 |
+| `src/plugins/governance/services/governance-popular-ranking.service.ts` | Governance poll contribution to popular ranking      |
 
 ## Design notes
 
@@ -215,9 +231,9 @@ A post is most likely to rank highly when it is:
 
 Most numeric signals use `log(1 + x)` so the ranking favors meaningful activity without letting one giant raw number dominate forever.
 
-### Why there is no time decay
+### Why there is no global time decay
 
-This is a "Top" ranking, not a "Hot" ranking. The time window itself (24h, 7d, all) acts as the freshness filter. Within a window, posts compete purely on accumulated engagement. This is simpler, more transparent, and better suited for a low-activity network where posts need time to gather signals.
+This is not a Hacker News-style feed where every post steadily decays. In a low-activity network, posts need time to gather signal. The algorithm instead uses all-time engagement plus a 24-hour additive boost, so new posts get initial visibility and then settle into the normal ranking.
 
 ### Why there are no score floors
 
