@@ -77,6 +77,7 @@ describe('LeaderboardController', () => {
       limit: 5,
       startDate: '2026-04-28T10:00:00.000Z',
       endDate: '2026-04-28T12:00:00.000Z',
+      tradingOnly: true,
     });
 
     expect(getLeaders).toHaveBeenCalledWith({
@@ -87,6 +88,7 @@ describe('LeaderboardController', () => {
       limit: 5,
       startDate: '2026-04-28T10:00:00.000Z',
       endDate: '2026-04-28T12:00:00.000Z',
+      tradingOnly: true,
     });
   });
 

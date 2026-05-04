@@ -40,6 +40,7 @@ export class LeaderboardController {
       'Without startDate + endDate, metrics are precomputed per window (7d / 30d / all). ' +
       'When startDate + endDate are supplied, leaders are ranked by selected-period performance among accounts that traded within that time range. ' +
       'In that mode, top-level metrics and buy/sell counts are scoped to the requested time range. ' +
+      'Set tradingOnly=true to base selected-period PNL/ROI on realized token trading PNL, excluding transfer-driven portfolio changes. ' +
       'Note: responses are cached for up to 60 seconds, so `meta.timeFilter.start` and `meta.timeFilter.end` reflect the time the cache entry was filled, not strictly the time of the current request.',
   })
   @ApiOkResponse({ type: LeaderboardResponseDto })

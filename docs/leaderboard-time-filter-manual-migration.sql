@@ -67,7 +67,7 @@
 --    table is small, ≤100 rows per window). Repeat for sortBy=roi/mdd/aum.
 --
 -- C) Hit a real selected-period performance request and inspect the duration:
---      curl 'https://<host>/api/accounts/leaderboard?window=7d&sortBy=pnl&startDate=2026-05-04T10:00:00.000Z&endDate=2026-05-04T18:00:00.000Z'
+--      curl 'https://<host>/api/accounts/leaderboard?window=7d&sortBy=pnl&startDate=2026-05-04T10:00:00.000Z&endDate=2026-05-04T18:00:00.000Z&tradingOnly=true'
 --    p95 should be well under 500ms. If it is not, capture the plan via
 --    `auto_explain` (or run the underlying queries manually with EXPLAIN ANALYZE)
 --    and check that `IDX_TRANSACTION_CREATED_AT_ADDRESS_TYPE` is being used.

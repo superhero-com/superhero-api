@@ -232,7 +232,7 @@ export const POPULAR_RANKING_CONFIG = {
     trendingBoost: 0.5, // w_tr (topical relevance)
     contentQuality: 0.3, // w_q (anti-spam)
     reads: 1.5, // w_reads (common passive signal)
-    freshnessBoost: 0.9, // w_fresh (temporary new-post lift)
+    freshnessBoost: 1.5, // w_fresh (temporary new-post lift)
     velocityBoost: 0.6, // w_vel (temporary lift for posts gaining activity quickly)
   },
 
