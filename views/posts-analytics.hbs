@@ -1,0 +1,880 @@
+{{#> main-layout title="Posts Analytics Dashboard" active="social-posts"}}
+<style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Inter", sans-serif;
+      }
+
+      body {
+        background-color: #f8fafc;
+        color: #1e293b;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .stat-card {
+        background: white;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-width: 0;
+      }
+
+      .stat-card h2 {
+        font-size: 0.75rem;
+        margin-bottom: 0.25rem;
+        color: #475569;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .stat-card .value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #0f172a;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+
+      .chart-container {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        height: 300px;
+      }
+
+      .chart-container.large {
+        grid-column: span 2;
+        height: 400px;
+      }
+
+      .chart-container h2 {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+        color: #475569;
+      }
+
+      .chart-wrapper {
+        height: calc(100% - 2rem);
+        position: relative;
+      }
+
+      .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: flex-end;
+        margin-bottom: 1.5rem;
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      }
+
+      .filter-bar > div {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        min-width: 150px;
+      }
+
+      .filter-bar > div.address-field {
+        flex: 1;
+        min-width: 280px;
+      }
+
+      .filter-bar label {
+        font-size: 0.875rem;
+        color: #475569;
+      }
+
+      .filter-bar input {
+        padding: 0.5rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        color: #1e293b;
+        width: 100%;
+      }
+
+      .filter-bar button {
+        padding: 0.5rem 1rem;
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        white-space: nowrap;
+      }
+
+      .filter-bar button:hover {
+        background-color: #2563eb;
+      }
+
+      .filter-bar button.secondary {
+        background-color: #e2e8f0;
+        color: #1e293b;
+      }
+
+      .filter-bar button.secondary:hover {
+        background-color: #cbd5e1;
+      }
+
+      .filter-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.25rem 0.6rem;
+        background: #eff6ff;
+        color: #1d4ed8;
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        margin-bottom: 1rem;
+      }
+
+      .filter-pill .clear {
+        cursor: pointer;
+        color: #1d4ed8;
+        font-weight: 700;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 1400px) {
+        .container {
+          padding: 0 1rem;
+        }
+      }
+
+      @media (max-width: 768px) {
+        .stats-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .charts-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .filter-bar {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .filter-bar > div {
+          width: 100%;
+        }
+
+        .filter-bar button {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .stats-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+    </style>
+
+    <div class="container">
+
+      <div class="filter-bar">
+        <div>
+          <label for="startDate">Start Date:</label>
+          <input type="date" id="startDate" />
+        </div>
+        <div>
+          <label for="endDate">End Date:</label>
+          <input type="date" id="endDate" />
+        </div>
+        <div class="address-field">
+          <label for="senderAddress">Sender Address (optional):</label>
+          <input
+            type="text"
+            id="senderAddress"
+            placeholder="ak_..."
+            autocomplete="off"
+          />
+        </div>
+        <button onclick="updateDashboard()">Apply</button>
+        <button class="secondary" onclick="clearAddressFilter()">Clear address</button>
+      </div>
+
+      <div id="filterPill" class="filter-pill hidden">
+        Filtered by <span id="filterPillAddress"></span>
+        <span class="clear" onclick="clearAddressFilter()">&times;</span>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h2>Total Posts (range)</h2>
+          <div class="value" id="rangeTotalPosts">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Total Comments (range)</h2>
+          <div class="value" id="rangeTotalComments">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Unique Posters (range)</h2>
+          <div class="value" id="rangeUniquePosters">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Past 24h Posts</h2>
+          <div class="value" id="past24Posts">-</div>
+          <div class="value" id="past24Comments" style="font-size: 0.75rem; font-weight: 500; color: #64748b; margin-top: 0.25rem;">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Past 24h Active Posters</h2>
+          <div class="value" id="past24Posters">-</div>
+        </div>
+        <div class="stat-card">
+          <h2>Cumulative Posts</h2>
+          <div class="value" id="cumulativePosts">-</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container">
+          <h2>Daily Posts (Top-level vs Comments)</h2>
+          <div class="chart-wrapper">
+            <canvas id="dailyPostsChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Cumulative Posts</h2>
+          <div class="chart-wrapper">
+            <canvas id="cumulativePostsChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Daily Unique Posters</h2>
+          <div class="chart-wrapper">
+            <canvas id="uniquePostersChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Avg Comments per Post</h2>
+          <div class="chart-wrapper">
+            <canvas id="avgCommentsChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container" id="topPostersContainer">
+          <h2>Top Posters (range)</h2>
+          <div class="chart-wrapper">
+            <canvas id="topPostersChart"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <h2>Top Topics (range)</h2>
+          <div class="chart-wrapper">
+            <canvas id="topTopicsChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_URL = "/api";
+
+      let dailyPostsChart = null;
+      let cumulativePostsChart = null;
+      let uniquePostersChart = null;
+      let avgCommentsChart = null;
+      let topPostersChart = null;
+      let topTopicsChart = null;
+
+      let analyticsData = [];
+
+      function destroyChart(chart) {
+        if (chart) {
+          chart.destroy();
+        }
+      }
+
+      function formatNumber(num) {
+        return Number(num || 0)
+          .toString()
+          .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      }
+
+      function formatDate(dateString) {
+        return moment(dateString).format("MMM D");
+      }
+
+      function shortenAddress(address) {
+        if (!address) return "";
+        if (address.length <= 14) return address;
+        return address.slice(0, 8) + "..." + address.slice(-6);
+      }
+
+      function displayPosterLabel(poster) {
+        const address = poster.sender_address || "";
+        const publicName = poster.public_name;
+        if (!publicName || publicName === address) {
+          return shortenAddress(address);
+        }
+        return publicName;
+      }
+
+      function getDateRange() {
+        const startDate = document.getElementById("startDate").value;
+        const endDate = document.getElementById("endDate").value;
+        return {
+          startDate: moment(startDate).format("YYYY-MM-DD"),
+          endDate: moment(endDate).format("YYYY-MM-DD"),
+        };
+      }
+
+      function getSenderAddress() {
+        const value = document.getElementById("senderAddress").value.trim();
+        return value || null;
+      }
+
+      function setDefaultDateRange() {
+        const endDate = moment();
+        const startDate = moment().subtract(14, "days");
+        document.getElementById("startDate").value = startDate.format(
+          "YYYY-MM-DD"
+        );
+        document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+      }
+
+      function clearAddressFilter() {
+        document.getElementById("senderAddress").value = "";
+        updateDashboard();
+      }
+
+      function updateFilterPill() {
+        const address = getSenderAddress();
+        const pill = document.getElementById("filterPill");
+        const pillAddress = document.getElementById("filterPillAddress");
+        const topPostersContainer = document.getElementById(
+          "topPostersContainer"
+        );
+        if (address) {
+          pillAddress.textContent = address;
+          pill.classList.remove("hidden");
+          topPostersContainer.classList.add("hidden");
+        } else {
+          pill.classList.add("hidden");
+          topPostersContainer.classList.remove("hidden");
+        }
+      }
+
+      async function fetchJsonOrThrow(url) {
+        const response = await fetch(url);
+        const text = await response.text();
+        let body;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = text;
+        }
+        if (!response.ok) {
+          const message =
+            (body && (body.message || body.error)) ||
+            `HTTP ${response.status}`;
+          throw new Error(`${url} -> ${message}`);
+        }
+        return body;
+      }
+
+      async function fetchAnalyticsData(startDate, endDate, senderAddress) {
+        // ALWAYS reset before re-fetch so a failure / empty response can never
+        // leave stale chart data on screen.
+        analyticsData = [];
+        try {
+          const params = new URLSearchParams({
+            start_date: startDate,
+            end_date: endDate,
+          });
+          if (senderAddress) {
+            params.set("sender_address", senderAddress);
+          }
+          const data = await fetchJsonOrThrow(
+            `${API_URL}/posts/analytics?${params}`
+          );
+          if (!Array.isArray(data)) {
+            console.error(
+              "Unexpected posts/analytics response (not an array):",
+              data
+            );
+            return [];
+          }
+          const sortedData = data
+            .slice()
+            .sort(
+              (a, b) => moment(a.date).valueOf() - moment(b.date).valueOf()
+            );
+          analyticsData = sortedData;
+          return sortedData;
+        } catch (error) {
+          console.error("Error fetching posts analytics data:", error);
+          return [];
+        }
+      }
+
+      async function fetchPast24HoursData(senderAddress) {
+        try {
+          const params = new URLSearchParams();
+          if (senderAddress) {
+            params.set("sender_address", senderAddress);
+          }
+          const url = `${API_URL}/posts/analytics/past-24-hours${
+            params.toString() ? `?${params}` : ""
+          }`;
+          return await fetchJsonOrThrow(url);
+        } catch (error) {
+          console.error("Error fetching past-24h data:", error);
+          return null;
+        }
+      }
+
+      async function fetchTopPosters(startDate, endDate) {
+        try {
+          const params = new URLSearchParams({
+            start_date: startDate,
+            end_date: endDate,
+            limit: "10",
+          });
+          const data = await fetchJsonOrThrow(
+            `${API_URL}/posts/analytics/top-posters?${params}`
+          );
+          return Array.isArray(data) ? data : [];
+        } catch (error) {
+          console.error("Error fetching top posters:", error);
+          return [];
+        }
+      }
+
+      async function fetchTopTopics(startDate, endDate) {
+        try {
+          const params = new URLSearchParams({
+            start_date: startDate,
+            end_date: endDate,
+            limit: "10",
+          });
+          const data = await fetchJsonOrThrow(
+            `${API_URL}/posts/analytics/top-topics?${params}`
+          );
+          return Array.isArray(data) ? data : [];
+        } catch (error) {
+          console.error("Error fetching top topics:", error);
+          return [];
+        }
+      }
+
+      function createDailyPostsChart() {
+        try {
+          const labels = analyticsData.map((item) => formatDate(item.date));
+          const topLevel = analyticsData.map(
+            (item) => parseInt(item.total_posts) || 0
+          );
+          const comments = analyticsData.map(
+            (item) => parseInt(item.total_comments) || 0
+          );
+
+          destroyChart(dailyPostsChart);
+          dailyPostsChart = new Chart(
+            document.getElementById("dailyPostsChart"),
+            {
+              type: "bar",
+              data: {
+                labels,
+                datasets: [
+                  {
+                    label: "Top-level Posts",
+                    data: topLevel,
+                    backgroundColor: "#3b82f6",
+                    borderRadius: 4,
+                  },
+                  {
+                    label: "Comments",
+                    data: comments,
+                    backgroundColor: "#a855f7",
+                    borderRadius: 4,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: "bottom" } },
+                scales: {
+                  x: {
+                    stacked: true,
+                    grid: { display: false },
+                  },
+                  y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: { color: "rgba(0, 0, 0, 0.05)" },
+                  },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating daily posts chart:", error);
+        }
+      }
+
+      function createCumulativePostsChart() {
+        try {
+          destroyChart(cumulativePostsChart);
+          cumulativePostsChart = new Chart(
+            document.getElementById("cumulativePostsChart"),
+            {
+              type: "line",
+              data: {
+                labels: analyticsData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Cumulative Posts",
+                    data: analyticsData.map(
+                      (item) => parseInt(item.cumulative_total_posts) || 0
+                    ),
+                    borderColor: "#f43f5e",
+                    backgroundColor: "rgba(244, 63, 94, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: "rgba(0, 0, 0, 0.05)" },
+                  },
+                  x: { grid: { display: false } },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating cumulative posts chart:", error);
+        }
+      }
+
+      function createUniquePostersChart() {
+        try {
+          destroyChart(uniquePostersChart);
+          uniquePostersChart = new Chart(
+            document.getElementById("uniquePostersChart"),
+            {
+              type: "line",
+              data: {
+                labels: analyticsData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Unique Posters",
+                    data: analyticsData.map(
+                      (item) => parseInt(item.total_unique_posters) || 0
+                    ),
+                    borderColor: "#8b5cf6",
+                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: "rgba(0, 0, 0, 0.05)" },
+                  },
+                  x: { grid: { display: false } },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating unique posters chart:", error);
+        }
+      }
+
+      function createAvgCommentsChart() {
+        try {
+          destroyChart(avgCommentsChart);
+          avgCommentsChart = new Chart(
+            document.getElementById("avgCommentsChart"),
+            {
+              type: "line",
+              data: {
+                labels: analyticsData.map((item) => formatDate(item.date)),
+                datasets: [
+                  {
+                    label: "Avg Comments / Post",
+                    data: analyticsData.map((item) =>
+                      Number(item.avg_comments_per_post || 0)
+                    ),
+                    borderColor: "#10b981",
+                    backgroundColor: "rgba(16, 185, 129, 0.1)",
+                    tension: 0.4,
+                    fill: true,
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: "rgba(0, 0, 0, 0.05)" },
+                    ticks: {
+                      callback: function (value) {
+                        return Number(value).toFixed(2);
+                      },
+                    },
+                  },
+                  x: { grid: { display: false } },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating avg comments chart:", error);
+        }
+      }
+
+      function createTopPostersChart(posters) {
+        try {
+          destroyChart(topPostersChart);
+          if (!posters || posters.length === 0) {
+            return;
+          }
+          const ctx = document.getElementById("topPostersChart");
+          topPostersChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+              labels: posters.map((p) => displayPosterLabel(p)),
+              datasets: [
+                {
+                  label: "Posts",
+                  data: posters.map((p) => parseInt(p.total_posts) || 0),
+                  backgroundColor: "#3b82f6",
+                  borderRadius: 4,
+                  stack: "total",
+                },
+                {
+                  label: "Comments",
+                  data: posters.map((p) => parseInt(p.total_comments) || 0),
+                  backgroundColor: "#a855f7",
+                  borderRadius: 4,
+                  stack: "total",
+                },
+              ],
+            },
+            options: {
+              indexAxis: "y",
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { position: "bottom" },
+                tooltip: {
+                  callbacks: {
+                    afterBody: function (tooltipItems) {
+                      const idx = tooltipItems[0]?.dataIndex;
+                      if (idx == null) return "";
+                      return posters[idx]?.sender_address || "";
+                    },
+                  },
+                },
+              },
+              onClick: function (_evt, elements) {
+                if (!elements || elements.length === 0) return;
+                const idx = elements[0].index;
+                const address = posters[idx]?.sender_address;
+                if (!address) return;
+                document.getElementById("senderAddress").value = address;
+                updateDashboard();
+              },
+              scales: {
+                x: {
+                  stacked: true,
+                  beginAtZero: true,
+                  grid: { color: "rgba(0, 0, 0, 0.05)" },
+                },
+                y: {
+                  stacked: true,
+                  grid: { display: false },
+                },
+              },
+            },
+          });
+        } catch (error) {
+          console.error("Error creating top posters chart:", error);
+        }
+      }
+
+      function createTopTopicsChart(topics) {
+        try {
+          destroyChart(topTopicsChart);
+          if (!topics || topics.length === 0) {
+            return;
+          }
+          topTopicsChart = new Chart(
+            document.getElementById("topTopicsChart"),
+            {
+              type: "bar",
+              data: {
+                labels: topics.map((t) => "#" + t.topic_name),
+                datasets: [
+                  {
+                    label: "Posts",
+                    data: topics.map((t) => parseInt(t.post_count) || 0),
+                    backgroundColor: "#f59e0b",
+                    borderRadius: 4,
+                  },
+                ],
+              },
+              options: {
+                indexAxis: "y",
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: {
+                    beginAtZero: true,
+                    grid: { color: "rgba(0, 0, 0, 0.05)" },
+                  },
+                  y: { grid: { display: false } },
+                },
+              },
+            }
+          );
+        } catch (error) {
+          console.error("Error creating top topics chart:", error);
+        }
+      }
+
+      function updateRangeStats() {
+        const totalPosts = analyticsData.reduce(
+          (sum, item) => sum + (parseInt(item.total_posts) || 0),
+          0
+        );
+        const totalComments = analyticsData.reduce(
+          (sum, item) => sum + (parseInt(item.total_comments) || 0),
+          0
+        );
+        // unique-posters-per-day max approximation; for accuracy we'd need a separate distinct query.
+        const uniquePostersPeak = analyticsData.reduce(
+          (max, item) =>
+            Math.max(max, parseInt(item.total_unique_posters) || 0),
+          0
+        );
+
+        document.getElementById("rangeTotalPosts").textContent =
+          formatNumber(totalPosts);
+        document.getElementById("rangeTotalComments").textContent =
+          formatNumber(totalComments);
+        document.getElementById("rangeUniquePosters").textContent =
+          formatNumber(uniquePostersPeak);
+
+        const last = analyticsData[analyticsData.length - 1];
+        document.getElementById("cumulativePosts").textContent = formatNumber(
+          last ? parseInt(last.cumulative_total_posts) || 0 : 0
+        );
+      }
+
+      async function updatePast24Stats(senderAddress) {
+        const data = await fetchPast24HoursData(senderAddress);
+        const topLevel = data ? parseInt(data.total_posts) || 0 : 0;
+        const comments = data ? parseInt(data.total_comments) || 0 : 0;
+        const posters = data ? parseInt(data.total_unique_posters) || 0 : 0;
+        document.getElementById("past24Posts").textContent =
+          formatNumber(topLevel);
+        document.getElementById("past24Comments").textContent =
+          "+ " + formatNumber(comments) + " comments";
+        document.getElementById("past24Posters").textContent =
+          formatNumber(posters);
+      }
+
+      async function updateDashboard() {
+        try {
+          updateFilterPill();
+
+          const { startDate, endDate } = getDateRange();
+          const senderAddress = getSenderAddress();
+
+          await fetchAnalyticsData(startDate, endDate, senderAddress);
+
+          createDailyPostsChart();
+          createCumulativePostsChart();
+          createUniquePostersChart();
+          createAvgCommentsChart();
+
+          updateRangeStats();
+          await updatePast24Stats(senderAddress);
+
+          if (!senderAddress) {
+            const [posters, topics] = await Promise.all([
+              fetchTopPosters(startDate, endDate),
+              fetchTopTopics(startDate, endDate),
+            ]);
+            createTopPostersChart(posters);
+            createTopTopicsChart(topics);
+          } else {
+            destroyChart(topPostersChart);
+            const topics = await fetchTopTopics(startDate, endDate);
+            createTopTopicsChart(topics);
+          }
+        } catch (error) {
+          console.error("Error updating posts dashboard:", error);
+        }
+      }
+
+      (async function () {
+        setDefaultDateRange();
+        await updateDashboard();
+      })();
+    </script>
+{{/main-layout}}
