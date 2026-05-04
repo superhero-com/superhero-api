@@ -60,5 +60,6 @@ export interface GetLeadersParams {
   minAumUsd?: number;
   startDate?: string;
   endDate?: string;
+  tradingOnly?: boolean;
   maxCandidates?: number; // kept for API compatibility, ignored in snapshot mode
 }

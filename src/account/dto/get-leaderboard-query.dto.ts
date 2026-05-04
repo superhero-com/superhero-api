@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsISO8601, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsISO8601,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Max,
+  Min,
+} from 'class-validator';
 import {
   LeaderboardSortBy,
   LeaderboardSortDir,
@@ -78,6 +86,20 @@ export class GetLeaderboardQueryDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   endDate?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'When true, selected-period PNL/ROI are based only on realized token trading PNL, excluding portfolio value changes caused by transfers.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean()
+  tradingOnly?: boolean;
 
   @ApiPropertyOptional({
     example: 30,
