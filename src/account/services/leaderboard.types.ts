@@ -15,11 +15,8 @@ export const LEADERBOARD_SNAPSHOT_MAX_CANDIDATES = 100;
 export type LeaderboardWindow = '7d' | '30d' | 'all';
 export type LeaderboardSortBy = 'pnl' | 'roi' | 'mdd' | 'aum';
 export type LeaderboardSortDir = 'ASC' | 'DESC';
-export type LeaderboardTimeUnit = 'minutes' | 'hours';
 
 export interface LeaderboardTimeFilter {
-  value: number;
-  unit: LeaderboardTimeUnit;
   start: Date;
   end: Date;
 }
@@ -33,8 +30,8 @@ export interface LeaderboardItemActivePeriod {
 export interface LeaderboardItem {
   address: string;
   chain_name?: string | null;
-  // metrics are snapshot-scoped by default; when timePeriod + timeUnit are
-  // supplied, they are computed over that rolling time window.
+  // metrics are snapshot-scoped by default; when startDate + endDate are
+  // supplied, they are computed over that selected time window.
   aum_usd: number;
   pnl_usd: number;
   roi_pct: number;
@@ -46,10 +43,10 @@ export interface LeaderboardItem {
   owned_trends_count: number;
   // chart
   portfolio_value_usd_sparkline: Array<[number, number]>;
-  // Event-window traded volume, present only for time-filtered leaderboards.
+  // Event-window traded volume, present only for selected-period leaderboards.
   volume_usd?: number;
   // Deprecated compatibility field from the first time-filter implementation.
-  // Time-filtered leaderboards now use top-level event-window metrics instead.
+  // Selected-period leaderboards now use top-level event-window metrics instead.
   active_period?: LeaderboardItemActivePeriod;
 }
 
@@ -61,7 +58,7 @@ export interface GetLeadersParams {
   limit?: number;
   points?: number;
   minAumUsd?: number;
-  timePeriod?: number;
-  timeUnit?: LeaderboardTimeUnit;
+  startDate?: string;
+  endDate?: string;
   maxCandidates?: number; // kept for API compatibility, ignored in snapshot mode
 }

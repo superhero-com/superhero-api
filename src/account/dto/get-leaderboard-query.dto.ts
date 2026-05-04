@@ -1,17 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsISO8601, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import {
   LeaderboardSortBy,
   LeaderboardSortDir,
-  LeaderboardTimeUnit,
   LeaderboardWindow,
 } from '../services/leaderboard.types';
 
 const WINDOWS: LeaderboardWindow[] = ['7d', '30d', 'all'];
 const SORT_BYS: LeaderboardSortBy[] = ['pnl', 'roi', 'mdd', 'aum'];
 const SORT_DIRS: LeaderboardSortDir[] = ['ASC', 'DESC'];
-const TIME_UNITS: LeaderboardTimeUnit[] = ['minutes', 'hours'];
 
 export class GetLeaderboardQueryDto {
   @ApiPropertyOptional({ enum: WINDOWS, example: '7d' })
@@ -64,26 +62,22 @@ export class GetLeaderboardQueryDto {
   minAumUsd?: number;
 
   @ApiPropertyOptional({
-    example: 30,
-    minimum: 1,
+    example: '2026-05-04T10:00:00.000Z',
     description:
-      'Optional rolling performance period. Must be provided together with timeUnit.',
+      'Optional absolute period start. Must be provided together with endDate.',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  timePeriod?: number;
+  @IsISO8601({ strict: true })
+  startDate?: string;
 
   @ApiPropertyOptional({
-    enum: TIME_UNITS,
-    example: 'minutes',
+    example: '2026-05-04T18:00:00.000Z',
     description:
-      'Unit for timePeriod. Ranks leaders by performance over the last N minutes or hours.',
+      'Optional absolute period end. Must be provided together with startDate.',
   })
   @IsOptional()
-  @IsIn(TIME_UNITS)
-  timeUnit?: LeaderboardTimeUnit;
+  @IsISO8601({ strict: true })
+  endDate?: string;
 
   @ApiPropertyOptional({
     example: 30,

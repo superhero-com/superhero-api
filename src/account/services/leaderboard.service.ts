@@ -13,7 +13,6 @@ import {
   LeaderboardSortBy,
   LeaderboardSortDir,
   LeaderboardTimeFilter,
-  LeaderboardTimeUnit,
   LeaderboardWindow,
 } from './leaderboard.types';
 
@@ -56,11 +55,7 @@ const VALID_SORT_DIRECTIONS: ReadonlySet<LeaderboardSortDir> = new Set([
   'ASC',
   'DESC',
 ]);
-const VALID_TIME_UNITS: ReadonlySet<LeaderboardTimeUnit> = new Set([
-  'minutes',
-  'hours',
-]);
-const MAX_TIME_FILTER_DAYS = 7;
+const MAX_TIME_FILTER_DAYS = 14;
 const MAX_TIME_FILTER_MS = MAX_TIME_FILTER_DAYS * 24 * 60 * 60 * 1000;
 const DEFAULT_LIMIT = 18;
 const MAX_LIMIT = 50;
@@ -583,41 +578,40 @@ export class LeaderboardService {
   private normalizeTimeFilter(
     params: GetLeadersParams,
   ): LeaderboardTimeFilter | undefined {
-    const hasPeriod = params.timePeriod !== undefined;
-    const hasUnit = params.timeUnit !== undefined && params.timeUnit !== null;
+    const hasStart =
+      params.startDate !== undefined && params.startDate !== null;
+    const hasEnd = params.endDate !== undefined && params.endDate !== null;
 
-    if (!hasPeriod && !hasUnit) {
+    if (!hasStart && !hasEnd) {
       return undefined;
     }
-    if (!hasPeriod || !hasUnit) {
+    if (!hasStart || !hasEnd) {
       throw new BadRequestException(
-        'timePeriod and timeUnit must be provided together',
+        'startDate and endDate must be provided together',
       );
     }
 
-    const value = Number(params.timePeriod);
-    const unit = params.timeUnit as LeaderboardTimeUnit;
+    const start = new Date(params.startDate as string);
+    const end = new Date(params.endDate as string);
 
-    if (!Number.isInteger(value) || value < 1) {
-      throw new BadRequestException('timePeriod must be a positive integer');
-    }
-    if (!VALID_TIME_UNITS.has(unit)) {
-      throw new BadRequestException('timeUnit must be one of: minutes, hours');
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new BadRequestException(
+        'startDate and endDate must be valid ISO 8601 timestamps',
+      );
     }
 
-    const durationMs =
-      unit === 'minutes' ? value * 60 * 1000 : value * 60 * 60 * 1000;
+    const durationMs = end.getTime() - start.getTime();
+    if (durationMs <= 0) {
+      throw new BadRequestException('endDate must be after startDate');
+    }
     if (durationMs > MAX_TIME_FILTER_MS) {
       throw new BadRequestException(
-        `timePeriod cannot exceed ${MAX_TIME_FILTER_DAYS} days`,
+        `Selected period cannot exceed ${MAX_TIME_FILTER_DAYS} days`,
       );
     }
 
-    const end = new Date();
     return {
-      value,
-      unit,
-      start: new Date(end.getTime() - durationMs),
+      start,
       end,
     };
   }
