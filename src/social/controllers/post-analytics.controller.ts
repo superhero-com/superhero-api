@@ -42,9 +42,7 @@ export class PostAnalyticsController {
     const startDate = moment(
       start_date ?? moment().subtract(10, 'day').format('YYYY-MM-DD'),
     ).toDate();
-    const endDate = moment(
-      end_date ?? moment().format('YYYY-MM-DD'),
-    ).toDate();
+    const endDate = moment(end_date ?? moment().format('YYYY-MM-DD')).toDate();
 
     if (startDate > endDate) {
       throw new BadRequestException('Start date must be before end date');
