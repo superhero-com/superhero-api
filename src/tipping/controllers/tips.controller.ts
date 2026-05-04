@@ -15,6 +15,11 @@ import { Tip } from '../entities/tip.entity';
 import { Account } from '@/account/entities/account.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Post } from '@/social/entities/post.entity';
+import {
+  AeAccountAddressPipe,
+  OpaqueIdPipe,
+  OptionalAeAccountAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('tips')
 @ApiTags('Tips')
@@ -53,8 +58,8 @@ export class TipsController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: 'amount' | 'type' | 'created_at' = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
-    @Query('sender') sender?: string,
-    @Query('receiver') receiver?: string,
+    @Query('sender', OptionalAeAccountAddressPipe) sender?: string,
+    @Query('receiver', OptionalAeAccountAddressPipe) receiver?: string,
     @Query('type') type?: string,
   ) {
     const query = this.tipRepository
@@ -101,7 +106,9 @@ export class TipsController {
     description: 'Returns total tips sent and received for an account',
   })
   @Get('accounts/:address/summary')
-  async getAccountSummary(@Param('address') address: string) {
+  async getAccountSummary(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
     const totals = await this.tipRepository
       .createQueryBuilder('tip')
       .select(
@@ -127,7 +134,7 @@ export class TipsController {
     description: 'Returns total tips amount for a post',
   })
   @Get('posts/:postId/summary')
-  async getPostSummary(@Param('postId') postId: string) {
+  async getPostSummary(@Param('postId', OpaqueIdPipe) postId: string) {
     const post = await this.postRepository.findOne({
       where: { id: postId },
     });

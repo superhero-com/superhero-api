@@ -208,4 +208,28 @@ describe('global ValidationPipe request DTO coverage', () => {
       ]),
     });
   });
+
+  it('rejects invalid SDK-backed account address fields', async () => {
+    await expect(
+      pipe
+        .transform(
+          {
+            sender_address: '100',
+            codes: ['code1'],
+          },
+          {
+            type: 'body',
+            metatype: CreateAffiliationDto,
+            data: '',
+          },
+        )
+        .catch((error: { getResponse?: () => unknown }) => {
+          throw error.getResponse?.() ?? error;
+        }),
+    ).rejects.toMatchObject({
+      message: expect.arrayContaining([
+        expect.stringMatching(/sender_address must be a valid account address/),
+      ]),
+    });
+  });
 });

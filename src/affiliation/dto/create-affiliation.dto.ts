@@ -1,10 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ArrayNotEmpty, IsArray, IsString, Matches } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsString } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class CreateAffiliationDto {
   @ApiProperty({ example: 'ak_2F4ExampleAddress' })
   @IsString()
-  @Matches(/^ak_[1-9A-HJ-NP-Za-km-z]+$/)
+  @IsAeAccountAddress()
   sender_address: string;
 
   @ApiProperty({ example: ['code1', 'code2', 'code3'] })

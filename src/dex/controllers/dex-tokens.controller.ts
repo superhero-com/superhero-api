@@ -21,6 +21,10 @@ import { DexTokenDto, DexTokenSummaryDto } from '../dto';
 import { Pair } from '../entities/pair.entity';
 import { DexTokenSummaryService } from '../services/dex-token-summary.service';
 import { DexTokenService } from '../services/dex-token.service';
+import {
+  AeContractAddressPipe,
+  OptionalAeContractAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
@@ -91,7 +95,7 @@ export class DexTokensController {
   })
   @ApiOkResponse({ type: DexTokenDto })
   @Get(':address')
-  async getByAddress(@Param('address') address: string) {
+  async getByAddress(@Param('address', AeContractAddressPipe) address: string) {
     const token = await this.dexTokenService.findByAddress(address);
     if (!token) {
       throw new NotFoundException(
@@ -113,7 +117,9 @@ export class DexTokensController {
   })
   @ApiOkResponse({ type: DexTokenDto })
   @Get(':address/price')
-  async getTokenPrice(@Param('address') address: string) {
+  async getTokenPrice(
+    @Param('address', AeContractAddressPipe) address: string,
+  ) {
     const token = await this.dexTokenService.findByAddress(address);
     if (!token) {
       throw new NotFoundException(
@@ -180,8 +186,8 @@ export class DexTokensController {
   })
   @Get(':address/price/analysis')
   async getTokenPriceAnalysis(
-    @Param('address') address: string,
-    @Query('base_token') baseToken?: string,
+    @Param('address', AeContractAddressPipe) address: string,
+    @Query('base_token', OptionalAeContractAddressPipe) baseToken?: string,
     @Query('debug') debug?: boolean,
   ) {
     const token = await this.dexTokenService.findByAddress(address);
@@ -218,7 +224,9 @@ export class DexTokensController {
   })
   @ApiOkResponse({ type: DexTokenSummaryDto })
   @Get(':address/summary')
-  async getTokenSummary(@Param('address') address: string) {
+  async getTokenSummary(
+    @Param('address', AeContractAddressPipe) address: string,
+  ) {
     const token = await this.dexTokenService.findByAddress(address);
     if (!token) {
       throw new NotFoundException(

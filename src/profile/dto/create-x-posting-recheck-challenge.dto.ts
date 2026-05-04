@@ -1,7 +1,8 @@
-import { IsString, Matches } from 'class-validator';
+import { IsString } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class CreateXPostingRecheckChallengeDto {
   @IsString()
-  @Matches(/^ak_[1-9A-HJ-NP-Za-km-z]+$/)
+  @IsAeAccountAddress()
   address: string;
 }

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MinLength, Validate } from 'class-validator';
-import { AeAccountAddressConstraint } from './ae-account-address.validator';
+import { IsString, Matches, MinLength } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class RequestChainNameDto {
   @ApiProperty({
@@ -8,7 +8,7 @@ export class RequestChainNameDto {
     example: 'ak_2519mBsgjJEVEFoRgno1ryDsn3BEaCZGRbXPEjThWYLX9MTpmk',
   })
   @IsString()
-  @Validate(AeAccountAddressConstraint)
+  @IsAeAccountAddress()
   address: string;
 
   @ApiProperty({

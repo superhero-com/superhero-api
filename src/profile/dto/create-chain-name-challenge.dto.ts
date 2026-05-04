@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Validate } from 'class-validator';
-import { AeAccountAddressConstraint } from './ae-account-address.validator';
+import { IsString } from 'class-validator';
+import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class CreateChainNameChallengeDto {
   @ApiProperty({
@@ -8,6 +8,6 @@ export class CreateChainNameChallengeDto {
     example: 'ak_2519mBsgjJEVEFoRgno1ryDsn3BEaCZGRbXPEjThWYLX9MTpmk',
   })
   @IsString()
-  @Validate(AeAccountAddressConstraint)
+  @IsAeAccountAddress()
   address: string;
 }

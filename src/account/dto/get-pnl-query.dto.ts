@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsNumber } from 'class-validator';
+import { IsInt, IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class GetPnlQueryDto {
@@ -11,7 +11,8 @@ export class GetPnlQueryDto {
     example: 12345678,
   })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
   @Type(() => Number)
   blockHeight?: number;
 }
