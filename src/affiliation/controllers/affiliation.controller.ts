@@ -1,7 +1,16 @@
-import { Controller, Post, Body, Param, Get, Render } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Param,
+  Get,
+  Render,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AdminApiKeyGuard } from '@/api-core/guards/admin-api-key.guard';
 import { CreateAffiliationDto } from '../dto/create-affiliation.dto';
 import { Affiliation } from '../entities/affiliation.entity';
 import { AffiliationCode } from '../entities/affiliation-code.entity';
@@ -88,18 +97,23 @@ export class AffiliationController {
       claimed_by: `${provider}@${userInfo.id}`,
     });
 
-    // Return the user info along with affiliation details
+    // Return only the minimum data the client needs to redeem the invite.
+    // Previously this leaked the full OAuth profile (including email) and
+    // the full AffiliationCode entity (including claimed_by), which was
+    // unnecessary PII exposure over an unauthenticated endpoint.
     return {
-      user: userInfo,
       affiliation: {
         code: affiliation.code,
         available_codes: availableCodes.length,
       },
-      invitationCode,
+      invitationCode: {
+        private_code: invitationCode.private_code,
+      },
     };
   }
 
   @Post('')
+  @UseGuards(AdminApiKeyGuard)
   @ApiOperation({
     operationId: 'generateMultipleInviteLink',
     summary: 'Generate multiple invites link',

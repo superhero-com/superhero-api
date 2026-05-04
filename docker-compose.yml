@@ -6,15 +6,18 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
+      # Only expose the API port publicly; Postgres and Redis stay on the
+      # loopback interface (see below).
       - "${APP_PORT:-3000}:3000"
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
-      - DB_PASSWORD=postgres
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - DB_DATABASE=bcl_api
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - NODE_ENV=development
     depends_on:
       - postgres
@@ -28,17 +31,30 @@ services:
     image: postgres:16-alpine
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - POSTGRES_DB=bcl_api
     ports:
-      - "5432:5432"
+      # Bind to loopback only: the DB port must not be reachable from the
+      # public internet. Use an SSH tunnel to connect from outside the host.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:alpine
+    # When REDIS_PASSWORD is set we enable auth. The default (empty) keeps
+    # local dev without a password working, but production deployments MUST
+    # set REDIS_PASSWORD.
+    command: >
+      sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        exec redis-server --requirepass "$$REDIS_PASSWORD";
+      else
+        exec redis-server;
+      fi'
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
 
