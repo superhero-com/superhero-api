@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   JoinTable,
   ManyToMany,
@@ -13,6 +14,11 @@ import { Topic } from './topic.entity';
 @Entity({
   name: 'posts',
 })
+@Index('IDX_POSTS_CREATED_AT', ['created_at'])
+@Index('IDX_POSTS_SENDER_ADDRESS_CREATED_AT', [
+  'sender_address',
+  'created_at',
+])
 export class Post {
   @PrimaryColumn()
   id: string;
@@ -38,6 +44,7 @@ export class Post {
   @Column('json')
   tx_args: any[];
 
+  @Index()
   @Column()
   sender_address: string;
 

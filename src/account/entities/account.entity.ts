@@ -81,6 +81,9 @@ export class Account {
   @Column({ type: 'jsonb', default: {} })
   links: Record<string, string>;
 
+  @Column({ default: false })
+  banned: boolean;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
