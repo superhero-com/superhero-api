@@ -196,8 +196,7 @@ describe('LeaderboardService', () => {
     expect(rowsSql).toContain('ORDER BY snap.mdd_pct ASC, snap.address ASC');
   });
 
-  it('ranks active traders by rolling-window performance when a time filter is supplied', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-04-28T12:00:00.000Z'));
+  it('ranks active traders by selected-period performance when startDate and endDate are supplied', async () => {
     batchTimestampToAeHeightMock.mockImplementation((timestamps: number[]) =>
       Promise.resolve(
         new Map(timestamps.map((timestamp, index) => [timestamp, index + 100])),
@@ -237,8 +236,8 @@ describe('LeaderboardService', () => {
     const result = await service.getLeaders({
       window: '30d',
       sortBy: 'pnl',
-      timePeriod: 2,
-      timeUnit: 'hours',
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
 
     expect(snapshotRepository.query).not.toHaveBeenCalled();
@@ -258,8 +257,6 @@ describe('LeaderboardService', () => {
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(2);
 
     expect(result.timeFilter).toEqual({
-      value: 2,
-      unit: 'hours',
       start: new Date('2026-04-28T10:00:00.000Z'),
       end: new Date('2026-04-28T12:00:00.000Z'),
     });
@@ -288,7 +285,6 @@ describe('LeaderboardService', () => {
   });
 
   it('sorts and paginates computed event metrics after applying min AUM', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-04-28T12:00:00.000Z'));
     batchTimestampToAeHeightMock.mockImplementation((timestamps: number[]) =>
       Promise.resolve(
         new Map(timestamps.map((timestamp, index) => [timestamp, index + 100])),
@@ -327,8 +323,8 @@ describe('LeaderboardService', () => {
       page: 2,
       limit: 1,
       minAumUsd: 1,
-      timePeriod: 30,
-      timeUnit: 'minutes',
+      startDate: '2026-04-28T11:30:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
 
     expect(result.totalCandidates).toBe(2);
@@ -336,63 +332,50 @@ describe('LeaderboardService', () => {
     expect(result.items[0].address).toBe('ak_second');
   });
 
-  it('accepts the 168-hour upper bound', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2026-04-28T12:00:00.000Z'));
+  it('accepts a 14-day selected period', async () => {
     const { service } = createService();
 
     const result = await service.getLeaders({
       window: '7d',
       sortBy: 'pnl',
-      timePeriod: 168,
-      timeUnit: 'hours',
+      startDate: '2026-04-14T12:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
 
     expect(result.timeFilter?.start).toEqual(
-      new Date('2026-04-21T12:00:00.000Z'),
+      new Date('2026-04-14T12:00:00.000Z'),
     );
     expect(result.timeFilter?.end).toEqual(
       new Date('2026-04-28T12:00:00.000Z'),
     );
   });
 
-  it('accepts the 10080-minute upper bound', async () => {
-    const { service } = createService();
-
-    await expect(
-      service.getLeaders({
-        window: '7d',
-        sortBy: 'pnl',
-        timePeriod: 10080,
-        timeUnit: 'minutes',
-      }),
-    ).resolves.toBeTruthy();
-  });
-
   it.each([
-    [{ timePeriod: 30 }, 'timePeriod and timeUnit must be provided together'],
     [
-      { timeUnit: 'hours' as const },
-      'timePeriod and timeUnit must be provided together',
+      { startDate: '2026-04-28T10:00:00.000Z' },
+      'startDate and endDate must be provided together',
     ],
     [
-      { timePeriod: 0, timeUnit: 'hours' as const },
-      'timePeriod must be a positive integer',
+      { endDate: '2026-04-28T12:00:00.000Z' },
+      'startDate and endDate must be provided together',
     ],
     [
-      { timePeriod: 1.5, timeUnit: 'hours' as const },
-      'timePeriod must be a positive integer',
+      { startDate: 'not-a-date', endDate: '2026-04-28T12:00:00.000Z' },
+      'startDate and endDate must be valid ISO 8601 timestamps',
     ],
     [
-      { timePeriod: 169, timeUnit: 'hours' as const },
-      'timePeriod cannot exceed 7 days',
+      {
+        startDate: '2026-04-28T12:00:00.000Z',
+        endDate: '2026-04-28T10:00:00.000Z',
+      },
+      'endDate must be after startDate',
     ],
     [
-      { timePeriod: 10081, timeUnit: 'minutes' as const },
-      'timePeriod cannot exceed 7 days',
-    ],
-    [
-      { timePeriod: 1, timeUnit: 'days' as unknown as 'minutes' },
-      'timeUnit must be one of: minutes, hours',
+      {
+        startDate: '2026-04-14T11:59:59.999Z',
+        endDate: '2026-04-28T12:00:00.000Z',
+      },
+      'Selected period cannot exceed 14 days',
     ],
   ])('rejects invalid time filters: %o', async (timeParams, message) => {
     const { service, snapshotRepository } = createService();
