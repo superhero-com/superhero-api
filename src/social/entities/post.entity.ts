@@ -15,10 +15,7 @@ import { Topic } from './topic.entity';
   name: 'posts',
 })
 @Index('IDX_POSTS_CREATED_AT', ['created_at'])
-@Index('IDX_POSTS_SENDER_ADDRESS_CREATED_AT', [
-  'sender_address',
-  'created_at',
-])
+@Index('IDX_POSTS_SENDER_ADDRESS_CREATED_AT', ['sender_address', 'created_at'])
 export class Post {
   @PrimaryColumn()
   id: string;
