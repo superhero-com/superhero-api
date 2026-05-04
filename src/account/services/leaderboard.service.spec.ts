@@ -15,10 +15,23 @@ describe('LeaderboardService', () => {
   });
 
   type MockRow = Record<string, unknown>;
+  type MockPnlPoint =
+    | number
+    | {
+        aum: number;
+        gain?: number;
+        cost?: number;
+      };
 
-  const pnlResult = (totalCurrentValueUsd: number) =>
+  const pnlResult = (
+    totalCurrentValueUsd: number,
+    totalGainUsd = 0,
+    totalCostBasisUsd = 0,
+  ) =>
     ({
       totalCurrentValueUsd,
+      totalGainUsd,
+      totalCostBasisUsd,
     }) as never;
 
   const createService = (options?: {
@@ -26,7 +39,7 @@ describe('LeaderboardService', () => {
     totalCount?: number | string;
     activeRows?: MockRow[];
     accounts?: MockRow[];
-    pnlByAddress?: Record<string, number[]>;
+    pnlByAddress?: Record<string, MockPnlPoint[]>;
   }) => {
     const rows = options?.snapshotRows ?? [];
     const totalCount = options?.totalCount ?? 0;
@@ -50,10 +63,15 @@ describe('LeaderboardService', () => {
         const values = options?.pnlByAddress?.[address] ?? [];
         return Promise.resolve(
           new Map(
-            heights.map((height, index) => [
-              height,
-              pnlResult(values[index] ?? 0),
-            ]),
+            heights.map((height, index) => {
+              const value = values[index] ?? 0;
+              return [
+                height,
+                typeof value === 'number'
+                  ? pnlResult(value)
+                  : pnlResult(value.aum, value.gain ?? 0, value.cost ?? 0),
+              ];
+            }),
           ),
         );
       },
@@ -330,6 +348,113 @@ describe('LeaderboardService', () => {
     expect(result.totalCandidates).toBe(2);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].address).toBe('ak_second');
+  });
+
+  it('uses range-based realized trading PNL when tradingOnly is enabled', async () => {
+    batchTimestampToAeHeightMock.mockImplementation((timestamps: number[]) =>
+      Promise.resolve(
+        new Map(timestamps.map((timestamp, index) => [timestamp, index + 100])),
+      ),
+    );
+    const { service, bclPnlService } = createService({
+      activeRows: [
+        {
+          address: 'ak_transfer_gain',
+          buy_count: '1',
+          sell_count: '1',
+          volume_usd: '100',
+        },
+        {
+          address: 'ak_trader',
+          buy_count: '2',
+          sell_count: '1',
+          volume_usd: '200',
+        },
+      ],
+      pnlByAddress: {
+        ak_transfer_gain: [
+          { aum: 100, gain: 0, cost: 0 },
+          { aum: 500, gain: 0, cost: 0 },
+        ],
+        ak_trader: [
+          { aum: 100, gain: 0, cost: 0 },
+          { aum: 130, gain: 30, cost: 100 },
+        ],
+      },
+    });
+
+    const result = await service.getLeaders({
+      sortBy: 'pnl',
+      tradingOnly: true,
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
+      points: 2,
+    });
+
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      'ak_transfer_gain',
+      [100, 101],
+      100,
+    );
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      'ak_trader',
+      [100, 101],
+      100,
+    );
+    expect(result.items[0]).toMatchObject({
+      address: 'ak_trader',
+      aum_usd: 130,
+      pnl_usd: 30,
+      roi_pct: 30,
+    });
+    expect(result.items[1]).toMatchObject({
+      address: 'ak_transfer_gain',
+      aum_usd: 500,
+      pnl_usd: 0,
+      roi_pct: 0,
+    });
+  });
+
+  it('bounds tradingOnly drawdown when realized PNL goes negative', async () => {
+    batchTimestampToAeHeightMock.mockImplementation((timestamps: number[]) =>
+      Promise.resolve(
+        new Map(timestamps.map((timestamp, index) => [timestamp, index + 100])),
+      ),
+    );
+    const { service } = createService({
+      activeRows: [
+        {
+          address: 'ak_loss',
+          buy_count: '1',
+          sell_count: '1',
+          volume_usd: '100',
+        },
+      ],
+      pnlByAddress: {
+        ak_loss: [
+          { aum: 100, gain: 0, cost: 100 },
+          { aum: 110, gain: 10, cost: 100 },
+          { aum: 95, gain: -5, cost: 100 },
+        ],
+      },
+    });
+
+    const result = await service.getLeaders({
+      sortBy: 'pnl',
+      tradingOnly: true,
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
+      points: 3,
+    });
+
+    expect(
+      result.items[0].portfolio_value_usd_sparkline.map(([, v]) => v),
+    ).toEqual([0, 10, -5]);
+    expect(result.items[0]).toMatchObject({
+      pnl_usd: -5,
+      roi_pct: -5,
+      mdd_pct: 100,
+    });
   });
 
   it('accepts a 14-day selected period', async () => {

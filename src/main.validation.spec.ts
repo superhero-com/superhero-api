@@ -145,6 +145,7 @@ describe('global ValidationPipe request DTO coverage', () => {
         minAumUsd: '1',
         startDate: '2026-04-28T10:00:00.000Z',
         endDate: '2026-04-28T12:00:00.000Z',
+        tradingOnly: 'true',
       },
       assertTransformed(result: GetLeaderboardQueryDto) {
         expect(result.page).toBe(2);
@@ -152,6 +153,7 @@ describe('global ValidationPipe request DTO coverage', () => {
         expect(result.minAumUsd).toBe(1);
         expect(result.startDate).toBe('2026-04-28T10:00:00.000Z');
         expect(result.endDate).toBe('2026-04-28T12:00:00.000Z');
+        expect(result.tradingOnly).toBe(true);
         expect(result.sortDir).toBe('DESC');
       },
     },

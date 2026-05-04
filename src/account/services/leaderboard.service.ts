@@ -111,6 +111,7 @@ export class LeaderboardService {
           ),
         ),
         points: params.points,
+        tradingOnly: params.tradingOnly ?? false,
       });
 
       return {
@@ -333,6 +334,7 @@ export class LeaderboardService {
     minAumUsd: number;
     maxCandidates: number;
     points?: number;
+    tradingOnly: boolean;
   }): Promise<{ items: LeaderboardItem[]; total: number }> {
     const activeRows = await this.queryActiveAddressRows(
       params.timeFilter,
@@ -364,6 +366,7 @@ export class LeaderboardService {
       accountByAddress,
       sampleTimestamps,
       heights,
+      tradingOnly: params.tradingOnly,
     });
 
     const eligibleItems = eventItems.filter(
@@ -447,6 +450,7 @@ export class LeaderboardService {
     accountByAddress: Map<string, Account>;
     sampleTimestamps: number[];
     heights: number[];
+    tradingOnly: boolean;
   }): Promise<LeaderboardItem[]> {
     const items: LeaderboardItem[] = [];
     const concurrency = 8;
@@ -465,6 +469,7 @@ export class LeaderboardService {
           account: params.accountByAddress.get(address),
           sampleTimestamps: params.sampleTimestamps,
           heights: params.heights,
+          tradingOnly: params.tradingOnly,
         });
         if (item) {
           items.push(item);
@@ -482,16 +487,21 @@ export class LeaderboardService {
     account?: Account;
     sampleTimestamps: number[];
     heights: number[];
+    tradingOnly: boolean;
   }): Promise<LeaderboardItem | undefined> {
+    const startHeight = params.heights[0];
     const pnlByHeight = await this.bclPnlService.calculateTokenPnlsBatch(
       params.address,
       params.heights,
+      params.tradingOnly ? startHeight : undefined,
     );
     const sparkline = params.heights.map((height, index): [number, number] => {
       const pnl = pnlByHeight.get(height);
       return [
         params.sampleTimestamps[index],
-        Math.max(pnl?.totalCurrentValueUsd ?? 0, 0),
+        params.tradingOnly
+          ? (pnl?.totalGainUsd ?? 0)
+          : Math.max(pnl?.totalCurrentValueUsd ?? 0, 0),
       ];
     });
 
@@ -500,9 +510,15 @@ export class LeaderboardService {
     }
 
     const startAumUsd = sparkline[0][1];
-    const endAumUsd = sparkline[sparkline.length - 1][1];
-    const pnlUsd = endAumUsd - startAumUsd;
-    const roiPct = startAumUsd > 0 ? (pnlUsd / startAumUsd) * 100 : 0;
+    const finalPnl = pnlByHeight.get(params.heights[params.heights.length - 1]);
+    const endAumUsd = Math.max(finalPnl?.totalCurrentValueUsd ?? 0, 0);
+    const pnlUsd = params.tradingOnly
+      ? (finalPnl?.totalGainUsd ?? 0)
+      : endAumUsd - startAumUsd;
+    const roiBasisUsd = params.tradingOnly
+      ? (finalPnl?.totalCostBasisUsd ?? 0)
+      : startAumUsd;
+    const roiPct = roiBasisUsd > 0 ? (pnlUsd / roiBasisUsd) * 100 : 0;
     const mddPct = this.calculateMaxDrawdownPct(sparkline);
     const activeRow = params.activeRow;
 
@@ -526,7 +542,8 @@ export class LeaderboardService {
     let peak = Number.NEGATIVE_INFINITY;
     let maxDrawdown = 0;
 
-    for (const [, value] of sparkline) {
+    for (const [, rawValue] of sparkline) {
+      const value = Math.max(rawValue, 0);
       if (value > peak) {
         peak = value;
       }
