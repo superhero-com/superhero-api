@@ -161,6 +161,45 @@
         background-color: #2563eb;
       }
 
+      .date-range button.secondary {
+        background-color: #e2e8f0;
+        color: #1e293b;
+      }
+
+      .date-range button.secondary:hover {
+        background-color: #cbd5e1;
+      }
+
+      .date-range > div.address-field {
+        flex: 1;
+        min-width: 280px;
+      }
+
+      .filter-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.25rem 0.6rem;
+        background: #eff6ff;
+        color: #1d4ed8;
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        margin-bottom: 1rem;
+      }
+
+      .filter-pill .clear {
+        cursor: pointer;
+        color: #1d4ed8;
+        font-weight: 700;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
       @media (max-width: 1400px) {
         .container {
           padding: 0 1rem;
@@ -209,20 +248,35 @@
           <label for="endDate">End Date:</label>
           <input type="date" id="endDate" />
         </div>
+        <div class="address-field">
+          <label for="addressFilter">Address (optional):</label>
+          <input
+            type="text"
+            id="addressFilter"
+            placeholder="ak_..."
+            autocomplete="off"
+          />
+        </div>
         <button onclick="updateDashboard()">Apply</button>
+        <button class="secondary" onclick="clearAddressFilter()">Clear address</button>
+      </div>
+
+      <div id="filterPill" class="filter-pill hidden">
+        Filtered by <span id="filterPillAddress"></span>
+        <span class="clear" onclick="clearAddressFilter()">&times;</span>
       </div>
 
       <div class="stats-grid">
         <div class="stat-card">
-          <h2>Total Unique Wallet Accounts</h2>
+          <h2 id="totalUsersLabel">Total Unique Wallet Accounts</h2>
           <div class="value" id="totalUsers">-</div>
         </div>
         <div class="stat-card">
-          <h2>Total Created Tokens</h2>
+          <h2 id="totalTokensLabel">Total Created Tokens</h2>
           <div class="value" id="totalTokens">-</div>
         </div>
         <div class="stat-card">
-          <h2>Past 24h Active Accounts</h2>
+          <h2 id="todayActiveUsersLabel">Past 24h Active Accounts</h2>
           <div class="value" id="todayActiveUsers">-</div>
         </div>
         <div class="stat-card">
@@ -235,9 +289,18 @@
           <div class="value" id="todayTokens">-</div>
         </div>
         <div class="stat-card">
-          <h2>Total MarketCap</h2>
+          <h2 id="totalMarketCapLabel">Total MarketCap</h2>
           <div class="value" id="totalMarketCap">-</div>
           <div class="value usd-value" id="totalMarketCapUSD">-</div>
+        </div>
+        <div class="stat-card user-only-card hidden" id="userVolumeCard">
+          <h2>Total Volume (range)</h2>
+          <div class="value" id="userTotalVolume">-</div>
+          <div class="value usd-value" id="userTotalVolumeUSD">-</div>
+        </div>
+        <div class="stat-card user-only-card hidden" id="userTxCard">
+          <h2>Total Transactions (range)</h2>
+          <div class="value" id="userTotalTransactions">-</div>
         </div>
       </div>
 
@@ -271,7 +334,7 @@
         </div>
 
         <div class="chart-container">
-          <h2>Daily Active Accounts</h2>
+          <h2 id="activeUsersChartLabel">Daily Active Accounts</h2>
           <div class="chart-wrapper">
             <canvas id="activeUsersChart"></canvas>
           </div>
@@ -326,6 +389,104 @@
           startDate: moment(startDate).format("YYYY-MM-DD"),
           endDate: moment(endDate).format("YYYY-MM-DD"),
         };
+      }
+
+      function getAddressFilter() {
+        const value = document
+          .getElementById("addressFilter")
+          .value.trim();
+        return value || null;
+      }
+
+      function clearAddressFilter() {
+        document.getElementById("addressFilter").value = "";
+        updateDashboard();
+      }
+
+      function getDefaultDateRange() {
+        return {
+          startDate: moment().subtract(14, "days").format("YYYY-MM-DD"),
+          endDate: moment().format("YYYY-MM-DD"),
+        };
+      }
+
+      function isCustomDateRange() {
+        const def = getDefaultDateRange();
+        const cur = getDateRange();
+        return cur.startDate !== def.startDate || cur.endDate !== def.endDate;
+      }
+
+      function isCustomFilter() {
+        return isCustomDateRange() || !!getAddressFilter();
+      }
+
+      function updateStatLabels() {
+        const custom = isCustomFilter();
+        const customRange = isCustomDateRange();
+        const address = getAddressFilter();
+
+        // Unique Wallet Accounts is ALWAYS platform-wide. When an address is
+        // also set, append (global) to make that explicit; the (range) suffix
+        // is appended whenever the date range is customized.
+        let usersLabel = address
+          ? "Unique Wallet Accounts (global"
+          : custom
+            ? "Unique Wallet Accounts"
+            : "Total Unique Wallet Accounts";
+        if (address) {
+          usersLabel += customRange ? ", range)" : ")";
+        } else if (custom) {
+          usersLabel += " (range)";
+        }
+        document.getElementById("totalUsersLabel").textContent = usersLabel;
+
+        document.getElementById("totalTokensLabel").textContent = custom
+          ? "Created Tokens (range)"
+          : "Total Created Tokens";
+
+        document.getElementById("totalMarketCapLabel").textContent = custom
+          ? "MarketCap (range)"
+          : "Total MarketCap";
+
+        // Past 24h Active Accounts and Daily Active Accounts chart are ALWAYS
+        // platform-wide. Add a (global) hint when an address filter is set so
+        // users understand they are not seeing per-user activity.
+        document.getElementById("todayActiveUsersLabel").textContent = address
+          ? "Past 24h Active Accounts (global)"
+          : "Past 24h Active Accounts";
+        document.getElementById("activeUsersChartLabel").textContent = address
+          ? "Daily Active Accounts (global)"
+          : "Daily Active Accounts";
+      }
+
+      function updateFilterPill() {
+        const address = getAddressFilter();
+        const pill = document.getElementById("filterPill");
+        const pillAddress = document.getElementById("filterPillAddress");
+        if (address) {
+          pillAddress.textContent = address;
+          pill.classList.remove("hidden");
+        } else {
+          pill.classList.add("hidden");
+        }
+      }
+
+      async function fetchJsonOrThrow(url) {
+        const response = await fetch(url);
+        const text = await response.text();
+        let body;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = text;
+        }
+        if (!response.ok) {
+          const message =
+            (body && (body.message || body.error)) ||
+            `HTTP ${response.status}`;
+          throw new Error(`${url} -> ${message}`);
+        }
+        return body;
       }
 
       // Set default date range (last 2 weeks)
@@ -410,40 +571,108 @@
         // return (aeAmount / decimals) * aePrice;
       }
 
-      // Fetch analytics data from unified API
-      async function fetchAnalyticsData(startDate, endDate) {
+      // Single-call helper: fetches the per-day analytics rows from the API
+      // and returns them sorted by date. Returns [] on error or non-array.
+      async function fetchAnalyticsRows(startDate, endDate, address) {
         try {
-          const response = await fetch(
-            `${API_URL}/analytics?start_date=${startDate}&end_date=${endDate}`
-          );
-          const data = await response.json();
-          
-          // Sort data by date in ascending order
-          const sortedData = [...data].sort(
-            (a, b) => moment(a.date).valueOf() - moment(b.date).valueOf()
-          );
-          
-          analyticsData = sortedData;
-          return sortedData;
+          const params = new URLSearchParams({
+            start_date: startDate,
+            end_date: endDate,
+          });
+          if (address) {
+            params.set("address", address);
+          }
+          const data = await fetchJsonOrThrow(`${API_URL}/analytics?${params}`);
+          if (!Array.isArray(data)) {
+            console.error(
+              "Unexpected /analytics response (not an array):",
+              data
+            );
+            return [];
+          }
+          return data
+            .slice()
+            .sort(
+              (a, b) => moment(a.date).valueOf() - moment(b.date).valueOf()
+            );
         } catch (error) {
-          console.error("Error fetching analytics data:", error);
+          console.error("Error fetching analytics rows:", error);
           return [];
         }
+      }
+
+      // Fetch analytics data from unified API. When `address` is set, ALSO
+      // fetches the unfiltered series in parallel and overwrites
+      // `total_active_accounts` per day so the Daily Active Accounts chart
+      // continues to show platform-wide context (not 0/1 per day).
+      async function fetchAnalyticsData(startDate, endDate, address) {
+        // Always reset before re-fetch so a failed/empty response can never
+        // leave stale chart data on screen.
+        analyticsData = [];
+        if (address) {
+          const [filtered, global] = await Promise.all([
+            fetchAnalyticsRows(startDate, endDate, address),
+            fetchAnalyticsRows(startDate, endDate, null),
+          ]);
+          const globalByDate = new Map(
+            global.map((row) => [
+              moment(row.date).format("YYYY-MM-DD"),
+              row,
+            ])
+          );
+          analyticsData = filtered.map((row) => {
+            const key = moment(row.date).format("YYYY-MM-DD");
+            const g = globalByDate.get(key);
+            return {
+              ...row,
+              total_active_accounts: g
+                ? parseInt(g.total_active_accounts) || 0
+                : 0,
+            };
+          });
+        } else {
+          analyticsData = await fetchAnalyticsRows(startDate, endDate, null);
+        }
+        return analyticsData;
       }
 
 
 
       // Update total unique users from analytics data
-      function updateTotalUsers() {
-        // Calculate total unique users from all data
-        const uniqueUsers = new Set();
-        analyticsData.forEach(item => {
-          for (let i = 0; i < parseInt(item.total_active_accounts); i++) {
-            uniqueUsers.add(`user_${item.date}_${i}`);
-          }
-        });
-        
-        document.getElementById("totalUsers").textContent = formatNumber(uniqueUsers.size);
+      // Fetches the TRUE distinct count of wallet accounts, either over the
+      // selected range (when a custom filter is active) or all-time (default).
+      async function fetchRangeSummary(startDate, endDate, address) {
+        try {
+          const params = new URLSearchParams();
+          if (startDate) params.set("start_date", startDate);
+          if (endDate) params.set("end_date", endDate);
+          if (address) params.set("address", address);
+          const url = `${API_URL}/analytics/summary${
+            params.toString() ? `?${params}` : ""
+          }`;
+          return await fetchJsonOrThrow(url);
+        } catch (error) {
+          console.error("Error fetching analytics summary:", error);
+          return null;
+        }
+      }
+
+      async function updateTotalUsers() {
+        // This card is ALWAYS platform-wide. If a custom date range is in
+        // effect we scope to that range; otherwise it's an all-time count.
+        // We never pass `address` so the result is meaningful when the user
+        // has filtered the rest of the dashboard to a single wallet.
+        let summary;
+        if (isCustomDateRange()) {
+          const { startDate, endDate } = getDateRange();
+          summary = await fetchRangeSummary(startDate, endDate, null);
+        } else {
+          summary = await fetchRangeSummary(null, null, null);
+        }
+        const value = summary
+          ? parseInt(summary.total_unique_accounts) || 0
+          : 0;
+        document.getElementById("totalUsers").textContent = formatNumber(value);
       }
 
 
@@ -849,59 +1078,124 @@
       }
 
       // Fetch past 24 hours data for today's metrics
-      async function fetchPast24HoursData() {
+      async function fetchPast24HoursData(address) {
         try {
-          const response = await fetch(`${API_URL}/analytics/past-24-hours`);
-          const data = await response.json();
-          console.log('==================');
-          console.log(data);
-          console.log('==================');
-          return data;
+          const params = new URLSearchParams();
+          if (address) {
+            params.set("address", address);
+          }
+          const url = `${API_URL}/analytics/past-24-hours${
+            params.toString() ? `?${params}` : ""
+          }`;
+          return await fetchJsonOrThrow(url);
         } catch (error) {
           console.error("Error fetching past 24 hours data:", error);
           return null;
         }
       }
 
-      // Update today's metrics
-      async function updateTodayMetrics() {
+      // Update today's metrics. When `address` is set, also fetches the
+      // unfiltered past-24h data in parallel so the "Active Accounts" card
+      // can stay platform-wide (not 1/0 for the selected user).
+      async function updateTodayMetrics(address) {
         try {
-          // Fetch past 24 hours data
-          const todayData = await fetchPast24HoursData();
-          if (!todayData) return;
-          
+          const [todayData, todayGlobalData] = await Promise.all([
+            fetchPast24HoursData(address),
+            address
+              ? fetchPast24HoursData(null)
+              : Promise.resolve(null),
+          ]);
+          if (!todayData) {
+            // Reset cards so stale values don't linger when the call fails.
+            document.getElementById("todayTokens").textContent = "0";
+            document.getElementById("todayVolume").textContent = "-";
+            document.getElementById("todayVolumeUSD").textContent = "-";
+            document.getElementById("todayActiveUsers").textContent = "0";
+            return;
+          }
+
           // Get current AE price
           const aePrice = await fetchAEPrice();
-          
+
           // Past 24h tokens
           document.getElementById("todayTokens").textContent = formatNumber(
             parseInt(todayData.total_created_tokens) || 0
           );
-          document.getElementById("totalTokens").textContent = formatNumber(todayData.total_tokens);
 
-          // Past 24h volume
+          // Total Created Tokens card: when a custom filter (range or address)
+          // is active, show the range-scoped sum. Otherwise show the all-time
+          // cumulative count from the past-24h endpoint.
+          if (isCustomFilter()) {
+            const sumInRange = analyticsData.reduce(
+              (acc, item) => acc + (parseInt(item.total_created_tokens) || 0),
+              0
+            );
+            document.getElementById("totalTokens").textContent =
+              formatNumber(sumInRange);
+          } else {
+            document.getElementById("totalTokens").textContent = formatNumber(
+              todayData.total_tokens
+            );
+          }
+
+          // Past 24h volume (filtered to user when address is set)
           const volumeAE = parseFloat(todayData.total_volume_sum) || 0;
           const volumeUSD = convertAEToUSD(volumeAE, aePrice);
           document.getElementById("todayVolume").textContent = formatAEAmount(volumeAE);
           document.getElementById("todayVolumeUSD").textContent = formatUSDAmount(volumeUSD);
 
-          // Past 24h active users
+          // Past 24h active users — always platform-wide context. When
+          // address is set we use the parallel global call; otherwise
+          // todayData itself is already global.
+          const activeAccountsSrc = address ? todayGlobalData : todayData;
           document.getElementById("todayActiveUsers").textContent = formatNumber(
-            parseInt(todayData.total_active_accounts) || 0
+            parseInt(activeAccountsSrc?.total_active_accounts) || 0
           );
+
+          return aePrice;
         } catch (error) {
           console.error("Error updating today's metrics:", error);
+          return 0;
         }
+      }
+
+      // Populate the 2 user-only stat cards (Total Volume / Total
+      // Transactions over the selected range). Hidden when no address filter.
+      function updateUserOnlyCards(address, aePrice) {
+        const cards = document.querySelectorAll(".user-only-card");
+        if (!address) {
+          cards.forEach((c) => c.classList.add("hidden"));
+          return;
+        }
+        cards.forEach((c) => c.classList.remove("hidden"));
+
+        const totalVolume = analyticsData.reduce(
+          (sum, item) => sum + (parseFloat(item.total_volume_sum) || 0),
+          0
+        );
+        const totalTx = analyticsData.reduce(
+          (sum, item) => sum + (parseInt(item.total_transactions) || 0),
+          0
+        );
+        document.getElementById("userTotalVolume").textContent =
+          formatAEAmount(totalVolume);
+        document.getElementById("userTotalVolumeUSD").textContent =
+          formatUSDAmount(totalVolume * (aePrice || 0));
+        document.getElementById("userTotalTransactions").textContent =
+          formatNumber(totalTx);
       }
 
       // Update all charts and metrics
       async function updateDashboard() {
         try {
+          updateFilterPill();
+          updateStatLabels();
           const { startDate, endDate } = getDateRange();
-          
+          const address = getAddressFilter();
+
           // Fetch data from unified API
-          await fetchAnalyticsData(startDate, endDate);
-          
+          await fetchAnalyticsData(startDate, endDate, address);
+
           // Update all charts
           createTokensChart();
           await createVolumeChart();
@@ -909,11 +1203,12 @@
           createTransactionsChart();
           await createMarketCapChart();
           createCumulativeTokensChart();
-          
+
           // Update metrics
-          await updateTodayMetrics();
-          updateTotalUsers();
+          const aePrice = await updateTodayMetrics(address);
+          await updateTotalUsers();
           await updateTotalMarketCap();
+          updateUserOnlyCards(address, aePrice);
         } catch (error) {
           console.error("Error updating dashboard:", error);
         }

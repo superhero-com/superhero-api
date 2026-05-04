@@ -11,6 +11,7 @@ import { Analytic } from '../entities/analytic.entity';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import moment from 'moment';
 import { CacheDailyAnalyticsDataService } from '../services/cache-daily-analytics-data.service';
+import { OptionalAeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('analytics')
 @ApiTags('Analytics')
@@ -28,6 +29,7 @@ export class AnalyticController {
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
   @ApiQuery({ name: 'force_pull', type: 'boolean', required: false })
+  @ApiQuery({ name: 'address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'getAnalyticsData',
   })
@@ -35,6 +37,8 @@ export class AnalyticController {
     @Query('start_date') start_date: string,
     @Query('end_date') end_date: string,
     @Query('force_pull') force_pull: boolean,
+    @Query('address', OptionalAeAccountAddressPipe)
+    address: string | undefined,
   ) {
     const startDate = moment(
       start_date ?? moment().subtract(10, 'day').format('YYYY-MM-DD'),
@@ -46,6 +50,16 @@ export class AnalyticController {
     // if the dates are not valid, return an error
     if (startDate > endDate) {
       throw new BadRequestException('Start date must be before end date');
+    }
+
+    // When filtering by address, always go live so the result reflects the
+    // requested user (the cached `analytics` table only stores global aggregates).
+    if (address) {
+      return this.cacheDailyAnalyticsDataService.getDateRangeAnalyticsLive(
+        startDate,
+        endDate,
+        address,
+      );
     }
 
     if (force_pull) {
@@ -62,17 +76,49 @@ export class AnalyticController {
     return analytics;
   }
 
+  @Get('summary')
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiQuery({ name: 'address', type: 'string', required: false })
+  @ApiOperation({
+    operationId: 'getAnalyticsSummary',
+  })
+  async getRangeSummary(
+    @Query('start_date') start_date: string,
+    @Query('end_date') end_date: string,
+    @Query('address', OptionalAeAccountAddressPipe)
+    address: string | undefined,
+  ) {
+    const startDate = start_date ? moment(start_date).toDate() : undefined;
+    const endDate = end_date ? moment(end_date).toDate() : undefined;
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new BadRequestException('Start date must be before end date');
+    }
+
+    return this.cacheDailyAnalyticsDataService.getRangeSummary(
+      startDate,
+      endDate,
+      address,
+    );
+  }
+
   @Get('past-24-hours')
+  @ApiQuery({ name: 'address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'getPast24HoursAnalytics',
   })
-  async getPast24HoursAnalytics() {
+  async getPast24HoursAnalytics(
+    @Query('address', OptionalAeAccountAddressPipe)
+    address: string | undefined,
+  ) {
     const startDate = moment().subtract(24, 'hours').toDate();
-    const endDate = moment().add(1, 'day').toDate();
+    const endDate = moment().toDate();
     const analyticsData =
       await this.cacheDailyAnalyticsDataService.getDateAnalytics(
         startDate,
         endDate,
+        address,
       );
     return analyticsData;
   }
