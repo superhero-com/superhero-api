@@ -143,14 +143,15 @@ describe('global ValidationPipe request DTO coverage', () => {
         page: '2',
         limit: '20',
         minAumUsd: '1',
-        timePeriod: '30',
-        timeUnit: 'minutes',
+        startDate: '2026-04-28T10:00:00.000Z',
+        endDate: '2026-04-28T12:00:00.000Z',
       },
       assertTransformed(result: GetLeaderboardQueryDto) {
         expect(result.page).toBe(2);
         expect(result.limit).toBe(20);
         expect(result.minAumUsd).toBe(1);
-        expect(result.timePeriod).toBe(30);
+        expect(result.startDate).toBe('2026-04-28T10:00:00.000Z');
+        expect(result.endDate).toBe('2026-04-28T12:00:00.000Z');
         expect(result.sortDir).toBe('DESC');
       },
     },

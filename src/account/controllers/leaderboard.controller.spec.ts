@@ -75,8 +75,8 @@ describe('LeaderboardController', () => {
       sortDir: 'ASC',
       page: 3,
       limit: 5,
-      timePeriod: 30,
-      timeUnit: 'minutes',
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
 
     expect(getLeaders).toHaveBeenCalledWith({
@@ -85,12 +85,12 @@ describe('LeaderboardController', () => {
       sortDir: 'ASC',
       page: 3,
       limit: 5,
-      timePeriod: 30,
-      timeUnit: 'minutes',
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
   });
 
-  it('serializes timeFilter dates as ISO strings and returns rolling-window metrics', async () => {
+  it('serializes timeFilter dates as ISO strings and returns selected-period metrics', async () => {
     const start = new Date('2026-04-28T10:00:00.000Z');
     const end = new Date('2026-04-28T12:00:00.000Z');
     const { service } = buildService({
@@ -116,20 +116,18 @@ describe('LeaderboardController', () => {
       window: '30d',
       sortBy: 'aum',
       sortDir: 'DESC',
-      timeFilter: { value: 2, unit: 'hours', start, end },
+      timeFilter: { start, end },
     });
     const controller = new LeaderboardController(service);
 
     const response = await controller.getLeaderboard({
       window: '30d',
       sortBy: 'aum',
-      timePeriod: 2,
-      timeUnit: 'hours',
+      startDate: '2026-04-28T10:00:00.000Z',
+      endDate: '2026-04-28T12:00:00.000Z',
     });
 
     expect(response.meta.timeFilter).toEqual({
-      value: 2,
-      unit: 'hours',
       start: '2026-04-28T10:00:00.000Z',
       end: '2026-04-28T12:00:00.000Z',
     });

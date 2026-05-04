@@ -6,7 +6,6 @@ import {
   LeaderboardItem,
   LeaderboardSortBy,
   LeaderboardSortDir,
-  LeaderboardTimeUnit,
   LeaderboardWindow,
 } from '../services/leaderboard.types';
 import { GetLeaderboardQueryDto } from '../dto/get-leaderboard-query.dto';
@@ -22,8 +21,6 @@ class LeaderboardResponseDto {
     sortBy: LeaderboardSortBy;
     sortDir: LeaderboardSortDir;
     timeFilter?: {
-      value: number;
-      unit: LeaderboardTimeUnit;
       start: string;
       end: string;
     };
@@ -40,9 +37,9 @@ export class LeaderboardController {
     operationId: 'getAccountsLeaderboard',
     description:
       'Returns paginated trading leaders with metrics (AUM, PNL, ROI, MDD), activity counters, and a portfolio sparkline. ' +
-      'Without timePeriod + timeUnit, metrics are precomputed per window (7d / 30d / all). ' +
-      'When timePeriod + timeUnit are supplied, leaders are ranked by rolling-window performance among accounts that traded within that recent window. ' +
-      'In that mode, top-level metrics and buy/sell counts are scoped to the requested rolling window. ' +
+      'Without startDate + endDate, metrics are precomputed per window (7d / 30d / all). ' +
+      'When startDate + endDate are supplied, leaders are ranked by selected-period performance among accounts that traded within that time range. ' +
+      'In that mode, top-level metrics and buy/sell counts are scoped to the requested time range. ' +
       'Note: responses are cached for up to 60 seconds, so `meta.timeFilter.start` and `meta.timeFilter.end` reflect the time the cache entry was filled, not strictly the time of the current request.',
   })
   @ApiOkResponse({ type: LeaderboardResponseDto })
@@ -69,8 +66,6 @@ export class LeaderboardController {
         sortDir: result.sortDir,
         timeFilter: result.timeFilter
           ? {
-              value: result.timeFilter.value,
-              unit: result.timeFilter.unit,
               start: result.timeFilter.start.toISOString(),
               end: result.timeFilter.end.toISOString(),
             }

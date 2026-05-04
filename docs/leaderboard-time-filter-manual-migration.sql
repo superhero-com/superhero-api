@@ -4,7 +4,7 @@
 --
 -- The TypeORM entity decorators added in this change describe the desired
 -- index shape, but production runs with `synchronize=false`. Apply this DDL
--- BEFORE shipping the new code path or rolling-window active trader discovery
+-- BEFORE shipping the new code path or selected-period active trader discovery
 -- will fall back to a sequential scan over `transactions` (potentially
 -- millions of rows) and the per-metric ORDER BYs on the snapshot table will
 -- not be index-backed.
@@ -38,7 +38,7 @@
 --        'IDX_ACCOUNT_LEADERBOARD_SNAPSHOTS_WINDOW_MDD'
 --      );
 -- 4. Only after every index is valid, deploy the new application version that
---    ranks by rolling-window performance when `timePeriod` / `timeUnit` query
+--    ranks by selected-period performance when `startDate` / `endDate` query
 --    params are supplied.
 --
 -- -----------------------------------------------------------------------------
@@ -66,8 +66,8 @@
 --    or a Sort node fed from one of the snapshot indexes (acceptable — the
 --    table is small, ≤100 rows per window). Repeat for sortBy=roi/mdd/aum.
 --
--- C) Hit a real rolling-performance request and inspect the duration:
---      curl 'https://<host>/api/accounts/leaderboard?window=7d&sortBy=pnl&timePeriod=30&timeUnit=minutes'
+-- C) Hit a real selected-period performance request and inspect the duration:
+--      curl 'https://<host>/api/accounts/leaderboard?window=7d&sortBy=pnl&startDate=2026-05-04T10:00:00.000Z&endDate=2026-05-04T18:00:00.000Z'
 --    p95 should be well under 500ms. If it is not, capture the plan via
 --    `auto_explain` (or run the underlying queries manually with EXPLAIN ANALYZE)
 --    and check that `IDX_TRANSACTION_CREATED_AT_ADDRESS_TYPE` is being used.
@@ -125,7 +125,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS
 
 -- 2. Transactions table index ------------------------------------------------
 
--- Backs rolling-window active trader discovery:
+-- Backs selected-period active trader discovery:
 --   WHERE t.tx_type IN ('buy','sell')
 --     AND t.created_at >= $start AND t.created_at < $end
 --
