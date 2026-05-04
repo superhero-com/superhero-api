@@ -377,13 +377,12 @@ export class PostsController {
     operationId: 'popular',
     summary: 'Popular posts',
     description:
-      'Returns top posts for selected time window (24h, 7d, all). Ranked by accumulated engagement — no time decay. Optional scale params let clients personalize signal importance.',
+      'Returns all-time popular posts with a temporary freshness boost for new posts. Optional scale params let clients personalize signal importance.',
   })
   @ApiOkResponsePaginated(PostDto)
   @Get('popular')
   async popular(@Query() query: PopularPostsQueryDto) {
     const {
-      window = '24h',
       page = 1,
       limit = 50,
       debug,
@@ -396,6 +395,7 @@ export class PostsController {
       reads,
       interactionsPerHour,
     } = query;
+    const window = 'all' as const;
     const offset = (page - 1) * limit;
     const weightOverrides = {
       comments,
@@ -478,16 +478,10 @@ export class PostsController {
       }
       return response;
     } catch (error) {
-      const windowHoursMap = { '24h': 24, '7d': 24 * 7, all: 0 } as const;
-      const windowHours = windowHoursMap[window] || 0;
       const fallbackQb = this.postRepository
         .createQueryBuilder('post')
         .where('post.is_hidden = false')
         .andWhere('post.post_id IS NULL');
-      if (windowHours > 0) {
-        const since = new Date(Date.now() - windowHours * 60 * 60 * 1000);
-        fallbackQb.andWhere('post.created_at >= :since', { since });
-      }
       const fallbackBasePosts = await fallbackQb
         .orderBy('post.created_at', 'DESC')
         .offset(offset)

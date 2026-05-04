@@ -10,12 +10,13 @@ import type { PopularWindow } from '../services/popular-ranking.service';
 export class PopularPostsQueryDto {
   @ApiPropertyOptional({
     enum: ['24h', '7d', 'all'],
-    description: 'Popular ranking time window',
-    default: '24h',
+    deprecated: true,
+    description:
+      'Deprecated. Popular ranking is now all-time; this value is accepted for backwards compatibility and ignored.',
   })
   @IsOptional()
   @IsIn(['24h', '7d', 'all'])
-  window?: PopularWindow = '24h';
+  window?: PopularWindow;
 
   @ApiPropertyOptional({
     type: Number,

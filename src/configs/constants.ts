@@ -215,8 +215,8 @@ export type PopularRankingWeightScale =
   (typeof POPULAR_RANKING_WEIGHT_SCALES)[number];
 
 /**
- * Popular posts ranking configuration — "Top" style (no time decay).
- * Posts are ranked purely by accumulated engagement within the selected window.
+ * Popular posts ranking configuration — all-time "Top" style with a short
+ * freshness boost so low-activity feeds still feel alive.
  */
 export const POPULAR_RANKING_CONFIG = {
   // time windows (hours)
@@ -232,6 +232,8 @@ export const POPULAR_RANKING_CONFIG = {
     trendingBoost: 0.5, // w_tr (topical relevance)
     contentQuality: 0.3, // w_q (anti-spam)
     reads: 1.5, // w_reads (common passive signal)
+    freshnessBoost: 0.9, // w_fresh (temporary new-post lift)
+    velocityBoost: 0.6, // w_vel (temporary lift for posts gaining activity quickly)
   },
 
   // user-facing scale controls tune relative importance instead of exposing raw weights
@@ -256,6 +258,14 @@ export const POPULAR_RANKING_CONFIG = {
 
   // trending scaling
   TRENDING_MAX_SCORE: 100, // scale trending tag score to [0..1]
+
+  // live popular behavior
+  FRESHNESS_BOOST_HOURS: 24,
+  AUTHOR_DIVERSITY: {
+    ENABLED: true,
+    OVERSAMPLE_MULTIPLIER: 4,
+    MIN_OVERSAMPLE: 80,
+  },
 
   // redis
   REDIS_KEYS: {
