@@ -1,0 +1,1082 @@
+{{#> main-layout title="Challenge Analytics" active="bcl-challenge"}}
+<style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: "Inter", sans-serif;
+      }
+
+      body {
+        background-color: #f8fafc;
+        color: #1e293b;
+        padding: 0;
+        min-height: 100vh;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .toolbar {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .toolbar-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: flex-end;
+      }
+
+      .toolbar-row > .field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        min-width: 160px;
+      }
+
+      .toolbar-row > .field.address-field {
+        flex: 1;
+        min-width: 280px;
+      }
+
+      .toolbar label {
+        font-size: 0.8rem;
+        color: #475569;
+      }
+
+      .toolbar input,
+      .toolbar select {
+        padding: 0.5rem;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        color: #1e293b;
+        width: 100%;
+      }
+
+      .toolbar button {
+        padding: 0.5rem 1rem;
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .toolbar button:hover {
+        background-color: #2563eb;
+      }
+
+      .toolbar button.secondary {
+        background-color: #e2e8f0;
+        color: #1e293b;
+      }
+
+      .toolbar button.secondary:hover {
+        background-color: #cbd5e1;
+      }
+
+      .segmented {
+        display: inline-flex;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.25rem;
+        overflow: hidden;
+      }
+
+      .segmented button {
+        padding: 0.5rem 0.85rem;
+        background: white;
+        color: #475569;
+        border: none;
+        border-radius: 0;
+        font-size: 0.85rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .segmented button + button {
+        border-left: 1px solid #e2e8f0;
+      }
+
+      .segmented button:hover {
+        background: #f1f5f9;
+      }
+
+      .segmented button.active {
+        background: #3b82f6;
+        color: white;
+      }
+
+      .segmented button.active:hover {
+        background: #2563eb;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        min-height: 1.5rem;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.3rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        color: #0f172a;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+      }
+
+      .chip .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .chip .remove {
+        cursor: pointer;
+        color: #475569;
+        font-weight: 700;
+        margin-left: 0.2rem;
+      }
+
+      .chip .remove:hover {
+        color: #b91c1c;
+      }
+
+      .empty-chips {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        font-style: italic;
+      }
+
+      .table-card {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+        overflow: hidden;
+      }
+
+      .table-card .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .table-card .head h2 {
+        font-size: 1rem;
+        color: #475569;
+      }
+
+      .table-card .head .meta {
+        font-size: 0.8rem;
+        color: #64748b;
+      }
+
+      .table-wrapper {
+        overflow-x: auto;
+        max-height: 540px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+
+      thead th {
+        background: #f8fafc;
+        position: sticky;
+        top: 0;
+        text-align: left;
+        padding: 0.6rem 0.8rem;
+        color: #475569;
+        font-weight: 600;
+        border-bottom: 1px solid #e2e8f0;
+        white-space: nowrap;
+      }
+
+      tbody td {
+        padding: 0.5rem 0.8rem;
+        border-bottom: 1px solid #f1f5f9;
+        white-space: nowrap;
+      }
+
+      tbody tr:hover td {
+        background: #f8fafc;
+      }
+
+      td.num,
+      th.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      th.sortable {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      th.sortable:hover {
+        background: #eef2f7;
+      }
+
+      th .sort-ind {
+        font-size: 0.7rem;
+        color: #94a3b8;
+        margin-left: 0.25rem;
+        font-weight: 700;
+      }
+
+      th.sortable.active .sort-ind {
+        color: #3b82f6;
+      }
+
+      td.address {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      td.address .swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      td.address .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        cursor: pointer;
+      }
+
+      td.address .mono:hover {
+        text-decoration: underline;
+      }
+
+      .pnl-positive { color: #15803d; font-weight: 600; }
+      .pnl-negative { color: #b91c1c; font-weight: 600; }
+      .pnl-zero    { color: #94a3b8; }
+
+      .pnl-sub {
+        display: block;
+        font-size: 0.7rem;
+        color: #94a3b8;
+        font-weight: 400;
+        margin-top: 1px;
+      }
+
+      .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+      }
+
+      .chart-container {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        height: 320px;
+      }
+
+      .chart-container h2 {
+        font-size: 1rem;
+        margin-bottom: 0.5rem;
+        color: #475569;
+      }
+
+      .chart-wrapper {
+        height: calc(100% - 2rem);
+        position: relative;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: #94a3b8;
+      }
+
+      .error-banner {
+        background: #fef2f2;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+        padding: 0.6rem 0.9rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        font-size: 0.85rem;
+      }
+
+      .loading-indicator {
+        font-size: 0.8rem;
+        color: #64748b;
+      }
+
+      @media (max-width: 1024px) {
+        .charts-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+
+    <div class="container">
+
+      <div class="toolbar">
+        <div class="toolbar-row">
+          <div class="field address-field">
+            <label for="addressInput">Add address (paste one or many, comma-separated)</label>
+            <input
+              type="text"
+              id="addressInput"
+              placeholder="ak_..."
+              autocomplete="off"
+            />
+          </div>
+          <button onclick="addAddressesFromInput()">Add</button>
+          <button class="secondary" onclick="clearAllAddresses()">Clear all</button>
+        </div>
+
+        <div class="chips" id="chips">
+          <div class="empty-chips" id="emptyChips">No addresses yet. Add at least one to start.</div>
+        </div>
+
+        <div class="toolbar-row">
+          <div class="field">
+            <label for="startDate">Start Date</label>
+            <input type="date" id="startDate" />
+          </div>
+          <div class="field">
+            <label for="endDate">End Date</label>
+            <input type="date" id="endDate" />
+          </div>
+          <div class="field" style="min-width: 0;">
+            <label>View</label>
+            <div class="segmented" id="viewToggle">
+              <button type="button" data-mode="per_day" class="active" onclick="setViewMode('per_day')">Per-day</button>
+              <button type="button" data-mode="range" onclick="setViewMode('range')">Range</button>
+            </div>
+          </div>
+          <button onclick="runComparison()">Run comparison</button>
+          <button class="secondary" onclick="exportCsv()">Export CSV</button>
+          <span class="loading-indicator" id="loadingIndicator"></span>
+        </div>
+      </div>
+
+      <div id="errorBanner" class="error-banner" style="display: none;"></div>
+
+      <div class="table-card">
+        <div class="head">
+          <h2 id="tableTitle">Per-day breakdown</h2>
+          <span class="meta" id="tableMeta"></span>
+        </div>
+        <div class="table-wrapper">
+          <table id="resultsTable">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort-key="address" onclick="clickSortHeader('address')">
+                  Address <span class="sort-ind"></span>
+                </th>
+                <th>Date</th>
+                <th class="num sortable" data-sort-key="total_posts" onclick="clickSortHeader('total_posts')">
+                  Total Posts <span class="sort-ind"></span>
+                </th>
+                <th class="num sortable" data-sort-key="total_trades" onclick="clickSortHeader('total_trades')">
+                  Total Trades <span class="sort-ind"></span>
+                </th>
+                <th class="num sortable" data-sort-key="pnl_ae" onclick="clickSortHeader('pnl_ae')">
+                  PNL (excluding deposit) <span class="sort-ind"></span>
+                </th>
+                <th class="num sortable" data-sort-key="total_volume_ae" onclick="clickSortHeader('total_volume_ae')">
+                  Total Volume (AE) <span class="sort-ind"></span>
+                </th>
+                <th class="num sortable" data-sort-key="created_tokens" onclick="clickSortHeader('created_tokens')">
+                  Created Tokens <span class="sort-ind"></span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td colspan="7" class="empty-state">Add addresses and run a comparison to see results.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-container">
+          <h2>PNL (AE)</h2>
+          <div class="chart-wrapper"><canvas id="pnlChart"></canvas></div>
+        </div>
+        <div class="chart-container">
+          <h2>Total Posts</h2>
+          <div class="chart-wrapper"><canvas id="postsChart"></canvas></div>
+        </div>
+        <div class="chart-container">
+          <h2>Total Trades</h2>
+          <div class="chart-wrapper"><canvas id="tradesChart"></canvas></div>
+        </div>
+        <div class="chart-container">
+          <h2>Total Volume (AE)</h2>
+          <div class="chart-wrapper"><canvas id="volumeChart"></canvas></div>
+        </div>
+        <div class="chart-container">
+          <h2>Created Tokens</h2>
+          <div class="chart-wrapper"><canvas id="createdTokensChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---------- Constants ----------
+      const STORAGE_KEY = 'challenge.addresses';
+      const VIEW_MODE_KEY = 'challenge.viewMode';
+      const SORT_STATE_KEY = 'challenge.sortState';
+      const MAX_ADDRESSES = 10;
+      // Numeric sort keys that map to row fields (used by applySort).
+      const NUMERIC_SORT_KEYS = new Set([
+        'total_posts',
+        'total_trades',
+        'pnl_ae',
+        'total_volume_ae',
+        'created_tokens',
+      ]);
+      // Colors used for chart lines + chips. Indexed by address position.
+      const PALETTE = [
+        '#3b82f6', // blue
+        '#ef4444', // red
+        '#10b981', // green
+        '#f59e0b', // amber
+        '#8b5cf6', // violet
+        '#ec4899', // pink
+        '#0ea5e9', // sky
+        '#f97316', // orange
+        '#14b8a6', // teal
+        '#a855f7', // purple
+      ];
+
+      // ---------- State ----------
+      let addresses = loadAddresses();
+      let lastRows = []; // raw per-day rows from the last successful fetch
+      let viewMode = loadViewMode(); // 'per_day' | 'range'
+      let sortState = loadSortState(); // { key: string|null, dir: 'asc'|'desc' }
+      const charts = {};
+      let runRequestId = 0; // monotonically increasing id to discard stale fetches
+
+      // ---------- Helpers ----------
+      function loadAddresses() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return [];
+          return parsed.filter((a) => typeof a === 'string').slice(0, MAX_ADDRESSES);
+        } catch (e) {
+          return [];
+        }
+      }
+
+      function saveAddresses() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(addresses));
+        } catch (e) {
+          // Storage quota / privacy mode - fail silently.
+        }
+      }
+
+      function loadViewMode() {
+        try {
+          const raw = localStorage.getItem(VIEW_MODE_KEY);
+          return raw === 'range' ? 'range' : 'per_day';
+        } catch (e) {
+          return 'per_day';
+        }
+      }
+
+      function saveViewMode() {
+        try {
+          localStorage.setItem(VIEW_MODE_KEY, viewMode);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function loadSortState() {
+        try {
+          const raw = localStorage.getItem(SORT_STATE_KEY);
+          if (!raw) return { key: null, dir: 'desc' };
+          const parsed = JSON.parse(raw);
+          const dir = parsed.dir === 'asc' ? 'asc' : 'desc';
+          const key =
+            parsed.key === 'address' || NUMERIC_SORT_KEYS.has(parsed.key)
+              ? parsed.key
+              : null;
+          return { key, dir };
+        } catch (e) {
+          return { key: null, dir: 'desc' };
+        }
+      }
+
+      function saveSortState() {
+        try {
+          localStorage.setItem(SORT_STATE_KEY, JSON.stringify(sortState));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function isValidAddress(addr) {
+        // Light client-side check; the backend re-validates.
+        return /^ak_[1-9A-HJ-NP-Za-km-z]{40,60}$/.test(addr);
+      }
+
+      function colorFor(addr) {
+        const idx = addresses.indexOf(addr);
+        if (idx === -1) return '#64748b';
+        return PALETTE[idx % PALETTE.length];
+      }
+
+      function shortenAddress(addr) {
+        if (!addr || addr.length < 14) return addr || '';
+        return addr.slice(0, 8) + '...' + addr.slice(-6);
+      }
+
+      function formatNumber(n, opts = {}) {
+        if (n === null || n === undefined || Number.isNaN(n)) return '0';
+        const decimals = opts.decimals ?? 0;
+        return Number(n).toLocaleString(undefined, {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        });
+      }
+
+      function formatAe(n) {
+        const v = Number(n ?? 0);
+        if (Math.abs(v) >= 1000) return formatNumber(v, { decimals: 2 });
+        if (Math.abs(v) >= 1) return formatNumber(v, { decimals: 4 });
+        return formatNumber(v, { decimals: 6 });
+      }
+
+      function formatUsd(n) {
+        const v = Number(n ?? 0);
+        if (v === 0) return '$0';
+        if (Math.abs(v) >= 1) return '$' + formatNumber(v, { decimals: 2 });
+        return '$' + formatNumber(v, { decimals: 4 });
+      }
+
+      function pnlClass(v) {
+        if (v > 0) return 'pnl-positive';
+        if (v < 0) return 'pnl-negative';
+        return 'pnl-zero';
+      }
+
+      function showError(msg) {
+        const banner = document.getElementById('errorBanner');
+        if (msg) {
+          banner.textContent = msg;
+          banner.style.display = 'block';
+        } else {
+          banner.textContent = '';
+          banner.style.display = 'none';
+        }
+      }
+
+      function setLoading(isLoading) {
+        document.getElementById('loadingIndicator').textContent = isLoading
+          ? 'Loading...'
+          : '';
+      }
+
+      // ---------- Chips ----------
+      function renderChips() {
+        const container = document.getElementById('chips');
+        const empty = document.getElementById('emptyChips');
+        // Remove all existing chips (but keep the empty-state placeholder).
+        container.querySelectorAll('.chip').forEach((el) => el.remove());
+
+        if (addresses.length === 0) {
+          empty.style.display = '';
+          return;
+        }
+        empty.style.display = 'none';
+
+        for (const addr of addresses) {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.style.borderColor = colorFor(addr);
+          chip.innerHTML =
+            '<span class="swatch" style="background:' + colorFor(addr) + '"></span>' +
+            '<span title="' + addr + '">' + shortenAddress(addr) + '</span>' +
+            '<span class="remove" title="Remove">&times;</span>';
+          chip.querySelector('.remove').addEventListener('click', () => {
+            removeAddress(addr);
+          });
+          container.appendChild(chip);
+        }
+      }
+
+      function addAddressesFromInput() {
+        const input = document.getElementById('addressInput');
+        const raw = (input.value || '').trim();
+        if (!raw) return;
+        const candidates = raw
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+
+        const accepted = [];
+        const rejected = [];
+        for (const c of candidates) {
+          if (!isValidAddress(c)) {
+            rejected.push(c);
+            continue;
+          }
+          if (addresses.includes(c)) continue;
+          if (addresses.length + accepted.length >= MAX_ADDRESSES) {
+            rejected.push(c + ' (max ' + MAX_ADDRESSES + ' addresses)');
+            continue;
+          }
+          accepted.push(c);
+        }
+
+        if (accepted.length > 0) {
+          addresses = addresses.concat(accepted);
+          saveAddresses();
+          renderChips();
+          input.value = '';
+          showError(rejected.length > 0 ? 'Skipped: ' + rejected.join(', ') : '');
+          runComparison();
+        } else if (rejected.length > 0) {
+          showError('Skipped: ' + rejected.join(', '));
+        }
+      }
+
+      function removeAddress(addr) {
+        addresses = addresses.filter((a) => a !== addr);
+        saveAddresses();
+        renderChips();
+        if (addresses.length === 0) {
+          resetResults();
+        } else {
+          runComparison();
+        }
+      }
+
+      function clearAllAddresses() {
+        addresses = [];
+        saveAddresses();
+        renderChips();
+        resetResults();
+      }
+
+      // ---------- Date range ----------
+      function initDateRange() {
+        const start = document.getElementById('startDate');
+        const end = document.getElementById('endDate');
+        const today = moment().format('YYYY-MM-DD');
+        const startDefault = moment().subtract(13, 'day').format('YYYY-MM-DD');
+        if (!start.value) start.value = startDefault;
+        if (!end.value) end.value = today;
+        start.addEventListener('change', runComparison);
+        end.addEventListener('change', runComparison);
+      }
+
+      // ---------- Fetch + render ----------
+      async function runComparison() {
+        if (addresses.length === 0) {
+          resetResults();
+          return;
+        }
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        if (!start || !end) return;
+        if (moment(start).isAfter(moment(end))) {
+          showError('Start date must be before end date');
+          return;
+        }
+        showError('');
+
+        const myId = ++runRequestId;
+        setLoading(true);
+
+        const params = new URLSearchParams({
+          addresses: addresses.join(','),
+          start_date: start,
+          end_date: end,
+        });
+
+        try {
+          const res = await fetch('/api/analytics/challenge?' + params.toString());
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error('API ' + res.status + ': ' + text);
+          }
+          const rows = await res.json();
+          if (myId !== runRequestId) return; // stale response
+          if (!Array.isArray(rows)) {
+            throw new Error('Unexpected response shape');
+          }
+          lastRows = rows;
+          renderResults();
+        } catch (err) {
+          if (myId !== runRequestId) return;
+          showError('Failed to load data: ' + (err && err.message ? err.message : err));
+          resetResults({ keepError: true });
+        } finally {
+          if (myId === runRequestId) setLoading(false);
+        }
+      }
+
+      // Single source of truth for table+chart rendering: derive view rows,
+      // sort them, then push to the table. Charts always show raw per-day data.
+      function renderResults() {
+        const baseRows =
+          viewMode === 'range' ? aggregateToRange(lastRows) : lastRows;
+        const sorted = applySort(baseRows);
+        renderTable(sorted);
+        renderCharts(lastRows);
+        updateSortIndicators();
+      }
+
+      function resetResults(opts = {}) {
+        if (!opts.keepError) showError('');
+        lastRows = [];
+        document.getElementById('tableMeta').textContent = '';
+        document.getElementById('resultsBody').innerHTML =
+          '<tr><td colspan="7" class="empty-state">' +
+          (addresses.length === 0
+            ? 'Add addresses and run a comparison to see results.'
+            : 'No data for the selected range.') +
+          '</td></tr>';
+        // Wipe charts.
+        Object.keys(charts).forEach((k) => {
+          charts[k].destroy();
+          delete charts[k];
+        });
+        updateSortIndicators();
+      }
+
+      function renderTable(rows) {
+        const body = document.getElementById('resultsBody');
+        if (rows.length === 0) {
+          body.innerHTML =
+            '<tr><td colspan="7" class="empty-state">No data for the selected range.</td></tr>';
+          document.getElementById('tableMeta').textContent = '';
+          return;
+        }
+
+        const html = rows
+          .map((r) => {
+            const c = colorFor(r.address);
+            const pnl = Number(r.pnl_ae ?? 0);
+            const pnlUsd = Number(r.pnl_usd ?? 0);
+            const pnlClsName = pnlClass(pnl);
+            return (
+              '<tr>' +
+              '<td class="address">' +
+                '<span class="swatch" style="background:' + c + '"></span>' +
+                '<span class="mono" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
+                  shortenAddress(r.address) +
+                '</span>' +
+              '</td>' +
+              '<td>' + r.date + '</td>' +
+              '<td class="num">' + formatNumber(r.total_posts) + '</td>' +
+              '<td class="num">' + formatNumber(r.total_trades) + '</td>' +
+              '<td class="num ' + pnlClsName + '">' +
+                (pnl >= 0 ? '+' : '') + formatAe(pnl) +
+                '<span class="pnl-sub">' + (pnlUsd >= 0 ? '+' : '') + formatUsd(pnlUsd) + '</span>' +
+              '</td>' +
+              '<td class="num">' + formatAe(r.total_volume_ae) + '</td>' +
+              '<td class="num">' + formatNumber(r.created_tokens) + '</td>' +
+              '</tr>'
+            );
+          })
+          .join('');
+        body.innerHTML = html;
+        document.getElementById('tableMeta').textContent =
+          rows.length + ' row(s) • ' + addresses.length + ' address(es)';
+      }
+
+      function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(() => {});
+        }
+      }
+
+      // ---------- View mode (per-day vs range) ----------
+      function aggregateToRange(rows) {
+        const byAddr = new Map();
+        for (const r of rows) {
+          const cur = byAddr.get(r.address) || {
+            address: r.address,
+            total_posts: 0,
+            total_trades: 0,
+            total_volume_ae: 0,
+            created_tokens: 0,
+            pnl_ae: 0,
+            pnl_usd: 0,
+          };
+          cur.total_posts += Number(r.total_posts || 0);
+          cur.total_trades += Number(r.total_trades || 0);
+          cur.total_volume_ae += Number(r.total_volume_ae || 0);
+          cur.created_tokens += Number(r.created_tokens || 0);
+          cur.pnl_ae += Number(r.pnl_ae || 0);
+          cur.pnl_usd += Number(r.pnl_usd || 0);
+          byAddr.set(r.address, cur);
+        }
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const dateLabel = start && end ? start + ' \u2192 ' + end : '';
+        // Preserve the user's original address order by iterating `addresses`.
+        return addresses
+          .map((a) => byAddr.get(a))
+          .filter(Boolean)
+          .map((row) => Object.assign({}, row, { date: dateLabel }));
+      }
+
+      function setViewMode(mode) {
+        if (mode !== 'per_day' && mode !== 'range') return;
+        if (viewMode === mode) return;
+        viewMode = mode;
+        saveViewMode();
+        document.querySelectorAll('#viewToggle button').forEach((btn) => {
+          btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+        document.getElementById('tableTitle').textContent =
+          mode === 'range' ? 'Per-address summary' : 'Per-day breakdown';
+        renderResults();
+      }
+
+      // ---------- Sorting ----------
+      function clickSortHeader(key) {
+        if (sortState.key !== key) {
+          // First click on a new column starts at desc (top performer first).
+          sortState = { key, dir: 'desc' };
+        } else if (sortState.dir === 'desc') {
+          sortState = { key, dir: 'asc' };
+        } else {
+          // Third click clears the sort (back to default order).
+          sortState = { key: null, dir: 'desc' };
+        }
+        saveSortState();
+        renderResults();
+      }
+
+      function applySort(rows) {
+        if (!sortState.key) return rows;
+        const key = sortState.key;
+        const dir = sortState.dir === 'asc' ? 1 : -1;
+
+        if (viewMode === 'range') {
+          return rows.slice().sort((a, b) => {
+            if (key === 'address') {
+              return String(a.address).localeCompare(String(b.address)) * dir;
+            }
+            return (Number(a[key] || 0) - Number(b[key] || 0)) * dir;
+          });
+        }
+
+        // per_day mode: rank ADDRESS GROUPS by sum-across-days, then re-emit
+        // rows grouped by ranked address (rows within an address stay in the
+        // original date-asc order).
+        const totals = new Map();
+        const seen = [];
+        for (const r of rows) {
+          if (!totals.has(r.address)) {
+            totals.set(r.address, 0);
+            seen.push(r.address);
+          }
+          if (key !== 'address') {
+            totals.set(r.address, totals.get(r.address) + Number(r[key] || 0));
+          }
+        }
+        const ranked = seen.slice().sort((a, b) => {
+          if (key === 'address') {
+            return String(a).localeCompare(String(b)) * dir;
+          }
+          return (Number(totals.get(a) || 0) - Number(totals.get(b) || 0)) * dir;
+        });
+        const byAddr = new Map(ranked.map((a) => [a, []]));
+        for (const r of rows) {
+          if (byAddr.has(r.address)) byAddr.get(r.address).push(r);
+        }
+        const out = [];
+        for (const a of ranked) {
+          const group = byAddr.get(a) || [];
+          for (const r of group) out.push(r);
+        }
+        return out;
+      }
+
+      function updateSortIndicators() {
+        document.querySelectorAll('th.sortable').forEach((th) => {
+          const key = th.dataset.sortKey;
+          const ind = th.querySelector('.sort-ind');
+          if (sortState.key === key) {
+            th.classList.add('active');
+            if (ind) ind.textContent = sortState.dir === 'asc' ? '\u2191' : '\u2193';
+          } else {
+            th.classList.remove('active');
+            if (ind) ind.textContent = '';
+          }
+        });
+      }
+
+      // ---------- CSV export ----------
+      function exportCsv() {
+        const baseRows =
+          viewMode === 'range' ? aggregateToRange(lastRows) : lastRows;
+        const rows = applySort(baseRows);
+        if (!rows || rows.length === 0) {
+          showError('Nothing to export');
+          return;
+        }
+        showError('');
+        const headers = [
+          'Address',
+          'Date',
+          'Total Posts',
+          'Total Trades',
+          'PNL (AE)',
+          'PNL (USD)',
+          'Total Volume (AE)',
+          'Created Tokens',
+        ];
+        const escape = (v) => {
+          const s = v === null || v === undefined ? '' : String(v);
+          return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+        };
+        const lines = [headers.join(',')];
+        for (const r of rows) {
+          lines.push(
+            [
+              r.address,
+              r.date,
+              Number(r.total_posts || 0),
+              Number(r.total_trades || 0),
+              Number(r.pnl_ae || 0),
+              Number(r.pnl_usd || 0),
+              Number(r.total_volume_ae || 0),
+              Number(r.created_tokens || 0),
+            ]
+              .map(escape)
+              .join(','),
+          );
+        }
+        const csv = lines.join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        a.href = url;
+        a.download = 'challenge_' + viewMode + '_' + start + '_' + end + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      // ---------- Charts ----------
+      function buildSeries(rows, metric) {
+        // Group by date in input order; one dataset per address.
+        const dateSet = new Set();
+        const byAddr = new Map();
+        for (const r of rows) {
+          dateSet.add(r.date);
+          if (!byAddr.has(r.address)) byAddr.set(r.address, new Map());
+          byAddr.get(r.address).set(r.date, Number(r[metric] ?? 0));
+        }
+        const dates = Array.from(dateSet).sort();
+        const datasets = addresses.map((addr) => {
+          const dayMap = byAddr.get(addr) || new Map();
+          return {
+            label: shortenAddress(addr),
+            data: dates.map((d) => dayMap.get(d) ?? 0),
+            borderColor: colorFor(addr),
+            backgroundColor: colorFor(addr) + '33',
+            tension: 0.25,
+            spanGaps: true,
+            pointRadius: 2,
+            borderWidth: 2,
+          };
+        });
+        return { dates, datasets };
+      }
+
+      function renderChart(canvasId, rows, metric, yLabel) {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return;
+        const { dates, datasets } = buildSeries(rows, metric);
+        if (charts[canvasId]) {
+          charts[canvasId].destroy();
+        }
+        charts[canvasId] = new Chart(ctx, {
+          type: 'line',
+          data: { labels: dates, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  title: (items) => items[0].label,
+                  label: (item) => item.dataset.label + ': ' + formatNumber(item.parsed.y, { decimals: yLabel === 'AE' ? 4 : 0 }),
+                },
+              },
+            },
+            scales: {
+              x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
+              y: { beginAtZero: false, ticks: { font: { size: 10 } } },
+            },
+          },
+        });
+      }
+
+      function renderCharts(rows) {
+        renderChart('pnlChart', rows, 'pnl_ae', 'AE');
+        renderChart('postsChart', rows, 'total_posts');
+        renderChart('tradesChart', rows, 'total_trades');
+        renderChart('volumeChart', rows, 'total_volume_ae', 'AE');
+        renderChart('createdTokensChart', rows, 'created_tokens');
+      }
+
+      // ---------- Init ----------
+      document.getElementById('addressInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addAddressesFromInput();
+        }
+      });
+      initDateRange();
+      renderChips();
+      // Reflect persisted view mode on the toggle and table title.
+      document.querySelectorAll('#viewToggle button').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.mode === viewMode);
+      });
+      document.getElementById('tableTitle').textContent =
+        viewMode === 'range' ? 'Per-address summary' : 'Per-day breakdown';
+      updateSortIndicators();
+      if (addresses.length > 0) runComparison();
+    </script>
+{{/main-layout}}
