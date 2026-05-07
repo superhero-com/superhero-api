@@ -560,4 +560,80 @@ describe('TokensService', () => {
       name: 'BLA',
     });
   });
+
+  describe('SQL parameterization', () => {
+    it('removes duplicated sale addresses in bounded batches', async () => {
+      tokensRepository.query.mockResolvedValueOnce([{ ctid: '(0,1)' }]);
+
+      await service.findAndRemoveDuplicatedTokensBaseSaleAddress();
+
+      expect(tokensRepository.delete).toHaveBeenCalledWith({
+        sale_address: expect.any(Object),
+      });
+      expect(tokensRepository.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = tokensRepository.query.mock.calls[0];
+      expect(params).toEqual([500]);
+      expect(sql).toContain('LIMIT $1');
+      expect(sql).toContain('RETURNING ctid');
+    });
+
+    it('findByAddress passes factory_address and sale_address as $1 and $2', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          sale_address: 'ct_sale',
+          factory_address: 'ct_factory',
+        }),
+      };
+      tokensRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      tokensRepository.query.mockResolvedValue([
+        { rank: 5, performance: { score: 42 } },
+      ]);
+
+      await service.findByAddress('ct_sale');
+
+      expect(tokensRepository.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = tokensRepository.query.mock.calls[0];
+      expect(params).toEqual(['ct_factory', 'ct_sale']);
+      expect(sql).toContain('$1');
+      expect(sql).toContain('$2');
+      expect(sql).not.toContain("'ct_factory'");
+      expect(sql).not.toContain("'ct_sale'");
+    });
+
+    it('getTokenRanks uses ANY($2::text[]) for the IN-list', async () => {
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: 'ct_factory',
+      });
+      tokensRepository.query.mockResolvedValue([
+        { sale_address: 'ct_a', rank: 1 },
+        { sale_address: 'ct_b', rank: 2 },
+      ]);
+
+      const result = await service.getTokenRanks(['ct_a', 'ct_b']);
+
+      expect(tokensRepository.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = tokensRepository.query.mock.calls[0];
+      expect(params).toEqual(['ct_factory', ['ct_a', 'ct_b']]);
+      expect(sql).toContain('ANY($2::text[])');
+      expect(sql).toContain('$1');
+      expect(result.get('ct_a')).toBe(1);
+      expect(result.get('ct_b')).toBe(2);
+    });
+
+    it('getTokenRanksByAex9Address uses ANY($2::text[]) for the IN-list', async () => {
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: 'ct_factory',
+      });
+      tokensRepository.query.mockResolvedValue([{ address: 'ct_x', rank: 3 }]);
+
+      const result = await service.getTokenRanksByAex9Address(['ct_x']);
+
+      const [sql, params] = tokensRepository.query.mock.calls[0];
+      expect(params).toEqual(['ct_factory', ['ct_x']]);
+      expect(sql).toContain('ANY($2::text[])');
+      expect(result.get('ct_x')).toBe(3);
+    });
+  });
 });

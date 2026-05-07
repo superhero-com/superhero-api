@@ -166,21 +166,34 @@ export class TokensService {
       sale_address: IsNull(),
     });
 
-    const duplicatedTokensQuery = `
-      SELECT sale_address, COUNT(*) as count
-      FROM token
-      WHERE sale_address IS NOT NULL
-      GROUP BY sale_address
-      HAVING COUNT(*) > 1
-    `;
-
-    const duplicatedTokens = await this.tokensRepository.query(
-      duplicatedTokensQuery,
-    );
-    // delete duplicated tokens
-    for (const token of duplicatedTokens) {
-      await this.tokensRepository.delete(token.id);
-    }
+    const duplicateDeleteBatchSize = 500;
+    let deletedRows = 0;
+    do {
+      const result = await this.tokensRepository.query(
+        `
+          WITH duplicate_rows AS (
+            SELECT ctid
+            FROM (
+              SELECT
+                ctid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY sale_address
+                  ORDER BY created_at ASC NULLS LAST, ctid ASC
+                ) AS row_number
+              FROM token
+              WHERE sale_address IS NOT NULL
+            ) duplicated_tokens
+            WHERE duplicated_tokens.row_number > 1
+            LIMIT $1
+          )
+          DELETE FROM token
+          WHERE ctid IN (SELECT ctid FROM duplicate_rows)
+          RETURNING ctid
+        `,
+        [duplicateDeleteBatchSize],
+      );
+      deletedRows = Array.isArray(result) ? result.length : 0;
+    } while (deletedRows === duplicateDeleteBatchSize);
   }
 
   findAll(limit = 1000, offset = 0): Promise<Token[]> {
@@ -235,17 +248,20 @@ export class TokensService {
               created_at ASC
           ) AS INTEGER) as rank
         FROM token
-        WHERE factory_address = '${token.factory_address}'
+        WHERE factory_address = $1
       )
       SELECT
         ranked_tokens.rank,
         row_to_json(token_performance_view.*) as performance
       FROM ranked_tokens
       LEFT JOIN token_performance_view ON ranked_tokens.sale_address = token_performance_view.sale_address
-      WHERE ranked_tokens.sale_address = '${token.sale_address}'
+      WHERE ranked_tokens.sale_address = $2
     `;
 
-    const [rankResult] = await this.tokensRepository.query(rankedQuery);
+    const [rankResult] = await this.tokensRepository.query(rankedQuery, [
+      token.factory_address,
+      token.sale_address,
+    ]);
     return {
       ...token,
       rank: rankResult?.rank,
@@ -856,13 +872,16 @@ export class TokensService {
               t.created_at ASC
           ) AS INTEGER) as rank
         FROM token t
-        WHERE t.factory_address = '${factory.address}'
+        WHERE t.factory_address = $1
         AND t.unlisted = false
       )
-      SELECT * FROM ranked_tokens WHERE sale_address IN (${tokenIds.join(',')})
+      SELECT * FROM ranked_tokens WHERE sale_address = ANY($2::text[])
     `;
 
-    const result = await this.tokensRepository.query(rankedQuery);
+    const result = await this.tokensRepository.query(rankedQuery, [
+      factory.address,
+      tokenIds,
+    ]);
     return new Map(result.map((token) => [token.sale_address, token.rank]));
   }
 
@@ -884,13 +903,16 @@ export class TokensService {
               t.created_at ASC
           ) AS INTEGER) as rank
         FROM token t
-        WHERE t.factory_address = '${factory.address}'
+        WHERE t.factory_address = $1
         AND t.unlisted = false
       )
-      SELECT * FROM ranked_tokens WHERE address IN ('${aex9Addresses.join("','")}')
+      SELECT * FROM ranked_tokens WHERE address = ANY($2::text[])
     `;
 
-    const result = await this.tokensRepository.query(rankedQuery);
+    const result = await this.tokensRepository.query(rankedQuery, [
+      factory.address,
+      aex9Addresses,
+    ]);
     return new Map(result.map((token) => [token.address, token.rank]));
   }
 

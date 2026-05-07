@@ -67,8 +67,10 @@ export class PairHistoryService {
     const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
     const value = fromToken === 'token0' ? '0' : '1';
-    const rawResults = await queryRunner.query(
-      `
+    let rawResults;
+    try {
+      rawResults = await queryRunner.query(
+        `
         WITH transactions_in_intervals AS (
           SELECT 
             t.created_at,
@@ -87,8 +89,8 @@ export class PairHistoryService {
           SELECT DISTINCT interval_start
           FROM transactions_in_intervals
           ORDER BY interval_start DESC
-          OFFSET ${offset}
-          LIMIT ${limit}
+          OFFSET $3
+          LIMIT $4
         ),
         interval_stats AS (
           SELECT 
@@ -118,7 +120,7 @@ export class PairHistoryService {
         )
         SELECT 
           interval_start as "timeOpen",
-          interval_start + (interval '$2 seconds') as "timeClose",
+          interval_start + make_interval(secs => $2) as "timeClose",
           MIN(low) as low,
           MAX(high) as high,
           MIN(open) as open,
@@ -133,10 +135,11 @@ export class PairHistoryService {
         GROUP BY interval_start
         ORDER BY interval_start ASC
       `,
-      [pair.address, interval],
-    );
-
-    await queryRunner.release();
+        [pair.address, interval, offset, limit],
+      );
+    } finally {
+      await queryRunner.release();
+    }
 
     // Modify the mapping to handle the previous close price correctly
     let lastClose = null;
