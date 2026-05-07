@@ -11,7 +11,7 @@ import {
   TOKEN_LIST_ELIGIBILITY_CONFIG,
   TRENDING_SCORE_CONFIG,
 } from '@/configs';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrl } from '@/utils/common';
 import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
 import { Encoded } from '@aeternity/aepp-sdk';
@@ -1180,7 +1180,7 @@ export class TokensService {
             `SyncTokenHoldersQueue:failed to load data from url::${nextUrl}`,
           );
           this.logger.error(`SyncTokenHoldersQueue:response::`, response);
-          return { holders: totalHolders, truncated: totalHolders.length > 0 };
+          return { holders: totalHolders, truncated: true };
         }
 
         const holders = response.data.filter((item) => item.amount > 0);
@@ -1198,15 +1198,16 @@ export class TokensService {
           });
         }
 
-        nextUrl = response.next
-          ? `${ACTIVE_NETWORK.middlewareUrl}${response.next}`
-          : null;
+        nextUrl = resolveMiddlewareNextUrl(
+          response.next,
+          ACTIVE_NETWORK.middlewareUrl,
+        );
         page++;
       } catch (error: any) {
         this.logger.error(`SyncTokenHoldersQueue->error`, error, error.stack);
         return {
           holders: totalHolders,
-          truncated: totalHolders.length > 0,
+          truncated: true,
         };
       }
     }

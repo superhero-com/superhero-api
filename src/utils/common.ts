@@ -23,6 +23,17 @@ class FetchJsonHttpError extends Error {
   }
 }
 
+export class InvalidMiddlewareNextUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidMiddlewareNextUrlError';
+  }
+}
+
+type MiddlewareNextUrlLogger = {
+  warn(message: string, ...optionalParams: unknown[]): void;
+};
+
 function formatResponseDetails(
   url: string,
   response: Response,
@@ -125,6 +136,56 @@ export async function fetchJson<T = any>(
   } finally {
     clearTimeout(timeoutId);
     options?.signal?.removeEventListener('abort', onParentAbort);
+  }
+}
+
+export function resolveMiddlewareNextUrl(
+  next: string | null | undefined,
+  middlewareUrl: string,
+): string | null {
+  if (!next) {
+    return null;
+  }
+
+  let baseUrl: URL;
+  let resolvedUrl: URL;
+
+  try {
+    baseUrl = new URL(middlewareUrl);
+    const basePath = baseUrl.pathname.replace(/\/$/, '');
+    resolvedUrl = next.startsWith('/')
+      ? new URL(`${baseUrl.origin}${basePath}${next}`)
+      : new URL(next, `${middlewareUrl.replace(/\/$/, '')}/`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new InvalidMiddlewareNextUrlError(
+      `Invalid middleware next URL "${next}": ${reason}`,
+    );
+  }
+
+  if (resolvedUrl.origin !== baseUrl.origin) {
+    throw new InvalidMiddlewareNextUrlError(
+      `Rejected middleware next URL "${next}" because it resolves outside ${baseUrl.origin}`,
+    );
+  }
+
+  return resolvedUrl.toString();
+}
+
+export function resolveMiddlewareNextUrlSafely(
+  next: string | null | undefined,
+  middlewareUrl: string,
+  logger: MiddlewareNextUrlLogger,
+  context: string,
+): string | null {
+  try {
+    return resolveMiddlewareNextUrl(next, middlewareUrl);
+  } catch (error) {
+    logger.warn(
+      `${context}: stopping pagination after invalid next URL`,
+      error,
+    );
+    return null;
   }
 }
 

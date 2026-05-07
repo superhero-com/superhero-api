@@ -3,7 +3,7 @@ import { ACTIVE_NETWORK } from '@/configs/network';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -122,10 +122,15 @@ export class FixHoldersService {
     }
 
     if (mdwResponse?.next) {
-      await this.pullAndUpdateAccountAex9Balances(
-        `${ACTIVE_NETWORK.middlewareUrl}${mdwResponse.next}`,
-        caller,
+      const nextUrl = resolveMiddlewareNextUrlSafely(
+        mdwResponse.next,
+        ACTIVE_NETWORK.middlewareUrl,
+        this.logger,
+        'FixHoldersService.pullAndUpdateAccountAex9Balances',
       );
+      if (nextUrl) {
+        await this.pullAndUpdateAccountAex9Balances(nextUrl, caller);
+      }
     }
 
     this.logger.log(`Pulled ${mdwResponse.data.length} tokens for ${caller}`);

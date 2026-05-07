@@ -1,4 +1,8 @@
-import { fetchJson, sanitizeJsonForPostgres } from '@/utils/common';
+import {
+  fetchJson,
+  resolveMiddlewareNextUrlSafely,
+  sanitizeJsonForPostgres,
+} from '@/utils/common';
 import {
   isDatabaseConnectionOrPoolError,
   logDatabaseIssue,
@@ -55,7 +59,12 @@ export class BlockSyncService {
       }
 
       // Check if there's a next page
-      url = response.next ? `${middlewareUrl}${response.next}` : null;
+      url = resolveMiddlewareNextUrlSafely(
+        response.next,
+        middlewareUrl,
+        this.logger,
+        'BlockSyncService.syncBlocks',
+      );
     }
 
     // Batch upsert all blocks (split into smaller batches to avoid PostgreSQL parameter limits)
@@ -290,7 +299,12 @@ export class BlockSyncService {
         }
       }
 
-      nextUrl = response.next ? `${middlewareUrl}${response.next}` : null;
+      nextUrl = resolveMiddlewareNextUrlSafely(
+        response.next,
+        middlewareUrl,
+        this.logger,
+        'BlockSyncService.processTransactionPage',
+      );
     }
 
     return txHashesByBlock ?? new Map();

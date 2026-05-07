@@ -7,6 +7,15 @@ import {
   RetryableTokenHoldersSyncError,
   TokensService,
 } from './tokens.service';
+import { fetchJson } from '@/utils/common';
+
+jest.mock('@/utils/common', () => {
+  const actual = jest.requireActual('@/utils/common');
+  return {
+    ...actual,
+    fetchJson: jest.fn(),
+  };
+});
 
 describe('TokensService', () => {
   let service: TokensService;
@@ -18,6 +27,7 @@ describe('TokensService', () => {
   let pullTokenInfoQueue: any;
 
   beforeEach(() => {
+    (fetchJson as jest.Mock).mockReset();
     tokensRepository = {
       createQueryBuilder: jest.fn(),
       update: jest.fn(),
@@ -503,6 +513,34 @@ describe('TokensService', () => {
     expect(service.getTokenContractsBySaleAddress).toHaveBeenCalledTimes(3);
     expect((service as any).sleep).toHaveBeenNthCalledWith(1, 500);
     expect((service as any).sleep).toHaveBeenNthCalledWith(2, 1000);
+  });
+
+  it('marks middleware holder loading as truncated when the response is missing data before any holders are loaded', async () => {
+    jest.spyOn(service, '_loadHoldersFromContract').mockResolvedValue([]);
+    (fetchJson as jest.Mock).mockResolvedValueOnce({ data: null, next: null });
+
+    const result = await service._loadHoldersData(
+      { sale_address: 'ct_sale' } as any,
+      'ct_aex9',
+    );
+
+    expect(result).toEqual({ holders: [], truncated: true });
+  });
+
+  it('marks middleware holder loading as truncated when cursor validation fails', async () => {
+    jest.spyOn(service, '_loadHoldersFromContract').mockResolvedValue([]);
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [{ account_id: 'ak_holder', amount: '10' }],
+      next: 'https://evil.test/v3/aex9/ct_aex9/balances',
+    });
+
+    const result = await service._loadHoldersData(
+      { sale_address: 'ct_sale' } as any,
+      'ct_aex9',
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.holders).toHaveLength(1);
   });
 
   it('uses upsert and reload when creating a token from a raw transaction', async () => {
