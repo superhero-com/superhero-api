@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -20,6 +21,9 @@ import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
 } from '@/common/validation/request-validation';
+
+const ALLOWED_ORDER_BY = new Set(['amount', 'type', 'created_at']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 
 @Controller('tips')
 @ApiTags('Tips')
@@ -62,6 +66,20 @@ export class TipsController {
     @Query('receiver', OptionalAeAccountAddressPipe) receiver?: string,
     @Query('type') type?: string,
   ) {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     const query = this.tipRepository
       .createQueryBuilder('tip')
       .leftJoinAndMapOne(

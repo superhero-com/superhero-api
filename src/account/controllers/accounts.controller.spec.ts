@@ -113,6 +113,20 @@ describe('AccountsController', () => {
     expect(queryBuilder.andWhere).not.toHaveBeenCalled();
   });
 
+  it('rejects invalid account pagination and ordering inputs before querying', async () => {
+    await expect(
+      controller.listAll(undefined, 0, 100, 'total_volume', 'DESC'),
+    ).rejects.toThrow('Page must be greater than or equal to 1');
+    await expect(
+      controller.listAll(undefined, 1, 101, 'total_volume', 'DESC'),
+    ).rejects.toThrow('Limit must be between 1 and 100');
+    await expect(
+      controller.listAll(undefined, 1, 100, 'unsafe_field', 'DESC'),
+    ).rejects.toThrow('Invalid order_by value: unsafe_field');
+
+    expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
   it('throws when account is missing', async () => {
     accountRepository.findOne.mockResolvedValue(null);
 

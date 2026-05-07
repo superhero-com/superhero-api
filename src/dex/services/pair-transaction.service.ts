@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PairTransaction } from '../entities/pair-transaction.entity';
@@ -7,6 +7,9 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
+
+const ALLOWED_ORDER_BY = new Set(['created_at', 'tx_type']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 
 @Injectable()
 export class PairTransactionService {
@@ -24,6 +27,14 @@ export class PairTransactionService {
     account_address?: string,
     tokenAddress?: string,
   ): Promise<Pagination<PairTransaction>> {
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     const query = this.pairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .leftJoinAndSelect('pairTransaction.pair', 'pair')
