@@ -205,8 +205,9 @@ export function isValidMediaUrl(url: string): boolean {
       'youtube.com',
       'vimeo.com',
     ];
-    const isFromMediaHost = commonMediaHosts.some((host) =>
-      parsedUrl.hostname.includes(host),
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isFromMediaHost = commonMediaHosts.some(
+      (host) => hostname === host || hostname.endsWith(`.${host}`),
     );
 
     return hasValidProtocol && (hasMediaExtension || isFromMediaHost);

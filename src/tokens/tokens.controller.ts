@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -42,6 +43,7 @@ import {
 
 const TOKENS_LIST_CACHE_TTL_MS = 60 * 1000;
 const TRENDING_TOKENS_LIST_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_TOKEN_SEARCH_LENGTH = 100;
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -150,6 +152,11 @@ export class TokensController {
     const allowedOrderDirections = ['ASC', 'DESC'];
     if (!allowedOrderDirections.includes(orderDirection)) {
       orderDirection = 'DESC';
+    }
+    if (search && search.length > MAX_TOKEN_SEARCH_LENGTH) {
+      throw new BadRequestException(
+        `search must be at most ${MAX_TOKEN_SEARCH_LENGTH} characters`,
+      );
     }
 
     let trendingCacheKey: string | null = null;

@@ -43,7 +43,7 @@ if (process.env.NODE_ENV === 'production' && process.env.DB_SYNC === 'true') {
 export const DATABASE_CONFIG: TypeOrmModuleOptions = {
   type: process.env.DB_TYPE as any,
   host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT),
+  port: parseNumber(process.env.DB_PORT, 5432),
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,

@@ -189,10 +189,12 @@ export class HistoricalController {
 
     const values = preview.result.map((item) => Number(item.last_price));
 
+    const safeWidth = this.parseSvgDimension(width, 160);
+    const safeHeight = this.parseSvgDimension(height, 60);
     const svg = buildSparklineSvg(
       values,
-      Number(width),
-      Number(height),
+      safeWidth,
+      safeHeight,
       sparklineStroke(values),
       background,
     );
@@ -209,5 +211,13 @@ export class HistoricalController {
       return moment.unix(value);
     }
     return moment(value);
+  }
+
+  private parseSvgDimension(value: string, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.floor(parsed), 1), 2000);
   }
 }
