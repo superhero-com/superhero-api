@@ -1,5 +1,6 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -21,6 +22,9 @@ import {
   OptionalAeAccountAddressPipe,
   OptionalAeContractAddressPipe,
 } from '@/common/validation/request-validation';
+
+const ALLOWED_ORDER_BY = new Set(['balance']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 
 @Controller('accounts')
 @ApiTags('Account Tokens')
@@ -67,8 +71,22 @@ export class AccountTokensController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'balance',
-    @Query('order_direction') orderDirection: 'DESC' | 'DESC' = 'DESC',
+    @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ): Promise<Pagination<TokenHolder>> {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     // when it's creator_address or owner_address, we should fetch all tokens based no matter if the balance is 0 or not
     if (creator_address || owner_address) {
       const queryBuilder = this.tokenRepository.createQueryBuilder('token');

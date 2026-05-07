@@ -3,6 +3,9 @@ import {
   IContentParsingOptions,
 } from '../interfaces/post.interfaces';
 import { TOKEN_HASHTAG_REGEX_SOURCE } from './token-mentions-sql.util';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('ContentParserUtil');
 
 /**
  * Default options for content parsing
@@ -109,7 +112,7 @@ export function extractMedia(
 
     return media;
   } catch (error) {
-    console.warn('Error extracting media from arguments:', error);
+    logger.warn('Error extracting media from arguments', error);
     return [];
   }
 }
@@ -205,8 +208,9 @@ export function isValidMediaUrl(url: string): boolean {
       'youtube.com',
       'vimeo.com',
     ];
-    const isFromMediaHost = commonMediaHosts.some((host) =>
-      parsedUrl.hostname.includes(host),
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isFromMediaHost = commonMediaHosts.some(
+      (host) => hostname === host || hostname.endsWith(`.${host}`),
     );
 
     return hasValidProtocol && (hasMediaExtension || isFromMediaHost);

@@ -1,4 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
@@ -15,7 +21,6 @@ import {
   PopularRankingContributor,
   PopularRankingContentItem,
 } from '@/plugins/popular-ranking.interface';
-import { Inject, Optional } from '@nestjs/common';
 import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
 
 export type PopularWindow = '24h' | '7d' | 'all';
@@ -63,7 +68,7 @@ interface PopularScoreInput {
 }
 
 @Injectable()
-export class PopularRankingService {
+export class PopularRankingService implements OnModuleDestroy {
   private readonly logger = new Logger(PopularRankingService.name);
   private readonly redis = new Redis(REDIS_CONFIG);
   private readonly recomputeInFlight = new Map<PopularWindow, Promise<void>>();
@@ -85,7 +90,15 @@ export class PopularRankingService {
     @Optional()
     @Inject(POPULAR_RANKING_CONTRIBUTOR)
     private readonly rankingContributors: PopularRankingContributor[] = [],
-  ) {}
+  ) {
+    this.redis.on('error', (error) => {
+      this.logger.error('Popular ranking Redis connection error', error);
+    });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.redis.quit();
+  }
 
   private getWindowHours(window: PopularWindow): number {
     if (window === '24h') {

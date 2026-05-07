@@ -1,6 +1,6 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import pairInterface from 'dex-contracts-v2/build/AedexV2Pair.aci.json';
@@ -20,6 +20,9 @@ type CachedContract = {
   lastUsedAt: number;
 };
 
+const ALLOWED_ORDER_BY = new Set(['transactions_count', 'created_at']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
+
 @Injectable()
 export class PairService {
   private static readonly MAX_CACHED_CONTRACTS = 100;
@@ -38,6 +41,14 @@ export class PairService {
     search?: string,
     token_address?: string,
   ): Promise<Pagination<Pair>> {
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     const query = this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')

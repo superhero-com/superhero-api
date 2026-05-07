@@ -7,6 +7,8 @@ const pipelineMock = {
 };
 
 const redisMock = {
+  on: jest.fn().mockReturnThis(),
+  quit: jest.fn().mockResolvedValue('OK'),
   ping: jest.fn().mockResolvedValue('PONG'),
   del: jest.fn().mockResolvedValue(1),
   zcard: jest.fn().mockResolvedValue(1),

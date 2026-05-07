@@ -14,7 +14,11 @@ import {
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { TokensService } from '@/tokens/tokens.service';
-import { buildSparklineSvg, sparklineStroke } from '@/utils/sparkline.util';
+import {
+  buildSparklineSvg,
+  parseSvgDimension,
+  sparklineStroke,
+} from '@/utils/sparkline.util';
 import moment from 'moment';
 import {
   ITransactionPreview,
@@ -189,10 +193,12 @@ export class HistoricalController {
 
     const values = preview.result.map((item) => Number(item.last_price));
 
+    const safeWidth = parseSvgDimension(width, 160);
+    const safeHeight = parseSvgDimension(height, 60);
     const svg = buildSparklineSvg(
       values,
-      Number(width),
-      Number(height),
+      safeWidth,
+      safeHeight,
       sparklineStroke(values),
       background,
     );

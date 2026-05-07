@@ -28,6 +28,10 @@ import {
   OptionalAeContractAddressPipe,
 } from '@/common/validation/request-validation';
 
+const MAX_PAGE_LIMIT = 100;
+const MIN_HISTORY_INTERVAL_SECONDS = 60;
+const MAX_HISTORY_INTERVAL_SECONDS = 86_400;
+
 @Controller('dex/pairs')
 @ApiTags('Dex Pair')
 export class PairsController {
@@ -36,6 +40,17 @@ export class PairsController {
     private readonly pairHistoryService: PairHistoryService,
     private readonly pairSummaryService: PairSummaryService,
   ) {}
+
+  private validatePagination(page: number, limit: number): void {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > MAX_PAGE_LIMIT) {
+      throw new BadRequestException(
+        `Limit must be between 1 and ${MAX_PAGE_LIMIT}`,
+      );
+    }
+  }
 
   @ApiQuery({
     name: 'search',
@@ -74,6 +89,7 @@ export class PairsController {
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
+    this.validatePagination(page, limit);
     return this.pairService.findAll(
       { page, limit },
       orderBy,
@@ -231,13 +247,26 @@ export class PairsController {
   @Get(':address/history')
   async getPaginatedHistory(
     @Param('address', AeContractAddressPipe) address: string,
-    @Query('interval') interval: number = 3600,
+    @Query('interval', new DefaultValuePipe(3600), ParseIntPipe)
+    interval: number = 3600,
     @Query('from_token') fromToken: string = 'token0',
     @Query('convertTo') convertTo: string = 'ae',
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
+    this.validatePagination(page, limit);
+    if (
+      interval < MIN_HISTORY_INTERVAL_SECONDS ||
+      interval > MAX_HISTORY_INTERVAL_SECONDS
+    ) {
+      throw new BadRequestException(
+        `interval must be between ${MIN_HISTORY_INTERVAL_SECONDS} and ${MAX_HISTORY_INTERVAL_SECONDS} seconds`,
+      );
+    }
     const pair = await this.pairService.findByAddress(address);
+    if (!pair) {
+      throw new NotFoundException(`Pair with address ${address} not found`);
+    }
     return this.pairHistoryService.getPaginatedHistoricalData({
       pair,
       interval,

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { MicroBlock } from '../entities/micro-block.entity';
 
 @Injectable()
@@ -115,9 +115,12 @@ export class MicroBlockService {
       }
 
       // Check if there's a next page
-      microBlocksUrl = response.next
-        ? `${middlewareUrl}${response.next}`
-        : null;
+      microBlocksUrl = resolveMiddlewareNextUrlSafely(
+        response.next,
+        middlewareUrl,
+        this.logger,
+        'MicroBlockService.fetchMicroBlocksForKeyBlock',
+      );
     }
 
     return microBlocksToSave;

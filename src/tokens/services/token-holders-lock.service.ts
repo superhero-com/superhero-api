@@ -11,6 +11,12 @@ export class TokenHoldersLockService implements OnModuleDestroy {
     process.env.SYNC_TOKEN_HOLDERS_LOCK_TTL_MS || 240_000,
   );
 
+  constructor() {
+    this.redis.on('error', (error) => {
+      this.logger.error('Token holders lock Redis connection error', error);
+    });
+  }
+
   async acquireLock(saleAddress: string): Promise<string | null> {
     const ownerToken = randomUUID();
     const key = this.getLockKey(saleAddress);

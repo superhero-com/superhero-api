@@ -292,6 +292,25 @@ export function createBaseController<T>(
       @Query('includes') includes?: string,
       @Query() allQueryParams?: Record<string, any>,
     ) {
+      if (page < 1) {
+        throw new BadRequestException(
+          'Page must be greater than or equal to 1',
+        );
+      }
+      if (limit < 1) {
+        throw new BadRequestException(
+          'Limit must be greater than or equal to 1',
+        );
+      }
+      if (orderBy && !orderByFields.includes(orderBy)) {
+        throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+      }
+      if (!['ASC', 'DESC'].includes(orderDirection)) {
+        throw new BadRequestException(
+          `Invalid order_direction value: ${orderDirection}`,
+        );
+      }
+
       // Hard limit: maximum 100 items per request
       if (limit > 100) {
         throw new BadRequestException('Maximum limit is 100 items per request');

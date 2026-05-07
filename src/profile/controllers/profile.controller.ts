@@ -28,6 +28,8 @@ import {
   isAeAccountAddress,
 } from '@/common/validation/request-validation';
 
+const MAX_PROFILE_ADDRESSES = 100;
+
 @Controller('profile')
 @ApiTags('Profile')
 export class ProfileController {
@@ -143,6 +145,11 @@ export class ProfileController {
       .split(',')
       .map((it) => it.trim())
       .filter(Boolean);
+    if (parsed.length > MAX_PROFILE_ADDRESSES) {
+      throw new BadRequestException(
+        `addresses must contain at most ${MAX_PROFILE_ADDRESSES} entries`,
+      );
+    }
     const invalidAddress = parsed.find(
       (address) => !isAeAccountAddress(address),
     );

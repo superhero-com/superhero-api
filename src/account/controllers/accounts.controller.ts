@@ -1,5 +1,6 @@
 import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -33,11 +34,29 @@ import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
-import { buildSparklineSvg, sparklineStroke } from '@/utils/sparkline.util';
+import {
+  buildSparklineSvg,
+  parseSvgDimension,
+  sparklineStroke,
+} from '@/utils/sparkline.util';
 import {
   AeAccountAddressPipe,
   AeAccountReferencePipe,
 } from '@/common/validation/request-validation';
+
+const ALLOWED_ORDER_BY = new Set([
+  'total_volume',
+  'total_tx_count',
+  'total_buy_tx_count',
+  'total_sell_tx_count',
+  'total_created_tokens',
+  'total_invitation_count',
+  'total_claimed_invitation_count',
+  'total_revoked_invitation_count',
+  'created_at',
+]);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
+const MAX_SEARCH_LENGTH = 100;
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -90,6 +109,25 @@ export class AccountsController {
     @Query('order_by') orderBy: string = 'total_volume',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
+    if (search && search.length > MAX_SEARCH_LENGTH) {
+      throw new BadRequestException(
+        `search must be at most ${MAX_SEARCH_LENGTH} characters`,
+      );
+    }
     const query = this.accountRepository.createQueryBuilder('account');
 
     if (search?.trim()) {
@@ -306,8 +344,8 @@ export class AccountsController {
 
     const svg = buildSparklineSvg(
       values,
-      Number(width),
-      Number(height),
+      parseSvgDimension(width, 160),
+      parseSvgDimension(height, 60),
       sparklineStroke(values),
       background,
     );

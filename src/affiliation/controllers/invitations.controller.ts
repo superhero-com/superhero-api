@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -11,6 +12,9 @@ import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Invitation } from '../entities/invitation.entity';
 import { Account } from '@/account/entities/account.entity';
+
+const ALLOWED_ORDER_BY = new Set(['amount', 'created_at']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 
 @Controller('invitations')
 @ApiTags('Invitations')
@@ -38,6 +42,20 @@ export class InvitationsController {
     @Query('order_by') orderBy: string = 'amount',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     const query = this.invitationRepository.createQueryBuilder('invitation');
     if (orderBy) {
       query.orderBy(`invitation.${orderBy}`, orderDirection);

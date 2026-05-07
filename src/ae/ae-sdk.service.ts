@@ -13,7 +13,7 @@ export class AeSdkService {
   sdk: AeSdk;
   constructor() {
     this.sdk = new AeSdk({
-      onCompiler: new CompilerHttp('https://v7.compiler.aepps.com'),
+      onCompiler: new CompilerHttp(ACTIVE_NETWORK.compilerUrl),
       nodes,
       // gasLimit: 5818000,
     });

@@ -1,5 +1,5 @@
 import { ACTIVE_NETWORK } from '@/configs';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -125,9 +125,12 @@ export class ProfileIndexerService {
           break;
         }
 
-        endpoint = response.next.startsWith('http')
-          ? response.next
-          : `${middlewareUrl}${response.next}`;
+        endpoint = resolveMiddlewareNextUrlSafely(
+          response.next,
+          middlewareUrl,
+          this.logger,
+          'ProfileIndexerService.syncProfiles',
+        );
       }
 
       for (const address of changedAddresses) {

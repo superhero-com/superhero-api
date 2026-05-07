@@ -8,14 +8,54 @@ import {
   Parent,
 } from '@nestjs/graphql';
 import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
-import { Inject, Optional, Type } from '@nestjs/common';
+import { BadRequestException, Inject, Optional, Type } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { PaginatedResponse } from '../types/pagination.type';
 import { EntityConfig } from '../types/entity-config.interface';
+import { getSortableFields } from '../utils/metadata-reader';
+
+const MAX_GRAPHQL_PAGE_SIZE = 100;
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
+
+function validateGraphqlPagination(page: number, limit: number): void {
+  if (page < 1) {
+    throw new BadRequestException('Page must be greater than or equal to 1');
+  }
+  if (limit < 1) {
+    throw new BadRequestException('Limit must be greater than or equal to 1');
+  }
+  if (limit > MAX_GRAPHQL_PAGE_SIZE) {
+    throw new BadRequestException('Maximum limit is 100 items per request');
+  }
+}
+
+function validateGraphqlOffset(offset: number): void {
+  if (offset < 0) {
+    throw new BadRequestException('Offset must be greater than or equal to 0');
+  }
+}
+
+function validateOrderDirection(
+  orderDirection?: string,
+  fallback: 'ASC' | 'DESC' = 'DESC',
+): 'ASC' | 'DESC' {
+  if (!orderDirection) {
+    return fallback;
+  }
+  if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+    throw new BadRequestException(
+      `Invalid orderDirection value: ${orderDirection}`,
+    );
+  }
+  return orderDirection as 'ASC' | 'DESC';
+}
 
 export function createBaseResolver<T>(config: EntityConfig<T>) {
   const PaginatedResponseType = PaginatedResponse(config.entity);
+  const orderByFields =
+    config.orderByFields ||
+    getSortableFields(config.entity).map((f) => f.field);
 
   // Collect all unique related entity types for repository injection
   const relatedEntityTypes = config.relations
@@ -59,13 +99,17 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
       orderDirection?: 'ASC' | 'DESC',
     ) {
       const query = this.repository.createQueryBuilder(config.tableAlias);
-
+      validateGraphqlPagination(page, limit);
+      if (orderBy && !orderByFields.includes(orderBy)) {
+        throw new BadRequestException(`Invalid orderBy value: ${orderBy}`);
+      }
       // Apply ordering
       if (orderBy) {
-        query.orderBy(
-          `${config.tableAlias}.${orderBy}`,
-          orderDirection || config.defaultOrderDirection || 'DESC',
+        const safeOrderDirection = validateOrderDirection(
+          orderDirection,
+          config.defaultOrderDirection || 'DESC',
         );
+        query.orderBy(`${config.tableAlias}.${orderBy}`, safeOrderDirection);
       } else {
         query.orderBy(
           `${config.tableAlias}.${config.defaultOrderBy}`,
@@ -161,6 +205,14 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
         // Build function body with proper parameter name references
         // Use mapped parameter names for reserved keywords, but keep original field names for DB columns
         // Note: Must use plain JavaScript (no TypeScript syntax like 'as any')
+        const relationOrderByFields = Array.from(
+          new Set(
+            [
+              ...getSortableFields(relation.relatedEntity).map((f) => f.field),
+              relation.defaultOrderBy,
+            ].filter(Boolean),
+          ),
+        );
         const functionBody = `
           const repo = this.relatedRepositories.get(relation.relatedEntity);
           if (!repo) {
@@ -177,6 +229,9 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
           if (parentValue === undefined || parentValue === null) {
             return [];
           }
+
+          validateGraphqlPagination(1, limit);
+          validateGraphqlOffset(offset);
           
           query.where(
             \`\${tableAlias}.\${relation.joinCondition.localField} = :parentValue\`,
@@ -196,9 +251,15 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
             .join('')}
 
           if (orderBy) {
+            if (!relationOrderByFields.includes(orderBy)) {
+              throw new BadRequestException(\`Invalid orderBy value: \${orderBy}\`);
+            }
             query.orderBy(
               \`\${tableAlias}.\${orderBy}\`,
-              orderDirection || relation.defaultOrderDirection || 'DESC',
+              validateOrderDirection(
+                orderDirection,
+                relation.defaultOrderDirection || 'DESC',
+              ),
             );
           } else if (relation.defaultOrderBy) {
             query.orderBy(
@@ -214,10 +275,24 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
         // Create function using Function constructor with closure variables passed as parameters
         const resolverImpl = new Function(
           'relation',
+          'relationOrderByFields',
+          'BadRequestException',
+          'validateGraphqlPagination',
+          'validateGraphqlOffset',
+          'validateOrderDirection',
           'BaseResolver',
           'T',
           `return async function(${paramList}) {${functionBody}}`,
-        )(relation, BaseResolver, config.entity);
+        )(
+          relation,
+          relationOrderByFields,
+          BadRequestException,
+          validateGraphqlPagination,
+          validateGraphqlOffset,
+          validateOrderDirection,
+          BaseResolver,
+          config.entity,
+        );
 
         // Assign implementation to prototype first
         (BaseResolver.prototype as any)[resolveMethodName] = resolverImpl;
