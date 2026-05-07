@@ -1,6 +1,9 @@
 import { ACTIVE_NETWORK } from '@/configs';
 import { fetchJson } from './common';
 import { DataSource } from 'typeorm';
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('BlockHeight');
 
 // Cache for top block and median interval with TTL
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -68,7 +71,7 @@ async function getKeyBlock(
     const kb = (await response.json()) as { height: number; time: number };
     return { height: kb.height, time: kb.time as number };
   } catch (error) {
-    console.error(`Error fetching key block at height ${height}:`, error);
+    logger.error(`Error fetching key block at height ${height}`, error);
     throw error;
   }
 }
@@ -195,7 +198,7 @@ async function getApproximateBlockHeightFromDB(
 
     return null;
   } catch (error) {
-    console.warn(
+    logger.warn(
       `[getApproximateBlockHeightFromDB] Error querying database:`,
       error,
     );
@@ -337,7 +340,7 @@ export async function timestampToAeHeight(
       lowTime = (await getKeyBlock(low)).time;
     }
   } catch (error) {
-    console.warn(
+    logger.warn(
       `[timestampToAeHeight] Error in sanity check for timestamp ${targetMs}, using low=${low}:`,
       error,
     );
@@ -395,7 +398,7 @@ export async function batchTimestampToAeHeight(
       [targetTimestamps],
     );
   } catch (error) {
-    console.warn(
+    logger.warn(
       '[batchTimestampToAeHeight] key_blocks query failed, will try transactions fallback:',
       error,
     );
@@ -439,7 +442,7 @@ export async function batchTimestampToAeHeight(
         [fallbackTimestamps],
       );
     } catch (error) {
-      console.warn(
+      logger.warn(
         '[batchTimestampToAeHeight] transactions fallback query failed:',
         error,
       );
