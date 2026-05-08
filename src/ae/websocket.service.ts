@@ -37,7 +37,7 @@ export class WebSocketService implements OnModuleDestroy {
   private readonly boundClose = this.handleWebsocketClose.bind(this);
   private readonly boundMessage = this.handleWebsocketMessage.bind(this);
 
-  pings = [];
+  pings: PingI[] = [];
 
   subscribers: Record<
     WebSocketChannelName,
@@ -233,10 +233,19 @@ export class WebSocketService implements OnModuleDestroy {
         return;
       }
 
+      const subscribers =
+        this.subscribers[data.subscription as WebSocketChannelName];
+      if (!subscribers) {
+        this.logger.warn(
+          `Ignoring websocket message for unknown subscription: ${data.subscription}`,
+        );
+        return;
+      }
+
       // Call all subscribers for the channel
-      Object.values(
-        this.subscribers[data.subscription as WebSocketChannelName],
-      ).forEach((subscriberCb) => subscriberCb(data.payload));
+      Object.values(subscribers).forEach((subscriberCb) =>
+        subscriberCb(data.payload),
+      );
     } catch (error) {
       this.logger.error('handleWebsocketMessage->error::', error);
     }
@@ -273,9 +282,18 @@ export class WebSocketService implements OnModuleDestroy {
     this.wsClient.on('close', this.boundClose);
     this.wsClient.on('message', this.boundMessage);
     this.wsClient.on('pong', (data: any) => {
-      const parsedData = JSON.parse(data.toString());
-      const pingData = parsedData.payload;
-      this.pings = this.pings.filter((ping) => ping.id !== pingData.id);
+      try {
+        const parsedData = JSON.parse(data.toString());
+        const pingId = parsedData?.payload?.id;
+        if (!pingId) {
+          this.logger.warn('Ignoring websocket pong without ping id');
+          return;
+        }
+        this.pings = this.pings.filter((ping) => ping.id !== pingId);
+      } catch (error) {
+        this.logger.warn('Failed to parse websocket pong payload', error);
+        this.pings = [];
+      }
     });
     this.pings = [];
   }

@@ -164,4 +164,58 @@ describe('WebSocketService', () => {
 
     expect(service.pings.length).toBe(0);
   });
+
+  it('should ignore messages for unknown subscriptions without crashing', () => {
+    const wsMessage = JSON.stringify({
+      subscription: 'NonExistentChannel',
+      payload: { data: 'test' },
+    });
+
+    expect(() => {
+      (service as any).handleWebsocketMessage(wsMessage);
+    }).not.toThrow();
+  });
+
+  it('should not call subscribers when subscription channel is unknown', () => {
+    const callback = jest.fn();
+    const message = {
+      op: WEB_SOCKET_SUBSCRIBE,
+      payload: WEB_SOCKET_CHANNELS.Transactions,
+    } as IMiddlewareWebSocketSubscriptionMessage;
+    service.subscribeForChannel(message, callback);
+
+    const wsMessage = JSON.stringify({
+      subscription: 'CompletelyDifferentChannel',
+      payload: { hash: 'shouldNotReach' },
+    });
+
+    (service as any).handleWebsocketMessage(wsMessage);
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('should handle PONG with missing payload.id gracefully', () => {
+    service.pings.push({ id: genUuid(), timestamp: Date.now() });
+
+    const pongCallback = mockWsClient.on.mock.calls.find(
+      ([event]) => event === 'pong',
+    )?.[1];
+
+    // pong with no id in payload
+    const pongNoId = JSON.stringify({ payload: {} });
+    expect(() => pongCallback?.(pongNoId)).not.toThrow();
+    expect(service.pings.length).toBe(1);
+  });
+
+  it('should handle malformed PONG JSON without crashing', () => {
+    service.pings.push({ id: genUuid(), timestamp: Date.now() });
+
+    const pongCallback = mockWsClient.on.mock.calls.find(
+      ([event]) => event === 'pong',
+    )?.[1];
+
+    expect(() => pongCallback?.('not valid json {')).not.toThrow();
+    // pings are cleared on parse failure as a safety measure
+    expect(service.pings.length).toBe(0);
+  });
 });

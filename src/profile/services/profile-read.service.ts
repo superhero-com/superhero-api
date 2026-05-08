@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ACTIVE_NETWORK } from '@/configs';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { Account } from '@/account/entities/account.entity';
 import { ProfileCache } from '../entities/profile-cache.entity';
 import { PROFILE_MUTATION_FUNCTIONS } from '../profile.constants';
@@ -508,9 +508,12 @@ export class ProfileReadService {
       if (!response?.next || addresses.length >= targetUnique) {
         break;
       }
-      endpoint = response.next.startsWith('http')
-        ? response.next
-        : `${middlewareUrl}${response.next}`;
+      endpoint = resolveMiddlewareNextUrlSafely(
+        response.next,
+        middlewareUrl,
+        this.logger,
+        'ProfileReadService.getRecentProfileMutationCallers',
+      );
     }
 
     return addresses;

@@ -30,6 +30,14 @@ export function sparklineStroke(values: number[]): string {
     : COLOR_DOWN;
 }
 
+export function parseSvgDimension(value: string, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(Math.max(Math.floor(parsed), 1), 2000);
+}
+
 /**
  * Build a minimal SVG sparkline path from a numeric series.
  */

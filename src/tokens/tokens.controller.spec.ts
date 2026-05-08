@@ -226,6 +226,20 @@ describe('TokensController', () => {
     );
   });
 
+  it('rejects invalid token list pagination and search before querying', async () => {
+    await expect(
+      controller.listAll(undefined, undefined, undefined, undefined, 0, 100),
+    ).rejects.toThrow('Page must be greater than or equal to 1');
+    await expect(
+      controller.listAll(undefined, undefined, undefined, undefined, 1, 101),
+    ).rejects.toThrow('Limit must be between 1 and 100');
+    await expect(controller.listAll('x'.repeat(101))).rejects.toThrow(
+      'search must be at most 100 characters',
+    );
+
+    expect(tokensService.queryTokensWithRanks).not.toHaveBeenCalled();
+  });
+
   it('should filter owner holdings with EXISTS instead of a distinct IN subquery', async () => {
     await controller.listAll(undefined, undefined, undefined, 'ak_owner');
 

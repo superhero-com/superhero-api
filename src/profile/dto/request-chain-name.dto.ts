@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MinLength } from 'class-validator';
+import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class RequestChainNameDto {
@@ -18,6 +18,7 @@ export class RequestChainNameDto {
   })
   @IsString()
   @MinLength(13)
+  @MaxLength(247)
   @Matches(/^[a-z0-9]+$/, {
     message: 'name must contain only lowercase letters and digits',
   })

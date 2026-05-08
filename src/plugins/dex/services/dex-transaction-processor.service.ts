@@ -82,7 +82,9 @@ export class DexTransactionProcessorService {
     try {
       // Check if this is a DEX router transaction
       if (tx.contract_id !== DEX_CONTRACTS.router) {
-        console.log('[dex] not a DEX router transaction', tx);
+        this.logger.debug(
+          `Skipping non-DEX router transaction ${tx.hash ?? ''}`,
+        );
         return null;
       }
 

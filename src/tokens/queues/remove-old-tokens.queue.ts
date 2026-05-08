@@ -26,7 +26,7 @@ export class RemoveOldTokensQueue {
     this.logger.log(`RemoveOldTokensQueue->started`);
     try {
       const factories = job.data.factories;
-      this.tokensRepository
+      await this.tokensRepository
         .createQueryBuilder()
         .where({
           factory_address: Not(In(factories)),

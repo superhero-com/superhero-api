@@ -2,10 +2,14 @@ import { ConfigService } from '@nestjs/config';
 import { BlockSyncService } from './block-sync.service';
 import { fetchJson } from '@/utils/common';
 
-jest.mock('@/utils/common', () => ({
-  fetchJson: jest.fn(),
-  sanitizeJsonForPostgres: jest.fn((value) => value),
-}));
+jest.mock('@/utils/common', () => {
+  const actual = jest.requireActual('@/utils/common');
+  return {
+    ...actual,
+    fetchJson: jest.fn(),
+    sanitizeJsonForPostgres: jest.fn((value) => value),
+  };
+});
 
 describe('BlockSyncService', () => {
   const buildMiddlewareTransaction = () => ({
@@ -157,6 +161,44 @@ describe('BlockSyncService', () => {
         nonce: '7',
         pow: [10, 11, 12],
       }),
+    );
+  });
+
+  it('stops key-block pagination without failing when middleware returns an invalid next URL', async () => {
+    const { service, blockRepository } = setup();
+    const loggerWarn = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [
+        {
+          hash: 'kh_3',
+          height: 3,
+          prev_hash: 'kh_2',
+          prev_key_hash: 'kh_2',
+          state_hash: 'bs_3',
+          beneficiary: 'ak_ben',
+          miner: 'ak_miner',
+          time: '1700000000200',
+          transactions_count: 0,
+          micro_blocks_count: 0,
+          beneficiary_reward: '0',
+          flags: '{}',
+          info: '{}',
+          target: '1',
+          version: 1,
+        },
+      ],
+      next: 'https://evil.test/v3/key-blocks',
+    });
+
+    await service.syncBlocks(3, 3);
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(blockRepository.upsert).toHaveBeenCalledTimes(1);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      'BlockSyncService.syncBlocks: stopping pagination after invalid next URL',
+      expect.any(Error),
     );
   });
 

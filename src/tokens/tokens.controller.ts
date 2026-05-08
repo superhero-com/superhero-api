@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -42,6 +43,8 @@ import {
 
 const TOKENS_LIST_CACHE_TTL_MS = 60 * 1000;
 const TRENDING_TOKENS_LIST_CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_TOKEN_SEARCH_LENGTH = 100;
+const MAX_PAGE_LIMIT = 100;
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
@@ -62,6 +65,17 @@ export class TokensController {
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {
     //
+  }
+
+  private validatePagination(page: number, limit: number): void {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > MAX_PAGE_LIMIT) {
+      throw new BadRequestException(
+        `Limit must be between 1 and ${MAX_PAGE_LIMIT}`,
+      );
+    }
   }
 
   private buildTrendingListCacheKey(params: {
@@ -132,6 +146,7 @@ export class TokensController {
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
     @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
   ): Promise<Pagination<Token>> {
+    this.validatePagination(page, limit);
     // Now, wrap with RANK()
     // allowed sort fields to avoid SQL Injection
     const allowedSortFields = [
@@ -150,6 +165,11 @@ export class TokensController {
     const allowedOrderDirections = ['ASC', 'DESC'];
     if (!allowedOrderDirections.includes(orderDirection)) {
       orderDirection = 'DESC';
+    }
+    if (search && search.length > MAX_TOKEN_SEARCH_LENGTH) {
+      throw new BadRequestException(
+        `search must be at most ${MAX_TOKEN_SEARCH_LENGTH} characters`,
+      );
     }
 
     let trendingCacheKey: string | null = null;
@@ -283,6 +303,7 @@ export class TokensController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<TokenHolder>> {
+    this.validatePagination(page, limit);
     const token = await this.tokensService.findByAddress(address);
     if (!token) {
       throw new NotFoundException('Token not found');
@@ -339,6 +360,7 @@ export class TokensController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(5), ParseIntPipe) limit = 5,
   ): Promise<Pagination<Token>> {
+    this.validatePagination(page, limit);
     const token = await this.tokensService.findByAddress(address);
     if (!token) {
       return {
@@ -355,7 +377,13 @@ export class TokensController {
 
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    // Get tokens with market cap around the target token
+    // All values below are bound as parameters rather than interpolated
+    // into the SQL string. Even though `factory.address` and
+    // `token.sale_address` come from our own DB today, string
+    // interpolation here would mean a single compromised upstream row
+    // becomes SQL injection. `Math.floor(limit / 2)` is numeric and still
+    // bound as a parameter for consistency.
+    const halfLimit = Math.floor(limit / 2);
     const rankedQuery = `
       WITH ranked_tokens AS (
         SELECT 
@@ -367,21 +395,21 @@ export class TokensController {
               t.created_at ASC
           ) AS INTEGER) as rank
         FROM token t
-        WHERE t.factory_address = '${factory.address}'
+        WHERE t.factory_address = $1
       ),
       target_rank AS (
         SELECT rank
         FROM ranked_tokens
-        WHERE sale_address = '${token.sale_address}'
+        WHERE sale_address = $2
       ),
       adjusted_limits AS (
-        SELECT 
-          CASE 
+        SELECT
+          CASE
             WHEN (SELECT rank FROM target_rank) <= 2
-            THEN ${Math.floor(limit / 2)} - (SELECT rank FROM target_rank) + 1
-            ELSE ${Math.floor(limit / 2)} 
+            THEN $3::int - (SELECT rank FROM target_rank) + 1
+            ELSE $3::int
           END as upper_limit,
-          ${Math.floor(limit / 2)} as lower_limit
+          $3::int as lower_limit
       )
       SELECT 
         ranked_tokens.*,
@@ -397,7 +425,11 @@ export class TokensController {
       ORDER BY market_cap DESC
     `;
 
-    const rankedTokens = await this.tokensRepository.query(rankedQuery);
+    const rankedTokens = await this.tokensRepository.query(rankedQuery, [
+      factory.address,
+      token.sale_address,
+      halfLimit,
+    ]);
 
     return {
       items: rankedTokens,

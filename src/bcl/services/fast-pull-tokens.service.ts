@@ -12,7 +12,7 @@ import {
 import { TokensService } from '@/tokens/tokens.service';
 import { TransactionService } from '@/transactions/services/transaction.service';
 import { SyncState } from '@/mdw-sync/entities/sync-state.entity';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -182,9 +182,12 @@ export class FastPullTokensService {
         this.logger.log('loadCreatedCommunityFromMdw->no data::', nextUrl);
       }
 
-      nextUrl = result.next
-        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
-        : null;
+      nextUrl = resolveMiddlewareNextUrlSafely(
+        result.next,
+        ACTIVE_NETWORK.middlewareUrl,
+        this.logger,
+        'FastPullTokensService.loadCreatedCommunityFromMdw',
+      );
     }
   }
 }

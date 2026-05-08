@@ -3,7 +3,7 @@ import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { IMiddlewareRequestConfig } from '@/social/interfaces/post.interfaces';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Contract } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
@@ -49,9 +49,7 @@ export class DexSyncService {
   }
 
   async onModuleInit(): Promise<void> {
-    console.log('========================');
-    console.log('==== DexSyncService ====');
-    console.log('========================');
+    this.logger.debug('DexSyncService initialized');
     // await this.dexPairTransactionRepository.clear();
 
     // this.routerContract = await Contract.initialize({
@@ -171,7 +169,7 @@ export class DexSyncService {
     }).toString();
     const url = `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions?${queryString}`;
     await this.pullDexPairsFromMdw(url);
-    console.log('DexTokens synced');
+    this.logger.debug('DexTokens synced');
   }
 
   async pullDexPairsFromMdw(url: string) {
@@ -190,9 +188,12 @@ export class DexSyncService {
         }
         await this.saveTransaction(transaction);
       }
-      nextUrl = result.next
-        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
-        : null;
+      nextUrl = resolveMiddlewareNextUrlSafely(
+        result.next,
+        ACTIVE_NETWORK.middlewareUrl,
+        this.logger,
+        'DexSyncService.pullDexPairsFromMdw',
+      );
     }
   }
 
@@ -242,7 +243,10 @@ export class DexSyncService {
         });
         // console.log('factoryContract.$decodeEvents decodedEvents', decodedEvents);
       } catch (error: any) {
-        console.log('factoryContract.$decodeEvents error', error?.message);
+        this.logger.debug(
+          'factoryContract.$decodeEvents error',
+          error?.message,
+        );
       }
     }
     if (!decodedEvents || decodedEvents.length === 0) {
@@ -286,9 +290,9 @@ export class DexSyncService {
       // if (transaction.tx.function?.includes('liquidity')) {
       //   return null;
       // }
-      console.log('TODO: handle->function:', transaction.tx.function);
-      console.log('decodedEvents:', decodedEvents);
-      console.log('args::', JSON.stringify(args, null, 2));
+      this.logger.debug(`Unhandled DEX function: ${transaction.tx.function}`);
+      this.logger.debug(`Decoded events: ${JSON.stringify(decodedEvents)}`);
+      this.logger.debug(`Args: ${JSON.stringify(args)}`);
     }
     if (!token0Address || !token1Address) {
       return null;

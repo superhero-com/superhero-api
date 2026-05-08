@@ -327,6 +327,7 @@ describe('ProfileChainNameService', () => {
       name: 'myuniquename123.chain',
       status: 'failed',
     });
+    const futureExpiry = Date.now() + 10_000;
     lockedChallengeRepository.createQueryBuilder.mockReturnValue({
       setLock: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -334,7 +335,7 @@ describe('ProfileChainNameService', () => {
       getOne: jest.fn().mockResolvedValue({
         nonce: 'a'.repeat(24),
         address: validAddress,
-        expires_at: new Date(Date.now() + 10_000),
+        expires_at: new Date(futureExpiry),
         consumed_at: null,
       }),
     });
@@ -348,7 +349,7 @@ describe('ProfileChainNameService', () => {
         address: validAddress,
         name: 'myuniquename123',
         challengeNonce: 'a'.repeat(24),
-        challengeExpiresAt: Date.now() + 10_000,
+        challengeExpiresAt: futureExpiry,
         signatureHex: 'b'.repeat(128),
       }),
     ).rejects.toThrow('This name is already being claimed by another address');

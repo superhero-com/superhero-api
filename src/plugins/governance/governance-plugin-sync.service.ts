@@ -3,6 +3,8 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import {
   fetchJson,
+  resolveMiddlewareNextUrl,
+  resolveMiddlewareNextUrlSafely,
   sanitizeJsonForPostgres,
   serializeBigInts,
 } from '@/utils/common';
@@ -480,8 +482,10 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
     addPollTxHash: string,
   ): Promise<void> {
     const middlewareUrl = this.getMiddlewareUrl();
-    let nextPath: string | null =
-      `/v3/transactions?type=contract_call&contract=${pollAddress}&direction=forward&limit=100`;
+    let nextUrl: string | null = resolveMiddlewareNextUrl(
+      `/v3/transactions?type=contract_call&contract=${pollAddress}&direction=forward&limit=100`,
+      middlewareUrl,
+    );
 
     let savedCount = 0;
     let skippedCount = 0;
@@ -489,11 +493,11 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
 
     try {
       while (
-        nextPath &&
+        nextUrl &&
         safety < GovernancePluginSyncService.VOTE_BACKFILL_PAGE_SAFETY
       ) {
         safety += 1;
-        const response = await fetchJson<any>(`${middlewareUrl}${nextPath}`);
+        const response = await fetchJson<any>(nextUrl);
         const page: any[] = response?.data ?? [];
 
         for (const raw of page) {
@@ -528,12 +532,17 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
 
         const nextLink: string | null =
           typeof response?.next === 'string' ? response.next : null;
-        nextPath = nextLink;
+        nextUrl = resolveMiddlewareNextUrlSafely(
+          nextLink,
+          middlewareUrl,
+          this.logger,
+          'GovernancePluginSyncService.backfillPollVotes',
+        );
       }
 
       if (
         safety >= GovernancePluginSyncService.VOTE_BACKFILL_PAGE_SAFETY &&
-        nextPath
+        nextUrl
       ) {
         this.logger.warn(
           `Vote backfill for poll ${pollAddress} hit the page safety limit (${GovernancePluginSyncService.VOTE_BACKFILL_PAGE_SAFETY}); remaining pages were not scanned.`,

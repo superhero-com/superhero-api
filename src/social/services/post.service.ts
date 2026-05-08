@@ -8,7 +8,7 @@ import {
   MAX_RETRIES_WHEN_REQUEST_FAILED,
   WAIT_TIME_WHEN_REQUEST_FAILED,
 } from '@/configs';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import moment from 'moment';
 import { ITransaction } from '@/utils/types';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
@@ -319,9 +319,12 @@ export class PostService {
         );
       }
 
-      nextUrl = result.next
-        ? `${ACTIVE_NETWORK.middlewareUrl}${result.next}`
-        : null;
+      nextUrl = resolveMiddlewareNextUrlSafely(
+        result.next,
+        ACTIVE_NETWORK.middlewareUrl,
+        this.logger,
+        'PostService.syncPostsFromMdw',
+      );
     }
 
     return totalCount;
@@ -372,6 +375,15 @@ export class PostService {
      */
     const postTypeInfo = this.detectPostType(transaction);
     // const commentInfo = this.detectComment(transaction);
+    if (!postTypeInfo) {
+      this.logger.warn(
+        'Skipping post transaction with missing post type data',
+        {
+          txHash,
+        },
+      );
+      return null;
+    }
 
     try {
       // Check if post already exists
@@ -623,7 +635,10 @@ export class PostService {
   }
 
   private detectPostType(transaction: ITransaction): IPostTypeInfo | null {
-    if (!transaction?.tx?.arguments?.[1]?.value) {
+    if (
+      !transaction?.tx?.arguments?.[1]?.value ||
+      !Array.isArray(transaction.tx.arguments[1].value)
+    ) {
       return null;
     }
     const argument = transaction.tx.arguments[1];

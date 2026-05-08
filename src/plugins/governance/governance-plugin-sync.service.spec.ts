@@ -5,11 +5,15 @@ import { GovernancePollRegistry } from './services/governance-poll-registry.serv
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { GOVERNANCE_CONTRACT } from './config/governance.config';
 
-jest.mock('@/utils/common', () => ({
-  fetchJson: jest.fn(),
-  sanitizeJsonForPostgres: jest.fn((value: any) => value),
-  serializeBigInts: jest.fn((value: any) => value),
-}));
+jest.mock('@/utils/common', () => {
+  const actual = jest.requireActual('@/utils/common');
+  return {
+    ...actual,
+    fetchJson: jest.fn(),
+    sanitizeJsonForPostgres: jest.fn((value: any) => value),
+    serializeBigInts: jest.fn((value: any) => value),
+  };
+});
 
 const POLL_ADDRESS = 'ct_pollAddressUnderTest';
 const CREATE_TX_HASH = 'th_createTxHashUnderTest';

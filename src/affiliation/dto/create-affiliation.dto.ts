@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ArrayNotEmpty, IsArray, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { IsAeAccountAddress } from '@/common/validation/request-validation';
 
 export class CreateAffiliationDto {
@@ -11,6 +17,8 @@ export class CreateAffiliationDto {
   @ApiProperty({ example: ['code1', 'code2', 'code3'] })
   @IsArray()
   @ArrayNotEmpty()
+  @ArrayMaxSize(100)
   @IsString({ each: true })
+  @MaxLength(64, { each: true })
   codes: string[];
 }
