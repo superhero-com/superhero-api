@@ -451,6 +451,14 @@
       const VIEW_MODE_KEY = 'challenge.viewMode';
       const SORT_STATE_KEY = 'challenge.sortState';
       const MAX_ADDRESSES = 10;
+      const URL_SYNC_KEYS = {
+        addresses: 'addresses',
+        startDate: 'start_date',
+        endDate: 'end_date',
+        view: 'view',
+        sortKey: 'sort_key',
+        sortDir: 'sort_dir',
+      };
       // Numeric sort keys that map to row fields (used by applySort).
       const NUMERIC_SORT_KEYS = new Set([
         'total_posts',
@@ -540,6 +548,96 @@
           localStorage.setItem(SORT_STATE_KEY, JSON.stringify(sortState));
         } catch (e) {
           // ignore
+        }
+      }
+
+      // ---------- URL sync ----------
+      function sanitizeAddressList(raw) {
+        if (!raw) return [];
+        const candidates = String(raw)
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const out = [];
+        for (const c of candidates) {
+          if (!isValidAddress(c)) continue;
+          if (out.includes(c)) continue;
+          out.push(c);
+          if (out.length >= MAX_ADDRESSES) break;
+        }
+        return out;
+      }
+
+      function updateUrlFromState() {
+        const params = new URLSearchParams(window.location.search);
+
+        const start = document.getElementById('startDate')?.value || '';
+        const end = document.getElementById('endDate')?.value || '';
+
+        if (addresses.length > 0) {
+          params.set(URL_SYNC_KEYS.addresses, addresses.join(','));
+        } else {
+          params.delete(URL_SYNC_KEYS.addresses);
+        }
+
+        if (start) params.set(URL_SYNC_KEYS.startDate, start);
+        else params.delete(URL_SYNC_KEYS.startDate);
+
+        if (end) params.set(URL_SYNC_KEYS.endDate, end);
+        else params.delete(URL_SYNC_KEYS.endDate);
+
+        params.set(URL_SYNC_KEYS.view, viewMode);
+
+        if (sortState && sortState.key) {
+          params.set(URL_SYNC_KEYS.sortKey, sortState.key);
+          params.set(URL_SYNC_KEYS.sortDir, sortState.dir === 'asc' ? 'asc' : 'desc');
+        } else {
+          params.delete(URL_SYNC_KEYS.sortKey);
+          params.delete(URL_SYNC_KEYS.sortDir);
+        }
+
+        const next = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+        if (next !== window.location.pathname + window.location.search) {
+          window.history.replaceState(null, '', next);
+        }
+      }
+
+      function initStateFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+
+        // Addresses
+        if (params.has(URL_SYNC_KEYS.addresses)) {
+          const urlAddresses = sanitizeAddressList(params.get(URL_SYNC_KEYS.addresses));
+          addresses = urlAddresses;
+          saveAddresses();
+        }
+
+        // Dates
+        const start = params.get(URL_SYNC_KEYS.startDate);
+        const end = params.get(URL_SYNC_KEYS.endDate);
+        if (start) {
+          const el = document.getElementById('startDate');
+          if (el) el.value = start;
+        }
+        if (end) {
+          const el = document.getElementById('endDate');
+          if (el) el.value = end;
+        }
+
+        // View mode
+        const view = params.get(URL_SYNC_KEYS.view);
+        if (view === 'per_day' || view === 'range') {
+          viewMode = view;
+          saveViewMode();
+        }
+
+        // Sort state
+        const sortKey = params.get(URL_SYNC_KEYS.sortKey);
+        const sortDir = params.get(URL_SYNC_KEYS.sortDir);
+        const keyOk = sortKey === 'address' || NUMERIC_SORT_KEYS.has(sortKey);
+        if (keyOk) {
+          sortState = { key: sortKey, dir: sortDir === 'asc' ? 'asc' : 'desc' };
+          saveSortState();
         }
       }
 
@@ -662,6 +760,7 @@
           saveAddresses();
           renderChips();
           input.value = '';
+          updateUrlFromState();
           showError(rejected.length > 0 ? 'Skipped: ' + rejected.join(', ') : '');
           runComparison();
         } else if (rejected.length > 0) {
@@ -673,6 +772,7 @@
         addresses = addresses.filter((a) => a !== addr);
         saveAddresses();
         renderChips();
+        updateUrlFromState();
         if (addresses.length === 0) {
           resetResults();
         } else {
@@ -684,6 +784,7 @@
         addresses = [];
         saveAddresses();
         renderChips();
+        updateUrlFromState();
         resetResults();
       }
 
@@ -695,6 +796,7 @@
         const startDefault = moment().subtract(13, 'day').format('YYYY-MM-DD');
         if (!start.value) start.value = startDefault;
         if (!end.value) end.value = today;
+        updateUrlFromState();
         start.addEventListener('change', runComparison);
         end.addEventListener('change', runComparison);
       }
@@ -702,6 +804,7 @@
       // ---------- Fetch + render ----------
       async function runComparison() {
         if (addresses.length === 0) {
+          updateUrlFromState();
           resetResults();
           return;
         }
@@ -713,6 +816,7 @@
           return;
         }
         showError('');
+        updateUrlFromState();
 
         const myId = ++runRequestId;
         setLoading(true);
@@ -857,6 +961,7 @@
         if (viewMode === mode) return;
         viewMode = mode;
         saveViewMode();
+        updateUrlFromState();
         document.querySelectorAll('#viewToggle button').forEach((btn) => {
           btn.classList.toggle('active', btn.dataset.mode === mode);
         });
@@ -877,6 +982,7 @@
           sortState = { key: null, dir: 'desc' };
         }
         saveSortState();
+        updateUrlFromState();
         renderResults();
       }
 
@@ -1068,6 +1174,8 @@
           addAddressesFromInput();
         }
       });
+      // Prefer URL params (shareable links) over localStorage defaults.
+      initStateFromUrl();
       initDateRange();
       renderChips();
       // Reflect persisted view mode on the toggle and table title.
@@ -1077,6 +1185,8 @@
       document.getElementById('tableTitle').textContent =
         viewMode === 'range' ? 'Per-address summary' : 'Per-day breakdown';
       updateSortIndicators();
+      // Ensure the current state is reflected in the URL.
+      updateUrlFromState();
       if (addresses.length > 0) runComparison();
     </script>
 {{/main-layout}}
