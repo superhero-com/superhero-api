@@ -24,6 +24,19 @@ jest.mock('ioredis', () => {
 
 import { PopularRankingService } from './popular-ranking.service';
 
+function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
+  return {
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    getRawMany: jest
+      .fn()
+      .mockResolvedValue(posts.map((post) => ({ id: post.id }))),
+  };
+}
+
 describe('PopularRankingService', () => {
   let service: PopularRankingService;
   let postRepository: any;
@@ -32,23 +45,15 @@ describe('PopularRankingService', () => {
   let postReadsRepository: any;
 
   beforeEach(() => {
-    const candidateQueryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([
-        {
-          id: 'post-1',
-          sender_address: 'ak_author',
-          created_at: new Date().toISOString(),
-          total_comments: 0,
-          content: '',
-          topics: [],
-        },
-      ]),
+    const defaultPost = {
+      id: 'post-1',
+      sender_address: 'ak_author',
+      created_at: new Date().toISOString(),
+      total_comments: 0,
+      content: '',
+      topics: [],
     };
+    const candidateQueryBuilder = createCandidateQueryBuilder([defaultPost]);
     const tipQueryBuilder = {
       select: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
@@ -81,7 +86,8 @@ describe('PopularRankingService', () => {
         .fn()
         .mockReturnValueOnce(candidateQueryBuilder)
         .mockReturnValueOnce(commentQueryBuilder),
-      findBy: jest.fn().mockResolvedValue([]),
+      find: jest.fn().mockResolvedValue([defaultPost]),
+      findBy: jest.fn().mockResolvedValue([defaultPost]),
     };
     tipRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(tipQueryBuilder),
@@ -137,8 +143,8 @@ describe('PopularRankingService', () => {
   it('falls back to window-filtered recent posts when Redis cache is empty', async () => {
     jest.spyOn(service, 'recompute').mockResolvedValue(undefined);
     redisMock.zcard
-      .mockResolvedValueOnce(0) // getVerifiedPopularIds — cache empty
-      .mockResolvedValueOnce(0); // after awaited recompute — still empty
+      .mockResolvedValueOnce(0) // getVerifiedPopularIds РІР‚вЂќ cache empty
+      .mockResolvedValueOnce(0); // after awaited recompute РІР‚вЂќ still empty
 
     const fallbackPost = {
       id: 'fallback-1',
@@ -188,14 +194,10 @@ describe('PopularRankingService', () => {
       content: 'old',
       topics: [],
     };
-    const candidateQueryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      orderBy: jest.fn().mockReturnThis(),
-      limit: jest.fn().mockReturnThis(),
-      getMany: jest.fn().mockResolvedValue([oldPost, fastPost]),
-    };
+    const candidateQueryBuilder = createCandidateQueryBuilder([
+      oldPost,
+      fastPost,
+    ]);
     const tipQueryBuilder = {
       select: jest.fn().mockReturnThis(),
       innerJoin: jest.fn().mockReturnThis(),
@@ -247,6 +249,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockReturnValueOnce(candidateQueryBuilder)
         .mockReturnValueOnce(commentQueryBuilder),
+      find: jest.fn().mockResolvedValue([oldPost, fastPost]),
       findBy: jest.fn().mockResolvedValue([oldPost, fastPost]),
     };
     tipRepository = {
@@ -381,14 +384,7 @@ describe('PopularRankingService', () => {
         content: 'weight test content that is long enough',
         topics: [],
       };
-      const candidateQB = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([post]),
-      };
+      const candidateQB = createCandidateQueryBuilder([post]);
       const commentQB = {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
@@ -432,6 +428,7 @@ describe('PopularRankingService', () => {
           .fn()
           .mockReturnValueOnce(candidateQB)
           .mockReturnValueOnce(commentQB),
+        find: jest.fn().mockResolvedValue([post]),
         findBy: jest.fn().mockResolvedValue([post]),
       };
       const tipRepo = { createQueryBuilder: jest.fn().mockReturnValue(tipQB) };
@@ -482,14 +479,7 @@ describe('PopularRankingService', () => {
 
   describe('computeInteractionsPerHour edge cases', () => {
     function buildServiceWith(post: any) {
-      const candidateQB = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([post]),
-      };
+      const candidateQB = createCandidateQueryBuilder([post]);
       const commentQB = {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
@@ -532,6 +522,7 @@ describe('PopularRankingService', () => {
             .fn()
             .mockReturnValueOnce(candidateQB)
             .mockReturnValueOnce(commentQB),
+          find: jest.fn().mockResolvedValue([post]),
           findBy: jest.fn().mockResolvedValue([post]),
         } as any,
         { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
@@ -592,14 +583,10 @@ describe('PopularRankingService', () => {
         topics: [],
       };
 
-      const candidateQB = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([very_old_post, recent_post]),
-      };
+      const candidateQB = createCandidateQueryBuilder([
+        very_old_post,
+        recent_post,
+      ]);
       const commentQB = {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
@@ -652,6 +639,7 @@ describe('PopularRankingService', () => {
             .fn()
             .mockReturnValueOnce(candidateQB)
             .mockReturnValueOnce(commentQB),
+          find: jest.fn().mockResolvedValue([very_old_post, recent_post]),
           findBy: jest.fn().mockResolvedValue([very_old_post, recent_post]),
         } as any,
         { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
@@ -695,14 +683,7 @@ describe('PopularRankingService', () => {
       posts: any[],
       comments: Record<string, string>,
     ) {
-      const candidateQB = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue(posts),
-      };
+      const candidateQB = createCandidateQueryBuilder(posts);
       const commentQB = {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
@@ -741,6 +722,7 @@ describe('PopularRankingService', () => {
             .fn()
             .mockReturnValueOnce(candidateQB)
             .mockReturnValueOnce(commentQB),
+          find: jest.fn().mockResolvedValue(posts),
           findBy: jest.fn().mockResolvedValue(posts),
         } as any,
         { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
@@ -749,6 +731,93 @@ describe('PopularRankingService', () => {
         [],
       );
     }
+
+    it('limits distinct candidate posts before hydrating topics', async () => {
+      const now = Date.now();
+      const topicHeavyPost = {
+        id: 'topic-heavy',
+        sender_address: 'ak_topic_heavy',
+        created_at: new Date(now - 60 * 60 * 1000).toISOString(),
+        content: 'topic heavy post',
+        topics: [{ name: 'ae' }, { name: 'superhero' }],
+      };
+      const targetPost = {
+        id: 'target-post',
+        sender_address: 'ak_target',
+        created_at: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+        content: 'older target post with strong engagement',
+        topics: [],
+      };
+      const candidateQB = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'topic-heavy' }, { id: 'target-post' }]),
+      };
+      const commentQB = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest
+          .fn()
+          .mockResolvedValue([{ parent_id: 'target-post', count: '4' }]),
+      };
+      const tipQB = {
+        select: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      const readsQB = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      const repo = {
+        createQueryBuilder: jest
+          .fn()
+          .mockReturnValueOnce(candidateQB)
+          .mockReturnValueOnce(commentQB),
+        find: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
+        findBy: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
+      };
+      const svc = new PopularRankingService(
+        repo as any,
+        { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
+        { find: jest.fn().mockResolvedValue([]) } as any,
+        { createQueryBuilder: jest.fn().mockReturnValue(readsQB) } as any,
+        [],
+      );
+
+      const result = await svc.getPopularPostsPage('all', 10, 0, undefined, {
+        comments: 'med',
+      });
+
+      expect(candidateQB.leftJoinAndSelect).not.toHaveBeenCalled();
+      expect(candidateQB.select).toHaveBeenCalledWith('post.id', 'id');
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { id: expect.anything() },
+        relations: ['topics'],
+      });
+      expect(result.scoredItems!.map((item) => item.postId)).toEqual([
+        'target-post',
+        'topic-heavy',
+      ]);
+    });
 
     it('boosts fresh posts and removes that boost after 24 hours', async () => {
       const now = Date.now();
@@ -987,14 +1056,7 @@ describe('PopularRankingService', () => {
         content: 'personalized',
         topics: [],
       };
-      const candidateQB = {
-        leftJoinAndSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([post]),
-      };
+      const candidateQB = createCandidateQueryBuilder([post]);
       const commentQB = {
         innerJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
@@ -1028,6 +1090,7 @@ describe('PopularRankingService', () => {
             .fn()
             .mockReturnValueOnce(candidateQB)
             .mockReturnValueOnce(commentQB),
+          find: jest.fn().mockResolvedValue([post]),
           findBy: jest.fn().mockResolvedValue([post]),
         } as any,
         { createQueryBuilder: jest.fn().mockReturnValue(tipQB) } as any,
