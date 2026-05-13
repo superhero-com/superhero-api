@@ -593,9 +593,9 @@ export class PopularRankingService implements OnModuleDestroy {
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    const candidates = await this.postRepository
+    const candidateRows = await this.postRepository
       .createQueryBuilder('post')
-      .leftJoinAndSelect('post.topics', 'topic')
+      .select('post.id', 'id')
       .where('post.is_hidden = false')
       .andWhere('post.post_id IS NULL')
       .andWhere(window === 'all' ? '1=1' : 'post.created_at >= :since', {
@@ -603,7 +603,20 @@ export class PopularRankingService implements OnModuleDestroy {
       })
       .orderBy('post.created_at', 'DESC')
       .limit(maxCandidates)
-      .getMany();
+      .getRawMany<{ id: string }>();
+    const candidateIds: string[] = candidateRows.map((row) => row.id);
+    const candidateOrder = new Map<string, number>(
+      candidateIds.map((id, index) => [id, index] as const),
+    );
+    const hydratedCandidates = candidateIds.length
+      ? await this.postRepository.find({
+          where: { id: In(candidateIds) },
+          relations: ['topics'],
+        })
+      : [];
+    const candidates = hydratedCandidates.sort(
+      (a, b) => candidateOrder.get(a.id)! - candidateOrder.get(b.id)!,
+    );
 
     this.logger.log(
       `Found ${candidates.length} candidate posts for window ${window}`,
