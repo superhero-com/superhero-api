@@ -37,9 +37,8 @@ import {
   PROFILE_X_POSTING_REWARD_THRESHOLD,
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
 } from '../profile.constants';
-import { ProfileCache } from '../entities/profile-cache.entity';
+import { Account } from '@/account/entities/account.entity';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
-import { ProfileXVerificationReward } from '../entities/profile-x-verification-reward.entity';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
 import {
@@ -107,10 +106,8 @@ export class ProfileXPostingRewardService {
   constructor(
     @InjectRepository(ProfileXPostingReward)
     private readonly postingRewardRepository: Repository<ProfileXPostingReward>,
-    @InjectRepository(ProfileCache)
-    private readonly profileCacheRepository: Repository<ProfileCache>,
-    @InjectRepository(ProfileXVerificationReward)
-    private readonly verificationRewardRepository: Repository<ProfileXVerificationReward>,
+    @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
     private readonly dataSource: DataSource,
     private readonly aeSdkService: AeSdkService,
     private readonly profileSpendQueueService: ProfileSpendQueueService,
@@ -325,10 +322,10 @@ export class ProfileXPostingRewardService {
   private async prepareManualRecheckCandidate(
     address: string,
   ): Promise<ProfileXPostingReward> {
-    const cachedProfile = await this.profileCacheRepository.findOne({
+    const account = await this.accountRepository.findOne({
       where: { address },
     });
-    const linkedXUsername = normalizeXUsername(cachedProfile?.x_username || '');
+    const linkedXUsername = normalizeXUsername(account?.links?.x || '');
     if (!linkedXUsername) {
       throw new BadRequestException(
         'X profile is not linked for this address yet',
@@ -343,38 +340,17 @@ export class ProfileXPostingRewardService {
         x_username: linkedXUsername,
         qualified_posts_count: 0,
         status: 'pending',
-        verified_at:
-          this.microTimeToDate(
-            cachedProfile?.last_seen_micro_time || undefined,
-          ) || new Date(),
+        verified_at: new Date(),
         next_retry_at: null,
       });
       return this.postingRewardRepository.save(reward);
     }
     reward.x_username = linkedXUsername;
     if (!reward.verified_at) {
-      reward.verified_at =
-        this.microTimeToDate(
-          cachedProfile?.last_seen_micro_time || undefined,
-        ) || new Date();
+      reward.verified_at = new Date();
     }
     reward.error = null;
     return this.postingRewardRepository.save(reward);
-  }
-
-  private async bootstrapPostingCandidate(address: string): Promise<void> {
-    const cachedProfile = await this.profileCacheRepository.findOne({
-      where: { address },
-    });
-    const xUsername = normalizeXUsername(cachedProfile?.x_username || '');
-    if (!xUsername) {
-      return;
-    }
-    await this.upsertVerifiedCandidate(
-      address,
-      xUsername,
-      cachedProfile?.last_seen_micro_time || undefined,
-    );
   }
 
   private async processAddressWithGuard(address: string): Promise<void> {

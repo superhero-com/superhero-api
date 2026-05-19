@@ -12,14 +12,11 @@ import {
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ProfileAttestationService } from '../services/profile-attestation.service';
 import { ProfileReadService } from '../services/profile-read.service';
-import { CreateXAttestationDto } from '../dto/create-x-attestation.dto';
 import { ProfileXInviteService } from '../services/profile-x-invite.service';
 import { CreateXInviteDto } from '../dto/create-x-invite.dto';
 import { BindXInviteDto } from '../dto/bind-x-invite.dto';
 import { CreateXInviteChallengeDto } from '../dto/create-x-invite-challenge.dto';
-import { ProfileXVerificationRewardService } from '../services/profile-x-verification-reward.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
 import {
@@ -34,34 +31,12 @@ const MAX_PROFILE_ADDRESSES = 100;
 @ApiTags('Profile')
 export class ProfileController {
   constructor(
-    private readonly profileAttestationService: ProfileAttestationService,
     private readonly profileReadService: ProfileReadService,
     private readonly profileXInviteService: ProfileXInviteService,
-    private readonly profileXVerificationRewardService: ProfileXVerificationRewardService,
     private readonly profileXPostingRewardService: ProfileXPostingRewardService,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
   ) {}
-
-  @Post('x/attestation')
-  @ApiOperation({
-    operationId: 'createXAttestation',
-    summary:
-      'Create signed X username attestation for contract call. Accepts either { address, accessToken } or { address, code, code_verifier, redirect_uri } (OAuth2 PKCE code exchange).',
-  })
-  async createXAttestation(@Body() body: CreateXAttestationDto) {
-    const options = body.accessToken
-      ? { accessToken: body.accessToken }
-      : {
-          code: body.code!,
-          code_verifier: body.code_verifier!,
-          redirect_uri: body.redirect_uri!,
-        };
-    return this.profileAttestationService.createXAttestation(
-      body.address,
-      options,
-    );
-  }
 
   @Post('x-invites')
   @ApiOperation({
@@ -135,12 +110,9 @@ export class ProfileController {
   @ApiQuery({
     name: 'includeOnChain',
     required: false,
-    description: 'When true, includes direct on-chain reads for each address',
+    description: 'Deprecated; profiles are served from indexed backend data',
   })
-  async getProfiles(
-    @Query('addresses') addresses: string,
-    @Query('includeOnChain') includeOnChain?: string,
-  ) {
+  async getProfiles(@Query('addresses') addresses: string) {
     const parsed = (addresses || '')
       .split(',')
       .map((it) => it.trim())
@@ -158,20 +130,7 @@ export class ProfileController {
         `addresses contains invalid account address ${invalidAddress}`,
       );
     }
-    return this.profileReadService.getProfilesByAddresses(parsed, {
-      includeOnChain: includeOnChain === 'true',
-    });
-  }
-
-  @Get(':address/onchain')
-  @ApiOperation({
-    operationId: 'getOnChainProfile',
-    summary: 'Get profile directly from contract dry-run call',
-  })
-  async getOnChainProfile(
-    @Param('address', AeAccountAddressPipe) address: string,
-  ) {
-    return this.profileReadService.getOnChainProfile(address);
+    return this.profileReadService.getProfilesByAddresses(parsed);
   }
 
   @Get(':address/x-invite-progress')
@@ -193,15 +152,13 @@ export class ProfileController {
   async getRewardsProgress(
     @Param('address', AeAccountAddressPipe) address: string,
   ) {
-    const [xVerification, xPosting, xInvite] = await Promise.all([
-      this.profileXVerificationRewardService.getRewardStatus(address),
+    const [xPosting, xInvite] = await Promise.all([
       this.profileXPostingRewardService.getRewardStatus(address),
       this.profileXInviteService.getProgress(address),
     ]);
     const affiliation = await this.getAffiliationProgress(address);
     return {
       address,
-      x_verification_reward: xVerification,
       x_posting_reward: xPosting,
       x_invite_reward: xInvite,
       affiliation,
@@ -264,15 +221,9 @@ export class ProfileController {
   @ApiQuery({
     name: 'includeOnChain',
     required: false,
-    description:
-      'When true, augments response with fresh on-chain contract read',
+    description: 'Deprecated; profiles are served from indexed backend data',
   })
-  async getProfile(
-    @Param('address', AeAccountAddressPipe) address: string,
-    @Query('includeOnChain') includeOnChain?: string,
-  ) {
-    return this.profileReadService.getProfile(address, {
-      includeOnChain: includeOnChain === 'true',
-    });
+  async getProfile(@Param('address', AeAccountAddressPipe) address: string) {
+    return this.profileReadService.getProfile(address);
   }
 }

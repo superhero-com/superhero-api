@@ -324,8 +324,6 @@ The stack uses `AE_NETWORK_ID=ae_uat`, separate volumes (`postgres_testnet2_data
 
 The database automatically syncs schema changes in development (`DB_SYNC=true`). For production, you should manage database migrations manually.
 
-For the X invite and verification reward schema added in this codebase, apply `docs/profile-x-invites-manual-migration.sql` before deploying with `DB_SYNC=false`.
-
 ## 🚀 Production Deployment
 
 For production deployment:

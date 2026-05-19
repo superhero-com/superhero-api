@@ -28,7 +28,6 @@ describe('ProfileXPostingRewardService disabled', () => {
     const service = new ProfileXPostingRewardService(
       postingRewardRepository,
       { findOne: jest.fn().mockResolvedValue(null) } as any,
-      { findOne: jest.fn().mockResolvedValue(null) } as any,
       {} as any,
       { sdk: { spend: jest.fn() } } as any,
       {

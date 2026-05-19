@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import moment from 'moment';
 import { Invitation } from '../entities/invitation.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { PROFILE_REGISTRY_CONTRACT_ADDRESS } from '@/profile/profile.constants';
+import { ADDRESS_LINK_CONTRACT_ADDRESS } from '@/plugins/address-links/address-links.constants';
 import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
 
 export type BclAffiliationDailyPoint = {
@@ -487,14 +487,17 @@ export class BclAffiliationAnalyticsService {
         `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD'))`,
         'date',
       )
-      .where('t.function = :fn', { fn: 'set_x_name_with_attestation' })
+      .where('t.function = :fn', { fn: 'link' })
       .andWhere('t.caller_id IS NOT NULL')
+      .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
+        provider: 'x',
+      })
       .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
       .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
 
-    if (PROFILE_REGISTRY_CONTRACT_ADDRESS) {
+    if (ADDRESS_LINK_CONTRACT_ADDRESS) {
       qb = qb.andWhere('t.contract_id = :contractId', {
-        contractId: PROFILE_REGISTRY_CONTRACT_ADDRESS,
+        contractId: ADDRESS_LINK_CONTRACT_ADDRESS,
       });
     }
 
@@ -518,14 +521,17 @@ export class BclAffiliationAnalyticsService {
     let qb = this.txRepo
       .createQueryBuilder('t')
       .select('COUNT(DISTINCT t.caller_id)::int', 'count')
-      .where('t.function = :fn', { fn: 'set_x_name_with_attestation' })
+      .where('t.function = :fn', { fn: 'link' })
       .andWhere('t.caller_id IS NOT NULL')
+      .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
+        provider: 'x',
+      })
       .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
       .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
 
-    if (PROFILE_REGISTRY_CONTRACT_ADDRESS) {
+    if (ADDRESS_LINK_CONTRACT_ADDRESS) {
       qb = qb.andWhere('t.contract_id = :contractId', {
-        contractId: PROFILE_REGISTRY_CONTRACT_ADDRESS,
+        contractId: ADDRESS_LINK_CONTRACT_ADDRESS,
       });
     }
 
