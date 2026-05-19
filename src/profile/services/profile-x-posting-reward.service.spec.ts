@@ -191,8 +191,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     rows?: Map<string, RewardRow>;
     aeSdkService?: any;
     profileSpendQueueService?: any;
-    profileCacheRow?: any;
-    verificationRewardRow?: any;
+    accountRow?: any;
     updateImpl?: (
       criteria: any,
       partial: any,
@@ -270,21 +269,15 @@ describe.skip('ProfileXPostingRewardService', () => {
         enqueueSpend: jest.fn().mockImplementation(async (_k, work) => work()),
         getRewardAccount: jest.fn().mockReturnValue({}),
       } as any);
-    const profileCacheRepository = {
-      findOne: jest.fn().mockResolvedValue(overrides?.profileCacheRow || null),
-    } as any;
-    const verificationRewardRepository = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue(overrides?.verificationRewardRow || null),
+    const accountRepository = {
+      findOne: jest.fn().mockResolvedValue(overrides?.accountRow || null),
     } as any;
     const dataSource = {} as any;
     const profileXApiClientService = new ProfileXApiClientService();
 
     const service = new ProfileXPostingRewardService(
       postingRewardRepository,
-      profileCacheRepository,
-      verificationRewardRepository,
+      accountRepository,
       dataSource,
       aeSdkService,
       profileSpendQueueService,
@@ -295,27 +288,26 @@ describe.skip('ProfileXPostingRewardService', () => {
       rows,
       aeSdkService,
       postingRewardRepository,
-      profileCacheRepository,
-      verificationRewardRepository,
+      accountRepository,
     };
   };
 
   it('keeps reward status reads side-effect free', async () => {
-    const { service, rows, profileCacheRepository } = getService({
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+    const { service, rows, accountRepository } = getService({
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
     });
 
     const result = await service.getRewardStatus(ADDRESS);
 
     expect(result.status).toBe('not_started');
     expect(rows.size).toBe(0);
-    expect(profileCacheRepository.findOne).not.toHaveBeenCalled();
+    expect(accountRepository.findOne).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('requires a currently linked x profile for manual recheck', async () => {
     const { service } = getService({
-      verificationRewardRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: {} },
     });
 
     await expect(service.requestManualRecheck(ADDRESS)).rejects.toThrow(
@@ -332,10 +324,9 @@ describe.skip('ProfileXPostingRewardService', () => {
       created_at: after,
     }));
     const { service, rows } = getService({
-      profileCacheRow: {
+      accountRow: {
         address: ADDRESS,
-        x_username: 'poster',
-        last_seen_micro_time: String(BigInt(verifiedAtMs) * 1000n),
+        links: { x: 'poster' },
       },
     });
 
@@ -359,7 +350,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     tweetsByUserId['100'] = [{ id: '1002', text: 'Check superhero.com now' }];
     const { service } = getService({
       rows,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
     });
 
     await service.requestManualRecheck(ADDRESS);
@@ -387,7 +378,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     tweetsByUserId['100'] = [{ id: '1002', text: 'superhero.com now' }];
     const { service, aeSdkService } = getService({
       rows,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
     });
 
     await service.requestManualRecheck(ADDRESS);
@@ -408,7 +399,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     ]);
     const { service } = getService({
       rows,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
     });
 
     await service.requestManualRecheck(ADDRESS);
@@ -498,7 +489,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     const first = getService({
       rows,
       aeSdkService,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
       updateImpl,
     });
 
@@ -509,7 +500,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     const second = getService({
       rows,
       aeSdkService,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
       updateImpl,
     });
     const secondResult = await second.service.requestManualRecheck(ADDRESS);
@@ -534,7 +525,7 @@ describe.skip('ProfileXPostingRewardService', () => {
     }));
     const { service, rows: stateRows } = getService({
       rows,
-      profileCacheRow: { address: ADDRESS, x_username: 'poster' },
+      accountRow: { address: ADDRESS, links: { x: 'poster' } },
     });
 
     const result = await service.requestManualRecheck(ADDRESS);

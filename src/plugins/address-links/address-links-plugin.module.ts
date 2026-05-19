@@ -4,11 +4,16 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Account } from '@/account/entities/account.entity';
 import { AeModule } from '@/ae/ae.module';
+import { ProfileModule } from '@/profile/profile.module';
 import { AddressLinksPlugin } from './address-links.plugin';
 import { AddressLinksPluginSyncService } from './address-links-plugin-sync.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Tx, PluginSyncState, Account]), AeModule],
+  imports: [
+    TypeOrmModule.forFeature([Tx, PluginSyncState, Account]),
+    AeModule,
+    ProfileModule,
+  ],
   providers: [AddressLinksPluginSyncService, AddressLinksPlugin],
   exports: [AddressLinksPlugin],
 })

@@ -5,6 +5,7 @@ import { encode, Encoding } from '@aeternity/aepp-sdk';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { ProfileXPostingRewardService } from '@/profile/services/profile-x-posting-reward.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
 import { ACTIVE_NETWORK } from '@/configs/network';
@@ -23,6 +24,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     aeSdkService: AeSdkService,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    private readonly profileXPostingRewardService: ProfileXPostingRewardService,
   ) {
     super(aeSdkService);
   }
@@ -51,11 +53,11 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     const logs: any[] = data.data ?? [];
 
     for (const log of logs) {
-      await this.processLog(log);
+      await this.processLog(tx, log);
     }
   }
 
-  private async processLog(log: any) {
+  private async processLog(tx: Tx, log: any) {
     const eventHash: string | undefined = log.event_hash;
     if (!eventHash) return;
 
@@ -68,7 +70,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     if (!address) return;
 
     if (eventHash === LINK_EVENT_HASH) {
-      await this.handleLinkEvent(address, payload);
+      await this.handleLinkEvent(tx, address, payload);
     } else if (eventHash === UNLINK_EVENT_HASH) {
       await this.handleUnlinkEvent(address, payload);
     }
@@ -105,7 +107,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     return /^[a-z]{1,10}$/.test(provider);
   }
 
-  private async handleLinkEvent(address: string, payload: string) {
+  private async handleLinkEvent(tx: Tx, address: string, payload: string) {
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) return;
 
@@ -134,6 +136,15 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .setParameter('value', value)
       .where('address = :address', { address })
       .execute();
+
+    if (provider === 'x') {
+      await this.profileXPostingRewardService.upsertVerifiedCandidateFromTx(
+        address,
+        value,
+        tx.micro_time?.toString?.(),
+        tx.hash,
+      );
+    }
   }
 
   private async handleUnlinkEvent(address: string, payload: string) {
