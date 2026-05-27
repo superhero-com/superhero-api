@@ -134,13 +134,10 @@ export class ProfileReadService {
     };
   }
 
-  private mergeProfile(
-    cache: ProfileCache | null,
-    account: Account | null,
-  ) {
+  private mergeProfile(cache: ProfileCache | null, account: Account | null) {
     return {
       fullname: cache?.fullname ?? '',
-      bio: cache?.bio ?? '',
+      bio: this.getLinkedBio(account) ?? cache?.bio ?? '',
       avatarurl: cache?.avatarurl ?? '',
       username: cache?.username ?? null,
       x_username: this.getLinkedXUsername(account),
@@ -166,5 +163,10 @@ export class ProfileReadService {
   private getLinkedXUsername(account: Account | null): string | null {
     const linked = account?.links?.x;
     return linked ? linked.trim().toLowerCase().replace(/^@+/, '') : null;
+  }
+
+  private getLinkedBio(account: Account | null): string | null {
+    const linked = account?.links?.bio;
+    return linked ? linked.trim() : null;
   }
 }
