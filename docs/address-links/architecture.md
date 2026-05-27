@@ -115,7 +115,8 @@ The `accounts` table has a `links` JSONB column:
 ```json
 {
   "nostr": "npub1xyzabc...",
-  "x": "superherocom"
+  "x": "superherocom",
+  "bio": "Builder on Aeternity"
 }
 ```
 
@@ -165,7 +166,7 @@ The prefix is:
 0x1a "aeternity Signed Message:\n "
 ```
 
-Frontends must use `unsafeSign(digest)` -- **not** `signMessage()` which produces a different 32-byte hash.
+Frontends should use `signMessage(message)` from `@aeternity/aepp-sdk`, which hashes the message the same way as the contract (`hashMessage()` format).
 
 ## Contract events
 

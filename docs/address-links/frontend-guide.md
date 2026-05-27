@@ -37,32 +37,17 @@ Every provider follows the same two-step pattern:
 
 ## AE wallet signing
 
-All providers require the user to sign the claim message with their AE wallet. The on-chain contract verifies against a specific 60-byte digest format.
+All providers require the user to sign the claim `message` string with their AE wallet. The on-chain contract verifies signatures using the same digest as `@aeternity/aepp-sdk` `hashMessage()` / `signMessage()`.
 
-**Use `unsafeSign`, not `signMessage`.** The SDK's `signMessage()` produces a different digest.
+**Use `signMessage(message)`** — pass the exact `message` from the claim (or unclaim) response. Do not manually hash or call `unsafeSign` unless you are implementing the digest yourself.
 
 ```typescript
-import { hash } from '@aeternity/aepp-sdk';
 import { Buffer } from 'buffer';
 
-const AE_MESSAGE_PREFIX = new Uint8Array([
-  0x1a, 0x61, 0x65, 0x74, 0x65, 0x72, 0x6e, 0x69, 0x74, 0x79,
-  0x20, 0x53, 0x69, 0x67, 0x6e, 0x65, 0x64, 0x20, 0x4d, 0x65,
-  0x73, 0x73, 0x61, 0x67, 0x65, 0x3a, 0x0a, 0x20,
-]);
-
-function buildContractDigest(message: string): Uint8Array {
-  const msgHash = hash(Buffer.from(message, 'utf-8')); // blake2b_256 -> 32 bytes
-  const digest = new Uint8Array(AE_MESSAGE_PREFIX.length + msgHash.length);
-  digest.set(AE_MESSAGE_PREFIX);
-  digest.set(msgHash, AE_MESSAGE_PREFIX.length);
-  return digest; // 28 + 32 = 60 bytes
-}
-
 async function signWithAeWallet(aeAccount: any, message: string): Promise<string> {
-  const digest = buildContractDigest(message);
-  const sig = await aeAccount.unsafeSign(digest);
-  return Buffer.from(sig).toString('hex'); // 128-char hex string
+  const sig = await aeAccount.signMessage(message);
+  const bytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, typeof sig === 'string' ? 'hex' : undefined);
+  return Buffer.from(bytes).toString('hex'); // 128-char hex string
 }
 ```
 
@@ -372,6 +357,97 @@ POST /address-links/x/unclaim/submit
 
 ---
 
+## Bio
+
+The bio provider uses the same claim and submit flow as X, but the claim value is the bio text itself. The current contract value limit is 200 characters, and bio values cannot contain `:`.
+
+### Claim
+
+```
+POST /address-links/bio/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "Builder on Aeternity"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "link:ak_2Qktt...:bio:Builder on Aeternity:0",
+  "nonce": 0,
+  "value": "Builder on Aeternity",
+  "verification_token": "eyJ..."
+}
+```
+
+### Submit
+
+```
+POST /address-links/bio/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "Builder on Aeternity",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+### Unclaim / Unlink
+
+```
+POST /address-links/bio/unclaim
+{ "address": "ak_2Qktt..." }
+
+POST /address-links/bio/unclaim/submit
+{ "address": "ak_2Qktt...", "nonce": 1, "signature": "ab12cd34...hex..." }
+```
+
+Linked bios are exposed as `profile.bio` in profile responses once the address-link transaction is indexed.
+
+### Full bio linking flow
+
+```typescript
+async function linkBio(apiBase: string, aeAccount: any, bioText: string): Promise<string> {
+  const address = aeAccount.address;
+  const value = bioText.trim();
+
+  const claimRes = await fetch(`${apiBase}/address-links/bio/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value }),
+  });
+  const claim = await claimRes.json();
+
+  const sig = await aeAccount.signMessage(claim.message);
+  const signature = Buffer.from(sig).toString('hex');
+
+  const submitRes = await fetch(`${apiBase}/address-links/bio/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  });
+  const { txHash } = await submitRes.json();
+  return txHash;
+}
+```
+
+---
+
 ## React Native / Expo integration
 
 For mobile apps with wallet and Nostr key derivation from a BIP-39 mnemonic.
@@ -441,12 +517,11 @@ The most common error. The contract rejected the Ed25519 signature.
 
 **Check in order:**
 
-1. **Signing method** -- Must use `unsafeSign(digest)`, not `signMessage(message)`.
-2. **Digest length** -- Must be exactly 60 bytes (28-byte prefix + 32-byte blake2b hash). If it's 32, you're likely using `signMessage`.
-3. **Hash function** -- Must be Blake2b-256 (from `@aeternity/aepp-sdk` `hash`), not SHA-256.
-4. **Signature encoding** -- Must be 128-char lowercase hex. No `0x` prefix, no base64.
-5. **Message** -- Must be the exact `message` string from the claim response. Don't reconstruct locally.
-6. **Account** -- The signer must match the `address` in the request.
+1. **Signing method** -- Use `signMessage(claim.message)` with the exact message from claim/unclaim. Do not sign a different string or a pre-hashed digest.
+2. **Signature format** -- Submit a 128-character hex string (64 bytes). No `0x` prefix.
+3. **Signature encoding** -- Must be 128-char lowercase hex. No `0x` prefix, no base64.
+4. **Message** -- Must be the exact `message` string from the claim response. Don't reconstruct locally.
+5. **Account** -- The signer must match the `address` in the request.
 
 ### `"Invalid signature: expected 128-character hex string"`
 
@@ -481,10 +556,7 @@ async function linkNostrDebug(apiBase: string, aeAccount: any, mnemonic: string)
   const claim = await claimNostrLink(apiBase, aeAccount.address, nostrKeys.npub);
   console.log('[nostr-link] message:', claim.message);
 
-  const digest = buildContractDigest(claim.message);
-  console.log('[nostr-link] digest length:', digest.length, '(MUST be 60)');
-
-  const sig = await aeAccount.unsafeSign(digest);
+  const sig = await aeAccount.signMessage(claim.message);
   const aeSignature = Buffer.from(sig).toString('hex');
   console.log('[nostr-link] signature length:', aeSignature.length, '(expected 128)');
 
@@ -499,8 +571,8 @@ async function linkNostrDebug(apiBase: string, aeAccount: any, mnemonic: string)
 ```
 
 Key checks:
-- `digest length` must be 60 (not 32)
 - `signature length` must be 128
+- `claim.message` was signed verbatim with `signMessage`
 - Event pubkey must match npub
 - Event content must match message
 

@@ -79,6 +79,40 @@ describe('ProfileReadService', () => {
     expect(result.profile.x_username).toBe('freshlinkedx');
   });
 
+  it('uses AddressLink bio value from account links', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_bio_linked',
+        bio: 'stale profile bio',
+      } as ProfileCache,
+      account: {
+        address: 'ak_bio_linked',
+        links: { bio: '  linked bio  ' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_bio_linked');
+
+    expect(result.profile.bio).toBe('linked bio');
+  });
+
+  it('falls back to profile cache bio when no AddressLink bio exists', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_cached_bio',
+        bio: 'cached bio',
+      } as ProfileCache,
+      account: {
+        address: 'ak_cached_bio',
+        links: { x: 'linkedx' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_cached_bio');
+
+    expect(result.profile.bio).toBe('cached bio');
+  });
+
   it('returns batch profiles in requested order', async () => {
     const service = createService({
       caches: [

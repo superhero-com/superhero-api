@@ -83,6 +83,9 @@ export class AddressLinksService {
   }
 
   private validateValue(value: string) {
+    if (value.length > 200) {
+      throw new BadRequestException('Value must be 200 characters or fewer');
+    }
     if (value.includes(':')) {
       throw new BadRequestException('Value must not contain ":"');
     }
