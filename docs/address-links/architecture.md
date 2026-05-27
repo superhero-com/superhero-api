@@ -116,7 +116,8 @@ The `accounts` table has a `links` JSONB column:
 {
   "nostr": "npub1xyzabc...",
   "x": "superherocom",
-  "bio": "Builder on Aeternity"
+  "bio": "Builder on Aeternity",
+  "site": "example.com"
 }
 ```
 

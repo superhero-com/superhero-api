@@ -138,6 +138,7 @@ export class ProfileReadService {
     return {
       fullname: cache?.fullname ?? '',
       bio: this.getLinkedBio(account) ?? cache?.bio ?? '',
+      site: this.getLinkedSite(account),
       avatarurl: cache?.avatarurl ?? '',
       username: cache?.username ?? null,
       x_username: this.getLinkedXUsername(account),
@@ -167,6 +168,11 @@ export class ProfileReadService {
 
   private getLinkedBio(account: Account | null): string | null {
     const linked = account?.links?.bio;
+    return linked ? linked.trim() : null;
+  }
+
+  private getLinkedSite(account: Account | null): string | null {
+    const linked = account?.links?.site;
     return linked ? linked.trim() : null;
   }
 }

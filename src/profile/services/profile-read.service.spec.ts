@@ -96,6 +96,31 @@ describe('ProfileReadService', () => {
     expect(result.profile.bio).toBe('linked bio');
   });
 
+  it('uses AddressLink site value from account links', async () => {
+    const service = createService({
+      account: {
+        address: 'ak_site_linked',
+        links: { site: 'example.com' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_site_linked');
+
+    expect(result.profile.site).toBe('example.com');
+  });
+
+  it('returns null site when no AddressLink site exists', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_no_site',
+      } as ProfileCache,
+    });
+
+    const result = await service.getProfile('ak_no_site');
+
+    expect(result.profile.site).toBeNull();
+  });
+
   it('falls back to profile cache bio when no AddressLink bio exists', async () => {
     const service = createService({
       cache: {
