@@ -448,6 +448,98 @@ async function linkBio(apiBase: string, aeAccount: any, bioText: string): Promis
 
 ---
 
+## Site (website)
+
+Same claim/submit flow as bio. The backend stores the site **without** `http://` or `https://` because the contract value cannot contain `:`. Ports are not supported (`example.com:8080` is rejected).
+
+### Claim
+
+```
+POST /address-links/site/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "https://example.com/blog"
+}
+```
+
+Response (normalized value):
+
+```json
+{
+  "message": "link:ak_2Qktt...:site:example.com/blog:0",
+  "nonce": 0,
+  "value": "example.com/blog",
+  "verification_token": "eyJ..."
+}
+```
+
+### Submit
+
+```
+POST /address-links/site/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "example.com/blog",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+Use `claim.value` on submit. Sign with `signMessage(claim.message)`.
+
+### Unclaim / Unlink
+
+```
+POST /address-links/site/unclaim
+{ "address": "ak_2Qktt..." }
+
+POST /address-links/site/unclaim/submit
+{ "address": "ak_2Qktt...", "nonce": 1, "signature": "ab12cd34...hex..." }
+```
+
+Linked sites appear as `profile.site` after indexing. Display with `https://${profile.site}` in the UI if needed.
+
+### Full site linking flow
+
+```typescript
+async function linkSite(apiBase: string, aeAccount: any, siteUrl: string): Promise<string> {
+  const address = aeAccount.address;
+
+  const claim = await fetch(`${apiBase}/address-links/site/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value: siteUrl }),
+  }).then((r) => r.json());
+
+  const signature = Buffer.from(
+    await aeAccount.signMessage(claim.message),
+  ).toString('hex');
+
+  const { txHash } = await fetch(`${apiBase}/address-links/site/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  }).then((r) => r.json());
+
+  return txHash;
+}
+```
+
+---
+
 ## React Native / Expo integration
 
 For mobile apps with wallet and Nostr key derivation from a BIP-39 mnemonic.
