@@ -1,4 +1,4 @@
-import { Account } from '@/account/entities/account.entity';
+import { AccountService } from '@/account/services/account.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -22,8 +22,7 @@ export class TipService {
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
 
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
+    private readonly accountService: AccountService,
 
     private readonly tokensService: TokensService,
   ) {
@@ -119,8 +118,8 @@ export class TipService {
 
     // Ensure sender and receiver accounts exist
     const [senderAccount, receiverAccount] = await Promise.all([
-      this.ensureAccountExists(senderAddress),
-      this.ensureAccountExists(receiverAddress),
+      this.accountService.ensureAccountExists(senderAddress),
+      this.accountService.ensureAccountExists(receiverAddress),
     ]);
 
     const savedTip = await this.tipRepository.save({
@@ -145,29 +144,6 @@ export class TipService {
     });
 
     return savedTip;
-  }
-
-  /**
-   * Ensures an account exists, creates it if it doesn't
-   */
-  private async ensureAccountExists(address: string): Promise<Account> {
-    try {
-      let existingAccount = await this.accountRepository.findOne({
-        where: { address },
-      });
-
-      if (!existingAccount) {
-        existingAccount = await this.accountRepository.save({
-          address,
-        });
-        this.logger.log(`Created new account: ${address}`);
-      }
-      return existingAccount;
-    } catch (error) {
-      this.logger.error(`Failed to ensure account exists: ${address}`, error);
-      // Don't throw - account creation failure shouldn't break tip processing
-    }
-    return null;
   }
 
   /**

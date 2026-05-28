@@ -4,7 +4,7 @@ describe('TipService', () => {
   let service: TipService;
   let tipRepository: any;
   let postRepository: any;
-  let accountRepository: any;
+  let accountService: any;
   let tokensService: any;
 
   beforeEach(() => {
@@ -15,7 +15,9 @@ describe('TipService', () => {
     postRepository = {
       findOne: jest.fn(),
     };
-    accountRepository = {};
+    accountService = {
+      ensureAccountExists: jest.fn(),
+    };
     tokensService = {
       updateTrendingScoresForSymbols: jest.fn(),
     };
@@ -23,7 +25,7 @@ describe('TipService', () => {
     service = new TipService(
       tipRepository as any,
       postRepository as any,
-      accountRepository as any,
+      accountService as any,
       tokensService as any,
     );
   });
@@ -38,7 +40,7 @@ describe('TipService', () => {
       token_mentions: ['ALPHA'],
     });
     jest
-      .spyOn(service as any, 'ensureAccountExists')
+      .spyOn(accountService, 'ensureAccountExists')
       .mockResolvedValueOnce({ address: 'ak_sender' })
       .mockResolvedValueOnce({ address: 'ak_receiver' });
     tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
@@ -71,7 +73,7 @@ describe('TipService', () => {
       token_mentions: ['ALPHA'],
     });
     const ensureAccountExists = jest.spyOn(
-      service as any,
+      accountService,
       'ensureAccountExists',
     );
 
@@ -96,7 +98,7 @@ describe('TipService', () => {
   it('does not persist self-tips on a profile', async () => {
     tipRepository.findOne.mockResolvedValue(null);
     const ensureAccountExists = jest.spyOn(
-      service as any,
+      accountService,
       'ensureAccountExists',
     );
 

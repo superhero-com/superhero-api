@@ -1,5 +1,6 @@
 import BigNumber from 'bignumber.js';
 import { BCL_FUNCTIONS } from '@/configs';
+import { Logger } from '@nestjs/common';
 import { SyncDirectionEnum } from '../../plugin.interface';
 import { TransactionProcessorService } from './transaction-processor.service';
 
@@ -13,6 +14,7 @@ describe('TransactionProcessorService', () => {
   let persistenceService: {
     cleanupOldTransactions: jest.Mock;
     saveTransaction: jest.Mock;
+    refreshAccountFromTransactions: jest.Mock;
   };
   let transactionsService: {
     decodeTxEvents: jest.Mock;
@@ -39,8 +41,9 @@ describe('TransactionProcessorService', () => {
       prepareTransactionData: jest.fn(),
     };
     persistenceService = {
-      cleanupOldTransactions: jest.fn(),
+      cleanupOldTransactions: jest.fn().mockResolvedValue([]),
       saveTransaction: jest.fn(),
+      refreshAccountFromTransactions: jest.fn(),
     };
     transactionsService = {
       decodeTxEvents: jest.fn(),
@@ -180,5 +183,64 @@ describe('TransactionProcessorService', () => {
     );
 
     expect(tokenService.updateTokenTrendingScore).toHaveBeenCalledWith(token);
+  });
+
+  it('continues processing when cleanup account refresh fails', async () => {
+    const rawTransaction = {
+      hash: 'th_cleanup_fail',
+      function: BCL_FUNCTIONS.create_community,
+      block_height: 123,
+      caller_id: 'ak_test',
+      raw: { log: [] },
+    };
+    const token = {
+      sale_address: 'ct_sale',
+      factory_address: 'ct_factory',
+    };
+
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      saleAddress: 'ct_sale',
+    });
+    tokenService.getToken.mockResolvedValue(token);
+    transactionsService.decodeTxEvents.mockResolvedValue(rawTransaction);
+    transactionsService.parseTransactionData.mockResolvedValue({
+      amount: new BigNumber(10),
+      volume: new BigNumber(2),
+      total_supply: new BigNumber(100),
+      protocol_reward: new BigNumber(1),
+    });
+    dataService.calculatePrices.mockReturnValue({
+      unitPriceData: { ae: 1 },
+      marketCapData: { ae: 10 },
+      buyPriceData: { ae: 1 },
+      previousBuyPriceData: { ae: 1 },
+    });
+    dataService.prepareTransactionData.mockResolvedValue({
+      tx_hash: rawTransaction.hash,
+      address: 'ak_trader',
+    });
+    persistenceService.saveTransaction.mockResolvedValue({ id: 1 });
+    persistenceService.cleanupOldTransactions.mockResolvedValue(['ak_old']);
+    persistenceService.refreshAccountFromTransactions.mockRejectedValue(
+      new Error('insert failed'),
+    );
+    tokenService.update.mockResolvedValue(token);
+    transactionsService.isTokenSupportedCollection.mockResolvedValue(true);
+    tokenService.syncTokenPrice.mockResolvedValue(undefined);
+    tokenHolderService.updateTokenHolder.mockResolvedValue(undefined);
+    tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      service.processTransaction(rawTransaction as any, SyncDirectionEnum.Live),
+    ).resolves.not.toThrow();
+
+    expect(
+      persistenceService.refreshAccountFromTransactions,
+    ).toHaveBeenCalledWith('ak_old', expect.anything());
+    expect(loggerError).toHaveBeenCalled();
   });
 });

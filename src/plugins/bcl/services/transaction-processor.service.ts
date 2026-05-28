@@ -63,15 +63,7 @@ export class TransactionProcessorService {
     const result = await this.transactionRepository.manager.transaction(
       async (manager) => {
         let transactionToken: Token | undefined;
-
-        // Delete old transactions (if create_community)
-        if (rawTransaction.function === BCL_FUNCTIONS.create_community) {
-          await this.persistenceService.cleanupOldTransactions(
-            saleAddress,
-            rawTransaction.hash,
-            manager,
-          );
-        }
+        let cleanupAffectedAddresses: string[] = [];
 
         // Resolve token first. For buy/sell this may lazily create token by sale
         // address via TokensService.getToken().
@@ -160,11 +152,37 @@ export class TransactionProcessorService {
           priceCalculations,
         );
 
+        // Delete stale create_community rows only once the replacement row is ready.
+        if (rawTransaction.function === BCL_FUNCTIONS.create_community) {
+          cleanupAffectedAddresses =
+            await this.persistenceService.cleanupOldTransactions(
+              saleAddress,
+              rawTransaction.hash,
+              manager,
+            );
+        }
+
         // Save transaction
         const savedTransaction = await this.persistenceService.saveTransaction(
           txData,
           manager,
         );
+
+        for (const address of new Set(cleanupAffectedAddresses)) {
+          if (address && address !== txData.address) {
+            try {
+              await this.persistenceService.refreshAccountFromTransactions(
+                address,
+                manager,
+              );
+            } catch (error) {
+              this.logger.error(
+                `Failed to refresh account totals for ${address}`,
+                error instanceof Error ? error.stack : String(error),
+              );
+            }
+          }
+        }
 
         // Update token's last_tx_hash and last_sync_block_height for live transactions only
         if (syncDirection === SyncDirectionEnum.Live) {
