@@ -4,6 +4,7 @@ describe('SocialTippingTransactionProcessorService', () => {
   let service: SocialTippingTransactionProcessorService;
   let tipRepository: any;
   let postRepository: any;
+  let accountService: any;
   let tokensService: any;
 
   beforeEach(() => {
@@ -15,13 +16,16 @@ describe('SocialTippingTransactionProcessorService', () => {
     postRepository = {
       findOne: jest.fn(),
     };
+    accountService = {
+      ensureAccountExists: jest.fn(),
+    };
     tokensService = {
       updateTrendingScoresForSymbols: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new SocialTippingTransactionProcessorService(
       tipRepository as any,
-      {} as any,
+      accountService as any,
       postRepository as any,
       tokensService as any,
     );
@@ -159,7 +163,7 @@ describe('SocialTippingTransactionProcessorService', () => {
     };
 
     const ensureAccountExists = jest.spyOn(
-      service as any,
+      accountService,
       'ensureAccountExists',
     );
 
@@ -208,7 +212,7 @@ describe('SocialTippingTransactionProcessorService', () => {
     };
 
     const ensureAccountExists = jest.spyOn(
-      service as any,
+      accountService,
       'ensureAccountExists',
     );
 

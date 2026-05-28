@@ -1,3 +1,4 @@
+import { AccountService } from '@/account/services/account.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { Transaction } from '@/transactions/entities/transaction.entity';
@@ -9,6 +10,8 @@ import { TransactionData } from './transaction-data.service';
 export class TransactionPersistenceService {
   private readonly logger = new Logger(TransactionPersistenceService.name);
 
+  constructor(private readonly accountService: AccountService) {}
+
   /**
    * Cleanup old create_community transactions for the same sale address
    * @param saleAddress - Sale address
@@ -19,7 +22,16 @@ export class TransactionPersistenceService {
     saleAddress: string,
     txHash: string,
     manager: EntityManager,
-  ): Promise<void> {
+  ): Promise<string[]> {
+    const oldTransactions: Array<{ address: string }> = await manager.query(
+      `SELECT DISTINCT address
+       FROM transactions
+       WHERE sale_address = $1
+         AND tx_type = $2
+         AND tx_hash != $3`,
+      [saleAddress, BCL_FUNCTIONS.create_community, txHash],
+    );
+
     await manager
       .createQueryBuilder()
       .delete()
@@ -34,6 +46,8 @@ export class TransactionPersistenceService {
         tx_hash: txHash,
       })
       .execute();
+
+    return oldTransactions.map((tx) => tx.address).filter(Boolean);
   }
 
   /**
@@ -54,6 +68,18 @@ export class TransactionPersistenceService {
     await transactionRepository.upsert(txData, {
       conflictPaths: ['tx_hash'],
     });
+
+    if (txData.address) {
+      try {
+        await this.refreshAccountFromTransactions(txData.address, manager);
+      } catch (error) {
+        this.logger.error(
+          `Failed to refresh account totals for ${txData.address}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+
     // Fetch and return the transaction entity
     const transaction = await transactionRepository.findOne({
       where: { tx_hash: txData.tx_hash },
@@ -83,5 +109,12 @@ export class TransactionPersistenceService {
     }
 
     return transaction;
+  }
+
+  async refreshAccountFromTransactions(
+    address: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    await this.accountService.ensureAccountFromTransactions(address, manager);
   }
 }

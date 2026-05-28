@@ -10,6 +10,7 @@ import { BullModule } from '@nestjs/bull';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { AccountModule } from '@/account/account.module';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 import { BclPlugin } from './bcl.plugin';
 import { BclPluginSyncService } from './bcl-plugin-sync.service';
@@ -32,6 +33,7 @@ import { TokenHolderService } from './services/token-holder.service';
     ]),
     TransactionsModule,
     TokensModule,
+    AccountModule,
     AePricingModule,
     AeModule,
     BullModule.registerQueue({
