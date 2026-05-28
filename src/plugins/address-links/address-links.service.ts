@@ -55,6 +55,50 @@ export class AddressLinksService {
     return { txHash: tx.hash };
   }
 
+  async claimLinkPrincipal(
+    signerAddress: string,
+    provider: string,
+    principal: string,
+    value: string,
+  ) {
+    this.validateValue(value);
+
+    const nonce = await this.contractService.getNoncePrincipal(
+      principal,
+      signerAddress,
+    );
+    const message = this.contractService.buildLinkMessageForPrincipal(
+      principal,
+      provider,
+      value,
+      nonce,
+    );
+
+    return { message, nonce, value, principal };
+  }
+
+  async submitLinkPrincipal(
+    signerAddress: string,
+    provider: string,
+    principal: string,
+    value: string,
+    nonce: number,
+    signature: string,
+  ) {
+    this.validateValue(value);
+
+    const tx = await this.contractService.linkPrincipal(
+      principal,
+      signerAddress,
+      provider,
+      value,
+      nonce,
+      signature,
+    );
+
+    return { txHash: tx.hash };
+  }
+
   async claimUnlink(address: string, provider: string) {
     const nonce = await this.contractService.getNonce(address);
     const message = this.contractService.buildUnlinkMessage(
@@ -74,6 +118,48 @@ export class AddressLinksService {
   ) {
     const tx = await this.contractService.unlink(
       address,
+      provider,
+      nonce,
+      signature,
+    );
+
+    return { txHash: tx.hash };
+  }
+
+  async claimUnlinkPrincipal(signerAddress: string, provider: string) {
+    const principal = await this.contractService.getLink(
+      signerAddress,
+      provider,
+    );
+    if (!principal) {
+      throw new BadRequestException(
+        'No link exists for this provider and address.',
+      );
+    }
+
+    const nonce = await this.contractService.getNoncePrincipal(
+      principal,
+      signerAddress,
+    );
+    const message = this.contractService.buildUnlinkMessageForPrincipal(
+      principal,
+      provider,
+      nonce,
+    );
+
+    return { message, nonce, value: principal, principal };
+  }
+
+  async submitUnlinkPrincipal(
+    signerAddress: string,
+    provider: string,
+    principal: string,
+    nonce: number,
+    signature: string,
+  ) {
+    const tx = await this.contractService.unlinkPrincipal(
+      principal,
+      signerAddress,
       provider,
       nonce,
       signature,

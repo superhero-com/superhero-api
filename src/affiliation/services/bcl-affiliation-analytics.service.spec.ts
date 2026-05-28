@@ -67,7 +67,7 @@ describe('BclAffiliationAnalyticsService', () => {
     await dashboardPromise;
   });
 
-  it('counts each caller once on their first verification day in range', async () => {
+  it('counts each linked address once on their first verification day in range', async () => {
     const groupBy = jest.fn().mockReturnThis();
     const orderBy = jest.fn().mockReturnThis();
     const andWhere = jest.fn().mockReturnThis();
@@ -81,9 +81,9 @@ describe('BclAffiliationAnalyticsService', () => {
         groupBy,
         orderBy,
         getRawMany: jest.fn().mockResolvedValue([
-          { caller_id: 'ak_a', date: '2026-03-01' },
-          { caller_id: 'ak_b', date: '2026-03-01' },
-          { caller_id: 'ak_c', date: '2026-03-02' },
+          { linked_address: 'ak_a', date: '2026-03-01' },
+          { linked_address: 'ak_b', date: '2026-03-01' },
+          { linked_address: 'ak_c', date: '2026-03-02' },
         ]),
       }),
     } as any;
@@ -103,7 +103,7 @@ describe('BclAffiliationAnalyticsService', () => {
       expect.stringContaining('MIN('),
       'date',
     );
-    expect(groupBy).toHaveBeenCalledWith('t.caller_id');
+    expect(groupBy).toHaveBeenCalledWith("t.raw->'arguments'->0->>'value'");
     expect(result).toEqual({
       '2026-03-01': 2,
       '2026-03-02': 1,

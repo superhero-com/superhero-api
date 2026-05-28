@@ -127,6 +127,48 @@ describe('ProfileChainNameService', () => {
     expect(challengeRepository.save).toHaveBeenCalledTimes(1);
   });
 
+  it('reports sponsorable when the sponsor balance covers the claim cost', async () => {
+    const { service, aeSdkService } = getService();
+    jest.spyOn(service as any, 'estimateTotalClaimCost').mockReturnValue(1000n);
+    aeSdkService.sdk.getBalance.mockResolvedValue('5000');
+
+    const result = await service.checkNameSponsorship('myuniquename123');
+
+    expect(result).toEqual({
+      name: 'myuniquename123.chain',
+      sponsorable: true,
+      sponsor_configured: true,
+      sponsor_balance_aettos: '5000',
+      required_balance_aettos: '1000',
+      reason: null,
+    });
+  });
+
+  it('reports not sponsorable when the sponsor balance is too low', async () => {
+    const { service, aeSdkService } = getService();
+    jest.spyOn(service as any, 'estimateTotalClaimCost').mockReturnValue(1000n);
+    aeSdkService.sdk.getBalance.mockResolvedValue('500');
+
+    const result = await service.checkNameSponsorship('myuniquename123');
+
+    expect(result.sponsorable).toBe(false);
+    expect(result.reason).toBe('Insufficient sponsor funds');
+    expect(result.sponsor_balance_aettos).toBe('500');
+    expect(result.required_balance_aettos).toBe('1000');
+  });
+
+  it('reports not sponsorable when the sponsor balance cannot be fetched', async () => {
+    const { service, aeSdkService } = getService();
+    jest.spyOn(service as any, 'estimateTotalClaimCost').mockReturnValue(1000n);
+    aeSdkService.sdk.getBalance.mockRejectedValue(new Error('node down'));
+
+    const result = await service.checkNameSponsorship('myuniquename123');
+
+    expect(result.sponsorable).toBe(false);
+    expect(result.sponsor_balance_aettos).toBeNull();
+    expect(result.reason).toBe('Unable to verify sponsor balance');
+  });
+
   it('treats the same in-flight name request as idempotent', async () => {
     const { service, claimRepository } = getService();
     jest

@@ -36,15 +36,24 @@ export class AddressLinksPlugin extends BasePlugin {
       return [];
     }
 
+    const addressLinkFunctions = [
+      'link',
+      'unlink',
+      'link_principal',
+      'unlink_principal',
+    ] as const;
+
     return [
       {
         type: 'contract_call',
         contractIds: [ADDRESS_LINK_CONTRACT_ADDRESS],
-        functions: ['link', 'unlink'],
+        functions: [...addressLinkFunctions],
         predicate: (tx: Partial<Tx>) =>
           tx.type === 'ContractCallTx' &&
           tx.contract_id === ADDRESS_LINK_CONTRACT_ADDRESS &&
-          (tx.function === 'link' || tx.function === 'unlink'),
+          addressLinkFunctions.includes(
+            tx.function as (typeof addressLinkFunctions)[number],
+          ),
       },
     ];
   }

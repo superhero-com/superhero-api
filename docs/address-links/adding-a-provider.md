@@ -267,3 +267,4 @@ No changes needed in `AddressLinksService`, `contract.service.ts`, or the plugin
 | X | OAuth + HMAC token | `x-link.controller.ts`, `x-link-verifier.service.ts`, `dto/x/` |
 | Bio | HMAC token + text validation | `bio-link.controller.ts`, `bio-link-verifier.service.ts`, `dto/bio/` |
 | Site | HMAC token + URL normalization | `site-link.controller.ts`, `site-link-verifier.service.ts`, `dto/site/` |
+| Preferred AENS name | HMAC token + display name validation | `preferred-link.controller.ts`, `preferred-link-verifier.service.ts`, `dto/preferred/` |

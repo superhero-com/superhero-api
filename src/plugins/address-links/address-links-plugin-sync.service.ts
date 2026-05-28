@@ -5,6 +5,7 @@ import { encode, Encoding } from '@aeternity/aepp-sdk';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { ProfileCacheService } from '@/profile/services/profile-cache.service';
 import { ProfileXPostingRewardService } from '@/profile/services/profile-x-posting-reward.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
@@ -16,6 +17,9 @@ const LINK_EVENT_HASH =
 const UNLINK_EVENT_HASH =
   'EIE1QPIL7TJBARSE513J05U144N3D9Q0MB4PQ69VATC40VROO3IG====';
 
+const LINK_EVENT_NAMES = new Set(['Link', 'PrincipalLink']);
+const UNLINK_EVENT_NAMES = new Set(['Unlink', 'PrincipalUnlink']);
+
 @Injectable()
 export class AddressLinksPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(AddressLinksPluginSyncService.name);
@@ -25,6 +29,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
     private readonly profileXPostingRewardService: ProfileXPostingRewardService,
+    private readonly profileCacheService: ProfileCacheService,
   ) {
     super(aeSdkService);
   }
@@ -34,6 +39,14 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _syncDirection: SyncDirection,
   ): Promise<void> {
+    if (tx.function === 'link_principal') {
+      await this.syncLinkPrincipalFromTx(tx);
+      return;
+    }
+    if (tx.function === 'unlink_principal') {
+      await this.syncUnlinkPrincipalFromTx(tx);
+      return;
+    }
     await this.fetchAndProcessLogs(tx);
   }
 
@@ -69,11 +82,64 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     const address = this.intToAddress(addressInt);
     if (!address) return;
 
-    if (eventHash === LINK_EVENT_HASH) {
+    const eventName: string | undefined = log.event_name;
+
+    if (
+      eventHash === LINK_EVENT_HASH ||
+      (eventName && LINK_EVENT_NAMES.has(eventName))
+    ) {
       await this.handleLinkEvent(tx, address, payload);
-    } else if (eventHash === UNLINK_EVENT_HASH) {
-      await this.handleUnlinkEvent(address, payload);
+    } else if (
+      eventHash === UNLINK_EVENT_HASH ||
+      (eventName && UNLINK_EVENT_NAMES.has(eventName))
+    ) {
+      await this.handleUnlinkEvent(tx, address, payload);
     }
+  }
+
+  private getRawArgument(tx: Tx, name: string): string | undefined {
+    const args = tx.raw?.arguments;
+    if (!Array.isArray(args)) {
+      return undefined;
+    }
+    const entry = args.find(
+      (arg: { name?: string; value?: unknown }) => arg?.name === name,
+    );
+    if (entry?.value === undefined || entry?.value === null) {
+      return undefined;
+    }
+    return String(entry.value);
+  }
+
+  private async syncLinkPrincipalFromTx(tx: Tx): Promise<void> {
+    const signer = this.getRawArgument(tx, 'signer');
+    const provider = this.getRawArgument(tx, 'provider');
+    const value = this.getRawArgument(tx, 'value');
+
+    if (!signer || !provider || !value) {
+      this.logger.warn(
+        `link_principal tx ${tx.hash} missing signer, provider, or value in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleLinkEvent(tx, signer, `${provider}:${value}`);
+  }
+
+  private async syncUnlinkPrincipalFromTx(tx: Tx): Promise<void> {
+    const signer = this.getRawArgument(tx, 'signer');
+    const provider = this.getRawArgument(tx, 'provider');
+
+    if (!signer || !provider) {
+      this.logger.warn(
+        `unlink_principal tx ${tx.hash} missing signer or provider in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleUnlinkEvent(tx, signer, `${provider}:`);
   }
 
   private intToAddress(intStr: string): string | null {
@@ -137,6 +203,14 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .where('address = :address', { address })
       .execute();
 
+    // Keep the profile_cache mirror fresh so the profile feed re-orders and
+    // link-only accounts become visible (the old ProfileRegistry indexer that
+    // used to write this table was removed with the AddressLink migration).
+    await this.profileCacheService.syncFromAccountLinks(
+      address,
+      tx.micro_time?.toString?.(),
+    );
+
     if (provider === 'x') {
       await this.profileXPostingRewardService.upsertVerifiedCandidateFromTx(
         address,
@@ -147,7 +221,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     }
   }
 
-  private async handleUnlinkEvent(address: string, payload: string) {
+  private async handleUnlinkEvent(tx: Tx, address: string, payload: string) {
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) return;
 
@@ -173,5 +247,12 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .setParameter('provider', provider)
       .where('address = :address', { address })
       .execute();
+
+    // Mirror the change into profile_cache (bumps updated_at) so the feed and
+    // accounts search reflect the unlink.
+    await this.profileCacheService.syncFromAccountLinks(
+      address,
+      tx.micro_time?.toString?.(),
+    );
   }
 }

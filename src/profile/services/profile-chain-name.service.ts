@@ -227,6 +227,52 @@ export class ProfileChainNameService {
     };
   }
 
+  async checkNameSponsorship(name: string): Promise<{
+    name: string;
+    sponsorable: boolean;
+    sponsor_configured: boolean;
+    sponsor_balance_aettos: string | null;
+    required_balance_aettos: string;
+    reason: string | null;
+  }> {
+    const fullName = `${name}.chain`;
+    const requiredBalance = this.estimateTotalClaimCost(fullName);
+    const requiredBalanceAettos = requiredBalance.toString();
+
+    if (!PROFILE_CHAIN_NAME_PRIVATE_KEY) {
+      return {
+        name: fullName,
+        sponsorable: false,
+        sponsor_configured: false,
+        sponsor_balance_aettos: null,
+        required_balance_aettos: requiredBalanceAettos,
+        reason: 'Chain name sponsoring is not configured',
+      };
+    }
+
+    const funds = await this.getSponsorFundsStatus(fullName);
+    if (!funds.balanceAvailable) {
+      return {
+        name: fullName,
+        sponsorable: false,
+        sponsor_configured: true,
+        sponsor_balance_aettos: null,
+        required_balance_aettos: requiredBalanceAettos,
+        reason: 'Unable to verify sponsor balance',
+      };
+    }
+
+    const sponsorable = funds.balance >= requiredBalance;
+    return {
+      name: fullName,
+      sponsorable,
+      sponsor_configured: true,
+      sponsor_balance_aettos: funds.balance.toString(),
+      required_balance_aettos: requiredBalanceAettos,
+      reason: sponsorable ? null : 'Insufficient sponsor funds',
+    };
+  }
+
   async getClaimStatus(address: string): Promise<{
     status: ChainNameClaimStatus | 'not_started';
     name: string | null;
@@ -700,29 +746,40 @@ export class ProfileChainNameService {
   }
 
   private async assertSponsorHasFunds(fullName: string): Promise<void> {
+    const requiredBalance = this.estimateTotalClaimCost(fullName);
+    const funds = await this.getSponsorFundsStatus(fullName);
+    if (!funds.balanceAvailable) {
+      throw new ServiceUnavailableException(
+        'Chain name claiming is temporarily unavailable',
+      );
+    }
+    if (funds.balance < requiredBalance) {
+      const sponsor = this.getSponsorAccount();
+      this.logger.error(
+        `Sponsor account ${sponsor.address} balance too low: ${funds.balance} aettos, need ${requiredBalance}`,
+      );
+      throw new ServiceUnavailableException(
+        'Chain name claiming is temporarily unavailable due to insufficient sponsor funds',
+      );
+    }
+  }
+
+  private async getSponsorFundsStatus(fullName: string): Promise<{
+    balance: bigint;
+    balanceAvailable: boolean;
+  }> {
     const sponsor = this.getSponsorAccount();
     try {
       const balance = await this.aeSdkService.sdk.getBalance(
         sponsor.address as `ak_${string}`,
       );
-      const requiredBalance = this.estimateTotalClaimCost(fullName);
-      if (BigInt(balance) < requiredBalance) {
-        this.logger.error(
-          `Sponsor account ${sponsor.address} balance too low: ${balance} aettos, need ${requiredBalance}`,
-        );
-        throw new ServiceUnavailableException(
-          'Chain name claiming is temporarily unavailable due to insufficient sponsor funds',
-        );
-      }
+      return { balance: BigInt(balance), balanceAvailable: true };
     } catch (error) {
-      if (error instanceof ServiceUnavailableException) throw error;
       this.logger.error(
-        'Failed to check sponsor balance',
+        `Failed to check sponsor balance for ${fullName}`,
         error instanceof Error ? error.stack : String(error),
       );
-      throw new ServiceUnavailableException(
-        'Chain name claiming is temporarily unavailable',
-      );
+      return { balance: 0n, balanceAvailable: false };
     }
   }
 
