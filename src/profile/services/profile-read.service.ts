@@ -141,6 +141,7 @@ export class ProfileReadService {
       site: this.getLinkedSite(account),
       avatarurl: cache?.avatarurl ?? '',
       username: cache?.username ?? null,
+      prefered_aens_name: this.getLinkedPreferedAensName(account),
       x_username: this.getLinkedXUsername(account),
       chain_name: cache?.chain_name ?? account?.chain_name ?? null,
       chain_expires_at: cache?.chain_expires_at ?? null,
@@ -150,11 +151,18 @@ export class ProfileReadService {
   private resolvePublicName(
     profile: {
       username?: string | null;
+      prefered_aens_name?: string | null;
       x_username?: string | null;
       chain_name?: string | null;
     },
     address: string,
   ): string {
+    // A user-set preferred AENS name overrides the middleware-derived chain
+    // name; otherwise default to the first name from the middleware
+    // (account.chain_name), then the legacy username, then the address.
+    if (profile.prefered_aens_name) {
+      return profile.prefered_aens_name;
+    }
     if (profile.chain_name) {
       return profile.chain_name;
     }
@@ -173,6 +181,11 @@ export class ProfileReadService {
 
   private getLinkedSite(account: Account | null): string | null {
     const linked = account?.links?.site;
+    return linked ? linked.trim() : null;
+  }
+
+  private getLinkedPreferedAensName(account: Account | null): string | null {
+    const linked = account?.links?.prefaens;
     return linked ? linked.trim() : null;
   }
 }

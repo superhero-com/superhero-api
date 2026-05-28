@@ -11,6 +11,7 @@ import { ProfileXInviteCredit } from './entities/profile-x-invite-credit.entity'
 import { ProfileXInviteMilestoneReward } from './entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from './entities/profile-x-posting-reward.entity';
 import { ProfileChainNameController } from './controllers/profile-chain-name.controller';
+import { ProfileCacheService } from './services/profile-cache.service';
 import { ProfileReadService } from './services/profile-read.service';
 import { ProfileSpendQueueService } from './services/profile-spend-queue.service';
 import { ProfileXApiClientService } from './services/profile-x-api-client.service';
@@ -39,6 +40,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
   ],
   providers: [
     ProfileReadService,
+    ProfileCacheService,
     ProfileSpendQueueService,
     ProfileXApiClientService,
     ProfileXInviteService,
@@ -46,6 +48,11 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileChainNameService,
   ],
   controllers: [ProfileChainNameController],
-  exports: [TypeOrmModule, ProfileReadService, ProfileXPostingRewardService],
+  exports: [
+    TypeOrmModule,
+    ProfileReadService,
+    ProfileCacheService,
+    ProfileXPostingRewardService,
+  ],
 })
 export class ProfileModule {}

@@ -540,6 +540,137 @@ async function linkSite(apiBase: string, aeAccount: any, siteUrl: string): Promi
 
 ---
 
+## Prefered AENS name
+
+Uses **`link_principal`** on-chain so the contract verifies AENS ownership via `AENSv2.lookup`. The user must link a `.chain` name they own (e.g. `hero.chain`).
+
+The signed message uses the **AENS name as principal**, not the `ak_` address:
+
+```
+link:hero.chain:prefaens:hero.chain:0
+```
+
+The on-chain provider id is `prefaens` (AddressLink allows max 10 lowercase `a-z` characters only). API routes use `/address-links/prefered-aens-name/`.
+
+### Claim
+
+```
+POST /address-links/prefered-aens-name/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "link:hero.chain:prefaens:hero.chain:0",
+  "nonce": 0,
+  "value": "hero.chain",
+  "principal": "hero.chain",
+  "verification_token": "eyJ..."
+}
+```
+
+| Error | Reason |
+|---|---|
+| 400 | Value is not a valid `.chain` name |
+| 400 | `PRINCIPAL_NOT_FOUND` — name not registered on AENS |
+| 400 | `PRINCIPAL_MISMATCH` — address does not own this name |
+
+### Submit
+
+```
+POST /address-links/prefered-aens-name/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+Sign with `signMessage(claim.message)`. Use `claim.value` on submit. Backend calls `link_principal` on the contract.
+
+### Unclaim / Unlink
+
+```
+POST /address-links/prefered-aens-name/unclaim
+{ "address": "ak_2Qktt..." }
+```
+
+Response includes the current linked name as `value` / `principal`:
+
+```json
+{
+  "message": "unlink:hero.chain:prefaens:1",
+  "nonce": 1,
+  "value": "hero.chain",
+  "principal": "hero.chain"
+}
+```
+
+```
+POST /address-links/prefered-aens-name/unclaim/submit
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain",
+  "nonce": 1,
+  "signature": "ab12cd34...hex..."
+}
+```
+
+Pass the `value` from the unclaim response. Backend calls `unlink_principal`.
+
+After indexing, the linked name appears as `profile.prefered_aens_name` (from `links.prefaens`) and takes precedence for `public_name`: a preferred AENS name overrides the middleware-derived `chain_name`, which in turn is preferred over the cached `username`.
+
+### Full prefered AENS name linking flow
+
+```typescript
+async function linkPreferedAensName(
+  apiBase: string,
+  aeAccount: any,
+  chainName: string,
+): Promise<string> {
+  const address = aeAccount.address;
+
+  const claim = await fetch(`${apiBase}/address-links/prefered-aens-name/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value: chainName }),
+  }).then((r) => r.json());
+
+  const signature = Buffer.from(
+    await aeAccount.signMessage(claim.message),
+  ).toString('hex');
+
+  const { txHash } = await fetch(`${apiBase}/address-links/prefered-aens-name/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  }).then((r) => r.json());
+
+  return txHash;
+}
+```
+
+---
+
 ## React Native / Expo integration
 
 For mobile apps with wallet and Nostr key derivation from a BIP-39 mnemonic.

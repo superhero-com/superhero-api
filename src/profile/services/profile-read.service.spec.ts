@@ -62,6 +62,42 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe('custom_one');
   });
 
+  it('uses AddressLink prefered AENS name from account links', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_preferred_linked',
+        username: 'cached_username',
+      } as ProfileCache,
+      account: {
+        address: 'ak_preferred_linked',
+        links: { prefaens: 'hero.chain' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_preferred_linked');
+
+    expect(result.profile.prefered_aens_name).toBe('hero.chain');
+    expect(result.public_name).toBe('hero.chain');
+  });
+
+  it('prefers linked prefered AENS name over chain_name for public_name', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_chain_preferred',
+        chain_name: 'chain_one',
+      } as ProfileCache,
+      account: {
+        address: 'ak_chain_preferred',
+        links: { prefaens: 'hero.chain' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_chain_preferred');
+
+    expect(result.profile.prefered_aens_name).toBe('hero.chain');
+    expect(result.public_name).toBe('hero.chain');
+  });
+
   it('uses AddressLink x value from account links', async () => {
     const service = createService({
       cache: {

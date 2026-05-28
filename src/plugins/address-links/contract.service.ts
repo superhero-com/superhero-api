@@ -61,6 +61,39 @@ export class AddressLinksContractService implements OnModuleInit {
     return `unlink:${address}:${provider}:${nonce}`;
   }
 
+  buildLinkMessageForPrincipal(
+    principal: string,
+    provider: string,
+    value: string,
+    nonce: number,
+  ): string {
+    return `link:${principal}:${provider}:${value}:${nonce}`;
+  }
+
+  buildUnlinkMessageForPrincipal(
+    principal: string,
+    provider: string,
+    nonce: number,
+  ): string {
+    return `unlink:${principal}:${provider}:${nonce}`;
+  }
+
+  async getNoncePrincipal(principal: string, signer: string): Promise<number> {
+    const contract = await this.getContractInstance();
+    const result: any = await contract.get_nonce_principal(principal, signer);
+    return Number(result?.decodedResult ?? result);
+  }
+
+  async getLink(address: string, provider: string): Promise<string | null> {
+    const contract = await this.getContractInstance();
+    const result: any = await contract.get_link(address, provider);
+    const value = result?.decodedResult ?? result;
+    if (value === undefined || value === null || value === false) {
+      return null;
+    }
+    return String(value);
+  }
+
   async link(
     address: string,
     provider: string,
@@ -88,6 +121,35 @@ export class AddressLinksContractService implements OnModuleInit {
     }
   }
 
+  async linkPrincipal(
+    principal: string,
+    signer: string,
+    provider: string,
+    value: string,
+    nonce: number,
+    signature: string,
+  ) {
+    const contract = await this.getContractInstance();
+    const sigBuffer = this.decodeSignature(signature);
+
+    try {
+      const tx = await contract.link_principal(
+        principal,
+        signer,
+        provider,
+        value,
+        nonce,
+        sigBuffer,
+        { onAccount: this.providerAccount! },
+      );
+
+      this.logger.log(`Link principal tx: ${tx.hash}`);
+      return tx;
+    } catch (error) {
+      throw this.mapContractError(error, 'link_principal');
+    }
+  }
+
   async unlink(
     address: string,
     provider: string,
@@ -109,6 +171,33 @@ export class AddressLinksContractService implements OnModuleInit {
     }
   }
 
+  async unlinkPrincipal(
+    principal: string,
+    signer: string,
+    provider: string,
+    nonce: number,
+    signature: string,
+  ) {
+    const contract = await this.getContractInstance();
+    const sigBuffer = this.decodeSignature(signature);
+
+    try {
+      const tx = await contract.unlink_principal(
+        principal,
+        signer,
+        provider,
+        nonce,
+        sigBuffer,
+        { onAccount: this.providerAccount! },
+      );
+
+      this.logger.log(`Unlink principal tx: ${tx.hash}`);
+      return tx;
+    } catch (error) {
+      throw this.mapContractError(error, 'unlink_principal');
+    }
+  }
+
   private static readonly KNOWN_CONTRACT_ERRORS: Record<string, string> = {
     INVALID_SIGNATURE:
       'Wallet signature verification failed. Ensure the message was signed with the correct AE account using the signed-message format.',
@@ -119,6 +208,11 @@ export class AddressLinksContractService implements OnModuleInit {
     NOT_LINKED: 'No link exists for this provider and address.',
     NOT_PROVIDER_OWNER:
       'The backend wallet is not the registered owner for this provider on the contract.',
+    PRINCIPAL_NOT_FOUND:
+      'AENS name not found. The name must be registered on-chain.',
+    PRINCIPAL_MISMATCH:
+      'AENS name is not owned by this address. Only the name owner can link or unlink.',
+    INVALID_PRINCIPAL: 'Invalid AENS name principal.',
   };
 
   private decodeSignature(hex: string): Buffer {

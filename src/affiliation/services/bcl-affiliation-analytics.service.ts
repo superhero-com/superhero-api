@@ -63,6 +63,10 @@ export type BclXInviteUsageSummary = {
 
 @Injectable()
 export class BclAffiliationAnalyticsService {
+  /** `link(addr, …)` user address; not `caller_id` (sponsor broadcasts via onAccount). */
+  private static readonly X_LINK_ADDRESS_SQL =
+    "t.raw->'arguments'->0->>'value'";
+
   constructor(
     @InjectRepository(Invitation)
     private readonly invitationRepo: Repository<Invitation>,
@@ -480,15 +484,16 @@ export class BclAffiliationAnalyticsService {
     endDate: Date,
   ): Promise<Record<string, number>> {
     const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
+    const linkedAddress = BclAffiliationAnalyticsService.X_LINK_ADDRESS_SQL;
     let qb = this.txRepo
       .createQueryBuilder('t')
-      .select('t.caller_id', 'caller_id')
+      .select(linkedAddress, 'linked_address')
       .addSelect(
         `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD'))`,
         'date',
       )
       .where('t.function = :fn', { fn: 'link' })
-      .andWhere('t.caller_id IS NOT NULL')
+      .andWhere(`${linkedAddress} IS NOT NULL`)
       .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
         provider: 'x',
       })
@@ -502,9 +507,9 @@ export class BclAffiliationAnalyticsService {
     }
 
     const rows = await qb
-      .groupBy('t.caller_id')
+      .groupBy(linkedAddress)
       .orderBy('date', 'ASC')
-      .getRawMany<{ caller_id: string; date: string }>();
+      .getRawMany<{ linked_address: string; date: string }>();
 
     const out: Record<string, number> = {};
     for (const r of rows) {
@@ -518,11 +523,12 @@ export class BclAffiliationAnalyticsService {
 
   private async getTotalVerifiedUsers(startDate: Date, endDate: Date) {
     const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
+    const linkedAddress = BclAffiliationAnalyticsService.X_LINK_ADDRESS_SQL;
     let qb = this.txRepo
       .createQueryBuilder('t')
-      .select('COUNT(DISTINCT t.caller_id)::int', 'count')
+      .select(`COUNT(DISTINCT ${linkedAddress})::int`, 'count')
       .where('t.function = :fn', { fn: 'link' })
-      .andWhere('t.caller_id IS NOT NULL')
+      .andWhere(`${linkedAddress} IS NOT NULL`)
       .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
         provider: 'x',
       })

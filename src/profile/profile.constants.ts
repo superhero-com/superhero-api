@@ -84,6 +84,9 @@ export const PROFILE_X_INVITE_PENDING_TIMEOUT_SECONDS = parseInt(
   10,
 );
 
+/** Sponsored claims only accept labels of at least this length (without `.chain`). */
+export const PROFILE_CHAIN_NAME_MIN_LABEL_LENGTH = 13;
+
 export const PROFILE_CHAIN_NAME_PRIVATE_KEY =
   process.env.PROFILE_CHAIN_NAME_PRIVATE_KEY || '';
 

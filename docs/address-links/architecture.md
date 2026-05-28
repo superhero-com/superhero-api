@@ -117,9 +117,12 @@ The `accounts` table has a `links` JSONB column:
   "nostr": "npub1xyzabc...",
   "x": "superherocom",
   "bio": "Builder on Aeternity",
-  "site": "example.com"
+  "site": "example.com",
+  "prefaens": "hero.chain"
 }
 ```
+
+The prefered AENS name provider uses `link_principal` on-chain. The signed message principal and stored value are the `.chain` name (e.g. `hero.chain`); the contract verifies AENS ownership via `AENSv2.lookup`. HTTP routes: `/address-links/prefered-aens-name/`; on-chain provider id: `prefaens`.
 
 Queried via `GET /accounts/:address` -- the `links` field is included in the response.
 
