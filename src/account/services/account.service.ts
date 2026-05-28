@@ -5,9 +5,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { IsNull, LessThan, Not, Repository } from 'typeorm';
+import { EntityManager, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { fetchJson } from '@/utils/common';
+
+type AggregatedAccountRow = {
+  address: string;
+  total_tx_count: number;
+  total_buy_tx_count: number;
+  total_sell_tx_count: number;
+  total_created_tokens: number;
+  total_volume: string;
+};
 
 @Injectable()
 export class AccountService {
@@ -29,6 +38,101 @@ export class AccountService {
     }
   }
 
+  /**
+   * Ensures a minimal account row exists (used when indexing activity).
+   */
+  async ensureAccountExists(
+    address: string,
+    manager?: EntityManager,
+  ): Promise<Account | null> {
+    const accountRepository = manager
+      ? manager.getRepository(Account)
+      : this.accountRepository;
+
+    await accountRepository.upsert(
+      { address },
+      {
+        conflictPaths: ['address'],
+        skipUpdateIfNoValuesChanged: true,
+      },
+    );
+
+    return accountRepository.findOne({ where: { address } });
+  }
+
+  /**
+   * Creates or refreshes an account row from indexed BCL transactions.
+   * The accounts list/search only queries this table; without a row, active
+   * traders are invisible even when transactions exist.
+   */
+  async ensureAccountFromTransactions(
+    address: string,
+    manager?: EntityManager,
+  ): Promise<Account | null> {
+    const accountRepository = manager
+      ? manager.getRepository(Account)
+      : this.accountRepository;
+    const transactionRepository = manager
+      ? manager.getRepository(Transaction)
+      : this.transactionRepository;
+
+    const existing = await accountRepository.findOne({
+      where: { address },
+    });
+
+    const aggregated = await this.aggregateAccountRow(
+      address,
+      transactionRepository,
+    );
+    if (!aggregated) {
+      return existing;
+    }
+
+    await accountRepository.upsert(aggregated, {
+      conflictPaths: ['address'],
+    });
+
+    return accountRepository.findOne({ where: { address } });
+  }
+
+  private async aggregateAccountRow(
+    address: string,
+    transactionRepository: Repository<Transaction>,
+  ): Promise<Account | null> {
+    const rows: AggregatedAccountRow[] = await transactionRepository.query(
+      `SELECT
+          address,
+          COUNT(*)::int                                    AS total_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $2)::int        AS total_buy_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $3)::int        AS total_sell_tx_count,
+          COUNT(*) FILTER (WHERE tx_type = $4)::int        AS total_created_tokens,
+          COALESCE(SUM(CAST(NULLIF(amount->>'ae','NaN') AS DECIMAL)), 0) AS total_volume
+        FROM transactions
+        WHERE address = $1
+        GROUP BY address`,
+      [
+        address,
+        TX_FUNCTIONS.buy,
+        TX_FUNCTIONS.sell,
+        TX_FUNCTIONS.create_community,
+      ],
+    );
+
+    if (!rows.length) {
+      return null;
+    }
+
+    const row = rows[0];
+    return {
+      address: row.address,
+      total_tx_count: row.total_tx_count,
+      total_buy_tx_count: row.total_buy_tx_count,
+      total_sell_tx_count: row.total_sell_tx_count,
+      total_created_tokens: row.total_created_tokens,
+      total_volume: new BigNumber(row.total_volume),
+    } as Account;
+  }
+
   private static readonly ACCOUNT_BATCH_SIZE = 500;
 
   isPullingAccounts = false;
@@ -38,15 +142,9 @@ export class AccountService {
     }
     this.isPullingAccounts = true;
     try {
-      const aggregated: Array<{
-        address: string;
-        total_tx_count: number;
-        total_buy_tx_count: number;
-        total_sell_tx_count: number;
-        total_created_tokens: number;
-        total_volume: string;
-      }> = await this.transactionRepository.query(
-        `SELECT
+      const aggregated: AggregatedAccountRow[] =
+        await this.transactionRepository.query(
+          `SELECT
           address,
           COUNT(*)::int                                    AS total_tx_count,
           COUNT(*) FILTER (WHERE tx_type = $1)::int        AS total_buy_tx_count,
@@ -55,8 +153,8 @@ export class AccountService {
           COALESCE(SUM(CAST(NULLIF(amount->>'ae','NaN') AS DECIMAL)), 0) AS total_volume
         FROM transactions
         GROUP BY address`,
-        [TX_FUNCTIONS.buy, TX_FUNCTIONS.sell, TX_FUNCTIONS.create_community],
-      );
+          [TX_FUNCTIONS.buy, TX_FUNCTIONS.sell, TX_FUNCTIONS.create_community],
+        );
 
       for (
         let i = 0;
@@ -74,13 +172,10 @@ export class AccountService {
             total_volume: new BigNumber(row.total_volume),
           }));
 
-        await this.accountRepository
-          .createQueryBuilder()
-          .insert()
-          .into(Account)
-          .values(batch)
-          .orIgnore()
-          .execute();
+        await this.accountRepository.upsert(batch, {
+          conflictPaths: ['address'],
+          skipUpdateIfNoValuesChanged: true,
+        });
       }
     } catch (error) {
       this.logger.error('Error pulling and saving accounts', error);

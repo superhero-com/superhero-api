@@ -1,7 +1,7 @@
 import { AccountsController } from './accounts.controller';
 import { StreamableFile } from '@nestjs/common';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn().mockResolvedValue({ items: [], meta: {} }),
@@ -23,6 +23,7 @@ describe('AccountsController', () => {
   let queryBuilder: ReturnType<typeof createQueryBuilder>;
   let accountService: {
     getChainNameForAccount: jest.Mock;
+    ensureAccountFromTransactions: jest.Mock;
   };
   let profileReadService: {
     getProfile: jest.Mock;
@@ -45,6 +46,7 @@ describe('AccountsController', () => {
     };
     accountService = {
       getChainNameForAccount: jest.fn(),
+      ensureAccountFromTransactions: jest.fn().mockResolvedValue(null),
     };
     profileReadService = {
       getProfile: jest.fn(),
@@ -91,9 +93,37 @@ describe('AccountsController', () => {
     expect(result).toEqual({ items: [], meta: {} });
   });
 
+  it('hydrates account from transactions when searching by account address', async () => {
+    const address = 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ';
+
+    await controller.listAll(address, 1, 10, 'total_volume', 'DESC');
+
+    expect(accountService.ensureAccountFromTransactions).toHaveBeenCalledWith(
+      address,
+    );
+  });
+
+  it('continues search when account hydration fails', async () => {
+    const address = 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ';
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    accountService.ensureAccountFromTransactions.mockRejectedValue(
+      new Error('aggregation timeout'),
+    );
+
+    await expect(
+      controller.listAll(address, 1, 10, 'total_volume', 'DESC'),
+    ).resolves.toEqual({ items: [], meta: {} });
+
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
   it('applies search across account addresses and names', async () => {
     await controller.listAll('alice', 1, 100, 'total_volume', 'DESC');
 
+    expect(accountService.ensureAccountFromTransactions).not.toHaveBeenCalled();
     expect(queryBuilder.leftJoin).toHaveBeenCalledWith(
       expect.any(Function),
       'profile_cache',
@@ -133,6 +163,55 @@ describe('AccountsController', () => {
     await expect(controller.getAccount('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('falls back to stored account when hydration fails', async () => {
+    const account = {
+      address: 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ',
+      chain_name: null,
+      chain_name_updated_at: new Date(),
+    };
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    accountService.ensureAccountFromTransactions.mockRejectedValue(
+      new Error('upsert failed'),
+    );
+    accountRepository.findOne.mockResolvedValue(account);
+    profileReadService.getProfile.mockResolvedValue({
+      profile: null,
+      public_name: null,
+    });
+
+    const result = await controller.getAccount(account.address);
+
+    expect(accountRepository.findOne).toHaveBeenCalledWith({
+      where: { address: account.address },
+    });
+    expect(result).toMatchObject({ address: account.address });
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it('hydrates account details from transactions before returning 404', async () => {
+    const account = {
+      address: 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ',
+      chain_name: null,
+      chain_name_updated_at: new Date(),
+    };
+    accountService.ensureAccountFromTransactions.mockResolvedValue(account);
+    profileReadService.getProfile.mockResolvedValue({
+      profile: null,
+      public_name: null,
+    });
+
+    const result = await controller.getAccount(account.address);
+
+    expect(accountService.ensureAccountFromTransactions).toHaveBeenCalledWith(
+      account.address,
+    );
+    expect(accountRepository.findOne).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ address: account.address });
   });
 
   describe('getPortfolioPnlChart', () => {

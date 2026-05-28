@@ -41,7 +41,7 @@ import { AePricingModule } from '@/ae-pricing/ae-pricing.module';
     LeaderboardService,
     LeaderboardSnapshotService,
   ],
-  exports: [TypeOrmModule, BclPnlService],
+  exports: [TypeOrmModule, AccountService, BclPnlService],
   controllers: [LeaderboardController, AccountsController, BclPnlController],
 })
 export class AccountModule {

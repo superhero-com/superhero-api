@@ -42,6 +42,7 @@ import {
 import {
   AeAccountAddressPipe,
   AeAccountReferencePipe,
+  isAeAccountAddress,
 } from '@/common/validation/request-validation';
 
 const ALLOWED_ORDER_BY = new Set([
@@ -128,6 +129,12 @@ export class AccountsController {
         `search must be at most ${MAX_SEARCH_LENGTH} characters`,
       );
     }
+
+    const trimmedSearch = search?.trim();
+    if (trimmedSearch && isAeAccountAddress(trimmedSearch)) {
+      await this.tryHydrateAccountFromTransactions(trimmedSearch);
+    }
+
     const query = this.accountRepository.createQueryBuilder('account');
 
     if (search?.trim()) {
@@ -396,9 +403,11 @@ export class AccountsController {
   @CacheTTL(10 * 60_000)
   @Get(':address')
   async getAccount(@Param('address', AeAccountAddressPipe) address: string) {
-    const account = await this.accountRepository.findOne({
-      where: { address },
-    });
+    const account =
+      (await this.tryHydrateAccountFromTransactions(address)) ??
+      (await this.accountRepository.findOne({
+        where: { address },
+      }));
 
     if (!account) {
       throw new NotFoundException('Account not found');
@@ -441,5 +450,19 @@ export class AccountsController {
       profile: profile.profile,
       public_name: profile.public_name,
     };
+  }
+
+  private async tryHydrateAccountFromTransactions(
+    address: string,
+  ): Promise<Account | null> {
+    try {
+      return await this.accountService.ensureAccountFromTransactions(address);
+    } catch (error) {
+      this.logger.error(
+        `Failed to hydrate account from transactions for ${address}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return null;
+    }
   }
 }

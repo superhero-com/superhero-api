@@ -1,3 +1,4 @@
+import { AccountService } from '@/account/services/account.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
@@ -5,7 +6,6 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirection } from '../../plugin.interface';
 import { decode, toAe } from '@aeternity/aepp-sdk';
 import { Tip } from '@/tipping/entities/tip.entity';
-import { Account } from '@/account/entities/account.entity';
 import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
@@ -20,8 +20,7 @@ export class SocialTippingTransactionProcessorService {
   constructor(
     @InjectRepository(Tip)
     private readonly tipRepository: Repository<Tip>,
-    @InjectRepository(Account)
-    private readonly accountRepository: Repository<Account>,
+    private readonly accountService: AccountService,
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
     private readonly tokensService: TokensService,
@@ -143,8 +142,8 @@ export class SocialTippingTransactionProcessorService {
 
     // Ensure sender and receiver accounts exist
     const [senderAccount, receiverAccount] = await Promise.all([
-      this.ensureAccountExists(tx.sender_id, manager),
-      this.ensureAccountExists(tx.recipient_id, manager),
+      this.accountService.ensureAccountExists(tx.sender_id, manager),
+      this.accountService.ensureAccountExists(tx.recipient_id, manager),
     ]);
 
     if (!senderAccount || !receiverAccount) {
@@ -174,34 +173,5 @@ export class SocialTippingTransactionProcessorService {
       }),
       post,
     };
-  }
-
-  /**
-   * Ensures an account exists, creates it if it doesn't
-   */
-  private async ensureAccountExists(
-    address: string,
-    manager: EntityManager,
-  ): Promise<Account | null> {
-    try {
-      const accountRepository = manager.getRepository(Account);
-
-      // Use upsert to handle duplicate key violations gracefully during parallel processing
-      await accountRepository.upsert(
-        { address },
-        {
-          conflictPaths: ['address'],
-          skipUpdateIfNoValuesChanged: true,
-        },
-      );
-
-      // Fetch and return the account
-      return await accountRepository.findOne({
-        where: { address },
-      });
-    } catch (error) {
-      this.logger.error(`Failed to ensure account exists: ${address}`, error);
-      return null;
-    }
   }
 }
