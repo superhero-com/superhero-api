@@ -1,10 +1,24 @@
 export const PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY =
   process.env.PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY || '';
 
+/**
+ * Master kill-switch for every profile reward payout (X posting reward, X
+ * invite milestone reward, …).
+ *
+ * TODO(reward-program): Reward payouts are disabled pending a product decision
+ * on the new AddressLink-based profile flow. No reward should be paid right
+ * now. The only things we sponsor are name claims and profile adjustments
+ * (link / unlink / link_principal / unlink_principal). This flag hard-overrides
+ * any per-reward env toggle below, so nothing pays out even if those env vars
+ * are set. Re-enable once the reward program is decided.
+ */
+export const PROFILE_REWARDS_DISABLED: boolean = true;
+
 export const PROFILE_X_POSTING_REWARD_AMOUNT_AE =
   process.env.PROFILE_X_POSTING_REWARD_AMOUNT_AE || '0.05';
 
 export const PROFILE_X_POSTING_REWARD_ENABLED =
+  !PROFILE_REWARDS_DISABLED &&
   (process.env.PROFILE_X_POSTING_REWARD_ENABLED || 'false')
     .trim()
     .toLowerCase() !== 'false';
