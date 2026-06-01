@@ -212,6 +212,11 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     );
 
     if (provider === 'x') {
+      // TODO(reward-program): The X posting reward is disabled right now (see
+      // PROFILE_REWARDS_DISABLED / PROFILE_X_POSTING_REWARD_ENABLED), so this
+      // call is a no-op and pays nothing. The only sponsored operations are
+      // name claims and profile adjustments. Re-enable once the reward program
+      // is decided.
       await this.profileXPostingRewardService.upsertVerifiedCandidateFromTx(
         address,
         value,
