@@ -123,7 +123,10 @@ describe('ProfileCacheService', () => {
 
   it('falls back to wall-clock now when no usable micro_time exists', async () => {
     const { service, profileCacheRepository, accountRepository } = getService();
-    accountRepository.findOne.mockResolvedValue({ address: ADDRESS, links: {} });
+    accountRepository.findOne.mockResolvedValue({
+      address: ADDRESS,
+      links: {},
+    });
 
     const before = Date.now();
     await service.syncFromAccountLinks(ADDRESS);
