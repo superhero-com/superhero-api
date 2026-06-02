@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
+import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileCache } from '../entities/profile-cache.entity';
 
 /**
@@ -80,16 +81,16 @@ export class ProfileCacheService {
   }
 
   /**
-   * Resolve the feed-ordering timestamp from the event's micro_time (epoch
-   * milliseconds). Falls back to wall-clock now only when no usable time is
-   * available, so live events still surface at the top.
+   * Resolve the feed-ordering timestamp from the event's micro_time.
+   * micro_time is microseconds since the epoch, so it must be scaled to
+   * milliseconds (see {@link microTimeToDate}) before constructing a Date;
+   * passing it raw would land updated_at thousands of years in the future and
+   * on a different scale than the wall-clock fallback. Falls back to
+   * wall-clock now only when no usable time is available, so live events still
+   * surface at the top.
    */
   private resolveEventTime(microTime: string | null): Date {
-    const ms = microTime ? Number(microTime) : NaN;
-    if (Number.isFinite(ms) && ms > 0) {
-      return new Date(ms);
-    }
-    return new Date();
+    return microTimeToDate(microTime) ?? new Date();
   }
 
   /**

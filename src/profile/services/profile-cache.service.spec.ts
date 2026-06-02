@@ -37,7 +37,8 @@ describe('ProfileCacheService', () => {
       links: { bio: 'hello' },
     });
 
-    await service.syncFromAccountLinks(ADDRESS, '1234');
+    // Middleware micro_time is microseconds since the epoch.
+    await service.syncFromAccountLinks(ADDRESS, '1700000000000000');
 
     expect(profileCacheRepository.upsert).toHaveBeenCalledTimes(1);
     const [values, options] = profileCacheRepository.upsert.mock.calls[0];
@@ -45,12 +46,13 @@ describe('ProfileCacheService', () => {
       expect.objectContaining({
         address: ADDRESS,
         public_name: null,
-        last_seen_micro_time: '1234',
+        last_seen_micro_time: '1700000000000000',
       }),
     );
-    // updated_at is derived from the event micro_time (epoch ms), not
-    // wall-clock now, so the feed keeps chronological order across backfills.
-    expect(values.updated_at).toEqual(new Date(1234));
+    // updated_at is derived from the event micro_time (scaled from microseconds
+    // to milliseconds), not wall-clock now, so the feed keeps chronological
+    // order across backfills.
+    expect(values.updated_at).toEqual(new Date(1_700_000_000_000));
     expect(options).toEqual({ conflictPaths: ['address'] });
     // Registry-only fields are never written, so they are preserved on update.
     expect(values).not.toHaveProperty('fullname');
@@ -107,17 +109,18 @@ describe('ProfileCacheService', () => {
     });
     profileCacheRepository.findOne.mockResolvedValue({
       address: ADDRESS,
-      last_seen_micro_time: '999',
+      last_seen_micro_time: '1700000000000000',
     });
 
     await service.syncFromAccountLinks(ADDRESS);
 
     expect(
       profileCacheRepository.upsert.mock.calls[0][0].last_seen_micro_time,
-    ).toBe('999');
-    // updated_at follows the carried-over event time, not wall-clock now.
+    ).toBe('1700000000000000');
+    // updated_at follows the carried-over event time (scaled from microseconds
+    // to milliseconds), not wall-clock now.
     expect(profileCacheRepository.upsert.mock.calls[0][0].updated_at).toEqual(
-      new Date(999),
+      new Date(1_700_000_000_000),
     );
   });
 
