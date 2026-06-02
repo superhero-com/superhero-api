@@ -16,8 +16,18 @@ describe('sponsored chain name label validation', () => {
     expect(isSponsoredChainNameLabel('a'.repeat(13))).toBe(true);
   });
 
-  it('rejects invalid AENS labels', () => {
-    expect(isSponsoredChainNameLabel('Invalid-Name')).toBe(false);
+  it('rejects uppercase, unicode and underscore labels (>= 13 chars)', () => {
+    // These are >= 13 chars, so they are rejected by the charset guard rather
+    // than the length check. `isNameValid` alone would accept uppercase and
+    // unicode, which the sponsor flow cannot store/compare safely.
+    expect(isSponsoredChainNameLabel('InvalidNameHere')).toBe(false);
+    expect(isSponsoredChainNameLabel('münchen-cafe123')).toBe(false);
+    expect(isSponsoredChainNameLabel('bad_name_here_xx')).toBe(false);
+  });
+
+  it('rejects labels with a leading or trailing hyphen', () => {
+    expect(isSponsoredChainNameLabel('-leadinghyphen')).toBe(false);
+    expect(isSponsoredChainNameLabel('trailinghyphen-')).toBe(false);
   });
 
   it('throws from the param pipe for invalid labels', () => {
