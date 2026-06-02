@@ -48,7 +48,9 @@ describe('ProfileCacheService', () => {
         last_seen_micro_time: '1234',
       }),
     );
-    expect(values.updated_at).toBeInstanceOf(Date);
+    // updated_at is derived from the event micro_time (epoch ms), not
+    // wall-clock now, so the feed keeps chronological order across backfills.
+    expect(values.updated_at).toEqual(new Date(1234));
     expect(options).toEqual({ conflictPaths: ['address'] });
     // Registry-only fields are never written, so they are preserved on update.
     expect(values).not.toHaveProperty('fullname');
@@ -113,6 +115,25 @@ describe('ProfileCacheService', () => {
     expect(
       profileCacheRepository.upsert.mock.calls[0][0].last_seen_micro_time,
     ).toBe('999');
+    // updated_at follows the carried-over event time, not wall-clock now.
+    expect(profileCacheRepository.upsert.mock.calls[0][0].updated_at).toEqual(
+      new Date(999),
+    );
+  });
+
+  it('falls back to wall-clock now when no usable micro_time exists', async () => {
+    const { service, profileCacheRepository, accountRepository } = getService();
+    accountRepository.findOne.mockResolvedValue({ address: ADDRESS, links: {} });
+
+    const before = Date.now();
+    await service.syncFromAccountLinks(ADDRESS);
+    const after = Date.now();
+
+    const updatedAt: Date =
+      profileCacheRepository.upsert.mock.calls[0][0].updated_at;
+    expect(updatedAt).toBeInstanceOf(Date);
+    expect(updatedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(updatedAt.getTime()).toBeLessThanOrEqual(after);
   });
 
   it('does not throw when the upsert fails', async () => {
