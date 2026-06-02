@@ -53,17 +53,21 @@ export class ProfileCacheService {
     ]);
 
     const publicName = this.resolvePublicName(account, existing);
+    const lastSeenMicroTime =
+      microTime ?? existing?.last_seen_micro_time ?? null;
 
     try {
       await this.profileCacheRepository.upsert(
         {
           address,
           public_name: publicName,
-          last_seen_micro_time:
-            microTime ?? existing?.last_seen_micro_time ?? null,
-          // Bump explicitly: TypeORM does not touch @UpdateDateColumn on
-          // upsert, and the feed orders by this column.
-          updated_at: new Date(),
+          last_seen_micro_time: lastSeenMicroTime,
+          // Derive from the on-chain event time, not wall-clock now: the feed
+          // orders by this column, so stamping it with the processing time
+          // would scramble feed order during a historical backfill (every
+          // replayed event would sort as "just now"). TypeORM does not touch
+          // @UpdateDateColumn on upsert, so it must be set explicitly.
+          updated_at: this.resolveEventTime(lastSeenMicroTime),
         },
         { conflictPaths: ['address'] },
       );
@@ -73,6 +77,19 @@ export class ProfileCacheService {
         error instanceof Error ? error.stack : String(error),
       );
     }
+  }
+
+  /**
+   * Resolve the feed-ordering timestamp from the event's micro_time (epoch
+   * milliseconds). Falls back to wall-clock now only when no usable time is
+   * available, so live events still surface at the top.
+   */
+  private resolveEventTime(microTime: string | null): Date {
+    const ms = microTime ? Number(microTime) : NaN;
+    if (Number.isFinite(ms) && ms > 0) {
+      return new Date(ms);
+    }
+    return new Date();
   }
 
   /**
