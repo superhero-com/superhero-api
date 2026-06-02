@@ -12,7 +12,7 @@ jest.mock('../profile.constants', () => ({
 import { ProfileXInviteService } from './profile-x-invite.service';
 import * as profileSignatureUtil from './profile-signature.util';
 
-describe.skip('ProfileXInviteService', () => {
+describe('ProfileXInviteService', () => {
   const getService = () => {
     const inviteRepository = {
       findOne: jest.fn(),
@@ -211,12 +211,15 @@ describe.skip('ProfileXInviteService', () => {
 
   it('preserves sg_ signature casing during challenge verification', async () => {
     const { service, manager, dataSource } = getService();
+    // expires_at maps to a timestamp column, so TypeORM hydrates it as a Date;
+    // the service calls challenge.expires_at.getTime(), so the mock must match.
+    const expiresAtMs = Date.now() + 10_000;
     const challenge = {
       address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
       purpose: 'create',
       invite_code: '',
       nonce: 'a'.repeat(24),
-      expires_at: Date.now() + 10_000,
+      expires_at: new Date(expiresAtMs),
       consumed_at: null,
     };
     const save = jest.fn().mockImplementation(async (v) => v);
@@ -240,7 +243,7 @@ describe.skip('ProfileXInviteService', () => {
       purpose: 'create',
       inviteCode: null,
       nonce: challenge.nonce,
-      expiresAt: challenge.expires_at,
+      expiresAt: expiresAtMs,
       signatureHex,
     });
 
