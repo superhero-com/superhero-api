@@ -85,11 +85,14 @@ describe('AddressLinksPluginSyncService', () => {
       micro_time: '1000',
       function: 'link_principal',
       raw: {
+        // Middleware returns contract-call arguments positionally as
+        // { type, value } with no `name` field, matching the ACI signature
+        // link_principal(principal, signer, provider, value, nonce, sig).
         arguments: [
-          { name: 'principal', value: 'hero.chain' },
-          { name: 'signer', value: SIGNER_ADDRESS },
-          { name: 'provider', value: 'prefaens' },
-          { name: 'value', value: 'hero.chain' },
+          { type: 'string', value: 'hero.chain' },
+          { type: 'address', value: SIGNER_ADDRESS },
+          { type: 'string', value: 'prefaens' },
+          { type: 'string', value: 'hero.chain' },
         ],
       },
       ...overrides,
@@ -121,10 +124,11 @@ describe('AddressLinksPluginSyncService', () => {
       baseTx({
         function: 'unlink_principal',
         raw: {
+          // unlink_principal(principal, signer, provider, nonce, sig)
           arguments: [
-            { name: 'principal', value: 'hero.chain' },
-            { name: 'signer', value: SIGNER_ADDRESS },
-            { name: 'provider', value: 'prefaens' },
+            { type: 'string', value: 'hero.chain' },
+            { type: 'address', value: SIGNER_ADDRESS },
+            { type: 'string', value: 'prefaens' },
           ],
         },
       }),
@@ -142,6 +146,47 @@ describe('AddressLinksPluginSyncService', () => {
       SIGNER_ADDRESS,
       '1000',
     );
+  });
+
+  it('falls back to named arguments when the middleware provides them', async () => {
+    await service.processTransaction(
+      baseTx({
+        raw: {
+          arguments: [
+            { name: 'principal', type: 'string', value: 'hero.chain' },
+            { name: 'value', type: 'string', value: 'hero.chain' },
+            { name: 'provider', type: 'string', value: 'prefaens' },
+            { name: 'signer', type: 'address', value: SIGNER_ADDRESS },
+          ],
+        },
+      }),
+      SyncDirectionEnum.Live,
+    );
+
+    expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+      'provider',
+      'prefaens',
+    );
+    expect(queryBuilder.where).toHaveBeenCalledWith('address = :address', {
+      address: SIGNER_ADDRESS,
+    });
+  });
+
+  it('falls back to fetching logs when call arguments are missing', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    } as Response);
+
+    await service.processTransaction(
+      baseTx({ raw: { arguments: [] } }),
+      SyncDirectionEnum.Live,
+    );
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(queryBuilder.update).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
   });
 
   it('handles PrincipalLink logs by event_name', async () => {

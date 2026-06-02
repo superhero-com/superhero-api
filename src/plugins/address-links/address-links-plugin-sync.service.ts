@@ -97,14 +97,28 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     }
   }
 
-  private getRawArgument(tx: Tx, name: string): string | undefined {
+  /**
+   * Read a decoded contract-call argument out of `tx.raw.arguments`.
+   *
+   * The middleware returns contract-call arguments as an ordered
+   * `[{ type, value }]` list with NO `name` field, so they must be resolved
+   * positionally (matching the function signature in the contract ACI). A
+   * name match is kept only as a defensive fallback in case a future
+   * middleware version starts including argument names.
+   */
+  private getRawArgument(
+    tx: Tx,
+    index: number,
+    name: string,
+  ): string | undefined {
     const args = tx.raw?.arguments;
     if (!Array.isArray(args)) {
       return undefined;
     }
-    const entry = args.find(
+    const byName = args.find(
       (arg: { name?: string; value?: unknown }) => arg?.name === name,
     );
+    const entry = byName ?? args[index];
     if (entry?.value === undefined || entry?.value === null) {
       return undefined;
     }
@@ -112,9 +126,10 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
   }
 
   private async syncLinkPrincipalFromTx(tx: Tx): Promise<void> {
-    const signer = this.getRawArgument(tx, 'signer');
-    const provider = this.getRawArgument(tx, 'provider');
-    const value = this.getRawArgument(tx, 'value');
+    // link_principal(principal, signer, provider, value, nonce, sig)
+    const signer = this.getRawArgument(tx, 1, 'signer');
+    const provider = this.getRawArgument(tx, 2, 'provider');
+    const value = this.getRawArgument(tx, 3, 'value');
 
     if (!signer || !provider || !value) {
       this.logger.warn(
@@ -128,8 +143,9 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
   }
 
   private async syncUnlinkPrincipalFromTx(tx: Tx): Promise<void> {
-    const signer = this.getRawArgument(tx, 'signer');
-    const provider = this.getRawArgument(tx, 'provider');
+    // unlink_principal(principal, signer, provider, nonce, sig)
+    const signer = this.getRawArgument(tx, 1, 'signer');
+    const provider = this.getRawArgument(tx, 2, 'provider');
 
     if (!signer || !provider) {
       this.logger.warn(
