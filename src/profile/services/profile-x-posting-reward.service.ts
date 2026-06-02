@@ -38,6 +38,7 @@ import {
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
 } from '../profile.constants';
 import { Account } from '@/account/entities/account.entity';
+import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
@@ -989,28 +990,7 @@ export class ProfileXPostingRewardService {
   }
 
   private microTimeToDate(value?: string): Date | null {
-    if (!value) {
-      return null;
-    }
-    try {
-      const raw = BigInt(value);
-      if (raw <= 0n) {
-        return null;
-      }
-      // Middleware micro_time is microseconds.
-      if (raw > 1_000_000_000_000_000n) {
-        return new Date(Number(raw / 1000n));
-      }
-      if (raw > 1_000_000_000_000n) {
-        return new Date(Number(raw / 1000n));
-      }
-      if (raw > 10_000_000_000n) {
-        return new Date(Number(raw));
-      }
-      return new Date(Number(raw) * 1000);
-    } catch {
-      return null;
-    }
+    return microTimeToDate(value);
   }
 
   private isXIdentityUniqueConstraintError(error: unknown): boolean {
