@@ -1,19 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import crypto from 'crypto';
 import { ClaimSiteLinkDto } from '../dto/site/claim-site-link.dto';
 import { SubmitSiteLinkDto } from '../dto/site/submit-site-link.dto';
-import {
-  ADDRESS_LINK_SECRET_KEY,
-  ADDRESS_LINK_VERIFICATION_TTL_SECONDS,
-} from '../address-links.constants';
+import { ADDRESS_LINK_VERIFICATION_TTL_SECONDS } from '../address-links.constants';
 import { VerifiedClaim } from './link-verifier.interface';
-
-interface VerificationTokenPayload {
-  address: string;
-  provider: string;
-  value: string;
-  expiry: number;
-}
+import {
+  createVerificationToken,
+  parseVerificationToken,
+} from './verification-token.util';
 
 /** Hostname with optional path; protocol and port are not allowed on-chain. */
 const SITE_VALUE_PATTERN =
@@ -24,7 +17,7 @@ export class SiteLinkVerifierService {
   async verifyClaim(dto: ClaimSiteLinkDto): Promise<VerifiedClaim> {
     const value = this.normalizeSite(dto.value);
     const expiry = Date.now() + ADDRESS_LINK_VERIFICATION_TTL_SECONDS * 1000;
-    const verificationToken = this.createVerificationToken({
+    const verificationToken = createVerificationToken({
       address: dto.address,
       provider: 'site',
       value,
@@ -36,7 +29,7 @@ export class SiteLinkVerifierService {
 
   async verifySubmit(dto: SubmitSiteLinkDto): Promise<void> {
     const value = this.normalizeSite(dto.value);
-    const payload = this.parseVerificationToken(dto.verification_token);
+    const payload = parseVerificationToken(dto.verification_token);
 
     if (Date.now() > payload.expiry) {
       throw new BadRequestException('Verification token has expired');
@@ -82,53 +75,5 @@ export class SiteLinkVerifierService {
     }
 
     return normalized;
-  }
-
-  private createVerificationToken(payload: VerificationTokenPayload): string {
-    const data = JSON.stringify(payload);
-    const hmac = crypto
-      .createHmac('sha256', ADDRESS_LINK_SECRET_KEY)
-      .update(data)
-      .digest('hex');
-    const tokenBytes = Buffer.from(`${data}.${hmac}`, 'utf-8');
-    return tokenBytes.toString('base64url');
-  }
-
-  private parseVerificationToken(token: string): VerificationTokenPayload {
-    let raw: string;
-    try {
-      raw = Buffer.from(token, 'base64url').toString('utf-8');
-    } catch {
-      throw new BadRequestException('Invalid verification token encoding');
-    }
-
-    const dotIdx = raw.lastIndexOf('.');
-    if (dotIdx === -1) {
-      throw new BadRequestException('Malformed verification token');
-    }
-
-    const data = raw.substring(0, dotIdx);
-    const providedHmac = raw.substring(dotIdx + 1);
-
-    const expectedHmac = crypto
-      .createHmac('sha256', ADDRESS_LINK_SECRET_KEY)
-      .update(data)
-      .digest('hex');
-
-    if (
-      providedHmac.length !== expectedHmac.length ||
-      !crypto.timingSafeEqual(
-        Buffer.from(providedHmac, 'hex'),
-        Buffer.from(expectedHmac, 'hex'),
-      )
-    ) {
-      throw new BadRequestException('Invalid verification token signature');
-    }
-
-    try {
-      return JSON.parse(data) as VerificationTokenPayload;
-    } catch {
-      throw new BadRequestException('Invalid verification token payload');
-    }
   }
 }

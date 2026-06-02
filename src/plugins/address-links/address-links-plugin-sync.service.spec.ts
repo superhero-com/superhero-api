@@ -98,6 +98,75 @@ describe('AddressLinksPluginSyncService', () => {
       ...overrides,
     }) as Tx;
 
+  it('updates accounts.links from link call arguments without fetching logs', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch');
+
+    await service.processTransaction(
+      baseTx({
+        function: 'link',
+        hash: 'th_link',
+        raw: {
+          // link(addr, provider, value, nonce, sig)
+          arguments: [
+            { type: 'address', value: SIGNER_ADDRESS },
+            { type: 'string', value: 'site' },
+            { type: 'string', value: 'www.wikipedia.org' },
+            { type: 'int', value: '1' },
+          ],
+        },
+      }),
+      SyncDirectionEnum.Live,
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(queryBuilder.setParameter).toHaveBeenCalledWith('provider', 'site');
+    expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+      'value',
+      'www.wikipedia.org',
+    );
+    expect(queryBuilder.where).toHaveBeenCalledWith('address = :address', {
+      address: SIGNER_ADDRESS,
+    });
+    expect(profileCacheService.syncFromAccountLinks).toHaveBeenCalledWith(
+      SIGNER_ADDRESS,
+      '1000',
+    );
+
+    fetchSpy.mockRestore();
+  });
+
+  it('removes provider from accounts.links for unlink call arguments', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch');
+
+    await service.processTransaction(
+      baseTx({
+        function: 'unlink',
+        hash: 'th_unlink',
+        raw: {
+          // unlink(addr, provider, nonce, sig)
+          arguments: [
+            { type: 'address', value: SIGNER_ADDRESS },
+            { type: 'string', value: 'site' },
+            { type: 'int', value: '1' },
+          ],
+        },
+      }),
+      SyncDirectionEnum.Live,
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(queryBuilder.setParameter).toHaveBeenCalledWith('provider', 'site');
+    expect(queryBuilder.where).toHaveBeenCalledWith('address = :address', {
+      address: SIGNER_ADDRESS,
+    });
+    expect(profileCacheService.syncFromAccountLinks).toHaveBeenCalledWith(
+      SIGNER_ADDRESS,
+      '1000',
+    );
+
+    fetchSpy.mockRestore();
+  });
+
   it('updates accounts.links from link_principal call arguments', async () => {
     await service.processTransaction(baseTx(), SyncDirectionEnum.Live);
 
@@ -205,7 +274,9 @@ describe('AddressLinksPluginSyncService', () => {
     } as Response);
 
     await service.processTransaction(
-      baseTx({ function: 'link', hash: 'th_link' }),
+      // Empty call arguments force the log-fetch fallback, which is where
+      // event_name resolution lives.
+      baseTx({ function: 'link', hash: 'th_link', raw: { arguments: [] } }),
       SyncDirectionEnum.Live,
     );
 

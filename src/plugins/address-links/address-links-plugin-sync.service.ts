@@ -39,6 +39,14 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _syncDirection: SyncDirection,
   ): Promise<void> {
+    if (tx.function === 'link') {
+      await this.syncLinkFromTx(tx);
+      return;
+    }
+    if (tx.function === 'unlink') {
+      await this.syncUnlinkFromTx(tx);
+      return;
+    }
     if (tx.function === 'link_principal') {
       await this.syncLinkPrincipalFromTx(tx);
       return;
@@ -123,6 +131,46 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       return undefined;
     }
     return String(entry.value);
+  }
+
+  private async syncLinkFromTx(tx: Tx): Promise<void> {
+    // link(addr, provider, value, nonce, sig)
+    //
+    // Decode the call arguments directly instead of round-tripping to the
+    // middleware contract-logs endpoint. During live (websocket) sync the tx is
+    // delivered the moment it is mined, but the middleware has not necessarily
+    // indexed its *logs* yet, so /v3/contracts/logs returns an empty list and
+    // the link silently fails to apply until a later catch-up pass reprocesses
+    // the block. Reading the args makes the update instant and deterministic.
+    const addr = this.getRawArgument(tx, 0, 'addr');
+    const provider = this.getRawArgument(tx, 1, 'provider');
+    const value = this.getRawArgument(tx, 2, 'value');
+
+    if (!addr || !provider || value === undefined) {
+      this.logger.warn(
+        `link tx ${tx.hash} missing addr, provider, or value in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleLinkEvent(tx, addr, `${provider}:${value}`);
+  }
+
+  private async syncUnlinkFromTx(tx: Tx): Promise<void> {
+    // unlink(addr, provider, nonce, sig)
+    const addr = this.getRawArgument(tx, 0, 'addr');
+    const provider = this.getRawArgument(tx, 1, 'provider');
+
+    if (!addr || !provider) {
+      this.logger.warn(
+        `unlink tx ${tx.hash} missing addr or provider in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleUnlinkEvent(tx, addr, `${provider}:`);
   }
 
   private async syncLinkPrincipalFromTx(tx: Tx): Promise<void> {
