@@ -28,7 +28,7 @@ function parseFanoutBatch(raw: string | undefined): number {
  */
 export default registerAs(ANNOUNCEMENTS_CONFIG, () => ({
   /** Master switch for the scheduler. Off by default; endpoints stay up regardless. */
-  enabled: process.env.ANNOUNCEMENTS_ENABLED === 'true',
+  enabled: true,
 
   /**
    * Addresses dispatched per fan-out batch. Refuses non-positive values so a
