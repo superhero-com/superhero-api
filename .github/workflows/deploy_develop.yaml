@@ -46,6 +46,9 @@ jobs:
       ADDRESS_LINK_SECRET_KEY: ${{ secrets.DEV_ADDRESS_LINK_SECRET_KEY }}
       ADDRESS_LINK_CONTRACT_ADDRESS: ${{ secrets.DEV_ADDRESS_LINK_CONTRACT_ADDRESS }}
       GIPHY_API_KEY: ${{ secrets.DEV_GIPHY_API_KEY }}
+      EXPO_ACCESS_TOKEN: ${{ secrets.DEV_EXPO_ACCESS_TOKEN }}
+      NOTIFICATIONS_ENABLED: "true"
+      ANNOUNCEMENTS_ENABLED: "true"
   deploy_testnet:
     name: api-testnet
     uses: ./.github/workflows/ssh_deploy.yaml
@@ -76,4 +79,7 @@ jobs:
       PROFILE_X_INVITE_LINK_BASE_URL: ${{ secrets.TESTNET_PROFILE_X_INVITE_LINK_BASE_URL }}
       ADDRESS_LINK_SECRET_KEY: ${{ secrets.TESTNET_ADDRESS_LINK_SECRET_KEY }}
       ADDRESS_LINK_CONTRACT_ADDRESS: ${{ secrets.TESTNET_ADDRESS_LINK_CONTRACT_ADDRESS }}
-      GIPHY_API_KEY: ${{ secrets.DEV_GIPHY_API_KEY }}
+      GIPHY_API_KEY: ${{ secrets.TESTNET_GIPHY_API_KEY }}
+      EXPO_ACCESS_TOKEN: ${{ secrets.TESTNET_EXPO_ACCESS_TOKEN }}
+      NOTIFICATIONS_ENABLED: "false"
+      ANNOUNCEMENTS_ENABLED: "false"

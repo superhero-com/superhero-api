@@ -86,6 +86,15 @@ on:
       ADDRESS_LINK_CONTRACT_ADDRESS:
         description: "Contract address for address link"
         required: false
+      EXPO_ACCESS_TOKEN:
+        description: "Expo access token"
+        required: false
+      NOTIFICATIONS_ENABLED:
+        description: "Whether to enable notifications (true/false)"
+        required: false
+      ANNOUNCEMENTS_ENABLED:
+        description: "Whether to enable announcements (true/false)"
+        required: false
 jobs:
   deploy:
     name: Deploy via ssh
@@ -115,6 +124,9 @@ jobs:
           ADDRESS_LINK_SECRET_KEY: "${{ secrets.ADDRESS_LINK_SECRET_KEY }}"
           ADDRESS_LINK_CONTRACT_ADDRESS: "${{ secrets.ADDRESS_LINK_CONTRACT_ADDRESS }}"
           GIPHY_API_KEY: "${{ secrets.GIPHY_API_KEY }}"
+          EXPO_ACCESS_TOKEN: "${{ secrets.EXPO_ACCESS_TOKEN }}"
+          NOTIFICATIONS_ENABLED: "${{ secrets.NOTIFICATIONS_ENABLED }}"
+          ANNOUNCEMENTS_ENABLED: "${{ secrets.ANNOUNCEMENTS_ENABLED }}"
         with:
           host: "${{ secrets.DEPLOY_HOST }}"
           username: "${{ secrets.DEPLOY_USERNAME }}"
@@ -139,6 +151,9 @@ jobs:
             ADDRESS_LINK_SECRET_KEY,
             ADDRESS_LINK_CONTRACT_ADDRESS,
             GIPHY_API_KEY,
+            EXPO_ACCESS_TOKEN,
+            NOTIFICATIONS_ENABLED,
+            ANNOUNCEMENTS_ENABLED,
             SHA
           script: |
             echo $SHA > $HOST_DATA_DIR/REVISION || true
@@ -170,6 +185,9 @@ jobs:
               -e ADDRESS_LINK_SECRET_KEY \
               -e ADDRESS_LINK_CONTRACT_ADDRESS \
               -e GIPHY_API_KEY \
+              -e EXPO_ACCESS_TOKEN \
+              -e NOTIFICATIONS_ENABLED \
+              -e ANNOUNCEMENTS_ENABLED \
               -e NODE_ENV=production \
               -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
               -e REDIS_PORT=6379 \
