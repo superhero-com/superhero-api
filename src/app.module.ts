@@ -36,6 +36,8 @@ import { SyncState } from './mdw-sync/entities/sync-state.entity';
 import { ProfileModule } from './profile/profile.module';
 import { StabilizationModule } from './stabilization/stabilization.module';
 import { AddressLinksModule } from './plugins/address-links/address-links.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 
 @Module({
   imports: [
@@ -102,6 +104,8 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
     ProfileModule,
     StabilizationModule,
     AddressLinksModule,
+    NotificationsModule,
+    AnnouncementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

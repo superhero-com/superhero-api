@@ -21,9 +21,14 @@ export class SocialPluginSyncService extends BasePluginSyncService {
     syncDirection: SyncDirection,
   ): Promise<void> {
     try {
-      // Delegate transaction processing to processor service
+      // Delegate transaction processing to processor service. Forward
+      // syncDirection so downstream emit sites can gate notification dispatch
+      // on Live and avoid paging users during historical replays.
       const result =
-        await this.postTransactionProcessorService.processTransaction(tx);
+        await this.postTransactionProcessorService.processTransaction(
+          tx,
+          syncDirection,
+        );
 
       if (result && result.success && result.post) {
         this.logger.debug('Post transaction processed successfully', {

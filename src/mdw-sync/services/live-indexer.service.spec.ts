@@ -72,6 +72,7 @@ describe('LiveIndexerService.handleLiveTransaction', () => {
     const microBlockService = {
       fetchMicroBlocksForKeyBlock: jest.fn(),
     } as any;
+    const eventEmitter = { emit: jest.fn() } as any;
 
     const service = new LiveIndexerService(
       txRepository,
@@ -82,12 +83,14 @@ describe('LiveIndexerService.handleLiveTransaction', () => {
       websocketService,
       pluginBatchProcessor,
       microBlockService,
+      eventEmitter,
     );
 
     return {
       service,
       txRepository,
       pluginBatchProcessor,
+      eventEmitter,
     };
   };
 
@@ -104,6 +107,22 @@ describe('LiveIndexerService.handleLiveTransaction', () => {
     expect(pluginBatchProcessor.isRelevantTransaction).toHaveBeenCalledTimes(1);
     expect(txRepository.save).not.toHaveBeenCalled();
     expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
+  });
+
+  it('emits the live-tx event for cross-cutting consumers, even when irrelevant', async () => {
+    // The notification trigger relies on this firing BEFORE the relevance gate,
+    // so transfers we never persist still surface to listeners.
+    const { service, eventEmitter, pluginBatchProcessor } = setup();
+    pluginBatchProcessor.isRelevantTransaction.mockReturnValue(false);
+
+    await service.handleLiveTransaction(
+      buildTransaction({ type: 'SpendTx', recipientId: 'ak_recipient' }),
+    );
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'chain.tx.live',
+      expect.objectContaining({ hash: 'th_live_1', type: 'SpendTx' }),
+    );
   });
 
   it('passes the mdw-shaped tx (not the raw websocket shape) to the relevance gate', async () => {

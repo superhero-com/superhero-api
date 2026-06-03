@@ -101,6 +101,12 @@ async function bootstrap() {
   // Helper used by the shared layout to mark active sidebar links.
   hbs.handlebars.registerHelper('eq', (a: any, b: any) => a === b);
 
+  // Run lifecycle teardown (OnModuleDestroy / OnApplicationShutdown) on
+  // SIGTERM/SIGINT. Without this, owned ioredis clients and pub/sub subscribers
+  // (notifications, announcements, websocket, indexer, …) are never quit()ed on
+  // a graceful shutdown — they leak until the process is force-killed.
+  app.enableShutdownHooks();
+
   await app.listen(process.env.APP_PORT ?? 3000);
 }
 void bootstrap();
