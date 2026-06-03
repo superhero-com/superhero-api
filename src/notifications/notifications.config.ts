@@ -29,7 +29,7 @@ function parsePositiveInt(
  */
 export default registerAs(NOTIFICATIONS_CONFIG, () => ({
   /** Master kill-switch. When false the live trigger no-ops; endpoints stay up. */
-  enabled: process.env.NOTIFICATIONS_ENABLED === 'true',
+  enabled: true,
 
   /** Optional Expo access token (raises limits + enables enhanced security). */
   expoAccessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
