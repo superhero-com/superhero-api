@@ -4,6 +4,8 @@ import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { parsePostContent } from '@/social/utils/content-parser.util';
+import { SyncDirection } from '../../plugin.interface';
+import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import { PostTransactionValidationService } from './post-transaction-validation.service';
 import { PostTypeDetectionService } from './post-type-detection.service';
 import { TopicManagementService } from './topic-management.service';
@@ -35,10 +37,15 @@ export class PostTransactionProcessorService {
   /**
    * Process a transaction end-to-end
    * @param tx - Transaction entity
+   * @param syncDirection - Forwarded so downstream notification emit sites
+   *   can gate on Live and avoid paging users during historical replays.
+   *   Defaults to Live to keep call sites that haven't been threaded through
+   *   working as before (no false negatives during real-time indexing).
    * @returns Processing result or null if transaction should be skipped
    */
   async processTransaction(
     tx: Tx,
+    syncDirection: SyncDirection = SyncDirectionEnum.Live,
   ): Promise<ProcessPostTransactionResult | null> {
     const txHash = tx.hash;
 
@@ -80,6 +87,7 @@ export class PostTransactionProcessorService {
             existingPost,
             postTypeInfo,
             txHash,
+            syncDirection,
           );
 
         if (result.success) {
@@ -134,13 +142,15 @@ export class PostTransactionProcessorService {
         };
       }
 
-      // For new comments, validate parent post exists with retry logic
+      // For new comments, validate parent post exists with retry logic.
+      // Hoisted so the post-commit notification emit below can read
+      // `parentPost.sender_address` without a second findOne.
+      let parentPost: Post | null = null;
       if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
-        const parentPostExists =
-          await this.persistenceService.validateParentPost(
-            postTypeInfo.parentPostId,
-          );
-        if (!parentPostExists) {
+        parentPost = await this.persistenceService.validateParentPost(
+          postTypeInfo.parentPostId,
+        );
+        if (!parentPost) {
           this.logger.warn(
             'Cannot create comment: parent post not found after retries',
             {
@@ -214,6 +224,20 @@ export class PostTransactionProcessorService {
       if (postTypeInfo.isComment && postTypeInfo.parentPostId) {
         await this.persistenceService.updatePostCommentCount(
           postTypeInfo.parentPostId,
+        );
+      }
+
+      // Notify the parent post's author. Emit AFTER the manager.transaction
+      // resolves so a rollback can't leak a phantom push (see F1 in round-3
+      // findings). `parentPost` is guaranteed non-null when isComment is still
+      // true here — the validateParentPost branch above flips isComment to
+      // false on null. Gated on Live inside the helper.
+      if (postTypeInfo.isComment && parentPost) {
+        this.persistenceService.emitCommentCreatedEvent(
+          parentPost,
+          post,
+          txHash,
+          syncDirection,
         );
       }
 

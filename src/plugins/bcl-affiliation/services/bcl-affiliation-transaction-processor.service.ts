@@ -1,11 +1,28 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirection } from '../../plugin.interface';
+import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import { toAe } from '@aeternity/aepp-sdk';
 import moment from 'moment';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
+import {
+  INVITATION_CLAIMED_EVENT,
+  InvitationClaimedEventPayload,
+} from '../events';
+
+/**
+ * Outcome of one of the save* helpers: the persisted invitations plus any
+ * post-commit events the caller should emit AFTER the surrounding transaction
+ * resolves successfully. The events MUST NOT be emitted inside the transaction
+ * callback — a commit failure after emit would send a phantom notification.
+ */
+interface ProcessOutcome {
+  invitations: Invitation[] | null;
+  events: InvitationClaimedEventPayload[];
+}
 
 @Injectable()
 export class BclAffiliationTransactionProcessorService {
@@ -16,6 +33,7 @@ export class BclAffiliationTransactionProcessorService {
   constructor(
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -28,7 +46,6 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Invitation[] | null> {
-    void syncDirection;
     try {
       // Check transaction result
       if (tx.raw.result !== 'ok') {
@@ -40,21 +57,42 @@ export class BclAffiliationTransactionProcessorService {
         return null;
       }
 
-      // Wrap operations in a transaction for consistency
-      return await this.invitationRepository.manager.transaction(
-        async (manager) => {
-          switch (functionName) {
-            case 'register_invitation_code':
-              return await this.saveRegisterInvitation(tx, manager);
-            case 'redeem_invitation_code':
-              return await this.saveClaimInvitation(tx, manager);
-            case 'revoke_invitation_code':
-              return await this.saveRevokeInvitation(tx, manager);
-            default:
-              return null;
-          }
-        },
-      );
+      // Wrap operations in a transaction for consistency. Events the save
+      // helpers want to emit are returned alongside the invitations and
+      // emitted AFTER commit (see below) — emitting inside the callback would
+      // leak phantom notifications on rollback.
+      const outcome =
+        await this.invitationRepository.manager.transaction<ProcessOutcome>(
+          async (manager) => {
+            switch (functionName) {
+              case 'register_invitation_code':
+                return {
+                  invitations: await this.saveRegisterInvitation(tx, manager),
+                  events: [],
+                };
+              case 'redeem_invitation_code':
+                return await this.saveClaimInvitation(tx, manager);
+              case 'revoke_invitation_code':
+                return {
+                  invitations: await this.saveRevokeInvitation(tx, manager),
+                  events: [],
+                };
+              default:
+                return { invitations: null, events: [] };
+            }
+          },
+        );
+
+      // Backfill / reorg replays would re-emit historical claims and page
+      // every inviter for every old redeem — gate on Live so only fresh chain
+      // events trigger notifications.
+      if (syncDirection === SyncDirectionEnum.Live) {
+        for (const event of outcome.events) {
+          this.eventEmitter.emit(INVITATION_CLAIMED_EVENT, event);
+        }
+      }
+
+      return outcome.invitations;
     } catch (error: any) {
       this.logger.error(
         `Failed to process affiliation transaction ${tx.hash}`,
@@ -123,19 +161,21 @@ export class BclAffiliationTransactionProcessorService {
   }
 
   /**
-   * Save claim invitation transaction - updates invitation status to 'claimed'
+   * Save claim invitation transaction - updates invitation status to 'claimed'.
+   * Returns the persisted invitations PLUS the post-commit event payload; the
+   * caller emits the event only after the transaction commits, gated on Live.
    */
   private async saveClaimInvitation(
     tx: Tx,
     manager: EntityManager,
-  ): Promise<Invitation[] | null> {
+  ): Promise<ProcessOutcome> {
     const invitationRepository = manager.getRepository(Invitation);
 
     const callerAddress = tx.caller_id;
     const receiverAddress = tx.raw.arguments?.[0]?.value;
 
     if (!callerAddress || !receiverAddress) {
-      return null;
+      return { invitations: null, events: [] };
     }
 
     const invitation = await invitationRepository.findOne({
@@ -148,7 +188,7 @@ export class BclAffiliationTransactionProcessorService {
       this.logger.warn(
         `No invitation found for claim by address: ${callerAddress}`,
       );
-      return null;
+      return { invitations: null, events: [] };
     }
 
     const microTime = parseInt(tx.micro_time, 10);
@@ -165,7 +205,24 @@ export class BclAffiliationTransactionProcessorService {
       where: { id: invitation.id },
     });
 
-    return updatedInvitation ? [updatedInvitation] : null;
+    // Build the post-commit event payload. The listener owns missing-field /
+    // self-event gating; we only check the sender_address null here because
+    // we need it to populate the payload at all.
+    const events: InvitationClaimedEventPayload[] = [];
+    if (updatedInvitation?.sender_address) {
+      events.push({
+        invitationId: updatedInvitation.id,
+        inviterAddress: updatedInvitation.sender_address,
+        claimerAddress: callerAddress,
+        amountAe: updatedInvitation.amount ?? '0',
+        txHash: tx.hash,
+      });
+    }
+
+    return {
+      invitations: updatedInvitation ? [updatedInvitation] : null,
+      events,
+    };
   }
 
   /**

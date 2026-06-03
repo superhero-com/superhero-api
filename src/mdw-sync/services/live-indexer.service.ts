@@ -8,8 +8,10 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { LIVE_TX_EVENT } from '../events';
 import { KeyBlock } from '../entities/key-block.entity';
 import { MicroBlock } from '../entities/micro-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
@@ -40,6 +42,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     private websocketService: WebSocketService,
     private pluginBatchProcessor: PluginBatchProcessorService,
     private microBlockService: MicroBlockService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   async onModuleInit() {
@@ -82,6 +85,12 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
   async handleLiveTransaction(transaction: ITransaction) {
     try {
       const mdwTx = this.convertToMdwTx(transaction);
+
+      // Surface every live tx to cross-cutting consumers (notifications, ...)
+      // BEFORE the plugin relevance filter, because some consumers care about
+      // transactions (e.g. plain transfers) that we intentionally never persist.
+      // emit() does not await @OnEvent handlers, so this never blocks ingestion.
+      this.eventEmitter.emit(LIVE_TX_EVENT, mdwTx);
 
       // Skip transactions that do not match any registered plugin filter.
       // We only index transactions the application actually cares about

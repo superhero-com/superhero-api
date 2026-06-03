@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
@@ -10,6 +11,12 @@ import {
   IPostTypeInfo,
   ICommentProcessingResult,
 } from '@/social/interfaces/post.interfaces';
+import {
+  POST_COMMENT_CREATED_EVENT,
+  PostCommentCreatedEventPayload,
+} from '../events';
+import { SyncDirection } from '../../plugin.interface';
+import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import moment from 'moment';
 
 @Injectable()
@@ -22,18 +29,24 @@ export class PostPersistenceService {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(Topic)
     private readonly topicRepository: Repository<Topic>,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
    * Validates that a parent post exists for a comment with retry logic
    * This handles timing issues in parallel processing where parent posts
-   * might be processed concurrently
+   * might be processed concurrently.
+   *
+   * Returns the loaded `Post` on success (or `null` if not found after
+   * retries) so callers don't have to re-query the parent for things like
+   * the author address. Callers using it as a boolean (`if (!validateParentPost…)`)
+   * still work via JS truthiness.
    */
   async validateParentPost(
     parentPostId: string,
     maxRetries: number = 3,
     retryDelay: number = 100,
-  ): Promise<boolean> {
+  ): Promise<Post | null> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const parentPost = await this.postRepository
@@ -45,7 +58,7 @@ export class PostPersistenceService {
             parentPostId,
             attempt,
           });
-          return true;
+          return parentPost;
         }
 
         // If not found and we have retries left, wait and try again
@@ -66,7 +79,7 @@ export class PostPersistenceService {
         });
 
         if (attempt === maxRetries) {
-          return false;
+          return null;
         }
 
         // Apply exponential backoff delay before retrying on errors
@@ -84,26 +97,32 @@ export class PostPersistenceService {
       parentPostId,
       maxRetries,
     });
-    return false;
+    return null;
   }
 
   /**
-   * Processes comment-specific logic for existing posts
+   * Processes comment-specific logic for existing posts.
+   *
+   * `syncDirection` defaults to Live so older internal callers that haven't
+   * been threaded through keep producing notifications for fresh chain
+   * events. Historical backfills (`syncDirection === Backward`) and reorg
+   * replays don't emit — otherwise a full resync would page every post
+   * author for years of historical comments.
    */
   async processExistingPostAsComment(
     existingPost: Post,
     postTypeInfo: IPostTypeInfo,
     txHash: string,
+    syncDirection: SyncDirection = SyncDirectionEnum.Live,
   ): Promise<ICommentProcessingResult> {
     if (!postTypeInfo.isComment || !postTypeInfo.parentPostId) {
       return { success: false, error: 'Invalid comment information' };
     }
 
-    // Check if parent post exists
-    const parentPostExists = await this.validateParentPost(
-      postTypeInfo.parentPostId,
-    );
-    if (!parentPostExists) {
+    // Check if parent post exists. The loaded entity is reused below to
+    // avoid a second findOne for the author address.
+    const parentPost = await this.validateParentPost(postTypeInfo.parentPostId);
+    if (!parentPost) {
       this.logger.warn('Parent post does not exist for comment', {
         txHash,
         parentPostId: postTypeInfo.parentPostId,
@@ -130,6 +149,13 @@ export class PostPersistenceService {
         parentPostId: postTypeInfo.parentPostId,
       });
 
+      this.emitCommentCreatedEvent(
+        parentPost,
+        existingPost,
+        txHash,
+        syncDirection,
+      );
+
       return { success: true, parentPostExists: true };
     } catch (error) {
       const errorMessage =
@@ -141,6 +167,53 @@ export class PostPersistenceService {
         error: errorMessage,
       });
       return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Emits POST_COMMENT_CREATED_EVENT for the notification module.
+   *
+   * Called from BOTH comment-creation paths in PostTransactionProcessorService:
+   *   1. Fresh comment indexed straight through (the common case).
+   *   2. Existing post reclassified as a comment via
+   *      processExistingPostAsComment (the re-index/migration case).
+   *
+   * Centralized here so the two paths can't drift on emit gating. Gated on
+   * Live to avoid paging users during historical backfills/reorg replays.
+   * Defensive checks for self-comments and missing recipients live in the
+   * listener so we only guard the null dereferences needed for the payload.
+   */
+  emitCommentCreatedEvent(
+    parentPost: Post,
+    commentPost: Post,
+    txHash: string,
+    syncDirection: SyncDirection,
+  ): void {
+    if (syncDirection !== SyncDirectionEnum.Live) {
+      return;
+    }
+    if (!parentPost.sender_address || !commentPost.sender_address) {
+      return;
+    }
+    try {
+      const payload: PostCommentCreatedEventPayload = {
+        commenterAddress: commentPost.sender_address,
+        postAuthorAddress: parentPost.sender_address,
+        parentPostId: parentPost.id,
+        commentId: commentPost.id,
+        txHash,
+      };
+      this.eventEmitter.emit(POST_COMMENT_CREATED_EVENT, payload);
+    } catch (notifyError) {
+      // Notification dispatch must never break indexing.
+      this.logger.warn('Failed to emit post-comment notification event', {
+        txHash,
+        parentPostId: parentPost.id,
+        error:
+          notifyError instanceof Error
+            ? notifyError.message
+            : String(notifyError),
+      });
     }
   }
 
