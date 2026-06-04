@@ -78,4 +78,41 @@ describe('ProfileRewardsController', () => {
       profileXPostingRewardService.requestManualRecheck,
     ).toHaveBeenCalledWith('ak_1');
   });
+
+  it('verifies challenge proof before minting a referral link', async () => {
+    const profileXInviteService = {
+      verifyPostingRewardRecheckChallenge: jest
+        .fn()
+        .mockResolvedValue(undefined),
+    } as any;
+    const profileXPostingRewardService = {
+      getOrCreateReferralLink: jest.fn().mockResolvedValue({
+        code: 'abc123def456',
+        link: 'https://x/r?ref=abc123def456',
+      }),
+    } as any;
+    const { controller } = getController({
+      profileXInviteService,
+      profileXPostingRewardService,
+    });
+
+    const result = await controller.createXRewardReferralLink('ak_1', {
+      challenge_nonce: 'a'.repeat(24),
+      challenge_expires_at: '123',
+      signature_hex: 'b'.repeat(128),
+    } as any);
+
+    expect(
+      profileXInviteService.verifyPostingRewardRecheckChallenge,
+    ).toHaveBeenCalledWith({
+      address: 'ak_1',
+      nonce: 'a'.repeat(24),
+      expiresAt: 123,
+      signatureHex: 'b'.repeat(128),
+    });
+    expect(
+      profileXPostingRewardService.getOrCreateReferralLink,
+    ).toHaveBeenCalledWith('ak_1');
+    expect(result.code).toBe('abc123def456');
+  });
 });

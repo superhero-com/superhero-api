@@ -1,14 +1,11 @@
 jest.mock('../profile.constants', () => ({
   PROFILE_X_POSTING_REWARD_AMOUNT_AE: '0.05',
   PROFILE_X_POSTING_REWARD_ENABLED: false,
-  PROFILE_X_POSTING_REWARD_ENABLE_PERIODIC_RECHECKS: false,
   PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS: 5000,
   PROFILE_X_POSTING_REWARD_KEYWORDS: ['superhero.com', 'superhero_chain'],
-  PROFILE_X_POSTING_REWARD_MANUAL_RECHECK_COOLDOWN_SECONDS: 3600,
   PROFILE_X_POSTING_REWARD_RETRY_BASE_SECONDS: 1,
   PROFILE_X_POSTING_REWARD_RETRY_MAX_SECONDS: 60,
-  PROFILE_X_POSTING_REWARD_SCAN_INTERVAL_SECONDS: 300,
-  PROFILE_X_POSTING_REWARD_THRESHOLD: 10,
+  PROFILE_X_REWARD_MIN_FOLLOWERS: 50,
   PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY:
     '1111111111111111111111111111111111111111111111111111111111111111',
 }));
@@ -35,6 +32,8 @@ describe('ProfileXPostingRewardService disabled', () => {
         getRewardAccount: jest.fn(),
       } as any,
       new ProfileXApiClientService(),
+      { find: jest.fn(), update: jest.fn() } as any,
+      { find: jest.fn(), update: jest.fn() } as any,
     );
 
     await expect(
