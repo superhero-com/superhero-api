@@ -32,7 +32,7 @@ describe('DeviceService', () => {
       execute: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     repo = {
-      query: jest.fn().mockResolvedValue([{ address: 'ak_alice' }]),
+      query: jest.fn().mockResolvedValue([{ previous_address: null }]),
       exist: jest.fn().mockResolvedValue(false),
       count: jest.fn().mockResolvedValue(0),
       find: jest.fn().mockResolvedValue([]),
@@ -54,7 +54,7 @@ describe('DeviceService', () => {
     service = new DeviceService(repo, registry, challenges, config);
   });
 
-  it('verifies the token-bound challenge then INSERT…ON CONFLICT and addAddress', async () => {
+  it('verifies the token-bound challenge then INSERT…ON CONFLICT (re-point) and addAddress', async () => {
     await service.register(baseDto);
     expect(challenges.verifyAndConsume).toHaveBeenCalledWith(
       'n1',
@@ -66,18 +66,44 @@ describe('DeviceService', () => {
     const [sql, params] = repo.query.mock.calls[0];
     expect(sql).toMatch(/INSERT INTO device_tokens/);
     expect(sql).toMatch(/ON CONFLICT \(expo_push_token\) DO UPDATE/);
-    expect(sql).toMatch(/WHERE device_tokens.address = EXCLUDED.address/);
+    // Override semantics: the upsert must NOT be guarded by an address-match WHERE.
+    expect(sql).not.toMatch(/WHERE device_tokens.address = EXCLUDED.address/);
+    expect(sql).toMatch(/RETURNING \(SELECT address FROM existing\)/);
     expect(params[0]).toBe(validToken);
     expect(params[1]).toBe('ak_alice');
     expect(registry.addAddress).toHaveBeenCalledWith('ak_alice');
   });
 
-  it('refuses to re-point a token already owned by a different address (RETURNING empty)', async () => {
-    repo.query.mockResolvedValue([]); // conflict was on a row with another address
-    await expect(service.register(baseDto)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
-    expect(registry.addAddress).not.toHaveBeenCalled();
+  it('fresh registration (no prior owner) adds the address and cleans up nothing', async () => {
+    repo.query.mockResolvedValue([{ previous_address: null }]);
+    await service.register(baseDto);
+    expect(registry.addAddress).toHaveBeenCalledWith('ak_alice');
+    expect(registry.removeAddress).not.toHaveBeenCalled();
+  });
+
+  it('re-points a token owned by a different account, dropping the old owner when it has no devices left', async () => {
+    repo.query.mockResolvedValue([{ previous_address: 'ak_other' }]);
+    repo.count.mockResolvedValue(0); // ak_other has no devices after the move
+    await service.register(baseDto);
+    expect(registry.addAddress).toHaveBeenCalledWith('ak_alice');
+    expect(registry.removeAddress).toHaveBeenCalledWith('ak_other');
+  });
+
+  it('re-points but keeps the old owner in the gate when it still has other devices', async () => {
+    repo.query.mockResolvedValue([{ previous_address: 'ak_other' }]);
+    repo.count.mockResolvedValue(2); // ak_other still has devices
+    await service.register(baseDto);
+    expect(registry.addAddress).toHaveBeenCalledWith('ak_alice');
+    expect(registry.removeAddress).not.toHaveBeenCalled();
+  });
+
+  it('treats a re-register for the same account as a heartbeat (no old-owner cleanup)', async () => {
+    repo.query.mockResolvedValue([{ previous_address: 'ak_alice' }]);
+    await service.register(baseDto);
+    expect(registry.addAddress).toHaveBeenCalledWith('ak_alice');
+    expect(registry.removeAddress).not.toHaveBeenCalled();
+    // No count() probe — previous === current short-circuits before cleanup.
+    expect(repo.count).not.toHaveBeenCalled();
   });
 
   it('unregister verifies the signed unlink challenge then runs the atomic CTE', async () => {
