@@ -1,180 +1,114 @@
-# This workflow is only for inclusion in other workflows.
+# Reusable deployment workflow — called by dockerhub.yaml.
+# Secrets are read from the GitHub Environment named by the ENVIRONMENT input;
+# no per-environment prefixes are needed (DEV_, PROD_, TESTNET_, etc.).
 name: Deploy via ssh
 on:
   workflow_call:
     inputs:
       VERSION:
-        description: "Version to deploy (dockerhub tag)"
+        description: "Docker image tag to deploy"
         required: false
         default: "latest"
         type: string
-      CONTAINER_NAME:
-        description: "Container name"
-        default: "superhero-api"
-        required: false
+      ENVIRONMENT:
+        description: "GitHub environment to deploy to (develop, testnet, staging, production)"
+        required: true
         type: string
-    secrets:
-      DEPLOY_HOST:
-        description: "Host to deploy to"
+      CONTAINER_NAME:
+        description: "Docker container name"
         required: true
-      DEPLOY_USERNAME:
-        description: "Username to use for ssh"
-        required: true
-      DEPLOY_KEY:
-        description: "SSH key to use for ssh"
-        required: true
+        type: string
       AE_NETWORK_ID:
-        description: "Aeternity network id (ae_uat, ae_mainnet)"
+        description: "Aeternity network id (ae_uat or ae_mainnet)"
         required: false
+        default: ae_mainnet
+        type: string
       API_HOST_PORT:
-        description: "Host port to expose the API on (3000)"
+        description: "Host port mapped to the container's port 3000"
         required: true
-      DB_USER:
-        description: "Database user"
-        required: true
-      DB_PASSWORD:
-        description: "Database password"
-        required: true
-      DB_DATABASE:
-        description: "Database name"
-        required: true
-      DOCKERHUB_USERNAME:
-        description: "Dockerhub username"
-        required: true
-      DOCKERHUB_TOKEN:
-        description: "Dockerhub password"
-        required: true
-      DOCKERHUB_REPO:
-        description: "Dockerhub repository"
-        required: true
-      TRENDING_TAGS_API_KEY:
-        description: "Trending tags API key"
-        required: true
-      GIPHY_API_KEY:
-        description: "Giphy API key"
-        required: true
-      X_CLIENT_ID:
-        description: "X-Client-Id for API requests"
-        required: false
-      X_CLIENT_SECRET:
-        description: "X-Client-Secret for API requests"
-        required: false
-      PROFILE_CHAIN_NAME_PRIVATE_KEY:
-        description: "Private key used to sponsor chain name claims"
-        required: false
-      PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY:
-        description: "Private key used for verification rewards"
-        required: false
-      PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY:
-        description: "Private key used for invite milestone rewards"
-        required: false
-      PROFILE_X_INVITE_LINK_BASE_URL:
-        description: "Base URL for invite links (e.g. https://superhero.com/invite)"
-        required: false
-      ADDRESS_LINK_SECRET_KEY:
-        description: "Secret key for address link"
-        required: false
-      ADDRESS_LINK_CONTRACT_ADDRESS:
-        description: "Contract address for address link"
-        required: false
-      EXPO_ACCESS_TOKEN:
-        description: "Expo access token"
-        required: false
-      NOTIFICATIONS_ENABLED:
-        description: "Whether to enable notifications (true/false)"
-        required: false
-      ANNOUNCEMENTS_ENABLED:
-        description: "Whether to enable announcements (true/false)"
-        required: false
+        type: string
 jobs:
   deploy:
     name: Deploy via ssh
     runs-on: ubuntu-latest
+    environment: ${{ inputs.ENVIRONMENT }}
     steps:
-      - name: Run deploy script
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate .env.api.${{ inputs.ENVIRONMENT }}
         env:
-          VERSION: "${{ inputs.VERSION }}"
-          SHA: "${{ github.sha }}"
-          AE_NETWORK_ID: "${{ secrets.AE_NETWORK_ID }}"
-          HOST_DATA_DIR: "./${{ inputs.CONTAINER_NAME }}"
-          API_HOST_PORT: "${{ secrets.API_HOST_PORT }}"
-          DB_USER: "${{ secrets.DB_USER }}"
-          DB_PASSWORD: "${{ secrets.DB_PASSWORD }}"
-          DB_DATABASE: "${{ secrets.DB_DATABASE }}"
-          TRENDING_TAGS_API_KEY: "${{ secrets.TRENDING_TAGS_API_KEY }}"
-          X_CLIENT_ID: "${{ secrets.X_CLIENT_ID }}"
-          X_CLIENT_SECRET: "${{ secrets.X_CLIENT_SECRET }}"
-          PROFILE_CHAIN_NAME_PRIVATE_KEY: "${{ secrets.PROFILE_CHAIN_NAME_PRIVATE_KEY }}"
-          PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY: "${{ secrets.PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY }}"
-          PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY: "${{ secrets.PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY }}"
-          PROFILE_X_INVITE_LINK_BASE_URL: "${{ secrets.PROFILE_X_INVITE_LINK_BASE_URL }}"
-          ADDRESS_LINK_SECRET_KEY: "${{ secrets.ADDRESS_LINK_SECRET_KEY }}"
-          ADDRESS_LINK_CONTRACT_ADDRESS: "${{ secrets.ADDRESS_LINK_CONTRACT_ADDRESS }}"
-          GIPHY_API_KEY: "${{ secrets.GIPHY_API_KEY }}"
-          EXPO_ACCESS_TOKEN: "${{ secrets.EXPO_ACCESS_TOKEN }}"
-          NOTIFICATIONS_ENABLED: "${{ secrets.NOTIFICATIONS_ENABLED }}"
-          ANNOUNCEMENTS_ENABLED: "${{ secrets.ANNOUNCEMENTS_ENABLED }}"
+          ENVIRONMENT: ${{ inputs.ENVIRONMENT }}
+          # All secrets and inputs are serialised as JSON so the script can look
+          # up each .env.example key by name without an explicit per-secret list.
+          # Secrets take precedence; inputs are the fallback (they carry static
+          # overrides such as AE_NETWORK_ID, DB_DATABASE, NOTIFICATIONS_ENABLED…)
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+          ALL_INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          # Build .env.api.<environment> from .env.example.
+          # For every KEY= line: if the key exists in ALL_SECRETS use that value
+          # (even empty), else if it exists in ALL_INPUTS use that, else keep
+          # the .env.example line as-is. Comment and blank lines are stripped.
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$line" ]]               && continue
+            key="${line%%=*}"
+            # jq -e exits 1 when the result is null (key absent from both objects),
+            # so the if/else cleanly separates found vs not-found with no sentinel.
+            if value=$(jq -rne \
+              --argjson s "$ALL_SECRETS" \
+              --argjson i "$ALL_INPUTS" \
+              --arg k "$key" \
+              'if ($s | has($k)) then $s[$k] elif ($i | has($k)) then $i[$k] else null end'); then
+              # Collapse newlines — env file values must be single-line
+              value=$(printf '%s' "$value" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+              printf '%s=%s\n' "$key" "$value"
+            else
+              printf '%s\n' "$line"
+            fi
+          done < .env.example > ".env.api.$ENVIRONMENT"
+
+      - name: Copy .env.api.${{ inputs.ENVIRONMENT }} to server
+        uses: appleboy/scp-action@v1.0.0
         with:
-          host: "${{ secrets.DEPLOY_HOST }}"
-          username: "${{ secrets.DEPLOY_USERNAME }}"
-          key: "${{ secrets.DEPLOY_KEY }}"
-          envs: >
-            AE_NETWORK_ID,
-            DB_USER,
-            DB_PASSWORD,
-            DB_DATABASE,
-            API_HOST_PORT,
-            HOST_DATA_DIR,
-            TRENDING_TAGS_API_KEY,
-            X_CLIENT_ID,
-            X_CLIENT_SECRET,
-            PROFILE_CHAIN_NAME_PRIVATE_KEY,
-            PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY,
-            PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY,
-            PROFILE_X_INVITE_LINK_BASE_URL,
-            ADDRESS_LINK_SECRET_KEY,
-            ADDRESS_LINK_CONTRACT_ADDRESS,
-            GIPHY_API_KEY,
-            EXPO_ACCESS_TOKEN,
-            NOTIFICATIONS_ENABLED,
-            ANNOUNCEMENTS_ENABLED,
-            SHA
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USERNAME }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          source: ".env.api.${{ inputs.ENVIRONMENT }}"
+          target: "~/"
+
+      - name: Deploy container
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          VERSION: ${{ inputs.VERSION }}
+          SHA: ${{ github.sha }}
+          CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          API_HOST_PORT: ${{ inputs.API_HOST_PORT }}
+          ENVIRONMENT: ${{ inputs.ENVIRONMENT }}
+          HOST_DATA_DIR: "./${{ inputs.CONTAINER_NAME }}"
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USERNAME }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          envs: VERSION,SHA,CONTAINER_NAME,API_HOST_PORT,ENVIRONMENT,HOST_DATA_DIR
           script: |
-            echo $SHA > $HOST_DATA_DIR/REVISION || true
+            mkdir -p "$HOST_DATA_DIR"
+            echo "$SHA" > "$HOST_DATA_DIR/REVISION"
             echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            docker pull "${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}" || true
-            docker stop ${{ inputs.CONTAINER_NAME }} || true
-            docker rm ${{ inputs.CONTAINER_NAME }} || true
-            docker run -d --name ${{ inputs.CONTAINER_NAME }} \
+            docker pull "${{ secrets.DOCKERHUB_REPO }}:$VERSION"
+            docker stop "$CONTAINER_NAME" || true
+            docker rm   "$CONTAINER_NAME" || true
+            docker run -d \
+              --name "$CONTAINER_NAME" \
               --restart=always \
               --log-driver json-file \
               --log-opt max-size=100m \
               --log-opt max-file=30 \
-              -p ${{ secrets.API_HOST_PORT }}:3000 \
-              -e APP_PORT="3000" \
-              -e DB_USER \
-              -e DB_PASSWORD \
-              -e AE_NETWORK_ID \
-              -e DB_DATABASE \
-              -e TRENDING_TAGS_API_KEY \
-              -e X_CLIENT_ID \
-              -e X_CLIENT_SECRET \
-              -e PROFILE_CHAIN_NAME_PRIVATE_KEY \
-              -e PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY \
-              -e PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY \
-              -e PROFILE_X_INVITE_LINK_BASE_URL \
-              -e ADDRESS_LINK_SECRET_KEY \
-              -e ADDRESS_LINK_CONTRACT_ADDRESS \
-              -e GIPHY_API_KEY \
-              -e EXPO_ACCESS_TOKEN \
-              -e NOTIFICATIONS_ENABLED \
-              -e ANNOUNCEMENTS_ENABLED \
+              -p "$API_HOST_PORT:3000" \
+              --env-file ~/.env.api."$ENVIRONMENT" \
               -e NODE_ENV=production \
-              -e REDIS_HOST=${{ inputs.CONTAINER_NAME }}-redis \
-              -e REDIS_PORT=6379 \
-              -e DB_TYPE=postgres \
-              -e DB_HOST=${{ inputs.CONTAINER_NAME }}-db \
-              -e DB_PORT=5432 \
-              --network ${{ inputs.CONTAINER_NAME }}-db \
-              ${{ secrets.DOCKERHUB_REPO }}:${{ inputs.VERSION }}
+              -e DB_HOST="${CONTAINER_NAME}-db" \
+              -e REDIS_HOST="${CONTAINER_NAME}-redis" \
+              --network "${CONTAINER_NAME}-db" \
+              "${{ secrets.DOCKERHUB_REPO }}:$VERSION"
