@@ -72,4 +72,71 @@ export class FixTokensService {
     }
     this.isFixingTokensWithNoPrice = false;
   }
+
+  isFixingTokensWithNoCollection = false;
+  /**
+   * Backfill `token.collection` for legacy rows created before it was set at
+   * creation time. The value is sourced from each token's own `create_community`
+   * tx (`txs.raw.arguments[0]`), which always exists for an indexed token.
+   *
+   * Pure local SQL in short 1000-row statements (no long locks / bloat), bounded
+   * per tick so the cron stays short. Idempotent and self-draining: once every
+   * row is filled it finds nothing and no-ops (and the create paths now set
+   * collection up front, so no new NULLs appear).
+   *
+   * On large tables, speed up the `collection IS NULL` scan with a partial index:
+   *   CREATE INDEX CONCURRENTLY IF NOT EXISTS token_create_tx_hash_null_collection_idx
+   *     ON token (create_tx_hash) WHERE collection IS NULL;
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async fixTokensWithNoCollection() {
+    if (this.isFixingTokensWithNoCollection) {
+      return;
+    }
+    this.isFixingTokensWithNoCollection = true;
+
+    const batchSize = 1000;
+    const maxRowsPerRun = 10000; // bound cron duration on large backlogs
+    let totalUpdated = 0;
+    try {
+      let affected = 0;
+      do {
+        const rows = await this.tokensRepository.query(
+          `
+            WITH batch AS (
+              SELECT t.sale_address,
+                     (x.raw->'arguments'->0->>'value') AS collection
+              FROM token t
+              JOIN txs x ON x.hash = t.create_tx_hash
+              WHERE t.collection IS NULL
+                AND x.function = 'create_community'
+                AND (x.raw->'arguments'->0->>'value') IS NOT NULL
+              LIMIT $1
+            )
+            UPDATE token t
+            SET collection = batch.collection
+            FROM batch
+            WHERE t.sale_address = batch.sale_address
+            RETURNING t.sale_address
+          `,
+          [batchSize],
+        );
+        affected = Array.isArray(rows) ? rows.length : 0;
+        totalUpdated += affected;
+      } while (affected === batchSize && totalUpdated < maxRowsPerRun);
+
+      if (totalUpdated) {
+        this.logger.log(
+          `FixTokensService: backfilled collection for ${totalUpdated} tokens`,
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `FixTokensService.fixTokensWithNoCollection: ${error.message}`,
+        error.stack,
+      );
+    } finally {
+      this.isFixingTokensWithNoCollection = false;
+    }
+  }
 }

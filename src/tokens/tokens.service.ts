@@ -196,60 +196,6 @@ export class TokensService {
     } while (deletedRows === duplicateDeleteBatchSize);
   }
 
-  /**
-   * Backfill `token.collection` for rows created before collection was set at
-   * creation time (legacy NULLs). The value is sourced from the token's own
-   * `create_community` transaction (`txs.raw.arguments[0]`), which always exists
-   * because a token row only exists once that tx was indexed.
-   *
-   * Batched (short transactions, no long locks / table bloat) so it is safe to
-   * run against large production tables. Idempotent: only touches NULL rows and
-   * derives from authoritative on-chain tx args, so re-running is harmless.
-   *
-   * Trigger as a one-off (admin endpoint / maintenance script); NOT wired to run
-   * on boot. For big tables, first add a partial index to make each batch cheap:
-   *   CREATE INDEX CONCURRENTLY IF NOT EXISTS token_create_tx_hash_null_collection_idx
-   *     ON token (create_tx_hash) WHERE collection IS NULL;
-   */
-  async backfillNullTokenCollections(batchSize = 1000): Promise<number> {
-    let totalUpdated = 0;
-    let affected = 0;
-    do {
-      const rows = await this.tokensRepository.query(
-        `
-          WITH batch AS (
-            SELECT t.sale_address,
-                   (x.raw->'arguments'->0->>'value') AS collection
-            FROM token t
-            JOIN txs x ON x.hash = t.create_tx_hash
-            WHERE t.collection IS NULL
-              AND x.function = 'create_community'
-              AND (x.raw->'arguments'->0->>'value') IS NOT NULL
-            LIMIT $1
-          )
-          UPDATE token t
-          SET collection = batch.collection
-          FROM batch
-          WHERE t.sale_address = batch.sale_address
-          RETURNING t.sale_address
-        `,
-        [batchSize],
-      );
-      affected = Array.isArray(rows) ? rows.length : 0;
-      totalUpdated += affected;
-      if (affected) {
-        this.logger.log(
-          `[backfill] token.collection set for ${totalUpdated} tokens so far`,
-        );
-      }
-    } while (affected === batchSize);
-
-    this.logger.log(
-      `[backfill] token.collection backfill complete: ${totalUpdated} rows updated`,
-    );
-    return totalUpdated;
-  }
-
   findAll(limit = 1000, offset = 0): Promise<Token[]> {
     return this.tokensRepository.find({ take: limit, skip: offset });
   }
