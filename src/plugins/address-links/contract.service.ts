@@ -206,6 +206,7 @@ export class AddressLinksContractService implements OnModuleInit {
     ALREADY_CLAIMED:
       'This provider is already linked to a different value for this address.',
     NOT_LINKED: 'No link exists for this provider and address.',
+    NO_LINKS: 'No link exists for this provider and address.',
     NOT_PROVIDER_OWNER:
       'The backend wallet is not the registered owner for this provider on the contract.',
     PRINCIPAL_NOT_FOUND:
