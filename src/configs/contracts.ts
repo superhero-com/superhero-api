@@ -60,6 +60,23 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
         ],
         description: 'Tokenize a unique name with up to 20.',
       },
+
+      'CHINESE-ak_3A4gmzXZdgW4Wa6hsoiPFcr5CHNHcFgCkRQxuwFmNRZ59F6Ns': {
+        id: 'CHINESE-ak_3A4gmzXZdgW4Wa6hsoiPFcr5CHNHcFgCkRQxuwFmNRZ59F6Ns',
+        name: 'CHINESE',
+        allowed_name_length: '20',
+        // Chinese ideographs + digits + hyphen only — no Latin letters.
+        allowed_name_chars: [
+          {
+            SingleChar: [45],
+          },
+          {
+            CharRangeFromTo: [48, 57],
+          },
+          { CharRangeFromTo: [19968, 40959] },
+        ],
+        description: 'Tokenize a unique name with up to 20.',
+      },
     },
   },
 };
