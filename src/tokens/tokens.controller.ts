@@ -21,7 +21,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Pagination, paginate } from 'nestjs-typeorm-paginate';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
 import { TokenHolder } from './entities/token-holders.entity';
@@ -194,72 +194,83 @@ export class TokensController {
       }
     }
 
-    const queryBuilder = this.tokensRepository
-      .createQueryBuilder('token')
-      .select('token.*')
-      .where('token.unlisted = false');
+    // Common filters (everything except the trending eligibility gate). Kept as
+    // a factory so the query can be rebuilt without the gate for the fallback.
+    const buildBaseQuery = (): SelectQueryBuilder<Token> => {
+      const qb = this.tokensRepository
+        .createQueryBuilder('token')
+        .select('token.*')
+        .where('token.unlisted = false');
 
+      if (search) {
+        qb.andWhere('token.name ILIKE :search', { search: `%${search}%` });
+      }
+      if (factory_address) {
+        qb.andWhere('token.factory_address = :factory_address', {
+          factory_address,
+        });
+      }
+      if (collection && collection.toLowerCase() !== 'all') {
+        if (collection.includes('-ak_')) {
+          // Full collection id, e.g. "CHINESE-ak_3A4g...".
+          qb.andWhere('token.collection = :collectionId', {
+            collectionId: collection,
+          });
+        } else {
+          // Collection name, e.g. "CHINESE" — match the name part of the stored
+          // "<NAME>-ak_<deployer>" id, case-insensitively.
+          qb.andWhere(
+            `LOWER(split_part(token.collection, '-ak_', 1)) = LOWER(:collectionName)`,
+            { collectionName: collection },
+          );
+        }
+      }
+      if (creator_address) {
+        qb.andWhere('token.creator_address = :creator_address', {
+          creator_address,
+        });
+      }
+      if (owner_address) {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1
+            FROM token_holder
+            WHERE token_holder.aex9_address = token.address
+              AND token_holder.address = :owner_address
+              AND token_holder.balance > 0
+          )`,
+          { owner_address },
+        );
+      }
+      return qb;
+    };
+
+    const queryBuilder = buildBaseQuery();
     if (orderBy === 'trending_score') {
       this.tokensService.applyListEligibilityFilters(queryBuilder);
     }
 
-    if (search) {
-      queryBuilder.andWhere('token.name ILIKE :search', {
-        search: `%${search}%`,
-      });
-    }
-    if (factory_address) {
-      queryBuilder.andWhere('token.factory_address = :factory_address', {
-        factory_address,
-      });
-    }
-    // else {
-    //   const factory = await this.communityFactoryService.getCurrentFactory();
-    //   queryBuilder.andWhere('token.factory_address = :address', {
-    //     address: factory.address,
-    //   });
-    // }
-    if (collection && collection.toLowerCase() !== 'all') {
-      if (collection.includes('-ak_')) {
-        // Full collection id, e.g. "CHINESE-ak_3A4g...".
-        queryBuilder.andWhere('token.collection = :collectionId', {
-          collectionId: collection,
-        });
-      } else {
-        // Collection name, e.g. "CHINESE" — match the name part of the stored
-        // "<NAME>-ak_<deployer>" id, case-insensitively.
-        queryBuilder.andWhere(
-          `LOWER(split_part(token.collection, '-ak_', 1)) = LOWER(:collectionName)`,
-          { collectionName: collection },
-        );
-      }
-    }
-    if (creator_address) {
-      queryBuilder.andWhere('token.creator_address = :creator_address', {
-        creator_address,
-      });
-    }
-
-    if (owner_address) {
-      queryBuilder.andWhere(
-        `EXISTS (
-          SELECT 1
-          FROM token_holder
-          WHERE token_holder.aex9_address = token.address
-            AND token_holder.address = :owner_address
-            AND token_holder.balance > 0
-        )`,
-        { owner_address },
-      );
-    }
-
-    const result = await this.tokensService.queryTokensWithRanks(
+    let result = await this.tokensService.queryTokensWithRanks(
       queryBuilder,
       limit,
       page,
       orderBy,
       orderDirection,
     );
+
+    // Fallback: if NO token clears the trending eligibility gate, drop the gate
+    // and return tokens anyway — an empty trending tab is worse than showing
+    // tokens that just have no activity yet. Keyed on the total (not this page)
+    // so pagination stays consistent across pages, not just page 1.
+    if (orderBy === 'trending_score' && result.meta.totalItems === 0) {
+      result = await this.tokensService.queryTokensWithRanks(
+        buildBaseQuery(),
+        limit,
+        page,
+        orderBy,
+        orderDirection,
+      );
+    }
 
     if (trendingCacheKey) {
       await this.cacheManager.set(
