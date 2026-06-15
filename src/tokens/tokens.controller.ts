@@ -87,7 +87,7 @@ export class TokensController {
     limit: number;
     orderBy: string;
     orderDirection: 'ASC' | 'DESC';
-    collection: 'all' | 'word' | 'number';
+    collection: string;
   }): string {
     return `tokens:list:trending:${JSON.stringify({
       orderBy: params.orderBy,
@@ -125,8 +125,10 @@ export class TokensController {
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
   @ApiQuery({
     name: 'collection',
-    enum: ['all', 'word', 'number'],
+    type: 'string',
     required: false,
+    description:
+      "Filter by collection. 'all' (default) returns every collection; otherwise pass a collection name (e.g. 'WORDS', 'CHINESE') or a full collection id (e.g. 'CHINESE-ak_...').",
   })
   @ApiOperation({ operationId: 'listAll' })
   @ApiOkResponsePaginated(TokenDto)
@@ -144,7 +146,7 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'market_cap',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
-    @Query('collection') collection: 'all' | 'word' | 'number' = 'all',
+    @Query('collection') collection: string = 'all',
   ): Promise<Pagination<Token>> {
     this.validatePagination(page, limit);
     // Now, wrap with RANK()
@@ -217,8 +219,20 @@ export class TokensController {
     //     address: factory.address,
     //   });
     // }
-    if (collection !== 'all') {
-      queryBuilder.andWhere('token.collection = :collection', { collection });
+    if (collection && collection.toLowerCase() !== 'all') {
+      if (collection.includes('-ak_')) {
+        // Full collection id, e.g. "CHINESE-ak_3A4g...".
+        queryBuilder.andWhere('token.collection = :collectionId', {
+          collectionId: collection,
+        });
+      } else {
+        // Collection name, e.g. "CHINESE" — match the name part of the stored
+        // "<NAME>-ak_<deployer>" id, case-insensitively.
+        queryBuilder.andWhere(
+          `LOWER(split_part(token.collection, '-ak_', 1)) = LOWER(:collectionName)`,
+          { collectionName: collection },
+        );
+      }
     }
     if (creator_address) {
       queryBuilder.andWhere('token.creator_address = :creator_address', {
