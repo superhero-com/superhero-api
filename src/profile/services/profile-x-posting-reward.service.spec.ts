@@ -1104,6 +1104,51 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(result.streak_bonus_paid_count).toBe(0);
   });
 
+  it('masks the X identity once the account has unlinked X but keeps paid history', async () => {
+    const { service } = makeService({
+      // Account no longer has an x link, but the reward row still references it.
+      account: { address: ADDRESS, links: {} },
+      rows: [
+        baseRow({
+          x_user_id: '100',
+          status: 'paid',
+          tx_hash: 'th_onboarding',
+          follower_count: 1000,
+          current_streak_days: 3,
+          qualified_posts_count: 5,
+        }),
+      ],
+    });
+
+    const result = await service.getRewardStatus(ADDRESS);
+
+    // Identity / active-scan fields are hidden.
+    expect(result.x_username).toBeNull();
+    expect(result.x_user_id).toBeNull();
+    expect(result.referral_code).toBeNull();
+    expect(result.referral_link).toBeNull();
+    expect(result.follower_count).toBeNull();
+    expect(result.current_streak_days).toBe(0);
+    expect(result.qualified_posts_count).toBe(0);
+    // Settled payout history is preserved.
+    expect(result.status).toBe('paid');
+    expect(result.onboarding_status).toBe('paid');
+    expect(result.tx_hash).toBe('th_onboarding');
+  });
+
+  it('still shows the X identity while the account link matches the reward row', async () => {
+    const { service } = makeService({
+      account: { address: ADDRESS, links: { x: 'poster' } },
+      rows: [baseRow({ x_user_id: '100', follower_count: 1000 })],
+    });
+
+    const result = await service.getRewardStatus(ADDRESS);
+
+    expect(result.x_username).toBe('poster');
+    expect(result.x_user_id).toBe('100');
+    expect(result.follower_count).toBe(1000);
+  });
+
   it('claims the onboarding payout slot at most once', async () => {
     const { service } = makeService({
       rows: [{ address: ADDRESS, status: 'pending', tx_hash: null }],

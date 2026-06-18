@@ -351,7 +351,68 @@ export class ProfileXPostingRewardService {
     const streakBonusStatus = reward
       ? await this.resolveStreakBonusStatus(reward)
       : undefined;
-    return this.toPublicRewardStatus(reward, ledgerTotals, streakBonusStatus);
+    const payload = this.toPublicRewardStatus(
+      reward,
+      ledgerTotals,
+      streakBonusStatus,
+    );
+    // The reward row keeps the X identity it was last verified with, but the
+    // on-chain link can be removed afterwards. The recheck path already refuses
+    // to run when the account has no current X link (bootstrapCandidate); mirror
+    // that here so the read-only status does not keep advertising an X account
+    // the user has since unlinked. Earned/paid history (onboarding + per-post +
+    // streak totals) is preserved — only the live identity/scan fields are
+    // masked, and the payload self-heals once the user re-links.
+    if (reward && (await this.isXIdentityUnlinked(address, reward))) {
+      return this.maskUnlinkedXIdentity(payload);
+    }
+    return payload;
+  }
+
+  /**
+   * True when the reward row still references an X identity that is no longer
+   * the account's currently linked X handle (unlinked, or re-linked to a
+   * different handle that has not been re-verified yet).
+   */
+  private async isXIdentityUnlinked(
+    address: string,
+    reward: ProfileXPostingReward,
+  ): Promise<boolean> {
+    const rewardUsername = normalizeXUsername(reward.x_username || '');
+    if (!rewardUsername) {
+      return false;
+    }
+    const account = await this.accountRepository.findOne({
+      where: { address },
+    });
+    const linkedXUsername = normalizeXUsername(account?.links?.x || '');
+    return linkedXUsername !== rewardUsername;
+  }
+
+  /**
+   * Strip the live X identity and active-scan fields from a status payload
+   * while keeping settled payout history (onboarding/per-post/streak totals and
+   * tx hash). Used when the account's X link has been removed.
+   */
+  private maskUnlinkedXIdentity(
+    payload: PublicPostingRewardStatusPayload,
+  ): PublicPostingRewardStatusPayload {
+    return {
+      ...payload,
+      status: payload.onboarding_status === 'paid' ? 'paid' : 'not_started',
+      x_username: null,
+      x_user_id: null,
+      referral_code: null,
+      referral_link: null,
+      qualified_posts_count: 0,
+      remaining_to_goal: payload.onboarding_threshold,
+      follower_count: null,
+      follower_tier_index: null,
+      tier_amount_ae: null,
+      current_streak_days: 0,
+      next_check_allowed_at: null,
+      error: null,
+    };
   }
 
   /**
