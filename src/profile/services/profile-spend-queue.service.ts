@@ -12,16 +12,35 @@ export class ProfileSpendQueueService {
     privateKey: string,
     work: () => Promise<void>,
   ): Promise<void> {
-    const currentQueue = this.queuesByKey.get(privateKey) || Promise.resolve();
+    // Serialize by the NORMALIZED key, not the raw string: two env values that
+    // encode the same wallet differently (e.g. a 32-byte seed vs the 64-byte
+    // secret key, or differing case/prefix) must share ONE queue. Two queues for
+    // the same on-chain account would let concurrent spends collide on the
+    // account nonce and strand a payout.
+    const queueKey = this.queueKeyFor(privateKey);
+    const currentQueue = this.queuesByKey.get(queueKey) || Promise.resolve();
     const current = currentQueue.then(work, work);
     this.queuesByKey.set(
-      privateKey,
+      queueKey,
       current.then(
         () => undefined,
         () => undefined,
       ),
     );
     return current;
+  }
+
+  /**
+   * Stable per-account queue key. Falls back to the raw key only when it cannot
+   * be normalized (a malformed key surfaces its real error later in `work` via
+   * getRewardAccount).
+   */
+  private queueKeyFor(privateKey: string): string {
+    try {
+      return this.normalizePrivateKey(privateKey, 'PROFILE_REWARD_PRIVATE_KEY');
+    } catch {
+      return privateKey;
+    }
   }
 
   getRewardAccount(
