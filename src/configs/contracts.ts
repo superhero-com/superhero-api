@@ -34,6 +34,43 @@ export const BCL_FACTORY: Record<INetworkTypes, ICommunityFactorySchema> = {
         ],
         description: 'Allowed: A–Z, 0–9, and -',
       },
+
+      'CHINESE-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV': {
+        id: 'CHINESE-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV',
+        name: 'CHINESE',
+        allowed_name_length: '20',
+        // Chinese ideographs (U+4E00–U+9FFF) + "-" separator — no digits, no Latin.
+        allowed_name_chars: [
+          { SingleChar: [45] },
+          { CharRangeFromTo: [19968, 40959] },
+        ],
+        description: '允许：汉字和 -',
+      },
+
+      'ARABIC-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV': {
+        id: 'ARABIC-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV',
+        name: 'ARABIC',
+        allowed_name_length: '20',
+        // Arabic letters (U+0621–U+064A) + "-" separator — no digits, no Latin.
+        allowed_name_chars: [
+          { SingleChar: [45] },
+          { CharRangeFromTo: [1569, 1610] },
+        ],
+        description: 'المسموح به: الأحرف العربية و -',
+      },
+
+      'RUSSIAN-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV': {
+        id: 'RUSSIAN-ak_2vmVWHYLRaqdoyLdWEUBi1NodQ3MA1bFuqqRe9A5DgNv3qoDuV',
+        name: 'RUSSIAN',
+        allowed_name_length: '20',
+        // Russian UPPERCASE Cyrillic — А–Я (U+0410–U+042F) + Ё (U+0401) + "-"; no digits, no Latin, no lowercase.
+        allowed_name_chars: [
+          { SingleChar: [45] },
+          { SingleChar: [1025] },
+          { CharRangeFromTo: [1040, 1071] },
+        ],
+        description: 'Разрешено: А–Я, Ё и -',
+      },
     },
   },
   [NETWORK_ID_TESTNET]: {
