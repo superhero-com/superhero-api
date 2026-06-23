@@ -10,7 +10,10 @@ import { ProfileXInvite } from './entities/profile-x-invite.entity';
 import { ProfileXInviteCredit } from './entities/profile-x-invite-credit.entity';
 import { ProfileXInviteMilestoneReward } from './entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from './entities/profile-x-posting-reward.entity';
+import { ProfileXPostRewardLedger } from './entities/profile-x-post-reward-ledger.entity';
+import { ProfileXStreakBonusReward } from './entities/profile-x-streak-bonus-reward.entity';
 import { ProfileChainNameController } from './controllers/profile-chain-name.controller';
+import { ProfileRewardsController } from './controllers/profile-rewards.controller';
 import { ProfileCacheService } from './services/profile-cache.service';
 import { ProfileReadService } from './services/profile-read.service';
 import { ProfileSpendQueueService } from './services/profile-spend-queue.service';
@@ -28,6 +31,8 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     TypeOrmModule.forFeature([
       ProfileCache,
       ProfileXPostingReward,
+      ProfileXPostRewardLedger,
+      ProfileXStreakBonusReward,
       ProfileXInviteChallenge,
       ProfileXInvite,
       ProfileXInviteCredit,
@@ -47,7 +52,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileXPostingRewardService,
     ProfileChainNameService,
   ],
-  controllers: [ProfileChainNameController],
+  controllers: [ProfileChainNameController, ProfileRewardsController],
   exports: [
     TypeOrmModule,
     ProfileReadService,
