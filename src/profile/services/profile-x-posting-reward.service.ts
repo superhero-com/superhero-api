@@ -22,6 +22,7 @@ import {
   Repository,
   Not,
 } from 'typeorm';
+import { buildTxHash } from '@aeternity/aepp-sdk';
 import { randomBytes } from 'crypto';
 import {
   PROFILE_X_FOLLOWER_TIERS,
@@ -46,6 +47,8 @@ import {
   PROFILE_X_REWARD_STREAK_LENGTH,
 } from '../profile.constants';
 import { Account } from '@/account/entities/account.entity';
+import { ACTIVE_NETWORK } from '@/configs/network';
+import { fetchJson } from '@/utils/common';
 import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
@@ -205,6 +208,9 @@ export class ProfileXPostingRewardService {
     ) {
       rewardEntry.verified_at = verificationDate;
     }
+    // A re-link to a DIFFERENT X handle must drop the previous handle's cached
+    // identity/scan state so the next scan starts fresh against the new account.
+    this.resetStaleXIdentityState(rewardEntry, normalizedXUsername);
     rewardEntry.x_username = normalizedXUsername;
     if (
       rewardEntry.status !== 'paid' &&
@@ -340,7 +346,12 @@ export class ProfileXPostingRewardService {
     });
     if (!PROFILE_X_POSTING_REWARD_ENABLED) {
       if (reward?.status === 'paid') {
-        return this.toPublicRewardStatus(reward, null);
+        // Still surface settled per-post history (side-effect-free read) so a
+        // paid user's totals don't drop to zero while the program is toggled off.
+        return this.toPublicRewardStatus(
+          reward,
+          await this.getPerPostTotals(address),
+        );
       }
       return {
         ...this.toPublicRewardStatus(null, null),
@@ -504,6 +515,7 @@ export class ProfileXPostingRewardService {
 
     // 2. Atomic, DB-enforced hard cap: at most one X API scan per address per
     //    window. Concurrent/duplicate requests and restarts cannot exceed it.
+    const priorScanAt = reward.last_x_api_scan_at ?? null;
     const claimed = await this.claimDailyScanSlot(address);
     if (!claimed) {
       const latest = await this.postingRewardRepository.findOne({
@@ -521,17 +533,41 @@ export class ProfileXPostingRewardService {
       );
     }
 
-    // 3. Run the (capped) scan + payouts.
-    await this.processAddressWithGuard(address);
+    // 3. Run the (capped) scan + payouts. A HANDLED scan failure (X outage, etc.)
+    //    returns an error status without throwing, so it correctly keeps the slot
+    //    consumed (fail-closed for the X budget). An UNEXPECTED throw (e.g. a DB
+    //    failure) is neither budget abuse nor the user's fault: roll the slot
+    //    back so they are not locked out for the whole window, and surface the
+    //    failure instead of returning a misleading success.
+    try {
+      await this.processAddressWithGuard(address);
+    } catch (error) {
+      await this.releaseDailyScanSlot(address, priorScanAt);
+      this.logger.error(
+        `X reward recheck failed for ${address} after claiming the scan slot; slot released`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new HttpException(
+        {
+          status: HttpStatus.SERVICE_UNAVAILABLE,
+          message: 'X reward check could not be completed. Please try again.',
+        },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
     return this.getRewardStatus(address);
   }
 
   /**
    * Atomically consume this address's daily X API scan slot. Returns true only
    * for the single caller that flips `last_x_api_scan_at`; concurrent callers
-   * and replays within the window get false. Set-before-fetch (fail-closed):
-   * the slot is consumed even if the subsequent scan errors, so transient X
-   * outages cannot be used to drain the API budget.
+   * and replays within the window get false. Set-before-fetch (fail-closed): a
+   * HANDLED scan failure (e.g. an X outage, which records an error status and
+   * returns rather than throwing) still consumes the slot, so X outages cannot
+   * be used to drain the API budget. An UNEXPECTED scan failure (a thrown infra
+   * error such as a DB outage) is rolled back by `releaseDailyScanSlot` — so a
+   * transient blip neither locks the user out for the window nor hides behind a
+   * success response.
    */
   private async claimDailyScanSlot(address: string): Promise<boolean> {
     const capHours = isValidPositiveInteger(PROFILE_X_REWARD_DAILY_CAP_HOURS)
@@ -551,6 +587,25 @@ export class ProfileXPostingRewardService {
     return Number(result?.affected || 0) > 0;
   }
 
+  /**
+   * Roll back a scan-slot claim after the guarded scan threw UNEXPECTEDLY, so an
+   * infra failure (e.g. a DB error) does not cost the user their daily slot. Only
+   * the slot this request just claimed is restored; a handled X failure returns
+   * normally and never reaches here, so the fail-closed X-budget guard stays
+   * intact. The daily cap already serialized this address (a concurrent claim
+   * would have been refused), so restoring the prior timestamp cannot clobber
+   * another caller's claim.
+   */
+  private async releaseDailyScanSlot(
+    address: string,
+    priorScanAt: Date | null,
+  ): Promise<void> {
+    await this.postingRewardRepository.update(
+      { address },
+      { last_x_api_scan_at: priorScanAt },
+    );
+  }
+
   private computeNextCheckAllowedAt(lastScanAt: Date | null): Date | null {
     if (!lastScanAt) {
       return null;
@@ -559,6 +614,36 @@ export class ProfileXPostingRewardService {
       ? PROFILE_X_REWARD_DAILY_CAP_HOURS
       : 24;
     return new Date(new Date(lastScanAt).getTime() + capHours * 3600 * 1000);
+  }
+
+  /**
+   * When the X handle linked to an address changes, the cached X identity and
+   * scan state from the PREVIOUS handle must not carry over: resolveXUserProfile
+   * prefers the cached `x_user_id`, so without this reset the next scan would
+   * resolve, accrue and PAY against the old X account (or count its tweets
+   * toward onboarding/streak). Earned history — the per-post ledger and streak
+   * bonus rows, keyed by the old `x_user_id` — is intentionally left intact
+   * (anti-sybil; immutable record of what was already paid). Returns true when a
+   * reset was applied. No-op when the handle is unchanged or none was stored.
+   */
+  private resetStaleXIdentityState(
+    reward: ProfileXPostingReward,
+    newUsername: string,
+  ): boolean {
+    const previous = normalizeXUsername(reward.x_username || '');
+    if (!previous || previous === newUsername) {
+      return false;
+    }
+    reward.x_user_id = null;
+    reward.last_scanned_tweet_id = null;
+    reward.follower_count = null;
+    reward.follower_tier_index = null;
+    reward.follower_snapshot_at = null;
+    reward.last_qualifying_post_day = null;
+    reward.current_streak_days = 0;
+    reward.qualified_posts_count = 0;
+    reward.x_lookup_failure_count = 0;
+    return true;
   }
 
   private async bootstrapCandidate(
@@ -589,6 +674,7 @@ export class ProfileXPostingRewardService {
       reward = await this.postingRewardRepository.save(reward);
       return reward;
     }
+    this.resetStaleXIdentityState(reward, linkedXUsername);
     reward.x_username = linkedXUsername;
     if (!reward.verified_at) {
       reward.verified_at = new Date();
@@ -607,6 +693,11 @@ export class ProfileXPostingRewardService {
   }
 
   private async processAddressWithGuard(address: string): Promise<void> {
+    // The in-flight guard's helper swallows (logs) a thrown scan error so the
+    // fire-and-forget guard never rejects. Capture it here so the caller
+    // (requestManualRecheck) can react — release the daily scan slot and surface
+    // the failure — instead of the error being hidden behind a success response.
+    let workError: unknown = null;
     await processAddressWithGuard({
       address,
       processingByAddress: this.processingByAddress,
@@ -624,12 +715,16 @@ export class ProfileXPostingRewardService {
             );
             return;
           }
+          workError = error;
           throw error;
         }
       },
       logger: this.logger,
       errorMessage: `Failed to process X posting reward for ${address}`,
     });
+    if (workError) {
+      throw workError;
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -713,6 +808,23 @@ export class ProfileXPostingRewardService {
     );
     rewardEntry.follower_tier_index = tier ? tier.index : null;
 
+    // Bound-identity guard: once an address has earned with one X identity it is
+    // committed to it. Re-linking a DIFFERENT handle (a new x_user_id) must NOT
+    // start a fresh round of per-post/streak earning — onboarding is already
+    // once-per-address, so without this a paid address could farm per-post and
+    // streak rewards across unlimited handles. A genuine handle RENAME keeps the
+    // same x_user_id and passes. Settled history (onboarding `paid` status, the
+    // ledger, streak rows) is preserved; only NEW accrual for the new identity is
+    // refused, and this short-circuits BEFORE the (paid) posts fetch.
+    if (
+      rewardEntry.rewarded_x_user_id &&
+      rewardEntry.rewarded_x_user_id !== xUserProfile.id
+    ) {
+      rewardEntry.error = 'x_identity_already_rewarded';
+      await this.postingRewardRepository.save(rewardEntry);
+      return;
+    }
+
     // Any active row already holding this x_user_id would make our save below
     // fail on the unique index anyway, so block BEFORE the (paid) posts fetch
     // instead of after it. Username-only conflicts still block only when the
@@ -784,6 +896,28 @@ export class ProfileXPostingRewardService {
 
     rewardEntry.qualified_posts_count =
       Number(rewardEntry.qualified_posts_count || 0) + onboardingNewCount;
+    // Bind the address to this X identity once it actually EARNS with it — a
+    // referral post (per-post / streak), or meeting the onboarding threshold
+    // while onboarding payouts are enabled. A later re-link to a DIFFERENT handle
+    // is then rejected by the bound-identity guard above, so a paid address
+    // cannot farm rewards across handles. Binding on real earning (not a bare
+    // keyword mention that pays nothing) avoids locking out a user who merely
+    // linked the wrong handle before earning. A rename keeps the same id and is
+    // unaffected.
+    const onboardingThreshold = isValidPositiveInteger(
+      PROFILE_X_ONBOARDING_THRESHOLD,
+    )
+      ? PROFILE_X_ONBOARDING_THRESHOLD
+      : 1;
+    const willEarnOnboarding =
+      PROFILE_X_ONBOARDING_REWARD_ENABLED &&
+      Number(rewardEntry.qualified_posts_count || 0) >= onboardingThreshold;
+    if (
+      !rewardEntry.rewarded_x_user_id &&
+      (referralPosts.length > 0 || willEarnOnboarding)
+    ) {
+      rewardEntry.rewarded_x_user_id = rewardEntry.x_user_id;
+    }
     // The cursor is forward-only (`since_id`), so we always advance to the newest
     // tweet we saw — including on truncation. A truncated scan keeps the 2000
     // newest tweets (the page cap); the older overflow is intentionally not
@@ -817,11 +951,21 @@ export class ProfileXPostingRewardService {
           .orIgnore()
           .execute();
       }
+      // Ledger the per-post rewards in the SAME transaction that advances the
+      // forward scan cursor (last_scanned_tweet_id). A crash between the cursor
+      // advance and these inserts would otherwise permanently skip these posts
+      // (the next scan starts strictly after them), silently losing their
+      // per-post reward. The (x_user_id, tweet_id) unique index + orIgnore keep
+      // the inserts idempotent if the transaction is retried.
+      for (const post of perPostLedgerCandidates) {
+        await this.ledgerPerPost(
+          rewardEntry,
+          post,
+          tier,
+          manager.getRepository(ProfileXPostRewardLedger),
+        );
+      }
     });
-
-    for (const post of perPostLedgerCandidates) {
-      await this.ledgerPerPost(rewardEntry, post, tier);
-    }
 
     // rewardEntry was just saved with the post-scan counts/streak, so reuse it
     // rather than re-reading the same row inside runPayouts.
@@ -953,6 +1097,8 @@ export class ProfileXPostingRewardService {
     reward: ProfileXPostingReward,
     post: XTweetItem,
     tier: ReturnType<typeof resolveFollowerTier>,
+    ledgerRepo: Repository<ProfileXPostRewardLedger> = this
+      .postRewardLedgerRepository,
   ): Promise<void> {
     if (!reward.x_user_id || !tier) {
       return;
@@ -972,7 +1118,7 @@ export class ProfileXPostingRewardService {
     if (!amountAettos) {
       return;
     }
-    await this.postRewardLedgerRepository
+    await ledgerRepo
       .createQueryBuilder()
       .insert()
       .into(ProfileXPostRewardLedger)
@@ -1012,6 +1158,10 @@ export class ProfileXPostingRewardService {
       return;
     }
     if (options?.logStuckPayouts) {
+      // Settle anything that broadcast on-chain but failed its DB confirmation
+      // BEFORE logging what is still stuck, so the warnings only cover rows that
+      // genuinely need a human (an in-progress sentinel from a hard crash).
+      await this.reconcileConfirmationPending(reward);
       await this.logStuckPayouts(reward);
     }
     await this.payOnboardingIfEligible(reward);
@@ -1062,6 +1212,176 @@ export class ProfileXPostingRewardService {
     }
   }
 
+  /**
+   * Reconcile payouts that broadcast on-chain but whose DB confirmation write
+   * failed (`payout_confirmation_pending` rows carrying the REAL tx hash). Each
+   * hash is looked up on the middleware; a tx that is on-chain flips the row to
+   * `paid` and clears the error. Rows still holding an in-progress sentinel
+   * (a crash before the real hash was persisted) are skipped — they are not
+   * confirmable from a hash we never recorded and are surfaced by
+   * logStuckPayouts for manual review. Idempotent and double-spend-safe: it only
+   * relabels an already-broadcast tx, it never sends.
+   */
+  private async reconcileConfirmationPending(
+    reward: ProfileXPostingReward,
+  ): Promise<void> {
+    // Key the onboarding reconcile on the DURABLE signal (a not-paid row holding
+    // a real broadcast hash) rather than on error === 'payout_confirmation_pending'.
+    // The error field is cleared by prepareCheckCandidate and overwritten by the
+    // next scan, but tx_hash + status persist — a real th_ hash on a non-paid row
+    // can only be a broadcast-but-unconfirmed payout (the paid path sets the hash
+    // and status='paid' together; the failed path leaves tx_hash null).
+    if (
+      (reward.status === 'pending' || reward.status === 'failed') &&
+      this.isRealTxHash(reward.tx_hash) &&
+      (await this.isTxOnChain(reward.tx_hash as string))
+    ) {
+      const result = await this.postingRewardRepository.update(
+        { address: reward.address, tx_hash: reward.tx_hash } as any,
+        { status: 'paid', error: null },
+      );
+      if (Number(result?.affected || 0) > 0) {
+        reward.status = 'paid';
+        reward.error = null;
+        this.logger.log(
+          `Reconciled onboarding payout for ${reward.address} from chain (${reward.tx_hash})`,
+        );
+      }
+    }
+
+    const pendingLedger = await this.postRewardLedgerRepository.find({
+      where: {
+        address: reward.address,
+        status: In(['pending', 'failed']),
+        error: 'payout_confirmation_pending',
+      } as any,
+      take: ProfileXPostingRewardService.LEDGER_BATCH_SIZE,
+    });
+    for (const row of pendingLedger) {
+      if (
+        this.isRealTxHash(row.tx_hash) &&
+        (await this.isTxOnChain(row.tx_hash as string))
+      ) {
+        await this.postRewardLedgerRepository.update(
+          { id: row.id, tx_hash: row.tx_hash } as any,
+          { status: 'paid', error: null },
+        );
+        this.logger.log(
+          `Reconciled per-post payout ${row.tweet_id} for ${row.address} from chain (${row.tx_hash})`,
+        );
+      }
+    }
+
+    const pendingBonus = await this.streakBonusRewardRepository.find({
+      where: {
+        address: reward.address,
+        status: In(['pending', 'failed']),
+        error: 'payout_confirmation_pending',
+      } as any,
+      take: ProfileXPostingRewardService.STREAK_BONUS_BATCH_SIZE,
+    });
+    for (const row of pendingBonus) {
+      if (
+        this.isRealTxHash(row.tx_hash) &&
+        (await this.isTxOnChain(row.tx_hash as string))
+      ) {
+        await this.streakBonusRewardRepository.update(
+          { id: row.id, tx_hash: row.tx_hash } as any,
+          { status: 'paid', error: null },
+        );
+        this.logger.log(
+          `Reconciled streak bonus (ending ${row.streak_completed_day}) for ${row.address} from chain (${row.tx_hash})`,
+        );
+      }
+    }
+  }
+
+  /**
+   * A real broadcast tx hash (th_...), as opposed to an in-progress sentinel or
+   * the `'broadcasted'` placeholder used when the SDK returned no hash.
+   */
+  private isRealTxHash(txHash: string | null | undefined): boolean {
+    return typeof txHash === 'string' && txHash.startsWith('th_');
+  }
+
+  /**
+   * Resolve the broadcast tx hash from a `spend()` rejection, returning a hash
+   * ONLY when the transaction was actually submitted on-chain — so the caller
+   * records it as broadcast (`payout_confirmation_pending`, unclaimable,
+   * reconciled from chain) instead of re-sending it (which would double-pay).
+   * Returns null for rejections that did NOT broadcast (build / signing /
+   * verification / node-rejection), which are genuinely safe to retry.
+   *
+   * The SDK broadcasts in `postTransaction` and THEN polls for mining
+   * (`waitMined` defaults to true). Two cases:
+   *  - `TxTimedOutError` is thrown ONLY by `poll()`, which runs AFTER a
+   *    successful broadcast — so the tx is definitely in the mempool and will
+   *    mine. The real hash is embedded in the message (with a `buildTxHash`
+   *    fallback). Trusted without a chain lookup.
+   *  - Any OTHER rejection that still carries the signed `rawTx` is ambiguous: it
+   *    could be a pre-broadcast sign/verify/node-reject, or a post-broadcast
+   *    transient poll/network error. Derive the candidate hash and ASK THE CHAIN —
+   *    a tx the node accepted is visible on the middleware; a never-broadcast tx
+   *    is not. Only a positive on-chain hit is treated as broadcast, so an
+   *    ordinary send failure still retries while a tx that genuinely landed is
+   *    never re-sent.
+   */
+  private async resolveBroadcastedTxHash(
+    error: unknown,
+  ): Promise<string | null> {
+    const candidate = error as {
+      name?: unknown;
+      message?: unknown;
+      rawTx?: unknown;
+    };
+    const isTimeout = candidate?.name === 'TxTimedOutError';
+    let hash: string | null = null;
+    // The timeout message embeds the real hash ("... transaction hash: th_...").
+    if (isTimeout && typeof candidate.message === 'string') {
+      hash = candidate.message.match(/th_[1-9A-HJ-NP-Za-km-z]+/)?.[0] ?? null;
+    }
+    // Otherwise (or if the message had none) derive it from the signed tx the
+    // SDK attaches to the error.
+    if (
+      !this.isRealTxHash(hash) &&
+      typeof candidate?.rawTx === 'string' &&
+      candidate.rawTx
+    ) {
+      try {
+        hash = buildTxHash(candidate.rawTx as `tx_${string}`);
+      } catch {
+        hash = null;
+      }
+    }
+    if (!this.isRealTxHash(hash)) {
+      return null;
+    }
+    // A poll timeout is proof of broadcast; trust it without a lookup.
+    if (isTimeout) {
+      return hash;
+    }
+    // Ambiguous failure: only treat it as broadcast (and therefore unclaimable)
+    // when the chain actually has the tx. A not-yet-broadcast failure is not on
+    // chain → null → the caller retries it safely.
+    return (await this.isTxOnChain(hash as string)) ? hash : null;
+  }
+
+  /**
+   * True when the middleware knows the transaction (i.e. it is on-chain). Any
+   * error (404 not-yet-seen / network / timeout) is treated as "not confirmed
+   * yet" so reconciliation simply retries on the next recovery pass.
+   */
+  private async isTxOnChain(txHash: string): Promise<boolean> {
+    try {
+      const tx = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/txs/${encodeURIComponent(txHash)}`,
+      );
+      return !!tx;
+    } catch {
+      return false;
+    }
+  }
+
   private async payOnboardingIfEligible(
     reward: ProfileXPostingReward,
   ): Promise<void> {
@@ -1096,6 +1416,17 @@ export class ProfileXPostingRewardService {
       rewardLabel: 'X onboarding reward',
     });
     if (!amountAettos) {
+      return;
+    }
+
+    // Respect the failure backoff: a failed send schedules next_retry_at, so do
+    // not re-send until it elapses. The atomic claim below still guards against
+    // concurrent double-claims; this only throttles the per-recheck retry cadence
+    // (the ledger/streak payouts back off the same way).
+    if (
+      reward.next_retry_at &&
+      new Date(reward.next_retry_at).getTime() > Date.now()
+    ) {
       return;
     }
 
@@ -1134,28 +1465,44 @@ export class ProfileXPostingRewardService {
         },
       );
     } catch (error) {
-      if (broadcastHash) {
+      const broadcastedHash =
+        broadcastHash ?? (await this.resolveBroadcastedTxHash(error));
+      if (broadcastedHash) {
+        // Broadcasted but the awaited spend/DB step failed — either the final DB
+        // write threw, or the post-broadcast mining poll timed out. Persist the
+        // REAL tx hash (still non-null → row stays unclaimable, no double-spend)
+        // so the confirmation finalizer can later settle it from the chain
+        // instead of re-sending it.
         await this.postingRewardRepository.update(
           { address: reward.address },
-          { error: 'payout_confirmation_pending', last_attempt_at: new Date() },
+          {
+            tx_hash: broadcastedHash,
+            error: 'payout_confirmation_pending',
+            last_attempt_at: new Date(),
+          },
         );
         this.logger.error(
-          `Onboarding reward broadcasted for ${reward.address} but DB state could not be confirmed`,
+          `Onboarding reward broadcasted for ${reward.address} but could not be confirmed`,
           error instanceof Error ? error.stack : String(error),
         );
         return;
       }
+      const retryCount = Number(reward.retry_count || 0) + 1;
       await this.postingRewardRepository.update(
         { address: reward.address },
         {
           tx_hash: null,
           status: 'failed',
           error: 'payout_send_failed',
+          retry_count: retryCount,
+          next_retry_at: new Date(
+            Date.now() + this.getRetryDelaySeconds(retryCount) * 1000,
+          ),
           last_attempt_at: new Date(),
         },
       );
       this.logger.warn(
-        `Failed to send X onboarding reward to ${reward.address}`,
+        `Failed to send X onboarding reward to ${reward.address}, scheduled retry`,
       );
     }
   }
@@ -1277,16 +1624,24 @@ export class ProfileXPostingRewardService {
         },
       );
     } catch (error) {
-      if (broadcastHash) {
-        // Broadcasted but the final DB write failed. Never revert the in-progress
-        // sentinel — the non-null tx_hash keeps the row unclaimable so we cannot
-        // double-spend. A human/finalizer reconciles `payout_confirmation_pending`.
+      const broadcastedHash =
+        broadcastHash ?? (await this.resolveBroadcastedTxHash(error));
+      if (broadcastedHash) {
+        // Broadcasted but the awaited spend/DB step failed (DB write error, or a
+        // post-broadcast mining-poll timeout). Persist the REAL tx hash (still
+        // non-null → row stays unclaimable so we cannot double-spend); the
+        // confirmation finalizer reconciles `payout_confirmation_pending` from
+        // the chain.
         await this.postRewardLedgerRepository.update(
           { id: row.id },
-          { error: 'payout_confirmation_pending', next_retry_at: null },
+          {
+            tx_hash: broadcastedHash,
+            error: 'payout_confirmation_pending',
+            next_retry_at: null,
+          },
         );
         this.logger.error(
-          `Per-post reward broadcasted for ${row.address} tweet ${row.tweet_id} but DB state could not be confirmed`,
+          `Per-post reward broadcasted for ${row.address} tweet ${row.tweet_id} but could not be confirmed`,
           error instanceof Error ? error.stack : String(error),
         );
         return true;
@@ -1410,17 +1765,24 @@ export class ProfileXPostingRewardService {
         },
       );
     } catch (error) {
-      if (broadcastHash) {
-        // Broadcasted but the final DB write failed. Never revert the
-        // in-progress sentinel — the non-null tx_hash keeps the row unclaimable
-        // so we cannot double-pay. A human/finalizer reconciles
-        // `payout_confirmation_pending`.
+      const broadcastedHash =
+        broadcastHash ?? (await this.resolveBroadcastedTxHash(error));
+      if (broadcastedHash) {
+        // Broadcasted but the awaited spend/DB step failed (DB write error, or a
+        // post-broadcast mining-poll timeout). Persist the REAL tx hash (still
+        // non-null → row stays unclaimable so we cannot double-pay); the
+        // confirmation finalizer reconciles `payout_confirmation_pending` from
+        // the chain.
         await this.streakBonusRewardRepository.update(
           { id: row.id },
-          { error: 'payout_confirmation_pending', next_retry_at: null },
+          {
+            tx_hash: broadcastedHash,
+            error: 'payout_confirmation_pending',
+            next_retry_at: null,
+          },
         );
         this.logger.error(
-          `Streak bonus broadcasted for ${row.address} (streak ending ${row.streak_completed_day}) but DB state could not be confirmed`,
+          `Streak bonus broadcasted for ${row.address} (streak ending ${row.streak_completed_day}) but could not be confirmed`,
           error instanceof Error ? error.stack : String(error),
         );
         return;
@@ -1589,7 +1951,9 @@ export class ProfileXPostingRewardService {
     if (
       txHash ===
         ProfileXPostingRewardService.ONBOARDING_PAYOUT_IN_PROGRESS_TX_HASH ||
-      txHash === ProfileXPostingRewardService.PERPOST_PAYOUT_IN_PROGRESS_TX_HASH
+      txHash ===
+        ProfileXPostingRewardService.PERPOST_PAYOUT_IN_PROGRESS_TX_HASH ||
+      txHash === ProfileXPostingRewardService.STREAK_PAYOUT_IN_PROGRESS_TX_HASH
     ) {
       return null;
     }
@@ -1683,8 +2047,16 @@ export class ProfileXPostingRewardService {
   ): Promise<XUserProfile | null> {
     if (knownUserId) {
       const byId = await this.fetchXUserById(knownUserId);
-      if (byId) {
-        return byId;
+      if (byId.profile) {
+        return byId.profile;
+      }
+      // Only spend a SECOND (paid) lookup when the id is definitively gone
+      // (404 / resolved-to-nothing) — e.g. the handle changed or the id rotated.
+      // On a transient failure (429 / 5xx / network / no token) abort having
+      // spent a single call; the next daily-capped scan retries, instead of
+      // burning two lookups per scan during an X outage.
+      if (!byId.notFound) {
+        return null;
       }
     }
     return this.fetchXUserProfileByUsername(username);
@@ -1724,10 +2096,12 @@ export class ProfileXPostingRewardService {
     }
   }
 
-  private async fetchXUserById(userId: string): Promise<XUserProfile | null> {
+  private async fetchXUserById(
+    userId: string,
+  ): Promise<{ profile: XUserProfile | null; notFound: boolean }> {
     const token = await this.getXAppAccessToken();
     if (!token) {
-      return null;
+      return { profile: null, notFound: false };
     }
     try {
       const { response, body, baseUrl } = await this.fetchXReadWithAuthFallback(
@@ -1736,23 +2110,33 @@ export class ProfileXPostingRewardService {
         )}?user.fields=id,username,public_metrics`,
         token,
       );
-      if (!response.ok || !(body as any)?.data?.id) {
-        this.logger.warn('X user id lookup failed for posting reward', {
-          user_id: userId,
-          base_url: baseUrl,
-          status: response.status,
-          detail: (body as any)?.detail || (body as any)?.title,
-        });
-        return null;
+      if (response.ok && (body as any)?.data?.id) {
+        return {
+          profile: this.toXUserProfile((body as any).data, null),
+          notFound: false,
+        };
       }
-      return this.toXUserProfile((body as any).data, null);
+      this.logger.warn('X user id lookup failed for posting reward', {
+        user_id: userId,
+        base_url: baseUrl,
+        status: response.status,
+        detail: (body as any)?.detail || (body as any)?.title,
+      });
+      // A 404, or a 200 whose payload resolved to no user, both mean the id is
+      // gone for good → worth a username fallback. Other non-OK statuses
+      // (429 / 5xx) are transient → signal "not notFound" so the caller does
+      // NOT spend a second lookup.
+      return {
+        profile: null,
+        notFound: response.status === 404 || response.ok,
+      };
     } catch (error) {
       this.logger.warn(
         `Failed to fetch X user by id ${userId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return null;
+      return { profile: null, notFound: false };
     }
   }
 

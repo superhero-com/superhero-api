@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS profile_x_posting_rewards (
   address                 character varying PRIMARY KEY,
   x_username              character varying NULL,
   x_user_id               character varying NULL,
+  rewarded_x_user_id      character varying NULL,
   qualified_posts_count   integer NOT NULL DEFAULT 0,
   referral_code           character varying NULL,
   last_x_api_scan_at      timestamp NULL,
@@ -49,6 +50,13 @@ CREATE TABLE IF NOT EXISTS profile_x_posting_rewards (
   created_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   updated_at              timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
 );
+
+-- Added after the table's first release: the X identity an address became bound
+-- to on its first qualifying post, so a re-link to a different handle cannot farm
+-- per-post/streak rewards again. ADD COLUMN IF NOT EXISTS keeps this idempotent
+-- for tables created before this column existed.
+ALTER TABLE profile_x_posting_rewards
+  ADD COLUMN IF NOT EXISTS rewarded_x_user_id character varying NULL;
 
 -- One reward row per X identity (anti-sybil) and per referral code. Partial so
 -- many rows may legitimately have NULL x_user_id / referral_code.

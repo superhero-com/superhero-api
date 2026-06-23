@@ -1,6 +1,3 @@
-export const PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY =
-  process.env.PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY || '';
-
 /**
  * Master kill-switch for every profile reward payout (X posting reward, X
  * invite milestone reward, …). It hard-overrides every per-reward `*_ENABLED`
@@ -45,13 +42,10 @@ export const PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH =
     .trim()
     .toLowerCase() !== 'false';
 
-export const PROFILE_X_POSTING_REWARD_KEYWORDS = (
-  process.env.PROFILE_X_POSTING_REWARD_KEYWORDS ||
-  'superhero.com,superhero_chain'
-)
-  .split(',')
-  .map((value) => value.trim().toLowerCase())
-  .filter(Boolean);
+export const PROFILE_X_POSTING_REWARD_KEYWORDS = [
+  'superhero.com',
+  'superhero_chain',
+];
 
 export const PROFILE_X_INVITE_MILESTONE_THRESHOLD = parseInt(
   process.env.PROFILE_X_INVITE_MILESTONE_THRESHOLD || '10',
@@ -62,21 +56,14 @@ export const PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE =
   process.env.PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE || '0';
 
 export const PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY =
-  process.env.PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY ||
-  PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY;
+  process.env.PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY || '';
 
 export const PROFILE_X_INVITE_LINK_BASE_URL =
   process.env.PROFILE_X_INVITE_LINK_BASE_URL || '';
 
-export const PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS = parseInt(
-  process.env.PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS || '300',
-  10,
-);
+export const PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS = 300;
 
-export const PROFILE_X_INVITE_PENDING_TIMEOUT_SECONDS = parseInt(
-  process.env.PROFILE_X_INVITE_PENDING_TIMEOUT_SECONDS || '300',
-  10,
-);
+export const PROFILE_X_INVITE_PENDING_TIMEOUT_SECONDS = 300;
 
 /** Sponsored claims only accept labels of at least this length (without `.chain`). */
 export const PROFILE_CHAIN_NAME_MIN_LABEL_LENGTH = 13;
@@ -84,10 +71,7 @@ export const PROFILE_CHAIN_NAME_MIN_LABEL_LENGTH = 13;
 export const PROFILE_CHAIN_NAME_PRIVATE_KEY =
   process.env.PROFILE_CHAIN_NAME_PRIVATE_KEY || '';
 
-export const PROFILE_CHAIN_NAME_CHALLENGE_TTL_SECONDS = parseInt(
-  process.env.PROFILE_CHAIN_NAME_CHALLENGE_TTL_SECONDS || '300',
-  10,
-);
+export const PROFILE_CHAIN_NAME_CHALLENGE_TTL_SECONDS = 300;
 
 export const PROFILE_CHAIN_NAME_RETRY_BASE_SECONDS = parseInt(
   process.env.PROFILE_CHAIN_NAME_RETRY_BASE_SECONDS || '30',
@@ -99,10 +83,7 @@ export const PROFILE_CHAIN_NAME_RETRY_MAX_SECONDS = parseInt(
   10,
 );
 
-export const PROFILE_CHAIN_NAME_MAX_RETRIES = parseInt(
-  process.env.PROFILE_CHAIN_NAME_MAX_RETRIES || '10',
-  10,
-);
+export const PROFILE_CHAIN_NAME_MAX_RETRIES = 10;
 
 /* -------------------------------------------------------------------------- */
 /* X reward program v2 (referral links, per-post rewards, streak bonus)        */
@@ -122,20 +103,19 @@ export const PROFILE_X_REWARD_DAILY_CAP_HOURS = (() => {
 })();
 
 /** Base URL used to build a user's unique referral link (`<base>?ref=<code>`). */
-export const PROFILE_X_REFERRAL_LINK_BASE_URL =
-  process.env.PROFILE_X_REFERRAL_LINK_BASE_URL || '';
+export const PROFILE_X_REFERRAL_LINK_BASE_URL = 'https://superhero.com';
 
 /**
  * Minimum X follower count required to participate in the reward program.
  * Accounts below this never accrue qualifying posts, per-post rewards or
- * streak progress (already-accrued payouts still settle). Falls back to 50.
+ * streak progress (already-accrued payouts still settle). Falls back to 100.
  */
 export const PROFILE_X_REWARD_MIN_FOLLOWERS = (() => {
   const parsed = parseInt(
-    process.env.PROFILE_X_REWARD_MIN_FOLLOWERS || '50',
+    process.env.PROFILE_X_REWARD_MIN_FOLLOWERS || '100',
     10,
   );
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 50;
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 100;
 })();
 
 /* --- Path 1: onboarding (verify X + 1 keyword post → one-time reward) ------ */
@@ -144,14 +124,10 @@ export const PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE =
   process.env.PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE ||
   PROFILE_X_POSTING_REWARD_AMOUNT_AE;
 
-export const PROFILE_X_ONBOARDING_THRESHOLD = parseInt(
-  process.env.PROFILE_X_ONBOARDING_THRESHOLD || '1',
-  10,
-);
+export const PROFILE_X_ONBOARDING_THRESHOLD = 1;
 
 export const PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY =
-  process.env.PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY ||
-  PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY;
+  process.env.PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY || '';
 
 export const PROFILE_X_ONBOARDING_REWARD_ENABLED =
   !PROFILE_REWARDS_DISABLED &&
@@ -162,8 +138,7 @@ export const PROFILE_X_ONBOARDING_REWARD_ENABLED =
 /* --- Path 2: per-post rewards (referral link post → follower-tiered AE) ----- */
 
 export const PROFILE_X_PERPOST_REWARD_PRIVATE_KEY =
-  process.env.PROFILE_X_PERPOST_REWARD_PRIVATE_KEY ||
-  PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY;
+  process.env.PROFILE_X_PERPOST_REWARD_PRIVATE_KEY || '';
 
 export const PROFILE_X_PERPOST_REWARD_ENABLED =
   !PROFILE_REWARDS_DISABLED &&
@@ -185,8 +160,7 @@ export const PROFILE_X_REWARD_STREAK_BONUS_AMOUNT_AE =
   process.env.PROFILE_X_REWARD_STREAK_BONUS_AMOUNT_AE || '50';
 
 export const PROFILE_X_REWARD_STREAK_BONUS_PRIVATE_KEY =
-  process.env.PROFILE_X_REWARD_STREAK_BONUS_PRIVATE_KEY ||
-  PROFILE_X_VERIFICATION_REWARD_PRIVATE_KEY;
+  process.env.PROFILE_X_REWARD_STREAK_BONUS_PRIVATE_KEY || '';
 
 export const PROFILE_X_REWARD_STREAK_BONUS_ENABLED =
   !PROFILE_REWARDS_DISABLED &&

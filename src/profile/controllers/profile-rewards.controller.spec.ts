@@ -115,4 +115,59 @@ describe('ProfileRewardsController', () => {
     ).toHaveBeenCalledWith('ak_1');
     expect(result.code).toBe('abc123def456');
   });
+
+  it('does NOT run the recheck when challenge verification fails', async () => {
+    const profileXInviteService = {
+      verifyPostingRewardRecheckChallenge: jest
+        .fn()
+        .mockRejectedValue(new Error('bad signature')),
+    } as any;
+    const profileXPostingRewardService = {
+      requestManualRecheck: jest.fn(),
+    } as any;
+    const { controller } = getController({
+      profileXInviteService,
+      profileXPostingRewardService,
+    });
+
+    await expect(
+      controller.recheckXPostingReward('ak_1', {
+        challenge_nonce: 'a'.repeat(24),
+        challenge_expires_at: '123',
+        signature_hex: 'b'.repeat(128),
+      } as any),
+    ).rejects.toThrow('bad signature');
+
+    // The signature gate must hold: no recheck runs without a valid proof.
+    expect(
+      profileXPostingRewardService.requestManualRecheck,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('does NOT mint a referral link when challenge verification fails', async () => {
+    const profileXInviteService = {
+      verifyPostingRewardRecheckChallenge: jest
+        .fn()
+        .mockRejectedValue(new Error('bad signature')),
+    } as any;
+    const profileXPostingRewardService = {
+      getOrCreateReferralLink: jest.fn(),
+    } as any;
+    const { controller } = getController({
+      profileXInviteService,
+      profileXPostingRewardService,
+    });
+
+    await expect(
+      controller.createXRewardReferralLink('ak_1', {
+        challenge_nonce: 'a'.repeat(24),
+        challenge_expires_at: '123',
+        signature_hex: 'b'.repeat(128),
+      } as any),
+    ).rejects.toThrow('bad signature');
+
+    expect(
+      profileXPostingRewardService.getOrCreateReferralLink,
+    ).not.toHaveBeenCalled();
+  });
 });

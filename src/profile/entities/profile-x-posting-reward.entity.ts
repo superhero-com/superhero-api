@@ -34,6 +34,20 @@ export class ProfileXPostingReward {
   })
   x_user_id: string | null;
 
+  /**
+   * The X identity (x_user_id) this address became BOUND to the first time it
+   * accrued a qualifying post. Unlike `x_user_id` — which resetStaleXIdentityState
+   * clears on a handle change so the new handle scans fresh — this survives a
+   * re-link, so a later scan that resolves a DIFFERENT identity is rejected: a
+   * paid/earning address cannot farm per-post/streak rewards across multiple X
+   * handles (onboarding is already once-per-address). A genuine handle RENAME
+   * keeps the same x_user_id and passes.
+   */
+  @Column({
+    nullable: true,
+  })
+  rewarded_x_user_id: string | null;
+
   @Column({
     type: 'int',
     default: 0,
