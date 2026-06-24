@@ -18,6 +18,7 @@ import { DeviceChallenge } from '../entities/device-challenge.entity';
 import {
   buildDeviceLinkMessage,
   buildDeviceUnlinkMessage,
+  buildFeedSessionMessage,
   buildPreferencesUpdateMessage,
 } from '../notifications.constants';
 import { buildRoomMuteMessage } from '@/token-gated-rooms/notifications/room-mute.message';
@@ -157,6 +158,25 @@ export class DeviceChallengeService {
       address,
       signature,
       buildRoomMuteMessage(address, nonce, saleAddress, muted, muteAll),
+    );
+  }
+
+  /**
+   * Same atomic verify, but against the **feed-session** message. The verified
+   * signature is the one-time proof of address control that the caller exchanges
+   * for a bearer session (see FeedSessionService); the session then authorizes
+   * feed reads and the socket handshake without re-signing per request.
+   */
+  async verifyAndConsumeForSession(
+    nonce: string,
+    address: string,
+    signature: string,
+  ): Promise<void> {
+    await this.verifyWithMessage(
+      nonce,
+      address,
+      signature,
+      buildFeedSessionMessage(address, nonce),
     );
   }
 

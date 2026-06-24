@@ -1,6 +1,7 @@
 import { Notifiable } from '../core/notifiable.interface';
 import {
   AppNotification,
+  DatabaseNotificationContent,
   ExpoMessageContent,
   NotificationChannelName,
   NotificationMeta,
@@ -38,7 +39,7 @@ export class InvitationClaimedNotification implements AppNotification {
   constructor(private readonly params: InvitationClaimedParams) {}
 
   via(): NotificationChannelName[] {
-    return ['expo'];
+    return ['expo', 'database', 'web-push'];
   }
 
   dedupKey(notifiable: Notifiable): string {
@@ -58,5 +59,10 @@ export class InvitationClaimedNotification implements AppNotification {
         amountAe: this.params.amountAe,
       },
     };
+  }
+
+  /** Feed copy mirrors the push for now; `data` carries the deep-link hints. */
+  toDatabase(): DatabaseNotificationContent {
+    return this.toExpo();
   }
 }

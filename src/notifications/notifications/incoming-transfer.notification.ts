@@ -34,6 +34,11 @@ export class IncomingTransferNotification implements AppNotification {
 
   constructor(private readonly params: IncomingTransferParams) {}
 
+  // Mobile push only. Incoming SpendTx are intentionally NOT persisted to the
+  // web feed: they fire for every on-chain transfer to the recipient, so adding
+  // 'database' here would write a feed row (and do the dispatch work) for every
+  // transfer — exactly the cost the web feed must not pay. Expo stays gated on
+  // the recipient having a registered device (see ChainTransferListener).
   via(): NotificationChannelName[] {
     return ['expo'];
   }

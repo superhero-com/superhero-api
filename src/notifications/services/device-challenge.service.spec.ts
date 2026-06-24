@@ -14,6 +14,7 @@ import { DeviceChallengeService } from './device-challenge.service';
 import {
   buildDeviceLinkMessage,
   buildDeviceUnlinkMessage,
+  buildFeedSessionMessage,
   buildPreferencesUpdateMessage,
 } from '../notifications.constants';
 
@@ -179,6 +180,30 @@ describe('DeviceChallengeService', () => {
       buildPreferencesUpdateMessage('ak_alice', 'n1', prefs),
       'sg_ok',
     );
+  });
+
+  it('verifyAndConsumeForSession verifies the feed-session message and consumes', async () => {
+    repo.findOne.mockResolvedValue(validChallenge());
+    verifyMock.mockReturnValue(true);
+    await service.verifyAndConsumeForSession('n1', 'ak_alice', 'sg_ok');
+    expect(verifyMock).toHaveBeenCalledWith(
+      'ak_alice',
+      buildFeedSessionMessage('ak_alice', 'n1'),
+      'sg_ok',
+    );
+    expect(repo.update).toHaveBeenCalledWith(
+      expect.objectContaining({ nonce: 'n1' }),
+      expect.objectContaining({ consumed_at: expect.any(Date) }),
+    );
+  });
+
+  it('verifyAndConsumeForSession rejects an invalid signature', async () => {
+    repo.findOne.mockResolvedValue(validChallenge());
+    verifyMock.mockReturnValue(false);
+    await expect(
+      service.verifyAndConsumeForSession('n1', 'ak_alice', 'sg_bad'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(repo.update).not.toHaveBeenCalled();
   });
 
   it('rejects a preferences signature replayed against a mutated body', async () => {

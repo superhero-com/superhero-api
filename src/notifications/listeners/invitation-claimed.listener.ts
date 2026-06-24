@@ -7,22 +7,25 @@ import {
   InvitationClaimedEventPayload,
 } from '@/plugins/bcl-affiliation/events';
 import { NotificationService } from '../core/notification.service';
-import { DeviceRegistryService } from '../services/device-registry.service';
 import { AccountLabelService } from '../services/account-label.service';
 import { InvitationClaimedNotification } from '../notifications/invitation-claimed.notification';
 import notificationsConfig from '../notifications.config';
 
 /**
  * Bridges INVITATION_CLAIMED_EVENT from the bcl-affiliation plugin into the
- * notification engine. Cheap hot-path gate: short-circuits if the inviter has
- * no registered device before doing any label resolution.
+ * notification engine. Unlike the SpendTx trigger, this is NOT gated on the
+ * recipient having a mobile device: invitation-claimed also delivers to the web
+ * feed (the 'database' channel), so a web-only inviter must still be dispatched.
+ * The per-channel fan-out stays cheap on its own — ExpoChannel no-ops when the
+ * recipient has no device token, and the opt-out is enforced in
+ * NotificationService.send. These events are bounded (one per redeemed invite),
+ * so there is no hot-path flood to guard against.
  */
 @Injectable()
 export class InvitationClaimedListener {
   private readonly logger = new Logger(InvitationClaimedListener.name);
 
   constructor(
-    private readonly registry: DeviceRegistryService,
     private readonly notifications: NotificationService,
     private readonly accountLabel: AccountLabelService,
     @Inject(notificationsConfig.KEY)
@@ -40,9 +43,6 @@ export class InvitationClaimedListener {
         return;
       }
       if (inviterAddress === claimerAddress) {
-        return;
-      }
-      if (!(await this.registry.hasDevices(inviterAddress))) {
         return;
       }
 
