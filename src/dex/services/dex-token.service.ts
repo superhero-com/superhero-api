@@ -51,10 +51,15 @@ export class DexTokenService {
     search: string = '',
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
+    listed?: boolean,
   ): Promise<Pagination<DexToken>> {
     const query = this.dexTokenRepository
       .createQueryBuilder('dexToken')
       .leftJoinAndSelect('dexToken.summary', 'summary');
+
+    if (listed !== undefined) {
+      query.andWhere('dexToken.listed = :listed', { listed });
+    }
 
     const allowedOrderFields = [
       'pairs_count',
@@ -145,12 +150,73 @@ export class DexTokenService {
     return paginate(query, options);
   }
 
+  /**
+   * Find the most relevant pair to chart a single token's price.
+   * Prefers a pair quoted against WAE (so the price is expressed in AE),
+   * and among the candidates picks the one with the deepest liquidity.
+   * Returns the pair plus the position ('token0' | 'token1') of the quote
+   * (base) token, which callers pass as `fromToken` to PairHistoryService so
+   * the resulting price series is the requested token priced in the base token.
+   */
+  async findBestPairForToken(
+    tokenAddress: string,
+  ): Promise<{ pair: Pair; basePosition: 'token0' | 'token1' } | null> {
+    const allPairs = await this.getAllPairsWithTokens();
+    const candidates = allPairs.filter(
+      (pair) =>
+        pair.token0?.address === tokenAddress ||
+        pair.token1?.address === tokenAddress,
+    );
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // Liquidity-depth proxy: the smaller of the two reserves. NOTE this is a
+    // coarse heuristic — reserves are raw amounts in tokens that may have
+    // different decimals, so cross-pair comparison is not strictly apples to
+    // apples. It is only used to break ties when picking a charting pool (the
+    // WAE-preference below is what actually matters), so a slightly imperfect
+    // ranking is acceptable here.
+    const liquidity = (pair: Pair) =>
+      Math.min(
+        parseFloat(String(pair.reserve0 ?? '0')) || 0,
+        parseFloat(String(pair.reserve1 ?? '0')) || 0,
+      );
+
+    const isWaePair = (pair: Pair) =>
+      pair.token0?.address === DEX_CONTRACTS.wae ||
+      pair.token1?.address === DEX_CONTRACTS.wae;
+
+    const waePairs = candidates.filter(isWaePair);
+    const pool = waePairs.length > 0 ? waePairs : candidates;
+
+    const pair = pool.reduce((best, current) =>
+      liquidity(current) > liquidity(best) ? current : best,
+    );
+
+    // The base (quote) token is the one that is NOT the requested token.
+    const basePosition: 'token0' | 'token1' =
+      pair.token0?.address === tokenAddress ? 'token1' : 'token0';
+
+    return { pair, basePosition };
+  }
+
   async findByAddress(address: string): Promise<DexToken> {
     return this.dexTokenRepository
       .createQueryBuilder('dexToken')
       .leftJoinAndSelect('dexToken.summary', 'summary')
       .where('dexToken.address = :address', { address })
       .getOne();
+  }
+
+  /** Toggle the curated "listed" flag for a token. Returns the updated token. */
+  async setListed(address: string, listed: boolean): Promise<DexToken | null> {
+    const token = await this.dexTokenRepository.findOne({ where: { address } });
+    if (!token) {
+      return null;
+    }
+    token.listed = listed;
+    return this.dexTokenRepository.save(token);
   }
 
   async getTokenPrice(

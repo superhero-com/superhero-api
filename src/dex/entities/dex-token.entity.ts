@@ -42,6 +42,13 @@ export class DexToken {
   })
   is_ae: boolean;
 
+  // Curated "listed" flag: a token is officially listed/featured by the DEX.
+  // Defaults to false and is toggled via the guarded admin endpoint.
+  @Column({
+    default: false,
+  })
+  listed: boolean;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

@@ -1,30 +1,63 @@
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import {
+  BadRequestException,
+  Body,
   Controller,
   DefaultValuePipe,
   Get,
   NotFoundException,
   Param,
   ParseIntPipe,
+  Patch,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiQuery,
+  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+import { ApiKeyGuard } from '@/trending-tags/guards/api-key.guard';
+import { SetListedDto } from '../dto/set-listed.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DexTokenDto, DexTokenSummaryDto } from '../dto';
 import { Pair } from '../entities/pair.entity';
 import { DexTokenSummaryService } from '../services/dex-token-summary.service';
 import { DexTokenService } from '../services/dex-token.service';
+import { PairHistoryService } from '../services/pair-history.service';
 import {
   AeContractAddressPipe,
   OptionalAeContractAddressPipe,
 } from '@/common/validation/request-validation';
+
+const MIN_HISTORY_INTERVAL_SECONDS = 60;
+const MAX_HISTORY_INTERVAL_SECONDS = 86_400;
+
+/**
+ * Parse the optional ?listed query param into a boolean filter.
+ * Accepts 'true'/'1' (→ true) and 'false'/'0' (→ false), case-insensitively,
+ * and returns undefined when the param is omitted. Any other value throws a
+ * 400 instead of being silently coerced to a (wrong) filter.
+ */
+function parseListedFilter(value?: string): boolean | undefined {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+  throw new BadRequestException(
+    `Invalid listed value: ${value}. Expected 'true' or 'false'.`,
+  );
+}
 
 @Controller('dex/tokens')
 @ApiTags('DEX')
@@ -34,6 +67,7 @@ export class DexTokensController {
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
     private readonly dexTokenSummaryService: DexTokenSummaryService,
+    private readonly pairHistoryService: PairHistoryService,
   ) {
     //
   }
@@ -60,6 +94,13 @@ export class DexTokensController {
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
+  @ApiQuery({
+    name: 'listed',
+    type: 'boolean',
+    required: false,
+    description:
+      'Filter to only listed (true) or only unlisted (false) tokens. Omit to return all tokens.',
+  })
   @ApiOperation({
     operationId: 'listAllDexTokens',
     summary: 'Get all DEX tokens',
@@ -74,12 +115,14 @@ export class DexTokensController {
     @Query('search') search = '',
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
+    @Query('listed') listed?: string,
   ) {
     return this.dexTokenService.findAll(
       { page, limit },
       search,
       orderBy,
       orderDirection,
+      parseListedFilter(listed),
     );
   }
 
@@ -236,5 +279,100 @@ export class DexTokensController {
     const summary =
       await this.dexTokenSummaryService.createOrUpdateSummary(address);
     return { ...summary, address };
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token contract address',
+  })
+  @ApiQuery({
+    name: 'interval',
+    type: 'number',
+    required: false,
+    description: `Candle interval in seconds (default 3600, min ${MIN_HISTORY_INTERVAL_SECONDS}, max ${MAX_HISTORY_INTERVAL_SECONDS})`,
+  })
+  @ApiQuery({
+    name: 'convertTo',
+    type: 'string',
+    required: false,
+    description: 'Currency label for the returned quote (default: ae)',
+  })
+  @ApiQuery({ name: 'page', type: 'number', required: false })
+  @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiOperation({
+    operationId: 'getDexTokenHistory',
+    summary: 'Get DEX token price history',
+    description:
+      'Get OHLCV price history for a single token. The series is derived from the deepest pool that pairs the token against WAE (so the price is expressed in AE); if no WAE pool exists, the deepest available pool is used.',
+  })
+  @Get(':address/history')
+  async getTokenHistory(
+    @Param('address', AeContractAddressPipe) address: string,
+    @Query('interval', new DefaultValuePipe(3600), ParseIntPipe)
+    interval: number = 3600,
+    @Query('convertTo') convertTo: string = 'ae',
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+  ) {
+    if (
+      interval < MIN_HISTORY_INTERVAL_SECONDS ||
+      interval > MAX_HISTORY_INTERVAL_SECONDS
+    ) {
+      throw new BadRequestException(
+        `interval must be between ${MIN_HISTORY_INTERVAL_SECONDS} and ${MAX_HISTORY_INTERVAL_SECONDS} seconds`,
+      );
+    }
+
+    const token = await this.dexTokenService.findByAddress(address);
+    if (!token) {
+      throw new NotFoundException(
+        `DEX token with address ${address} not found`,
+      );
+    }
+
+    const best = await this.dexTokenService.findBestPairForToken(address);
+    if (!best) {
+      throw new NotFoundException(
+        `No liquidity pool found to chart token ${address}`,
+      );
+    }
+
+    return this.pairHistoryService.getPaginatedHistoricalData({
+      pair: best.pair,
+      interval,
+      fromToken: best.basePosition,
+      convertTo,
+      page,
+      limit,
+    });
+  }
+
+  @ApiParam({
+    name: 'address',
+    type: 'string',
+    description: 'Token contract address',
+  })
+  @ApiSecurity('api-key')
+  @ApiOperation({
+    operationId: 'setDexTokenListed',
+    summary: 'Set the listed flag for a DEX token (admin)',
+    description:
+      'Mark a token as listed/unlisted. Requires an API key (x-api-key header or Bearer token).',
+  })
+  @ApiOkResponse({ type: DexTokenDto })
+  @UseGuards(ApiKeyGuard)
+  @Patch(':address/listed')
+  async setListed(
+    @Param('address', AeContractAddressPipe) address: string,
+    @Body() body: SetListedDto,
+  ) {
+    const token = await this.dexTokenService.setListed(address, body.listed);
+    if (!token) {
+      throw new NotFoundException(
+        `DEX token with address ${address} not found`,
+      );
+    }
+    return token;
   }
 }
