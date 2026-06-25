@@ -294,9 +294,13 @@ export class DexTokensController {
   })
   @ApiQuery({
     name: 'convertTo',
-    type: 'string',
+    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
     required: false,
-    description: 'Currency label for the returned quote (default: ae)',
+    description:
+      'Currency the OHLC/market-cap/volume values are converted into (default: ae). ' +
+      'Fiat conversion uses the AE→currency rate as of each candle’s time (historical ' +
+      'coin_prices snapshots) and requires the token to have a WAE-quoted pool; requesting ' +
+      'a fiat currency for a token without one returns 400.',
   })
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
@@ -304,7 +308,7 @@ export class DexTokensController {
     operationId: 'getDexTokenHistory',
     summary: 'Get DEX token price history',
     description:
-      'Get OHLCV price history for a single token. The series is derived from the deepest pool that pairs the token against WAE (so the price is expressed in AE); if no WAE pool exists, the deepest available pool is used.',
+      'Get OHLCV price history for a single token. The series is derived from the deepest pool that pairs the token against WAE (so the price is expressed in AE); if no WAE pool exists, the deepest available pool is used. Pass convertTo to express the values in a fiat currency.',
   })
   @Get(':address/history')
   async getTokenHistory(

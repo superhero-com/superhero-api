@@ -1,8 +1,9 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { CURRENCIES } from '@/configs';
 import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
@@ -12,6 +13,11 @@ import { PairSummaryDto } from '../dto/pair-summary.dto';
 import { Pair } from '../entities/pair.entity';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
+
+/** Fiat currencies we can convert AE-denominated prices into. */
+const SUPPORTED_CURRENCIES = new Set<string>(
+  CURRENCIES.map(({ code }) => code),
+);
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -64,9 +70,60 @@ export class PairHistoryService {
     const { fromToken, pair, interval, page, limit, convertTo = 'ae' } = props;
     const offset = (page - 1) * limit;
 
+    // The OHLC / market-cap / volume values produced below are denominated in
+    // the pair's base (quote) token — the `fromToken` side. When that base
+    // token is WAE the values are in AE and can be converted to a fiat
+    // currency. Conversion uses the AE→currency rate *as of each candle's time*
+    // (joined per-candle from the coin_prices snapshots, see the SQL below), so
+    // historical candles are priced with the historical rate rather than
+    // today's. We validate up front so an unsupported currency or a non-AE pool
+    // fails fast (400) before the expensive history query runs.
+    const requestedCurrency = (convertTo || 'ae').toLowerCase();
+    const convertToFiat = requestedCurrency !== 'ae';
+    if (convertToFiat) {
+      const baseToken = fromToken === 'token0' ? pair.token0 : pair.token1;
+      if (baseToken?.address !== DEX_CONTRACTS.wae) {
+        throw new BadRequestException(
+          `Cannot convert price to ${requestedCurrency}: this pool is not quoted against AE (WAE).`,
+        );
+      }
+      if (!SUPPORTED_CURRENCIES.has(requestedCurrency)) {
+        throw new BadRequestException(
+          `Unsupported convertTo currency: ${convertTo}`,
+        );
+      }
+    }
+    const convertedTo = convertToFiat ? requestedCurrency : 'ae';
+
     const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
     const value = fromToken === 'token0' ? '0' : '1';
+    // Per-candle historical AE→currency rate, sourced from the coin_prices
+    // snapshots: the latest snapshot at/just-before the candle's open, falling
+    // back to the earliest snapshot for candles older than any snapshot. Only
+    // added (with its $5 parameter) when actually converting to fiat.
+    const conversionRateColumn = convertToFiat
+      ? `,
+          COALESCE(
+            (
+              SELECT cp.rates->>$5
+              FROM coin_prices cp
+              WHERE cp.created_at <= interval_start
+              ORDER BY cp.created_at DESC
+              LIMIT 1
+            ),
+            (
+              SELECT cp.rates->>$5
+              FROM coin_prices cp
+              ORDER BY cp.created_at ASC
+              LIMIT 1
+            )
+          ) as conversion_rate`
+      : '';
+    const params: (string | number)[] = [pair.address, interval, offset, limit];
+    if (convertToFiat) {
+      params.push(requestedCurrency);
+    }
     let rawResults;
     try {
       rawResults = await queryRunner.query(
@@ -130,39 +187,95 @@ export class PairHistoryService {
           MAX(total_supply) as total_supply,
           MIN("timeMin") as "timeMin",
           MAX("timeMax") as "timeMax",
-          LAG(MAX(close)) OVER (ORDER BY interval_start) as previous_close
+          LAG(MAX(close)) OVER (ORDER BY interval_start) as previous_close${conversionRateColumn}
         FROM interval_stats
         GROUP BY interval_start
         ORDER BY interval_start ASC
       `,
-        [pair.address, interval, offset, limit],
+        params,
       );
     } finally {
       await queryRunner.release();
     }
 
+    // If any candle has no coin_prices snapshot at all (empty table), degrade
+    // to the latest known rate for those candles instead of dropping the
+    // conversion. Fetched once, only when needed.
+    let fallbackRate: BigNumber | null = null;
+    if (
+      convertToFiat &&
+      rawResults.some((row) => row.conversion_rate == null)
+    ) {
+      const rates = await this.aePricingService.getCurrencyRates();
+      const latest = rates[requestedCurrency as keyof typeof rates];
+      fallbackRate =
+        latest != null && Number.isFinite(Number(latest))
+          ? new BigNumber(latest)
+          : null;
+    }
+
+    const rateFor = (row: any): BigNumber => {
+      if (!convertToFiat) {
+        return new BigNumber(1);
+      }
+      if (row.conversion_rate != null) {
+        return new BigNumber(row.conversion_rate);
+      }
+      return fallbackRate ?? new BigNumber(1);
+    };
+
+    // `ratio0`/`ratio1` are derived from RAW on-chain reserves, so a stored
+    // ratio only equals a real price when both tokens share the same decimals.
+    // Normalise every candle's price to human units using the pair's token
+    // decimals: price_human = ratio_raw * 10^(quoteDecimals - baseDecimals),
+    // where the base (quote-currency) token is the `fromToken` side and the
+    // quote (charted) token is the other side. Without this, prices for any
+    // non-18-decimal token are off by 10^(18 - tokenDecimals).
+    const baseToken = value === '0' ? pair.token0 : pair.token1;
+    const quoteToken = value === '0' ? pair.token1 : pair.token0;
+    const baseDecimals = Number(baseToken?.decimals ?? 18);
+    const quoteDecimals = Number(quoteToken?.decimals ?? 18);
+    const priceScale = new BigNumber(10).pow(quoteDecimals - baseDecimals);
+
+    // Price-side conversion: raw ratio → human units (priceScale) → fiat (rate,
+    // which is 1 for AE). Always applies priceScale, so AE prices are corrected
+    // too — we can no longer preserve the raw string byte-for-byte.
+    const toPriceString = (raw: unknown, rate: BigNumber): string =>
+      new BigNumber((raw as any) || '0')
+        .multipliedBy(priceScale)
+        .multipliedBy(rate)
+        .toString();
+
     // Modify the mapping to handle the previous close price correctly
     let lastClose = null;
     return rawResults.map((row) => {
+      const rate = rateFor(row);
+      const close = toPriceString(row.close, rate);
       const result = {
         timeOpen: row.timeOpen,
         timeClose: row.timeClose,
         timeHigh: row.timeMax,
         timeLow: row.timeMin,
         quote: {
-          convertedTo: convertTo,
-          open: lastClose !== null ? lastClose : String(row.open || '0'),
-          high: String(row.high || '0'),
-          low: String(row.low || '0'),
-          close: String(row.close || '0'),
-          volume: parseFloat(row.volume || '0'),
-          market_cap: new BigNumber(row.market_cap || '0'),
-          total_supply: new BigNumber(row.total_supply || '0'),
+          convertedTo,
+          open: lastClose !== null ? lastClose : toPriceString(row.open, rate),
+          high: toPriceString(row.high, rate),
+          low: toPriceString(row.low, rate),
+          close,
+          volume: convertToFiat
+            ? new BigNumber(row.volume || '0').multipliedBy(rate).toNumber()
+            : parseFloat(row.volume || '0'),
+          // market_cap and total_supply are not populated for DEX pairs (the
+          // sync layer never writes per-token market caps, and `total_supply`
+          // on a transaction is the sum of raw reserves, not the LP supply), so
+          // we return null rather than presenting a fabricated 0.
+          market_cap: null,
+          total_supply: null,
           timestamp: row.timeClose,
-          symbol: pair.token0.symbol,
+          symbol: quoteToken?.symbol ?? pair.token0?.symbol,
         },
       };
-      lastClose = String(row.close || '0');
+      lastClose = close;
       return result;
     });
   }

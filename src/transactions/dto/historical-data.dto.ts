@@ -7,8 +7,10 @@ export interface QuoteDto {
   low: number;
   close: number;
   volume: number;
-  total_supply: BigNumber;
-  market_cap: BigNumber;
+  // null for DEX pairs: LP total supply and per-token market cap are not tracked
+  // by the sync layer, so we return null rather than a fabricated value.
+  total_supply: BigNumber | null;
+  market_cap: BigNumber | null;
   // marketCap: number;
   timestamp: Date;
   symbol: string;

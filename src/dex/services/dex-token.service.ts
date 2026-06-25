@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import BigNumber from 'bignumber.js';
 import { DexToken } from '../entities/dex-token.entity';
 import {
   IPaginationOptions,
@@ -161,27 +162,34 @@ export class DexTokenService {
   async findBestPairForToken(
     tokenAddress: string,
   ): Promise<{ pair: Pair; basePosition: 'token0' | 'token1' } | null> {
-    const allPairs = await this.getAllPairsWithTokens();
-    const candidates = allPairs.filter(
-      (pair) =>
-        pair.token0?.address === tokenAddress ||
-        pair.token1?.address === tokenAddress,
-    );
+    // Targeted lookup: only the pairs that contain this token, instead of
+    // loading the entire pairs table into memory on every chart request.
+    const candidates = await this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .where(
+        'token0.address = :tokenAddress OR token1.address = :tokenAddress',
+        { tokenAddress },
+      )
+      .getMany();
     if (candidates.length === 0) {
       return null;
     }
 
-    // Liquidity-depth proxy: the smaller of the two reserves. NOTE this is a
-    // coarse heuristic — reserves are raw amounts in tokens that may have
-    // different decimals, so cross-pair comparison is not strictly apples to
-    // apples. It is only used to break ties when picking a charting pool (the
-    // WAE-preference below is what actually matters), so a slightly imperfect
-    // ranking is acceptable here.
-    const liquidity = (pair: Pair) =>
-      Math.min(
-        parseFloat(String(pair.reserve0 ?? '0')) || 0,
-        parseFloat(String(pair.reserve1 ?? '0')) || 0,
+    // Liquidity-depth proxy: the smaller of the two reserves, normalised to
+    // human units by each token's decimals so pools with different-decimal
+    // tokens are compared apples-to-apples. Used to pick the deepest charting
+    // pool (after the WAE-preference below, which is what actually matters).
+    const liquidity = (pair: Pair) => {
+      const r0 = new BigNumber(String(pair.reserve0 ?? '0')).shiftedBy(
+        -Number(pair.token0?.decimals ?? 18),
       );
+      const r1 = new BigNumber(String(pair.reserve1 ?? '0')).shiftedBy(
+        -Number(pair.token1?.decimals ?? 18),
+      );
+      return BigNumber.min(r0, r1).toNumber();
+    };
 
     const isWaePair = (pair: Pair) =>
       pair.token0?.address === DEX_CONTRACTS.wae ||
@@ -201,7 +209,7 @@ export class DexTokenService {
     return { pair, basePosition };
   }
 
-  async findByAddress(address: string): Promise<DexToken> {
+  async findByAddress(address: string): Promise<DexToken | null> {
     return this.dexTokenRepository
       .createQueryBuilder('dexToken')
       .leftJoinAndSelect('dexToken.summary', 'summary')
