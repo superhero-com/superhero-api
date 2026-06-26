@@ -70,19 +70,24 @@ export class PairHistoryService {
     const { fromToken, pair, interval, page, limit, convertTo = 'ae' } = props;
     const offset = (page - 1) * limit;
 
-    // The OHLC / market-cap / volume values produced below are denominated in
-    // the pair's base (quote) token — the `fromToken` side. When that base
-    // token is WAE the values are in AE and can be converted to a fiat
-    // currency. Conversion uses the AE→currency rate *as of each candle's time*
-    // (joined per-candle from the coin_prices snapshots, see the SQL below), so
-    // historical candles are priced with the historical rate rather than
-    // today's. We validate up front so an unsupported currency or a non-AE pool
-    // fails fast (400) before the expensive history query runs.
+    // The OHLC / volume values produced below are denominated in the pair's
+    // base (quote) token — the `fromToken` side. `value` selects the matching
+    // ratio/volume columns; baseToken/quoteToken drive decimal normalization
+    // and the denomination label.
+    const value = fromToken === 'token0' ? '0' : '1';
+    const baseToken = value === '0' ? pair.token0 : pair.token1;
+    const quoteToken = value === '0' ? pair.token1 : pair.token0;
+    const baseIsWae = baseToken?.address === DEX_CONTRACTS.wae;
+
+    // When the base token is WAE the values are in AE and can be converted to a
+    // fiat currency, using the AE→currency rate *as of each candle's time*
+    // (joined per-candle from the coin_prices snapshots, see the SQL below).
+    // We validate up front so an unsupported currency or a non-AE pool fails
+    // fast (400) before the expensive history query runs.
     const requestedCurrency = (convertTo || 'ae').toLowerCase();
     const convertToFiat = requestedCurrency !== 'ae';
     if (convertToFiat) {
-      const baseToken = fromToken === 'token0' ? pair.token0 : pair.token1;
-      if (baseToken?.address !== DEX_CONTRACTS.wae) {
+      if (!baseIsWae) {
         throw new BadRequestException(
           `Cannot convert price to ${requestedCurrency}: this pool is not quoted against AE (WAE).`,
         );
@@ -93,11 +98,17 @@ export class PairHistoryService {
         );
       }
     }
-    const convertedTo = convertToFiat ? requestedCurrency : 'ae';
+    // Denomination label. For a non-WAE pool the OHLC values are priced in the
+    // base token, NOT AE — label them with that token so clients don't treat
+    // the series as AE-denominated.
+    const convertedTo = convertToFiat
+      ? requestedCurrency
+      : baseIsWae
+        ? 'ae'
+        : (baseToken?.symbol ?? baseToken?.address ?? 'unknown');
 
     const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-    const value = fromToken === 'token0' ? '0' : '1';
     // Per-candle historical AE→currency rate, sourced from the coin_prices
     // snapshots: the latest snapshot at/just-before the candle's open, falling
     // back to the earliest snapshot for candles older than any snapshot. Only
@@ -214,14 +225,19 @@ export class PairHistoryService {
           : null;
     }
 
-    const rateFor = (row: any): BigNumber => {
+    // Returns null when converting to fiat but no rate is available for this
+    // candle (no per-candle snapshot and no usable fallback from
+    // getCurrencyRates). Such candles must be omitted rather than emitted at
+    // rate 1 — that would leave AE-sized OHLC/volume mislabeled as the fiat
+    // currency.
+    const rateFor = (row: any): BigNumber | null => {
       if (!convertToFiat) {
         return new BigNumber(1);
       }
       if (row.conversion_rate != null) {
         return new BigNumber(row.conversion_rate);
       }
-      return fallbackRate ?? new BigNumber(1);
+      return fallbackRate;
     };
 
     // `ratio0`/`ratio1` are derived from RAW on-chain reserves, so a stored
@@ -231,11 +247,14 @@ export class PairHistoryService {
     // where the base (quote-currency) token is the `fromToken` side and the
     // quote (charted) token is the other side. Without this, prices for any
     // non-18-decimal token are off by 10^(18 - tokenDecimals).
-    const baseToken = value === '0' ? pair.token0 : pair.token1;
-    const quoteToken = value === '0' ? pair.token1 : pair.token0;
     const baseDecimals = Number(baseToken?.decimals ?? 18);
     const quoteDecimals = Number(quoteToken?.decimals ?? 18);
     const priceScale = new BigNumber(10).pow(quoteDecimals - baseDecimals);
+    // Volume is the SUM of raw base-token amounts (volume0/volume1). Normalise
+    // it to human units (÷ 10^baseDecimals) so it is consistent with the human
+    // prices and so fiat conversion (× rate) is correct instead of off by
+    // 10^baseDecimals.
+    const volumeScale = new BigNumber(10).pow(-baseDecimals);
 
     // Price-side conversion: raw ratio → human units (priceScale) → fiat (rate,
     // which is 1 for AE). Always applies priceScale, so AE prices are corrected
@@ -247,37 +266,46 @@ export class PairHistoryService {
         .toString();
 
     // Modify the mapping to handle the previous close price correctly
-    let lastClose = null;
-    return rawResults.map((row) => {
-      const rate = rateFor(row);
-      const close = toPriceString(row.close, rate);
-      const result = {
-        timeOpen: row.timeOpen,
-        timeClose: row.timeClose,
-        timeHigh: row.timeMax,
-        timeLow: row.timeMin,
-        quote: {
-          convertedTo,
-          open: lastClose !== null ? lastClose : toPriceString(row.open, rate),
-          high: toPriceString(row.high, rate),
-          low: toPriceString(row.low, rate),
-          close,
-          volume: convertToFiat
-            ? new BigNumber(row.volume || '0').multipliedBy(rate).toNumber()
-            : parseFloat(row.volume || '0'),
-          // market_cap and total_supply are not populated for DEX pairs (the
-          // sync layer never writes per-token market caps, and `total_supply`
-          // on a transaction is the sum of raw reserves, not the LP supply), so
-          // we return null rather than presenting a fabricated 0.
-          market_cap: null,
-          total_supply: null,
-          timestamp: row.timeClose,
-          symbol: quoteToken?.symbol ?? pair.token0?.symbol,
-        },
-      };
-      lastClose = close;
-      return result;
-    });
+    let lastClose: string | null = null;
+    return rawResults
+      .map((row) => {
+        const rate = rateFor(row);
+        if (rate === null) {
+          // Fiat conversion requested but no usable rate for this candle —
+          // omit it instead of mislabeling AE-sized values as the fiat currency.
+          return null;
+        }
+        const close = toPriceString(row.close, rate);
+        const result = {
+          timeOpen: row.timeOpen,
+          timeClose: row.timeClose,
+          timeHigh: row.timeMax,
+          timeLow: row.timeMin,
+          quote: {
+            convertedTo,
+            open:
+              lastClose !== null ? lastClose : toPriceString(row.open, rate),
+            high: toPriceString(row.high, rate),
+            low: toPriceString(row.low, rate),
+            close,
+            volume: new BigNumber(row.volume || '0')
+              .multipliedBy(volumeScale)
+              .multipliedBy(rate)
+              .toNumber(),
+            // market_cap and total_supply are not populated for DEX pairs (the
+            // sync layer never writes per-token market caps, and `total_supply`
+            // on a transaction is the sum of raw reserves, not the LP supply),
+            // so we return null rather than presenting a fabricated 0.
+            market_cap: null,
+            total_supply: null,
+            timestamp: row.timeClose,
+            symbol: quoteToken?.symbol ?? pair.token0?.symbol,
+          },
+        };
+        lastClose = close;
+        return result;
+      })
+      .filter((candle) => candle !== null);
   }
 
   // async getHistoricalData(

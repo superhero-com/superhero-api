@@ -94,7 +94,10 @@ export class PairTransactionService {
     return paginate(query, options);
   }
 
-  private parseDate(value: string | undefined, field: string): Date | undefined {
+  private parseDate(
+    value: string | undefined,
+    field: string,
+  ): Date | undefined {
     if (value === undefined || value === null || value === '') {
       return undefined;
     }

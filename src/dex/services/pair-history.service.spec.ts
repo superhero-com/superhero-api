@@ -241,6 +241,72 @@ describe('PairHistoryService', () => {
     });
   });
 
+  describe('getPaginatedHistoricalData - denomination & volume', () => {
+    const baseRow = (overrides: Record<string, unknown> = {}) => ({
+      timeOpen: new Date('2025-01-01T00:00:00Z'),
+      timeClose: new Date('2025-01-01T01:00:00Z'),
+      low: '1',
+      high: '1',
+      open: '1',
+      close: '1',
+      volume: '0',
+      timeMin: new Date('2025-01-01T00:05:00Z'),
+      timeMax: new Date('2025-01-01T00:55:00Z'),
+      ...overrides,
+    });
+
+    it('labels the series with the base token symbol for a non-WAE pool', async () => {
+      // makePair has no WAE token; with fromToken='token0' the base (quote)
+      // token is token0 (TOK0), so the series is priced in TOK0, NOT AE.
+      queryRunnerMock.query.mockResolvedValue([baseRow()]);
+
+      const [result] = await service.getPaginatedHistoricalData({
+        pair: makePair(),
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token0',
+      });
+
+      expect(result.quote.convertedTo).toBe('TOK0');
+    });
+
+    it('normalizes volume to human base-token units (ae)', async () => {
+      // 5 WAE in aettos → human volume 5.
+      queryRunnerMock.query.mockResolvedValue([
+        baseRow({ volume: '5000000000000000000' }),
+      ]);
+
+      const [result] = await service.getPaginatedHistoricalData({
+        pair: makeWaePair(),
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token1',
+      });
+
+      expect(result.quote.volume).toBe(5);
+    });
+
+    it('applies decimal normalization before the fiat rate for volume', async () => {
+      queryRunnerMock.query.mockResolvedValue([
+        baseRow({ volume: '5000000000000000000', conversion_rate: '2' }),
+      ]);
+
+      const [result] = await service.getPaginatedHistoricalData({
+        pair: makeWaePair(),
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token1',
+        convertTo: 'usd',
+      });
+
+      // human 5 AE * rate 2 = 10 USD — NOT 5e18 * 2.
+      expect(result.quote.volume).toBe(10);
+    });
+  });
+
   describe('getPaginatedHistoricalData - currency conversion', () => {
     const makeRow = (overrides: Record<string, unknown> = {}) => ({
       timeOpen: new Date('2025-01-01T00:00:00Z'),
@@ -249,7 +315,8 @@ describe('PairHistoryService', () => {
       high: '2.0',
       open: '1.5',
       close: '1.8',
-      volume: '100',
+      // Raw base-token (WAE, 18 dp) volume of 100 → human volume 100.
+      volume: '100000000000000000000',
       market_cap: '5000',
       total_supply: '10000',
       timeMin: new Date('2025-01-01T00:05:00Z'),
@@ -270,6 +337,7 @@ describe('PairHistoryService', () => {
 
       expect(result.quote.convertedTo).toBe('ae');
       expect(result.quote.close).toBe('1.8');
+      // volume is normalized from raw base-token units (100e18) to human (100).
       expect(result.quote.volume).toBe(100);
       // market_cap is not tracked for DEX pairs → null, not a fabricated value.
       expect(result.quote.market_cap).toBeNull();
@@ -321,7 +389,8 @@ describe('PairHistoryService', () => {
       expect(result[0].quote.convertedTo).toBe('usd');
       expect(result[0].quote.high).toBe('1'); // 2.0 * 0.5
       expect(result[0].quote.close).toBe('0.9'); // 1.8 * 0.5
-      expect(result[0].quote.volume).toBe(50); // 100 * 0.5
+      // volume: 100e18 raw → human 100 → fiat 100 * 0.5 = 50
+      expect(result[0].quote.volume).toBe(50);
       // market_cap / total_supply are not tracked for DEX pairs → null.
       expect(result[0].quote.market_cap).toBeNull();
       expect(result[0].quote.total_supply).toBeNull();
@@ -349,6 +418,29 @@ describe('PairHistoryService', () => {
 
       expect(aePricingMock.getCurrencyRates).toHaveBeenCalledTimes(1);
       expect(result.quote.close).toBe('5.4'); // 1.8 * 3 (fallback)
+    });
+
+    it('omits candles with no rate and no usable fallback instead of using rate 1', async () => {
+      // getCurrencyRates returns nothing usable for usd → no fallback rate.
+      aePricingMock.getCurrencyRates.mockResolvedValue({} as any);
+      queryRunnerMock.query.mockResolvedValue([
+        makeRow({ conversion_rate: '2' }), // convertible
+        makeRow({ conversion_rate: null }), // no rate + no fallback → omitted
+      ]);
+
+      const result = await service.getPaginatedHistoricalData({
+        pair: makeWaePair(),
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token1',
+        convertTo: 'usd',
+      });
+
+      // The un-convertible candle is dropped, NOT emitted at rate 1.
+      expect(result).toHaveLength(1);
+      expect(result[0].quote.convertedTo).toBe('usd');
+      expect(result[0].quote.close).toBe('3.6'); // 1.8 * 2
     });
 
     it('rejects fiat conversion for a pool not quoted against WAE before querying', async () => {

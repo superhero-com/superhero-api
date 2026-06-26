@@ -67,7 +67,9 @@ describe('DexSchemaBootstrapService', () => {
 
     await service.onModuleInit();
 
-    const executed = query.mock.calls.map((call) => call[0] as string).join('\n');
+    const executed = query.mock.calls
+      .map((call) => call[0] as string)
+      .join('\n');
     expect(executed).toMatch(/IDX_pair_transactions_created_at/);
     expect(executed).toMatch(/IDX_pair_transactions_tx_type/);
     expect(executed).toMatch(/IDX_pair_transactions_account_address/);
@@ -118,7 +120,9 @@ describe('DexSchemaBootstrapService', () => {
     await expect(service.onModuleInit()).resolves.toBeUndefined();
     expect(Logger.prototype.error).toHaveBeenCalled();
     // Later index statements still ran despite the earlier failure.
-    const executed = query.mock.calls.map((call) => call[0] as string).join('\n');
+    const executed = query.mock.calls
+      .map((call) => call[0] as string)
+      .join('\n');
     expect(executed).toMatch(/IDX_pairs_token0_address/);
   });
 });

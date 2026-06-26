@@ -195,8 +195,15 @@ export class DexTokenService {
       pair.token0?.address === DEX_CONTRACTS.wae ||
       pair.token1?.address === DEX_CONTRACTS.wae;
 
-    const waePairs = candidates.filter(isWaePair);
-    const pool = waePairs.length > 0 ? waePairs : candidates;
+    // Prefer a WAE pair so the series is AE-denominated — but only among WAE
+    // pools that actually have liquidity. Otherwise an empty/zero-liquidity WAE
+    // pool would be chosen over an active non-WAE pool, producing useless or
+    // empty charts. With no liquid WAE pool, fall back to the deepest pool among
+    // all candidates.
+    const liquidWaePairs = candidates.filter(
+      (candidate) => isWaePair(candidate) && liquidity(candidate) > 0,
+    );
+    const pool = liquidWaePairs.length > 0 ? liquidWaePairs : candidates;
 
     const pair = pool.reduce((best, current) =>
       liquidity(current) > liquidity(best) ? current : best,

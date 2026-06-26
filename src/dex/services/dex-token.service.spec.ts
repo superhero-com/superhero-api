@@ -136,6 +136,30 @@ describe('DexTokenService', () => {
       expect(best?.basePosition).toBe('token1');
     });
 
+    it('skips a zero-liquidity WAE pool in favor of an active non-WAE pool', async () => {
+      // A WAE pool exists but is empty; the only liquid pool is non-WAE. The
+      // empty WAE pool must NOT be chosen (it would yield empty charts).
+      const { service } = setupWithPairs([
+        makePair('ct_wae_empty', 'ct_token', DEX_CONTRACTS.wae, 1, 1, '0', '0'),
+        makePair('ct_active', 'ct_token', 'ct_mid', 1, 1, '500', '500'),
+      ]);
+
+      const best = await service.findBestPairForToken('ct_token');
+
+      expect(best?.pair.address).toBe('ct_active');
+    });
+
+    it('still prefers a liquid WAE pool over a deeper non-WAE pool', async () => {
+      const { service } = setupWithPairs([
+        makePair('ct_deep_nonwae', 'ct_token', 'ct_mid', 1, 1, '999', '999'),
+        makePair('ct_wae', 'ct_token', DEX_CONTRACTS.wae, 1, 1, '100', '100'),
+      ]);
+
+      const best = await service.findBestPairForToken('ct_token');
+
+      expect(best?.pair.address).toBe('ct_wae');
+    });
+
     it('falls back to the deepest pool when no WAE pair exists', async () => {
       const { service } = setupWithPairs([
         makePair('ct_shallow', 'ct_mid', 'ct_token', 1, 1, '10', '10'),
@@ -154,11 +178,7 @@ describe('DexTokenService', () => {
       // with mid at reserve 5 (tiny). Pair B: token 6 decimals reserve
       // 2_000_000 (=2.0 human) with mid reserve 10. Raw min would pick A's
       // mid-side 5; human-normalised depth should still pick the deeper pool B.
-      const withDecimals = (
-        address: string,
-        r0: string,
-        r1: string,
-      ): any => ({
+      const withDecimals = (address: string, r0: string, r1: string): any => ({
         address,
         token0: { address: 'ct_token', decimals: 6 },
         token1: { address: 'ct_mid', decimals: 18 },
@@ -178,7 +198,10 @@ describe('DexTokenService', () => {
 
   describe('setListed', () => {
     it('returns null when the token does not exist', async () => {
-      const repository = { findOne: jest.fn().mockResolvedValue(null), save: jest.fn() };
+      const repository = {
+        findOne: jest.fn().mockResolvedValue(null),
+        save: jest.fn(),
+      };
       const service = new DexTokenService(repository as any, {} as any);
 
       expect(await service.setListed('ct_missing', true)).toBeNull();
