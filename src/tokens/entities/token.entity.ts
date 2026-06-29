@@ -1,4 +1,8 @@
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
+import {
+  NOSTR_ROOM_STATES,
+  NostrRoomState,
+} from '@/token-gated-rooms/enums/nostr-room-state.enum';
 import { BigNumber } from 'bignumber.js';
 import {
   Column,
@@ -185,4 +189,66 @@ export class Token {
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
   public created_at: Date;
+
+  /**
+   * Token-gated rooms (plan §4.1).
+   *
+   * Immutable NIP-29 group id (= `sale_address` per D3); set once when the room
+   * is requested. Index for room lookups by group id.
+   */
+  @Index()
+  @Column({
+    type: 'varchar',
+    nullable: true,
+  })
+  nostr_group_id: string;
+
+  /** True only after the relay ACKs the group create (set by later tasks). */
+  @Column({
+    default: false,
+  })
+  has_nostr_room: boolean;
+
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  nostr_room_created_at: Date;
+
+  /**
+   * `nostr_room_state` machine (plan §4.7):
+   *   none → pending → created; pending → failed; failed → pending (retry, capped
+   *   backoff); pending stale >24h w/o ACK → re-publish (stays pending); relay
+   *   `"Group already exists"` → created; community deleted → deleted (TERMINAL,
+   *   relay blocks recreate of a 9008-deleted id).
+   * Transition enforcement is Task 09 — see
+   * `@/token-gated-rooms/enums/nostr-room-state.enum`.
+   */
+  @Index('idx_token_nostr_room_state_pending', ['nostr_room_state'], {
+    where: "nostr_room_state <> 'created'",
+  })
+  @Column({
+    type: 'enum',
+    enum: NOSTR_ROOM_STATES,
+    default: 'none',
+  })
+  nostr_room_state: NostrRoomState;
+
+  /**
+   * The NIP-29 group id (= `sale_address`) once the room is CONFIRMED created on
+   * the relay; NULL = no room yet. Source of truth for the provisioning cron
+   * (`room_id IS NULL` ⟺ not yet created). Set on the `9007` ok ACK
+   * (`RoomBackfillService.onPublishAck`), the same place `has_nostr_room`/
+   * `nostr_room_created_at` are stamped. Indexed (partial, `WHERE room_id IS NULL`)
+   * for the roomless-token selection.
+   */
+  @Index('idx_token_room_id_null', ['room_id'], {
+    where: 'room_id IS NULL',
+  })
+  @Column({
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  room_id: string;
 }

@@ -14,6 +14,7 @@ describe('TokenHolderService', () => {
     update: jest.Mock;
     loadAndSaveTokenHoldersFromMdw: jest.Mock;
   };
+  let eventEmitter: { emit: jest.Mock };
 
   beforeEach(() => {
     const queryBuilder = {
@@ -34,7 +35,36 @@ describe('TokenHolderService', () => {
       loadAndSaveTokenHoldersFromMdw: jest.fn().mockResolvedValue(undefined),
     };
 
-    service = new TokenHolderService(repository as any, tokenService as any);
+    eventEmitter = { emit: jest.fn() };
+
+    service = new TokenHolderService(
+      repository as any,
+      tokenService as any,
+      eventEmitter as any,
+    );
+  });
+
+  it('emits tgr.balance.changed after a balance update so room eligibility recomputes', async () => {
+    repository.findOne.mockResolvedValue({
+      id: 'ak_user_ct_token',
+      balance: new BigNumber('1000000000000000000'),
+    });
+
+    await service.updateTokenHolder(
+      { address: 'ct_token', sale_address: 'ct_sale', holders_count: 1 } as any,
+      {
+        function: BCL_FUNCTIONS.buy,
+        caller_id: 'ak_user',
+        hash: 'th_buy2',
+        block_height: 12,
+      } as any,
+      new BigNumber(1),
+    );
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('tgr.balance.changed', {
+      tokenAddress: 'ct_token',
+      holderAddress: 'ak_user',
+    });
   });
 
   it('removes a holder from the count when they sell their full balance', async () => {

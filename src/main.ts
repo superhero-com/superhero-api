@@ -12,29 +12,13 @@ import {
   hasExplicitAllowlist,
   parseAllowedOrigins,
 } from './configs/allowed-origins';
+import { registerProcessGuards } from './process-guards';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // Global process-level guards to surface and prevent silent killers
-// NOTE: After logging we explicitly exit with code 1 so that the process
-// manager (Docker, PM2, systemd, etc.) can restart the service. Continuing
-// after these events is unsafe.
-process.on('uncaughtException', (error: unknown) => {
-  // eslint-disable-next-line no-console
-  console.error('UNCAUGHT EXCEPTION, process will exit:', error);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason: unknown) => {
-  // eslint-disable-next-line no-console
-  console.error('UNHANDLED REJECTION, process will exit:', reason);
-  process.exit(1);
-});
-
-process.on('exit', (code: number) => {
-  // eslint-disable-next-line no-console
-  console.error('Process exiting with code', code);
-});
+// (uncaughtException / unhandledRejection → log + exit 1).
+registerProcessGuards();
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -109,4 +93,11 @@ async function bootstrap() {
 
   await app.listen(process.env.APP_PORT ?? 3000);
 }
+
+// One image, ONE process (worker mode removed — see
+// `agent/api/tasks/token-gated-room/deworker-plan.md`): HTTP API + chain indexer
+// AND the NIP-29 relay duties (writer/subscriber + Bull consumers +
+// backfill/reconcile/membership-sync) all run here. The relay duties self-enable
+// iff a relay is configured (`TG_RELAY_URL` + `TG_BOT_NSEC`); otherwise they stay
+// dormant and the API still boots and indexes.
 void bootstrap();

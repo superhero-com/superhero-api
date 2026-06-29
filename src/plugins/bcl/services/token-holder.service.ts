@@ -1,11 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { BCL_FUNCTIONS } from '@/configs';
+import {
+  TGR_BALANCE_CHANGED,
+  type TgrBalanceChangedPayload,
+} from '@/token-gated-rooms/events';
 import { Encoded } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
 
@@ -17,6 +22,7 @@ export class TokenHolderService {
     @InjectRepository(TokenHolder)
     private tokenHolderRepository: Repository<TokenHolder>,
     private readonly tokenService: TokensService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -156,6 +162,17 @@ export class TokenHolderService {
 
         await this.updateTokenHoldersCount(token, tokenHolderCount, manager);
       }
+
+      // Notify token-gated-rooms that this holder's balance for `token.address`
+      // (the AEX9 contract) changed, so room eligibility backed by this token is
+      // recomputed reactively (buy/sell is the primary acquisition path). In-process
+      // EventEmitter2, main process only — `EligibilityService.onBalanceChanged`
+      // consumes it. `token.address` is non-null here (early-returned above); the
+      // sell-with-no-holder case returned before this point (no balance change).
+      this.eventEmitter.emit(TGR_BALANCE_CHANGED, {
+        tokenAddress: token.address,
+        holderAddress: tx.caller_id,
+      } as TgrBalanceChangedPayload);
     } catch (error) {
       this.logger.error('Error updating token holder', error);
       throw error;

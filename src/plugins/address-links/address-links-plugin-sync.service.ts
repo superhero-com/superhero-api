@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { encode, Encoding } from '@aeternity/aepp-sdk';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -11,6 +12,18 @@ import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { ADDRESS_LINK_CONTRACT_ADDRESS } from './address-links.constants';
+import {
+  TGR_LINK_CHANGED,
+  TgrLinkChangedPayload,
+} from '@/token-gated-rooms/events';
+
+/**
+ * Token-gated-rooms link provider (default `nostr`, env-overridable). Token-gated
+ * rooms only care about the nostr link, so the `tgr.link.changed` seam below
+ * fires only for this provider to avoid waking the identity pipeline on unrelated
+ * link/unlink (x/site/bio/…). Kept in lockstep with `tgrConfig.nostrLinkProvider`
+ * via the same `NOSTR_LINK_PROVIDER` env var. */
+const NOSTR_LINK_PROVIDER = process.env.NOSTR_LINK_PROVIDER || 'nostr';
 
 const LINK_EVENT_HASH =
   '6SB35NM6QMV5IG8BGTLL5O77IU72C5E3OC63PB4KHNDNSS83HAOG====';
@@ -30,8 +43,28 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     private readonly accountRepo: Repository<Account>,
     private readonly profileXPostingRewardService: ProfileXPostingRewardService,
     private readonly profileCacheService: ProfileCacheService,
+    // Optional so the existing unit DI (which builds a minimal testing module)
+    // still resolves; the global EventEmitterModule provides it in the real app.
+    // This is the Task 05 seam: emit `tgr.link.changed` on nostr link/unlink so
+    // the identity-resolution pipeline (IdentityService) re-resolves member_pubkey
+    // and the eligibility service (Task 06) re-evaluates. Reactive correctness for
+    // existing links is covered by IdentityBackfillService at startup.
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
   ) {
     super(aeSdkService);
+  }
+
+  /**
+   * Notify the token-gated-rooms identity pipeline that an account's nostr link
+   * changed. Fires only for the nostr provider (token-gated rooms ignore other
+   * providers) and is a no-op when no EventEmitter is wired (e.g. minimal tests).
+   */
+  private emitTgrLinkChanged(provider: string, address: string): void {
+    if (provider !== NOSTR_LINK_PROVIDER) return;
+    if (!this.eventEmitter) return;
+    const payload: TgrLinkChangedPayload = { address };
+    this.eventEmitter.emit(TGR_LINK_CHANGED, payload);
   }
 
   async processTransaction(
@@ -275,6 +308,9 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       tx.micro_time?.toString?.(),
     );
 
+    // Task 05 seam: tell the identity pipeline this nostr link changed.
+    this.emitTgrLinkChanged(provider, address);
+
     if (provider === 'x') {
       // TODO(reward-program): The X posting reward is disabled right now (see
       // PROFILE_REWARDS_DISABLED / PROFILE_X_POSTING_REWARD_ENABLED), so this
@@ -323,5 +359,8 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       address,
       tx.micro_time?.toString?.(),
     );
+
+    // Task 05 seam: tell the identity pipeline this nostr link was removed.
+    this.emitTgrLinkChanged(provider, address);
   }
 }

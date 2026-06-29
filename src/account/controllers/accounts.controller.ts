@@ -32,6 +32,8 @@ import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
+import { NostrAccountRefDto } from '../dto/nostr-account-ref.dto';
+import { normalizePubkey } from '@/token-gated-rooms/nostr/pubkey';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
 import {
@@ -100,6 +102,14 @@ export class AccountsController {
     required: false,
   })
   @ApiQuery({ name: 'order_direction', enum: ['ASC', 'DESC'], required: false })
+  @ApiQuery({
+    name: 'has_nostr',
+    type: 'boolean',
+    required: false,
+    description:
+      'When true, only return accounts that have linked a Nostr key ' +
+      "(`links->>'nostr' IS NOT NULL`) — e.g. to suggest chat contacts.",
+  })
   @ApiOperation({ operationId: 'listAll' })
   @CacheTTL(60_000)
   @Get()
@@ -109,6 +119,7 @@ export class AccountsController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
     @Query('order_by') orderBy: string = 'total_volume',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
+    @Query('has_nostr') hasNostr?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -168,10 +179,86 @@ export class AccountsController {
       );
     }
 
+    // Chat-contact suggestions: only accounts that linked a Nostr key can be
+    // messaged, so allow filtering the list down to them. `links` is a `jsonb`
+    // column; `->>'nostr'` extracts the linked npub/hex (NULL when absent).
+    if (hasNostr === 'true' || hasNostr === '1') {
+      query.andWhere("account.links->>'nostr' IS NOT NULL");
+      query.andWhere("account.links->>'nostr' <> ''");
+    }
+
     if (orderBy) {
       query.orderBy(`account.${orderBy}`, orderDirection);
     }
     return paginate(query, { page, limit });
+  }
+
+  /**
+   * Reverse lookup: resolve nostr pubkeys → the aeternity accounts that linked
+   * them, so a client can show the AE identity (chain name / `ak_`) for a nostr
+   * pubkey instead of the raw hex (e.g. a NIP-29 group's member list + membership
+   * system lines). `pubkeys` is a CSV of npub/hex (each normalized to hex; an
+   * `npub` and its hex resolve identically). Only matched accounts are returned —
+   * unlinked pubkeys are simply absent. Declared before `:address` so the literal
+   * segment isn't captured as an address param.
+   *
+   * `links->>'nostr'` may store hex OR npub, so we can't match the raw value in
+   * SQL; we narrow to nostr-linked accounts then normalize each in memory (same
+   * approach as `IdentityService.getAddressForPubkey`). The nostr-linked set is
+   * small today; revisit with a hex+npub `IN (…)` filter if it grows.
+   */
+  @ApiOperation({ operationId: 'resolveByNostr' })
+  @ApiQuery({
+    name: 'pubkeys',
+    type: 'string',
+    required: true,
+    description:
+      'Comma-separated nostr pubkeys (npub or 64-char hex), max 200.',
+  })
+  @ApiOkResponse({ type: [NostrAccountRefDto] })
+  @CacheTTL(60_000)
+  @Get('by-nostr')
+  async resolveByNostr(
+    @Query('pubkeys') pubkeysCsv?: string,
+  ): Promise<NostrAccountRefDto[]> {
+    const requested = (pubkeysCsv ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!requested.length) return [];
+    if (requested.length > 200) {
+      throw new BadRequestException('At most 200 pubkeys per request');
+    }
+
+    // Target set: normalized hex pubkeys we were asked about.
+    const wanted = new Set<string>();
+    for (const p of requested) {
+      const hex = normalizePubkey(p);
+      if (hex) wanted.add(hex);
+    }
+    if (!wanted.size) return [];
+
+    const candidates = await this.accountRepository
+      .createQueryBuilder('account')
+      .select(['account.address', 'account.chain_name', 'account.links'])
+      .where("account.links->>'nostr' IS NOT NULL")
+      .andWhere("account.links->>'nostr' <> ''")
+      .getMany();
+
+    const out: NostrAccountRefDto[] = [];
+    const seen = new Set<string>();
+    for (const account of candidates) {
+      const hex = normalizePubkey(account.links?.nostr);
+      if (hex && wanted.has(hex) && !seen.has(hex)) {
+        seen.add(hex);
+        out.push({
+          nostr_pubkey: hex,
+          address: account.address,
+          chain_name: account.chain_name ?? null,
+        });
+      }
+    }
+    return out;
   }
 
   /**
