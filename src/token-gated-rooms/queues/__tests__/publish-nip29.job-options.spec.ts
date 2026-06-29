@@ -10,7 +10,10 @@ describe('publishNip29JobOptions', () => {
     expect(opts.attempts).toBe(6);
     expect(opts.backoff).toEqual({ type: TGR_CAPPED_BACKOFF });
     expect(opts.removeOnComplete).toBe(true);
-    expect(opts.removeOnFail).toBe(false);
+    // Failed publishes are cleaned (not retained forever) to avoid unbounded
+    // Redis growth on the highest-volume queue; failures are surfaced via the
+    // `tgr.publish.ack(ok:false)` seam + ERROR logs, so the raw jobs add no value.
+    expect(opts.removeOnFail).toBe(true);
   });
 
   it('floors attempts at 1 for zero retries', () => {
