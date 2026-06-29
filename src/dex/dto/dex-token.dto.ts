@@ -53,14 +53,16 @@ export class DexTokenDto {
 
   @ApiProperty({
     description: 'Price Data',
+    type: () => PriceDto,
   })
   price: PriceDto;
 
   @ApiProperty({
     description:
-      'Aggregated volume and price change summary across all pools for this token',
+      'Aggregated volume and price change summary across all pools for this token. ' +
+      'Null when the token has no computed summary (LEFT JOIN).',
     type: () => DexTokenSummaryDto,
     nullable: true,
   })
-  summary: DexTokenSummaryDto;
+  summary: DexTokenSummaryDto | null;
 }

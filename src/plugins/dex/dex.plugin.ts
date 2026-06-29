@@ -71,4 +71,27 @@ export class DexPlugin extends BasePlugin {
   protected getSyncService(): DexPluginSyncService {
     return this.dexPluginSyncService;
   }
+
+  /**
+   * On reorg the underlying `tx` rows are already deleted, but pair_transactions
+   * has no FK to them (only a CASCADE to `pairs`), so they must be cleaned up
+   * explicitly — otherwise reorged-out swaps stay counted in every DEX
+   * aggregate forever and are double-counted against their canonical
+   * replacements.
+   */
+  async onReorg(removedTxHashes: string[]): Promise<void> {
+    if (!removedTxHashes || removedTxHashes.length === 0) {
+      return;
+    }
+
+    try {
+      const removed =
+        await this.dexPluginSyncService.handleReorg(removedTxHashes);
+      this.logger.log(
+        `[${this.name}] Reorg cleanup removed ${removed} pair_transactions for ${removedTxHashes.length} reverted transactions`,
+      );
+    } catch (error: any) {
+      this.logger.error(`[${this.name}] Reorg cleanup failed`, error.stack);
+    }
+  }
 }

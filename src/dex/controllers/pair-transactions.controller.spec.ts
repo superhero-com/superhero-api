@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { PairTransactionsController } from './pair-transactions.controller';
 
 describe('PairTransactionsController', () => {
@@ -59,5 +60,46 @@ describe('PairTransactionsController', () => {
       undefined,
       undefined,
     );
+  });
+
+  describe('getByTxHash', () => {
+    it('returns the transaction when found', async () => {
+      const txn = { tx_hash: 'th_1' };
+      service.findByTxHash.mockResolvedValue(txn);
+
+      await expect(controller.getByTxHash('th_1')).resolves.toBe(txn);
+      expect(service.findByTxHash).toHaveBeenCalledWith('th_1');
+    });
+
+    it('throws NotFound when the transaction does not exist', async () => {
+      service.findByTxHash.mockResolvedValue(null);
+
+      await expect(controller.getByTxHash('th_missing')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('getByPairAddress', () => {
+    it('delegates to the service with pagination and ordering', async () => {
+      const page = { items: [], meta: {} };
+      service.findByPairAddress.mockResolvedValue(page);
+
+      const result = await controller.getByPairAddress(
+        'ct_pair',
+        2,
+        25,
+        'created_at',
+        'ASC',
+      );
+
+      expect(service.findByPairAddress).toHaveBeenCalledWith(
+        'ct_pair',
+        { page: 2, limit: 25 },
+        'created_at',
+        'ASC',
+      );
+      expect(result).toBe(page);
+    });
   });
 });

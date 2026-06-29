@@ -14,6 +14,9 @@ describe('DexTokensController', () => {
   let pairHistoryService: {
     getPaginatedHistoricalData: jest.Mock;
   };
+  let dexTokenSummaryService: {
+    createOrUpdateSummary: jest.Mock;
+  };
 
   beforeEach(() => {
     dexTokenService = {
@@ -27,13 +30,133 @@ describe('DexTokensController', () => {
     pairHistoryService = {
       getPaginatedHistoricalData: jest.fn().mockResolvedValue([]),
     };
+    dexTokenSummaryService = {
+      createOrUpdateSummary: jest.fn(),
+    };
 
     controller = new DexTokensController(
       dexTokenService as any,
       {} as any,
-      {} as any,
+      dexTokenSummaryService as any,
       pairHistoryService as any,
     );
+  });
+
+  describe('getByAddress', () => {
+    it('returns the token when found', async () => {
+      const token = { address: 'ct_token' };
+      dexTokenService.findByAddress.mockResolvedValue(token);
+
+      await expect(controller.getByAddress('ct_token')).resolves.toBe(token);
+    });
+
+    it('throws NotFound when the token does not exist', async () => {
+      dexTokenService.findByAddress.mockResolvedValue(null);
+
+      await expect(controller.getByAddress('ct_token')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('getTokenPrice', () => {
+    it('throws NotFound when the token does not exist', async () => {
+      dexTokenService.findByAddress.mockResolvedValue(null);
+
+      await expect(controller.getTokenPrice('ct_token')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(dexTokenService.getTokenPrice).not.toHaveBeenCalled();
+    });
+
+    it('merges the price payload with the token', async () => {
+      const token = { address: 'ct_token', symbol: 'TOK' };
+      dexTokenService.findByAddress.mockResolvedValue(token);
+      dexTokenService.getTokenPrice.mockResolvedValue({
+        price: '1.5',
+        bestPath: ['a', 'b'],
+      });
+
+      const result: any = await controller.getTokenPrice('ct_token');
+
+      expect(dexTokenService.getTokenPrice).toHaveBeenCalledWith(
+        'ct_token',
+        true,
+      );
+      expect(result).toEqual({
+        price: '1.5',
+        token,
+        bestPath: ['a', 'b'],
+      });
+    });
+  });
+
+  describe('getTokenPriceAnalysis', () => {
+    it('throws NotFound when the token does not exist', async () => {
+      dexTokenService.findByAddress.mockResolvedValue(null);
+
+      await expect(
+        controller.getTokenPriceAnalysis('ct_token'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(
+        dexTokenService.getTokenPriceWithLiquidityAnalysis,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFound when no price path is found', async () => {
+      dexTokenService.findByAddress.mockResolvedValue({ address: 'ct_token' });
+      dexTokenService.getTokenPriceWithLiquidityAnalysis.mockResolvedValue(
+        null,
+      );
+
+      await expect(
+        controller.getTokenPriceAnalysis('ct_token'),
+      ).rejects.toThrow(/No price paths/);
+    });
+
+    it('returns the analysis when found', async () => {
+      const analysis = { price: '2', bestPath: [], allPaths: [] };
+      dexTokenService.findByAddress.mockResolvedValue({ address: 'ct_token' });
+      dexTokenService.getTokenPriceWithLiquidityAnalysis.mockResolvedValue(
+        analysis,
+      );
+
+      await expect(controller.getTokenPriceAnalysis('ct_token')).resolves.toBe(
+        analysis,
+      );
+    });
+  });
+
+  describe('getTokenSummary', () => {
+    it('throws NotFound when the token does not exist', async () => {
+      dexTokenService.findByAddress.mockResolvedValue(null);
+
+      await expect(
+        controller.getTokenSummary('ct_token'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(
+        dexTokenSummaryService.createOrUpdateSummary,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('returns the summary with the address attached', async () => {
+      dexTokenService.findByAddress.mockResolvedValue({ address: 'ct_token' });
+      dexTokenSummaryService.createOrUpdateSummary.mockResolvedValue({
+        total_volume: { ae: '10' },
+        change: {},
+      });
+
+      const result: any = await controller.getTokenSummary('ct_token');
+
+      expect(dexTokenSummaryService.createOrUpdateSummary).toHaveBeenCalledWith(
+        'ct_token',
+      );
+      expect(result).toEqual({
+        total_volume: { ae: '10' },
+        change: {},
+        address: 'ct_token',
+      });
+    });
   });
 
   describe('listAll', () => {

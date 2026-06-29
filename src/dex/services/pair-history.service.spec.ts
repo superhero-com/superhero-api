@@ -239,6 +239,125 @@ describe('PairHistoryService', () => {
 
       expect(result.quote.close).toBe('1.8');
     });
+
+    it('drops a dust-state candle whose price is beyond the chartable range', async () => {
+      // 18/18 pair (priceScale = 1). The first candle is a normal price; the
+      // second is a 5e17 dust artifact that must be omitted, not emitted as an
+      // unplottable spike.
+      queryRunnerMock.query.mockResolvedValue([
+        {
+          timeOpen: new Date('2025-01-01T00:00:00Z'),
+          timeClose: new Date('2025-01-01T01:00:00Z'),
+          low: '1',
+          high: '1',
+          open: '1',
+          close: '1',
+          volume: '0',
+          timeMin: new Date('2025-01-01T00:05:00Z'),
+          timeMax: new Date('2025-01-01T00:55:00Z'),
+        },
+        {
+          timeOpen: new Date('2025-01-02T00:00:00Z'),
+          timeClose: new Date('2025-01-02T01:00:00Z'),
+          low: '500000000000000000',
+          high: '500000000000000000',
+          open: '500000000000000000',
+          close: '500000000000000000',
+          volume: '0',
+          timeMin: new Date('2025-01-02T00:05:00Z'),
+          timeMax: new Date('2025-01-02T00:55:00Z'),
+        },
+      ]);
+
+      const result = await service.getPaginatedHistoricalData({
+        pair: {
+          address: 'ct_equal',
+          token0: { symbol: 'A', address: 'ct_a', decimals: 18 },
+          token1: { symbol: 'B', address: 'ct_b', decimals: 18 },
+        } as any,
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token0',
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].quote.close).toBe('1');
+    });
+
+    it('allows fiat conversion when the charted token itself is WAE (AE/currency rate)', async () => {
+      // WAE (token0) / IMAE (token1), fromToken='token1' → base is IMAE,
+      // quote (charted) token is WAE. baseIsWae is false, but quoteIsWae is
+      // true, so fiat must be allowed: price = 1 AE × rate = the AE/USD rate.
+      queryRunnerMock.query.mockResolvedValue([
+        {
+          timeOpen: new Date('2025-01-01T00:00:00Z'),
+          timeClose: new Date('2025-01-01T01:00:00Z'),
+          low: '5',
+          high: '5',
+          open: '5',
+          close: '5',
+          volume: '0',
+          timeMin: new Date('2025-01-01T00:05:00Z'),
+          timeMax: new Date('2025-01-01T00:55:00Z'),
+          conversion_rate: '0.005',
+        },
+      ]);
+
+      const [result] = await service.getPaginatedHistoricalData({
+        pair: {
+          address: 'ct_wae_imae',
+          token0: { symbol: 'WAE', address: DEX_CONTRACTS.wae, decimals: 18 },
+          token1: { symbol: 'IMAE', address: 'ct_imae', decimals: 18 },
+        } as any,
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token1',
+        convertTo: 'usd',
+      });
+
+      expect(result.quote.convertedTo).toBe('usd');
+      expect(result.quote.close).toBe('0.005');
+    });
+
+    it('charts WAE itself as a flat 1 AE, not the pool ratio against the base', async () => {
+      // WAE (token0) / IMAE (token1). Charting WAE means the base side is IMAE,
+      // so the SQL price is the WAE/IMAE ratio (~0.003). But WAE is wrapped AE,
+      // so its AE price must be a flat 1 — never that unrelated ratio.
+      queryRunnerMock.query.mockResolvedValue([
+        {
+          timeOpen: new Date('2025-01-01T00:00:00Z'),
+          timeClose: new Date('2025-01-01T01:00:00Z'),
+          low: '0.003',
+          high: '0.003',
+          open: '0.003',
+          close: '0.003',
+          volume: '0',
+          timeMin: new Date('2025-01-01T00:05:00Z'),
+          timeMax: new Date('2025-01-01T00:55:00Z'),
+        },
+      ]);
+
+      const [result] = await service.getPaginatedHistoricalData({
+        pair: {
+          address: 'ct_wae_imae',
+          token0: { symbol: 'WAE', address: DEX_CONTRACTS.wae, decimals: 18 },
+          token1: { symbol: 'IMAE', address: 'ct_imae', decimals: 18 },
+        } as any,
+        interval: 3600,
+        page: 1,
+        limit: 10,
+        fromToken: 'token1',
+      });
+
+      expect(result.quote.close).toBe('1');
+      expect(result.quote.open).toBe('1');
+      expect(result.quote.high).toBe('1');
+      expect(result.quote.low).toBe('1');
+      expect(result.quote.convertedTo).toBe('ae');
+      expect(result.quote.symbol).toBe('WAE');
+    });
   });
 
   describe('getPaginatedHistoricalData - denomination & volume', () => {
@@ -473,6 +592,220 @@ describe('PairHistoryService', () => {
 
       expect(queryRunnerMock.query).not.toHaveBeenCalled();
       expect(aePricingMock.getCurrencyRates).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('calculatePairSummary', () => {
+    // Route each mocked query to a sensible response by inspecting its SQL so
+    // the JS-side arithmetic (price-change) actually runs against real numbers.
+    const wireQueries = (opts: {
+      totalVolume?: string;
+      periodVolume?: string;
+      startPrice?: string | null;
+      currentPrice?: string | null;
+    }) => {
+      queryRunnerMock.query.mockImplementation((sql: string) => {
+        if (sql.includes('start_price')) {
+          return Promise.resolve([
+            {
+              start_price: opts.startPrice ?? null,
+              current_price: opts.currentPrice ?? null,
+            },
+          ]);
+        }
+        // volume queries (total + per-period)
+        return Promise.resolve([
+          { total_volume: opts.periodVolume ?? opts.totalVolume ?? '0' },
+        ]);
+      });
+    };
+
+    // Every supplied parameter MUST be referenced in the SQL. Postgres infers a
+    // parameter's type from its usage, so an unreferenced $N aborts the whole
+    // query with "could not determine data type of parameter $N" at runtime —
+    // which mocked-query tests don't otherwise catch.
+    const assertNoDanglingParams = (sql: unknown, params: unknown[]) => {
+      const referenced = new Set(
+        [...String(sql).matchAll(/\$(\d+)/g)].map((m) => Number(m[1])),
+      );
+      for (let i = 1; i <= params.length; i++) {
+        expect(referenced.has(i)).toBe(true);
+      }
+    };
+
+    it('issues no query with a dangling/unreferenced parameter (Postgres type-inference)', async () => {
+      (aePricingMock as any).getPriceData = jest
+        .fn()
+        .mockResolvedValue({ ae: 0 });
+      wireQueries({ totalVolume: '0', startPrice: null, currentPrice: null });
+
+      const pair = {
+        address: 'ct_p',
+        token0: { address: 'ct_t', decimals: 6 },
+        token1: { address: DEX_CONTRACTS.wae, decimals: 18 },
+      } as any;
+
+      await service.calculatePairSummary(pair);
+
+      const calls = queryRunnerMock.query.mock.calls.filter((c) =>
+        Array.isArray(c[1]),
+      );
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [sql, params] of calls) {
+        assertNoDanglingParams(sql, params as unknown[]);
+      }
+    });
+
+    it('takes the WAE leg directly and never reconstructs via the reserve ratio (dust-safe)', async () => {
+      (aePricingMock as any).getPriceData = jest
+        .fn()
+        .mockResolvedValue({ ae: 0 });
+      wireQueries({ totalVolume: '0' });
+
+      const pair = {
+        address: 'ct_p',
+        token0: { address: 'ct_t', decimals: 6 },
+        token1: { address: DEX_CONTRACTS.wae, decimals: 18 },
+      } as any;
+
+      await service.calculatePairSummary(pair);
+
+      const volCall = queryRunnerMock.query.mock.calls.find(
+        (c) =>
+          String(c[0]).includes('total_volume') &&
+          String(c[0]).includes('POW(10'),
+      );
+      expect(volCall).toBeDefined();
+      const volSql = String(volCall[0]);
+      // The WAE side is taken directly (param $2 — no dangling $2 placeholder)...
+      expect(volSql).toContain('token1.address = $2 THEN pt.volume1');
+      expect(volCall[1]).toContain(DEX_CONTRACTS.wae);
+      const allSql = queryRunnerMock.query.mock.calls
+        .map((c) => String(c[0]))
+        .join('\n');
+      // ...and the dust-exploding reconstruction is gone for good.
+      expect(allSql).not.toContain('volume0 * ratio1');
+      expect(allSql).not.toMatch(
+        /reserve1 \/ POW\(10, token1\.decimals\)\)\) \//,
+      );
+      expect(allSql).not.toContain('NULLIF(pt.reserve0');
+    });
+
+    it('computes price-change percentage from decimal-normalized ratios', async () => {
+      (aePricingMock as any).getPriceData = jest
+        .fn()
+        .mockResolvedValue({ ae: 0 });
+      // token0 has 6 decimals, WAE (token1) 18. No token param → selected token
+      // is the WAE side (volumeToken='1'), so otherToken='0' and priceScale is
+      // 10^(dec1-dec0) = 10^12. Raw ratios 1e-12 and 1.1e-12 → human 1 and 1.1.
+      wireQueries({
+        totalVolume: '0',
+        periodVolume: '0',
+        startPrice: '0.000000000001',
+        currentPrice: '0.0000000000011',
+      });
+
+      const pair = {
+        address: 'ct_p',
+        token0: { address: 'ct_t', decimals: 6 },
+        token1: { address: DEX_CONTRACTS.wae, decimals: 18 },
+      } as any;
+
+      const result: any = await service.calculatePairSummary(pair);
+
+      // (1.1 - 1) / 1 * 100 = 10%, value = 0.1 — exact in BigNumber.
+      expect(result.change['24h'].price_change.percentage).toBe('10');
+      expect(result.change['24h'].price_change.value).toBe('0.1');
+    });
+
+    it('reports no change (0.00) when the start price is a drained/dust artifact', async () => {
+      (aePricingMock as any).getPriceData = jest
+        .fn()
+        .mockResolvedValue({ ae: 0 });
+      // start_price = 0 → division guard must keep percentage at the default.
+      wireQueries({
+        totalVolume: '0',
+        periodVolume: '0',
+        startPrice: '0',
+        currentPrice: '0.0000000000011',
+      });
+
+      const pair = {
+        address: 'ct_p',
+        token0: { address: 'ct_t', decimals: 6 },
+        token1: { address: DEX_CONTRACTS.wae, decimals: 18 },
+      } as any;
+
+      const result: any = await service.calculatePairSummary(pair);
+
+      expect(result.change['24h'].price_change.percentage).toBe('0.00');
+      expect(result.change['24h'].price_change.value).toBe('0');
+    });
+  });
+
+  describe('getForPreview', () => {
+    it('normalizes ratio1 by decimals and uses a single price direction', async () => {
+      // token0 = 6 dp, token1 = 18 dp → ratio1 raw scaled by 10^(6-18) = 1e-12.
+      const pair = {
+        address: 'ct_p',
+        token0: { decimals: 6 },
+        token1: { decimals: 18 },
+      } as any;
+      queryRunnerMock.query.mockResolvedValue([
+        {
+          truncated_time: new Date('2025-01-02T00:00:00Z'),
+          last_ratio1: '500000000000',
+        },
+        {
+          truncated_time: new Date('2025-01-01T00:00:00Z'),
+          last_ratio1: '400000000000',
+        },
+      ]);
+
+      const res: any = await service.getForPreview(pair, '7d');
+
+      // 5e11 * 1e-12 = 0.5 ; 4e11 * 1e-12 = 0.4
+      expect(res.result[0].last_price).toBe('0.5');
+      expect(res.result[1].last_price).toBe('0.4');
+      // No reciprocal-direction mixing: ratio0 is no longer referenced.
+      expect(String(queryRunnerMock.query.mock.calls[0][0])).not.toContain(
+        'ratio0',
+      );
+    });
+
+    it('falls back to the 7d window for an unrecognised interval instead of crashing', async () => {
+      // The HTTP layer can pass a value outside the '1d'|'7d'|'30d' union; the
+      // service must not destructure `undefined` and 500.
+      const pair = {
+        address: 'ct_p',
+        token0: { decimals: 18 },
+        token1: { decimals: 18 },
+      } as any;
+      queryRunnerMock.query.mockResolvedValue([]);
+
+      const res: any = await service.getForPreview(pair, 'BOGUS' as any);
+
+      expect(res.timeframe).toBe('7 days');
+    });
+
+    it('drops a dust-state bucket whose price is beyond the chartable range', async () => {
+      const pair = {
+        address: 'ct_p',
+        token0: { decimals: 18 },
+        token1: { decimals: 18 },
+      } as any;
+      queryRunnerMock.query.mockResolvedValue([
+        { truncated_time: new Date('2025-01-02T00:00:00Z'), last_ratio1: '1' },
+        {
+          truncated_time: new Date('2025-01-01T00:00:00Z'),
+          last_ratio1: '500000000000000000',
+        },
+      ]);
+
+      const res: any = await service.getForPreview(pair, '7d');
+
+      expect(res.result).toHaveLength(1);
+      expect(res.result[0].last_price).toBe('1');
     });
   });
 });

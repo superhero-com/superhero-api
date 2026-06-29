@@ -28,7 +28,6 @@ import {
   OptionalAeContractAddressPipe,
 } from '@/common/validation/request-validation';
 
-const MAX_PAGE_LIMIT = 100;
 const MIN_HISTORY_INTERVAL_SECONDS = 60;
 const MAX_HISTORY_INTERVAL_SECONDS = 86_400;
 
@@ -40,17 +39,6 @@ export class PairsController {
     private readonly pairHistoryService: PairHistoryService,
     private readonly pairSummaryService: PairSummaryService,
   ) {}
-
-  private validatePagination(page: number, limit: number): void {
-    if (page < 1) {
-      throw new BadRequestException('Page must be greater than or equal to 1');
-    }
-    if (limit < 1 || limit > MAX_PAGE_LIMIT) {
-      throw new BadRequestException(
-        `Limit must be between 1 and ${MAX_PAGE_LIMIT}`,
-      );
-    }
-  }
 
   @ApiQuery({
     name: 'search',
@@ -89,7 +77,8 @@ export class PairsController {
     @Query('order_by') orderBy: string = 'created_at',
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'DESC',
   ) {
-    this.validatePagination(page, limit);
+    // Pagination is clamped in PairService.findAll (consistent with the other
+    // DEX list endpoints), so no hard reject here.
     return this.pairService.findAll(
       { page, limit },
       orderBy,
@@ -254,7 +243,7 @@ export class PairsController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
-    this.validatePagination(page, limit);
+    // page/limit are clamped inside getPaginatedHistoricalData.
     if (
       interval < MIN_HISTORY_INTERVAL_SECONDS ||
       interval > MAX_HISTORY_INTERVAL_SECONDS
@@ -335,6 +324,12 @@ export class PairsController {
   ): Promise<ITransactionPreview> {
     if (!address || address == 'null') {
       throw new BadRequestException('Address is required');
+    }
+    const allowedIntervals = ['1d', '7d', '30d'];
+    if (interval && !allowedIntervals.includes(interval)) {
+      throw new BadRequestException(
+        `interval must be one of: ${allowedIntervals.join(', ')}`,
+      );
     }
     const pair = await this.pairService.findByAddress(address);
     if (!pair) {

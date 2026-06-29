@@ -96,7 +96,32 @@ export class PluginBatchProcessorService {
       }
       // Process batch - errors are handled inside processBatch
       try {
-        await plugin.processBatch(matchingTransactions, syncDirection);
+        const result = await plugin.processBatch(
+          matchingTransactions,
+          syncDirection,
+        );
+
+        // Park per-transaction failures for retry. Previously these were caught
+        // and logged deep inside processBatch and then dropped — yet the sync
+        // checkpoint still advanced past their block height, so a transient
+        // failure (middleware/DB hiccup) on a single tx silently and
+        // permanently lost it. Recording them here puts them in the
+        // failed-transactions table so they are retried (version-bump or manual)
+        // exactly like whole-batch failures.
+        const failures = result && result.failed ? result.failed : [];
+        for (const failure of failures) {
+          await this.failedTransactionService.recordFailure(
+            plugin.name,
+            failure.tx,
+            failure.error,
+            syncState.version,
+          );
+        }
+        if (failures.length > 0) {
+          this.logger.warn(
+            `[${plugin.name}] Parked ${failures.length}/${matchingTransactions.length} failed transactions for retry`,
+          );
+        }
 
         // Update sync state with the highest block height processed
         const maxHeight = Math.max(

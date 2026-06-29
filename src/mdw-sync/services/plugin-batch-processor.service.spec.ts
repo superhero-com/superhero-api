@@ -150,6 +150,102 @@ describe('PluginBatchProcessorService filtering', () => {
     });
   });
 
+  describe('processBatch failure parking', () => {
+    const SyncDirectionEnum = { Backward: 'backward', Live: 'live' } as const;
+
+    const buildProcessingPlugin = (
+      name: string,
+      processBatch: jest.Mock,
+    ): Plugin =>
+      ({
+        name,
+        version: 7,
+        filters: () => [{ predicate: () => true }],
+        processBatch,
+      }) as unknown as Plugin;
+
+    const setupProcessing = (plugin: Plugin) => {
+      const pluginRegistryService = {
+        getPlugins: jest.fn(() => [plugin]),
+      } as unknown as PluginRegistryService;
+      const failedTransactionService = {
+        recordFailure: jest.fn().mockResolvedValue(undefined),
+      } as any;
+      const pluginSyncStateRepository = {
+        findOne: jest.fn().mockResolvedValue({
+          plugin_name: plugin.name,
+          version: 7,
+        }),
+        update: jest.fn().mockResolvedValue(undefined),
+      } as any;
+
+      const service = new PluginBatchProcessorService(
+        pluginRegistryService,
+        failedTransactionService,
+        pluginSyncStateRepository,
+      );
+
+      return { service, failedTransactionService, pluginSyncStateRepository };
+    };
+
+    it('parks per-transaction failures returned by the plugin for retry', async () => {
+      const badTx = tx({ hash: 'th_bad', block_height: 10 }) as Tx;
+      const error = new Error('middleware hiccup');
+      const processBatch = jest
+        .fn()
+        .mockResolvedValue({ failed: [{ tx: badTx, error }] });
+      const plugin = buildProcessingPlugin('dex', processBatch);
+      const { service, failedTransactionService } = setupProcessing(plugin);
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx, badTx],
+        SyncDirectionEnum.Backward as any,
+      );
+
+      // The failed tx is recorded with the plugin's current version so it is
+      // retried rather than silently lost when the checkpoint advances.
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledTimes(1);
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledWith(
+        'dex',
+        badTx,
+        error,
+        7,
+      );
+    });
+
+    it('does not record failures when the plugin reports none', async () => {
+      const processBatch = jest.fn().mockResolvedValue({ failed: [] });
+      const plugin = buildProcessingPlugin('dex', processBatch);
+      const { service, failedTransactionService, pluginSyncStateRepository } =
+        setupProcessing(plugin);
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx],
+        SyncDirectionEnum.Backward as any,
+      );
+
+      expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+      // Checkpoint still advances on a clean batch.
+      expect(pluginSyncStateRepository.update).toHaveBeenCalledWith(
+        { plugin_name: 'dex' },
+        expect.objectContaining({ backward_synced_height: 9 }),
+      );
+    });
+
+    it('tolerates a plugin that returns void (no failure info)', async () => {
+      const processBatch = jest.fn().mockResolvedValue(undefined);
+      const plugin = buildProcessingPlugin('legacy', processBatch);
+      const { service, failedTransactionService } = setupProcessing(plugin);
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 5 }) as Tx],
+        SyncDirectionEnum.Backward as any,
+      );
+
+      expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+    });
+  });
+
   describe('isRelevantTransaction', () => {
     it('returns false when no plugins are registered (never index by default)', () => {
       const { service } = setup([]);

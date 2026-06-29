@@ -12,6 +12,7 @@ import {
 import { Repository } from 'typeorm';
 import { Pair } from '../entities/pair.entity';
 import { getPaths } from '../utils/paths';
+import { clampPaginationOptions } from '@/utils/pagination';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
@@ -86,7 +87,9 @@ export class PairService {
       );
     }
 
-    return paginate(query, options);
+    // Bound page/limit (clamp, not reject) so the DEX list endpoints behave
+    // consistently and a caller cannot force an unbounded scan + sort.
+    return paginate(query, clampPaginationOptions(options));
   }
 
   async findByAddress(address: string): Promise<Pair> {
@@ -215,8 +218,13 @@ export class PairService {
     pair.total_supply = total_supply?.toString() || '0';
     pair.reserve0 = reserves.reserve0?.toString() || '0';
     pair.reserve1 = reserves.reserve1?.toString() || '0';
-    pair.ratio0 = new BigNumber(pair.reserve0).div(pair.reserve1).toNumber();
-    pair.ratio1 = new BigNumber(pair.reserve1).div(pair.reserve0).toNumber();
+    // Guard against divide-by-zero on a dead/one-sided pool (0 reserves) — an
+    // unguarded BigNumber div by 0 yields NaN/Infinity, which then poisons the
+    // stored ratio. Matches the guard already used by the tx processor and sync.
+    const reserve0Bn = new BigNumber(pair.reserve0);
+    const reserve1Bn = new BigNumber(pair.reserve1);
+    pair.ratio0 = reserve1Bn.gt(0) ? reserve0Bn.div(reserve1Bn).toNumber() : 0;
+    pair.ratio1 = reserve0Bn.gt(0) ? reserve1Bn.div(reserve0Bn).toNumber() : 0;
     return this.pairRepository.save(pair);
   }
 }

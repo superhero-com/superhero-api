@@ -15,8 +15,13 @@ describe('DexTransactionProcessorService', () => {
     } as any;
     const dexPairTransactionRepository = {
       manager: { transaction: jest.fn() },
+      createQueryBuilder: jest.fn(),
+      delete: jest.fn(),
     } as any;
     const pairService = { pullPairData: jest.fn() } as any;
+    const dexTokenSummaryService = {
+      createOrUpdateSummary: jest.fn().mockResolvedValue(undefined),
+    } as any;
 
     const service = new DexTransactionProcessorService(
       dexTokenRepository,
@@ -24,9 +29,14 @@ describe('DexTransactionProcessorService', () => {
       dexPairTransactionRepository,
       { sdk: {} } as any,
       pairService,
+      dexTokenSummaryService,
     );
 
-    return { service };
+    return {
+      service,
+      dexPairTransactionRepository,
+      dexTokenSummaryService,
+    };
   };
 
   it('falls back to factory decode when router decode returns empty array', async () => {
@@ -150,6 +160,52 @@ describe('DexTransactionProcessorService', () => {
     expect(passedLog[0].topics[0]).toBeNull();
   });
 
+  it('stores reserves/ratios/volumes as full-precision strings (no toNumber truncation)', async () => {
+    const { service } = setup();
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const pairTransactionRepository = {
+      upsert,
+      findOne: jest.fn().mockResolvedValue({
+        tx_hash: 'th_1',
+        pair: { address: 'ct_pair' },
+      }),
+    } as any;
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(pairTransactionRepository),
+    } as any;
+
+    // 24-digit reserve — exceeds Number.MAX_SAFE_INTEGER (~9e15).
+    const bigReserve = '820442033002146053770130';
+
+    await (service as any).saveDexPairTransaction(
+      { address: 'ct_pair' },
+      {
+        reserve0: bigReserve,
+        reserve1: '1000000000000000000',
+        volume0: '500000000000000000',
+        volume1: '0',
+        swapInfo: null,
+        pairMintInfo: null,
+      },
+      {
+        hash: 'th_1',
+        block_height: 1,
+        micro_time: '1000',
+        caller_id: 'ak_1',
+        function: 'swap',
+      },
+      manager,
+    );
+
+    const payload = upsert.mock.calls[0][0];
+    // Exact value preserved (old code went through toNumber() → lossy float).
+    expect(payload.reserve0).toBe(bigReserve);
+    expect(typeof payload.reserve0).toBe('string');
+    expect(payload.volume0).toBe('500000000000000000');
+    // ratio0 = reserve0 / reserve1, full precision.
+    expect(payload.ratio0).toBe('820442.03300214605377013');
+  });
+
   it('loads pair relation after upsert when fetching saved tx', async () => {
     const { service } = setup();
     const pairTransactionRepository = {
@@ -186,6 +242,74 @@ describe('DexTransactionProcessorService', () => {
     expect(pairTransactionRepository.findOne).toHaveBeenCalledWith({
       where: { tx_hash: 'th_1' },
       relations: { pair: true },
+    });
+  });
+
+  describe('removeByTxHashes (reorg cleanup)', () => {
+    it('is a no-op for an empty hash list', async () => {
+      const { service, dexPairTransactionRepository, dexTokenSummaryService } =
+        setup();
+
+      const removed = await service.removeByTxHashes([]);
+
+      expect(removed).toBe(0);
+      expect(dexPairTransactionRepository.delete).not.toHaveBeenCalled();
+      expect(
+        dexTokenSummaryService.createOrUpdateSummary,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('deletes orphaned pair_transactions and recomputes affected token summaries', async () => {
+      const { service, dexPairTransactionRepository, dexTokenSummaryService } =
+        setup();
+
+      const qb: any = {
+        leftJoin: jest.fn(() => qb),
+        select: jest.fn(() => qb),
+        addSelect: jest.fn(() => qb),
+        where: jest.fn(() => qb),
+        getRawMany: jest.fn().mockResolvedValue([
+          { token0_address: 'ct_t0', token1_address: 'ct_wae' },
+          { token0_address: 'ct_t0', token1_address: 'ct_t1' },
+        ]),
+      };
+      dexPairTransactionRepository.createQueryBuilder.mockReturnValue(qb);
+      dexPairTransactionRepository.delete.mockResolvedValue({ affected: 2 });
+
+      const removed = await service.removeByTxHashes(['th_1', 'th_2']);
+
+      expect(removed).toBe(2);
+      expect(dexPairTransactionRepository.delete).toHaveBeenCalledTimes(1);
+      // Each distinct token gets exactly one recompute (no duplicates for ct_t0).
+      const recomputed = (
+        dexTokenSummaryService.createOrUpdateSummary as jest.Mock
+      ).mock.calls.map((c) => c[0]);
+      expect(new Set(recomputed)).toEqual(
+        new Set(['ct_t0', 'ct_wae', 'ct_t1']),
+      );
+      expect(recomputed).toHaveLength(3);
+    });
+
+    it('skips recompute when nothing was actually deleted', async () => {
+      const { service, dexPairTransactionRepository, dexTokenSummaryService } =
+        setup();
+
+      const qb: any = {
+        leftJoin: jest.fn(() => qb),
+        select: jest.fn(() => qb),
+        addSelect: jest.fn(() => qb),
+        where: jest.fn(() => qb),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      dexPairTransactionRepository.createQueryBuilder.mockReturnValue(qb);
+      dexPairTransactionRepository.delete.mockResolvedValue({ affected: 0 });
+
+      const removed = await service.removeByTxHashes(['th_unknown']);
+
+      expect(removed).toBe(0);
+      expect(
+        dexTokenSummaryService.createOrUpdateSummary,
+      ).not.toHaveBeenCalled();
     });
   });
 });

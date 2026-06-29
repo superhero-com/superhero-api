@@ -7,9 +7,10 @@ import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { Contract } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { DEX_CONTRACTS } from '../config/dex-contracts.config';
 import { DexToken } from '../entities/dex-token.entity';
 import { PairTransaction } from '../entities/pair-transaction.entity';
@@ -29,6 +30,9 @@ export class DexSyncService {
   private readonly logger = new Logger(DexSyncService.name);
   routerContract: ContractInstance;
   factoryContract: ContractInstance;
+  // Distinct from DexSchemaBootstrapService's advisory lock (4019283746).
+  private static readonly PRICE_SYNC_LOCK_KEY = 4019283747;
+  private priceSyncRunning = false;
   constructor(
     @InjectRepository(DexToken)
     private readonly dexTokenRepository: Repository<DexToken>,
@@ -36,6 +40,8 @@ export class DexSyncService {
     private readonly dexPairRepository: Repository<Pair>,
     @InjectRepository(PairTransaction)
     private readonly dexPairTransactionRepository: Repository<PairTransaction>,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
 
     private aeSdkService: AeSdkService,
     private pairService: PairService,
@@ -46,6 +52,65 @@ export class DexSyncService {
     private tokenSummaryService: DexTokenSummaryService,
   ) {
     //
+  }
+
+  /**
+   * Periodically recompute derived DEX data — token prices, token summaries and
+   * pair summaries — from the live pairs/transactions, so the stored values
+   * self-heal instead of needing a manual `sync-dex.js` run after every deploy.
+   *
+   * Guards: an in-process flag prevents overlap if a run exceeds the interval; a
+   * non-blocking Postgres advisory lock ensures only ONE container recomputes at
+   * a time; and the whole job is skipped when live sync is disabled (the backfill
+   * scripts run with DISABLE_MDW_SYNC=true and drive the sync themselves).
+   */
+  @Cron(process.env.DEX_PRICE_SYNC_CRON || CronExpression.EVERY_10_MINUTES)
+  async scheduledPriceSync(): Promise<void> {
+    if (process.env.DISABLE_MDW_SYNC === 'true') {
+      return;
+    }
+    if (this.priceSyncRunning) {
+      this.logger.warn(
+        'Scheduled DEX price sync still running; skipping this tick',
+      );
+      return;
+    }
+    this.priceSyncRunning = true;
+    const queryRunner = this.dataSource.createQueryRunner();
+    let locked = false;
+    try {
+      await queryRunner.connect();
+      const lockRows = await queryRunner.query(
+        'SELECT pg_try_advisory_lock($1) AS locked',
+        [DexSyncService.PRICE_SYNC_LOCK_KEY],
+      );
+      locked = !!lockRows?.[0]?.locked;
+      if (!locked) {
+        this.logger.debug(
+          'Another instance holds the DEX price-sync lock; skipping this tick',
+        );
+        return;
+      }
+      await this.syncTokenPrices();
+      this.logger.debug('Scheduled DEX price sync completed');
+    } catch (error) {
+      this.logger.error('Scheduled DEX price sync failed', error as Error);
+    } finally {
+      if (locked) {
+        try {
+          await queryRunner.query('SELECT pg_advisory_unlock($1)', [
+            DexSyncService.PRICE_SYNC_LOCK_KEY,
+          ]);
+        } catch (unlockError) {
+          this.logger.error(
+            'Failed to release DEX price-sync advisory lock',
+            unlockError as Error,
+          );
+        }
+      }
+      await queryRunner.release();
+      this.priceSyncRunning = false;
+    }
   }
 
   async onModuleInit(): Promise<void> {
@@ -112,13 +177,21 @@ export class DexSyncService {
               { allPairs },
             );
 
-          if (!priceAnalysis || !priceAnalysis.medianPrice) {
+          // Use the deepest-liquidity path price (matches the chart and the
+          // /price endpoint), NOT the median — the median is poisoned by
+          // dust/dead pools and multi-hop outliers.
+          if (!priceAnalysis) {
             continue;
           }
 
-          const price_data = await this.aePricingService.getPriceData(
-            new BigNumber(priceAnalysis.medianPrice),
-          );
+          // A null price means the token has no AE-denominated price (no liquid
+          // path to WAE). Persist null so the stored/listed price clears instead
+          // of keeping a stale value; the summary (volume) is still recomputed.
+          const price_data = priceAnalysis.price
+            ? await this.aePricingService.getPriceData(
+                new BigNumber(priceAnalysis.price),
+              )
+            : null;
           await this.dexTokenRepository.update(token.address, {
             price: price_data,
           });
@@ -467,19 +540,24 @@ export class DexSyncService {
         tx_type: transaction.tx.function,
         tx_hash: transaction.hash,
         block_height: transaction.blockHeight,
-        reserve0: pairInfo.reserve0,
-        reserve1: pairInfo.reserve1,
-        total_supply: new BigNumber(pairInfo.reserve0)
-          .plus(pairInfo.reserve1)
-          .toNumber(),
-        ratio0: new BigNumber(pairInfo.reserve0)
-          .div(pairInfo.reserve1)
-          .toNumber(),
-        ratio1: new BigNumber(pairInfo.reserve1)
-          .div(pairInfo.reserve0)
-          .toNumber(),
-        volume0: pairInfo.volume0,
-        volume1: pairInfo.volume1,
+        // Full-precision decimal strings (numeric columns); never toNumber().
+        reserve0: new BigNumber(pairInfo.reserve0 || 0).toFixed(),
+        reserve1: new BigNumber(pairInfo.reserve1 || 0).toFixed(),
+        total_supply: new BigNumber(pairInfo.reserve0 || 0)
+          .plus(pairInfo.reserve1 || 0)
+          .toFixed(),
+        ratio0: new BigNumber(pairInfo.reserve1 || 0).gt(0)
+          ? new BigNumber(pairInfo.reserve0 || 0)
+              .div(pairInfo.reserve1)
+              .toFixed()
+          : '0',
+        ratio1: new BigNumber(pairInfo.reserve0 || 0).gt(0)
+          ? new BigNumber(pairInfo.reserve1 || 0)
+              .div(pairInfo.reserve0)
+              .toFixed()
+          : '0',
+        volume0: new BigNumber(pairInfo.volume0 || 0).toFixed(),
+        volume1: new BigNumber(pairInfo.volume1 || 0).toFixed(),
         swap_info: pairInfo.swapInfo,
         pair_mint_info: pairInfo.pairMintInfo,
         created_at: moment(transaction.microTime).toDate(),

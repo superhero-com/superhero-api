@@ -156,9 +156,24 @@ export class DexTokensController {
   @ApiOperation({
     operationId: 'getTokenPrice',
     summary: 'Get DEX token price',
-    description: 'Retrieve a specific DEX token by its contract address',
+    description:
+      'Retrieve a token together with its current price and price metadata.',
   })
-  @ApiOkResponse({ type: DexTokenDto })
+  @ApiOkResponse({
+    description: 'The token plus its price and price metadata',
+    schema: {
+      type: 'object',
+      properties: {
+        price: {
+          type: 'string',
+          description: 'Best price found',
+          nullable: true,
+        },
+        token: { $ref: '#/components/schemas/DexTokenDto' },
+      },
+      additionalProperties: true,
+    },
+  })
   @Get(':address/price')
   async getTokenPrice(
     @Param('address', AeContractAddressPipe) address: string,

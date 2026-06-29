@@ -4,6 +4,7 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import {
   Plugin,
+  PluginBatchResult,
   PluginFilter,
   SyncDirection,
   SyncDirectionEnum,
@@ -55,9 +56,12 @@ export abstract class BasePlugin implements Plugin {
    * @param txs - Transactions to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
    */
-  async processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void> {
+  async processBatch(
+    txs: Tx[],
+    syncDirection: SyncDirection,
+  ): Promise<PluginBatchResult> {
     if (txs.length === 0) {
-      return;
+      return { failed: [] };
     }
 
     const syncService = this.getSyncService();
@@ -112,8 +116,9 @@ export abstract class BasePlugin implements Plugin {
       }
     }
 
-    // Process transactions with decoded data
-    await syncService.processBatch(updatedTxs, syncDirection);
+    // Process transactions with decoded data, propagating per-tx failures so
+    // the caller can park them for retry rather than advancing past lost data.
+    return syncService.processBatch(updatedTxs, syncDirection);
   }
 
   /**

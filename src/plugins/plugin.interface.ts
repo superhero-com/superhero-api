@@ -15,6 +15,21 @@ export interface PluginFilter {
   predicate?: (tx: Partial<Tx>) => boolean;
 }
 
+/** A single transaction that failed during batch processing. */
+export interface PluginBatchFailure {
+  tx: Tx;
+  error: Error;
+}
+
+/**
+ * Outcome of processing a batch. `failed` lists the transactions that could not
+ * be processed so the caller can park them for retry instead of silently
+ * advancing the sync checkpoint past them (which would lose the data forever).
+ */
+export interface PluginBatchResult {
+  failed: PluginBatchFailure[];
+}
+
 export interface Plugin {
   name: string;
   /**
@@ -28,8 +43,13 @@ export interface Plugin {
    * Process a batch of transactions. Plugins can override for optimized batch processing.
    * @param txs - Transactions to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
+   * @returns the per-transaction failures (if any) so the caller can park them
+   *   for retry. Returning `void` is treated as "no failures".
    */
-  processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void>;
+  processBatch(
+    txs: Tx[],
+    syncDirection: SyncDirection,
+  ): Promise<PluginBatchResult | void>;
   /**
    * Handle reorg by receiving list of removed transaction hashes.
    * Also used for invalid transactions detected during verification.

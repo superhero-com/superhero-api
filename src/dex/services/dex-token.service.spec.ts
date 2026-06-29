@@ -79,6 +79,171 @@ describe('DexTokenService', () => {
     });
   });
 
+  it('prefers the direct WAE pool over a deeper multi-hop route', async () => {
+    const { service } = setup();
+    // Direct token/WAE pool is shallow (reserves 100) and prices the token at
+    // 73 AE. A deeper 2-hop route (token->mid->WAE, reserves 1000) prices it at
+    // 51. The displayed price must follow the direct pool (what swaps use), even
+    // though the multi-hop route has more liquidity.
+    const allPairs = [
+      makePair('ct_direct', 'ct_token', 'ct_wae', 1 / 73, 73, '100', '100'),
+      makePair('ct_hop1', 'ct_token', 'ct_mid', 1, 1, '1000', '1000'),
+      makePair('ct_hop2', 'ct_mid', 'ct_wae', 1, 51, '1000', '1000'),
+    ];
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_token',
+      'ct_wae',
+      { allPairs },
+    );
+
+    expect(result?.price).toBe('73');
+    expect(result?.bestPath).toHaveLength(1);
+  });
+
+  it('ignores dead/empty pools and prices via the live pool', async () => {
+    const { service } = setup();
+    const allPairs = [
+      // Dead pool (zero reserves) — must be excluded, not poison the price.
+      makePair('ct_dead', 'ct_token', 'ct_wae', 1, 1, '0', '0'),
+      // Live pool: ratio1 = 2 → token price 2 WAE.
+      makePair('ct_live', 'ct_token', 'ct_wae', 0.5, 2, '1000', '1000'),
+    ];
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_token',
+      'ct_wae',
+      { allPairs },
+    );
+
+    expect(result?.price).toBe('2');
+    // Only the live path survives; the dead pool's path is dropped.
+    expect(result?.allPaths).toHaveLength(1);
+  });
+
+  it('falls back to the last traded price when every pool is dead/drained', async () => {
+    // RPT-style token: its only WAE pool is fully drained (0 reserves), so there
+    // is no live path. Instead of the misleading 1 AE default, the price must be
+    // the last transaction's ratio (what the chart still shows, ~124 AE).
+    const deadWaePair = makePair(
+      'ct_wae_rpt',
+      DEX_CONTRACTS.wae,
+      'ct_rpt',
+      124,
+      1 / 124,
+      '0',
+      '0',
+    );
+    const qb: any = {
+      leftJoinAndSelect: jest.fn(() => qb),
+      where: jest.fn(() => qb),
+      getMany: jest.fn().mockResolvedValue([deadWaePair]),
+    };
+    const pairRepository: any = {
+      createQueryBuilder: jest.fn(() => qb),
+      manager: { query: jest.fn().mockResolvedValue([{ ratio: '124.45' }]) },
+    };
+    const service = new DexTokenService({} as any, pairRepository);
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_rpt',
+      DEX_CONTRACTS.wae,
+      { allPairs: [deadWaePair] },
+    );
+
+    expect(result?.price).toBe('124.45');
+    expect(result?.allPaths).toHaveLength(0);
+  });
+
+  it('rejects a dust-pool price (1-wei reserve) and falls back to the last sane trade', async () => {
+    // WAE(18)/yani(18) pool drained to 1 wei of yani vs 2 WAE → the live ratio
+    // is an absurd 2e18 AE per token. It passes the reserve>0 check but must NOT
+    // be reported; fall back to the last sane traded price (matches the chart).
+    const dustPair = makePair(
+      'ct_dust',
+      'ct_wae',
+      'ct_yani',
+      2e18,
+      5e-19,
+      '2000000000000000001',
+      '1',
+    );
+    const qb: any = {
+      leftJoinAndSelect: jest.fn(() => qb),
+      where: jest.fn(() => qb),
+      getMany: jest.fn().mockResolvedValue([dustPair]),
+    };
+    const pairRepository: any = {
+      createQueryBuilder: jest.fn(() => qb),
+      // The bounded query returns the most recent SANE trade.
+      manager: { query: jest.fn().mockResolvedValue([{ ratio: '0.00005' }]) },
+    };
+    const service = new DexTokenService({} as any, pairRepository);
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_yani',
+      'ct_wae',
+      { allPairs: [dustPair] },
+    );
+
+    // The absurd 2e18 path price was rejected; the last sane trade is used.
+    expect(result?.price).toBe('0.00005');
+    expect(result?.allPaths).toHaveLength(0);
+  });
+
+  it('returns a null price (not 1) for a token with no AE path — only non-WAE liquidity', async () => {
+    // B's WAE pool is dead; its only live pool is A/B, and A has no WAE pool.
+    // There is no AE-denominated price, so the result must be null — never the
+    // misleading 1 AE placeholder.
+    const deadWae = makePair('ct_wae_b', 'ct_wae', 'ct_b', 1, 1, '0', '0');
+    const liveAB = makePair('ct_a_b', 'ct_a', 'ct_b', 1, 1, '1000', '1000');
+    const qb: any = {
+      leftJoinAndSelect: jest.fn(() => qb),
+      where: jest.fn(() => qb),
+      getMany: jest.fn().mockResolvedValue([deadWae, liveAB]),
+    };
+    const pairRepository: any = {
+      createQueryBuilder: jest.fn(() => qb),
+      manager: { query: jest.fn() },
+    };
+    const service = new DexTokenService({} as any, pairRepository);
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_b',
+      'ct_wae',
+      { allPairs: [deadWae, liveAB] },
+    );
+
+    expect(result?.price).toBeNull();
+    expect(result?.medianPrice).toBeNull();
+    expect(result?.liquidityWeightedPrice).toBeNull();
+    expect(result?.allPaths).toHaveLength(0);
+  });
+
+  it('decimal-normalizes the price for a non-18-decimal token', async () => {
+    const { service } = setup();
+    // token (6 dp) / WAE (18 dp). Reserves: 2 token, 1 WAE → 1 token = 0.5 WAE.
+    // ratio1 (raw) = reserve1/reserve0 = 1e18 / 2e6 = 5e11; normalised by
+    // 10^(6 - 18) = 1e-12 → 0.5.
+    const pair = {
+      address: 'ct_p',
+      token0: { address: 'ct_token', decimals: 6 },
+      token1: { address: 'ct_wae', decimals: 18 },
+      ratio0: 0.000000000002,
+      ratio1: 500000000000,
+      reserve0: '2000000',
+      reserve1: '1000000000000000000',
+    } as any;
+
+    const result = await service.getTokenPriceWithLiquidityAnalysis(
+      'ct_token',
+      'ct_wae',
+      { allPairs: [pair] },
+    );
+
+    expect(result?.price).toBe('0.5');
+  });
+
   describe('findBestPairForToken', () => {
     // findBestPairForToken does a TARGETED query (only pairs containing the
     // token) rather than loading the whole table, so we mock the query builder.
@@ -147,6 +312,20 @@ describe('DexTokenService', () => {
       const best = await service.findBestPairForToken('ct_token');
 
       expect(best?.pair.address).toBe('ct_active');
+    });
+
+    it('prefers a dead WAE pool over a dead non-WAE pool so the price stays AE-denominated', async () => {
+      // Every pool is drained. The WAE pair must still win so the last-known
+      // price / chart is AE-denominated rather than priced in an arbitrary token.
+      const { service } = setupWithPairs([
+        makePair('ct_dead_nonwae', 'ct_token', 'ct_mid', 1, 1, '0', '0'),
+        makePair('ct_dead_wae', 'ct_token', DEX_CONTRACTS.wae, 1, 1, '0', '0'),
+      ]);
+
+      const best = await service.findBestPairForToken('ct_token');
+
+      expect(best?.pair.address).toBe('ct_dead_wae');
+      expect(best?.basePosition).toBe('token1');
     });
 
     it('still prefers a liquid WAE pool over a deeper non-WAE pool', async () => {

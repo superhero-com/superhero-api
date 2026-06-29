@@ -110,4 +110,41 @@ describe('PairTransactionService', () => {
     );
     expect(dateClauses).toHaveLength(0);
   });
+
+  it('clamps an oversized limit and a zero page before paginating', async () => {
+    const { service, qb } = setup();
+
+    await service.findAll({ page: 0, limit: 10_000_000 });
+
+    expect(paginate as jest.Mock).toHaveBeenCalledWith(
+      qb,
+      expect.objectContaining({ page: 1, limit: 100 }),
+    );
+  });
+
+  it('filters by token address using the joined aliases, not the relation path', async () => {
+    const { service, qb } = setup();
+
+    await service.findAll(
+      { page: 1, limit: 100 },
+      'created_at',
+      'DESC',
+      undefined,
+      undefined,
+      undefined,
+      'ct_token',
+    );
+
+    const tokenClause = qb.andWhere.mock.calls.find((call: any[]) =>
+      String(call[0]).includes('address = :tokenAddress'),
+    );
+    expect(tokenClause).toBeDefined();
+    // Must reference the join aliases. The relation path `pair.token0.address`
+    // is emitted verbatim by TypeORM and produces invalid SQL.
+    expect(tokenClause[0]).toBe(
+      '(token0.address = :tokenAddress OR token1.address = :tokenAddress)',
+    );
+    expect(tokenClause[0]).not.toContain('pair.token0.address');
+    expect(tokenClause[1]).toEqual({ tokenAddress: 'ct_token' });
+  });
 });
