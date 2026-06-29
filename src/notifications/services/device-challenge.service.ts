@@ -20,6 +20,7 @@ import {
   buildDeviceUnlinkMessage,
   buildPreferencesUpdateMessage,
 } from '../notifications.constants';
+import { buildRoomMuteMessage } from '@/token-gated-rooms/notifications/room-mute.message';
 import notificationsConfig from '../notifications.config';
 
 export interface IssuedChallenge {
@@ -133,6 +134,29 @@ export class DeviceChallengeService {
       address,
       signature,
       buildPreferencesUpdateMessage(address, nonce, preferences),
+    );
+  }
+
+  /**
+   * Same atomic verify, but against the **room-mute** message (Task 13). The
+   * shared nonce table is reused; the distinct intent line (`Superhero Rooms\nMute
+   * <saleAddress> for <address>`) plus the body hash over `(muted, mute_all)`
+   * prevent cross-replay from the prefs/device intents AND prevent the mute flags
+   * (or the target room) from being swapped on a captured nonce+sig.
+   */
+  async verifyAndConsumeForRoomMute(
+    nonce: string,
+    address: string,
+    saleAddress: string,
+    muted: boolean,
+    muteAll: boolean | undefined,
+    signature: string,
+  ): Promise<void> {
+    await this.verifyWithMessage(
+      nonce,
+      address,
+      signature,
+      buildRoomMuteMessage(address, nonce, saleAddress, muted, muteAll),
     );
   }
 

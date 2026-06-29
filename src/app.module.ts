@@ -38,6 +38,7 @@ import { StabilizationModule } from './stabilization/stabilization.module';
 import { AddressLinksModule } from './plugins/address-links/address-links.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.module';
 
 @Module({
   imports: [
@@ -106,6 +107,11 @@ import { AnnouncementsModule } from './announcements/announcements.module';
     AddressLinksModule,
     NotificationsModule,
     AnnouncementsModule,
+    // Token-gated rooms (NIP-29). Single always-on process — indexing listeners,
+    // HTTP read API, and the relay duties (writer/subscriber + Bull consumers)
+    // all load here; the relay duties self-enable iff a relay is configured
+    // (`TG_RELAY_URL` + `TG_BOT_NSEC`). See deworker-plan.md.
+    TokenGatedRoomsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

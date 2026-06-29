@@ -3,6 +3,8 @@ import { IncomingTransferNotification } from './notifications/incoming-transfer.
 import { AnnouncementNotification } from './notifications/announcement.notification';
 import { InvitationClaimedNotification } from './notifications/invitation-claimed.notification';
 import { PostCommentNotification } from './notifications/post-comment.notification';
+import { RoomMembershipNotification } from '@/token-gated-rooms/notifications/room-membership.notification';
+import { RoomMessageNotification } from '@/token-gated-rooms/notifications/room-message.notification';
 
 /**
  * Catalog of every notification type the user can opt into / out of. Source of
@@ -20,6 +22,8 @@ export const NOTIFICATION_CATALOG: ReadonlyArray<NotificationMeta> = [
   AnnouncementNotification.META,
   InvitationClaimedNotification.META,
   PostCommentNotification.META,
+  RoomMembershipNotification.META,
+  RoomMessageNotification.META,
 ];
 
 /** O(1) lookup used to whitelist incoming `type` strings in update payloads. */

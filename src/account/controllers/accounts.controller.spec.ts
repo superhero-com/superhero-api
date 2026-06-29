@@ -12,6 +12,9 @@ describe('AccountsController', () => {
     leftJoin: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue([]),
   });
 
   let controller: AccountsController;
@@ -285,6 +288,52 @@ describe('AccountsController', () => {
       const svgBuffer = (result as StreamableFile).getStream().read() as Buffer;
       expect(svgBuffer.toString()).toContain('<svg');
       expect(svgBuffer.toString()).not.toContain('<path');
+    });
+  });
+
+  describe('resolveByNostr', () => {
+    const HEX_A = 'a'.repeat(64);
+    const HEX_B = 'b'.repeat(64);
+    const HEX_C = 'c'.repeat(64);
+
+    it('returns only the matched accounts, normalized', async () => {
+      queryBuilder.getMany.mockResolvedValue([
+        {
+          address: 'ak_alice',
+          chain_name: 'alice.chain',
+          links: { nostr: HEX_A },
+        },
+        { address: 'ak_bob', chain_name: null, links: { nostr: HEX_C } },
+      ]);
+
+      const result = await controller.resolveByNostr(`${HEX_A},${HEX_B}`);
+
+      expect(queryBuilder.where).toHaveBeenCalledWith(
+        "account.links->>'nostr' IS NOT NULL",
+      );
+      expect(result).toEqual([
+        { nostr_pubkey: HEX_A, address: 'ak_alice', chain_name: 'alice.chain' },
+      ]);
+    });
+
+    it('returns [] and does not query for empty input', async () => {
+      const result = await controller.resolveByNostr('  ,  ');
+      expect(result).toEqual([]);
+      expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('returns [] when no requested pubkey is a valid hex/npub', async () => {
+      const result = await controller.resolveByNostr('not-a-pubkey,also-bad');
+      expect(result).toEqual([]);
+      expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('rejects more than 200 pubkeys', async () => {
+      const many = Array.from({ length: 201 }, () => HEX_A).join(',');
+      await expect(controller.resolveByNostr(many)).rejects.toThrow(
+        'At most 200 pubkeys per request',
+      );
+      expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });
