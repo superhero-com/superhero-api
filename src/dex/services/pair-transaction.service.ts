@@ -26,6 +26,8 @@ export class PairTransactionService {
     txType?: string,
     account_address?: string,
     tokenAddress?: string,
+    fromDate?: string,
+    toDate?: string,
   ): Promise<Pagination<PairTransaction>> {
     if (!ALLOWED_ORDER_BY.has(orderBy)) {
       throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
@@ -35,6 +37,10 @@ export class PairTransactionService {
         `Invalid order_direction value: ${orderDirection}`,
       );
     }
+
+    const parsedFromDate = this.parseDate(fromDate, 'from_date');
+    const parsedToDate = this.parseDate(toDate, 'to_date');
+
     const query = this.pairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .leftJoinAndSelect('pairTransaction.pair', 'pair')
@@ -68,12 +74,40 @@ export class PairTransactionService {
       );
     }
 
+    // Filter by created_at time range if provided
+    if (parsedFromDate) {
+      query.andWhere('pairTransaction.created_at >= :fromDate', {
+        fromDate: parsedFromDate,
+      });
+    }
+    if (parsedToDate) {
+      query.andWhere('pairTransaction.created_at <= :toDate', {
+        toDate: parsedToDate,
+      });
+    }
+
     // Add ordering
     if (orderBy) {
       query.orderBy(`pairTransaction.${orderBy}`, orderDirection);
     }
 
     return paginate(query, options);
+  }
+
+  private parseDate(
+    value: string | undefined,
+    field: string,
+  ): Date | undefined {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(
+        `Invalid ${field} value: ${value}. Expected an ISO-8601 date string.`,
+      );
+    }
+    return parsed;
   }
 
   async findByTxHash(txHash: string): Promise<PairTransaction> {

@@ -46,6 +46,12 @@ export class DexTokenDto {
   is_ae: boolean;
 
   @ApiProperty({
+    description: 'Whether the token is officially listed/featured by the DEX',
+    example: false,
+  })
+  listed: boolean;
+
+  @ApiProperty({
     description: 'Price Data',
   })
   price: PriceDto;

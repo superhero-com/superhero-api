@@ -132,10 +132,35 @@ export class DexTransactionProcessorService {
     // Ensure contracts are initialized
     await this.ensureContractsInitialized();
 
+    // The middleware stores event `topics` as decimal strings, but aepp-sdk's
+    // `$decodeEvents` matches them against the BigInt event-name hash with
+    // strict equality (`BigInt(hash) === topic`). A string topic never matches,
+    // so with `omitUnknown: true` every event is silently dropped and the pair
+    // can never be extracted. Normalise topics to BigInt before decoding.
+    //
+    // Guard per-topic: a single unconvertible topic (null/empty/non-numeric)
+    // from an unrelated log line in the same transaction must NOT abort the
+    // whole batch. Leave such topics untouched — `omitUnknown` then drops only
+    // that entry, while the valid pair events still decode.
+    const toBigIntTopic = (topic: any): any => {
+      if (typeof topic === 'bigint') return topic;
+      try {
+        return BigInt(topic);
+      } catch {
+        return topic;
+      }
+    };
+    const eventLog = (tx.raw?.log ?? []).map((entry: any) => ({
+      ...entry,
+      topics: Array.isArray(entry?.topics)
+        ? entry.topics.map(toBigIntTopic)
+        : entry?.topics,
+    }));
+
     let decodedEvents = null;
     try {
       if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log, {
+        decodedEvents = this.routerContract.$decodeEvents(eventLog, {
           omitUnknown: true,
         });
       }
@@ -146,7 +171,7 @@ export class DexTransactionProcessorService {
     if (!decodedEvents || decodedEvents.length === 0) {
       try {
         if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log, {
+          decodedEvents = this.factoryContract.$decodeEvents(eventLog, {
             omitUnknown: true,
           });
         }

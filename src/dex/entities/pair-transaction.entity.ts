@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryColumn,
@@ -11,6 +12,11 @@ import { Pair } from './pair.entity';
 @Entity({
   name: 'pair_transactions',
 })
+// Backs the per-pair, time-ordered history query (PairHistoryService) and the
+// from_date/to_date range filter. Index name is shared with the idempotent
+// bootstrap so synchronize-based and production environments converge on one
+// index. Keep both in sync if you rename it.
+@Index('IDX_pair_transactions_pair_created_at', ['pair', 'created_at'])
 export class PairTransaction {
   @PrimaryColumn()
   tx_hash: string;

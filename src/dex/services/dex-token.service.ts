@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import BigNumber from 'bignumber.js';
 import { DexToken } from '../entities/dex-token.entity';
 import {
   IPaginationOptions,
@@ -51,10 +52,15 @@ export class DexTokenService {
     search: string = '',
     orderBy: string = 'created_at',
     orderDirection: 'ASC' | 'DESC' = 'DESC',
+    listed?: boolean,
   ): Promise<Pagination<DexToken>> {
     const query = this.dexTokenRepository
       .createQueryBuilder('dexToken')
       .leftJoinAndSelect('dexToken.summary', 'summary');
+
+    if (listed !== undefined) {
+      query.andWhere('dexToken.listed = :listed', { listed });
+    }
 
     const allowedOrderFields = [
       'pairs_count',
@@ -145,12 +151,87 @@ export class DexTokenService {
     return paginate(query, options);
   }
 
-  async findByAddress(address: string): Promise<DexToken> {
+  /**
+   * Find the most relevant pair to chart a single token's price.
+   * Prefers a pair quoted against WAE (so the price is expressed in AE),
+   * and among the candidates picks the one with the deepest liquidity.
+   * Returns the pair plus the position ('token0' | 'token1') of the quote
+   * (base) token, which callers pass as `fromToken` to PairHistoryService so
+   * the resulting price series is the requested token priced in the base token.
+   */
+  async findBestPairForToken(
+    tokenAddress: string,
+  ): Promise<{ pair: Pair; basePosition: 'token0' | 'token1' } | null> {
+    // Targeted lookup: only the pairs that contain this token, instead of
+    // loading the entire pairs table into memory on every chart request.
+    const candidates = await this.pairRepository
+      .createQueryBuilder('pair')
+      .leftJoinAndSelect('pair.token0', 'token0')
+      .leftJoinAndSelect('pair.token1', 'token1')
+      .where(
+        'token0.address = :tokenAddress OR token1.address = :tokenAddress',
+        { tokenAddress },
+      )
+      .getMany();
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // Liquidity-depth proxy: the smaller of the two reserves, normalised to
+    // human units by each token's decimals so pools with different-decimal
+    // tokens are compared apples-to-apples. Used to pick the deepest charting
+    // pool (after the WAE-preference below, which is what actually matters).
+    const liquidity = (pair: Pair) => {
+      const r0 = new BigNumber(String(pair.reserve0 ?? '0')).shiftedBy(
+        -Number(pair.token0?.decimals ?? 18),
+      );
+      const r1 = new BigNumber(String(pair.reserve1 ?? '0')).shiftedBy(
+        -Number(pair.token1?.decimals ?? 18),
+      );
+      return BigNumber.min(r0, r1).toNumber();
+    };
+
+    const isWaePair = (pair: Pair) =>
+      pair.token0?.address === DEX_CONTRACTS.wae ||
+      pair.token1?.address === DEX_CONTRACTS.wae;
+
+    // Prefer a WAE pair so the series is AE-denominated — but only among WAE
+    // pools that actually have liquidity. Otherwise an empty/zero-liquidity WAE
+    // pool would be chosen over an active non-WAE pool, producing useless or
+    // empty charts. With no liquid WAE pool, fall back to the deepest pool among
+    // all candidates.
+    const liquidWaePairs = candidates.filter(
+      (candidate) => isWaePair(candidate) && liquidity(candidate) > 0,
+    );
+    const pool = liquidWaePairs.length > 0 ? liquidWaePairs : candidates;
+
+    const pair = pool.reduce((best, current) =>
+      liquidity(current) > liquidity(best) ? current : best,
+    );
+
+    // The base (quote) token is the one that is NOT the requested token.
+    const basePosition: 'token0' | 'token1' =
+      pair.token0?.address === tokenAddress ? 'token1' : 'token0';
+
+    return { pair, basePosition };
+  }
+
+  async findByAddress(address: string): Promise<DexToken | null> {
     return this.dexTokenRepository
       .createQueryBuilder('dexToken')
       .leftJoinAndSelect('dexToken.summary', 'summary')
       .where('dexToken.address = :address', { address })
       .getOne();
+  }
+
+  /** Toggle the curated "listed" flag for a token. Returns the updated token. */
+  async setListed(address: string, listed: boolean): Promise<DexToken | null> {
+    const token = await this.dexTokenRepository.findOne({ where: { address } });
+    if (!token) {
+      return null;
+    }
+    token.listed = listed;
+    return this.dexTokenRepository.save(token);
   }
 
   async getTokenPrice(

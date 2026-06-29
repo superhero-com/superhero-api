@@ -63,6 +63,20 @@ export class PairTransactionsController {
     required: false,
     description: 'Filter by transaction type',
   })
+  @ApiQuery({
+    name: 'from_date',
+    type: 'string',
+    required: false,
+    description:
+      'Only include transactions at or after this ISO-8601 date/time (created_at >= from_date)',
+  })
+  @ApiQuery({
+    name: 'to_date',
+    type: 'string',
+    required: false,
+    description:
+      'Only include transactions at or before this ISO-8601 date/time (created_at <= to_date)',
+  })
   @ApiOperation({
     operationId: 'listAllPairTransactions',
     summary: 'Get all pair transactions',
@@ -82,6 +96,8 @@ export class PairTransactionsController {
     @Query('tx_type') txType?: string,
     @Query('account_address', OptionalAeAccountAddressPipe)
     account_address?: string,
+    @Query('from_date') fromDate?: string,
+    @Query('to_date') toDate?: string,
   ) {
     return this.pairTransactionService.findAll(
       { page, limit },
@@ -91,6 +107,8 @@ export class PairTransactionsController {
       txType,
       account_address,
       tokenAddress,
+      fromDate,
+      toDate,
     );
   }
 

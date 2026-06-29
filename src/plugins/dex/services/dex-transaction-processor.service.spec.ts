@@ -61,6 +61,95 @@ describe('DexTransactionProcessorService', () => {
     expect(result?.pairAddress).toBe('ct_pair');
   });
 
+  it('normalizes string event topics to BigInt before decoding', async () => {
+    // The middleware stores topics as decimal strings; aepp-sdk matches them
+    // against BigInt event hashes with strict equality, so a string topic never
+    // matches and every event is silently dropped. The processor must convert
+    // topics to BigInt before calling $decodeEvents.
+    const { service } = setup();
+    jest
+      .spyOn(service as any, 'ensureContractsInitialized')
+      .mockResolvedValue(undefined);
+    const routerDecode = jest
+      .fn()
+      .mockReturnValue([
+        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
+      ]);
+    (service as any).routerContract = { $decodeEvents: routerDecode };
+    (service as any).factoryContract = { $decodeEvents: jest.fn() };
+    jest
+      .spyOn(service as any, 'getOrCreateToken')
+      .mockResolvedValueOnce({ address: 'ct_t0' })
+      .mockResolvedValueOnce({ address: 'ct_t1' });
+
+    const swapTokensHash =
+      '72742236172837736358043391645586411318758140104138559400527506523271326125229';
+
+    await (service as any).extractPairInfoFromTransaction({
+      hash: 'th_1',
+      function: TX_FUNCTIONS.add_liquidity,
+      raw: {
+        log: [
+          { address: 'ct_pair', data: 'cb_x', topics: [swapTokensHash, '1'] },
+        ],
+        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
+      },
+    });
+
+    const passedLog = routerDecode.mock.calls[0][0];
+    expect(passedLog[0].topics.every((t: any) => typeof t === 'bigint')).toBe(
+      true,
+    );
+    expect(passedLog[0].topics[0]).toBe(BigInt(swapTokensHash));
+  });
+
+  it('does not abort decoding when one log entry has an unconvertible topic', async () => {
+    // A non-pair log line in the same tx may carry a null/empty/non-numeric
+    // topic. BigInt() throws on those, so converting them unguarded would abort
+    // extraction for the whole transaction — even though the valid pair event
+    // would decode after conversion.
+    const { service } = setup();
+    jest
+      .spyOn(service as any, 'ensureContractsInitialized')
+      .mockResolvedValue(undefined);
+    const routerDecode = jest
+      .fn()
+      .mockReturnValue([
+        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
+      ]);
+    (service as any).routerContract = { $decodeEvents: routerDecode };
+    (service as any).factoryContract = { $decodeEvents: jest.fn() };
+    jest
+      .spyOn(service as any, 'getOrCreateToken')
+      .mockResolvedValueOnce({ address: 'ct_t0' })
+      .mockResolvedValueOnce({ address: 'ct_t1' });
+
+    const validHash =
+      '72742236172837736358043391645586411318758140104138559400527506523271326125229';
+
+    const result = await (service as any).extractPairInfoFromTransaction({
+      hash: 'th_1',
+      function: TX_FUNCTIONS.add_liquidity,
+      raw: {
+        log: [
+          { address: 'ct_other', data: 'cb_x', topics: [null] }, // unconvertible
+          { address: 'ct_pair', data: 'cb_y', topics: [validHash, '1'] }, // valid
+        ],
+        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
+      },
+    });
+
+    // The valid pair event was still decoded — the bad topic did not abort it.
+    expect(result?.pairAddress).toBe('ct_pair');
+    const passedLog = routerDecode.mock.calls[0][0];
+    // Valid entry fully converted to BigInt...
+    expect(passedLog[1].topics.every((t: any) => typeof t === 'bigint')).toBe(
+      true,
+    );
+    // ...and the unconvertible topic was left untouched (omitUnknown drops it).
+    expect(passedLog[0].topics[0]).toBeNull();
+  });
+
   it('loads pair relation after upsert when fetching saved tx', async () => {
     const { service } = setup();
     const pairTransactionRepository = {
