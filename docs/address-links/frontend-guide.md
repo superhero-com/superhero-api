@@ -37,32 +37,17 @@ Every provider follows the same two-step pattern:
 
 ## AE wallet signing
 
-All providers require the user to sign the claim message with their AE wallet. The on-chain contract verifies against a specific 60-byte digest format.
+All providers require the user to sign the claim `message` string with their AE wallet. The on-chain contract verifies signatures using the same digest as `@aeternity/aepp-sdk` `hashMessage()` / `signMessage()`.
 
-**Use `unsafeSign`, not `signMessage`.** The SDK's `signMessage()` produces a different digest.
+**Use `signMessage(message)`** — pass the exact `message` from the claim (or unclaim) response. Do not manually hash or call `unsafeSign` unless you are implementing the digest yourself.
 
 ```typescript
-import { hash } from '@aeternity/aepp-sdk';
 import { Buffer } from 'buffer';
 
-const AE_MESSAGE_PREFIX = new Uint8Array([
-  0x1a, 0x61, 0x65, 0x74, 0x65, 0x72, 0x6e, 0x69, 0x74, 0x79,
-  0x20, 0x53, 0x69, 0x67, 0x6e, 0x65, 0x64, 0x20, 0x4d, 0x65,
-  0x73, 0x73, 0x61, 0x67, 0x65, 0x3a, 0x0a, 0x20,
-]);
-
-function buildContractDigest(message: string): Uint8Array {
-  const msgHash = hash(Buffer.from(message, 'utf-8')); // blake2b_256 -> 32 bytes
-  const digest = new Uint8Array(AE_MESSAGE_PREFIX.length + msgHash.length);
-  digest.set(AE_MESSAGE_PREFIX);
-  digest.set(msgHash, AE_MESSAGE_PREFIX.length);
-  return digest; // 28 + 32 = 60 bytes
-}
-
 async function signWithAeWallet(aeAccount: any, message: string): Promise<string> {
-  const digest = buildContractDigest(message);
-  const sig = await aeAccount.unsafeSign(digest);
-  return Buffer.from(sig).toString('hex'); // 128-char hex string
+  const sig = await aeAccount.signMessage(message);
+  const bytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, typeof sig === 'string' ? 'hex' : undefined);
+  return Buffer.from(bytes).toString('hex'); // 128-char hex string
 }
 ```
 
@@ -372,6 +357,320 @@ POST /address-links/x/unclaim/submit
 
 ---
 
+## Bio
+
+The bio provider uses the same claim and submit flow as X, but the claim value is the bio text itself. The current contract value limit is 200 characters, and bio values cannot contain `:`.
+
+### Claim
+
+```
+POST /address-links/bio/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "Builder on Aeternity"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "link:ak_2Qktt...:bio:Builder on Aeternity:0",
+  "nonce": 0,
+  "value": "Builder on Aeternity",
+  "verification_token": "eyJ..."
+}
+```
+
+### Submit
+
+```
+POST /address-links/bio/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "Builder on Aeternity",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+### Unclaim / Unlink
+
+```
+POST /address-links/bio/unclaim
+{ "address": "ak_2Qktt..." }
+
+POST /address-links/bio/unclaim/submit
+{ "address": "ak_2Qktt...", "nonce": 1, "signature": "ab12cd34...hex..." }
+```
+
+Linked bios are exposed as `profile.bio` in profile responses once the address-link transaction is indexed.
+
+### Full bio linking flow
+
+```typescript
+async function linkBio(apiBase: string, aeAccount: any, bioText: string): Promise<string> {
+  const address = aeAccount.address;
+  const value = bioText.trim();
+
+  const claimRes = await fetch(`${apiBase}/address-links/bio/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value }),
+  });
+  const claim = await claimRes.json();
+
+  const sig = await aeAccount.signMessage(claim.message);
+  const signature = Buffer.from(sig).toString('hex');
+
+  const submitRes = await fetch(`${apiBase}/address-links/bio/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  });
+  const { txHash } = await submitRes.json();
+  return txHash;
+}
+```
+
+---
+
+## Site (website)
+
+Same claim/submit flow as bio. The backend stores the site **without** `http://` or `https://` because the contract value cannot contain `:`. Ports are not supported (`example.com:8080` is rejected).
+
+### Claim
+
+```
+POST /address-links/site/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "https://example.com/blog"
+}
+```
+
+Response (normalized value):
+
+```json
+{
+  "message": "link:ak_2Qktt...:site:example.com/blog:0",
+  "nonce": 0,
+  "value": "example.com/blog",
+  "verification_token": "eyJ..."
+}
+```
+
+### Submit
+
+```
+POST /address-links/site/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "example.com/blog",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+Use `claim.value` on submit. Sign with `signMessage(claim.message)`.
+
+### Unclaim / Unlink
+
+```
+POST /address-links/site/unclaim
+{ "address": "ak_2Qktt..." }
+
+POST /address-links/site/unclaim/submit
+{ "address": "ak_2Qktt...", "nonce": 1, "signature": "ab12cd34...hex..." }
+```
+
+Linked sites appear as `profile.site` after indexing. Display with `https://${profile.site}` in the UI if needed.
+
+### Full site linking flow
+
+```typescript
+async function linkSite(apiBase: string, aeAccount: any, siteUrl: string): Promise<string> {
+  const address = aeAccount.address;
+
+  const claim = await fetch(`${apiBase}/address-links/site/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value: siteUrl }),
+  }).then((r) => r.json());
+
+  const signature = Buffer.from(
+    await aeAccount.signMessage(claim.message),
+  ).toString('hex');
+
+  const { txHash } = await fetch(`${apiBase}/address-links/site/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  }).then((r) => r.json());
+
+  return txHash;
+}
+```
+
+---
+
+## Prefered AENS name
+
+Uses **`link_principal`** on-chain so the contract verifies AENS ownership via `AENSv2.lookup`. The user must link a `.chain` name they own (e.g. `hero.chain`).
+
+The signed message uses the **AENS name as principal**, not the `ak_` address:
+
+```
+link:hero.chain:prefaens:hero.chain:0
+```
+
+The on-chain provider id is `prefaens` (AddressLink allows max 10 lowercase `a-z` characters only). API routes use `/address-links/prefered-aens-name/`.
+
+### Claim
+
+```
+POST /address-links/prefered-aens-name/claim
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "link:hero.chain:prefaens:hero.chain:0",
+  "nonce": 0,
+  "value": "hero.chain",
+  "principal": "hero.chain",
+  "verification_token": "eyJ..."
+}
+```
+
+| Error | Reason |
+|---|---|
+| 400 | Value is not a valid `.chain` name |
+| 400 | `PRINCIPAL_NOT_FOUND` — name not registered on AENS |
+| 400 | `PRINCIPAL_MISMATCH` — address does not own this name |
+
+### Submit
+
+```
+POST /address-links/prefered-aens-name/submit
+```
+
+```json
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain",
+  "nonce": 0,
+  "signature": "ab12cd34...hex...",
+  "verification_token": "eyJ..."
+}
+```
+
+Sign with `signMessage(claim.message)`. Use `claim.value` on submit. Backend calls `link_principal` on the contract.
+
+### Unclaim / Unlink
+
+```
+POST /address-links/prefered-aens-name/unclaim
+{ "address": "ak_2Qktt..." }
+```
+
+Response includes the current linked name as `value` / `principal`:
+
+```json
+{
+  "message": "unlink:hero.chain:prefaens:1",
+  "nonce": 1,
+  "value": "hero.chain",
+  "principal": "hero.chain"
+}
+```
+
+```
+POST /address-links/prefered-aens-name/unclaim/submit
+{
+  "address": "ak_2Qktt...",
+  "value": "hero.chain",
+  "nonce": 1,
+  "signature": "ab12cd34...hex..."
+}
+```
+
+Pass the `value` from the unclaim response. Backend calls `unlink_principal`.
+
+After indexing, the linked name appears as `profile.prefered_aens_name` (from `links.prefaens`) and takes precedence for `public_name`: a preferred AENS name overrides the middleware-derived `chain_name`, which in turn is preferred over the cached `username`.
+
+### Full prefered AENS name linking flow
+
+```typescript
+async function linkPreferedAensName(
+  apiBase: string,
+  aeAccount: any,
+  chainName: string,
+): Promise<string> {
+  const address = aeAccount.address;
+
+  const claim = await fetch(`${apiBase}/address-links/prefered-aens-name/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, value: chainName }),
+  }).then((r) => r.json());
+
+  const signature = Buffer.from(
+    await aeAccount.signMessage(claim.message),
+  ).toString('hex');
+
+  const { txHash } = await fetch(`${apiBase}/address-links/prefered-aens-name/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address,
+      value: claim.value,
+      nonce: claim.nonce,
+      signature,
+      verification_token: claim.verification_token,
+    }),
+  }).then((r) => r.json());
+
+  return txHash;
+}
+```
+
+---
+
 ## React Native / Expo integration
 
 For mobile apps with wallet and Nostr key derivation from a BIP-39 mnemonic.
@@ -441,12 +740,11 @@ The most common error. The contract rejected the Ed25519 signature.
 
 **Check in order:**
 
-1. **Signing method** -- Must use `unsafeSign(digest)`, not `signMessage(message)`.
-2. **Digest length** -- Must be exactly 60 bytes (28-byte prefix + 32-byte blake2b hash). If it's 32, you're likely using `signMessage`.
-3. **Hash function** -- Must be Blake2b-256 (from `@aeternity/aepp-sdk` `hash`), not SHA-256.
-4. **Signature encoding** -- Must be 128-char lowercase hex. No `0x` prefix, no base64.
-5. **Message** -- Must be the exact `message` string from the claim response. Don't reconstruct locally.
-6. **Account** -- The signer must match the `address` in the request.
+1. **Signing method** -- Use `signMessage(claim.message)` with the exact message from claim/unclaim. Do not sign a different string or a pre-hashed digest.
+2. **Signature format** -- Submit a 128-character hex string (64 bytes). No `0x` prefix.
+3. **Signature encoding** -- Must be 128-char lowercase hex. No `0x` prefix, no base64.
+4. **Message** -- Must be the exact `message` string from the claim response. Don't reconstruct locally.
+5. **Account** -- The signer must match the `address` in the request.
 
 ### `"Invalid signature: expected 128-character hex string"`
 
@@ -481,10 +779,7 @@ async function linkNostrDebug(apiBase: string, aeAccount: any, mnemonic: string)
   const claim = await claimNostrLink(apiBase, aeAccount.address, nostrKeys.npub);
   console.log('[nostr-link] message:', claim.message);
 
-  const digest = buildContractDigest(claim.message);
-  console.log('[nostr-link] digest length:', digest.length, '(MUST be 60)');
-
-  const sig = await aeAccount.unsafeSign(digest);
+  const sig = await aeAccount.signMessage(claim.message);
   const aeSignature = Buffer.from(sig).toString('hex');
   console.log('[nostr-link] signature length:', aeSignature.length, '(expected 128)');
 
@@ -499,8 +794,8 @@ async function linkNostrDebug(apiBase: string, aeAccount: any, mnemonic: string)
 ```
 
 Key checks:
-- `digest length` must be 60 (not 32)
 - `signature length` must be 128
+- `claim.message` was signed verbatim with `signMessage`
 - Event pubkey must match npub
 - Event content must match message
 

@@ -1,9 +1,14 @@
 name: Dockerhub
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: "Docker image tag to deploy (leave empty to use branch default; useful for rollbacks)"
+        required: false
+        type: string
   push:
     tags: [v*]
-    branches: [main, staging, develop]
+    branches: [main, develop]
 concurrency: ${{ github.workflow }}-${{ github.ref_name }}
 jobs:
   buildx:
@@ -14,19 +19,17 @@ jobs:
         with:
           fetch-depth: 0 # needed for docker-package to be able to calculate the version
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          install: true
+        uses: docker/setup-buildx-action@v4
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ secrets.DOCKERHUB_REPO }}
@@ -36,7 +39,7 @@ jobs:
           flavor: |
             latest=${{ contains(github.ref_name, '-rc.') && 'false' || 'auto' }}
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -45,21 +48,42 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           secrets: |
             "GITHUB_TOKEN=${{ secrets.NPM_GITHUB_TOKEN }}"
+
   deploy_develop:
     if: github.ref_name == 'develop'
-    name: Develop Deploy
-    uses: ./.github/workflows/deploy_develop.yaml
-    secrets: inherit
+    name: Deploy (develop)
     needs: buildx
-  deploy_staging:
-    if: github.ref_name == 'staging'
-    name: Staging Deploy
-    uses: ./.github/workflows/deploy_staging.yaml
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION || 'develop' }}
+      ENVIRONMENT: develop
+      CONTAINER_NAME: develop-superhero-api-mainnet
+      AE_NETWORK_ID: ae_mainnet
+      API_HOST_PORT: "3043"
     secrets: inherit
+
+  deploy_testnet:
+    if: github.ref_name == 'develop'
+    name: Deploy (testnet)
     needs: buildx
-  deploy_main:
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION || 'develop' }}
+      ENVIRONMENT: testnet
+      CONTAINER_NAME: develop-superhero-api-testnet
+      AE_NETWORK_ID: ae_uat
+      API_HOST_PORT: "3044"
+    secrets: inherit
+
+  deploy_production:
     if: github.ref_name == 'main'
-    name: Production Deploy
-    uses: ./.github/workflows/deploy_main.yaml
-    secrets: inherit
+    name: Deploy (production)
     needs: buildx
+    uses: ./.github/workflows/ssh_deploy.yaml
+    with:
+      VERSION: ${{ inputs.VERSION || 'latest' }}
+      ENVIRONMENT: production
+      CONTAINER_NAME: production-superhero-api-mainnet
+      AE_NETWORK_ID: ae_mainnet
+      API_HOST_PORT: "3033"
+    secrets: inherit

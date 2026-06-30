@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryColumn,
@@ -11,6 +12,11 @@ import { Pair } from './pair.entity';
 @Entity({
   name: 'pair_transactions',
 })
+// Backs the per-pair, time-ordered history query (PairHistoryService) and the
+// from_date/to_date range filter. Index name is shared with the idempotent
+// bootstrap so synchronize-based and production environments converge on one
+// index. Keep both in sync if you rename it.
+@Index('IDX_pair_transactions_pair_created_at', ['pair', 'created_at'])
 export class PairTransaction {
   @PrimaryColumn()
   tx_hash: string;
@@ -35,65 +41,68 @@ export class PairTransaction {
   @Column()
   tx_type: string;
 
+  // Postgres `numeric` is returned as a string by the driver, and these raw
+  // amounts exceed Number.MAX_SAFE_INTEGER — so they are typed as `string` and
+  // written as full-precision decimal strings (never via Number/toNumber()).
   @Column({
     default: 0,
     type: 'numeric',
   })
-  reserve0: number;
+  reserve0: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  reserve1: number;
+  reserve1: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  ratio0: number;
+  ratio0: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  ratio1: number;
+  ratio1: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  total_supply: number;
+  total_supply: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  volume0: number;
+  volume0: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  volume1: number;
+  volume1: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  market_cap0: number;
+  market_cap0: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  market_cap1: number;
+  market_cap1: string;
 
   @Column({
     default: 0,
     type: 'numeric',
   })
-  market_cap: number; // Pool Market Cap
+  market_cap: string; // Pool Market Cap
 
   // Swap related Info jsonb
   @Column({

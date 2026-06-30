@@ -39,11 +39,20 @@ describe('DexSyncService', () => {
     const aePricingService = {
       getPriceData: jest.fn(),
     } as any;
+    const queryRunner = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      query: jest.fn().mockResolvedValue([{ locked: true }]),
+      release: jest.fn().mockResolvedValue(undefined),
+    };
+    const dataSource = {
+      createQueryRunner: jest.fn().mockReturnValue(queryRunner),
+    } as any;
 
     const service = new DexSyncService(
       dexTokenRepository,
       dexPairRepository,
       dexPairTransactionRepository,
+      dataSource,
       { sdk: {} } as any,
       { findByAddress: jest.fn(), pullPairData: jest.fn() } as any,
       dexTokenService,
@@ -63,6 +72,8 @@ describe('DexSyncService', () => {
       pairSummaryService,
       tokenSummaryService,
       aePricingService,
+      dataSource,
+      queryRunner,
     };
   };
 
@@ -142,7 +153,8 @@ describe('DexSyncService', () => {
       .mockResolvedValueOnce([]);
     dexTokenService.getAllPairsWithTokens.mockResolvedValue(allPairs);
     dexTokenService.getTokenPriceWithLiquidityAnalysis.mockResolvedValue({
-      medianPrice: '1.5',
+      // syncTokenPrices stores the deepest-path `price`, not the median.
+      price: '1.5',
     });
     aePricingService.getPriceData.mockResolvedValue({ ae: '1.5' });
     tokenSummaryService.createOrUpdateSummary.mockResolvedValue(undefined);
@@ -173,5 +185,82 @@ describe('DexSyncService', () => {
     expect(secondOptions.allPairs).toBe(allPairs);
     expect(firstOptions.priceCache).toBe(secondOptions.priceCache);
     expect(firstOptions.priceCache).toBeInstanceOf(Map);
+  });
+
+  describe('scheduledPriceSync (cron)', () => {
+    const ORIGINAL = process.env.DISABLE_MDW_SYNC;
+    const unlockCalls = (qr: any) =>
+      qr.query.mock.calls.filter((c: any[]) =>
+        String(c[0]).includes('pg_advisory_unlock'),
+      );
+    afterEach(() => {
+      if (ORIGINAL === undefined) delete process.env.DISABLE_MDW_SYNC;
+      else process.env.DISABLE_MDW_SYNC = ORIGINAL;
+    });
+
+    it('skips entirely when live sync is disabled', async () => {
+      process.env.DISABLE_MDW_SYNC = 'true';
+      const { service, dataSource } = setup();
+      const sync = jest
+        .spyOn(service, 'syncTokenPrices')
+        .mockResolvedValue(undefined);
+
+      await service.scheduledPriceSync();
+
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+      expect(sync).not.toHaveBeenCalled();
+    });
+
+    it('skips the sync (no unlock) but releases the runner when another instance holds the lock', async () => {
+      delete process.env.DISABLE_MDW_SYNC;
+      const { service, queryRunner } = setup();
+      queryRunner.query.mockResolvedValue([{ locked: false }]);
+      const sync = jest
+        .spyOn(service, 'syncTokenPrices')
+        .mockResolvedValue(undefined);
+
+      await service.scheduledPriceSync();
+
+      expect(sync).not.toHaveBeenCalled();
+      expect(unlockCalls(queryRunner)).toHaveLength(0);
+      expect(queryRunner.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs the sync under the advisory lock and releases it', async () => {
+      delete process.env.DISABLE_MDW_SYNC;
+      const { service, queryRunner } = setup();
+      queryRunner.query.mockImplementation((sql: string) =>
+        String(sql).includes('pg_try_advisory_lock')
+          ? Promise.resolve([{ locked: true }])
+          : Promise.resolve([]),
+      );
+      const sync = jest
+        .spyOn(service, 'syncTokenPrices')
+        .mockResolvedValue(undefined);
+
+      await service.scheduledPriceSync();
+
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(unlockCalls(queryRunner)).toHaveLength(1);
+      expect(queryRunner.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the lock and swallows the error if the sync throws', async () => {
+      delete process.env.DISABLE_MDW_SYNC;
+      const { service, queryRunner } = setup();
+      queryRunner.query.mockImplementation((sql: string) =>
+        String(sql).includes('pg_try_advisory_lock')
+          ? Promise.resolve([{ locked: true }])
+          : Promise.resolve([]),
+      );
+      jest
+        .spyOn(service, 'syncTokenPrices')
+        .mockRejectedValue(new Error('boom'));
+
+      await expect(service.scheduledPriceSync()).resolves.toBeUndefined();
+
+      expect(unlockCalls(queryRunner)).toHaveLength(1);
+      expect(queryRunner.release).toHaveBeenCalledTimes(1);
+    });
   });
 });

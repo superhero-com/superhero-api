@@ -29,16 +29,21 @@ export class DeviceService {
 
   /**
    * Verify the signed challenge (bound to the push token), then atomically
-   * register-or-refresh the device. The previous version did findOne+upsert
-   * across two statements, which left a TOCTOU window where two concurrent
-   * registers for the same token under different addresses could both observe
-   * existing===null and then race in the upsert — the second writer would
-   * silently overwrite the first's address.
+   * register-or-refresh the device, **re-pointing** the token to `dto.address`
+   * even if it was previously linked to a different account (override semantics).
    *
-   * We close that window with a single conditional INSERT … ON CONFLICT DO UPDATE
-   * whose WHERE clause refuses the update when the existing row's address
-   * differs. On Postgres this is one atomic statement; if RETURNING comes back
-   * empty, we know the conflict landed on a row owned by someone else.
+   * The challenge already proved control of `dto.address` AND knowledge of the
+   * token, which is the authority we require to move it — so a same-device
+   * account switch no longer needs a prior signed unlink (the user may not even
+   * still hold the old account's key). This is the original "one active account
+   * per device — switching re-points" model; the earlier 409 that refused to
+   * re-point has been removed.
+   *
+   * Single statement, no TOCTOU: `INSERT … ON CONFLICT (expo_push_token) DO
+   * UPDATE` is atomic, so concurrent registers for the same token resolve to a
+   * deterministic last-writer-wins. The `existing` CTE reads the prior owner
+   * from the pre-write snapshot so we can drop it from the has-devices gate when
+   * the move leaves it with no devices.
    */
   async register(dto: RegisterDeviceDto): Promise<void> {
     await this.challenges.verifyAndConsume(
@@ -48,8 +53,13 @@ export class DeviceService {
       dto.signature,
     );
 
-    const rows = await this.deviceRepository.query<{ address: string }[]>(
-      `INSERT INTO device_tokens
+    const rows = await this.deviceRepository.query<
+      { previous_address: string | null }[]
+    >(
+      `WITH existing AS (
+         SELECT address FROM device_tokens WHERE expo_push_token = $1
+       )
+       INSERT INTO device_tokens
          (expo_push_token, address, platform, app_version, device_id,
           last_seen_at, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, now(), now(), now())
@@ -60,8 +70,7 @@ export class DeviceService {
              device_id     = EXCLUDED.device_id,
              last_seen_at  = now(),
              updated_at    = now()
-         WHERE device_tokens.address = EXCLUDED.address
-       RETURNING address`,
+       RETURNING (SELECT address FROM existing) AS previous_address`,
       [
         dto.expoPushToken,
         dto.address,
@@ -71,15 +80,15 @@ export class DeviceService {
       ],
     );
 
-    if (rows.length === 0) {
-      // The token exists but is owned by a different address; the WHERE clause
-      // suppressed the UPDATE and the INSERT was blocked by the conflict.
-      throw new ConflictException(
-        'Push token is already registered to a different account',
-      );
-    }
-
     await this.registry.addAddress(dto.address);
+
+    // If the token moved off another account, that account may now have zero
+    // devices — drop it from the hot-path gate. Best-effort: cleanupAddressIfEmpty
+    // re-counts first, and the hourly registry rebuild corrects any drift.
+    const previousAddress = rows[0]?.previous_address ?? null;
+    if (previousAddress && previousAddress !== dto.address) {
+      await this.cleanupAddressIfEmpty(previousAddress);
+    }
   }
 
   /**

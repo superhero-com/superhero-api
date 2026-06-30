@@ -1,7 +1,11 @@
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import { Logger } from '@nestjs/common';
-import { PluginFilter, SyncDirection } from './plugin.interface';
+import {
+  PluginBatchResult,
+  PluginFilter,
+  SyncDirection,
+} from './plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
@@ -57,16 +61,27 @@ export abstract class BasePluginSyncService {
    * Plugins can override for optimized batch processing.
    * @param txs - Transactions to process
    * @param syncDirection - 'backward' for historical sync, 'live' for real-time sync, 'reorg' for reorg processing
+   * @returns the per-transaction failures so the caller can park them for retry.
+   *   We keep processing the rest of the batch on a single failure (one poison
+   *   tx must not stall the whole batch), but the failures are reported up so
+   *   the sync checkpoint is NOT silently advanced past lost data.
    */
-  async processBatch(txs: Tx[], syncDirection: SyncDirection): Promise<void> {
+  async processBatch(
+    txs: Tx[],
+    syncDirection: SyncDirection,
+  ): Promise<PluginBatchResult> {
+    const failed: PluginBatchResult['failed'] = [];
     for (const tx of txs) {
       try {
         await this.processTransaction(tx, syncDirection);
       } catch (error: any) {
         this.handleError(error as Error, tx, 'processBatch');
-        // Continue processing other transactions even if one fails
+        // Continue processing other transactions even if one fails, but record
+        // the failure so it can be parked for retry by the caller.
+        failed.push({ tx, error: error as Error });
       }
     }
+    return { failed };
   }
 
   /**

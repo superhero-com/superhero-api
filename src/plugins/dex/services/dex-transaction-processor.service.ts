@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { In, Repository, EntityManager } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirection } from '../../plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -16,6 +16,7 @@ import { DexToken } from '@/dex/entities/dex-token.entity';
 import { PairTransaction } from '@/dex/entities/pair-transaction.entity';
 import { Pair } from '@/dex/entities/pair.entity';
 import { PairService } from '@/dex/services/pair.service';
+import { DexTokenSummaryService } from '@/dex/services/dex-token-summary.service';
 
 interface PairInfo {
   pairAddress: string;
@@ -24,8 +25,10 @@ interface PairInfo {
   swapInfo: any;
   reserve0: string;
   reserve1: string;
-  volume0: number;
-  volume1: number;
+  // Raw on-chain amounts kept as decimal strings to preserve full precision
+  // (they exceed Number.MAX_SAFE_INTEGER).
+  volume0: string;
+  volume1: string;
   pairMintInfo: any;
 }
 
@@ -46,7 +49,71 @@ export class DexTransactionProcessorService {
     private readonly dexPairTransactionRepository: Repository<PairTransaction>,
     private readonly aeSdkService: AeSdkService,
     private readonly pairService: PairService,
+    private readonly dexTokenSummaryService: DexTokenSummaryService,
   ) {}
+
+  /**
+   * Remove pair_transactions for transactions that were rolled back by a reorg
+   * (or flagged invalid), and recompute the summaries that counted them.
+   *
+   * pair_transactions has no FK to the `tx` table — only a CASCADE to `pairs` —
+   * so deleting the underlying `tx` rows does NOT clean these up. Without this,
+   * a reorged-out swap stays in the table forever and every downstream
+   * aggregate (OHLC candles, volume, token summaries) keeps counting a
+   * transaction that no longer exists on-chain, while its canonical replacement
+   * is also inserted — double-counting it.
+   *
+   * @returns number of pair_transactions rows removed
+   */
+  async removeByTxHashes(txHashes: string[]): Promise<number> {
+    if (!txHashes || txHashes.length === 0) {
+      return 0;
+    }
+
+    // Collect the tokens whose summaries counted these transactions BEFORE the
+    // rows are deleted, so we can recompute them afterwards.
+    const affectedRows = await this.dexPairTransactionRepository
+      .createQueryBuilder('pt')
+      .leftJoin('pt.pair', 'pair')
+      .select('pair.token0_address', 'token0_address')
+      .addSelect('pair.token1_address', 'token1_address')
+      .where('pt.tx_hash IN (:...txHashes)', { txHashes })
+      .getRawMany<{ token0_address: string; token1_address: string }>();
+
+    const result = await this.dexPairTransactionRepository.delete({
+      tx_hash: In(txHashes),
+    });
+    const removed = result.affected ?? 0;
+
+    if (removed === 0) {
+      return 0;
+    }
+
+    const affectedTokens = new Set<string>();
+    for (const row of affectedRows) {
+      if (row.token0_address) affectedTokens.add(row.token0_address);
+      if (row.token1_address) affectedTokens.add(row.token1_address);
+    }
+
+    // Recompute each affected token summary so derived volume/price/change do
+    // not keep reflecting the removed transactions until the next sync tick.
+    for (const tokenAddress of affectedTokens) {
+      try {
+        await this.dexTokenSummaryService.createOrUpdateSummary(tokenAddress);
+      } catch (error: any) {
+        this.logger.error(
+          `Failed to recompute summary for ${tokenAddress} after reorg`,
+          error.stack,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Removed ${removed} pair_transactions and recomputed ${affectedTokens.size} token summaries after reorg`,
+    );
+
+    return removed;
+  }
 
   /**
    * Initialize contracts lazily
@@ -113,14 +180,15 @@ export class DexTransactionProcessorService {
   /**
    * Validates and converts volume to proper decimal format
    */
-  private validateAndConvertVolume(volume: string): number {
+  private validateAndConvertVolume(volume: string): string {
     if (!volume || volume === '0' || volume === 'NaN' || volume === 'undefined')
-      return 0;
+      return '0';
 
     const bigNumber = new BigNumber(volume);
-    if (bigNumber.isNaN() || bigNumber.isLessThanOrEqualTo(0)) return 0;
+    if (bigNumber.isNaN() || bigNumber.isLessThanOrEqualTo(0)) return '0';
 
-    return bigNumber.toNumber();
+    // Keep full precision (raw aettos exceed Number.MAX_SAFE_INTEGER).
+    return bigNumber.toFixed();
   }
 
   /**
@@ -132,10 +200,35 @@ export class DexTransactionProcessorService {
     // Ensure contracts are initialized
     await this.ensureContractsInitialized();
 
+    // The middleware stores event `topics` as decimal strings, but aepp-sdk's
+    // `$decodeEvents` matches them against the BigInt event-name hash with
+    // strict equality (`BigInt(hash) === topic`). A string topic never matches,
+    // so with `omitUnknown: true` every event is silently dropped and the pair
+    // can never be extracted. Normalise topics to BigInt before decoding.
+    //
+    // Guard per-topic: a single unconvertible topic (null/empty/non-numeric)
+    // from an unrelated log line in the same transaction must NOT abort the
+    // whole batch. Leave such topics untouched — `omitUnknown` then drops only
+    // that entry, while the valid pair events still decode.
+    const toBigIntTopic = (topic: any): any => {
+      if (typeof topic === 'bigint') return topic;
+      try {
+        return BigInt(topic);
+      } catch {
+        return topic;
+      }
+    };
+    const eventLog = (tx.raw?.log ?? []).map((entry: any) => ({
+      ...entry,
+      topics: Array.isArray(entry?.topics)
+        ? entry.topics.map(toBigIntTopic)
+        : entry?.topics,
+    }));
+
     let decodedEvents = null;
     try {
       if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(tx.raw.log, {
+        decodedEvents = this.routerContract.$decodeEvents(eventLog, {
           omitUnknown: true,
         });
       }
@@ -146,7 +239,7 @@ export class DexTransactionProcessorService {
     if (!decodedEvents || decodedEvents.length === 0) {
       try {
         if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(tx.raw.log, {
+          decodedEvents = this.factoryContract.$decodeEvents(eventLog, {
             omitUnknown: true,
           });
         }
@@ -211,8 +304,8 @@ export class DexTransactionProcessorService {
     }
 
     // Extract swap info
-    let volume0 = 0;
-    let volume1 = 0;
+    let volume0 = '0';
+    let volume1 = '0';
     let swapInfo = null;
     const swapInfoData = decodedEvents.find(
       (event) => event.name === 'SwapTokens',
@@ -264,8 +357,8 @@ export class DexTransactionProcessorService {
         amount1: pairMintInfoData[2]?.toString(),
       };
       // Don't count liquidity operations as volume
-      volume0 = 0;
-      volume1 = 0;
+      volume0 = '0';
+      volume1 = '0';
     }
 
     const pairBurnInfoData = decodedEvents.find(
@@ -279,8 +372,8 @@ export class DexTransactionProcessorService {
         amount0: args[0]?.toString(),
         amount1: args[1]?.toString(),
       };
-      volume0 = 0;
-      volume1 = 0;
+      volume0 = '0';
+      volume1 = '0';
     }
 
     // Get or create tokens
@@ -412,8 +505,11 @@ export class DexTransactionProcessorService {
   ): Promise<PairTransaction> {
     const pairTransactionRepository = manager.getRepository(PairTransaction);
 
-    const reserve0Num = new BigNumber(pairInfo.reserve0 || '0').toNumber();
-    const reserve1Num = new BigNumber(pairInfo.reserve1 || '0').toNumber();
+    // Raw reserves can exceed Number.MAX_SAFE_INTEGER, so keep everything in
+    // BigNumber and store as full-precision decimal strings (the columns are
+    // `numeric`). Converting through toNumber() would silently truncate.
+    const reserve0Bn = new BigNumber(pairInfo.reserve0 || '0');
+    const reserve1Bn = new BigNumber(pairInfo.reserve1 || '0');
     const microTime = parseInt(tx.micro_time, 10);
 
     await pairTransactionRepository.upsert(
@@ -423,17 +519,11 @@ export class DexTransactionProcessorService {
         tx_type: tx.function || '',
         tx_hash: tx.hash,
         block_height: tx.block_height,
-        reserve0: reserve0Num,
-        reserve1: reserve1Num,
-        total_supply: new BigNumber(reserve0Num).plus(reserve1Num).toNumber(),
-        ratio0:
-          reserve1Num > 0
-            ? new BigNumber(reserve0Num).div(reserve1Num).toNumber()
-            : 0,
-        ratio1:
-          reserve0Num > 0
-            ? new BigNumber(reserve1Num).div(reserve0Num).toNumber()
-            : 0,
+        reserve0: reserve0Bn.toFixed(),
+        reserve1: reserve1Bn.toFixed(),
+        total_supply: reserve0Bn.plus(reserve1Bn).toFixed(),
+        ratio0: reserve1Bn.gt(0) ? reserve0Bn.div(reserve1Bn).toFixed() : '0',
+        ratio1: reserve0Bn.gt(0) ? reserve1Bn.div(reserve0Bn).toFixed() : '0',
         volume0: pairInfo.volume0,
         volume1: pairInfo.volume1,
         swap_info: pairInfo.swapInfo,

@@ -14,12 +14,15 @@ export type DevicePlatform = 'ios' | 'android' | 'web';
  * one per install) and is the proven secret for unregister flows.
  *
  * "One active account per device" is enforced atomically in `DeviceService.register`
- * via `INSERT … ON CONFLICT (expo_push_token) DO UPDATE … WHERE address = excluded`:
- * a register call for ak_A whose token is already owned by ak_B does NOT re-point
- * — it returns 409. Account switches must unregister first. The signature on the
- * registration message also commits to the token's SHA-256 fingerprint (see
- * `buildDeviceLinkMessage`), so a known-token attacker cannot reassign someone
- * else's device even with a valid signature for their own address.
+ * via `INSERT … ON CONFLICT (expo_push_token) DO UPDATE`: a register call for ak_A
+ * whose token is currently owned by ak_B **re-points** the row to ak_A (override),
+ * so a same-device account switch just registers the new account — no prior unlink
+ * needed. The registration message commits to the token's SHA-256 fingerprint (see
+ * `buildDeviceLinkMessage`), so re-pointing still requires a valid signature for the
+ * *target* account AND knowledge of the token; it is not silent. (Trade-off: a party
+ * that learns a push token and controls any account can move that token onto their
+ * account — see the decision log in
+ * `agent/api/tasks/notification/planning/03-api-and-registration.md`.)
  */
 @Entity({ name: 'device_tokens' })
 export class DeviceToken {

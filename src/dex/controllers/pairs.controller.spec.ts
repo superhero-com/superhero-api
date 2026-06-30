@@ -32,15 +32,21 @@ describe('PairsController', () => {
     );
   });
 
-  it('rejects invalid pair list pagination before calling the service', async () => {
+  it('forwards oversized pagination to the service (clamped there) instead of rejecting', async () => {
+    // The DEX list endpoints clamp rather than 400 — pagination bounds are
+    // enforced in PairService.findAll (see pair.service.spec), so the controller
+    // no longer hard-rejects page<1 / limit>100.
     await expect(
-      controller.listAll(undefined, undefined, 0, 25, 'created_at', 'ASC'),
-    ).rejects.toThrow('Page must be greater than or equal to 1');
-    await expect(
-      controller.listAll(undefined, undefined, 1, 101, 'created_at', 'ASC'),
-    ).rejects.toThrow('Limit must be between 1 and 100');
+      controller.listAll(undefined, undefined, 0, 100000, 'created_at', 'ASC'),
+    ).resolves.toBeDefined();
 
-    expect(pairService.findAll).not.toHaveBeenCalled();
+    expect(pairService.findAll).toHaveBeenCalledWith(
+      { page: 0, limit: 100000 },
+      'created_at',
+      'ASC',
+      undefined,
+      undefined,
+    );
   });
 
   it('rejects out-of-range history intervals before looking up a pair', async () => {

@@ -964,6 +964,7 @@ export class TokensService {
       dao_address: daoAddress,
       sale_address: saleAddress,
       factory_address: factory.address,
+      collection: tx?.arguments?.[0]?.value,
       creator_address:
         tx?.callerId || tx?.caller_id || tokenExists?.creator_address,
       created_at: moment(

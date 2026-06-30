@@ -1,4 +1,5 @@
 jest.mock('../profile.constants', () => ({
+  PROFILE_REWARDS_DISABLED: true,
   PROFILE_X_INVITE_LINK_BASE_URL: 'https://example.app/invite',
   PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS: 300,
   PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE: '0.02',
@@ -11,7 +12,7 @@ jest.mock('../profile.constants', () => ({
 import { ProfileXInviteService } from './profile-x-invite.service';
 import * as profileSignatureUtil from './profile-signature.util';
 
-describe.skip('ProfileXInviteService', () => {
+describe('ProfileXInviteService', () => {
   const getService = () => {
     const inviteRepository = {
       findOne: jest.fn(),
@@ -181,7 +182,11 @@ describe.skip('ProfileXInviteService', () => {
     ).rejects.toThrow('Invalid invite code format');
   });
 
-  it('creates one credit and triggers milestone reward spend once', async () => {
+  // TODO(reward-program): While PROFILE_REWARDS_DISABLED is true, processing an
+  // invitee's X verification is a no-op: no invite credit is recorded and no
+  // milestone reward is paid. Restore the credit/milestone-reward assertions
+  // when the reward program is re-enabled.
+  it('records no credit and pays no milestone reward while rewards are disabled', async () => {
     const {
       service,
       inviteRepository,
@@ -198,64 +203,23 @@ describe.skip('ProfileXInviteService', () => {
     await service.processInviteeXVerified(
       'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
     );
-    inviteCreditInsertBuilder.execute.mockResolvedValueOnce({
-      identifiers: [],
-    });
-    await service.processInviteeXVerified(
-      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
-    );
 
-    expect(aeSdkService.sdk.spend).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not enqueue milestone payout when a fresh pending reward already exists', async () => {
-    const {
-      service,
-      inviteRepository,
-      inviteCreditInsertBuilder,
-      aeSdkService,
-      manager,
-    } = getService();
-    inviteRepository.findOne.mockResolvedValue({
-      code: 'abc123def456',
-      inviter_address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
-      invitee_address: 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
-      status: 'bound',
-    });
-    manager.getRepository.mockReturnValue({
-      createQueryBuilder: jest.fn().mockReturnValue({
-        setLock: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue({
-          inviter_address:
-            'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
-          threshold: 10,
-          status: 'pending',
-          tx_hash: null,
-          updated_at: new Date(),
-        }),
-      }),
-      create: jest.fn().mockImplementation((v) => v),
-      save: jest.fn().mockImplementation(async (v) => v),
-    });
-
-    await service.processInviteeXVerified(
-      'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo',
-    );
-
-    expect(inviteCreditInsertBuilder.execute).toHaveBeenCalledTimes(1);
+    expect(inviteRepository.findOne).not.toHaveBeenCalled();
+    expect(inviteCreditInsertBuilder.execute).not.toHaveBeenCalled();
     expect(aeSdkService.sdk.spend).not.toHaveBeenCalled();
   });
 
   it('preserves sg_ signature casing during challenge verification', async () => {
     const { service, manager, dataSource } = getService();
+    // expires_at maps to a timestamp column, so TypeORM hydrates it as a Date;
+    // the service calls challenge.expires_at.getTime(), so the mock must match.
+    const expiresAtMs = Date.now() + 10_000;
     const challenge = {
       address: 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s',
       purpose: 'create',
       invite_code: '',
       nonce: 'a'.repeat(24),
-      expires_at: Date.now() + 10_000,
+      expires_at: new Date(expiresAtMs),
       consumed_at: null,
     };
     const save = jest.fn().mockImplementation(async (v) => v);
@@ -279,7 +243,7 @@ describe.skip('ProfileXInviteService', () => {
       purpose: 'create',
       inviteCode: null,
       nonce: challenge.nonce,
-      expiresAt: challenge.expires_at,
+      expiresAt: expiresAtMs,
       signatureHex,
     });
 

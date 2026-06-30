@@ -5,6 +5,8 @@ import { encode, Encoding } from '@aeternity/aepp-sdk';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { ProfileCacheService } from '@/profile/services/profile-cache.service';
+import { ProfileXPostingRewardService } from '@/profile/services/profile-x-posting-reward.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection } from '../plugin.interface';
 import { ACTIVE_NETWORK } from '@/configs/network';
@@ -15,6 +17,9 @@ const LINK_EVENT_HASH =
 const UNLINK_EVENT_HASH =
   'EIE1QPIL7TJBARSE513J05U144N3D9Q0MB4PQ69VATC40VROO3IG====';
 
+const LINK_EVENT_NAMES = new Set(['Link', 'PrincipalLink']);
+const UNLINK_EVENT_NAMES = new Set(['Unlink', 'PrincipalUnlink']);
+
 @Injectable()
 export class AddressLinksPluginSyncService extends BasePluginSyncService {
   protected readonly logger = new Logger(AddressLinksPluginSyncService.name);
@@ -23,6 +28,8 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     aeSdkService: AeSdkService,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    private readonly profileXPostingRewardService: ProfileXPostingRewardService,
+    private readonly profileCacheService: ProfileCacheService,
   ) {
     super(aeSdkService);
   }
@@ -32,6 +39,22 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _syncDirection: SyncDirection,
   ): Promise<void> {
+    if (tx.function === 'link') {
+      await this.syncLinkFromTx(tx);
+      return;
+    }
+    if (tx.function === 'unlink') {
+      await this.syncUnlinkFromTx(tx);
+      return;
+    }
+    if (tx.function === 'link_principal') {
+      await this.syncLinkPrincipalFromTx(tx);
+      return;
+    }
+    if (tx.function === 'unlink_principal') {
+      await this.syncUnlinkPrincipalFromTx(tx);
+      return;
+    }
     await this.fetchAndProcessLogs(tx);
   }
 
@@ -51,11 +74,11 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     const logs: any[] = data.data ?? [];
 
     for (const log of logs) {
-      await this.processLog(log);
+      await this.processLog(tx, log);
     }
   }
 
-  private async processLog(log: any) {
+  private async processLog(tx: Tx, log: any) {
     const eventHash: string | undefined = log.event_hash;
     if (!eventHash) return;
 
@@ -67,11 +90,120 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     const address = this.intToAddress(addressInt);
     if (!address) return;
 
-    if (eventHash === LINK_EVENT_HASH) {
-      await this.handleLinkEvent(address, payload);
-    } else if (eventHash === UNLINK_EVENT_HASH) {
-      await this.handleUnlinkEvent(address, payload);
+    const eventName: string | undefined = log.event_name;
+
+    if (
+      eventHash === LINK_EVENT_HASH ||
+      (eventName && LINK_EVENT_NAMES.has(eventName))
+    ) {
+      await this.handleLinkEvent(tx, address, payload);
+    } else if (
+      eventHash === UNLINK_EVENT_HASH ||
+      (eventName && UNLINK_EVENT_NAMES.has(eventName))
+    ) {
+      await this.handleUnlinkEvent(tx, address, payload);
     }
+  }
+
+  /**
+   * Read a decoded contract-call argument out of `tx.raw.arguments`.
+   *
+   * The middleware returns contract-call arguments as an ordered
+   * `[{ type, value }]` list with NO `name` field, so they must be resolved
+   * positionally (matching the function signature in the contract ACI). A
+   * name match is kept only as a defensive fallback in case a future
+   * middleware version starts including argument names.
+   */
+  private getRawArgument(
+    tx: Tx,
+    index: number,
+    name: string,
+  ): string | undefined {
+    const args = tx.raw?.arguments;
+    if (!Array.isArray(args)) {
+      return undefined;
+    }
+    const byName = args.find(
+      (arg: { name?: string; value?: unknown }) => arg?.name === name,
+    );
+    const entry = byName ?? args[index];
+    if (entry?.value === undefined || entry?.value === null) {
+      return undefined;
+    }
+    return String(entry.value);
+  }
+
+  private async syncLinkFromTx(tx: Tx): Promise<void> {
+    // link(addr, provider, value, nonce, sig)
+    //
+    // Decode the call arguments directly instead of round-tripping to the
+    // middleware contract-logs endpoint. During live (websocket) sync the tx is
+    // delivered the moment it is mined, but the middleware has not necessarily
+    // indexed its *logs* yet, so /v3/contracts/logs returns an empty list and
+    // the link silently fails to apply until a later catch-up pass reprocesses
+    // the block. Reading the args makes the update instant and deterministic.
+    const addr = this.getRawArgument(tx, 0, 'addr');
+    const provider = this.getRawArgument(tx, 1, 'provider');
+    const value = this.getRawArgument(tx, 2, 'value');
+
+    if (!addr || !provider || value === undefined) {
+      this.logger.warn(
+        `link tx ${tx.hash} missing addr, provider, or value in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleLinkEvent(tx, addr, `${provider}:${value}`);
+  }
+
+  private async syncUnlinkFromTx(tx: Tx): Promise<void> {
+    // unlink(addr, provider, nonce, sig)
+    const addr = this.getRawArgument(tx, 0, 'addr');
+    const provider = this.getRawArgument(tx, 1, 'provider');
+
+    if (!addr || !provider) {
+      this.logger.warn(
+        `unlink tx ${tx.hash} missing addr or provider in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleUnlinkEvent(tx, addr, `${provider}:`);
+  }
+
+  private async syncLinkPrincipalFromTx(tx: Tx): Promise<void> {
+    // link_principal(principal, signer, provider, value, nonce, sig)
+    const signer = this.getRawArgument(tx, 1, 'signer');
+    const provider = this.getRawArgument(tx, 2, 'provider');
+    const value = this.getRawArgument(tx, 3, 'value');
+
+    if (!signer || !provider || !value) {
+      this.logger.warn(
+        `link_principal tx ${tx.hash} missing signer, provider, or value in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleLinkEvent(tx, signer, `${provider}:${value}`);
+  }
+
+  private async syncUnlinkPrincipalFromTx(tx: Tx): Promise<void> {
+    // unlink_principal(principal, signer, provider, nonce, sig)
+    const signer = this.getRawArgument(tx, 1, 'signer');
+    const provider = this.getRawArgument(tx, 2, 'provider');
+
+    if (!signer || !provider) {
+      this.logger.warn(
+        `unlink_principal tx ${tx.hash} missing signer or provider in raw arguments`,
+      );
+      await this.fetchAndProcessLogs(tx);
+      return;
+    }
+
+    await this.handleUnlinkEvent(tx, signer, `${provider}:`);
   }
 
   private intToAddress(intStr: string): string | null {
@@ -105,7 +237,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
     return /^[a-z]{1,10}$/.test(provider);
   }
 
-  private async handleLinkEvent(address: string, payload: string) {
+  private async handleLinkEvent(tx: Tx, address: string, payload: string) {
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) return;
 
@@ -134,9 +266,31 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .setParameter('value', value)
       .where('address = :address', { address })
       .execute();
+
+    // Keep the profile_cache mirror fresh so the profile feed re-orders and
+    // link-only accounts become visible (the old ProfileRegistry indexer that
+    // used to write this table was removed with the AddressLink migration).
+    await this.profileCacheService.syncFromAccountLinks(
+      address,
+      tx.micro_time?.toString?.(),
+    );
+
+    if (provider === 'x') {
+      // TODO(reward-program): The X posting reward is disabled right now (see
+      // PROFILE_REWARDS_DISABLED / PROFILE_X_POSTING_REWARD_ENABLED), so this
+      // call is a no-op and pays nothing. The only sponsored operations are
+      // name claims and profile adjustments. Re-enable once the reward program
+      // is decided.
+      await this.profileXPostingRewardService.upsertVerifiedCandidateFromTx(
+        address,
+        value,
+        tx.micro_time?.toString?.(),
+        tx.hash,
+      );
+    }
   }
 
-  private async handleUnlinkEvent(address: string, payload: string) {
+  private async handleUnlinkEvent(tx: Tx, address: string, payload: string) {
     const colonIdx = payload.indexOf(':');
     if (colonIdx === -1) return;
 
@@ -162,5 +316,12 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
       .setParameter('provider', provider)
       .where('address = :address', { address })
       .execute();
+
+    // Mirror the change into profile_cache (bumps updated_at) so the feed and
+    // accounts search reflect the unlink.
+    await this.profileCacheService.syncFromAccountLinks(
+      address,
+      tx.micro_time?.toString?.(),
+    );
   }
 }

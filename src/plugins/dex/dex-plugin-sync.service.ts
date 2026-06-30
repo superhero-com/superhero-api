@@ -45,4 +45,15 @@ export class DexPluginSyncService extends BasePluginSyncService {
       throw error; // Re-throw to let BasePluginSyncService handle it
     }
   }
+
+  /**
+   * Clean up DEX data for transactions removed by a reorg (or flagged invalid).
+   * Delegates to the processor, which deletes the orphaned pair_transactions and
+   * recomputes the affected token summaries.
+   */
+  async handleReorg(removedTxHashes: string[]): Promise<number> {
+    return this.dexTransactionProcessorService.removeByTxHashes(
+      removedTxHashes,
+    );
+  }
 }

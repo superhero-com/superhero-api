@@ -6,14 +6,11 @@ describe('ProfileController', () => {
 
   const getController = (overrides?: {
     profileXInviteService?: any;
-    profileXVerificationRewardService?: any;
     profileXPostingRewardService?: any;
     invitationRepository?: any;
   }) => {
     const profileXInviteService =
       overrides?.profileXInviteService || ({} as any);
-    const profileXVerificationRewardService =
-      overrides?.profileXVerificationRewardService || ({} as any);
     const profileXPostingRewardService =
       overrides?.profileXPostingRewardService || ({} as any);
     const invitationRepository =
@@ -29,12 +26,9 @@ describe('ProfileController', () => {
     const profileReadService = {
       getProfilesByAddresses: jest.fn().mockResolvedValue([]),
     } as any;
-    const profileAttestationService = {} as any;
     const controller = new ProfileController(
-      profileAttestationService,
       profileReadService,
       profileXInviteService,
-      profileXVerificationRewardService,
       profileXPostingRewardService,
       invitationRepository,
     );
@@ -44,12 +38,12 @@ describe('ProfileController', () => {
   it('parses addresses query for batch endpoint', async () => {
     const { controller, profileReadService } = getController();
 
-    await controller.getProfiles(`${validAddress1}, ${validAddress2}`, 'false');
+    await controller.getProfiles(`${validAddress1}, ${validAddress2}`);
 
-    expect(profileReadService.getProfilesByAddresses).toHaveBeenCalledWith(
-      [validAddress1, validAddress2],
-      { includeOnChain: false },
-    );
+    expect(profileReadService.getProfilesByAddresses).toHaveBeenCalledWith([
+      validAddress1,
+      validAddress2,
+    ]);
   });
 
   it('creates invite and returns generated link payload', async () => {
@@ -130,9 +124,6 @@ describe('ProfileController', () => {
     const profileXInviteService = {
       getProgress: jest.fn().mockResolvedValue({ verified_friends_count: 3 }),
     } as any;
-    const profileXVerificationRewardService = {
-      getRewardStatus: jest.fn().mockResolvedValue({ status: 'paid' }),
-    } as any;
     const profileXPostingRewardService = {
       getRewardStatus: jest.fn().mockResolvedValue({ status: 'pending' }),
     } as any;
@@ -152,22 +143,17 @@ describe('ProfileController', () => {
     } as any;
     const { controller } = getController({
       profileXInviteService,
-      profileXVerificationRewardService,
       profileXPostingRewardService,
       invitationRepository,
     });
 
     const result = await controller.getRewardsProgress('ak_2');
-    expect(
-      profileXVerificationRewardService.getRewardStatus,
-    ).toHaveBeenCalledWith('ak_2');
     expect(profileXPostingRewardService.getRewardStatus).toHaveBeenCalledWith(
       'ak_2',
     );
     expect(profileXInviteService.getProgress).toHaveBeenCalledWith('ak_2');
     expect(result).toEqual({
       address: 'ak_2',
-      x_verification_reward: { status: 'paid' },
       x_posting_reward: { status: 'pending' },
       x_invite_reward: { verified_friends_count: 3 },
       affiliation: {

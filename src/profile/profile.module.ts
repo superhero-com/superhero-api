@@ -5,24 +5,21 @@ import { Invitation } from '@/affiliation/entities/invitation.entity';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfileCache } from './entities/profile-cache.entity';
-import { ProfileSyncState } from './entities/profile-sync-state.entity';
 import { ProfileXInviteChallenge } from './entities/profile-x-invite-challenge.entity';
 import { ProfileXInvite } from './entities/profile-x-invite.entity';
 import { ProfileXInviteCredit } from './entities/profile-x-invite-credit.entity';
 import { ProfileXInviteMilestoneReward } from './entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from './entities/profile-x-posting-reward.entity';
-import { ProfileXVerificationReward } from './entities/profile-x-verification-reward.entity';
+import { ProfileXPostRewardLedger } from './entities/profile-x-post-reward-ledger.entity';
+import { ProfileXStreakBonusReward } from './entities/profile-x-streak-bonus-reward.entity';
 import { ProfileChainNameController } from './controllers/profile-chain-name.controller';
-import { ProfileAttestationService } from './services/profile-attestation.service';
-import { ProfileContractService } from './services/profile-contract.service';
-import { ProfileIndexerService } from './services/profile-indexer.service';
-import { ProfileLiveSyncService } from './services/profile-live-sync.service';
+import { ProfileRewardsController } from './controllers/profile-rewards.controller';
+import { ProfileCacheService } from './services/profile-cache.service';
 import { ProfileReadService } from './services/profile-read.service';
 import { ProfileSpendQueueService } from './services/profile-spend-queue.service';
 import { ProfileXApiClientService } from './services/profile-x-api-client.service';
 import { ProfileXInviteService } from './services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from './services/profile-x-posting-reward.service';
-import { ProfileXVerificationRewardService } from './services/profile-x-verification-reward.service';
 import { ProfileChainNameChallenge } from './entities/profile-chain-name-challenge.entity';
 import { ProfileChainNameClaim } from './entities/profile-chain-name-claim.entity';
 import { ProfileChainNameService } from './services/profile-chain-name.service';
@@ -33,9 +30,9 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     forwardRef(() => AffiliationModule),
     TypeOrmModule.forFeature([
       ProfileCache,
-      ProfileSyncState,
-      ProfileXVerificationReward,
       ProfileXPostingReward,
+      ProfileXPostRewardLedger,
+      ProfileXStreakBonusReward,
       ProfileXInviteChallenge,
       ProfileXInvite,
       ProfileXInviteCredit,
@@ -47,19 +44,20 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ]),
   ],
   providers: [
-    ProfileAttestationService,
-    ProfileContractService,
-    ProfileIndexerService,
-    ProfileLiveSyncService,
     ProfileReadService,
+    ProfileCacheService,
     ProfileSpendQueueService,
     ProfileXApiClientService,
     ProfileXInviteService,
     ProfileXPostingRewardService,
-    ProfileXVerificationRewardService,
     ProfileChainNameService,
   ],
-  controllers: [ProfileChainNameController],
-  exports: [TypeOrmModule, ProfileReadService, ProfileContractService],
+  controllers: [ProfileChainNameController, ProfileRewardsController],
+  exports: [
+    TypeOrmModule,
+    ProfileReadService,
+    ProfileCacheService,
+    ProfileXPostingRewardService,
+  ],
 })
 export class ProfileModule {}

@@ -4,6 +4,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
 import {
+  PROFILE_REWARDS_DISABLED,
   PROFILE_X_INVITE_CHALLENGE_TTL_SECONDS,
   PROFILE_X_INVITE_LINK_BASE_URL,
   PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE,
@@ -258,6 +259,16 @@ export class ProfileXInviteService {
   }
 
   async processInviteeXVerified(inviteeAddress: string): Promise<void> {
+    // TODO(reward-program): Counting how many invited friends have verified
+    // their X account (per inviter) and the resulting milestone reward are
+    // disabled pending a product decision on the new AddressLink-based profile
+    // flow. While disabled, no invite credit is recorded and no reward is paid.
+    // Re-enable once the reward program is decided. Invite create/bind and
+    // progress reads stay functional (progress simply reports zero credits).
+    if (PROFILE_REWARDS_DISABLED) {
+      return;
+    }
+
     if (!inviteeAddress) {
       return;
     }
@@ -327,6 +338,12 @@ export class ProfileXInviteService {
   private async sendMilestoneRewardIfEligible(
     inviterAddress: string,
   ): Promise<void> {
+    // TODO(reward-program): No reward should be paid right now. Hard kill-switch
+    // guards the payout even if this method is reached. Re-enable once the
+    // reward program is decided. See PROFILE_REWARDS_DISABLED.
+    if (PROFILE_REWARDS_DISABLED) {
+      return;
+    }
     if (!PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY) {
       this.logger.warn(
         'Skipping invite milestone reward, PROFILE_X_INVITE_MILESTONE_REWARD_PRIVATE_KEY is not configured',

@@ -149,6 +149,7 @@ export class TokenService {
       dao_address: daoAddress,
       sale_address: saleAddress,
       factory_address: factory.address,
+      collection: tx?.raw?.arguments?.[0]?.value,
       creator_address: tx.caller_id || tokenExists?.creator_address,
       created_at: moment(parseInt(tx.micro_time, 10)).toDate(),
       name: tokenName,

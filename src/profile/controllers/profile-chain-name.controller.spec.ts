@@ -46,6 +46,19 @@ describe('ProfileChainNameController', () => {
     });
   });
 
+  it('checks sponsorship funds for a chain name label', async () => {
+    const profileChainNameService = {
+      checkNameSponsorship: jest.fn().mockResolvedValue({ sponsorable: true }),
+    } as any;
+    const { controller } = getController({ profileChainNameService });
+
+    await controller.checkChainNameSponsorship('myuniquename123');
+
+    expect(profileChainNameService.checkNameSponsorship).toHaveBeenCalledWith(
+      'myuniquename123',
+    );
+  });
+
   it('gets claim status by address', async () => {
     const profileChainNameService = {
       getClaimStatus: jest.fn().mockResolvedValue({ status: 'pending' }),

@@ -16,6 +16,7 @@ export class ProfileRewardsController {
   ) {}
 
   @Get(':address/x-posting-reward')
+  @UseGuards(RateLimitGuard)
   @ApiOperation({
     operationId: 'getXPostingRewardStatus',
     summary: 'Get X posting reward status for an address',
@@ -58,5 +59,25 @@ export class ProfileRewardsController {
       signatureHex: body.signature_hex,
     });
     return this.profileXPostingRewardService.requestManualRecheck(address);
+  }
+
+  @Post(':address/x-reward/referral-link')
+  @UseGuards(RateLimitGuard)
+  @ApiOperation({
+    operationId: 'createXRewardReferralLink',
+    summary:
+      'Verify wallet ownership and mint (or return) the unique X reward referral link',
+  })
+  async createXRewardReferralLink(
+    @Param('address', AeAccountAddressPipe) address: string,
+    @Body() body: SubmitXPostingRecheckDto,
+  ) {
+    await this.profileXInviteService.verifyPostingRewardRecheckChallenge({
+      address,
+      nonce: body.challenge_nonce,
+      expiresAt: Number(body.challenge_expires_at),
+      signatureHex: body.signature_hex,
+    });
+    return this.profileXPostingRewardService.getOrCreateReferralLink(address);
   }
 }

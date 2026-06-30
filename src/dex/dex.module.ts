@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DexTokensController } from './controllers/dex-tokens.controller';
 import { PairsController } from './controllers/pairs.controller';
 import { PairTransactionsController } from './controllers/pair-transactions.controller';
+import { SwapRoutesController } from './controllers/swap-routes.controller';
 import { DexToken } from './entities/dex-token.entity';
 import { Pair } from './entities/pair.entity';
 import { PairTransaction } from './entities/pair-transaction.entity';
@@ -18,6 +19,7 @@ import { PairHistoryService } from './services/pair-history.service';
 import { PairSummaryService } from './services/pair-summary.service';
 import { DexTokenSummary } from './entities/dex-token-summary.entity';
 import { DexTokenSummaryService } from './services/dex-token-summary.service';
+import { DexSchemaBootstrapService } from './services/dex-schema-bootstrap.service';
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { DexTokenSummaryService } from './services/dex-token-summary.service';
     PairHistoryService,
     PairSummaryService,
     DexTokenSummaryService,
+    DexSchemaBootstrapService,
   ],
   exports: [
     PairService,
@@ -53,6 +56,7 @@ import { DexTokenSummaryService } from './services/dex-token-summary.service';
     PairsController,
     DexTokensController,
     PairTransactionsController,
+    SwapRoutesController,
   ],
 })
 export class DexModule {

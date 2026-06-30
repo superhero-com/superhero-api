@@ -1,10 +1,11 @@
 import { RateLimitGuard } from '@/api-core/guards/rate-limit.guard';
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { CreateChainNameChallengeDto } from '../dto/create-chain-name-challenge.dto';
 import { RequestChainNameDto } from '../dto/request-chain-name.dto';
 import { ProfileChainNameService } from '../services/profile-chain-name.service';
 import { AeAccountAddressPipe } from '@/common/validation/request-validation';
+import { SponsoredChainNameLabelPipe } from '../validation/sponsored-chain-name-label.validation';
 
 @Controller('profile')
 @ApiTags('ProfileChainName')
@@ -39,6 +40,24 @@ export class ProfileChainNameController {
       challengeExpiresAt: Number(body.challenge_expires_at),
       signatureHex: body.signature_hex,
     });
+  }
+
+  @Get('chain-name/sponsorship/:name')
+  @ApiOperation({
+    operationId: 'checkChainNameSponsorship',
+    summary:
+      'Check whether the sponsor account has enough balance to fund a chain name claim',
+  })
+  @ApiParam({
+    name: 'name',
+    description:
+      'Desired chain name without the .chain suffix (AENS rules, at least 13 characters)',
+    example: 'myuniquename123',
+  })
+  async checkChainNameSponsorship(
+    @Param('name', SponsoredChainNameLabelPipe) name: string,
+  ) {
+    return this.profileChainNameService.checkNameSponsorship(name);
   }
 
   @Get(':address/chain-name-claim')

@@ -13,3 +13,6 @@ export const ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS = parseInt(
   process.env.ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS || '300',
   10,
 );
+
+/** On-chain provider id for preferred AENS name links (contract max 10 lowercase a-z). */
+export const PREFERRED_AENS_NAME_PROVIDER = 'prefaens';

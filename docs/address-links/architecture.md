@@ -115,9 +115,14 @@ The `accounts` table has a `links` JSONB column:
 ```json
 {
   "nostr": "npub1xyzabc...",
-  "x": "superherocom"
+  "x": "superherocom",
+  "bio": "Builder on Aeternity",
+  "site": "example.com",
+  "prefaens": "hero.chain"
 }
 ```
+
+The prefered AENS name provider uses `link_principal` on-chain. The signed message principal and stored value are the `.chain` name (e.g. `hero.chain`); the contract verifies AENS ownership via `AENSv2.lookup`. HTTP routes: `/address-links/prefered-aens-name/`; on-chain provider id: `prefaens`.
 
 Queried via `GET /accounts/:address` -- the `links` field is included in the response.
 
@@ -165,7 +170,7 @@ The prefix is:
 0x1a "aeternity Signed Message:\n "
 ```
 
-Frontends must use `unsafeSign(digest)` -- **not** `signMessage()` which produces a different 32-byte hash.
+Frontends should use `signMessage(message)` from `@aeternity/aepp-sdk`, which hashes the message the same way as the contract (`hashMessage()` format).
 
 ## Contract events
 

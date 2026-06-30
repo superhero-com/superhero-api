@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsString } from 'class-validator';
 import { IsAeAccountAddress } from '@/common/validation/request-validation';
+import { IsSponsoredChainNameLabel } from '../validation/sponsored-chain-name-label.validation';
 
 export class RequestChainNameDto {
   @ApiProperty({
@@ -13,15 +14,11 @@ export class RequestChainNameDto {
 
   @ApiProperty({
     description:
-      'Desired chain name without the .chain suffix. Must be longer than 12 characters.',
+      'Desired chain name without the .chain suffix (AENS rules, at least 13 characters).',
     example: 'myuniquename123',
   })
   @IsString()
-  @MinLength(13)
-  @MaxLength(247)
-  @Matches(/^[a-z0-9]+$/, {
-    message: 'name must contain only lowercase letters and digits',
-  })
+  @IsSponsoredChainNameLabel()
   name: string;
 
   @ApiProperty({

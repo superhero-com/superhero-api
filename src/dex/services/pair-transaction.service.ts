@@ -7,6 +7,7 @@ import {
   paginate,
   Pagination,
 } from 'nestjs-typeorm-paginate';
+import { clampPaginationOptions } from '@/utils/pagination';
 
 const ALLOWED_ORDER_BY = new Set(['created_at', 'tx_type']);
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
@@ -26,6 +27,8 @@ export class PairTransactionService {
     txType?: string,
     account_address?: string,
     tokenAddress?: string,
+    fromDate?: string,
+    toDate?: string,
   ): Promise<Pagination<PairTransaction>> {
     if (!ALLOWED_ORDER_BY.has(orderBy)) {
       throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
@@ -35,6 +38,13 @@ export class PairTransactionService {
         `Invalid order_direction value: ${orderDirection}`,
       );
     }
+
+    const parsedFromDate = this.parseDate(fromDate, 'from_date');
+    const parsedToDate = this.parseDate(toDate, 'to_date');
+
+    // Bound page/limit so a caller cannot force a full scan of pair_transactions.
+    const safeOptions = clampPaginationOptions(options);
+
     const query = this.pairTransactionRepository
       .createQueryBuilder('pairTransaction')
       .leftJoinAndSelect('pairTransaction.pair', 'pair')
@@ -58,14 +68,29 @@ export class PairTransactionService {
       });
     }
 
-    // Filter by token address if provided
+    // Filter by token address if provided.
+    // Note: must reference the joined aliases (token0/token1), not the
+    // relation path (pair.token0.address) — TypeORM emits the latter
+    // verbatim, producing invalid SQL ("too many identifiers").
     if (tokenAddress) {
       query.andWhere(
-        '(pair.token0.address = :tokenAddress OR pair.token1.address = :tokenAddress)',
+        '(token0.address = :tokenAddress OR token1.address = :tokenAddress)',
         {
           tokenAddress,
         },
       );
+    }
+
+    // Filter by created_at time range if provided
+    if (parsedFromDate) {
+      query.andWhere('pairTransaction.created_at >= :fromDate', {
+        fromDate: parsedFromDate,
+      });
+    }
+    if (parsedToDate) {
+      query.andWhere('pairTransaction.created_at <= :toDate', {
+        toDate: parsedToDate,
+      });
     }
 
     // Add ordering
@@ -73,7 +98,23 @@ export class PairTransactionService {
       query.orderBy(`pairTransaction.${orderBy}`, orderDirection);
     }
 
-    return paginate(query, options);
+    return paginate(query, safeOptions);
+  }
+
+  private parseDate(
+    value: string | undefined,
+    field: string,
+  ): Date | undefined {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(
+        `Invalid ${field} value: ${value}. Expected an ISO-8601 date string.`,
+      );
+    }
+    return parsed;
   }
 
   async findByTxHash(txHash: string): Promise<PairTransaction> {

@@ -7,7 +7,6 @@ import {
   DailyTradeVolumeQueryDto,
   DailyUniqueActiveUsersQueryDto,
 } from './transactions/dto/analytics-transactions.dto';
-import { CreateXAttestationDto } from './profile/dto/create-x-attestation.dto';
 import { CreateXInviteDto } from './profile/dto/create-x-invite.dto';
 import { CreateXInviteChallengeDto } from './profile/dto/create-x-invite-challenge.dto';
 import { BindXInviteDto } from './profile/dto/bind-x-invite.dto';
@@ -33,15 +32,6 @@ describe('global ValidationPipe request DTO coverage', () => {
       validPayload: {
         sender_address: validAddress,
         codes: ['code1', 'code2'],
-      },
-    },
-    {
-      name: 'CreateXAttestationDto',
-      metatype: CreateXAttestationDto,
-      type: 'body' as const,
-      validPayload: {
-        address: validAddress,
-        accessToken: 'token-value-12345',
       },
     },
     {
