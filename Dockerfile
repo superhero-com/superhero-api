@@ -17,4 +17,6 @@ RUN npm prune --omit=dev
 RUN chown -R node:node /src
 USER node
 
-CMD ["npm", "run", "start:prod"]
+# Run pending DB migrations (synchronize is off), then start the app.
+# For multiple replicas, run migrate:prod once as a pre-deploy Job instead.
+CMD ["sh", "-c", "npm run migrate:prod && npm run start:prod"]
