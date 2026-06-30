@@ -81,7 +81,11 @@ jobs:
     needs: buildx
     uses: ./.github/workflows/ssh_deploy.yaml
     with:
-      VERSION: ${{ inputs.VERSION || 'latest' }}
+      # The buildx step tags images by branch name (type=ref,event=branch), so a
+      # push to `main` pushes `<repo>:main` — NOT `:latest` (flavor `latest=auto`
+      # only tags `latest` for semver git tags). Deploy the tag that actually
+      # exists, mirroring deploy_develop/testnet which use their branch name.
+      VERSION: ${{ inputs.VERSION || 'main' }}
       ENVIRONMENT: production
       CONTAINER_NAME: production-superhero-api-mainnet
       AE_NETWORK_ID: ae_mainnet
