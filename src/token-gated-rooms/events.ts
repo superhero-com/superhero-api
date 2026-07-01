@@ -60,6 +60,17 @@ export interface TgrMembershipChangedPayload {
   memberAddress: string;
   /** New `room_membership.relay_state`. */
   relayState: 'pending_add' | 'added' | 'pending_remove' | 'removed';
+  /**
+   * Access-ledger event id (access-ledger plan). Set ONLY for genuine
+   * effective-access transitions emitted by `MembershipAccessService` (grant /
+   * debounced revoke); the room-notify processor stamps this event's `notified_at`
+   * on dispatch (durable dedup). Absent for thin role transitions.
+   */
+  accessEventId?: string;
+  /** True iff the member's first-ever access grant (drives "Welcome" copy). */
+  isFirstGrant?: boolean;
+  /** Why access changed (audit/telemetry) — e.g. `join`, `eligibility_lost`. */
+  reason?: string;
 }
 
 /** An address↔nostr identity link changed (Task 05; from address-links). */

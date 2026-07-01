@@ -6,6 +6,7 @@ import { NotificationPreference } from '@/notifications/entities/notification-pr
 import { NotificationPreferencesService } from '@/notifications/services/notification-preferences.service';
 import { CommunityRoom } from '../entities/community-room.entity';
 import { RoomMembership } from '../entities/room-membership.entity';
+import { RoomMembershipEvent } from '../entities/room-membership-event.entity';
 import { RoomNotificationPreference } from '../entities/room-notification-preference.entity';
 import { RoomMessageSeen } from '../entities/room-message-seen.entity';
 import { TokenBalance } from '../entities/token-balance.entity';
@@ -73,6 +74,7 @@ d('RoomNotifyProcessor (integration)', () => {
         Token,
         CommunityRoom,
         RoomMembership,
+        RoomMembershipEvent,
         RoomNotificationPreference,
         RoomMessageSeen,
         TokenBalance,
@@ -109,6 +111,7 @@ d('RoomNotifyProcessor (integration)', () => {
     getActiveTokens = jest.fn().mockResolvedValue(['ExponentPushToken[x]']);
     processor = new RoomNotifyProcessor(
       tokenRepo,
+      ds.getRepository(RoomMembershipEvent),
       { getActiveTokens } as any,
       roomPreferences,
       { send } as any,

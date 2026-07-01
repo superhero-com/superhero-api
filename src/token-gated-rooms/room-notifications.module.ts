@@ -9,6 +9,7 @@ import { NotificationRedisService } from '@/notifications/services/notification-
 import tgrConfig from './config/tgr.config';
 import { CommunityRoom } from './entities/community-room.entity';
 import { RoomMembership } from './entities/room-membership.entity';
+import { RoomMembershipEvent } from './entities/room-membership-event.entity';
 import { RoomMessageSeen } from './entities/room-message-seen.entity';
 import { RoomNotificationPreference } from './entities/room-notification-preference.entity';
 import { RoomPreferencesService } from './services/room-preferences.service';
@@ -43,6 +44,7 @@ import { ROOM_NOTIFY_QUEUE } from './queues/room-notify.types';
       RoomNotificationPreference,
       CommunityRoom,
       RoomMembership,
+      RoomMembershipEvent,
       RoomMessageSeen,
     ]),
     NotificationsModule,

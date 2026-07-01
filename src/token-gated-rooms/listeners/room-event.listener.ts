@@ -104,7 +104,13 @@ export class RoomEventListener {
       }
 
       await this.roomNotifyQueue.add(
-        { saleAddress, memberAddress, change },
+        {
+          saleAddress,
+          memberAddress,
+          change,
+          accessEventId: payload?.accessEventId,
+          isFirstGrant: payload?.isFirstGrant,
+        },
         roomNotifyJobOptions(),
       );
     } catch (error) {

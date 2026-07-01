@@ -15,9 +15,9 @@ import { TokenBalance } from './token-balance.entity';
 import { RoomBackfillState } from './room-backfill-state.entity';
 
 /**
- * DB integration (Task 00): apply the 7 ordered migrations on a real Postgres and
- * assert the 6 TGR tables + 4 Token columns + named indexes + enum types exist,
- * then revert and assert they are gone.
+ * DB integration (Task 00): apply the ordered TGR migrations on a real Postgres and
+ * assert the TGR tables + 4 Token columns + named indexes + enum types exist, then
+ * revert every migration and assert they are gone.
  *
  * Hermetic isolation (Task 02 harness): the migrations hard-code the `"public"`
  * schema and `ALTER TABLE "token"`, so a *dedicated schema* on the shared DB is
@@ -99,10 +99,11 @@ d('TGR migrations (integration)', () => {
     return rows.length > 0;
   };
 
-  it('creates all 6 TGR tables', async () => {
+  it('creates all TGR tables', async () => {
     for (const t of [
       'community_room',
       'room_membership',
+      'room_membership_event',
       'room_notification_preference',
       'room_message_seen',
       'token_balance',
@@ -167,11 +168,13 @@ d('TGR migrations (integration)', () => {
     }
   });
 
-  it('creates the 3 Postgres enum types', async () => {
+  it('creates the Postgres enum types', async () => {
     for (const e of [
       'token_nostr_room_state_enum',
       'room_membership_role_enum',
       'room_membership_relay_state_enum',
+      'room_membership_access_state_enum',
+      'room_membership_event_event_enum',
     ]) {
       expect(await enumExists(e)).toBe(true);
     }
@@ -199,14 +202,22 @@ d('TGR migrations (integration)', () => {
     });
   });
 
-  it('reverting all 7 removes the tables, Token columns and enum types', async () => {
-    for (let i = 0; i < 7; i++) {
-      await ds.undoLastMigration();
+  it('reverting every migration removes the tables, Token columns and enum types', async () => {
+    // Drain ALL applied migrations (count-independent, so adding a migration never
+    // silently leaves a hardcoded loop under-reverting). `undoLastMigration` throws
+    // once there is nothing left to revert.
+    for (let i = 0; i < 100; i++) {
+      try {
+        await ds.undoLastMigration();
+      } catch {
+        break;
+      }
     }
 
     for (const t of [
       'community_room',
       'room_membership',
+      'room_membership_event',
       'room_notification_preference',
       'room_message_seen',
       'token_balance',
@@ -226,6 +237,8 @@ d('TGR migrations (integration)', () => {
       'token_nostr_room_state_enum',
       'room_membership_role_enum',
       'room_membership_relay_state_enum',
+      'room_membership_access_state_enum',
+      'room_membership_event_event_enum',
     ]) {
       expect(await enumExists(e)).toBe(false);
     }

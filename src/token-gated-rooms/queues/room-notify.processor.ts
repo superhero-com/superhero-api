@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { Token } from '@/tokens/entities/token.entity';
 import { NotificationService } from '@/notifications/core/notification.service';
 import { DeviceService } from '@/notifications/services/device.service';
+import { RoomMembershipEvent } from '../entities/room-membership-event.entity';
 import { RoomMembershipNotification } from '../notifications/room-membership.notification';
 import { RoomPreferencesService } from '../services/room-preferences.service';
 import { ROOM_NOTIFY_QUEUE, type RoomNotifyJob } from './room-notify.types';
@@ -37,6 +38,8 @@ export class RoomNotifyProcessor {
   constructor(
     @InjectRepository(Token)
     private readonly tokenRepo: Repository<Token>,
+    @InjectRepository(RoomMembershipEvent)
+    private readonly eventRepo: Repository<RoomMembershipEvent>,
     private readonly devices: DeviceService,
     private readonly roomPreferences: RoomPreferencesService,
     private readonly notifications: NotificationService,
@@ -44,8 +47,15 @@ export class RoomNotifyProcessor {
 
   @Process()
   async process(job: Job<RoomNotifyJob>): Promise<void> {
-    const { saleAddress, memberAddress, change } = job.data;
+    const { saleAddress, memberAddress, change, accessEventId, isFirstGrant } =
+      job.data;
     if (!saleAddress || !memberAddress || !change) {
+      return;
+    }
+
+    // (0) Durable dedup: if this access-ledger event was already pushed (Bull
+    // retry / redelivery after a restart), do not push it again.
+    if (accessEventId && (await this.alreadyNotified(accessEventId))) {
       return;
     }
 
@@ -72,11 +82,53 @@ export class RoomNotifyProcessor {
     // (4) Dispatch (NotificationService re-applies the type-level chokepoint).
     const outcome = await this.notifications.send(
       { address: memberAddress as Encoded.AccountAddress },
-      new RoomMembershipNotification({ saleAddress, symbol, change }),
+      new RoomMembershipNotification({
+        saleAddress,
+        symbol,
+        change,
+        isFirstGrant,
+      }),
     );
     if (outcome.outcome === 'failed') {
       this.logger.warn(
         `room-membership notification failed for ${memberAddress} in ${saleAddress}: ${outcome.error}`,
+      );
+      return;
+    }
+
+    // (5) Stamp the ledger event dispatched (durable dedup). Best-effort — a stamp
+    // failure must not fail the job (it would only risk a duplicate push).
+    if (accessEventId) {
+      await this.markNotified(accessEventId);
+    }
+  }
+
+  /** True iff the access-ledger event has already been dispatched. */
+  private async alreadyNotified(accessEventId: string): Promise<boolean> {
+    try {
+      const event = await this.eventRepo.findOne({
+        where: { id: accessEventId },
+        select: ['id', 'notified_at'],
+      });
+      return !!event?.notified_at;
+    } catch {
+      // Fail open: a lookup blip should not silently swallow the notification.
+      return false;
+    }
+  }
+
+  /** Stamp `notified_at=now()` on the access-ledger event (best-effort). */
+  private async markNotified(accessEventId: string): Promise<void> {
+    try {
+      await this.eventRepo.update(
+        { id: accessEventId },
+        { notified_at: new Date() },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `failed to stamp notified_at for access event ${accessEventId}: ${
+          (error as Error).message
+        }`,
       );
     }
   }

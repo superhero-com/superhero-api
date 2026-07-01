@@ -20,12 +20,10 @@ import { RoomMembership } from '../entities/room-membership.entity';
 import {
   TGR_COMMUNITY_UPSERTED,
   TGR_ELIGIBILITY_CHANGED,
-  TGR_MEMBERSHIP_CHANGED,
   TGR_PUBLISH_ACK,
   TGR_ROOM_CREATED,
   type TgrCommunityUpsertedPayload,
   type TgrEligibilityChangedPayload,
-  type TgrMembershipChangedPayload,
   type TgrPublishAckPayload,
   type TgrRoomCreatedPayload,
 } from '../events';
@@ -42,6 +40,7 @@ import { PUBLISH_NIP29_QUEUE } from '../queues/publish-nip29.processor';
 import type { PublishNip29Job } from '../queues/publish-nip29.types';
 import { RoomAdminsService } from './room-admins.service';
 import { GroupMissingTracker } from './group-missing-tracker.service';
+import { MembershipAccessService } from './membership-access.service';
 
 /** NIP-29 relay role tokens (mirrors `room-admins.service.ts`). */
 const NIP29_ROLE_ADMIN = 'admin';
@@ -133,6 +132,13 @@ export class MembershipSyncService
     // DI container always provides it in the running app.
     @Optional()
     private readonly groupMissing?: GroupMissingTracker,
+    // Access-transition ledger (access-ledger plan): the sole emitter of the
+    // membership push. `applyAck`/`handleDeletedRoom` fold relay-state transitions
+    // into it instead of emitting `tgr.membership.changed` directly — so relay-sync
+    // churn (reconcile re-adds, `39002` regen, flaps) no longer re-notifies. Optional
+    // for the same positional-construction test reason; always DI-provided in-app.
+    @Optional()
+    private readonly membershipAccess?: MembershipAccessService,
   ) {}
 
   /**
@@ -501,7 +507,8 @@ export class MembershipSyncService
         { id: row.id },
         { relay_state: 'added', last_published_at: now },
       );
-      this.emitMembershipChanged(row, 'added');
+      // Effective access GAINED — the ledger emits the (deduped) push.
+      await this.recordAccess(row, true, 'access_gained');
       return;
     }
 
@@ -513,18 +520,38 @@ export class MembershipSyncService
         { id: row.id },
         { relay_state: 'removed', last_published_at: now },
       );
-      this.emitMembershipChanged(row, 'removed');
+      // Effective access LOST — the ledger arms the debounce (no push yet; a
+      // re-add within the grace window cancels it, absorbing a flap).
+      await this.recordAccess(row, false, 'eligibility_lost');
       return;
     }
 
     if (kind === NIP29_KIND.SET_ROLES) {
-      // Role publish confirmed — stamp the publish time + emit a role transition.
+      // Role publish confirmed — stamp the publish time. A role change does NOT
+      // change effective access (the member stays 'added'), so folding it into the
+      // ledger is a no-op that will never produce a spurious "you now have access"
+      // push (the old direct `emitMembershipChanged(row, 'role')` did).
       await this.membershipRepo.update(
         { id: row.id },
         { last_published_at: now },
       );
-      this.emitMembershipChanged(row, 'role');
+      await this.recordAccess(row, row.relay_state === 'added', 'role');
       return;
+    }
+  }
+
+  /**
+   * Fold a relay-state transition into the access-transition ledger (the sole
+   * emitter of the membership push). No-op when the ledger service is absent (the
+   * positional-construction unit tests) so relay_state bookkeeping still runs.
+   */
+  private async recordAccess(
+    row: RoomMembership,
+    effective: boolean,
+    reason: string,
+  ): Promise<void> {
+    if (this.membershipAccess) {
+      await this.membershipAccess.recordAccessTransition(row, effective, reason);
     }
   }
 
@@ -711,7 +738,9 @@ export class MembershipSyncService
         { id: row.id },
         { relay_state: 'removed', last_published_at: new Date() },
       );
-      this.emitMembershipChanged(row, 'removed');
+      // Fold into the access ledger — arms the debounced revoke (reason
+      // room_deleted) for members who currently have access.
+      await this.recordAccess(row, false, 'room_deleted');
     }
     this.logger.log(
       `community ${saleAddress} deleted: enqueued 9008 and removed ${rows.length} membership row(s)`,
@@ -746,24 +775,5 @@ export class MembershipSyncService
       },
       publishNip29JobOptions(this.config.publishMaxRetries),
     );
-  }
-
-  /** Emit `tgr.membership.changed` (non-blocking; mirror `live-indexer.service.ts:93`). */
-  private emitMembershipChanged(
-    row: RoomMembership,
-    change: 'added' | 'removed' | 'role',
-  ): void {
-    const relayState: TgrMembershipChangedPayload['relayState'] =
-      change === 'added'
-        ? 'added'
-        : change === 'removed'
-          ? 'removed'
-          : row.relay_state;
-    const payload: TgrMembershipChangedPayload = {
-      saleAddress: row.sale_address,
-      memberAddress: row.member_address,
-      relayState,
-    };
-    this.eventEmitter.emit(TGR_MEMBERSHIP_CHANGED, payload);
   }
 }

@@ -10,6 +10,7 @@ import { DATABASE_CONFIG } from '@/configs/database';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from '../entities/community-room.entity';
 import { RoomMembership } from '../entities/room-membership.entity';
+import { RoomMembershipEvent } from '../entities/room-membership-event.entity';
 import { RoomNotificationPreference } from '../entities/room-notification-preference.entity';
 import { RoomMessageSeen } from '../entities/room-message-seen.entity';
 import { TokenBalance } from '../entities/token-balance.entity';
@@ -21,6 +22,7 @@ import {
   type TgrMembershipChangedPayload,
 } from '../events';
 import type { PublishNip29Job } from '../queues/publish-nip29.types';
+import { MembershipAccessService } from './membership-access.service';
 import { MembershipSyncService } from './membership-sync.service';
 
 if (typeof (globalThis as { WebSocket?: unknown }).WebSocket === 'undefined') {
@@ -101,6 +103,7 @@ d('MembershipSyncService (integration)', () => {
         Token,
         CommunityRoom,
         RoomMembership,
+        RoomMembershipEvent,
         RoomNotificationPreference,
         RoomMessageSeen,
         TokenBalance,
@@ -123,6 +126,13 @@ d('MembershipSyncService (integration)', () => {
     publishQueue = { add: jest.fn().mockResolvedValue({ id: 'p' }) } as any;
     isConfiguredAdmin = jest.fn().mockReturnValue(false);
 
+    const membershipAccess = new MembershipAccessService(
+      membershipRepo,
+      ds.getRepository(RoomMembershipEvent),
+      emitter,
+      { accessRevokeGraceSec: 180 } as any,
+    );
+
     service = new MembershipSyncService(
       membershipRepo,
       roomRepo,
@@ -136,6 +146,8 @@ d('MembershipSyncService (integration)', () => {
         reconcileBatchSize: 2,
         reconcileIntervalSec: 600,
       } as any,
+      undefined, // groupMissing (optional)
+      membershipAccess,
     );
   });
 
@@ -228,9 +240,18 @@ d('MembershipSyncService (integration)', () => {
     });
     expect(row.relay_state).toBe('added');
     expect(row.last_published_at).toBeInstanceOf(Date);
-    expect(seen).toEqual([
-      { saleAddress: SALE, memberAddress: MEMBER, relayState: 'added' },
-    ]);
+    // The push is now emitted by the access-transition ledger with the enriched
+    // payload (ledger event id + first-grant flag).
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      saleAddress: SALE,
+      memberAddress: MEMBER,
+      relayState: 'added',
+      isFirstGrant: true,
+    });
+    expect(seen[0].accessEventId).toBeDefined();
+    // The row's effective-access state flips to granted.
+    expect(row.access_state).toBe('granted');
   });
 
   it('eligibility off → 9001 enqueued, ACK → relay_state=removed', async () => {
