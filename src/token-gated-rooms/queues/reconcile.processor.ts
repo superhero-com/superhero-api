@@ -4,6 +4,7 @@ import { ConfigType } from '@nestjs/config';
 import { Queue } from 'bull';
 import tgrConfig, { isRelayConfigured } from '../config/tgr.config';
 import { prefixQueue, TGR_QUEUE_NAMES } from '../config/queue-prefix';
+import { MembershipAccessService } from '../services/membership-access.service';
 import { ReconciliationService } from '../services/reconciliation.service';
 import { ReorgEvictionService } from '../services/reorg-eviction.service';
 
@@ -34,6 +35,19 @@ export const RECONCILE_MEMBERSHIP_JOB = 'reconcile-membership-batch';
 export const REORG_FLUSH_JOB = 'reorg-eviction-flush';
 
 /**
+ * Access-revoke debounce finalizer (access-ledger plan §3.5). Emits the single
+ * `access_revoked` push for members whose access loss has outlived the grace
+ * window (and silently clears rows re-added within it). Unlike the other two jobs
+ * this is pure DB + event-emit, so it is scheduled + run **regardless of relay
+ * configuration** (a revoke can be armed by a room deletion even with no relay).
+ */
+export const ACCESS_REVOKE_FINALIZE_JOB = 'access-revoke-finalize';
+
+/** Finalizer cadence — frequent enough that the effective revoke latency is
+ * grace + at most this interval. Bounded to [30s, reconcileInterval]. */
+const REVOKE_FINALIZE_MIN_SEC = 30;
+
+/**
  * Consumer for `worker:reconcile-membership` (Task 11).
  *
  * Owns two repeatable jobs (both registered on boot, relay-gated):
@@ -55,6 +69,7 @@ export class ReconcileProcessor implements OnModuleInit {
     private readonly queue: Queue,
     private readonly reconciliation: ReconciliationService,
     private readonly reorgEviction: ReorgEvictionService,
+    private readonly membershipAccess: MembershipAccessService,
     @Inject(tgrConfig.KEY)
     private readonly config: ConfigType<typeof tgrConfig>,
   ) {}
@@ -66,10 +81,35 @@ export class ReconcileProcessor implements OnModuleInit {
    * (nothing to read back / publish).
    */
   async onModuleInit(): Promise<void> {
+    const everyMs = Math.max(1, this.config.reconcileIntervalSec) * 1000;
+
+    // The revoke finalizer is relay-independent (pure DB + event-emit): schedule it
+    // even when no relay is configured, so a room-deletion-armed revoke still fires.
+    const finalizeEveryMs =
+      Math.min(
+        Math.max(REVOKE_FINALIZE_MIN_SEC, 1),
+        Math.max(1, this.config.reconcileIntervalSec),
+      ) * 1000;
+    try {
+      await this.queue.add(
+        ACCESS_REVOKE_FINALIZE_JOB,
+        {},
+        {
+          jobId: ACCESS_REVOKE_FINALIZE_JOB,
+          repeat: { every: finalizeEveryMs },
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `failed to schedule access-revoke-finalize job: ${error?.message ?? error}`,
+      );
+    }
+
     if (!isRelayConfigured(this.config)) {
       return;
     }
-    const everyMs = Math.max(1, this.config.reconcileIntervalSec) * 1000;
     try {
       await this.queue.add(
         RECONCILE_MEMBERSHIP_JOB,
@@ -126,6 +166,21 @@ export class ReconcileProcessor implements OnModuleInit {
     if (published > 0 || cancelled > 0) {
       this.logger.debug(
         `[reorg-flush] published=${published} cancelled=${cancelled}`,
+      );
+    }
+  }
+
+  /**
+   * Emit debounced access-revoke pushes (relay-independent — always runs). A row
+   * re-added within the grace window is cleared silently (flap absorbed).
+   */
+  @Process({ name: ACCESS_REVOKE_FINALIZE_JOB, concurrency: 1 })
+  async finalizeRevokes(): Promise<void> {
+    const { revoked, cancelled } =
+      await this.membershipAccess.finalizeDueRevokes();
+    if (revoked > 0 || cancelled > 0) {
+      this.logger.debug(
+        `[access-revoke-finalize] revoked=${revoked} cancelled=${cancelled}`,
       );
     }
   }

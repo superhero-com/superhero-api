@@ -16,6 +16,18 @@ export type RoomMembershipRelayState =
 /** NIP-29 role of a member within a room (plan §4.3). */
 export type RoomMembershipRole = 'member' | 'admin';
 
+/**
+ * Last **notified** effective-access state (access-ledger plan). Decoupled from
+ * `relay_state` (a sync signal that churns): notifications are driven off
+ * transitions of THIS field, so reconcile re-adds / `39002` regeneration / a
+ * transient flap absorbed within the grace window never re-notify.
+ * `granted` ⇔ the member currently has room access (was `relay_state='added'`).
+ */
+export type RoomMembershipAccessState = 'none' | 'granted';
+
+export const ROOM_MEMBERSHIP_ACCESS_STATES: readonly RoomMembershipAccessState[] =
+  ['none', 'granted'] as const;
+
 export const ROOM_MEMBERSHIP_ROLES: readonly RoomMembershipRole[] = [
   'member',
   'admin',
@@ -73,6 +85,45 @@ export class RoomMembership {
     default: 'pending_add',
   })
   relay_state: RoomMembershipRelayState;
+
+  /**
+   * Last **notified** effective-access state (access-ledger plan). Drives the
+   * membership push instead of the raw `relay_state` ACK, so relay-sync churn
+   * (reconcile re-adds, `39002` regeneration, flaps absorbed within the grace
+   * window) never re-notifies. Written only by `MembershipAccessService`.
+   */
+  @Column({
+    type: 'enum',
+    enum: ROOM_MEMBERSHIP_ACCESS_STATES,
+    default: 'none',
+  })
+  access_state: RoomMembershipAccessState;
+
+  /** When `access_state` last flipped (audit/observability). */
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  access_changed_at: Date;
+
+  /**
+   * Debounce timer: set when access is lost (`relay_state → removed`); if still
+   * set + still-removed after `TG_ACCESS_REVOKE_GRACE_SEC`, the finalizer emits a
+   * single `access_revoked`. Cleared if access is regained first (flap absorbed —
+   * no push either way). NULL = no pending revoke.
+   */
+  @Column({
+    type: 'timestamptz',
+    nullable: true,
+  })
+  pending_revoke_since: Date;
+
+  /** Reason carried through the revoke debounce for the finalizer's event row. */
+  @Column({
+    type: 'varchar',
+    nullable: true,
+  })
+  pending_revoke_reason: string;
 
   /** Reorg eviction buffer: hold removal until this height passes (§6.5). */
   @Column({

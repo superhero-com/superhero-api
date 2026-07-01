@@ -24,6 +24,14 @@ export interface RoomNotifyJob {
   memberAddress: string;
   /** Whether the holder was added to or removed from the room. */
   change: RoomMembershipChange;
+  /**
+   * `room_membership_event.id` for this transition (access-ledger plan). The
+   * processor stamps `notified_at` on dispatch → durable dedup (never re-push the
+   * same access transition on a Bull retry / after a restart).
+   */
+  accessEventId?: string;
+  /** True iff the member's first-ever access grant (drives "Welcome" copy). */
+  isFirstGrant?: boolean;
 }
 
 /**

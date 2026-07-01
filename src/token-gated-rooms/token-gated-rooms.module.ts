@@ -10,6 +10,7 @@ import tgrConfig from './config/tgr.config';
 import { prefixQueue, TGR_QUEUE_NAMES } from './config/queue-prefix';
 import { CommunityRoom } from './entities/community-room.entity';
 import { RoomMembership } from './entities/room-membership.entity';
+import { RoomMembershipEvent } from './entities/room-membership-event.entity';
 import { RoomNotificationPreference } from './entities/room-notification-preference.entity';
 import { RoomMessageSeen } from './entities/room-message-seen.entity';
 import { TokenBalance } from './entities/token-balance.entity';
@@ -17,6 +18,7 @@ import { RoomBackfillState } from './entities/room-backfill-state.entity';
 import { IdentityService } from './services/identity.service';
 import { IdentityBackfillService } from './services/identity-backfill.service';
 import { EligibilityService } from './services/eligibility.service';
+import { MembershipAccessService } from './services/membership-access.service';
 import { RoomAdminsService } from './services/room-admins.service';
 import { RelayAdminHealthService } from './nostr/relay-admin-health';
 import { PublishNip29Module } from './queues/publish-nip29.module';
@@ -52,6 +54,7 @@ import { TgrObservabilityModule } from './observability/tgr-observability.module
 const TGR_ENTITIES = [
   CommunityRoom,
   RoomMembership,
+  RoomMembershipEvent,
   RoomNotificationPreference,
   RoomMessageSeen,
   TokenBalance,
@@ -116,6 +119,10 @@ const TGR_ENTITIES = [
     // Indexer-driven desired-state (Postgres writes + enqueue only).
     IdentityBackfillService,
     EligibilityService,
+    // Access-transition ledger (durable membership-push dedup + debounced revoke).
+    // Injected by MembershipSyncService (grant/revoke folding) + ReconcileProcessor
+    // (the finalize job).
+    MembershipAccessService,
     // Relay actuators — construct always, self-gate on `isRelayConfigured`.
     RoomAdminsService,
     RelayAdminHealthService,

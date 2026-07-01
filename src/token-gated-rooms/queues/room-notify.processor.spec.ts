@@ -8,6 +8,7 @@ describe('RoomNotifyProcessor', () => {
   const MEMBER = 'ak_member';
 
   let tokenRepo: { findOne: jest.Mock };
+  let eventRepo: { findOne: jest.Mock; update: jest.Mock };
   let devices: { getActiveTokens: jest.Mock };
   let roomPreferences: { isRoomEnabled: jest.Mock };
   let notifications: { send: jest.Mock };
@@ -25,6 +26,10 @@ describe('RoomNotifyProcessor', () => {
 
   beforeEach(() => {
     tokenRepo = { findOne: jest.fn().mockResolvedValue({ symbol: 'FOO' }) };
+    eventRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
     devices = {
       getActiveTokens: jest.fn().mockResolvedValue(['ExponentPushToken[x]']),
     };
@@ -32,6 +37,7 @@ describe('RoomNotifyProcessor', () => {
     notifications = { send: jest.fn().mockResolvedValue({ outcome: 'sent' }) };
     processor = new RoomNotifyProcessor(
       tokenRepo as any,
+      eventRepo as any,
       devices as any,
       roomPreferences as any,
       notifications as any,

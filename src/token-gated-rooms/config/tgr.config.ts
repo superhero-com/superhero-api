@@ -269,6 +269,18 @@ export default registerAs(TGR_CONFIG, () => ({
     min: 0,
   }),
 
+  /**
+   * Access-revoke debounce (access-ledger plan §4). When a member's room access is
+   * lost (`relay_state → removed`), the "you no longer have access" push is held
+   * this many seconds; if access is regained within the window (a transient
+   * eligibility flap) NEITHER push fires. Default 180s. `0` disables the debounce
+   * (revoke immediately) — not recommended while balances can flap.
+   */
+  accessRevokeGraceSec: parseDurationSeconds(
+    process.env.TG_ACCESS_REVOKE_GRACE_SEC,
+    180,
+  ),
+
   /** room-notify queue depth that trips the §7.1 circuit-breaker. */
   roomNotifyDepthBreak: parseNumber(
     process.env.TG_ROOM_NOTIFY_DEPTH_BREAK,

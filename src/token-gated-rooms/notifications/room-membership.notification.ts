@@ -16,6 +16,12 @@ export interface RoomMembershipParams {
   symbol?: string;
   /** Whether the holder was added to or removed from the room. */
   change: RoomMembershipChange;
+  /**
+   * For an `added` change: whether this is the member's first-ever access grant
+   * (access-ledger plan). `true` → a "welcome" copy; `false` → a "you're back"
+   * copy (access regained after a real lapse). Ignored for `removed`.
+   */
+  isFirstGrant?: boolean;
 }
 
 /**
@@ -53,10 +59,15 @@ export class RoomMembershipNotification implements AppNotification {
     const room = this.params.symbol
       ? `the ${this.params.symbol} room`
       : 'a room';
-    const body =
-      this.params.change === 'added'
-        ? `You now have access to ${room}.`
-        : `You no longer have access to ${room}.`;
+    let body: string;
+    if (this.params.change === 'added') {
+      body =
+        this.params.isFirstGrant === false
+          ? `You're back in ${room}.`
+          : `You now have access to ${room}.`;
+    } else {
+      body = `You no longer have access to ${room}.`;
+    }
     return {
       title: 'Room access',
       body,

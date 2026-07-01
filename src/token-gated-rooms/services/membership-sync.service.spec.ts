@@ -48,6 +48,10 @@ function makeMembership(over: Partial<RoomMembership> = {}): RoomMembership {
     role: 'member',
     eligible: true,
     relay_state: 'pending_add',
+    access_state: 'none',
+    access_changed_at: null as any,
+    pending_revoke_since: null as any,
+    pending_revoke_reason: null as any,
     held_until_height: null as any,
     last_published_at: null as any,
     last_reconciled_at: null as any,
@@ -74,6 +78,7 @@ interface Harness {
   roomAdmins: { isConfiguredAdmin: jest.Mock };
   emitter: EventEmitter2;
   emitted: TgrMembershipChangedPayload[];
+  membershipAccess: { recordAccessTransition: jest.Mock };
   scheduler: {
     addInterval: jest.Mock;
     deleteInterval: jest.Mock;
@@ -125,6 +130,10 @@ function setup(
     doesExist: jest.fn().mockReturnValue(false),
   };
 
+  const membershipAccess = {
+    recordAccessTransition: jest.fn().mockResolvedValue(undefined),
+  };
+
   const service = new MembershipSyncService(
     membershipRepo,
     communityRoomRepo,
@@ -143,6 +152,8 @@ function setup(
       reconcileBatchSize: 500,
       reconcileIntervalSec: 600,
     } as any,
+    undefined, // groupMissing (optional)
+    membershipAccess as any, // access-transition ledger (sole push emitter)
   );
 
   return {
@@ -154,6 +165,7 @@ function setup(
     roomAdmins,
     emitter,
     emitted,
+    membershipAccess,
     scheduler,
   };
 }
@@ -346,9 +358,12 @@ describe('MembershipSyncService — ACK-driven relay_state flips (§6.3)', () =>
         last_published_at: expect.any(Date),
       }),
     );
-    expect(h.emitted).toEqual([
-      { saleAddress: SALE, memberAddress: 'ak_member', relayState: 'added' },
-    ]);
+    // The push is emitted by the access-transition ledger, not applyAck directly.
+    expect(h.membershipAccess.recordAccessTransition).toHaveBeenCalledWith(
+      row,
+      true,
+      'access_gained',
+    );
   });
 
   it('9001 ACK → relay_state="removed" + emits removed', async () => {
@@ -366,9 +381,12 @@ describe('MembershipSyncService — ACK-driven relay_state flips (§6.3)', () =>
       { id: row.id },
       expect.objectContaining({ relay_state: 'removed' }),
     );
-    expect(h.emitted).toEqual([
-      { saleAddress: SALE, memberAddress: 'ak_member', relayState: 'removed' },
-    ]);
+    // Access loss folds into the ledger (which arms the debounced revoke).
+    expect(h.membershipAccess.recordAccessTransition).toHaveBeenCalledWith(
+      row,
+      false,
+      'eligibility_lost',
+    );
   });
 
   it('re-observed 9000 ACK on an already-added row is a no-op (no write, no event)', async () => {
@@ -384,6 +402,7 @@ describe('MembershipSyncService — ACK-driven relay_state flips (§6.3)', () =>
 
     expect(h.membershipRepo.update).not.toHaveBeenCalled();
     expect(h.emitted).toHaveLength(0);
+    expect(h.membershipAccess.recordAccessTransition).not.toHaveBeenCalled();
   });
 
   it('re-observed 9001 ACK on an already-removed row is a no-op', async () => {
@@ -399,6 +418,7 @@ describe('MembershipSyncService — ACK-driven relay_state flips (§6.3)', () =>
 
     expect(h.membershipRepo.update).not.toHaveBeenCalled();
     expect(h.emitted).toHaveLength(0);
+    expect(h.membershipAccess.recordAccessTransition).not.toHaveBeenCalled();
   });
 
   it('failed ACK (ok=false) leaves pending state untouched', async () => {
@@ -457,7 +477,17 @@ describe('MembershipSyncService — community deletion → 9008 (§4.7, terminal
       { id: 2 },
       expect.objectContaining({ relay_state: 'removed' }),
     );
-    expect(h.emitted.map((e) => e.relayState)).toEqual(['removed', 'removed']);
+    // Both rows fold into the access ledger as a room_deleted access loss.
+    expect(h.membershipAccess.recordAccessTransition).toHaveBeenCalledWith(
+      rowA,
+      false,
+      'room_deleted',
+    );
+    expect(h.membershipAccess.recordAccessTransition).toHaveBeenCalledWith(
+      rowB,
+      false,
+      'room_deleted',
+    );
   });
 
   it('non-deleted community upsert → no delete-group enqueued', async () => {

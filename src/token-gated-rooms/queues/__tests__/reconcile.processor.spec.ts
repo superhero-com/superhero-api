@@ -1,5 +1,6 @@
 import type { Queue } from 'bull';
 import {
+  ACCESS_REVOKE_FINALIZE_JOB,
   RECONCILE_MEMBERSHIP_JOB,
   RECONCILE_MEMBERSHIP_QUEUE,
   REORG_FLUSH_JOB,
@@ -36,6 +37,11 @@ describe('ReconcileProcessor (unit)', () => {
         .fn()
         .mockResolvedValue({ published: 0, cancelled: 0 }),
     };
+    const membershipAccess = {
+      finalizeDueRevokes: jest
+        .fn()
+        .mockResolvedValue({ revoked: 0, cancelled: 0 }),
+    };
     const config = {
       reconcileIntervalSec: 600,
       nostrRelayUrl: relayConfigured ? 'ws://relay' : undefined,
@@ -45,38 +51,51 @@ describe('ReconcileProcessor (unit)', () => {
       queue as unknown as Queue,
       reconciliation as any,
       reorgEviction as any,
+      membershipAccess as any,
       config as any,
     );
-    return { processor, queue, reconciliation, reorgEviction };
+    return { processor, queue, reconciliation, reorgEviction, membershipAccess };
   };
 
   it('exposes the canonical worker-prefixed queue name', () => {
     expect(RECONCILE_MEMBERSHIP_QUEUE).toBe('worker:reconcile-membership');
   });
 
-  describe('onModuleInit (relay-gated)', () => {
-    it('schedules BOTH repeatable jobs when a relay is configured', async () => {
+  describe('onModuleInit', () => {
+    it('schedules the relay jobs + the finalizer when a relay is configured', async () => {
       const { processor, queue } = build(true);
 
       await processor.onModuleInit();
 
       const jobNames = queue.add.mock.calls.map((c) => c[0]);
       expect(jobNames).toEqual(
-        expect.arrayContaining([RECONCILE_MEMBERSHIP_JOB, REORG_FLUSH_JOB]),
+        expect.arrayContaining([
+          RECONCILE_MEMBERSHIP_JOB,
+          REORG_FLUSH_JOB,
+          ACCESS_REVOKE_FINALIZE_JOB,
+        ]),
       );
-      expect(queue.add).toHaveBeenCalledTimes(2);
-      // Both repeat on the configured interval (10m default → 600s).
+      expect(queue.add).toHaveBeenCalledTimes(3);
+      // The two relay jobs repeat on the configured interval (10m → 600s).
       for (const call of queue.add.mock.calls) {
-        expect(call[2].repeat).toEqual({ every: 600_000 });
+        if (call[0] === ACCESS_REVOKE_FINALIZE_JOB) {
+          // The finalizer runs more often: min(30s, interval).
+          expect(call[2].repeat).toEqual({ every: 30_000 });
+        } else {
+          expect(call[2].repeat).toEqual({ every: 600_000 });
+        }
       }
     });
 
-    it('schedules NOTHING when no relay is configured (boot-safe)', async () => {
+    it('still schedules the relay-independent finalizer when no relay is configured', async () => {
       const { processor, queue } = build(false);
 
       await processor.onModuleInit();
 
-      expect(queue.add).not.toHaveBeenCalled();
+      // Only the finalizer (pure DB + event-emit) — no relay read/publish jobs.
+      const jobNames = queue.add.mock.calls.map((c) => c[0]);
+      expect(jobNames).toEqual([ACCESS_REVOKE_FINALIZE_JOB]);
+      expect(queue.add).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -105,6 +124,14 @@ describe('ReconcileProcessor (unit)', () => {
 
       expect(reconciliation.reconcileBatch).not.toHaveBeenCalled();
       expect(reorgEviction.flushDueEvictions).not.toHaveBeenCalled();
+    });
+
+    it('finalizeRevokes() delegates regardless of relay config', async () => {
+      for (const relay of [true, false]) {
+        const { processor, membershipAccess } = build(relay);
+        await processor.finalizeRevokes();
+        expect(membershipAccess.finalizeDueRevokes).toHaveBeenCalledTimes(1);
+      }
     });
   });
 });
