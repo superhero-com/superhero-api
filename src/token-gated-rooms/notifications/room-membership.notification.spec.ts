@@ -57,6 +57,48 @@ describe('RoomMembershipNotification', () => {
     );
   });
 
+  it('keys the dedup on the ledger event id so distinct transitions never collapse', () => {
+    // Two DISTINCT access transitions (e.g. a grant then a real regain within the
+    // dedup TTL) both carry change='added' but different ledger event ids → the
+    // Redis dedup must NOT collapse them (that would drop the "you're back" push).
+    const grant = new RoomMembershipNotification({
+      saleAddress: SALE,
+      change: 'added',
+      accessEventId: '1',
+    });
+    const regain = new RoomMembershipNotification({
+      saleAddress: SALE,
+      change: 'added',
+      accessEventId: '2',
+    });
+    expect(grant.dedupKey({ address: ADDR })).toBe(
+      `room-membership:${SALE}:evt:1:${ADDR}`,
+    );
+    expect(regain.dedupKey({ address: ADDR })).not.toBe(
+      grant.dedupKey({ address: ADDR }),
+    );
+    // Same event redelivered (Bull retry) → SAME key (true-duplicate idempotency).
+    const grantRetry = new RoomMembershipNotification({
+      saleAddress: SALE,
+      change: 'added',
+      accessEventId: '1',
+    });
+    expect(grantRetry.dedupKey({ address: ADDR })).toBe(
+      grant.dedupKey({ address: ADDR }),
+    );
+  });
+
+  it('renders a "you\'re back" copy for a non-first-grant re-add', () => {
+    const regained = new RoomMembershipNotification({
+      saleAddress: SALE,
+      symbol: 'FOO',
+      change: 'added',
+      isFirstGrant: false,
+    }).toExpo();
+    expect(regained.body).toContain("back in");
+    expect(regained.body).toContain('FOO');
+  });
+
   it('renders distinct added vs removed copy and a data payload', () => {
     const added = new RoomMembershipNotification({
       saleAddress: SALE,

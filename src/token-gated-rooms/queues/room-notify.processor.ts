@@ -87,6 +87,7 @@ export class RoomNotifyProcessor {
         symbol,
         change,
         isFirstGrant,
+        accessEventId,
       }),
     );
     if (outcome.outcome === 'failed') {
