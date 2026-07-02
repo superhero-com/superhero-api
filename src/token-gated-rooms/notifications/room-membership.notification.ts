@@ -22,6 +22,15 @@ export interface RoomMembershipParams {
    * copy (access regained after a real lapse). Ignored for `removed`.
    */
   isFirstGrant?: boolean;
+  /**
+   * `room_membership_event.id` — the durable identity of THIS access transition
+   * (access-ledger plan). When present it keys the dedup so distinct transitions
+   * (e.g. a real regain within `NOTIF_DEDUP_TTL_MS`) never collapse onto an earlier
+   * push; the Redis dedup then only collapses true duplicates (Bull re-delivery of
+   * the same event), matching the `notified_at` guard. Falls back to the
+   * (room, change, recipient) key when absent (non-ledger callers).
+   */
+  accessEventId?: string;
 }
 
 /**
@@ -50,8 +59,17 @@ export class RoomMembershipNotification implements AppNotification {
   }
 
   dedupKey(notifiable: Notifiable): string {
-    // Distinct per (room, change, recipient): an add and a later remove never
-    // collapse, while repeated adds for the same room collapse to one push.
+    // Prefer the durable per-transition ledger id: distinct access transitions
+    // (a grant, a later revoke, a real regain) each get a UNIQUE key, so the Redis
+    // dedup only collapses true duplicates (Bull re-delivery of the SAME event) —
+    // never two legitimate transitions that happen to fall within the dedup TTL.
+    // This keeps the Redis backstop consistent with the ledger's `notified_at`
+    // guard (both keyed on the event), so a Redis-suppressed send can never mark an
+    // undelivered distinct transition as notified.
+    if (this.params.accessEventId) {
+      return `room-membership:${this.params.saleAddress}:evt:${this.params.accessEventId}:${notifiable.address}`;
+    }
+    // Fallback (non-ledger callers): per (room, change, recipient).
     return `room-membership:${this.params.saleAddress}:${this.params.change}:${notifiable.address}`;
   }
 
