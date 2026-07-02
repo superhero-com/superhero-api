@@ -8,10 +8,12 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * (`access_state`, `access_changed_at`, `pending_revoke_since`,
  * `pending_revoke_reason`).
  *
- * **Backfill (critical):** seeds every currently-added member as
- * `access_state='granted'` so the deploy does NOT emit a "you're in" push to
- * everyone already in a room. Effective access = `relay_state='added'` (independent
- * of `eligible`, so room admins are seeded too). It ALSO inserts a historical
+ * **Backfill (critical):** seeds every member **present on the relay**
+ * (`relay_state IN ('added','pending_remove')`, independent of `eligible` so room
+ * admins are seeded too) as `access_state='granted'` so the deploy does NOT emit a
+ * "you're in" push to everyone already in a room — AND so a member with a removal
+ * in flight still gets a "you no longer have access" push when it lands (else the
+ * remove ACK would bail at `access_state='none'`). It ALSO inserts a historical
  * `access_granted` ledger row per backfilled member (reason `backfill`, pre-stamped
  * `notified_at`) so post-deploy first-grant detection is correct — a later
  * revoke→regain reads as "you're back", not a fresh "Welcome".
@@ -57,10 +59,18 @@ export class TgrRoomMembershipEvent1718900000009 implements MigrationInterface {
     );
 
     // ── backfill: current members are already granted (no push storm on deploy) ─
+    // "Currently has effective access" at migration time = **present on the relay**,
+    // i.e. `relay_state IN ('added','pending_remove')`. `pending_remove` is a member
+    // with a removal in flight who (in the dominant added→pending_remove case) still
+    // has access; seeding them `granted` means the post-deploy remove ACK correctly
+    // arms a debounced revoke ("you no longer have access") instead of bailing at
+    // `access_state='none'`. The rare pending_add→pending_remove (never actually on
+    // the relay) case is absorbed by the grace window — a flap re-adds within grace
+    // and pushes nothing; only a durable removal notifies.
     await queryRunner.query(
       `UPDATE "room_membership"
         SET "access_state" = 'granted', "access_changed_at" = "updated_at"
-        WHERE "relay_state" = 'added'`,
+        WHERE "relay_state" IN ('added', 'pending_remove')`,
     );
 
     // Seed a historical `access_granted` ledger row per backfilled member so
@@ -74,7 +84,7 @@ export class TgrRoomMembershipEvent1718900000009 implements MigrationInterface {
         ("sale_address", "member_address", "event", "reason", "is_first_grant", "created_at", "notified_at")
        SELECT "sale_address", "member_address", 'access_granted', 'backfill', true, "updated_at", "updated_at"
        FROM "room_membership"
-       WHERE "relay_state" = 'added'`,
+       WHERE "relay_state" IN ('added', 'pending_remove')`,
     );
 
     // Partial index for the finalizer sweep (rows with an armed pending revoke).
