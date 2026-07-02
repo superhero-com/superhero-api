@@ -54,7 +54,13 @@ describe('ReconcileProcessor (unit)', () => {
       membershipAccess as any,
       config as any,
     );
-    return { processor, queue, reconciliation, reorgEviction, membershipAccess };
+    return {
+      processor,
+      queue,
+      reconciliation,
+      reorgEviction,
+      membershipAccess,
+    };
   };
 
   it('exposes the canonical worker-prefixed queue name', () => {

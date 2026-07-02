@@ -75,7 +75,11 @@ describe('MembershipAccessService — gains', () => {
       expect.objectContaining({ access_state: 'granted' }),
     );
     expect(h.eventRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'access_granted', reason: 'join', is_first_grant: true }),
+      expect.objectContaining({
+        event: 'access_granted',
+        reason: 'join',
+        is_first_grant: true,
+      }),
     );
     expect(h.emitted).toHaveLength(1);
     expect(h.emitted[0]).toMatchObject({
@@ -172,10 +176,16 @@ describe('MembershipAccessService — finalizeDueRevokes', () => {
       expect.objectContaining({ access_state: 'none' }),
     );
     expect(h.eventRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'access_revoked', reason: 'eligibility_lost' }),
+      expect.objectContaining({
+        event: 'access_revoked',
+        reason: 'eligibility_lost',
+      }),
     );
     expect(h.emitted).toHaveLength(1);
-    expect(h.emitted[0]).toMatchObject({ relayState: 'removed', accessEventId: '1' });
+    expect(h.emitted[0]).toMatchObject({
+      relayState: 'removed',
+      accessEventId: '1',
+    });
   });
 
   it('re-added within grace (relay_state=added) → cancelled silently, NO push', async () => {
