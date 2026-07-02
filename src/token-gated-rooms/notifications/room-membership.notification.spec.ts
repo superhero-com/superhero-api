@@ -95,7 +95,7 @@ describe('RoomMembershipNotification', () => {
       change: 'added',
       isFirstGrant: false,
     }).toExpo();
-    expect(regained.body).toContain("back in");
+    expect(regained.body).toContain('back in');
     expect(regained.body).toContain('FOO');
   });
 
