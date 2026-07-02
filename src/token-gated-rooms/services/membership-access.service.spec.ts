@@ -42,7 +42,8 @@ function makeRow(over: Partial<RoomMembership> = {}): RoomMembership {
 
 function setup(opts: { grace?: number; priorGrants?: number } = {}) {
   const membershipRepo = {
-    update: jest.fn().mockResolvedValue(undefined),
+    // update() returns an UpdateResult; `affected` drives the compare-and-set guard.
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
     find: jest.fn().mockResolvedValue([]),
   };
   let seq = 1;
@@ -71,7 +72,7 @@ describe('MembershipAccessService — gains', () => {
     await h.service.recordAccessTransition(row, true, 'access_gained');
 
     expect(h.membershipRepo.update).toHaveBeenCalledWith(
-      { id: 1 },
+      { id: 1, access_state: 'none' }, // compare-and-set on the prior state
       expect.objectContaining({ access_state: 'granted' }),
     );
     expect(h.eventRepo.save).toHaveBeenCalledWith(
@@ -104,6 +105,19 @@ describe('MembershipAccessService — gains', () => {
   it('re-add of an already-granted member is a SILENT no-op (the flap/reconcile churn)', async () => {
     const h = setup();
     const row = makeRow({ access_state: 'granted' });
+
+    await h.service.recordAccessTransition(row, true, 'access_gained');
+
+    expect(h.eventRepo.save).not.toHaveBeenCalled();
+    expect(h.emitted).toHaveLength(0);
+  });
+
+  it('lost the none→granted CAS race (affected=0) → no ledger row, no push', async () => {
+    // Two concurrent ACKs both see access_state='none'; the DB compare-and-set only
+    // lets ONE win. The loser's UPDATE matches 0 rows → must not double-emit.
+    const h = setup();
+    h.membershipRepo.update = jest.fn().mockResolvedValue({ affected: 0 });
+    const row = makeRow({ access_state: 'none' });
 
     await h.service.recordAccessTransition(row, true, 'access_gained');
 
@@ -172,7 +186,7 @@ describe('MembershipAccessService — finalizeDueRevokes', () => {
 
     expect(result).toEqual({ revoked: 1, cancelled: 0 });
     expect(h.membershipRepo.update).toHaveBeenCalledWith(
-      { id: 1 },
+      { id: 1, access_state: 'granted' }, // compare-and-set on the prior state
       expect.objectContaining({ access_state: 'none' }),
     );
     expect(h.eventRepo.save).toHaveBeenCalledWith(
@@ -186,6 +200,24 @@ describe('MembershipAccessService — finalizeDueRevokes', () => {
       relayState: 'removed',
       accessEventId: '1',
     });
+  });
+
+  it('lost the revoke CAS race (affected=0) → no revoke row, no push', async () => {
+    const h = setup();
+    const armed = makeRow({
+      access_state: 'granted',
+      relay_state: 'removed',
+      pending_revoke_since: new Date(Date.now() - 10 * 60_000),
+      pending_revoke_reason: 'eligibility_lost',
+    });
+    h.membershipRepo.find = jest.fn().mockResolvedValue([armed]);
+    h.membershipRepo.update = jest.fn().mockResolvedValue({ affected: 0 });
+
+    const result = await h.service.finalizeDueRevokes();
+
+    expect(result).toEqual({ revoked: 0, cancelled: 0 });
+    expect(h.eventRepo.save).not.toHaveBeenCalled();
+    expect(h.emitted).toHaveLength(0);
   });
 
   it('re-added within grace (relay_state=added) → cancelled silently, NO push', async () => {

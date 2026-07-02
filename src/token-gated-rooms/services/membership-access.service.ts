@@ -97,7 +97,27 @@ export class MembershipAccessService {
       return;
     }
 
-    // Genuine transition none → granted.
+    // Genuine transition none → granted. **Atomic compare-and-set**: condition the
+    // flip on the prior `access_state='none'` so only ONE handler wins when the same
+    // relay ACK is processed concurrently (publish concurrency ≥ 2 → duplicate 9000
+    // ACKs for one member). A racing/duplicate handler matches 0 rows and returns
+    // WITHOUT inserting a ledger row or emitting — no duplicate event, no duplicate push.
+    const now = new Date();
+    const result = await this.membershipRepo.update(
+      { id: row.id, access_state: 'none' },
+      {
+        access_state: 'granted',
+        access_changed_at: now,
+        pending_revoke_since: null,
+        pending_revoke_reason: null,
+      },
+    );
+    if (!result.affected) {
+      return; // lost the race — another handler already granted this transition
+    }
+
+    // Only the winner counts + inserts (so `priorGrants` never includes this
+    // transition's own row → correct first-grant detection under concurrency).
     const priorGrants = await this.eventRepo.count({
       where: {
         sale_address: row.sale_address,
@@ -106,17 +126,6 @@ export class MembershipAccessService {
       },
     });
     const isFirst = priorGrants === 0;
-    const now = new Date();
-
-    await this.membershipRepo.update(
-      { id: row.id },
-      {
-        access_state: 'granted',
-        access_changed_at: now,
-        pending_revoke_since: null,
-        pending_revoke_reason: null,
-      },
-    );
 
     const event = await this.eventRepo.save(
       this.eventRepo.create({
@@ -191,8 +200,10 @@ export class MembershipAccessService {
 
         const reason = row.pending_revoke_reason || 'access_lost';
         const now = new Date();
-        await this.membershipRepo.update(
-          { id: row.id },
+        // Atomic compare-and-set (mirror the grant path): only flip a still-`granted`
+        // row so overlapping finalizer runs can't emit two `access_revoked` rows/pushes.
+        const result = await this.membershipRepo.update(
+          { id: row.id, access_state: 'granted' },
           {
             access_state: 'none',
             access_changed_at: now,
@@ -200,6 +211,9 @@ export class MembershipAccessService {
             pending_revoke_reason: null,
           },
         );
+        if (!result.affected) {
+          continue; // lost the race — already resolved elsewhere
+        }
         const event = await this.eventRepo.save(
           this.eventRepo.create({
             sale_address: row.sale_address,
