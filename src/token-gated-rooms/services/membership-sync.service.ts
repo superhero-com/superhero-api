@@ -551,7 +551,11 @@ export class MembershipSyncService
     reason: string,
   ): Promise<void> {
     if (this.membershipAccess) {
-      await this.membershipAccess.recordAccessTransition(row, effective, reason);
+      await this.membershipAccess.recordAccessTransition(
+        row,
+        effective,
+        reason,
+      );
     }
   }
 

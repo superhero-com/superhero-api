@@ -13,9 +13,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * everyone already in a room. Effective access = `relay_state='added'` (independent
  * of `eligible`, so room admins are seeded too).
  */
-export class TgrRoomMembershipEvent1718900000009
-  implements MigrationInterface
-{
+export class TgrRoomMembershipEvent1718900000009 implements MigrationInterface {
   name = 'TgrRoomMembershipEvent1718900000009';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
