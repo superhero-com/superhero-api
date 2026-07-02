@@ -11,7 +11,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * **Backfill (critical):** seeds every currently-added member as
  * `access_state='granted'` so the deploy does NOT emit a "you're in" push to
  * everyone already in a room. Effective access = `relay_state='added'` (independent
- * of `eligible`, so room admins are seeded too).
+ * of `eligible`, so room admins are seeded too). It ALSO inserts a historical
+ * `access_granted` ledger row per backfilled member (reason `backfill`, pre-stamped
+ * `notified_at`) so post-deploy first-grant detection is correct — a later
+ * revoke→regain reads as "you're back", not a fresh "Welcome".
  */
 export class TgrRoomMembershipEvent1718900000009 implements MigrationInterface {
   name = 'TgrRoomMembershipEvent1718900000009';
@@ -58,6 +61,20 @@ export class TgrRoomMembershipEvent1718900000009 implements MigrationInterface {
       `UPDATE "room_membership"
         SET "access_state" = 'granted', "access_changed_at" = "updated_at"
         WHERE "relay_state" = 'added'`,
+    );
+
+    // Seed a historical `access_granted` ledger row per backfilled member so
+    // first-grant detection is correct AFTER deploy: their genuine first grant
+    // happened pre-ledger, so a later revoke→regain must read as "you're back"
+    // (is_first_grant=false), not a fresh "Welcome". `notified_at` is set (never
+    // pushed — these are historical, not enqueued) so they stay out of the
+    // unnotified index. `is_first_grant=true` records that this WAS their first grant.
+    await queryRunner.query(
+      `INSERT INTO "room_membership_event"
+        ("sale_address", "member_address", "event", "reason", "is_first_grant", "created_at", "notified_at")
+       SELECT "sale_address", "member_address", 'access_granted', 'backfill', true, "updated_at", "updated_at"
+       FROM "room_membership"
+       WHERE "relay_state" = 'added'`,
     );
 
     // Partial index for the finalizer sweep (rows with an armed pending revoke).
