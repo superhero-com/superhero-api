@@ -275,8 +275,27 @@ export const POPULAR_RANKING_CONFIG = {
   // trending scaling
   TRENDING_MAX_SCORE: 100, // scale trending tag score to [0..1]
 
-  // live popular behavior
-  FRESHNESS_BOOST_HOURS: 24,
+  // live popular behavior — 48h, not 24h: on a low-activity network posts
+  // need longer to gather their fair share of signal
+  FRESHNESS_BOOST_HOURS: 48,
+
+  // velocity looks at interactions inside this window (divided by post age
+  // when the post is younger), so an old post catching fire still registers
+  VELOCITY_WINDOW_HOURS: 48,
+
+  // recursion guard for whole-thread comment counting — real threads never
+  // approach this, it only bounds pathological reply chains
+  THREAD_COUNT_MAX_DEPTH: 50,
+
+  // reads counted toward the score are capped at this many per (1 + active
+  // interaction) — reads are the easiest signal to inflate, so passive volume
+  // alone cannot outvote real engagement indefinitely
+  READS_PER_INTERACTION_CAP: 100,
+
+  // deterministic per-hour score jitter in [0, epsilon) rotating near-tied
+  // posts (mostly the zero-engagement tail) so their order isn't frozen;
+  // keep well below typical engaged-post score gaps
+  TIE_ROTATION_EPSILON: 0.05,
 
   // 'all' window age decay: score / (ageHours + 2)^gravity. Scores are
   // log-dampened so their spread stays small — gravity must stay gentle
@@ -296,7 +315,10 @@ export const POPULAR_RANKING_CONFIG = {
     popular7d: 'popular:7d',
     popularAll: 'popular:all',
   },
-  REDIS_TTL_SECONDS: 30,
+  // Kept far above the slowest cron refresh cadence (10 min for 'all') so a
+  // key only goes cold if refreshes fail repeatedly; requests then hit the
+  // lazy recompute fallback.
+  REDIS_TTL_SECONDS: 1800,
 
   // Bot UA denylist (lowercase substrings)
   BOT_UA_DENYLIST: [
