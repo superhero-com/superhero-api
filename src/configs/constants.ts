@@ -251,7 +251,8 @@ export const POPULAR_RANKING_CONFIG = {
     contentQuality: 0.3, // w_q (anti-spam)
     reads: 1.5, // w_reads (common passive signal)
     freshnessBoost: 1.5, // w_fresh (temporary new-post lift)
-    velocityBoost: 0.6, // w_vel (temporary lift for posts gaining activity quickly)
+    velocityBoost: 0.6, // w_vel (freshness-gated early-life amplifier)
+    interactionsPerHour: 0.6, // w_iph (always-on momentum baseline, counts at any age)
   },
 
   // user-facing scale controls tune relative importance instead of exposing raw weights
@@ -260,9 +261,6 @@ export const POPULAR_RANKING_CONFIG = {
       low: 0.6,
       med: 1,
       high: 1.5,
-    },
-    ADDITIONAL_SIGNAL_WEIGHTS: {
-      interactionsPerHour: 1.1,
     },
   },
 
@@ -279,6 +277,13 @@ export const POPULAR_RANKING_CONFIG = {
 
   // live popular behavior
   FRESHNESS_BOOST_HOURS: 24,
+
+  // 'all' window age decay: score / (ageHours + 2)^gravity. Scores are
+  // log-dampened so their spread stays small — gravity must stay gentle
+  // (~0.15..0.4); near 1 the divisor outgrows any achievable score gap and
+  // 'all' degenerates into a recency feed. Raise slightly if old posts still
+  // dominate, lower if evergreen content churns out too fast.
+  ALL_WINDOW_GRAVITY: 0.25,
   AUTHOR_DIVERSITY: {
     ENABLED: true,
     OVERSAMPLE_MULTIPLIER: 4,

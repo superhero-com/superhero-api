@@ -46,15 +46,10 @@ export type PopularRankingWeightOverrides = Partial<
   Record<PopularCustomizableWeightKey, PopularRankingWeightScale | undefined>
 >;
 
-type Mutable<T> = {
-  -readonly [K in keyof T]: T[K];
-};
-
-type PopularRankingResolvedWeights = Mutable<
-  typeof POPULAR_RANKING_CONFIG.WEIGHTS
-> & {
-  interactionsPerHour: number;
-};
+type PopularRankingResolvedWeights = Record<
+  keyof typeof POPULAR_RANKING_CONFIG.WEIGHTS,
+  number
+>;
 
 interface PopularScoreInput {
   content: string;
@@ -129,7 +124,6 @@ export class PopularRankingService implements OnModuleDestroy {
   ): PopularRankingResolvedWeights {
     const resolved: PopularRankingResolvedWeights = {
       ...POPULAR_RANKING_CONFIG.WEIGHTS,
-      interactionsPerHour: 0,
     };
 
     if (!this.hasWeightOverrides(overrides)) {
@@ -143,11 +137,7 @@ export class PopularRankingService implements OnModuleDestroy {
       }
 
       const multiplier = multipliers[value];
-      if (key === 'interactionsPerHour') {
-        resolved.interactionsPerHour =
-          POPULAR_RANKING_CONFIG.CUSTOMIZATION.ADDITIONAL_SIGNAL_WEIGHTS
-            .interactionsPerHour * multiplier;
-      } else if (key in resolved) {
+      if (key in resolved) {
         (resolved as Record<string, number>)[key] *= multiplier;
       }
     }
@@ -963,7 +953,7 @@ export class PopularRankingService implements OnModuleDestroy {
     const interactionsPerHour = this.computeInteractionsPerHour(input, window);
     const freshnessFactor = this.computeFreshnessFactor(input);
 
-    return (
+    const baseScore =
       weights.comments * Math.log(1 + comments) +
       weights.tipsAmountAE * Math.log(1 + tipsAmountAE) +
       weights.tipsCount * Math.log(1 + tipsCount) +
@@ -975,7 +965,19 @@ export class PopularRankingService implements OnModuleDestroy {
       weights.velocityBoost *
         Math.log(1 + interactionsPerHour) *
         freshnessFactor +
-      weights.interactionsPerHour * Math.log(1 + interactionsPerHour)
+      weights.interactionsPerHour * Math.log(1 + interactionsPerHour);
+
+    if (window !== 'all') {
+      return baseScore;
+    }
+
+    // Log-dampened engagement never decays on its own, so without gravity old
+    // high-total posts pin the 'all' feed forever. +2 keeps brand-new posts
+    // from being divided by ~0.
+    const ageHours = this.computeAgeHours(input.createdAt, 1) ?? 1;
+    return (
+      baseScore /
+      Math.pow(ageHours + 2, POPULAR_RANKING_CONFIG.ALL_WINDOW_GRAVITY)
     );
   }
 
@@ -1040,21 +1042,28 @@ export class PopularRankingService implements OnModuleDestroy {
     }));
   }
 
+  private countEmojis(content: string): number {
+    try {
+      // Extended_Pictographic instead of Emoji: \p{Emoji} also matches digits,
+      // '#' and '*'. Global flag so every occurrence counts, not just the first.
+      return (content.match(/\p{Extended_Pictographic}/gu) || []).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private computeContentQuality(content: string): number {
     if (!content) return 0;
     const cfg = POPULAR_RANKING_CONFIG.CONTENT;
-    const len = content.length;
+    // Code-point length, not UTF-16 length: emoji are surrogate pairs, so an
+    // emoji-only post would otherwise cap emojiRatio at 0.5 and dodge the
+    // short-and-emoji-heavy penalty.
+    const len = [...content].length;
     const lengthScore = Math.max(
       0,
       Math.min(1, (len - cfg.minLengthForNoPenalty) / cfg.maxReferenceLength),
     );
-    let emojis = 0;
-    try {
-      const emojiRegex = /[\p{Emoji_Presentation}\p{Emoji}\u200d]+/u;
-      emojis = (content.match(emojiRegex) || []).length;
-    } catch {
-      emojis = 0;
-    }
+    const emojis = this.countEmojis(content);
     const emojiRatio = Math.min(1, emojis / Math.max(1, len));
     const alnumMatches = content.match(/[A-Za-z0-9]/g) || [];
     const alnumRatio = Math.min(1, alnumMatches.length / Math.max(1, len));

@@ -46,7 +46,7 @@ This means popularity is computed within the newest all-time candidate pool, not
 Each candidate gets a score from accumulated engagement and content signals:
 
 ```text
-score =
+baseScore =
   w_comments * log(1 + comments) +
   w_tips_amount * log(1 + tipsAmountAE) +
   w_tips_count * log(1 + tipsCount) +
@@ -55,10 +55,16 @@ score =
   w_trending * trendingBoost +
   w_quality * contentQuality +
   w_fresh * freshnessFactor +
-  w_velocity * log(1 + interactionsPerHour) * freshnessFactor
+  w_velocity * log(1 + interactionsPerHour) * freshnessFactor +
+  w_iph * log(1 + interactionsPerHour)
 ```
 
-There is no time-decay divisor. The live boost is additive and bounded, so it helps new content without permanently overriding all-time engagement.
+Velocity contributes twice, on purpose:
+
+- `w_iph` is the **always-on momentum baseline** — a post gaining interactions
+  quickly gets credit at any age.
+- `w_velocity` is a **freshness-gated early-life amplifier** — new posts that
+  are also accelerating get an extra, temporary lift.
 
 Freshness is linear over the first 24 hours:
 
@@ -66,7 +72,21 @@ Freshness is linear over the first 24 hours:
 freshnessFactor = max(0, 1 - ageHours / 24)
 ```
 
-After 24 hours, both `freshnessFactor` and the velocity boost are zero. The post then ranks by normal accumulated engagement.
+After 24 hours, `freshnessFactor` and the amplifier are zero; the always-on
+momentum baseline keeps counting.
+
+For the `24h` and `7d` windows the score is `baseScore` as-is — those feeds are
+already bounded by their time filter. The `all` window additionally applies a
+gentle gravity-style age decay so old high-total posts cannot occupy the top
+forever:
+
+```text
+score(all) = baseScore / (ageHours + 2) ^ ALL_WINDOW_GRAVITY
+```
+
+Because every engagement signal is log-dampened, score gaps between posts stay
+small, so the gravity exponent must stay gentle (`0.25` today, sane range
+roughly `0.15..0.4`). Values near `1` would turn the feed into pure recency.
 
 ## Current weights
 
@@ -81,9 +101,11 @@ WEIGHTS: {
   trendingBoost: 0.5,
   contentQuality: 0.3,
   reads: 1.5,
-  freshnessBoost: 0.9,
-  velocityBoost: 0.6,
+  freshnessBoost: 1.5,
+  velocityBoost: 0.6, // freshness-gated early-life amplifier
+  interactionsPerHour: 0.6, // always-on momentum baseline
 }
+ALL_WINDOW_GRAVITY: 0.25
 ```
 
 ### What matters most
@@ -213,7 +235,7 @@ A post is most likely to rank highly when it is:
 - being read actively,
 - connected to a trending topic,
 - written with enough substance to avoid quality penalties,
-- less than 24 hours old or gaining early interaction velocity.
+- gaining interaction velocity (at any age), with an extra amplifier while less than 24 hours old.
 
 ## Files involved
 
@@ -231,9 +253,9 @@ A post is most likely to rank highly when it is:
 
 Most numeric signals use `log(1 + x)` so the ranking favors meaningful activity without letting one giant raw number dominate forever.
 
-### Why there is no global time decay
+### Why time decay applies only to the `all` window
 
-This is not a Hacker News-style feed where every post steadily decays. In a low-activity network, posts need time to gather signal. The algorithm instead uses all-time engagement plus a 24-hour additive boost, so new posts get initial visibility and then settle into the normal ranking.
+The `24h` and `7d` feeds are already bounded by their time filter, so they need no decay. The `all` feed is different: log-dampened engagement never shrinks, so without decay the oldest high-total posts would occupy the top permanently. A gentle gravity divisor (`(ageHours + 2)^0.25`) keeps that feed churning while still letting genuinely evergreen content outrank mediocre new posts. New posts additionally get a 24-hour additive freshness boost so they have discovery room in a low-activity network.
 
 ### Why there are no score floors
 

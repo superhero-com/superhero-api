@@ -23,6 +23,7 @@ jest.mock('ioredis', () => {
 });
 
 import { PopularRankingService } from './popular-ranking.service';
+import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
 
 function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
   return {
@@ -844,7 +845,9 @@ describe('PopularRankingService', () => {
       };
       const svc = buildScoredService([dayOldPost, olderPost, freshPost], {});
 
-      const result = await svc.getPopularPostsPage('all', 10, 0, undefined, {
+      // 7d window: the 'all' window now applies age gravity, so equal-score
+      // posts of different ages are only expected on time-bounded windows.
+      const result = await svc.getPopularPostsPage('7d', 10, 0, undefined, {
         comments: 'med',
       });
       const scores = new Map(
@@ -1016,6 +1019,118 @@ describe('PopularRankingService', () => {
 
       expect(explanation.map((item) => item.id)).toEqual(
         result.items.map((item) => item.id),
+      );
+    });
+  });
+
+  describe('scoring math (velocity, gravity, emoji)', () => {
+    const noTrending = new Map<string, number>();
+
+    function scoreInput(ageHours: number, overrides: Record<string, any> = {}) {
+      return {
+        content: 'a perfectly reasonable amount of content',
+        comments: 0,
+        tipsAmountAE: 0,
+        tipsCount: 0,
+        uniqueTippers: 0,
+        reads: 0,
+        topics: [],
+        createdAt: new Date(
+          Date.now() - ageHours * 60 * 60 * 1000,
+        ).toISOString(),
+        ...overrides,
+      };
+    }
+
+    it('seeds interactionsPerHour weight from config for the default feed', () => {
+      const weights = (service as any).resolveWeights();
+      expect(weights.interactionsPerHour).toBe(
+        POPULAR_RANKING_CONFIG.WEIGHTS.interactionsPerHour,
+      );
+      expect(weights.interactionsPerHour).toBeGreaterThan(0);
+    });
+
+    it('scales the interactionsPerHour override from the config default', () => {
+      const weights = (service as any).resolveWeights({
+        interactionsPerHour: 'high',
+      });
+      expect(weights.interactionsPerHour).toBeCloseTo(
+        POPULAR_RANKING_CONFIG.WEIGHTS.interactionsPerHour *
+          POPULAR_RANKING_CONFIG.CUSTOMIZATION.SCALE_MULTIPLIERS.high,
+      );
+    });
+
+    it('keeps a positive velocity contribution past the freshness window on default weights', () => {
+      // Both posts are past FRESHNESS_BOOST_HOURS with identical totals, so
+      // freshness-gated terms are zero for both and any score gap comes from
+      // the always-on interactionsPerHour term.
+      const weights = (service as any).resolveWeights();
+      const momentum = (service as any).computeScore(
+        noTrending,
+        scoreInput(POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS + 10, {
+          comments: 48,
+        }),
+        weights,
+        '7d',
+      );
+      const slowBurn = (service as any).computeScore(
+        noTrending,
+        scoreInput(160, { comments: 48 }),
+        weights,
+        '7d',
+      );
+      expect(momentum).toBeGreaterThan(slowBurn);
+    });
+
+    it("decays older posts in the 'all' window given identical engagement", () => {
+      const weights = (service as any).resolveWeights();
+      const newer = (service as any).computeScore(
+        noTrending,
+        scoreInput(24, { comments: 20, reads: 100 }),
+        weights,
+        'all',
+      );
+      const older = (service as any).computeScore(
+        noTrending,
+        scoreInput(24 * 30, { comments: 20, reads: 100 }),
+        weights,
+        'all',
+      );
+      expect(newer).toBeGreaterThan(older);
+    });
+
+    it("does not decay time-bounded windows' scores by age gravity", () => {
+      // Same totals, same age: gravity applies only to 'all', so the '24h'
+      // score must be strictly higher than the gravity-divided 'all' score.
+      const weights = (service as any).resolveWeights();
+      const input = scoreInput(10, { comments: 20 });
+      const windowed = (service as any).computeScore(
+        noTrending,
+        input,
+        weights,
+        '24h',
+      );
+      const allWindow = (service as any).computeScore(
+        noTrending,
+        input,
+        weights,
+        'all',
+      );
+      expect(windowed).toBeGreaterThan(allWindow);
+    });
+
+    it('counts every emoji, not just the first match', () => {
+      const svc = service as any;
+      expect(svc.countEmojis('nice 😀 post 😀 with 😀 five 😀 emojis 😀')).toBe(
+        5,
+      );
+      expect(svc.countEmojis('plain text with 123 #hash and *star')).toBe(0);
+    });
+
+    it('penalizes short emoji-only posts in content quality', () => {
+      const svc = service as any;
+      expect(svc.computeContentQuality('😂😂😂😂😂')).toBeLessThan(
+        svc.computeContentQuality('hello'),
       );
     });
   });
