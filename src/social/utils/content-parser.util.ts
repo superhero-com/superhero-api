@@ -74,8 +74,9 @@ function normalizeTopic(topic: string): string {
   // Remove the # prefix if present
   const withoutHash = topic.startsWith('#') ? topic.slice(1) : topic;
 
-  // First, convert camelCase to kebab-case
-  const kebabCase = withoutHash.replace(/([a-z])([A-Z])/g, '$1-$2');
+  // camelCase -> kebab-case, in any script that has letter case. Must stay in
+  // step with `normalizeTagName`, or a trending tag never matches its topic.
+  const kebabCase = withoutHash.replace(/(\p{Ll})(\p{Lu})/gu, '$1-$2');
 
   return (
     kebabCase

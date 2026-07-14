@@ -599,6 +599,61 @@ describe('TokensService', () => {
     });
   });
 
+  describe('lookup by name or symbol', () => {
+    const lookupQueryBuilder = () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      tokensRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      return qb;
+    };
+
+    it('folds the input so /tokens/привет resolves like /tokens/ПРИВЕТ', async () => {
+      const qb = lookupQueryBuilder();
+
+      await service.findByNameOrSymbol('привет');
+
+      // The column stays bare so the btree index on name/symbol is still used;
+      // it is the caller's input that gets folded onto the stored symbol.
+      expect(qb.where).toHaveBeenCalledWith('token.name = :name', {
+        name: 'ПРИВЕТ',
+      });
+      expect(qb.orWhere).toHaveBeenCalledWith('token.symbol = :name', {
+        name: 'ПРИВЕТ',
+      });
+    });
+
+    it('leaves caseless symbols untouched', async () => {
+      const qb = lookupQueryBuilder();
+
+      await service.findByNameOrSymbol('汉字');
+
+      expect(qb.where).toHaveBeenCalledWith('token.name = :name', {
+        name: '汉字',
+      });
+    });
+
+    it('keeps address matching case-sensitive, since base58 is', async () => {
+      const qb = lookupQueryBuilder();
+
+      await service.findByAddress('ct_Sale');
+
+      // Addresses must NOT be folded — base58 is case-significant.
+      expect(qb.where).toHaveBeenCalledWith('token.address = :address', {
+        address: 'ct_Sale',
+      });
+      expect(qb.orWhere).toHaveBeenCalledWith('token.sale_address = :address', {
+        address: 'ct_Sale',
+      });
+      // ...while the name/symbol branches of the same query are folded.
+      expect(qb.orWhere).toHaveBeenCalledWith('token.name = :symbol', {
+        symbol: 'CT_SALE',
+      });
+    });
+  });
+
   describe('SQL parameterization', () => {
     it('removes duplicated sale addresses in bounded batches', async () => {
       tokensRepository.query.mockResolvedValueOnce([{ ctid: '(0,1)' }]);

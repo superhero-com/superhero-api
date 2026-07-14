@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTag } from '../entities/trending-tags.entity';
+import { normalizeTagName } from '../utils/tag-name.util';
 
 @Injectable()
 export class TrendingTagsService {
@@ -37,23 +38,6 @@ export class TrendingTagsService {
   }
 
   /**
-   * Process and normalize tag name according to business rules:
-   * - Convert to uppercase
-   * - Remove special characters (only A-Z, 0-9 allowed)
-   * - Convert camelCase to kebab-case
-   */
-  private normalizeTag(tag: string): string {
-    // First, convert camelCase to kebab-case
-    const kebabCase = tag.replace(/([a-z])([A-Z])/g, '$1-$2');
-
-    // Convert to uppercase and remove all special characters except alphanumeric and hyphens
-    const normalized = kebabCase.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-
-    // Clean up multiple hyphens and leading/trailing hyphens
-    return normalized.replace(/-+/g, '-').replace(/^-|-$/g, '');
-  }
-
-  /**
    * Create trending tags from external provider data
    */
   async createTrendingTags(
@@ -72,7 +56,7 @@ export class TrendingTagsService {
 
     for (const item of data.items) {
       try {
-        const normalizedTag = this.normalizeTag(item.tag);
+        const normalizedTag = normalizeTagName(item.tag);
 
         // Skip if normalized tag is empty
         if (!normalizedTag) {

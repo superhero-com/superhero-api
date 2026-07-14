@@ -28,6 +28,7 @@ import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Post } from '@/social/entities/post.entity';
 import { buildTokenMentionExistsSql } from '@/social/utils/token-mentions-sql.util';
+import { normalizeTokenSymbol } from './utils/token-symbol.util';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -212,8 +213,8 @@ export class TokensService {
   async findByNameOrSymbol(name: string) {
     return this.tokensRepository
       .createQueryBuilder('token')
-      .where('token.name = :name', { name })
-      .orWhere('token.symbol = :name', { name })
+      .where('token.name = :name', { name: normalizeTokenSymbol(name) })
+      .orWhere('token.symbol = :name', { name: normalizeTokenSymbol(name) })
       .getOne();
   }
 
@@ -223,10 +224,19 @@ export class TokensService {
   ): Promise<Token | null> {
     const token = await this.tokensRepository
       .createQueryBuilder('token')
+      // Addresses are base58 and case-significant, so they stay exact. Names and
+      // symbols are the on-chain community name, which the collections only ever
+      // permit in uppercase (A-Z, А-Я) or a caseless script — so folding the
+      // *input* makes `/tokens/привет` resolve like `/tokens/ПРИВЕТ` while still
+      // hitting the btree indexes on name/symbol (UPPER(column) would not).
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
-      .orWhere('token.name = :address', { address })
-      .orWhere('token.symbol = :address', { address })
+      .orWhere('token.name = :symbol', {
+        symbol: normalizeTokenSymbol(address),
+      })
+      .orWhere('token.symbol = :symbol', {
+        symbol: normalizeTokenSymbol(address),
+      })
       .getOne();
 
     if (!token) {
