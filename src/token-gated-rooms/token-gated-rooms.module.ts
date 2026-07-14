@@ -4,7 +4,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
 import { Account } from '@/account/entities/account.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { SyncState } from '@/mdw-sync/entities/sync-state.entity';
 import tgrConfig from './config/tgr.config';
 import { prefixQueue, TGR_QUEUE_NAMES } from './config/queue-prefix';
@@ -61,9 +60,6 @@ const TGR_ENTITIES = [
   RoomBackfillState,
   Account,
   Token,
-  // `token_holder` is the canonical, already-populated holder ledger (BCL indexer
-  // + MDW reconcile). EligibilityService reads it directly — see its balance read.
-  TokenHolder,
   SyncState,
 ];
 

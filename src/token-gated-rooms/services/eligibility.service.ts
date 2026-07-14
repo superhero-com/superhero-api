@@ -10,7 +10,7 @@ import {
   RoomMembershipRelayState,
   RoomMembershipRole,
 } from '../entities/room-membership.entity';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
+import { TokenBalance } from '../entities/token-balance.entity';
 import { IdentityService } from './identity.service';
 import tgrConfig from '../config/tgr.config';
 import {
@@ -102,8 +102,8 @@ export class EligibilityService {
     private readonly communityRoomRepo: Repository<CommunityRoom>,
     @InjectRepository(RoomMembership)
     private readonly membershipRepo: Repository<RoomMembership>,
-    @InjectRepository(TokenHolder)
-    private readonly tokenHolderRepo: Repository<TokenHolder>,
+    @InjectRepository(TokenBalance)
+    private readonly tokenBalanceRepo: Repository<TokenBalance>,
     private readonly identity: IdentityService,
     private readonly eventEmitter: EventEmitter2,
     @Inject(tgrConfig.KEY)
@@ -272,7 +272,7 @@ export class EligibilityService {
    * `room_membership` rows, so it cannot bootstrap a brand-new room whose holders
    * predate it (the common case for the existing 54k-token registry). This walks
    * the union of:
-   *   - current positive holders of the room's AEX9 token (`token_holder`),
+   *   - current positive holders of the room's AEX9 token (`token_balance`),
    *   - existing membership rows (so a holder who dropped to zero is demoted), and
    *   - configured moderators (admins keep a row regardless of balance, §6.7),
    * recomputing each. Returns the number of `eligible` flips.
@@ -290,17 +290,17 @@ export class EligibilityService {
     const addresses = new Set<string>();
 
     // 1) All holders of the room's AEX9 token — load balances ONCE into a map so
-    //    the per-member recompute below never re-reads token_holder (perf).
-    const holders = await this.tokenHolderRepo.find({
-      where: { aex9_address: room.token_address },
-      select: ['address', 'balance'],
+    //    the per-member recompute below never re-reads token_balance (perf).
+    const holders = await this.tokenBalanceRepo.find({
+      where: { token_address: room.token_address },
+      select: ['holder_address', 'balance'],
     });
     const balanceByAddress = new Map<string, BigNumber>();
     for (const holder of holders) {
       const bal = new BigNumber(holder.balance ?? 0);
-      balanceByAddress.set(holder.address, bal);
+      balanceByAddress.set(holder.holder_address, bal);
       if (bal.gt(0)) {
-        addresses.add(holder.address);
+        addresses.add(holder.holder_address);
       }
     }
 
@@ -382,24 +382,25 @@ export class EligibilityService {
     if (room.deleted) {
       eligible = false;
     } else {
-      // Eligibility reads the canonical, already-populated holder ledger
-      // (`token_holder`, maintained by the BCL indexer + MDW reconcile) rather than
-      // a TGR-private balance table. `community_room.token_address` IS the AEX9
-      // contract address (room-state.service sets it from `Token.address`), so it
-      // maps directly to `token_holder.aex9_address`. Raw-vs-raw compare — both are
-      // base units (token_holder stores balance × 10^decimals).
+      // Eligibility reads `token_balance`, the ledger kept current by the AEX9
+      // transfer plugin for EVERY transfer (plain wallet-to-wallet, DEX swap,
+      // airdrop) — not `token_holder`, which only reacts to BCL buy/sell calls
+      // and would go stale on any other transfer. `community_room.token_address`
+      // IS the AEX9 contract address (room-state.service sets it from
+      // `Token.address`), so it maps directly to `token_balance.token_address`.
+      // Raw-vs-raw compare — both are base units.
       // Perf: the seed/batch path (recomputeRoomFromHolders) has ALREADY loaded
       // every holder's balance, so it passes `balanceRaw` to skip a per-member
-      // token_holder read (O(N) reads → 0 for a whole-room recompute). When not
+      // token_balance read (O(N) reads → 0 for a whole-room recompute). When not
       // provided (the single-member reactive paths), read it here.
       const holderBalance =
         balanceRaw !== undefined
           ? balanceRaw
           : ((
-              await this.tokenHolderRepo.findOne({
+              await this.tokenBalanceRepo.findOne({
                 where: {
-                  aex9_address: room.token_address,
-                  address: memberAddress,
+                  token_address: room.token_address,
+                  holder_address: memberAddress,
                 },
               })
             )?.balance ?? null);

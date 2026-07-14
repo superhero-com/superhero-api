@@ -529,14 +529,14 @@ describe('EligibilityService.recomputeRoom (cursor batching, mocked QB)', () => 
 });
 
 describe('EligibilityService.recomputeRoomFromHolders (seed, batched reads)', () => {
-  it('seeds members from the holder ledger with NO per-member token_holder/membership reads', async () => {
+  it('seeds members from the holder ledger with NO per-member token_balance/membership reads', async () => {
     const room = makeRoom(); // threshold 1000
     const communityRoomRepo = { findOne: jest.fn().mockResolvedValue(room) };
     // One positive holder (eligible) + one zero-balance row (not a holder).
-    const tokenHolderRepo = {
+    const tokenBalanceRepo = {
       find: jest.fn().mockResolvedValue([
-        { address: 'ak_holder', balance: new BigNumber('5000') },
-        { address: 'ak_zero', balance: new BigNumber('0') },
+        { holder_address: 'ak_holder', balance: new BigNumber('5000') },
+        { holder_address: 'ak_zero', balance: new BigNumber('0') },
       ]),
       findOne: jest.fn(), // MUST NOT be called — balances are pre-loaded
     };
@@ -551,7 +551,7 @@ describe('EligibilityService.recomputeRoomFromHolders (seed, batched reads)', ()
     const service = new EligibilityService(
       communityRoomRepo as any,
       membershipRepo as any,
-      tokenHolderRepo as any,
+      tokenBalanceRepo as any,
       identity as any,
       emitter,
       { reconcileBatchSize: 500 } as any,
@@ -567,9 +567,9 @@ describe('EligibilityService.recomputeRoomFromHolders (seed, batched reads)', ()
     );
     expect(membershipRepo.insert.mock.calls[0][0].eligible).toBe(true);
     // The whole point: batched — zero per-member reads.
-    expect(tokenHolderRepo.findOne).not.toHaveBeenCalled();
+    expect(tokenBalanceRepo.findOne).not.toHaveBeenCalled();
     expect(membershipRepo.findOne).not.toHaveBeenCalled();
-    expect(tokenHolderRepo.find).toHaveBeenCalledTimes(1);
+    expect(tokenBalanceRepo.find).toHaveBeenCalledTimes(1);
     expect(membershipRepo.find).toHaveBeenCalledTimes(1);
   });
 });

@@ -27,7 +27,7 @@ import { RoomBackfillService } from './room-backfill.service';
  * service is the ACTIVE path the client calls to force a recheck. For the caller +
  * room it:
  *
- *  1. **Recomputes eligibility** from the live `token_holder` ledger
+ *  1. **Recomputes eligibility** from the live `token_balance` ledger
  *     ({@link EligibilityService.recomputeMember}) — picks up a just-settled buy +
  *     resolves the Nostr pubkey, so a fresh holder gets a desired-state row.
  *  2. **Reconciles against the relay** (the authoritative member set, when a relay

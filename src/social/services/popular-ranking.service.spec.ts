@@ -1095,37 +1095,48 @@ describe('PopularRankingService', () => {
       const weights = (service as any).resolveWeights();
       const cap = POPULAR_RANKING_CONFIG.READS_PER_INTERACTION_CAP;
 
-      // Zero active interactions: a million reads score the same as the cap.
-      const inflated = (service as any).computeScore(
-        noTrending,
-        scoreInput(10, { reads: 1_000_000 }),
-        weights,
-        '24h',
-      );
-      const atCap = (service as any).computeScore(
-        noTrending,
-        scoreInput(10, { reads: cap }),
-        weights,
-        '24h',
-      );
-      expect(inflated).toBeCloseTo(atCap, 10);
+      // `computeScore` -> `computeFreshnessFactor`/`computeInteractionsPerHour`
+      // call `Date.now()` live on every invocation, so two calls a few
+      // microseconds apart get a genuinely different age-in-hours and thus a
+      // genuinely different (if tiny) score — flaking a `toBeCloseTo(..., 10)`
+      // assertion regardless of a shared `createdAt`. Freeze `Date.now()` for
+      // each paired comparison so both calls see identical elapsed time.
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.now());
+      try {
+        // Zero active interactions: a million reads score the same as the cap.
+        const inflated = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { reads: 1_000_000 }),
+          weights,
+          '24h',
+        );
+        const atCap = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { reads: cap }),
+          weights,
+          '24h',
+        );
+        expect(inflated).toBeCloseTo(atCap, 10);
 
-      // Active engagement raises the cap, so real interactions unlock more
-      // read credit.
-      const engaged = (service as any).computeScore(
-        noTrending,
-        scoreInput(10, { comments: 10, reads: 1_000_000 }),
-        weights,
-        '24h',
-      );
-      const engagedAtCap = (service as any).computeScore(
-        noTrending,
-        scoreInput(10, { comments: 10, reads: cap * 11 }),
-        weights,
-        '24h',
-      );
-      expect(engaged).toBeCloseTo(engagedAtCap, 10);
-      expect(engaged).toBeGreaterThan(inflated);
+        // Active engagement raises the cap, so real interactions unlock more
+        // read credit.
+        const engaged = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { comments: 10, reads: 1_000_000 }),
+          weights,
+          '24h',
+        );
+        const engagedAtCap = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { comments: 10, reads: cap * 11 }),
+          weights,
+          '24h',
+        );
+        expect(engaged).toBeCloseTo(engagedAtCap, 10);
+        expect(engaged).toBeGreaterThan(inflated);
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
 
     it('applies bounded, deterministic tie rotation per post id', () => {

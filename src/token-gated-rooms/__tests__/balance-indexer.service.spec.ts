@@ -125,6 +125,36 @@ describe('BalanceIndexerService', () => {
       // height was newer → only an updated_height bump, not a balance save
       expect(tokenBalanceRepository.update).toHaveBeenCalled();
     });
+
+    it('routes read+write through the passed transactional manager (joins the outer tx), not the default repo', async () => {
+      const { service, tokenBalanceRepository } = makeService({
+        existingBalance: null,
+      });
+      // A manager whose repository records the writes, so we can prove the
+      // default (auto-committing) repo was NOT touched under a transaction.
+      const txRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation((x) => x),
+        save: jest.fn().mockImplementation(async (x) => x),
+        update: jest.fn().mockResolvedValue(undefined),
+      };
+      const manager = { getRepository: jest.fn().mockReturnValue(txRepo) };
+
+      const next = await service.applyDelta(
+        TOKEN,
+        HOLDER,
+        new BigNumber('1000'),
+        50,
+        manager as any,
+      );
+
+      expect(next?.toFixed()).toBe('1000');
+      // The write went to the transactional repo…
+      expect(txRepo.save).toHaveBeenCalledTimes(1);
+      // …and the default connection repo was never used (would survive rollback).
+      expect(tokenBalanceRepository.findOne).not.toHaveBeenCalled();
+      expect(tokenBalanceRepository.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('allowlist', () => {

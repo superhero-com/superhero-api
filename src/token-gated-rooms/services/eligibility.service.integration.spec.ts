@@ -7,7 +7,6 @@ import { BigNumber } from 'bignumber.js';
 import { DATABASE_CONFIG } from '@/configs/database';
 import { Account } from '@/account/entities/account.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { CommunityRoom } from '@/token-gated-rooms/entities/community-room.entity';
 import { RoomMembership } from '@/token-gated-rooms/entities/room-membership.entity';
 import { RoomNotificationPreference } from '@/token-gated-rooms/entities/room-notification-preference.entity';
@@ -81,7 +80,7 @@ d('EligibilityService (integration)', () => {
   let accountRepo: Repository<Account>;
   let roomRepo: Repository<CommunityRoom>;
   let membershipRepo: Repository<RoomMembership>;
-  let holderRepo: Repository<TokenHolder>;
+  let balanceRepo: Repository<TokenBalance>;
   let eventEmitter: EventEmitter2;
 
   beforeAll(async () => {
@@ -90,7 +89,6 @@ d('EligibilityService (integration)', () => {
       synchronize: false,
       entities: [
         Token,
-        TokenHolder,
         Account,
         CommunityRoom,
         RoomMembership,
@@ -117,7 +115,6 @@ d('EligibilityService (integration)', () => {
             CommunityRoom,
             RoomMembership,
             TokenBalance,
-            TokenHolder,
             Token,
           ],
         }),
@@ -125,7 +122,7 @@ d('EligibilityService (integration)', () => {
           Account,
           CommunityRoom,
           RoomMembership,
-          TokenHolder,
+          TokenBalance,
         ]),
       ],
       providers: [
@@ -148,7 +145,7 @@ d('EligibilityService (integration)', () => {
     accountRepo = moduleRef.get(getRepositoryToken(Account));
     roomRepo = moduleRef.get(getRepositoryToken(CommunityRoom));
     membershipRepo = moduleRef.get(getRepositoryToken(RoomMembership));
-    holderRepo = moduleRef.get(getRepositoryToken(TokenHolder));
+    balanceRepo = moduleRef.get(getRepositoryToken(TokenBalance));
     eventEmitter = moduleRef.get(EventEmitter2);
   }, 90_000);
 
@@ -168,7 +165,7 @@ d('EligibilityService (integration)', () => {
 
   async function cleanup(): Promise<void> {
     await membershipRepo.delete({ sale_address: SALE });
-    await holderRepo.delete({ aex9_address: TOKEN });
+    await balanceRepo.delete({ token_address: TOKEN });
     await roomRepo.delete({ sale_address: SALE });
     await accountRepo
       .createQueryBuilder()
@@ -204,12 +201,10 @@ d('EligibilityService (integration)', () => {
     const member = 'ak_int_elig_member';
     await seedRoom();
     await accountRepo.insert({ address: member, links: { [PROVIDER]: HEX } });
-    await holderRepo.insert({
-      id: `${member}_${TOKEN}`,
-      aex9_address: TOKEN,
-      address: member,
+    await balanceRepo.insert({
+      token_address: TOKEN,
+      holder_address: member,
       balance: new BigNumber('5000') as any,
-      block_number: 10,
     });
 
     const seen: any[] = [];
@@ -239,12 +234,10 @@ d('EligibilityService (integration)', () => {
     const member = 'ak_int_elig_member';
     await seedRoom();
     await accountRepo.insert({ address: member, links: { [PROVIDER]: HEX } });
-    await holderRepo.insert({
-      id: `${member}_${TOKEN}`,
-      aex9_address: TOKEN,
-      address: member,
+    await balanceRepo.insert({
+      token_address: TOKEN,
+      holder_address: member,
       balance: new BigNumber('5000') as any,
-      block_number: 10,
     });
     // Start from a published-eligible row.
     await membershipRepo.insert({
@@ -291,12 +284,10 @@ d('EligibilityService (integration)', () => {
     // All linked + all above threshold → all should become eligible.
     for (const m of members) {
       await accountRepo.insert({ address: m, links: { [PROVIDER]: HEX } });
-      await holderRepo.insert({
-        id: `${m}_${TOKEN}`,
-        aex9_address: TOKEN,
-        address: m,
+      await balanceRepo.insert({
+        token_address: TOKEN,
+        holder_address: m,
         balance: new BigNumber('5000') as any,
-        block_number: 10,
       });
       // Pre-create the membership rows (ineligible) so the cursor scan has rows.
       await membershipRepo.insert({
@@ -324,12 +315,10 @@ d('EligibilityService (integration)', () => {
     const member = 'ak_int_elig_member';
     await seedRoom();
     await accountRepo.insert({ address: member, links: { [PROVIDER]: HEX } });
-    await holderRepo.insert({
-      id: `${member}_${TOKEN}`,
-      aex9_address: TOKEN,
-      address: member,
+    await balanceRepo.insert({
+      token_address: TOKEN,
+      holder_address: member,
       balance: new BigNumber('5000') as any,
-      block_number: 10,
     });
 
     const room = await roomRepo.findOneByOrFail({ sale_address: SALE });

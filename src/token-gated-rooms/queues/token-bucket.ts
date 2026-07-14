@@ -18,7 +18,10 @@ export interface TokenBucketDeps {
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 
 export class TokenBucket {
   private readonly capacity: number;

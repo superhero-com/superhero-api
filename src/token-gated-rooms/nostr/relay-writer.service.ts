@@ -275,6 +275,7 @@ export class RelayWriterService
       };
 
       const timer = setTimeout(finish, this.config.publishAckTimeoutMs);
+      timer.unref?.();
 
       const sub = relay.subscribe(
         [{ kinds: [KIND_GROUP_MEMBERS], '#d': [groupId] }],
@@ -413,6 +414,10 @@ export class RelayWriterService
       this.reconnectTimer = undefined;
       void this.reconnect();
     }, delay);
+    // `.unref()` so a pending reconnect backoff (up to RELAY_RECONNECT_MAX_MS)
+    // never keeps the process alive — mirrors the equivalent timer in
+    // relay-subscriber.service.ts and this file's own healthWatchdog.
+    this.reconnectTimer.unref?.();
   }
 
   private async reconnect(): Promise<void> {
@@ -443,6 +448,7 @@ export class RelayWriterService
   private withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => reject(new PublishTimeoutError(ms)), ms);
+      timer.unref?.();
       p.then(
         (v) => {
           clearTimeout(timer);

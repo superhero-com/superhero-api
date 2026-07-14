@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { ConfigType } from '@nestjs/config';
-import { IsNull, Not, Repository } from 'typeorm';
+import { EntityManager, IsNull, Not, Repository } from 'typeorm';
 import { BigNumber } from 'bignumber.js';
 import { Token } from '@/tokens/entities/token.entity';
 import { LIVE_TX_EVENT, LiveTxEventPayload } from '@/mdw-sync/events';
@@ -172,14 +172,26 @@ export class BalanceIndexerService {
    * (never persist negative). Returns the new balance iff it actually changed
    * (so the caller can emit `tgr.balance.changed`), else `null`. Does NOT emit —
    * the sync service emits after the whole tx's legs are applied/idempotency-safe.
+   *
+   * `manager` (optional): when the caller is inside an outer DB transaction
+   * (e.g. the BCL buy/sell processor mirroring its delta here), pass the
+   * transactional `EntityManager` so the `token_balance` read+write joins that
+   * transaction and rolls back atomically with it. Without it, the AEX9-transfer
+   * indexer path (which has no surrounding transaction) uses the default
+   * connection unchanged.
    */
   async applyDelta(
     tokenAddress: string,
     holderAddress: string,
     delta: BigNumber,
     updatedHeight: number,
+    manager?: EntityManager,
   ): Promise<BigNumber | null> {
-    const existing = await this.tokenBalanceRepository.findOne({
+    const repo = manager
+      ? manager.getRepository(TokenBalance)
+      : this.tokenBalanceRepository;
+
+    const existing = await repo.findOne({
       where: { token_address: tokenAddress, holder_address: holderAddress },
     });
 
@@ -194,7 +206,7 @@ export class BalanceIndexerService {
       // No-op (e.g. a clamp that lands on the same value): keep height fresh but
       // do not signal a change.
       if (updatedHeight > existing.updated_height) {
-        await this.tokenBalanceRepository.update(
+        await repo.update(
           { token_address: tokenAddress, holder_address: holderAddress },
           { updated_height: updatedHeight },
         );
@@ -202,8 +214,8 @@ export class BalanceIndexerService {
       return null;
     }
 
-    await this.tokenBalanceRepository.save(
-      this.tokenBalanceRepository.create({
+    await repo.save(
+      repo.create({
         token_address: tokenAddress,
         holder_address: holderAddress,
         balance: next,

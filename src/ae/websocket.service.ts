@@ -32,6 +32,7 @@ export class WebSocketService implements OnModuleDestroy {
   subscribersQueue: IMiddlewareWebSocketSubscriptionMessage[] = [];
   isWsConnected = false;
   reconnectInterval: NodeJS.Timeout;
+  private openPollInterval?: NodeJS.Timeout;
 
   private readonly boundOpen = this.handleWebsocketOpen.bind(this);
   private readonly boundClose = this.handleWebsocketClose.bind(this);
@@ -56,12 +57,18 @@ export class WebSocketService implements OnModuleDestroy {
 
   async handleWebsocketOpen() {
     await new Promise((resolve) => {
-      const interval = setInterval(() => {
+      // Tracked on the instance (not a bare local) so `onModuleDestroy` can
+      // clear it even if the socket never reaches OPEN (e.g. no network
+      // access in a test/CI environment) — otherwise this polls forever and
+      // keeps the process alive. `.unref()` so it never blocks exit either way.
+      this.openPollInterval = setInterval(() => {
         if (this.wsClient.readyState === WebSocket.OPEN) {
-          clearInterval(interval);
+          clearInterval(this.openPollInterval);
+          this.openPollInterval = undefined;
           resolve(true);
         }
       }, 100);
+      this.openPollInterval.unref?.();
     });
 
     this.isWsConnected = true;
@@ -70,9 +77,10 @@ export class WebSocketService implements OnModuleDestroy {
         this.wsClient.send(JSON.stringify(message));
       });
     } catch (error) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         this.handleWebsocketOpen();
       }, WEB_SOCKET_RECONNECT_TIMEOUT);
+      timer.unref?.();
     }
   }
 
@@ -140,6 +148,7 @@ export class WebSocketService implements OnModuleDestroy {
         this.reconnect();
       }
     }, WEB_SOCKET_RECONNECT_TIMEOUT);
+    this.reconnectInterval.unref?.();
   }
 
   private reconnect() {
@@ -300,6 +309,10 @@ export class WebSocketService implements OnModuleDestroy {
 
   onModuleDestroy() {
     clearInterval(this.reconnectInterval);
+    if (this.openPollInterval) {
+      clearInterval(this.openPollInterval);
+      this.openPollInterval = undefined;
+    }
     this.disconnect();
   }
 
@@ -310,7 +323,10 @@ export class WebSocketService implements OnModuleDestroy {
       this.disconnect();
       // Wait for 1 second to ensure complete disconnection
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 1000);
+      timer.unref?.();
+    });
     this.connect(ACTIVE_NETWORK.websocketUrl);
   }
 }
