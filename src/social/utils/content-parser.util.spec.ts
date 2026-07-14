@@ -124,6 +124,29 @@ describe('Content Parser Utilities', () => {
         'CAMELCASE',
       ]);
     });
+
+    it('extracts mentions of tokens from the non-Latin collections', () => {
+      expect(extractTrendMentions('buying #汉字 today')).toEqual(['汉字']);
+      expect(extractTrendMentions('buying #مرحبا today')).toEqual(['مرحبا']);
+      expect(extractTrendMentions('buying #ПРИВЕТ today')).toEqual(['ПРИВЕТ']);
+    });
+
+    it('uppercases a Cyrillic mention to the symbol the token is stored under', () => {
+      // The RUSSIAN collection only permits А-Я, so the on-chain symbol is
+      // uppercase; a lowercase hashtag has to fold onto it to resolve.
+      expect(extractTrendMentions('держим #привет крепко')).toEqual(['ПРИВЕТ']);
+      expect(extractTrendMentions('и #ёлка тоже')).toEqual(['ЁЛКА']);
+    });
+
+    it('extracts Latin and non-Latin mentions from the same post', () => {
+      expect(
+        extractTrendMentions('swapping #WORDS-1 for #汉字 and #привет'),
+      ).toEqual(['WORDS-1', '汉字', 'ПРИВЕТ']);
+    });
+
+    it('deduplicates a non-Latin mention repeated in one post', () => {
+      expect(extractTrendMentions('#汉字 then #汉字 again')).toEqual(['汉字']);
+    });
   });
 
   describe('extractMedia', () => {
