@@ -117,4 +117,99 @@ describe('PostsController', () => {
       expect.any(Object),
     );
   });
+
+  describe('trend mention performance', () => {
+    const attachTrendMentions = (
+      items: Array<{ id: string; content: string }>,
+      tokens: Array<Record<string, any>>,
+    ) => {
+      const tokenQueryBuilder = {
+        leftJoinAndMapOne: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(tokens),
+      };
+      const tokenRepository = {
+        createQueryBuilder: jest.fn().mockReturnValue(tokenQueryBuilder),
+      };
+      const trendController = new PostsController(
+        {} as any,
+        tokenRepository as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      return {
+        tokenQueryBuilder,
+        run: () =>
+          (trendController as any).attachTrendMentionsPerformance(items),
+      };
+    };
+
+    it('resolves a hashtag naming a token from a non-Latin collection', async () => {
+      const items = [{ id: 'post-1', content: 'accumulating #汉字 早期' }];
+      const { tokenQueryBuilder, run } = attachTrendMentions(items, [
+        { symbol: '汉字', sale_address: 'ct_chinese', performance: { pct: 1 } },
+      ]);
+
+      await run();
+
+      expect(tokenQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'UPPER(token.symbol) IN (:...names)',
+        { names: ['汉字'] },
+      );
+      expect((items[0] as any).trend_mentions).toEqual([
+        {
+          name: '汉字',
+          sale_address: 'ct_chinese',
+          performance: { pct: 1 },
+        },
+      ]);
+    });
+
+    it('resolves a lowercase Cyrillic hashtag onto the uppercase symbol', async () => {
+      const items = [{ id: 'post-2', content: 'держим #привет' }];
+      const { tokenQueryBuilder, run } = attachTrendMentions(items, [
+        { symbol: 'ПРИВЕТ', sale_address: 'ct_russian', performance: null },
+      ]);
+
+      await run();
+
+      expect(tokenQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'UPPER(token.symbol) IN (:...names)',
+        { names: ['ПРИВЕТ'] },
+      );
+      expect((items[0] as any).trend_mentions).toEqual([
+        { name: 'ПРИВЕТ', sale_address: 'ct_russian', performance: null },
+      ]);
+    });
+
+    it('resolves Latin and non-Latin hashtags in the same post', async () => {
+      const items = [{ id: 'post-3', content: 'swapping #WORDS-1 for #汉字' }];
+      const { run } = attachTrendMentions(items, [
+        { symbol: 'WORDS-1', sale_address: 'ct_words', performance: null },
+        { symbol: '汉字', sale_address: 'ct_chinese', performance: null },
+      ]);
+
+      await run();
+
+      expect((items[0] as any).trend_mentions).toEqual([
+        { name: 'WORDS-1', sale_address: 'ct_words', performance: null },
+        { name: '汉字', sale_address: 'ct_chinese', performance: null },
+      ]);
+    });
+
+    it('reports a mention with no matching token as an unresolved trend', async () => {
+      const items = [{ id: 'post-4', content: 'hyping #汉字' }];
+      const { run } = attachTrendMentions(items, []);
+
+      await run();
+
+      expect((items[0] as any).trend_mentions).toEqual([
+        { name: '汉字', sale_address: null, performance: null },
+      ]);
+    });
+  });
 });
