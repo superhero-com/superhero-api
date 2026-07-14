@@ -1206,6 +1206,30 @@ describe('PopularRankingService', () => {
         svc.computeContentQuality('hello'),
       );
     });
+
+    it('scores non-Latin posts on par with Latin ones of the same length', () => {
+      // The alphanumeric ratio used an ASCII-only class, so a wholly Chinese,
+      // Arabic or Cyrillic post scored 0 on that term and ranked below an
+      // otherwise identical Latin post.
+      const svc = service as any;
+      const latin = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const baseline = svc.computeContentQuality(latin);
+
+      for (const content of [
+        '汉'.repeat(latin.length),
+        'م'.repeat(latin.length),
+        'п'.repeat(latin.length),
+      ]) {
+        expect(svc.computeContentQuality(content)).toBeCloseTo(baseline, 10);
+      }
+    });
+
+    it('still discounts a post of pure punctuation', () => {
+      const svc = service as any;
+      expect(svc.computeContentQuality('!'.repeat(30))).toBeLessThan(
+        svc.computeContentQuality('a'.repeat(30)),
+      );
+    });
   });
 
   describe('scheduled refresh locking', () => {

@@ -6,6 +6,7 @@ import {
   AeContractAddressPipe,
   AeTransactionHashPipe,
   OpaqueIdPipe,
+  TopicParamPipe,
 } from './request-validation';
 
 describe('request validation pipes', () => {
@@ -54,5 +55,41 @@ describe('request validation pipes', () => {
     expect(() => pipe.transform('../secret', { data: 'id' })).toThrow(
       BadRequestException,
     );
+  });
+
+  describe('TopicParamPipe', () => {
+    const pipe = new TopicParamPipe();
+
+    it('accepts topics in the scripts the token collections allow', () => {
+      // GET /api/topics/name/%D8%A3%D9%86%D8%A7
+      expect(pipe.transform('أنا', { data: 'name' })).toBe('أنا');
+      expect(pipe.transform('汉字', { data: 'name' })).toBe('汉字');
+      expect(pipe.transform('ПРИВЕТ', { data: 'name' })).toBe('ПРИВЕТ');
+      expect(pipe.transform('привет', { data: 'name' })).toBe('привет');
+    });
+
+    it('still accepts the Latin topics it always did', () => {
+      expect(pipe.transform('WORDS-1', { data: 'name' })).toBe('WORDS-1');
+      expect(pipe.transform('some topic_name.v2', { data: 'name' })).toBe(
+        'some topic_name.v2',
+      );
+    });
+
+    it('keeps rejecting traversal and separator characters', () => {
+      for (const value of ['../secret', 'a/b', 'a\\b', '.hidden', '-lead']) {
+        expect(() => pipe.transform(value, { data: 'name' })).toThrow(
+          BadRequestException,
+        );
+      }
+    });
+
+    it('rejects an empty or over-long topic', () => {
+      expect(() => pipe.transform('', { data: 'name' })).toThrow(
+        BadRequestException,
+      );
+      expect(() => pipe.transform('汉'.repeat(129), { data: 'name' })).toThrow(
+        BadRequestException,
+      );
+    });
   });
 });

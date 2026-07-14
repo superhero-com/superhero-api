@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Topic } from '@/social/entities/topic.entity';
 import { Post } from '@/social/entities/post.entity';
+import { normalizeTopicName } from '@/social/utils/topic-name.util';
 
 @Injectable()
 export class TopicManagementService {
@@ -31,7 +32,7 @@ export class TopicManagementService {
         continue;
       }
 
-      const normalizedName = topicName.trim().toLowerCase();
+      const normalizedName = normalizeTopicName(topicName);
 
       // Try to find existing topic
       let topic = await this.topicRepository.findOne({
