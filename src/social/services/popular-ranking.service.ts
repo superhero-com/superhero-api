@@ -1214,7 +1214,10 @@ export class PopularRankingService implements OnModuleDestroy {
     );
     const emojis = this.countEmojis(content);
     const emojiRatio = Math.min(1, emojis / Math.max(1, len));
-    const alnumMatches = content.match(/[A-Za-z0-9]/g) || [];
+    // Letters/numbers in any script: an ASCII-only class scores a wholly Chinese,
+    // Arabic or Cyrillic post at a 0 ratio, permanently forfeiting this term and
+    // ranking non-Latin posts below identical Latin ones.
+    const alnumMatches = content.match(/[\p{L}\p{N}]/gu) || [];
     const alnumRatio = Math.min(1, alnumMatches.length / Math.max(1, len));
 
     let quality = 0.6 * lengthScore + 0.2 * alnumRatio + 0.2 * (1 - emojiRatio);

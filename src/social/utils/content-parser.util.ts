@@ -50,11 +50,25 @@ export function parsePostContent(
 }
 
 /**
+ * A hashtag, scanned rather than split on whitespace: Chinese is written without
+ * spaces, so `我喜欢#汉字` has no whitespace-delimited word starting with `#` and a
+ * split-based scan finds nothing — while `extractTrendMentions` (a real regex
+ * scan) does find the token. The two extractors have to agree.
+ *
+ * The body is exactly what `TOPIC_PATTERN` in the request validation accepts, so
+ * a topic we store is always addressable at `/topics/name/:name`.
+ */
+const TOPIC_HASHTAG_PATTERN = /#([\p{L}\p{N}][\p{L}\p{N}_.-]*)/gu;
+
+/** Characters `TOPIC_PATTERN` would reject, e.g. `。`, `؟`, `!`, emoji. */
+const TOPIC_DISALLOWED_CHARS = /[^\p{L}\p{N}_.-]+/gu;
+
+/**
  * Normalize topic name according to business rules:
  * - Convert camelCase to kebab-case
  * - Convert to uppercase
- * - Keep all characters (no removal)
- * - Clean up multiple hyphens and leading/trailing hyphens
+ * - Drop characters a topic name may not contain
+ * - Clean up hyphens, and ensure it starts with a letter or number
  */
 function normalizeTopic(topic: string): string {
   // Remove the # prefix if present
@@ -63,11 +77,17 @@ function normalizeTopic(topic: string): string {
   // First, convert camelCase to kebab-case
   const kebabCase = withoutHash.replace(/([a-z])([A-Z])/g, '$1-$2');
 
-  // Convert to uppercase (but keep all characters)
-  const normalized = kebabCase.toUpperCase();
-
-  // Clean up multiple hyphens and leading/trailing hyphens
-  return normalized.replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return (
+    kebabCase
+      .toUpperCase()
+      // CJK/Arabic terminal punctuation clings to a hashtag (there is no
+      // separating space), so `#汉字。` would otherwise be stored as `汉字。` — a
+      // name TopicParamPipe rejects, making the topic's own page 400.
+      .replace(TOPIC_DISALLOWED_CHARS, '')
+      .replace(/-+/g, '-')
+      .replace(/^[_.-]+/, '')
+      .replace(/-$/, '')
+  );
 }
 
 /**
@@ -81,9 +101,7 @@ export function extractTopics(
     return [];
   }
 
-  const topics = content
-    .split(/\s+/)
-    .filter((word) => word.startsWith('#') && word.length > 1)
+  const topics = (content.match(TOPIC_HASHTAG_PATTERN) ?? [])
     .map((topic) => normalizeTopic(topic))
     .filter((topic) => topic.length > 0 && topic.length <= 50) // Reasonable length limits
     .slice(0, maxTopics);
