@@ -5,9 +5,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import { EntityManager, IsNull, LessThan, Not, Repository } from 'typeorm';
+import {
+  Brackets,
+  EntityManager,
+  In,
+  IsNull,
+  LessThan,
+  Not,
+  Repository,
+} from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { fetchJson } from '@/utils/common';
+
+const SEARCH_DEFAULT_LIMIT = 8;
+const SEARCH_MIN_LIMIT = 1;
+const SEARCH_MAX_LIMIT = 20;
+// Minimum trimmed query length before we touch the DB. A leading-wildcard
+// ILIKE ('%q%') is non-sargable (sequential scan), so we refuse 1-char terms
+// that would scan the whole table for no useful typeahead value.
+const SEARCH_MIN_QUERY_LENGTH = 2;
+const CHAIN_NAMES_MAX_ADDRESSES = 25;
 
 type AggregatedAccountRow = {
   address: string;
@@ -131,6 +148,81 @@ export class AccountService {
       total_created_tokens: row.total_created_tokens,
       total_volume: new BigNumber(row.total_volume),
     } as Account;
+  }
+
+  /**
+   * Typeahead search over accounts by address or chain name, for account
+   * autocomplete. Returns `[]` for a missing/blank term without touching the
+   * database. Accounts that have a chain name are ranked first, then by
+   * total_volume desc, so an autocomplete list surfaces "known" identities
+   * before anonymous addresses.
+   */
+  async searchByNameOrAddress(
+    q: string | undefined,
+    limit: number = SEARCH_DEFAULT_LIMIT,
+  ): Promise<Array<{ address: string; chain_name: string | null }>> {
+    const trimmed = q?.trim();
+    if (!trimmed || trimmed.length < SEARCH_MIN_QUERY_LENGTH) {
+      return [];
+    }
+
+    const clampedLimit = Math.min(
+      Math.max(limit, SEARCH_MIN_LIMIT),
+      SEARCH_MAX_LIMIT,
+    );
+    const term = `%${trimmed}%`;
+
+    const accounts = await this.accountRepository
+      .createQueryBuilder('account')
+      .select(['account.address', 'account.chain_name', 'account.total_volume'])
+      .where(
+        new Brackets((qb) => {
+          qb.where('account.address ILIKE :term', { term }).orWhere(
+            'account.chain_name ILIKE :term',
+            { term },
+          );
+        }),
+      )
+      .orderBy('(account.chain_name IS NOT NULL)', 'DESC')
+      .addOrderBy('account.total_volume', 'DESC')
+      .limit(clampedLimit)
+      .getMany();
+
+    return accounts.map((account) => ({
+      address: account.address,
+      chain_name: account.chain_name ?? null,
+    }));
+  }
+
+  /**
+   * Batch chain-name resolver, for e.g. a comparison page that needs to
+   * display chain names for a fixed set of addresses. Every requested
+   * (valid) address is present in the result map — `null` when the account
+   * is unknown or has no chain name — so callers never need to special-case
+   * a missing key.
+   */
+  async getChainNamesForAddresses(
+    addresses: string[],
+  ): Promise<Record<string, string | null>> {
+    const capped = addresses.slice(0, CHAIN_NAMES_MAX_ADDRESSES);
+    const result: Record<string, string | null> = {};
+    if (!capped.length) {
+      return result;
+    }
+
+    const accounts = await this.accountRepository.find({
+      where: { address: In(capped) },
+      select: ['address', 'chain_name'],
+    });
+
+    const chainNameByAddress = new Map(
+      accounts.map((account) => [account.address, account.chain_name ?? null]),
+    );
+
+    for (const address of capped) {
+      result[address] = chainNameByAddress.get(address) ?? null;
+    }
+    return result;
   }
 
   private static readonly ACCOUNT_BATCH_SIZE = 500;

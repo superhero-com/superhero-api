@@ -47,6 +47,62 @@
       .toolbar-row > .field.address-field {
         flex: 1;
         min-width: 280px;
+        position: relative;
+      }
+
+      .suggestions {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 0.25rem;
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.375rem;
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+        max-height: 260px;
+        overflow-y: auto;
+        z-index: 30;
+      }
+
+      .suggestions.open {
+        display: block;
+      }
+
+      .suggestion-item {
+        padding: 0.45rem 0.7rem;
+        cursor: pointer;
+        border-bottom: 1px solid #f1f5f9;
+      }
+
+      .suggestion-item:last-child {
+        border-bottom: none;
+      }
+
+      .suggestion-item:hover,
+      .suggestion-item.active {
+        background: #eff6ff;
+      }
+
+      .suggestion-item .s-name {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #1e293b;
+      }
+
+      .suggestion-item .s-name.muted {
+        font-weight: 400;
+        font-style: italic;
+        color: #94a3b8;
+      }
+
+      .suggestion-item .s-addr {
+        margin-top: 1px;
+        font-size: 0.75rem;
+        color: #94a3b8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
       }
 
       .toolbar label {
@@ -149,6 +205,19 @@
         height: 10px;
         border-radius: 50%;
         flex-shrink: 0;
+      }
+
+      .chip .chip-lines {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.2;
+      }
+
+      .chip .chip-name {
+        font-size: 0.7rem;
+        font-weight: 400;
+        font-family: "Inter", sans-serif;
+        color: #64748b;
       }
 
       .chip .remove {
@@ -266,6 +335,12 @@
         flex-shrink: 0;
       }
 
+      td.address .addr-lines {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.2;
+      }
+
       td.address .mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
           "Liberation Mono", "Courier New", monospace;
@@ -281,6 +356,14 @@
       .pnl-zero    { color: #94a3b8; }
 
       .pnl-sub {
+        display: block;
+        font-size: 0.7rem;
+        color: #94a3b8;
+        font-weight: 400;
+        margin-top: 1px;
+      }
+
+      .chain-sub {
         display: block;
         font-size: 0.7rem;
         color: #94a3b8;
@@ -351,6 +434,7 @@
               placeholder="ak_..."
               autocomplete="off"
             />
+            <div class="suggestions" id="addressSuggestions"></div>
           </div>
           <button onclick="addAddressesFromInput()">Add</button>
           <button class="secondary" onclick="clearAllAddresses()">Clear all</button>
@@ -488,6 +572,13 @@
       let sortState = loadSortState(); // { key: string|null, dir: 'asc'|'desc' }
       const charts = {};
       let runRequestId = 0; // monotonically increasing id to discard stale fetches
+      let chainNames = {}; // address -> chain_name|null, resolved via /api/accounts/chain-names
+
+      // Autocomplete state.
+      let suggestionItems = []; // current [{ address, chain_name }] suggestions
+      let suggestionActiveIndex = -1;
+      let suggestionRequestId = 0; // monotonically increasing id to discard stale searches
+      let suggestionDebounceTimer = null;
 
       // ---------- Helpers ----------
       function loadAddresses() {
@@ -703,6 +794,40 @@
           : '';
       }
 
+      function escapeHtml(str) {
+        return String(str ?? '').replace(/[&<>"']/g, (ch) => (
+          { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+        ));
+      }
+
+      // ---------- Chain names ----------
+      function chainNameFor(addr) {
+        return chainNames[addr] || '';
+      }
+
+      // Resolve chain names for any addresses not already cached, merge them
+      // in, then refresh whatever's currently on screen. Fails silently
+      // (like saveAddresses) so a flaky lookup never blocks the page.
+      async function resolveChainNames(addrs) {
+        const missing = (addrs || []).filter((a) => !(a in chainNames));
+        if (missing.length === 0) return;
+        try {
+          const params = new URLSearchParams({ addresses: missing.join(',') });
+          const res = await fetch('/api/accounts/chain-names?' + params.toString());
+          if (!res.ok) return;
+          const map = await res.json();
+          if (!map || typeof map !== 'object') return;
+          Object.assign(chainNames, map);
+          renderChips();
+          if (lastRows.length > 0) {
+            const baseRows = viewMode === 'range' ? aggregateToRange(lastRows) : lastRows;
+            renderTable(applySort(baseRows));
+          }
+        } catch (e) {
+          // Lookup failed - addresses still render fine without a chain name.
+        }
+      }
+
       // ---------- Chips ----------
       function renderChips() {
         const container = document.getElementById('chips');
@@ -720,9 +845,13 @@
           const chip = document.createElement('span');
           chip.className = 'chip';
           chip.style.borderColor = colorFor(addr);
+          const name = chainNameFor(addr);
           chip.innerHTML =
             '<span class="swatch" style="background:' + colorFor(addr) + '"></span>' +
-            '<span title="' + addr + '">' + shortenAddress(addr) + '</span>' +
+            '<span class="chip-lines">' +
+              '<span title="' + addr + '">' + shortenAddress(addr) + '</span>' +
+              (name ? '<span class="chip-name">' + escapeHtml(name) + '</span>' : '') +
+            '</span>' +
             '<span class="remove" title="Remove">&times;</span>';
           chip.querySelector('.remove').addEventListener('click', () => {
             removeAddress(addr);
@@ -731,13 +860,14 @@
         }
       }
 
-      function addAddressesFromInput() {
-        const input = document.getElementById('addressInput');
-        const raw = (input.value || '').trim();
-        if (!raw) return;
-        const candidates = raw
-          .split(/[\s,]+/)
-          .map((s) => s.trim())
+      // Shared accepted-address logic used by both the comma-separated
+      // paste-add flow and single-address selection from the autocomplete
+      // dropdown. Applies dedupe + the MAX_ADDRESSES cap, persists, re-renders
+      // chips, syncs the URL, re-runs the comparison, and kicks off chain-name
+      // resolution for any newly added addresses.
+      function addAddresses(list) {
+        const candidates = (list || [])
+          .map((s) => (typeof s === 'string' ? s.trim() : ''))
           .filter((s) => s.length > 0);
 
         const accepted = [];
@@ -759,13 +889,31 @@
           addresses = addresses.concat(accepted);
           saveAddresses();
           renderChips();
-          input.value = '';
           updateUrlFromState();
           showError(rejected.length > 0 ? 'Skipped: ' + rejected.join(', ') : '');
           runComparison();
+          resolveChainNames(addresses);
         } else if (rejected.length > 0) {
           showError('Skipped: ' + rejected.join(', '));
         }
+
+        return { accepted, rejected };
+      }
+
+      function addAddressesFromInput() {
+        const input = document.getElementById('addressInput');
+        const raw = (input.value || '').trim();
+        if (!raw) return;
+        const candidates = raw
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+
+        const { accepted } = addAddresses(candidates);
+        if (accepted.length > 0) {
+          input.value = '';
+        }
+        closeSuggestions();
       }
 
       function removeAddress(addr) {
@@ -786,6 +934,103 @@
         renderChips();
         updateUrlFromState();
         resetResults();
+      }
+
+      // ---------- Autocomplete ----------
+      function closeSuggestions() {
+        // Cancel any pending debounce and invalidate any in-flight search so a
+        // dropdown we explicitly close can't silently reopen ~200ms later with
+        // stale results (e.g. after paste-detect, blur, Escape, or clearing the
+        // field). Bumping the request id makes fetchSuggestions' stale-guard
+        // discard the abandoned response.
+        if (suggestionDebounceTimer) {
+          clearTimeout(suggestionDebounceTimer);
+          suggestionDebounceTimer = null;
+        }
+        suggestionRequestId++;
+        suggestionItems = [];
+        suggestionActiveIndex = -1;
+        const box = document.getElementById('addressSuggestions');
+        box.classList.remove('open');
+        box.innerHTML = '';
+      }
+
+      function updateSuggestionActiveClass() {
+        const box = document.getElementById('addressSuggestions');
+        box.querySelectorAll('.suggestion-item').forEach((el, idx) => {
+          el.classList.toggle('active', idx === suggestionActiveIndex);
+        });
+      }
+
+      function renderSuggestions() {
+        const box = document.getElementById('addressSuggestions');
+        if (suggestionItems.length === 0) {
+          box.classList.remove('open');
+          box.innerHTML = '';
+          return;
+        }
+        box.innerHTML = suggestionItems
+          .map((item, idx) => {
+            const name = item.chain_name
+              ? '<span class="s-name">' + escapeHtml(item.chain_name) + '</span>'
+              : '<span class="s-name muted">(no name)</span>';
+            return (
+              '<div class="suggestion-item' + (idx === suggestionActiveIndex ? ' active' : '') + '" data-idx="' + idx + '">' +
+                name +
+                '<div class="s-addr">' + escapeHtml(shortenAddress(item.address)) + '</div>' +
+              '</div>'
+            );
+          })
+          .join('');
+        box.classList.add('open');
+        box.querySelectorAll('.suggestion-item').forEach((el) => {
+          el.addEventListener('click', () => {
+            const idx = Number(el.dataset.idx);
+            selectSuggestion(suggestionItems[idx]);
+          });
+        });
+      }
+
+      function selectSuggestion(item) {
+        if (!item || !item.address) return;
+        chainNames[item.address] = item.chain_name || null;
+        addAddresses([item.address]);
+        // Covers the edge case where the address was already added (addAddresses
+        // is then a silent no-op) but we still just cached/refreshed its name.
+        renderChips();
+        const input = document.getElementById('addressInput');
+        input.value = '';
+        closeSuggestions();
+      }
+
+      function scheduleSuggestionsFetch(token) {
+        if (suggestionDebounceTimer) clearTimeout(suggestionDebounceTimer);
+        suggestionDebounceTimer = setTimeout(() => fetchSuggestions(token), 200);
+      }
+
+      async function fetchSuggestions(token) {
+        const myId = ++suggestionRequestId;
+        try {
+          const params = new URLSearchParams({ q: token, limit: '8' });
+          const res = await fetch('/api/accounts/search?' + params.toString());
+          if (myId !== suggestionRequestId) return; // stale response
+          if (!res.ok) {
+            closeSuggestions();
+            return;
+          }
+          const data = await res.json();
+          if (myId !== suggestionRequestId) return; // stale response
+          if (!Array.isArray(data)) {
+            closeSuggestions();
+            return;
+          }
+          suggestionItems = data;
+          suggestionActiveIndex = -1;
+          renderSuggestions();
+        } catch (e) {
+          if (myId !== suggestionRequestId) return;
+          closeSuggestions();
+        }
       }
 
       // ---------- Date range ----------
@@ -893,12 +1138,16 @@
             const pnl = Number(r.pnl_ae ?? 0);
             const pnlUsd = Number(r.pnl_usd ?? 0);
             const pnlClsName = pnlClass(pnl);
+            const chainName = chainNameFor(r.address);
             return (
               '<tr>' +
               '<td class="address">' +
                 '<span class="swatch" style="background:' + c + '"></span>' +
-                '<span class="mono" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
-                  shortenAddress(r.address) +
+                '<span class="addr-lines">' +
+                  '<span class="mono" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
+                    shortenAddress(r.address) +
+                  '</span>' +
+                  (chainName ? '<span class="chain-sub">' + escapeHtml(chainName) + '</span>' : '') +
                 '</span>' +
               '</td>' +
               '<td>' + r.date + '</td>' +
@@ -1115,7 +1364,7 @@
         const datasets = addresses.map((addr) => {
           const dayMap = byAddr.get(addr) || new Map();
           return {
-            label: shortenAddress(addr),
+            label: chainNameFor(addr) || shortenAddress(addr),
             data: dates.map((d) => dayMap.get(d) ?? 0),
             borderColor: colorFor(addr),
             backgroundColor: colorFor(addr) + '33',
@@ -1168,14 +1417,69 @@
       }
 
       // ---------- Init ----------
-      document.getElementById('addressInput').addEventListener('keydown', (e) => {
+      const addressInputEl = document.getElementById('addressInput');
+
+      addressInputEl.addEventListener('keydown', (e) => {
+        const box = document.getElementById('addressSuggestions');
+        const isOpen = box.classList.contains('open') && suggestionItems.length > 0;
+
+        if (e.key === 'ArrowDown') {
+          if (!isOpen) return;
+          e.preventDefault();
+          suggestionActiveIndex = (suggestionActiveIndex + 1) % suggestionItems.length;
+          updateSuggestionActiveClass();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          if (!isOpen) return;
+          e.preventDefault();
+          suggestionActiveIndex =
+            suggestionActiveIndex <= 0 ? suggestionItems.length - 1 : suggestionActiveIndex - 1;
+          updateSuggestionActiveClass();
+          return;
+        }
+        if (e.key === 'Escape') {
+          if (!isOpen) return;
+          e.preventDefault();
+          closeSuggestions();
+          return;
+        }
         if (e.key === 'Enter') {
           e.preventDefault();
-          addAddressesFromInput();
+          if (isOpen && suggestionActiveIndex >= 0) {
+            selectSuggestion(suggestionItems[suggestionActiveIndex]);
+          } else {
+            addAddressesFromInput();
+          }
         }
       });
+
+      addressInputEl.addEventListener('input', (e) => {
+        const value = e.target.value;
+        if (/[\s,]/.test(value)) {
+          // Comma/whitespace means the user is pasting a list - skip autocomplete.
+          closeSuggestions();
+          return;
+        }
+        const token = value.trim();
+        // Mirror the backend's SEARCH_MIN_QUERY_LENGTH: 1-char terms are refused
+        // server-side (non-sargable full-table scan), so don't bother querying.
+        if (token.length < 2) {
+          closeSuggestions();
+          return;
+        }
+        scheduleSuggestionsFetch(token);
+      });
+
+      addressInputEl.addEventListener('blur', () => {
+        // Small delay so a click on a suggestion item registers before we
+        // tear down the dropdown.
+        setTimeout(() => closeSuggestions(), 150);
+      });
+
       // Prefer URL params (shareable links) over localStorage defaults.
       initStateFromUrl();
+      resolveChainNames(addresses);
       initDateRange();
       renderChips();
       // Reflect persisted view mode on the toggle and table title.

@@ -27,6 +27,8 @@ describe('AccountsController', () => {
   let accountService: {
     getChainNameForAccount: jest.Mock;
     ensureAccountFromTransactions: jest.Mock;
+    searchByNameOrAddress: jest.Mock;
+    getChainNamesForAddresses: jest.Mock;
   };
   let profileReadService: {
     getProfile: jest.Mock;
@@ -50,6 +52,8 @@ describe('AccountsController', () => {
     accountService = {
       getChainNameForAccount: jest.fn(),
       ensureAccountFromTransactions: jest.fn().mockResolvedValue(null),
+      searchByNameOrAddress: jest.fn().mockResolvedValue([]),
+      getChainNamesForAddresses: jest.fn().mockResolvedValue({}),
     };
     profileReadService = {
       getProfile: jest.fn(),
@@ -334,6 +338,79 @@ describe('AccountsController', () => {
         'At most 200 pubkeys per request',
       );
       expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('searchAccounts', () => {
+    it('delegates to the service with the raw q and limit', async () => {
+      accountService.searchByNameOrAddress.mockResolvedValue([
+        { address: 'ak_alice', chain_name: 'alice.chain' },
+      ]);
+
+      const result = await controller.searchAccounts('alice', 8);
+
+      expect(accountService.searchByNameOrAddress).toHaveBeenCalledWith(
+        'alice',
+        8,
+      );
+      expect(result).toEqual([
+        { address: 'ak_alice', chain_name: 'alice.chain' },
+      ]);
+    });
+
+    it('rejects a q longer than MAX_SEARCH_LENGTH without calling the service', async () => {
+      const longQ = 'a'.repeat(101);
+      await expect(controller.searchAccounts(longQ, 8)).rejects.toThrow(
+        'q must be at most 100 characters',
+      );
+      expect(accountService.searchByNameOrAddress).not.toHaveBeenCalled();
+    });
+
+    it('passes an undefined/blank q through to the service (which returns [])', async () => {
+      const result = await controller.searchAccounts(undefined, 8);
+
+      expect(accountService.searchByNameOrAddress).toHaveBeenCalledWith(
+        undefined,
+        8,
+      );
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('getChainNamesForAddresses', () => {
+    const ADDR_A = 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ';
+    const ADDR_B = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
+
+    it('splits/trims/dedupes/validates the CSV before calling the service', async () => {
+      accountService.getChainNamesForAddresses.mockResolvedValue({
+        [ADDR_A]: 'alice.chain',
+        [ADDR_B]: null,
+      });
+
+      const result = await controller.getChainNamesForAddresses(
+        ` ${ADDR_A} , ${ADDR_B}, ${ADDR_A} ,not-an-address, `,
+      );
+
+      expect(accountService.getChainNamesForAddresses).toHaveBeenCalledWith([
+        ADDR_A,
+        ADDR_B,
+      ]);
+      expect(result).toEqual({ [ADDR_A]: 'alice.chain', [ADDR_B]: null });
+    });
+
+    it('returns {} without calling the service when no address is valid', async () => {
+      const result = await controller.getChainNamesForAddresses(
+        'not-an-address, also-bad',
+      );
+
+      expect(result).toEqual({});
+      expect(accountService.getChainNamesForAddresses).not.toHaveBeenCalled();
+    });
+
+    it('returns {} for missing/blank addresses param', async () => {
+      expect(await controller.getChainNamesForAddresses(undefined)).toEqual({});
+      expect(await controller.getChainNamesForAddresses('  ,  ')).toEqual({});
+      expect(accountService.getChainNamesForAddresses).not.toHaveBeenCalled();
     });
   });
 });

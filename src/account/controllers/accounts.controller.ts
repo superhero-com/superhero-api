@@ -33,6 +33,7 @@ import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.d
 import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { NostrAccountRefDto } from '../dto/nostr-account-ref.dto';
+import { AccountSearchResultDto } from '../dto/account-search-result.dto';
 import { normalizePubkey } from '@/token-gated-rooms/nostr/pubkey';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
@@ -60,6 +61,11 @@ const ALLOWED_ORDER_BY = new Set([
 ]);
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 const MAX_SEARCH_LENGTH = 100;
+// Upper bound on the raw `addresses` CSV before we split/dedupe/validate, so
+// an oversized query string can't force unbounded parse work. Comfortably fits
+// the 25 addresses we actually resolve (~54 chars each + commas); the rest is
+// silently dropped, consistent with the "at most 25 resolved" contract.
+const MAX_ADDRESSES_CSV_LENGTH = 2000;
 
 @UseInterceptors(CacheInterceptor)
 @Controller('accounts')
@@ -259,6 +265,87 @@ export class AccountsController {
       }
     }
     return out;
+  }
+
+  /**
+   * Typeahead search for account autocomplete (search by chain name /
+   * address). Declared before `:address` so the literal segment isn't
+   * captured as an address param.
+   */
+  @ApiOperation({
+    operationId: 'searchAccounts',
+    summary: 'Typeahead search for accounts by address or chain name',
+    description:
+      'Powers account autocomplete. Returns `[]` when `q` is missing or blank.',
+  })
+  @ApiQuery({
+    name: 'q',
+    type: 'string',
+    required: false,
+    description: `Search term (address or chain name substring), max ${MAX_SEARCH_LENGTH} characters.`,
+  })
+  @ApiQuery({
+    name: 'limit',
+    type: 'number',
+    required: false,
+    description: 'Max results, clamped to 1-20 (default 8).',
+  })
+  @ApiOkResponse({ type: [AccountSearchResultDto] })
+  @CacheTTL(60_000)
+  @Get('search')
+  async searchAccounts(
+    @Query('q') q: string | undefined,
+    @Query('limit', new DefaultValuePipe(8), ParseIntPipe) limit = 8,
+  ): Promise<AccountSearchResultDto[]> {
+    if (q && q.length > MAX_SEARCH_LENGTH) {
+      throw new BadRequestException(
+        `q must be at most ${MAX_SEARCH_LENGTH} characters`,
+      );
+    }
+    return this.accountService.searchByNameOrAddress(q, limit);
+  }
+
+  /**
+   * Batch chain-name resolver, e.g. for a comparison page that needs the
+   * chain name (or lack thereof) for a fixed list of addresses in one call.
+   * Declared before `:address` so the literal segment isn't captured as an
+   * address param.
+   */
+  @ApiOperation({
+    operationId: 'getChainNamesForAddresses',
+    summary: 'Batch resolve chain names for a list of addresses',
+    description:
+      'Every requested valid address is present in the result, mapped to ' +
+      'its chain name or `null` when unknown / unset. Invalid addresses ' +
+      'are silently dropped; at most 25 are resolved.',
+  })
+  @ApiQuery({
+    name: 'addresses',
+    type: 'string',
+    required: true,
+    description: 'Comma-separated account addresses, max 25 resolved.',
+  })
+  @ApiOkResponse({
+    description: 'Map of address -> chain_name (string) or null.',
+  })
+  @CacheTTL(60_000)
+  @Get('chain-names')
+  async getChainNamesForAddresses(
+    @Query('addresses') addressesCsv?: string,
+  ): Promise<Record<string, string | null>> {
+    const requested = (addressesCsv ?? '')
+      .slice(0, MAX_ADDRESSES_CSV_LENGTH)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const deduped = Array.from(new Set(requested));
+    const valid = deduped.filter((address) => isAeAccountAddress(address));
+
+    if (!valid.length) {
+      return {};
+    }
+
+    return this.accountService.getChainNamesForAddresses(valid);
   }
 
   /**
