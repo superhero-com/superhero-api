@@ -415,20 +415,16 @@ export class PopularRankingService implements OnModuleDestroy {
   /**
    * Scheduled refresh so user requests almost never pay recompute latency —
    * on a low-traffic instance the lazy path would otherwise find a cold cache
-   * on nearly every request. Cadence is staggered by how fast each feed
-   * actually changes ('all' scores 10k candidates; no point doing that every
-   * minute), and the lazy recompute stays as cold-start fallback.
+   * on nearly every request; the lazy recompute stays as cold-start fallback.
+   *
+   * Only the 'all' window is refreshed on a schedule. GET /posts/popular is
+   * all-time — the `window` query param is deprecated and ignored — so nothing
+   * reads the '24h'/'7d' caches. Scheduling those recomputes only burned DB
+   * (candidate scan, tips/reads aggregation, recursive thread CTE) every
+   * minute/5 minutes to populate caches no request serves. The windowed code
+   * paths remain for the lazy/on-demand fallback should a consumer request
+   * them again.
    */
-  @Cron(CronExpression.EVERY_MINUTE)
-  refreshPopular24h(): Promise<void> {
-    return this.refreshWindowLocked('24h', 55);
-  }
-
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  refreshPopular7d(): Promise<void> {
-    return this.refreshWindowLocked('7d', 295);
-  }
-
   @Cron(CronExpression.EVERY_10_MINUTES)
   refreshPopularAll(): Promise<void> {
     return this.refreshWindowLocked('all', 595);

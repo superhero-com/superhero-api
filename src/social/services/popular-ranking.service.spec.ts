@@ -1261,22 +1261,22 @@ describe('PopularRankingService', () => {
     it('recomputes when the per-window lock is acquired', async () => {
       redisMock.set.mockResolvedValue('OK');
 
-      await service.refreshPopular24h();
+      await service.refreshPopularAll();
 
       expect(redisMock.set).toHaveBeenCalledWith(
-        'popular:refresh-lock:24h',
+        'popular:refresh-lock:all',
         '1',
         'EX',
         expect.any(Number),
         'NX',
       );
-      expect(recomputeSpy).toHaveBeenCalledWith('24h');
+      expect(recomputeSpy).toHaveBeenCalledWith('all');
     });
 
     it('skips the tick when another instance holds the lock', async () => {
       redisMock.set.mockResolvedValue(null);
 
-      await service.refreshPopular7d();
+      await service.refreshPopularAll();
 
       expect(recomputeSpy).not.toHaveBeenCalled();
     });
@@ -1289,17 +1289,22 @@ describe('PopularRankingService', () => {
       expect(recomputeSpy).not.toHaveBeenCalled();
     });
 
-    it('uses lock TTLs below each window refresh interval', async () => {
+    it('uses a lock TTL below the all-window refresh interval', async () => {
       redisMock.set.mockResolvedValue('OK');
 
-      await service.refreshPopular24h();
-      await service.refreshPopular7d();
       await service.refreshPopularAll();
 
-      const ttls = redisMock.set.mock.calls.map((call: any[]) => call[3]);
-      expect(ttls[0]).toBeLessThan(60);
-      expect(ttls[1]).toBeLessThan(300);
-      expect(ttls[2]).toBeLessThan(600);
+      const ttl = redisMock.set.mock.calls[0][3];
+      expect(ttl).toBeLessThan(600);
+    });
+
+    // Guards against re-introducing the wasted work: GET /posts/popular is
+    // all-time only, so nothing reads the 24h/7d caches and they must not be
+    // recomputed on a schedule.
+    it('does not schedule recomputes for the deprecated 24h/7d windows', () => {
+      const svc = service as unknown as Record<string, unknown>;
+      expect(svc.refreshPopular24h).toBeUndefined();
+      expect(svc.refreshPopular7d).toBeUndefined();
     });
   });
 
