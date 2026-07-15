@@ -108,21 +108,20 @@ export class AccountTokensController {
         .map((t) => t.address)
         .filter((addr): addr is string => addr !== undefined);
 
-      const tokenRanks = await this.tokensService.getTokenRanksByAex9Address(
-        tokenAddresses as any,
-      );
-
-      const holdings = tokenAddresses.length
-        ? await this.tokenHolderRepository
-            .createQueryBuilder('token_holder')
-            .where('token_holder.address = :address', {
-              address: owner_address || creator_address,
-            })
-            .andWhere('token_holder.aex9_address IN (:...tokenAddresses)', {
-              tokenAddresses,
-            })
-            .getMany()
-        : [];
+      const [tokenRanks, holdings] = await Promise.all([
+        this.tokensService.getTokenRanksByAex9Address(tokenAddresses as any),
+        tokenAddresses.length
+          ? this.tokenHolderRepository
+              .createQueryBuilder('token_holder')
+              .where('token_holder.address = :address', {
+                address: owner_address || creator_address,
+              })
+              .andWhere('token_holder.aex9_address IN (:...tokenAddresses)', {
+                tokenAddresses,
+              })
+              .getMany()
+          : Promise.resolve([]),
+      ]);
       return {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
@@ -193,13 +192,10 @@ export class AccountTokensController {
         (aex9_address): aex9_address is string => aex9_address !== undefined,
       );
 
-    const tokenRanks = await this.tokensService.getTokenRanksByAex9Address(
-      tokenIds as any,
-    );
-
-    const tokens = await this.tokensService.getTokensByAex9Address(
-      tokenIds as any,
-    );
+    const [tokenRanks, tokens] = await Promise.all([
+      this.tokensService.getTokenRanksByAex9Address(tokenIds as any),
+      this.tokensService.getTokensByAex9Address(tokenIds as any),
+    ]);
 
     // Merge the rank information into the token holders
     tokenHolders.items.forEach((holder) => {
