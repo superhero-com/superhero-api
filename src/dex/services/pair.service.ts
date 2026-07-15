@@ -28,6 +28,9 @@ const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 export class PairService {
   private static readonly MAX_CACHED_CONTRACTS = 100;
   private contractCache: Record<Encoded.ContractAddress, CachedContract> = {};
+  private cachedPathPairs: Pair[] | null = null;
+  private pathPairsCacheTime = 0;
+  private static readonly PATH_PAIRS_CACHE_TTL_MS = 30_000;
   constructor(
     @InjectRepository(Pair)
     private readonly pairRepository: Repository<Pair>,
@@ -136,12 +139,21 @@ export class PairService {
   }
 
   async getAllPairsForPathFinding(): Promise<Pair[]> {
-    return this.pairRepository
+    const now = Date.now();
+    if (
+      this.cachedPathPairs &&
+      now - this.pathPairsCacheTime < PairService.PATH_PAIRS_CACHE_TTL_MS
+    ) {
+      return this.cachedPathPairs;
+    }
+    this.cachedPathPairs = await this.pairRepository
       .createQueryBuilder('pair')
       .leftJoinAndSelect('pair.token0', 'token0')
       .leftJoinAndSelect('pair.token1', 'token1')
       .leftJoinAndSelect('pair.summary', 'summary')
       .getMany();
+    this.pathPairsCacheTime = now;
+    return this.cachedPathPairs;
   }
 
   async findSwapPaths(
