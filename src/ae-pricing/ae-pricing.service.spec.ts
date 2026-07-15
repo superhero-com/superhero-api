@@ -130,4 +130,88 @@ describe('AePricingService', () => {
     expect(result.usd).toEqual(new BigNumber(0.2));
     expect(result.eur).toEqual(new BigNumber(0.18));
   });
+
+  it('should memoize the rates snapshot across getPriceData calls within the TTL', async () => {
+    const rates = buildCompleteRates({ usd: 0.1 });
+    coinPriceRepository.query.mockResolvedValue([
+      {
+        id: 1,
+        rates,
+        created_at: new Date(),
+      },
+    ]);
+
+    await service.getPriceData(new BigNumber(1));
+    await service.getPriceData(new BigNumber(2));
+    const thirdResult = await service.getPriceData(new BigNumber(3));
+
+    expect(coinPriceRepository.query).toHaveBeenCalledTimes(1);
+    expect(thirdResult.usd).toEqual(new BigNumber(0.3));
+  });
+
+  it('should re-fetch the rates snapshot once the memo TTL expires', async () => {
+    const rates = buildCompleteRates({ usd: 0.1 });
+    coinPriceRepository.query.mockResolvedValue([
+      {
+        id: 1,
+        rates,
+        created_at: new Date(),
+      },
+    ]);
+    const nowSpy = jest.spyOn(Date, 'now');
+
+    nowSpy.mockReturnValue(1_000_000);
+    await service.getPriceData(new BigNumber(1));
+    nowSpy.mockReturnValue(1_000_000 + 30_000);
+    await service.getPriceData(new BigNumber(1));
+
+    expect(coinPriceRepository.query).toHaveBeenCalledTimes(2);
+    nowSpy.mockRestore();
+  });
+
+  it('should coalesce concurrent cold-cache lookups into a single DB query', async () => {
+    const rates = buildCompleteRates({ usd: 0.1 });
+    let resolveQuery: (rows: unknown[]) => void = () => undefined;
+    coinPriceRepository.query.mockReturnValue(
+      new Promise((resolve) => {
+        resolveQuery = resolve;
+      }),
+    );
+
+    // Fire concurrently while the cache is cold — all three enter the refresh
+    // path before any DB read resolves.
+    const p1 = service.getPriceData(new BigNumber(1));
+    const p2 = service.getPriceData(new BigNumber(2));
+    const p3 = service.getPriceData(new BigNumber(3));
+
+    resolveQuery([{ id: 1, rates, created_at: new Date() }]);
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+    expect(coinPriceRepository.query).toHaveBeenCalledTimes(1);
+    expect(r1.usd).toEqual(new BigNumber(0.1));
+    expect(r2.usd).toEqual(new BigNumber(0.2));
+    expect(r3.usd).toEqual(new BigNumber(0.3));
+  });
+
+  it('should not memoize a failed (null) rates lookup', async () => {
+    coinGeckoService.getAeternityRates.mockRejectedValue(
+      new Error('cache miss'),
+    );
+    coinPriceRepository.query.mockResolvedValue([]);
+
+    const firstResult = await service.getPriceData(new BigNumber(1));
+    expect(firstResult.usd).toBeNull();
+
+    const rates = buildCompleteRates({ usd: 0.1 });
+    coinPriceRepository.query.mockResolvedValue([
+      {
+        id: 1,
+        rates,
+        created_at: new Date(),
+      },
+    ]);
+
+    const secondResult = await service.getPriceData(new BigNumber(2));
+    expect(secondResult.usd).toEqual(new BigNumber(0.2));
+  });
 });

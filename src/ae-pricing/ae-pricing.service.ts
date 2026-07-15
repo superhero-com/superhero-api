@@ -12,6 +12,9 @@ import { CoinPrice } from './entities/coin-price.entity';
 @Injectable()
 export class AePricingService {
   latestRates: CoinPrice | null = null;
+  private latestRatesFetchedAt = 0;
+  private ratesRefreshInFlight: Promise<CoinPrice | null> | null = null;
+  private static readonly RATES_SNAPSHOT_TTL_MS = 30_000;
 
   constructor(
     public coinGeckoService: CoinGeckoService,
@@ -77,13 +80,14 @@ export class AePricingService {
    * @returns An object containing the price data for AE and other currencies.
    */
   async getPriceData(price: BigNumber): Promise<IPriceDto> {
-    let latestRates = await this.findLatestCompleteRatesSnapshot();
-
-    // Populate latestRates from cache if not yet in DB (first startup before cron runs)
-    if (!latestRates) {
-      latestRates = await this.pullAndSaveCoinCurrencyRates();
+    const latestRates = this.latestRates;
+    const now = Date.now();
+    if (
+      !latestRates ||
+      now - this.latestRatesFetchedAt >= AePricingService.RATES_SNAPSHOT_TTL_MS
+    ) {
+      await this.refreshLatestRates(now);
     }
-    this.latestRates = latestRates;
 
     const prices: Record<string, BigNumber | null> = {
       ae: price,
@@ -105,6 +109,41 @@ export class AePricingService {
     });
 
     return prices as any;
+  }
+
+  /**
+   * Refreshes the in-memory rates snapshot, coalescing concurrent callers.
+   * The first caller on a cold/expired cache starts the DB read; every other
+   * caller that arrives while it is in flight awaits the same promise instead
+   * of issuing its own query. Without this, a burst of concurrent getPriceData
+   * calls (the common case — they fire in Promise.all bundles) would each hit
+   * the DB before the memo is populated.
+   */
+  private async refreshLatestRates(now: number): Promise<CoinPrice | null> {
+    if (this.ratesRefreshInFlight) {
+      return this.ratesRefreshInFlight;
+    }
+
+    const refresh = (async () => {
+      let latestRates = await this.findLatestCompleteRatesSnapshot();
+
+      // Populate latestRates from cache if not yet in DB (first startup before cron runs)
+      if (!latestRates) {
+        latestRates = await this.pullAndSaveCoinCurrencyRates();
+      }
+      if (latestRates) {
+        this.latestRatesFetchedAt = now;
+      }
+      this.latestRates = latestRates;
+      return latestRates;
+    })();
+    this.ratesRefreshInFlight = refresh;
+
+    try {
+      return await refresh;
+    } finally {
+      this.ratesRefreshInFlight = null;
+    }
   }
 
   private async findLatestCompleteRatesSnapshot(): Promise<CoinPrice | null> {

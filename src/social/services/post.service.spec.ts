@@ -242,6 +242,94 @@ describe('PostService', () => {
     });
   });
 
+  describe('updateTopicPostCounts', () => {
+    it('should update every topic from a single grouped count query', async () => {
+      const topics = [
+        { id: 'topic-1', name: 'Topic 1' },
+        { id: 'topic-2', name: 'Topic 2' },
+      ] as Topic[];
+      const mockQueryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { topic_id: 'topic-1', count: '5' },
+          { topic_id: 'topic-2', count: '0' },
+        ]),
+      };
+      const postCreateQueryBuilderSpy = jest
+        .fn()
+        .mockReturnValue(mockQueryBuilder);
+      (repository as any).createQueryBuilder = postCreateQueryBuilderSpy;
+
+      await (service as any).updateTopicPostCounts(topics);
+
+      expect(postCreateQueryBuilderSpy).toHaveBeenCalledTimes(1);
+      expect(mockQueryBuilder.where).toHaveBeenCalledWith(
+        'topic.id IN (:...topicIds)',
+        { topicIds: ['topic-1', 'topic-2'] },
+      );
+      expect(mockTopicRepository.update).toHaveBeenCalledWith('topic-1', {
+        post_count: 5,
+      });
+      expect(mockTopicRepository.update).toHaveBeenCalledWith('topic-2', {
+        post_count: 0,
+      });
+    });
+
+    it('should default to zero for a topic missing from the grouped result', async () => {
+      const topics = [{ id: 'topic-1', name: 'Topic 1' }] as Topic[];
+      const mockQueryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      (repository as any).createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(mockQueryBuilder);
+
+      await (service as any).updateTopicPostCounts(topics);
+
+      expect(mockTopicRepository.update).toHaveBeenCalledWith('topic-1', {
+        post_count: 0,
+      });
+    });
+
+    it('should skip both the query and updates when there are no topics', async () => {
+      const postCreateQueryBuilderSpy = jest.fn();
+      (repository as any).createQueryBuilder = postCreateQueryBuilderSpy;
+
+      await (service as any).updateTopicPostCounts([]);
+
+      expect(postCreateQueryBuilderSpy).not.toHaveBeenCalled();
+      expect(mockTopicRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('should update no topics when the grouped query fails', async () => {
+      const topics = [{ id: 'topic-1', name: 'Topic 1' }] as Topic[];
+      const mockQueryBuilder = {
+        innerJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockRejectedValue(new Error('db down')),
+      };
+      (repository as any).createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(mockQueryBuilder);
+
+      await (service as any).updateTopicPostCounts(topics);
+
+      expect(mockTopicRepository.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('savePostFromTransaction', () => {
     it('should return null for invalid transaction', async () => {
       jest.spyOn(service as any, 'validateTransaction').mockReturnValue(false);

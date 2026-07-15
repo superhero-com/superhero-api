@@ -106,12 +106,51 @@ describe('TransactionsController', () => {
       expect(paginate).toHaveBeenCalled();
     });
 
+    it('should use a plain leftJoin (not leftJoinAndSelect) for the default listing', async () => {
+      const mockPagination: Pagination<Transaction> = {
+        items: [{ id: 1, tx_hash: 'test_hash' } as unknown as Transaction],
+        meta: {
+          totalItems: 1,
+          itemCount: 1,
+          itemsPerPage: 100,
+          totalPages: 1,
+          currentPage: 1,
+        },
+      };
+      (paginate as jest.Mock).mockResolvedValue(mockPagination);
+      const queryBuilder = {
+        orderBy: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        leftJoinAndMapOne: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([mockPagination.items, 1]),
+      };
+      jest
+        .spyOn(transactionsRepository, 'createQueryBuilder')
+        .mockReturnValue(queryBuilder as any);
+
+      const result = await controller.listTransactions();
+
+      expect(result).toEqual(mockPagination);
+      expect(queryBuilder.leftJoin).toHaveBeenCalledWith(
+        'token',
+        'token',
+        'token.sale_address = transactions.sale_address',
+      );
+      expect(queryBuilder.leftJoinAndSelect).not.toHaveBeenCalled();
+      expect(queryBuilder.leftJoinAndMapOne).not.toHaveBeenCalled();
+    });
+
     it('should return an empty page when token lookup returns null', async () => {
       jest.spyOn(tokenService, 'getToken').mockResolvedValueOnce(null as any);
       const createQueryBuilderSpy = jest
         .spyOn(transactionsRepository, 'createQueryBuilder')
         .mockReturnValue({
           orderBy: jest.fn().mockReturnThis(),
+          leftJoin: jest.fn().mockReturnThis(),
           leftJoinAndMapOne: jest.fn().mockReturnThis(),
           leftJoinAndSelect: jest.fn().mockReturnThis(),
         } as any);
@@ -138,6 +177,7 @@ describe('TransactionsController', () => {
         .mockRejectedValueOnce(new Error('invalid token'));
       jest.spyOn(transactionsRepository, 'createQueryBuilder').mockReturnValue({
         orderBy: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         leftJoinAndMapOne: jest.fn().mockReturnThis(),
       } as any);

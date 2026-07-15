@@ -386,13 +386,6 @@ export class TransactionService {
   ): Promise<void> {
     try {
       const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
-      const tokenHolderCount = await this.tokenHolderRepository
-        .createQueryBuilder('token_holders')
-        .where('token_holders.aex9_address = :aex9_address', {
-          aex9_address: token.address,
-        })
-        .andWhere('token_holders.balance > 0')
-        .getCount();
 
       const tokenHolder = await this.tokenHolderRepository
         .createQueryBuilder('token_holders')
@@ -443,6 +436,13 @@ export class TransactionService {
         }
       } else {
         if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
+          const tokenHolderCount = await this.tokenHolderRepository
+            .createQueryBuilder('token_holders')
+            .where('token_holders.aex9_address = :aex9_address', {
+              aex9_address: token.address,
+            })
+            .andWhere('token_holders.balance > 0')
+            .getCount();
           // create token holder
           await this.tokenHolderRepository.save({
             id: `${rawTransaction.tx.callerId}_${token.address}`,

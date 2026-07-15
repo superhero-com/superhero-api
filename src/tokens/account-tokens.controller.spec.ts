@@ -17,6 +17,7 @@ jest.mock('nestjs-typeorm-paginate', () => ({
 describe('AccountTokensController', () => {
   let controller: AccountTokensController;
   let tokenHolderRepository: Repository<TokenHolder>;
+  let tokenRepository: Repository<Token>;
   let communityFactoryService: CommunityFactoryService;
   let tokensService: jest.Mocked<TokensService>;
   let tokenHolderQueryBuilder: {
@@ -77,6 +78,7 @@ describe('AccountTokensController', () => {
     tokenHolderRepository = module.get<Repository<TokenHolder>>(
       getRepositoryToken(TokenHolder),
     );
+    tokenRepository = module.get<Repository<Token>>(getRepositoryToken(Token));
     communityFactoryService = module.get<CommunityFactoryService>(
       CommunityFactoryService,
     );
@@ -176,6 +178,100 @@ describe('AccountTokensController', () => {
       );
       await controller.listAccountTokens('test_address');
       expect(spyGetFactory).toHaveBeenCalled();
+    });
+
+    it('should merge ranks and holdings for creator_address/owner_address lookups', async () => {
+      (paginate as jest.Mock).mockResolvedValue({
+        items: [{ address: 'ct_token_1' } as Token],
+        meta: {
+          totalItems: 1,
+          itemCount: 1,
+          itemsPerPage: 10,
+          totalPages: 1,
+          currentPage: 1,
+        },
+      });
+      const tokenQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+      };
+      jest
+        .spyOn(tokenRepository, 'createQueryBuilder')
+        .mockReturnValue(tokenQueryBuilder as any);
+      const holderQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest
+          .fn()
+          .mockResolvedValue([
+            { aex9_address: 'ct_token_1', balance: '42' } as any,
+          ]),
+      };
+      jest
+        .spyOn(tokenHolderRepository, 'createQueryBuilder')
+        .mockReturnValue(holderQueryBuilder as any);
+      tokensService.getTokenRanksByAex9Address.mockResolvedValue(
+        new Map([['ct_token_1', 3]]),
+      );
+
+      const result = await controller.listAccountTokens(
+        'test_address',
+        undefined,
+        undefined,
+        'creator_address_value',
+      );
+
+      expect(result).toEqual({
+        items: [
+          expect.objectContaining({
+            token: expect.objectContaining({
+              address: 'ct_token_1',
+              rank: 3,
+            }),
+            address: 'creator_address_value',
+            balance: '42',
+          }),
+        ],
+        meta: expect.any(Object),
+      });
+      expect(tokensService.getTokenRanksByAex9Address).toHaveBeenCalledWith([
+        'ct_token_1',
+      ]);
+      expect(holderQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'token_holder.aex9_address IN (:...tokenAddresses)',
+        { tokenAddresses: ['ct_token_1'] },
+      );
+    });
+
+    it('should skip the holdings query when no tokens are returned for creator_address', async () => {
+      (paginate as jest.Mock).mockResolvedValue({
+        items: [],
+        meta: {
+          totalItems: 0,
+          itemCount: 0,
+          itemsPerPage: 10,
+          totalPages: 0,
+          currentPage: 1,
+        },
+      });
+      jest.spyOn(tokenRepository, 'createQueryBuilder').mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+      } as any);
+      const holderCreateQueryBuilderSpy = jest.spyOn(
+        tokenHolderRepository,
+        'createQueryBuilder',
+      );
+
+      const result = await controller.listAccountTokens(
+        'test_address',
+        undefined,
+        undefined,
+        'creator_address_value',
+      );
+
+      expect(result.items).toEqual([]);
+      expect(holderCreateQueryBuilderSpy).not.toHaveBeenCalled();
     });
   });
 });

@@ -48,4 +48,32 @@ describe('PairService', () => {
 
     expect(repository.createQueryBuilder).not.toHaveBeenCalled();
   });
+
+  describe('getAllPairsForPathFinding', () => {
+    it('reuses the cached pairs within the TTL instead of re-querying', async () => {
+      const { service, repository, qb } = setup();
+      qb.getMany = jest.fn(() => Promise.resolve([{ address: 'pair1' }]));
+
+      const first = await service.getAllPairsForPathFinding();
+      const second = await service.getAllPairsForPathFinding();
+
+      expect(repository.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(first).toBe(second);
+      expect(first).toEqual([{ address: 'pair1' }]);
+    });
+
+    it('re-queries once the cache TTL expires', async () => {
+      const { service, repository, qb } = setup();
+      qb.getMany = jest.fn(() => Promise.resolve([{ address: 'pair1' }]));
+      const nowSpy = jest.spyOn(Date, 'now');
+
+      nowSpy.mockReturnValue(1_000_000);
+      await service.getAllPairsForPathFinding();
+      nowSpy.mockReturnValue(1_000_000 + 30_000);
+      await service.getAllPairsForPathFinding();
+
+      expect(repository.createQueryBuilder).toHaveBeenCalledTimes(2);
+      nowSpy.mockRestore();
+    });
+  });
 });

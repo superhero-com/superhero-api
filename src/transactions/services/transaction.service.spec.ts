@@ -208,20 +208,15 @@ describe('TransactionService', () => {
   });
 
   it('should not create a holder row for a sell with no existing holder', async () => {
-    const holderCountQuery = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getCount: jest.fn().mockResolvedValue(0),
-    };
     const existingHolderQuery = {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getOne: jest.fn().mockResolvedValue(null),
     };
 
-    tokenHolderRepository.createQueryBuilder
-      .mockReturnValueOnce(holderCountQuery)
-      .mockReturnValueOnce(existingHolderQuery);
+    tokenHolderRepository.createQueryBuilder.mockReturnValueOnce(
+      existingHolderQuery,
+    );
 
     await service.updateTokenHolder(
       {
@@ -240,6 +235,11 @@ describe('TransactionService', () => {
       new BigNumber(1),
     );
 
+    // A sell with no existing holder is a no-op branch: no holder-count
+    // query should run (that query only happens on the buy-creates-a-new-
+    // holder path), and only the one createQueryBuilder call (the
+    // existence check) should have happened.
+    expect(tokenHolderRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
     expect(tokenHolderRepository.save).not.toHaveBeenCalled();
     expect(tokenService.update).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -247,6 +247,49 @@ describe('TransactionService', () => {
     );
     expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledWith(
       'ct_sale',
+    );
+  });
+
+  it('should query the holder count exactly once when a buy creates a new holder', async () => {
+    const existingHolderQuery = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    const holderCountQuery = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(4),
+    };
+
+    tokenHolderRepository.createQueryBuilder
+      .mockReturnValueOnce(existingHolderQuery)
+      .mockReturnValueOnce(holderCountQuery);
+
+    await service.updateTokenHolder(
+      {
+        address: 'ct_token',
+        sale_address: 'ct_sale',
+        holders_count: 4,
+      } as Token,
+      {
+        tx: {
+          function: BCL_FUNCTIONS.buy,
+          callerId: 'ak_user',
+        },
+        hash: 'th_buy',
+        blockHeight: 42,
+      } as any,
+      new BigNumber(1),
+    );
+
+    expect(tokenHolderRepository.createQueryBuilder).toHaveBeenCalledTimes(2);
+    expect(tokenHolderRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ address: 'ak_user', aex9_address: 'ct_token' }),
+    );
+    expect(tokenService.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ holders_count: 5 }),
     );
   });
 });

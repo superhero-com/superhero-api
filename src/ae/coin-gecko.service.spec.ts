@@ -211,4 +211,33 @@ describe('CoinGeckoService', () => {
     );
     expect(fetchJson).not.toHaveBeenCalled();
   });
+
+  it('should memoize the parsed fallback pricing JSON across calls', () => {
+    const first = (service as any).readFallbackPricingData();
+    const second = (service as any).readFallbackPricingData();
+
+    expect(second).toBe(first);
+    expect(first?.prices?.length).toBeGreaterThan(0);
+  });
+
+  it('should not let a caller mutating readFallbackPriceData corrupt the memoized cache', () => {
+    // A consumer (e.g. PortfolioService) sorts the returned array in place.
+    const first = (service as any).readFallbackPriceData() as Array<
+      [number, number]
+    >;
+    expect(first.length).toBeGreaterThan(1);
+    const originalFirstTs = first[0][0];
+
+    // Mutate the returned array in place: reorder + drop an element.
+    first.sort((a, b) => b[0] - a[0]);
+    first.length = 1;
+
+    // A subsequent read must be unaffected by the previous caller's mutation.
+    const second = (service as any).readFallbackPriceData() as Array<
+      [number, number]
+    >;
+    expect(second).not.toBe(first);
+    expect(second.length).toBeGreaterThan(1);
+    expect(second[0][0]).toBe(originalFirstTs);
+  });
 });

@@ -1007,13 +1007,36 @@ export class PostService {
       ? manager.getRepository(Topic)
       : this.topicRepository;
 
+    if (topics.length === 0) {
+      return;
+    }
+
+    let countByTopicId = new Map<string, number>();
+    try {
+      const rows = await postRepository
+        .createQueryBuilder('post')
+        .innerJoin('post.topics', 'topic')
+        .select('topic.id', 'topic_id')
+        .addSelect('COUNT(post.id)', 'count')
+        .where('topic.id IN (:...topicIds)', {
+          topicIds: topics.map((topic) => topic.id),
+        })
+        .groupBy('topic.id')
+        .getRawMany<{ topic_id: string; count: string }>();
+      countByTopicId = new Map(
+        rows.map((row) => [row.topic_id, parseInt(row.count, 10)]),
+      );
+    } catch (error) {
+      this.logger.error('Failed to load topic post counts', {
+        topicIds: topics.map((topic) => topic.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
     for (const topic of topics) {
       try {
-        const count = await postRepository
-          .createQueryBuilder('post')
-          .innerJoin('post.topics', 'topic')
-          .where('topic.id = :topicId', { topicId: topic.id })
-          .getCount();
+        const count = countByTopicId.get(topic.id) ?? 0;
 
         await topicRepository.update(topic.id, {
           post_count: count,
