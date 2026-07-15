@@ -159,7 +159,8 @@ describe('TokensController', () => {
           useValue: {
             getCurrentFactory: jest
               .fn()
-              .mockResolvedValue({ address: 'ct_123' }),
+              .mockResolvedValue({ address: 'ct_123', collections: {} }),
+            mapCollectionInfo: jest.fn().mockReturnValue(null),
           },
         },
       ],
@@ -272,7 +273,10 @@ describe('TokensController', () => {
   });
 
   it('should return cached trending-score token lists', async () => {
-    cacheManager.get.mockResolvedValueOnce({ items: ['cached'], meta: {} });
+    cacheManager.get.mockResolvedValueOnce({
+      items: [{ sale_address: 'ct_a', collection: 'CHINESE-ak_x' }],
+      meta: {},
+    });
 
     const result = await controller.listAll(
       undefined,
@@ -286,9 +290,46 @@ describe('TokensController', () => {
       'all',
     );
 
-    expect(result).toEqual({ items: ['cached'], meta: {} });
+    expect((result as any).items[0].sale_address).toBe('ct_a');
     expect(tokensService.applyListEligibilityFilters).not.toHaveBeenCalled();
     expect(tokensService.queryTokensWithRanks).not.toHaveBeenCalled();
+  });
+
+  it('enriches cached trending-score token lists with collection_info on read', async () => {
+    // Simulate an entry cached before collection_info existed: it lacks the
+    // field, but the hit path must still resolve and attach it.
+    cacheManager.get.mockResolvedValueOnce({
+      items: [{ sale_address: 'ct_a', collection: 'CHINESE-ak_x' }],
+      meta: {},
+    });
+    const collectionInfo = {
+      id: 'CHINESE-ak_x',
+      name: 'CHINESE',
+      description: 'Chinese collection',
+      allowed_name_length: '20',
+    };
+    (communityFactoryService.mapCollectionInfo as jest.Mock).mockReturnValue(
+      collectionInfo,
+    );
+
+    const result = await controller.listAll(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      1,
+      100,
+      'trending_score',
+      'DESC',
+      'all',
+    );
+
+    expect(tokensService.queryTokensWithRanks).not.toHaveBeenCalled();
+    expect(communityFactoryService.mapCollectionInfo).toHaveBeenCalledWith(
+      expect.anything(),
+      'CHINESE-ak_x',
+    );
+    expect((result as any).items[0].collection_info).toEqual(collectionInfo);
   });
 
   it('should not collide trending cache keys when filter values contain separators', async () => {
@@ -334,6 +375,7 @@ describe('TokensController', () => {
       rank: 5,
       total_supply: { toNumber: expect.any(Function) },
       factory_address: 'ct_123',
+      collection_info: null,
     });
   });
 

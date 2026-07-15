@@ -216,3 +216,13 @@ export type ICommunityFactorySchema = {
     };
   };
 };
+
+/**
+ * Trimmed collection metadata surfaced to API clients (e.g. as a token's
+ * collection badge). Drops `allowed_name_chars` — the bulky per-character
+ * validation rules are not needed on token/mention list responses.
+ */
+export type ICollectionInfo = Pick<
+  ICommunityFactorySchema['collections'][keyof ICommunityFactorySchema['collections']],
+  'id' | 'name' | 'description' | 'allowed_name_length'
+>;

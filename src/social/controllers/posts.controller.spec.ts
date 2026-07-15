@@ -56,6 +56,7 @@ describe('PostsController', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   });
 
@@ -101,6 +102,10 @@ describe('PostsController', () => {
       {
         getProfilesByAddresses: jest.fn().mockResolvedValue([]),
       } as any,
+      {
+        getCurrentFactory: jest.fn().mockResolvedValue({ collections: {} }),
+        mapCollectionInfo: jest.fn().mockReturnValue(null),
+      } as any,
     );
 
     await popularController.popular({
@@ -122,6 +127,7 @@ describe('PostsController', () => {
     const attachTrendMentions = (
       items: Array<{ id: string; content: string }>,
       tokens: Array<Record<string, any>>,
+      collections: Record<string, any> = {},
     ) => {
       const tokenQueryBuilder = {
         leftJoinAndMapOne: jest.fn().mockReturnThis(),
@@ -133,12 +139,31 @@ describe('PostsController', () => {
       const tokenRepository = {
         createQueryBuilder: jest.fn().mockReturnValue(tokenQueryBuilder),
       };
+      // Faithful stand-in for CommunityFactoryService.mapCollectionInfo so the
+      // resolved collection badge reflects the real lookup behaviour.
+      const communityFactoryService = {
+        getCurrentFactory: jest.fn().mockResolvedValue({ collections }),
+        mapCollectionInfo: jest.fn((factory, collectionId) => {
+          const collection = collectionId
+            ? factory?.collections?.[collectionId]
+            : undefined;
+          return collection
+            ? {
+                id: collection.id,
+                name: collection.name,
+                description: collection.description,
+                allowed_name_length: collection.allowed_name_length,
+              }
+            : null;
+        }),
+      };
       const trendController = new PostsController(
         {} as any,
         tokenRepository as any,
         {} as any,
         {} as any,
         {} as any,
+        communityFactoryService as any,
       );
 
       return {
@@ -164,6 +189,7 @@ describe('PostsController', () => {
         {
           name: '汉字',
           sale_address: 'ct_chinese',
+          collection_info: null,
           performance: { pct: 1 },
         },
       ]);
@@ -182,7 +208,12 @@ describe('PostsController', () => {
         { names: ['ПРИВЕТ'] },
       );
       expect((items[0] as any).trend_mentions).toEqual([
-        { name: 'ПРИВЕТ', sale_address: 'ct_russian', performance: null },
+        {
+          name: 'ПРИВЕТ',
+          sale_address: 'ct_russian',
+          collection_info: null,
+          performance: null,
+        },
       ]);
     });
 
@@ -196,8 +227,18 @@ describe('PostsController', () => {
       await run();
 
       expect((items[0] as any).trend_mentions).toEqual([
-        { name: 'WORDS-1', sale_address: 'ct_words', performance: null },
-        { name: '汉字', sale_address: 'ct_chinese', performance: null },
+        {
+          name: 'WORDS-1',
+          sale_address: 'ct_words',
+          collection_info: null,
+          performance: null,
+        },
+        {
+          name: '汉字',
+          sale_address: 'ct_chinese',
+          collection_info: null,
+          performance: null,
+        },
       ]);
     });
 
@@ -208,7 +249,52 @@ describe('PostsController', () => {
       await run();
 
       expect((items[0] as any).trend_mentions).toEqual([
-        { name: '汉字', sale_address: null, performance: null },
+        {
+          name: '汉字',
+          sale_address: null,
+          collection_info: null,
+          performance: null,
+        },
+      ]);
+    });
+
+    it('attaches resolved collection metadata to a mentioned token', async () => {
+      const items = [{ id: 'post-5', content: 'buying #汉字' }];
+      const collectionId = '汉字-ak_deployer';
+      const { run } = attachTrendMentions(
+        items,
+        [
+          {
+            symbol: '汉字',
+            sale_address: 'ct_chinese',
+            collection: collectionId,
+            performance: null,
+          },
+        ],
+        {
+          [collectionId]: {
+            id: collectionId,
+            name: '汉字',
+            description: 'Chinese collection',
+            allowed_name_length: '20',
+          },
+        },
+      );
+
+      await run();
+
+      expect((items[0] as any).trend_mentions).toEqual([
+        {
+          name: '汉字',
+          sale_address: 'ct_chinese',
+          collection_info: {
+            id: collectionId,
+            name: '汉字',
+            description: 'Chinese collection',
+            allowed_name_length: '20',
+          },
+          performance: null,
+        },
       ]);
     });
   });

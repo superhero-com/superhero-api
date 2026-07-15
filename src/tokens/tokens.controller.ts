@@ -67,6 +67,28 @@ export class TokensController {
     //
   }
 
+  /**
+   * Attaches the resolved `collection_info` badge object to each token, mapping
+   * the stored `collection` id through the factory's collection registry. The
+   * factory schema is loaded once for the whole batch. Tokens with no/unknown
+   * collection get `collection_info: null`.
+   */
+  private async attachCollectionInfo(
+    items: Array<{ collection?: string | null }>,
+  ): Promise<void> {
+    if (!items?.length) {
+      return;
+    }
+    const factory = await this.communityFactoryService.getCurrentFactory();
+    for (const item of items) {
+      (item as any).collection_info =
+        this.communityFactoryService.mapCollectionInfo(
+          factory,
+          item?.collection,
+        );
+    }
+  }
+
   private validatePagination(page: number, limit: number): void {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -190,6 +212,10 @@ export class TokensController {
       const cached =
         await this.cacheManager.get<Pagination<Token>>(trendingCacheKey);
       if (cached) {
+        // Enrich on read as well: entries cached before collection_info existed
+        // (or with stale collection metadata) must still carry the field on the
+        // hit path, which otherwise returns before attachCollectionInfo runs.
+        await this.attachCollectionInfo(cached.items);
         return cached;
       }
     }
@@ -272,6 +298,8 @@ export class TokensController {
       );
     }
 
+    await this.attachCollectionInfo(result.items);
+
     if (trendingCacheKey) {
       await this.cacheManager.set(
         trendingCacheKey,
@@ -308,6 +336,10 @@ export class TokensController {
   })
   async findByAddress(@Param('address') address: string) {
     const token = await this.tokensService.getToken(address);
+
+    if (token) {
+      await this.attachCollectionInfo([token as any]);
+    }
 
     return token;
   }
@@ -455,6 +487,14 @@ export class TokensController {
       token.sale_address,
       halfLimit,
     ]);
+
+    for (const rankedToken of rankedTokens) {
+      rankedToken.collection_info =
+        this.communityFactoryService.mapCollectionInfo(
+          factory,
+          rankedToken?.collection,
+        );
+    }
 
     return {
       items: rankedTokens,

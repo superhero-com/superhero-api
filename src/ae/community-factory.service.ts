@@ -2,7 +2,7 @@ import { Encoded } from '@aeternity/aepp-sdk';
 import { Injectable } from '@nestjs/common';
 import { CommunityFactory, initCommunityFactory } from 'bctsl-sdk';
 import { ACTIVE_NETWORK, BCL_FACTORY } from '@/configs';
-import { ICommunityFactorySchema } from '@/utils/types';
+import { ICollectionInfo, ICommunityFactorySchema } from '@/utils/types';
 import { AeSdkService } from './ae-sdk.service';
 
 @Injectable()
@@ -85,5 +85,44 @@ export class CommunityFactoryService {
     this.cachedFactorySchema[factory.address] = factory;
 
     return factory;
+  }
+
+  /**
+   * Maps a token's stored collection id (the "<NAME>-ak_<deployer>" string) to
+   * its trimmed collection metadata using an already-loaded factory schema.
+   * Returns null when the token has no collection or the collection is unknown.
+   * Prefer this over {@link getCollectionInfo} when enriching many items — load
+   * the factory once and reuse it instead of awaiting per item.
+   */
+  mapCollectionInfo(
+    factory: ICommunityFactorySchema,
+    collectionId?: string | null,
+  ): ICollectionInfo | null {
+    const collection = collectionId
+      ? factory.collections?.[collectionId]
+      : undefined;
+    if (!collection) {
+      return null;
+    }
+    return {
+      id: collection.id,
+      name: collection.name,
+      description: collection.description,
+      allowed_name_length: collection.allowed_name_length,
+    };
+  }
+
+  /**
+   * Resolves the trimmed collection metadata for a single collection id.
+   * Returns null when the id is empty or unknown to the current factory.
+   */
+  async getCollectionInfo(
+    collectionId?: string | null,
+  ): Promise<ICollectionInfo | null> {
+    if (!collectionId) {
+      return null;
+    }
+    const factory = await this.getCurrentFactory();
+    return this.mapCollectionInfo(factory, collectionId);
   }
 }
