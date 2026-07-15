@@ -29,6 +29,7 @@ import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view'
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
+import { CommunityFactoryService } from '@/ae/community-factory.service';
 import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
@@ -45,6 +46,7 @@ export class PostsController {
     private readonly popularRankingService: PopularRankingService,
     private readonly readsService: ReadsService,
     private readonly profileReadService: ProfileReadService,
+    private readonly communityFactoryService: CommunityFactoryService,
   ) {
     //
   }
@@ -106,6 +108,10 @@ export class PostsController {
       }
     }
 
+    // Loaded once so every mention resolves its collection badge from the same
+    // cached factory schema instead of awaiting per mention.
+    const factory = await this.communityFactoryService.getCurrentFactory();
+
     for (const item of items) {
       const names = mentionsByPost.get(item.id);
       if (!names) {
@@ -116,6 +122,10 @@ export class PostsController {
         return {
           name,
           sale_address: token?.sale_address ?? null,
+          collection_info: this.communityFactoryService.mapCollectionInfo(
+            factory,
+            token?.collection,
+          ),
           performance: token?.performance ?? null,
         };
       });

@@ -10,7 +10,11 @@ const CHAIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}\.chain$/i;
 const INVITE_CODE_PATTERN = /^[a-z0-9]{1,64}$/i;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/i;
 const POST_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._~:-]{0,127}$/u;
-const TOPIC_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,127}$/;
+// Topics carry whatever script the post was written in (`extractTopics` strips no
+// characters), and tokens now come from non-Latin collections, so `#أنا` and `#汉字`
+// are real topic names. Letters/numbers in any script, matching POST_ID_PATTERN.
+// Still excludes `/`, `\` and a leading `.`, so no path traversal.
+const TOPIC_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} _.-]{0,127}$/u;
 
 type ValidatorFn = (value: string) => boolean;
 

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PriceDto } from './price.dto';
 import { TokenPerformanceDto } from './token-performance.dto';
+import { CollectionInfoDto } from './collection-info.dto';
 
 export class TokenDto {
   @ApiProperty()
@@ -35,6 +36,15 @@ export class TokenDto {
 
   @ApiProperty()
   collection: string;
+
+  @ApiProperty({
+    description:
+      "Resolved metadata for the token's collection, or null when the " +
+      'token has no collection / the collection is unknown to the factory.',
+    type: () => CollectionInfoDto,
+    nullable: true,
+  })
+  collection_info: CollectionInfoDto | null;
 
   @ApiProperty()
   metaInfo: Record<string, string>;

@@ -21,6 +21,7 @@ import { Repository } from 'typeorm';
 import { Topic } from '../entities/topic.entity';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { TopicParamPipe } from '@/common/validation/request-validation';
+import { normalizeTopicName } from '../utils/topic-name.util';
 
 const ALLOWED_ORDER_BY = new Set(['name', 'post_count', 'created_at']);
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
@@ -120,7 +121,7 @@ export class TopicsController {
       );
 
     const topic = await this.topicRepository.findOne({
-      where: isUUID ? { id } : { name: id },
+      where: isUUID ? { id } : { name: normalizeTopicName(id) },
       relations: ['posts'],
     });
     if (!topic) {
@@ -144,7 +145,7 @@ export class TopicsController {
   @Get('name/:name')
   async getByName(@Param('name', TopicParamPipe) name: string) {
     const topic = await this.topicRepository.findOne({
-      where: { name },
+      where: { name: normalizeTopicName(name) },
       relations: ['posts'],
     });
     if (!topic) {

@@ -12,6 +12,7 @@ import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { AccountModule } from '@/account/account.module';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
+import { Aex9TransferPluginModule } from '@/token-gated-rooms/plugins/aex9-transfer-plugin.module';
 import { BclPlugin } from './bcl.plugin';
 import { BclPluginSyncService } from './bcl-plugin-sync.service';
 import { TransactionsService } from './services/transactions.service';
@@ -36,6 +37,11 @@ import { TokenHolderService } from './services/token-holder.service';
     AccountModule,
     AePricingModule,
     AeModule,
+    // `TokenHolderService` mirrors buy/sell deltas into `token_balance` via
+    // `BalanceIndexerService` (see its module doc) — buy/sell never reaches
+    // `Aex9TransferSyncService` since those calls target the sale contract,
+    // not the AEX9 token contract itself.
+    Aex9TransferPluginModule,
     BullModule.registerQueue({
       name: PULL_TOKEN_INFO_QUEUE,
     }),

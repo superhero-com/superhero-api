@@ -5,6 +5,7 @@ import {
   OnModuleDestroy,
   Optional,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
@@ -46,23 +47,25 @@ export type PopularRankingWeightOverrides = Partial<
   Record<PopularCustomizableWeightKey, PopularRankingWeightScale | undefined>
 >;
 
-type Mutable<T> = {
-  -readonly [K in keyof T]: T[K];
-};
-
-type PopularRankingResolvedWeights = Mutable<
-  typeof POPULAR_RANKING_CONFIG.WEIGHTS
-> & {
-  interactionsPerHour: number;
-};
+type PopularRankingResolvedWeights = Record<
+  keyof typeof POPULAR_RANKING_CONFIG.WEIGHTS,
+  number
+>;
 
 interface PopularScoreInput {
+  id?: string;
   content: string;
   comments: number;
   tipsAmountAE: number;
   tipsCount: number;
   uniqueTippers: number;
   reads: number;
+  /**
+   * Interactions within VELOCITY_WINDOW_HOURS. When absent (sources without
+   * interaction timestamps, e.g. plugin items) velocity falls back to the
+   * lifetime average.
+   */
+  recentInteractions?: number;
   topics?: Array<{ name?: string }>;
   createdAt?: Date | string;
 }
@@ -129,7 +132,6 @@ export class PopularRankingService implements OnModuleDestroy {
   ): PopularRankingResolvedWeights {
     const resolved: PopularRankingResolvedWeights = {
       ...POPULAR_RANKING_CONFIG.WEIGHTS,
-      interactionsPerHour: 0,
     };
 
     if (!this.hasWeightOverrides(overrides)) {
@@ -143,11 +145,7 @@ export class PopularRankingService implements OnModuleDestroy {
       }
 
       const multiplier = multipliers[value];
-      if (key === 'interactionsPerHour') {
-        resolved.interactionsPerHour =
-          POPULAR_RANKING_CONFIG.CUSTOMIZATION.ADDITIONAL_SIGNAL_WEIGHTS
-            .interactionsPerHour * multiplier;
-      } else if (key in resolved) {
+      if (key in resolved) {
         (resolved as Record<string, number>)[key] *= multiplier;
       }
     }
@@ -414,6 +412,52 @@ export class PopularRankingService implements OnModuleDestroy {
     await task;
   }
 
+  /**
+   * Scheduled refresh so user requests almost never pay recompute latency —
+   * on a low-traffic instance the lazy path would otherwise find a cold cache
+   * on nearly every request; the lazy recompute stays as cold-start fallback.
+   *
+   * Only the 'all' window is refreshed on a schedule. GET /posts/popular is
+   * all-time — the `window` query param is deprecated and ignored — so nothing
+   * reads the '24h'/'7d' caches. Scheduling those recomputes only burned DB
+   * (candidate scan, tips/reads aggregation, recursive thread CTE) every
+   * minute/5 minutes to populate caches no request serves. The windowed code
+   * paths remain for the lazy/on-demand fallback should a consumer request
+   * them again.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  refreshPopularAll(): Promise<void> {
+    return this.refreshWindowLocked('all', 595);
+  }
+
+  /**
+   * A short-lived Redis lock (TTL just under the window's cron interval)
+   * keeps multiple app instances from recomputing the same window in
+   * parallel — whoever grabs the lock does the work, the rest skip the tick.
+   */
+  private async refreshWindowLocked(
+    window: PopularWindow,
+    lockTtlSeconds: number,
+  ): Promise<void> {
+    try {
+      const acquired = await this.redis.set(
+        `popular:refresh-lock:${window}`,
+        '1',
+        'EX',
+        lockTtlSeconds,
+        'NX',
+      );
+      if (acquired === null) {
+        return;
+      }
+    } catch {
+      // Redis unreachable — recompute could not cache its result anyway.
+      return;
+    }
+
+    await this.awaitOrTriggerRecompute(window);
+  }
+
   private async hydrateRankedItems(
     window: PopularWindow,
     ids: string[],
@@ -659,8 +703,11 @@ export class PopularRankingService implements OnModuleDestroy {
 
     const ids = candidates.map((c) => c.id);
     let tipsByPost = new Map<string, any>();
-    let commentsByPost = new Map<string, number>();
+    let commentsByPost = new Map<string, { count: number; recent: number }>();
     let readsByPost = new Map<string, number>();
+    const recentSince = new Date(
+      Date.now() - POPULAR_RANKING_CONFIG.VELOCITY_WINDOW_HOURS * 3600 * 1000,
+    );
 
     if (ids.length > 0) {
       const tipsRaw = await this.tipRepository
@@ -673,30 +720,65 @@ export class PopularRankingService implements OnModuleDestroy {
         )
         .addSelect('COUNT(*)', 'count')
         .addSelect('COUNT(DISTINCT tip.sender_address)', 'unique_tippers')
+        .addSelect(
+          'COUNT(*) FILTER (WHERE tip.created_at >= :recentSince)',
+          'recent_count',
+        )
         .where('tip.post_id IN (:...ids)', { ids })
         .andWhere('tip.sender_address != post.sender_address')
+        .setParameter('recentSince', recentSince)
         .groupBy('tip.post_id')
         .getRawMany<{
           post_id: string;
           amount_sum: string;
           count: string;
           unique_tippers: string;
+          recent_count: string;
         }>();
       tipsByPost = new Map(tipsRaw.map((t) => [t.post_id, t] as const));
 
-      const commentsRaw = await this.postRepository
-        .createQueryBuilder('comment')
-        .innerJoin(Post, 'parent', 'parent.id = comment.post_id')
-        .select('comment.post_id', 'parent_id')
-        .addSelect('COUNT(*)', 'count')
-        .where('comment.post_id IN (:...ids)', { ids })
-        .andWhere('comment.is_hidden = false')
-        .andWhere('comment.sender_address != parent.sender_address')
-        .groupBy('comment.post_id')
-        .getRawMany<{ parent_id: string; count: string }>();
+      // Whole-thread comment count: replies to comments attach to the
+      // comment's id, so counting direct children only would score a deep
+      // 30-message discussion as its handful of top-level comments. Replies
+      // authored by the root post's author are excluded (same anti-self-boost
+      // rule as before), and hidden comments prune their entire subtree.
+      const commentsRaw: Array<{
+        root_id: string;
+        count: string;
+        recent_count: string;
+      }> = await this.postRepository.query(
+        `WITH RECURSIVE thread AS (
+           SELECT p.id, p.id AS root_id, p.sender_address AS root_sender,
+                  0 AS depth
+           FROM posts p
+           WHERE p.id = ANY($1)
+           UNION ALL
+           SELECT c.id, t.root_id, t.root_sender, t.depth + 1
+           FROM posts c
+           INNER JOIN thread t ON c.post_id = t.id
+           WHERE c.is_hidden = false
+             AND t.depth < ${POPULAR_RANKING_CONFIG.THREAD_COUNT_MAX_DEPTH}
+         )
+         SELECT t.root_id AS root_id,
+                COUNT(*) AS count,
+                COUNT(*) FILTER (WHERE c.created_at >= $2) AS recent_count
+         FROM thread t
+         INNER JOIN posts c ON c.id = t.id
+         WHERE t.id != t.root_id
+           AND c.sender_address != t.root_sender
+         GROUP BY t.root_id`,
+        [ids, recentSince],
+      );
       commentsByPost = new Map(
         commentsRaw.map(
-          (r) => [r.parent_id, parseInt(r.count || '0', 10)] as const,
+          (r) =>
+            [
+              r.root_id,
+              {
+                count: parseInt(r.count || '0', 10),
+                recent: parseInt(r.recent_count || '0', 10),
+              },
+            ] as const,
         ),
       );
 
@@ -727,19 +809,25 @@ export class PopularRankingService implements OnModuleDestroy {
 
     const scoredPosts: PopularScoreItem[] = candidates.map((post) => {
       const tipsAgg = tipsByPost.get(post.id);
+      const commentsAgg = commentsByPost.get(post.id);
+      const recentInteractions =
+        (commentsAgg?.recent || 0) +
+        (tipsAgg ? parseInt(tipsAgg.recent_count || '0', 10) : 0);
       return {
         postId: post.id,
         score: this.computeScore(
           trendingByTag,
           {
+            id: post.id,
             content: post.content,
-            comments: commentsByPost.get(post.id) || 0,
+            comments: commentsAgg?.count || 0,
             tipsAmountAE: tipsAgg ? parseFloat(tipsAgg.amount_sum || '0') : 0,
             tipsCount: tipsAgg ? parseInt(tipsAgg.count || '0', 10) : 0,
             uniqueTippers: tipsAgg
               ? parseInt(tipsAgg.unique_tippers || '0', 10)
               : 0,
             reads: readsByPost.get(post.id) || 0,
+            recentInteractions,
             topics: post.topics,
             createdAt: post.created_at,
           },
@@ -756,6 +844,7 @@ export class PopularRankingService implements OnModuleDestroy {
         score: this.computeScore(
           trendingByTag,
           {
+            id: item.id,
             content: item.content,
             comments: item.total_comments || 0,
             tipsAmountAE: 0,
@@ -890,6 +979,17 @@ export class PopularRankingService implements OnModuleDestroy {
       return 0;
     }
 
+    // Recent interactions over the velocity window (or the post's age when
+    // younger): an old post catching fire today registers full velocity
+    // instead of having new activity averaged over its lifetime.
+    if (input.recentInteractions !== undefined) {
+      const velocityHours = Math.min(
+        ageHours,
+        POPULAR_RANKING_CONFIG.VELOCITY_WINDOW_HOURS,
+      );
+      return input.recentInteractions / Math.max(1, velocityHours);
+    }
+
     const effectiveHours =
       window === 'all'
         ? ageHours
@@ -919,6 +1019,30 @@ export class PopularRankingService implements OnModuleDestroy {
     return Math.max(
       minimumHours,
       (Date.now() - date.getTime()) / (60 * 60 * 1000),
+    );
+  }
+
+  /**
+   * Deterministic per-hour jitter in [0, TIE_ROTATION_EPSILON) that rotates
+   * near-tied posts (mostly the zero-engagement tail) so their relative order
+   * changes every hour instead of being frozen between recomputes. Added
+   * before gravity, so it scales down with everything else on 'all'.
+   */
+  private computeTieRotation(id?: string): number {
+    if (!id) {
+      return 0;
+    }
+
+    const hourBucket = Math.floor(Date.now() / (60 * 60 * 1000));
+    const seed = `${id}:${hourBucket}`;
+    let hash = 0x811c9dc5; // FNV-1a
+    for (let i = 0; i < seed.length; i++) {
+      hash ^= seed.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+
+    return (
+      ((hash >>> 0) / 0x100000000) * POPULAR_RANKING_CONFIG.TIE_ROTATION_EPSILON
     );
   }
 
@@ -963,19 +1087,42 @@ export class PopularRankingService implements OnModuleDestroy {
     const interactionsPerHour = this.computeInteractionsPerHour(input, window);
     const freshnessFactor = this.computeFreshnessFactor(input);
 
-    return (
+    // Reads are the easiest signal to inflate (a request with a browser UA is
+    // enough), so their counted volume is capped relative to active
+    // engagement — passive signal alone cannot outvote real interactions.
+    const activeInteractions = comments + tipsCount + uniqueTippers;
+    const effectiveReads = Math.min(
+      reads,
+      POPULAR_RANKING_CONFIG.READS_PER_INTERACTION_CAP *
+        (1 + activeInteractions),
+    );
+
+    const baseScore =
       weights.comments * Math.log(1 + comments) +
       weights.tipsAmountAE * Math.log(1 + tipsAmountAE) +
       weights.tipsCount * Math.log(1 + tipsCount) +
       weights.uniqueTippers * Math.log(1 + uniqueTippers) +
-      weights.reads * Math.log(1 + reads) +
+      weights.reads * Math.log(1 + effectiveReads) +
       weights.trendingBoost * trendingBoost +
       weights.contentQuality * contentQuality +
       weights.freshnessBoost * freshnessFactor +
       weights.velocityBoost *
         Math.log(1 + interactionsPerHour) *
         freshnessFactor +
-      weights.interactionsPerHour * Math.log(1 + interactionsPerHour)
+      weights.interactionsPerHour * Math.log(1 + interactionsPerHour) +
+      this.computeTieRotation(input.id);
+
+    if (window !== 'all') {
+      return baseScore;
+    }
+
+    // Log-dampened engagement never decays on its own, so without gravity old
+    // high-total posts pin the 'all' feed forever. +2 keeps brand-new posts
+    // from being divided by ~0.
+    const ageHours = this.computeAgeHours(input.createdAt, 1) ?? 1;
+    return (
+      baseScore /
+      Math.pow(ageHours + 2, POPULAR_RANKING_CONFIG.ALL_WINDOW_GRAVITY)
     );
   }
 
@@ -1040,23 +1187,33 @@ export class PopularRankingService implements OnModuleDestroy {
     }));
   }
 
+  private countEmojis(content: string): number {
+    try {
+      // Extended_Pictographic instead of Emoji: \p{Emoji} also matches digits,
+      // '#' and '*'. Global flag so every occurrence counts, not just the first.
+      return (content.match(/\p{Extended_Pictographic}/gu) || []).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private computeContentQuality(content: string): number {
     if (!content) return 0;
     const cfg = POPULAR_RANKING_CONFIG.CONTENT;
-    const len = content.length;
+    // Code-point length, not UTF-16 length: emoji are surrogate pairs, so an
+    // emoji-only post would otherwise cap emojiRatio at 0.5 and dodge the
+    // short-and-emoji-heavy penalty.
+    const len = [...content].length;
     const lengthScore = Math.max(
       0,
       Math.min(1, (len - cfg.minLengthForNoPenalty) / cfg.maxReferenceLength),
     );
-    let emojis = 0;
-    try {
-      const emojiRegex = /[\p{Emoji_Presentation}\p{Emoji}\u200d]+/u;
-      emojis = (content.match(emojiRegex) || []).length;
-    } catch {
-      emojis = 0;
-    }
+    const emojis = this.countEmojis(content);
     const emojiRatio = Math.min(1, emojis / Math.max(1, len));
-    const alnumMatches = content.match(/[A-Za-z0-9]/g) || [];
+    // Letters/numbers in any script: an ASCII-only class scores a wholly Chinese,
+    // Arabic or Cyrillic post at a 0 ratio, permanently forfeiting this term and
+    // ranking non-Latin posts below identical Latin ones.
+    const alnumMatches = content.match(/[\p{L}\p{N}]/gu) || [];
     const alnumRatio = Math.min(1, alnumMatches.length / Math.max(1, len));
 
     let quality = 0.6 * lengthScore + 0.2 * alnumRatio + 0.2 * (1 - emojiRatio);

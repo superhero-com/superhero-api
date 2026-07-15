@@ -59,6 +59,11 @@ export class TransactionProcessorService {
 
     const saleAddress = validation.saleAddress;
 
+    // Deferred `tgr.balance.changed` emit from updateTokenHolder — fired only
+    // AFTER the transaction below commits, so room eligibility never recomputes
+    // off a balance a rollback discards (or one not yet visible to its reader).
+    let emitBalanceChanged: (() => void) | null = null;
+
     // Wrap all DB operations in a single transaction
     const result = await this.transactionRepository.manager.transaction(
       async (manager) => {
@@ -222,8 +227,9 @@ export class TransactionProcessorService {
         if (syncDirection === SyncDirectionEnum.Live) {
           await this.tokenService.syncTokenPrice(transactionToken, manager);
 
-          // Update token holder
-          await this.tokenHolderService.updateTokenHolder(
+          // Update token holder. The balance-changed emit is deferred and
+          // fired after this transaction commits (see below).
+          emitBalanceChanged = await this.tokenHolderService.updateTokenHolder(
             transactionToken,
             decodedTx,
             parsedData.volume,
@@ -239,6 +245,12 @@ export class TransactionProcessorService {
         };
       },
     );
+
+    // Transaction committed — now it is safe to wake room eligibility off the
+    // freshly-persisted (and durable) token_balance. If the transaction had
+    // rolled back, `.transaction()` would have thrown and we would never reach
+    // this line, so a discarded balance never emits.
+    emitBalanceChanged?.();
 
     // Update token trending score (non-critical operation outside transaction)
     if (result?.isSupported && syncDirection === SyncDirectionEnum.Live) {

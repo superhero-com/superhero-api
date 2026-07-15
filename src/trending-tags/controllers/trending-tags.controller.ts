@@ -25,6 +25,7 @@ import { Repository } from 'typeorm';
 import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTagsService } from '../services/trending-tags.service';
+import { normalizeTagName } from '../utils/tag-name.util';
 import { ApiKeyGuard } from '../guards/api-key.guard';
 import { TopicParamPipe } from '@/common/validation/request-validation';
 
@@ -106,7 +107,7 @@ export class TrendingTagsController {
   @Get(':tag')
   async getTrendingTag(@Param('tag', TopicParamPipe) tag: string) {
     const trendingTag = await this.trendingTagRepository.findOne({
-      where: { tag },
+      where: { tag: normalizeTagName(tag) },
     });
 
     if (!trendingTag) {

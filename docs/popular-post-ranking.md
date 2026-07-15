@@ -1,6 +1,6 @@
 ## Popular post ranking
 
-The popular post endpoint ranks content all-time, then adds a short-lived live boost so newer posts can surface in a low-activity network. The result is a "Top + fresh" feed: durable engagement still wins over time, but new posts get discovery room during their first day.
+The popular post endpoint ranks content all-time, then adds a short-lived live boost so newer posts can surface in a low-activity network. The result is a "Top + fresh" feed: durable engagement still wins over time, but new posts get discovery room during their first two days.
 
 The current implementation rewards posts that attract:
 
@@ -46,7 +46,7 @@ This means popularity is computed within the newest all-time candidate pool, not
 Each candidate gets a score from accumulated engagement and content signals:
 
 ```text
-score =
+baseScore =
   w_comments * log(1 + comments) +
   w_tips_amount * log(1 + tipsAmountAE) +
   w_tips_count * log(1 + tipsCount) +
@@ -55,18 +55,50 @@ score =
   w_trending * trendingBoost +
   w_quality * contentQuality +
   w_fresh * freshnessFactor +
-  w_velocity * log(1 + interactionsPerHour) * freshnessFactor
+  w_velocity * log(1 + interactionsPerHour) * freshnessFactor +
+  w_iph * log(1 + interactionsPerHour)
 ```
 
-There is no time-decay divisor. The live boost is additive and bounded, so it helps new content without permanently overriding all-time engagement.
+Velocity contributes twice, on purpose:
 
-Freshness is linear over the first 24 hours:
+- `w_iph` is the **always-on momentum baseline** — a post gaining interactions
+  quickly gets credit at any age.
+- `w_velocity` is a **freshness-gated early-life amplifier** — new posts that
+  are also accelerating get an extra, temporary lift.
+
+`interactionsPerHour` is measured over a recent window, not the post's
+lifetime:
 
 ```text
-freshnessFactor = max(0, 1 - ageHours / 24)
+interactionsPerHour = interactionsInLast48h / min(ageHours, 48)
 ```
 
-After 24 hours, both `freshnessFactor` and the velocity boost are zero. The post then ranks by normal accumulated engagement.
+so an old post that catches fire today registers full velocity instead of
+having its new activity averaged away over months. (Plugin content without
+interaction timestamps falls back to the lifetime average.)
+
+Freshness is linear over the first `FRESHNESS_BOOST_HOURS` (48 — generous on
+purpose: on a low-activity network posts need longer to gather signal):
+
+```text
+freshnessFactor = max(0, 1 - ageHours / 48)
+```
+
+After 48 hours, `freshnessFactor` and the amplifier are zero; the always-on
+momentum baseline keeps counting.
+
+For the `24h` and `7d` windows the score is `baseScore` as-is — those feeds are
+already bounded by their time filter. The `all` window additionally applies a
+gentle gravity-style age decay so old high-total posts cannot occupy the top
+forever:
+
+```text
+score(all) = baseScore / (ageHours + 2) ^ ALL_WINDOW_GRAVITY
+```
+
+Because every engagement signal is log-dampened, score gaps between posts stay
+small, so the gravity exponent must stay gentle (`0.25` today, sane range
+roughly `0.15..0.4`). Values near `1` would turn the feed into pure recency.
 
 ## Current weights
 
@@ -81,9 +113,15 @@ WEIGHTS: {
   trendingBoost: 0.5,
   contentQuality: 0.3,
   reads: 1.5,
-  freshnessBoost: 0.9,
-  velocityBoost: 0.6,
+  freshnessBoost: 1.5,
+  velocityBoost: 0.6, // freshness-gated early-life amplifier
+  interactionsPerHour: 0.6, // always-on momentum baseline
 }
+FRESHNESS_BOOST_HOURS: 48
+VELOCITY_WINDOW_HOURS: 48
+READS_PER_INTERACTION_CAP: 100
+TIE_ROTATION_EPSILON: 0.05
+ALL_WINDOW_GRAVITY: 0.25
 ```
 
 ### What matters most
@@ -94,7 +132,7 @@ The biggest direct drivers are:
 - `uniqueTippers`
 - `reads`
 - `tipsAmountAE`
-- temporary freshness and velocity for posts less than 24 hours old
+- always-on interaction velocity, with temporary freshness boosts for posts less than 48 hours old
 
 Because logarithms are used for all count- and amount-based signals, they have diminishing returns. Doubling activity helps, but not linearly forever.
 
@@ -106,7 +144,7 @@ Tipping is a rare action on this network. The weight for `tipsAmountAE` (2.0) is
 
 ### 1. Comments
 
-The score counts comments (replies) on the post, excluding the post author's own replies. This prevents authors from inflating their ranking by replying to their own posts.
+The score counts the post's **entire reply thread** (replies to replies included, via a recursive query), excluding replies authored by the post's own author. This prevents authors from inflating their ranking by replying to their own posts, while a deep discussion under a few top-level comments is credited at its real size. Hidden comments prune their whole subtree.
 
 More discussion helps a post rank higher, but through `log(1 + comments)`, so going from 0 to 5 comments matters more than going from 500 to 505.
 
@@ -130,10 +168,17 @@ The number of distinct addresses that tipped a post (excluding self-tips). This 
 
 Reads are pulled from `post_reads_daily` and summed for all available candidate posts.
 
-The ranking uses raw reads:
+Reads are the easiest signal to inflate, so they are hardened twice:
+
+- **At recording time**, a read counts once per viewer (IP+UA hash), post, and
+  UTC day — a request loop from one client cannot inflate the counter. The
+  dedup fails open if Redis is unavailable. Bot user agents are ignored.
+- **At scoring time**, counted reads are capped at
+  `READS_PER_INTERACTION_CAP × (1 + comments + tipsCount + uniqueTippers)`,
+  so passive volume alone cannot outvote real engagement indefinitely:
 
 ```text
-log(1 + reads)
+log(1 + min(reads, cap))
 ```
 
 Reads are not normalized by age. Freshness is handled by the bounded new-post boost.
@@ -189,19 +234,29 @@ The service:
 
 This keeps each page full while preventing one active user from dominating the popular tab.
 
+## Tie rotation
+
+Every score also carries a small deterministic jitter in `[0, TIE_ROTATION_EPSILON)` derived from the post id and the current hour. Posts with meaningfully different engagement are unaffected (their score gaps are much larger than the epsilon), but near-tied posts — mostly the zero-engagement tail, whose scores differ only by content quality — rotate their relative order every hour instead of being frozen in the same sequence between recomputes. This spreads exposure across posts that haven't had a chance to gather signal yet, without any stored state.
+
 ## Caching behavior
 
-Computed rankings are stored in the Redis sorted set `popular:all`.
+Computed rankings are stored in the Redis sorted sets `popular:24h`, `popular:7d`, and `popular:all`.
 
-TTL is currently:
+Crons refresh each window at a cadence matched to how fast it changes — `24h`
+every minute, `7d` every 5 minutes, `all` (10k candidates, slow-moving) every
+10 minutes — and the TTL is kept far above the slowest cadence:
 
 ```ts
-REDIS_TTL_SECONDS: 30;
+REDIS_TTL_SECONDS: 1800;
 ```
 
-So the feed is intentionally refreshed often.
-
-When the cache is empty (cold start or after TTL expiry with no cron), recompute is triggered with a mutex to prevent stampede. The current request falls back to recent posts while the cache is being rebuilt.
+so user requests essentially never pay recompute latency — a key only goes
+cold if refreshes fail repeatedly. Each refresh takes a short-lived Redis
+`SET NX` lock per window, so running multiple app instances does not multiply
+the recompute work. On a cold cache (startup, repeated cron failures)
+recompute is still triggered lazily with a per-window mutex to prevent
+stampede, and the current request falls back to recent posts while the cache
+is being rebuilt.
 
 ## Practical interpretation
 
@@ -213,7 +268,7 @@ A post is most likely to rank highly when it is:
 - being read actively,
 - connected to a trending topic,
 - written with enough substance to avoid quality penalties,
-- less than 24 hours old or gaining early interaction velocity.
+- gaining interaction velocity (at any age), with an extra amplifier while less than 48 hours old.
 
 ## Files involved
 
@@ -231,9 +286,9 @@ A post is most likely to rank highly when it is:
 
 Most numeric signals use `log(1 + x)` so the ranking favors meaningful activity without letting one giant raw number dominate forever.
 
-### Why there is no global time decay
+### Why time decay applies only to the `all` window
 
-This is not a Hacker News-style feed where every post steadily decays. In a low-activity network, posts need time to gather signal. The algorithm instead uses all-time engagement plus a 24-hour additive boost, so new posts get initial visibility and then settle into the normal ranking.
+The `24h` and `7d` feeds are already bounded by their time filter, so they need no decay. The `all` feed is different: log-dampened engagement never shrinks, so without decay the oldest high-total posts would occupy the top permanently. A gentle gravity divisor (`(ageHours + 2)^0.25`) keeps that feed churning while still letting genuinely evergreen content outrank mediocre new posts. New posts additionally get a 48-hour additive freshness boost so they have discovery room in a low-activity network.
 
 ### Why there are no score floors
 

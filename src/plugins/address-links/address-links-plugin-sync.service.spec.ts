@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { decode } from '@aeternity/aepp-sdk';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import { AddressLinksPluginSyncService } from './address-links-plugin-sync.service';
 import { Account } from '@/account/entities/account.entity';
@@ -8,6 +9,7 @@ import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ProfileCacheService } from '@/profile/services/profile-cache.service';
 import { ProfileXPostingRewardService } from '@/profile/services/profile-x-posting-reward.service';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { TGR_LINK_CHANGED } from '@/token-gated-rooms/events';
 
 const SIGNER_ADDRESS = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
 const SIGNER_ADDRESS_INT = BigInt(
@@ -32,6 +34,7 @@ describe('AddressLinksPluginSyncService', () => {
     where: jest.Mock;
   };
   let profileCacheService: { syncFromAccountLinks: jest.Mock };
+  let eventEmitter: { emit: jest.Mock };
 
   beforeEach(async () => {
     queryBuilder = {
@@ -55,6 +58,8 @@ describe('AddressLinksPluginSyncService', () => {
       syncFromAccountLinks: jest.fn().mockResolvedValue(undefined),
     };
 
+    eventEmitter = { emit: jest.fn() };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         AddressLinksPluginSyncService,
@@ -72,6 +77,10 @@ describe('AddressLinksPluginSyncService', () => {
         {
           provide: ProfileCacheService,
           useValue: profileCacheService,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: eventEmitter,
         },
       ],
     }).compile();
@@ -291,5 +300,70 @@ describe('AddressLinksPluginSyncService', () => {
     );
 
     fetchSpy.mockRestore();
+  });
+
+  describe('tgr.link.changed seam (Task 05)', () => {
+    it('emits tgr.link.changed on a nostr link', async () => {
+      await service.processTransaction(
+        baseTx({
+          function: 'link',
+          hash: 'th_nostr_link',
+          raw: {
+            arguments: [
+              { type: 'address', value: SIGNER_ADDRESS },
+              { type: 'string', value: 'nostr' },
+              { type: 'string', value: 'npub1abc' },
+              { type: 'int', value: '1' },
+            ],
+          },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(TGR_LINK_CHANGED, {
+        address: SIGNER_ADDRESS,
+      });
+    });
+
+    it('emits tgr.link.changed on a nostr unlink', async () => {
+      await service.processTransaction(
+        baseTx({
+          function: 'unlink',
+          hash: 'th_nostr_unlink',
+          raw: {
+            arguments: [
+              { type: 'address', value: SIGNER_ADDRESS },
+              { type: 'string', value: 'nostr' },
+              { type: 'int', value: '1' },
+            ],
+          },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(TGR_LINK_CHANGED, {
+        address: SIGNER_ADDRESS,
+      });
+    });
+
+    it('does NOT emit tgr.link.changed for a non-nostr provider', async () => {
+      await service.processTransaction(
+        baseTx({
+          function: 'link',
+          hash: 'th_site_link',
+          raw: {
+            arguments: [
+              { type: 'address', value: SIGNER_ADDRESS },
+              { type: 'string', value: 'site' },
+              { type: 'string', value: 'www.wikipedia.org' },
+              { type: 'int', value: '1' },
+            ],
+          },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
   });
 });

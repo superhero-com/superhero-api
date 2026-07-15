@@ -11,6 +11,7 @@ const redisMock = {
   quit: jest.fn().mockResolvedValue('OK'),
   ping: jest.fn().mockResolvedValue('PONG'),
   del: jest.fn().mockResolvedValue(1),
+  set: jest.fn().mockResolvedValue('OK'),
   zcard: jest.fn().mockResolvedValue(1),
   pipeline: jest.fn().mockReturnValue(pipelineMock),
 };
@@ -23,6 +24,7 @@ jest.mock('ioredis', () => {
 });
 
 import { PopularRankingService } from './popular-ranking.service';
+import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
 
 function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
   return {
@@ -60,15 +62,7 @@ describe('PopularRankingService', () => {
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
-      groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([]),
-    };
-    const commentQueryBuilder = {
-      innerJoin: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
     };
@@ -82,10 +76,8 @@ describe('PopularRankingService', () => {
     };
 
     postRepository = {
-      createQueryBuilder: jest
-        .fn()
-        .mockReturnValueOnce(candidateQueryBuilder)
-        .mockReturnValueOnce(commentQueryBuilder),
+      createQueryBuilder: jest.fn().mockReturnValue(candidateQueryBuilder),
+      query: jest.fn().mockResolvedValue([]),
       find: jest.fn().mockResolvedValue([defaultPost]),
       findBy: jest.fn().mockResolvedValue([defaultPost]),
     };
@@ -124,20 +116,17 @@ describe('PopularRankingService', () => {
     );
   });
 
-  it('excludes self-comments from ranking comment count', async () => {
+  it('counts whole threads while excluding the root author from comment count', async () => {
     await service.recompute('7d', 10);
 
-    const commentQueryBuilder =
-      postRepository.createQueryBuilder.mock.results[1].value;
+    const [sql, params] = postRepository.query.mock.calls[0];
 
-    expect(commentQueryBuilder.innerJoin).toHaveBeenCalledWith(
-      expect.any(Function),
-      'parent',
-      'parent.id = comment.post_id',
-    );
-    expect(commentQueryBuilder.andWhere).toHaveBeenCalledWith(
-      'comment.sender_address != parent.sender_address',
-    );
+    expect(sql).toContain('WITH RECURSIVE');
+    expect(sql).toContain('c.sender_address != t.root_sender');
+    expect(sql).toContain('c.is_hidden = false');
+    expect(sql).toContain('t.depth <');
+    expect(params[0]).toEqual(['post-1']);
+    expect(params[1]).toBeInstanceOf(Date);
   });
 
   it('falls back to window-filtered recent posts when Redis cache is empty', async () => {
@@ -204,6 +193,7 @@ describe('PopularRankingService', () => {
       addSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([
         {
@@ -211,25 +201,15 @@ describe('PopularRankingService', () => {
           amount_sum: '0',
           count: '2',
           unique_tippers: '2',
+          recent_count: '2',
         },
         {
           post_id: 'post-fast',
           amount_sum: '0',
           count: '2',
           unique_tippers: '2',
+          recent_count: '2',
         },
-      ]),
-    };
-    const commentQueryBuilder = {
-      innerJoin: jest.fn().mockReturnThis(),
-      select: jest.fn().mockReturnThis(),
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      groupBy: jest.fn().mockReturnThis(),
-      getRawMany: jest.fn().mockResolvedValue([
-        { parent_id: 'post-old', count: '4' },
-        { parent_id: 'post-fast', count: '4' },
       ]),
     };
     const readsQueryBuilder = {
@@ -245,10 +225,11 @@ describe('PopularRankingService', () => {
     };
 
     postRepository = {
-      createQueryBuilder: jest
-        .fn()
-        .mockReturnValueOnce(candidateQueryBuilder)
-        .mockReturnValueOnce(commentQueryBuilder),
+      createQueryBuilder: jest.fn().mockReturnValue(candidateQueryBuilder),
+      query: jest.fn().mockResolvedValue([
+        { root_id: 'post-old', count: '4', recent_count: '4' },
+        { root_id: 'post-fast', count: '4', recent_count: '4' },
+      ]),
       find: jest.fn().mockResolvedValue([oldPost, fastPost]),
       findBy: jest.fn().mockResolvedValue([oldPost, fastPost]),
     };
@@ -385,23 +366,13 @@ describe('PopularRankingService', () => {
         topics: [],
       };
       const candidateQB = createCandidateQueryBuilder([post]);
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest
-          .fn()
-          .mockResolvedValue([{ parent_id: 'post-w', count: '5' }]),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           {
@@ -409,6 +380,7 @@ describe('PopularRankingService', () => {
             amount_sum: '100',
             count: '3',
             unique_tippers: '2',
+            recent_count: '3',
           },
         ]),
       };
@@ -424,10 +396,12 @@ describe('PopularRankingService', () => {
       };
 
       const repo = {
-        createQueryBuilder: jest
+        createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+        query: jest
           .fn()
-          .mockReturnValueOnce(candidateQB)
-          .mockReturnValueOnce(commentQB),
+          .mockResolvedValue([
+            { root_id: 'post-w', count: '5', recent_count: '5' },
+          ]),
         find: jest.fn().mockResolvedValue([post]),
         findBy: jest.fn().mockResolvedValue([post]),
       };
@@ -480,23 +454,13 @@ describe('PopularRankingService', () => {
   describe('computeInteractionsPerHour edge cases', () => {
     function buildServiceWith(post: any) {
       const candidateQB = createCandidateQueryBuilder([post]);
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest
-          .fn()
-          .mockResolvedValue([{ parent_id: post.id, count: '3' }]),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           {
@@ -504,6 +468,7 @@ describe('PopularRankingService', () => {
             amount_sum: '0',
             count: '1',
             unique_tippers: '1',
+            recent_count: '1',
           },
         ]),
       };
@@ -518,10 +483,12 @@ describe('PopularRankingService', () => {
 
       return new PopularRankingService(
         {
-          createQueryBuilder: jest
+          createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+          query: jest
             .fn()
-            .mockReturnValueOnce(candidateQB)
-            .mockReturnValueOnce(commentQB),
+            .mockResolvedValue([
+              { root_id: post.id, count: '3', recent_count: '3' },
+            ]),
           find: jest.fn().mockResolvedValue([post]),
           findBy: jest.fn().mockResolvedValue([post]),
         } as any,
@@ -566,13 +533,13 @@ describe('PopularRankingService', () => {
       expect(result.scoredItems![0].score).toBeGreaterThanOrEqual(0);
     });
 
-    it('caps effectiveHours to window size for 24h window', async () => {
+    it('caps velocity hours so equal recent activity favors the younger post', async () => {
       const now = Date.now();
       const very_old_post = {
         id: 'post-capped',
         sender_address: 'ak_capped',
-        created_at: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
-        content: 'old post that should be capped at 24h',
+        created_at: new Date(now - 200 * 60 * 60 * 1000).toISOString(),
+        content: 'old post whose velocity divisor is capped',
         topics: [],
       };
       const recent_post = {
@@ -587,24 +554,13 @@ describe('PopularRankingService', () => {
         very_old_post,
         recent_post,
       ]);
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([
-          { parent_id: 'post-capped', count: '5' },
-          { parent_id: 'post-recent', count: '5' },
-        ]),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([
           {
@@ -612,12 +568,14 @@ describe('PopularRankingService', () => {
             amount_sum: '0',
             count: '2',
             unique_tippers: '2',
+            recent_count: '2',
           },
           {
             post_id: 'post-recent',
             amount_sum: '0',
             count: '2',
             unique_tippers: '2',
+            recent_count: '2',
           },
         ]),
       };
@@ -635,10 +593,11 @@ describe('PopularRankingService', () => {
 
       const svc = new PopularRankingService(
         {
-          createQueryBuilder: jest
-            .fn()
-            .mockReturnValueOnce(candidateQB)
-            .mockReturnValueOnce(commentQB),
+          createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+          query: jest.fn().mockResolvedValue([
+            { root_id: 'post-capped', count: '5', recent_count: '5' },
+            { root_id: 'post-recent', count: '5', recent_count: '5' },
+          ]),
           find: jest.fn().mockResolvedValue([very_old_post, recent_post]),
           findBy: jest.fn().mockResolvedValue([very_old_post, recent_post]),
         } as any,
@@ -648,7 +607,7 @@ describe('PopularRankingService', () => {
         [],
       );
 
-      const result = await svc.getPopularPostsPage('24h', 10, 0, undefined, {
+      const result = await svc.getPopularPostsPage('all', 10, 0, undefined, {
         interactionsPerHour: 'high',
       });
 
@@ -684,26 +643,13 @@ describe('PopularRankingService', () => {
       comments: Record<string, string>,
     ) {
       const candidateQB = createCandidateQueryBuilder(posts);
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue(
-          Object.entries(comments).map(([parent_id, count]) => ({
-            parent_id,
-            count,
-          })),
-        ),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([]),
       };
@@ -718,10 +664,14 @@ describe('PopularRankingService', () => {
 
       return new PopularRankingService(
         {
-          createQueryBuilder: jest
-            .fn()
-            .mockReturnValueOnce(candidateQB)
-            .mockReturnValueOnce(commentQB),
+          createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+          query: jest.fn().mockResolvedValue(
+            Object.entries(comments).map(([root_id, count]) => ({
+              root_id,
+              count,
+              recent_count: count,
+            })),
+          ),
           find: jest.fn().mockResolvedValue(posts),
           findBy: jest.fn().mockResolvedValue(posts),
         } as any,
@@ -759,23 +709,13 @@ describe('PopularRankingService', () => {
           .fn()
           .mockResolvedValue([{ id: 'topic-heavy' }, { id: 'target-post' }]),
       };
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest
-          .fn()
-          .mockResolvedValue([{ parent_id: 'target-post', count: '4' }]),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([]),
       };
@@ -788,10 +728,12 @@ describe('PopularRankingService', () => {
         getRawMany: jest.fn().mockResolvedValue([]),
       };
       const repo = {
-        createQueryBuilder: jest
+        createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+        query: jest
           .fn()
-          .mockReturnValueOnce(candidateQB)
-          .mockReturnValueOnce(commentQB),
+          .mockResolvedValue([
+            { root_id: 'target-post', count: '4', recent_count: '4' },
+          ]),
         find: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
         findBy: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
       };
@@ -819,8 +761,9 @@ describe('PopularRankingService', () => {
       ]);
     });
 
-    it('boosts fresh posts and removes that boost after 24 hours', async () => {
+    it('boosts fresh posts and removes that boost after the freshness window', async () => {
       const now = Date.now();
+      const boostHours = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS;
       const freshPost = {
         id: 'post-fresh',
         sender_address: 'ak_fresh',
@@ -828,23 +771,32 @@ describe('PopularRankingService', () => {
         content: 'same quality content',
         topics: [],
       };
-      const dayOldPost = {
-        id: 'post-day-old',
-        sender_address: 'ak_day_old',
-        created_at: new Date(now - 25 * 60 * 60 * 1000).toISOString(),
+      const pastWindowPost = {
+        id: 'post-past-window',
+        sender_address: 'ak_past_window',
+        created_at: new Date(
+          now - (boostHours + 2) * 60 * 60 * 1000,
+        ).toISOString(),
         content: 'same quality content',
         topics: [],
       };
       const olderPost = {
         id: 'post-older',
         sender_address: 'ak_older',
-        created_at: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
+        created_at: new Date(
+          now - (boostHours + 26) * 60 * 60 * 1000,
+        ).toISOString(),
         content: 'same quality content',
         topics: [],
       };
-      const svc = buildScoredService([dayOldPost, olderPost, freshPost], {});
+      const svc = buildScoredService(
+        [pastWindowPost, olderPost, freshPost],
+        {},
+      );
 
-      const result = await svc.getPopularPostsPage('all', 10, 0, undefined, {
+      // 7d window: the 'all' window now applies age gravity, so equal-score
+      // posts of different ages are only expected on time-bounded windows.
+      const result = await svc.getPopularPostsPage('7d', 10, 0, undefined, {
         comments: 'med',
       });
       const scores = new Map(
@@ -852,9 +804,13 @@ describe('PopularRankingService', () => {
       );
 
       expect(scores.get('post-fresh')).toBeGreaterThan(
-        scores.get('post-day-old')!,
+        scores.get('post-past-window')!,
       );
-      expect(scores.get('post-day-old')).toBeCloseTo(scores.get('post-older')!);
+      // Past the window both posts carry no freshness or velocity — scores
+      // may differ only by the deterministic tie-rotation jitter.
+      expect(
+        Math.abs(scores.get('post-past-window')! - scores.get('post-older')!),
+      ).toBeLessThanOrEqual(POPULAR_RANKING_CONFIG.TIE_ROTATION_EPSILON);
     });
 
     it('avoids duplicate authors within a page when alternatives exist', async () => {
@@ -1020,6 +976,338 @@ describe('PopularRankingService', () => {
     });
   });
 
+  describe('scoring math (velocity, gravity, emoji)', () => {
+    const noTrending = new Map<string, number>();
+
+    function scoreInput(ageHours: number, overrides: Record<string, any> = {}) {
+      return {
+        content: 'a perfectly reasonable amount of content',
+        comments: 0,
+        tipsAmountAE: 0,
+        tipsCount: 0,
+        uniqueTippers: 0,
+        reads: 0,
+        topics: [],
+        createdAt: new Date(
+          Date.now() - ageHours * 60 * 60 * 1000,
+        ).toISOString(),
+        ...overrides,
+      };
+    }
+
+    it('seeds interactionsPerHour weight from config for the default feed', () => {
+      const weights = (service as any).resolveWeights();
+      expect(weights.interactionsPerHour).toBe(
+        POPULAR_RANKING_CONFIG.WEIGHTS.interactionsPerHour,
+      );
+      expect(weights.interactionsPerHour).toBeGreaterThan(0);
+    });
+
+    it('scales the interactionsPerHour override from the config default', () => {
+      const weights = (service as any).resolveWeights({
+        interactionsPerHour: 'high',
+      });
+      expect(weights.interactionsPerHour).toBeCloseTo(
+        POPULAR_RANKING_CONFIG.WEIGHTS.interactionsPerHour *
+          POPULAR_RANKING_CONFIG.CUSTOMIZATION.SCALE_MULTIPLIERS.high,
+      );
+    });
+
+    it('keeps a positive velocity contribution past the freshness window on default weights', () => {
+      // Both posts are past FRESHNESS_BOOST_HOURS with identical totals, so
+      // freshness-gated terms are zero for both and any score gap comes from
+      // the always-on interactionsPerHour term.
+      const weights = (service as any).resolveWeights();
+      const momentum = (service as any).computeScore(
+        noTrending,
+        scoreInput(POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS + 10, {
+          comments: 48,
+        }),
+        weights,
+        '7d',
+      );
+      const slowBurn = (service as any).computeScore(
+        noTrending,
+        scoreInput(160, { comments: 48 }),
+        weights,
+        '7d',
+      );
+      expect(momentum).toBeGreaterThan(slowBurn);
+    });
+
+    it("decays older posts in the 'all' window given identical engagement", () => {
+      const weights = (service as any).resolveWeights();
+      const newer = (service as any).computeScore(
+        noTrending,
+        scoreInput(24, { comments: 20, reads: 100 }),
+        weights,
+        'all',
+      );
+      const older = (service as any).computeScore(
+        noTrending,
+        scoreInput(24 * 30, { comments: 20, reads: 100 }),
+        weights,
+        'all',
+      );
+      expect(newer).toBeGreaterThan(older);
+    });
+
+    it("does not decay time-bounded windows' scores by age gravity", () => {
+      // Same totals, same age: gravity applies only to 'all', so the '24h'
+      // score must be strictly higher than the gravity-divided 'all' score.
+      const weights = (service as any).resolveWeights();
+      const input = scoreInput(10, { comments: 20 });
+      const windowed = (service as any).computeScore(
+        noTrending,
+        input,
+        weights,
+        '24h',
+      );
+      const allWindow = (service as any).computeScore(
+        noTrending,
+        input,
+        weights,
+        'all',
+      );
+      expect(windowed).toBeGreaterThan(allWindow);
+    });
+
+    it('registers momentum for an old post catching fire via recent interactions', () => {
+      // Same lifetime totals, same age (so identical gravity); only the
+      // recent-interaction count differs.
+      const weights = (service as any).resolveWeights();
+      const catchingFire = (service as any).computeScore(
+        noTrending,
+        scoreInput(24 * 90, { comments: 100, recentInteractions: 50 }),
+        weights,
+        'all',
+      );
+      const dormant = (service as any).computeScore(
+        noTrending,
+        scoreInput(24 * 90, { comments: 100, recentInteractions: 0 }),
+        weights,
+        'all',
+      );
+      expect(catchingFire).toBeGreaterThan(dormant);
+    });
+
+    it('caps read contribution relative to active engagement', () => {
+      const weights = (service as any).resolveWeights();
+      const cap = POPULAR_RANKING_CONFIG.READS_PER_INTERACTION_CAP;
+
+      // `computeScore` -> `computeFreshnessFactor`/`computeInteractionsPerHour`
+      // call `Date.now()` live on every invocation, so two calls a few
+      // microseconds apart get a genuinely different age-in-hours and thus a
+      // genuinely different (if tiny) score — flaking a `toBeCloseTo(..., 10)`
+      // assertion regardless of a shared `createdAt`. Freeze `Date.now()` for
+      // each paired comparison so both calls see identical elapsed time.
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.now());
+      try {
+        // Zero active interactions: a million reads score the same as the cap.
+        const inflated = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { reads: 1_000_000 }),
+          weights,
+          '24h',
+        );
+        const atCap = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { reads: cap }),
+          weights,
+          '24h',
+        );
+        expect(inflated).toBeCloseTo(atCap, 10);
+
+        // Active engagement raises the cap, so real interactions unlock more
+        // read credit.
+        const engaged = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { comments: 10, reads: 1_000_000 }),
+          weights,
+          '24h',
+        );
+        const engagedAtCap = (service as any).computeScore(
+          noTrending,
+          scoreInput(10, { comments: 10, reads: cap * 11 }),
+          weights,
+          '24h',
+        );
+        expect(engaged).toBeCloseTo(engagedAtCap, 10);
+        expect(engaged).toBeGreaterThan(inflated);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it('applies bounded, deterministic tie rotation per post id', () => {
+      const svc = service as any;
+      const first = svc.computeTieRotation('post-a');
+      const second = svc.computeTieRotation('post-a');
+      const other = svc.computeTieRotation('post-b');
+
+      expect(first).toBe(second);
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(first).toBeLessThan(POPULAR_RANKING_CONFIG.TIE_ROTATION_EPSILON);
+      expect(other).not.toBe(first);
+      expect(svc.computeTieRotation(undefined)).toBe(0);
+    });
+
+    it('counts every emoji, not just the first match', () => {
+      const svc = service as any;
+      expect(svc.countEmojis('nice 😀 post 😀 with 😀 five 😀 emojis 😀')).toBe(
+        5,
+      );
+      expect(svc.countEmojis('plain text with 123 #hash and *star')).toBe(0);
+      // ZWJ sequences count per pictographic component, variation-selector
+      // emoji count once — both nonzero so the ratio penalty can trigger.
+      expect(svc.countEmojis('👨‍👩‍👧')).toBe(3);
+      expect(svc.countEmojis('❤️')).toBe(1);
+    });
+
+    it('computes velocity from recent interactions capped at the velocity window', () => {
+      const svc = service as any;
+      const window = POPULAR_RANKING_CONFIG.VELOCITY_WINDOW_HOURS;
+
+      // Old post: divisor is the velocity window, not the post age.
+      expect(
+        svc.computeInteractionsPerHour(
+          scoreInput(200, { recentInteractions: window * 2 }),
+          'all',
+        ),
+      ).toBeCloseTo(2);
+
+      // Very young post: divisor clamps to 1 hour so a burst in the first
+      // minutes is not multiplied into an absurd hourly rate.
+      expect(
+        svc.computeInteractionsPerHour(
+          scoreInput(0.1, { recentInteractions: 5 }),
+          '24h',
+        ),
+      ).toBeCloseTo(5);
+
+      // No recent data (plugin items): lifetime-average fallback.
+      expect(
+        svc.computeInteractionsPerHour(scoreInput(2, { comments: 4 }), '24h'),
+      ).toBeCloseTo(2);
+    });
+
+    it('scores the all window safely when createdAt is missing or invalid', () => {
+      const weights = (service as any).resolveWeights();
+      for (const createdAt of [undefined, 'not-a-date']) {
+        const score = (service as any).computeScore(
+          noTrending,
+          { ...scoreInput(1, { comments: 5 }), createdAt },
+          weights,
+          'all',
+        );
+        expect(Number.isFinite(score)).toBe(true);
+        expect(score).toBeGreaterThanOrEqual(0);
+      }
+    });
+
+    it('returns zero tie rotation for missing or empty ids', () => {
+      const svc = service as any;
+      expect(svc.computeTieRotation(undefined)).toBe(0);
+      expect(svc.computeTieRotation('')).toBe(0);
+    });
+
+    it('penalizes short emoji-only posts in content quality', () => {
+      const svc = service as any;
+      expect(svc.computeContentQuality('😂😂😂😂😂')).toBeLessThan(
+        svc.computeContentQuality('hello'),
+      );
+    });
+
+    it('scores non-Latin posts on par with Latin ones of the same length', () => {
+      // The alphanumeric ratio used an ASCII-only class, so a wholly Chinese,
+      // Arabic or Cyrillic post scored 0 on that term and ranked below an
+      // otherwise identical Latin post.
+      const svc = service as any;
+      const latin = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const baseline = svc.computeContentQuality(latin);
+
+      for (const content of [
+        '汉'.repeat(latin.length),
+        'م'.repeat(latin.length),
+        'п'.repeat(latin.length),
+      ]) {
+        expect(svc.computeContentQuality(content)).toBeCloseTo(baseline, 10);
+      }
+    });
+
+    it('still discounts a post of pure punctuation', () => {
+      const svc = service as any;
+      expect(svc.computeContentQuality('!'.repeat(30))).toBeLessThan(
+        svc.computeContentQuality('a'.repeat(30)),
+      );
+    });
+  });
+
+  describe('scheduled refresh locking', () => {
+    let recomputeSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      redisMock.set.mockReset();
+      recomputeSpy = jest
+        .spyOn(service as any, 'awaitOrTriggerRecompute')
+        .mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      recomputeSpy.mockRestore();
+      redisMock.set.mockResolvedValue('OK');
+    });
+
+    it('recomputes when the per-window lock is acquired', async () => {
+      redisMock.set.mockResolvedValue('OK');
+
+      await service.refreshPopularAll();
+
+      expect(redisMock.set).toHaveBeenCalledWith(
+        'popular:refresh-lock:all',
+        '1',
+        'EX',
+        expect.any(Number),
+        'NX',
+      );
+      expect(recomputeSpy).toHaveBeenCalledWith('all');
+    });
+
+    it('skips the tick when another instance holds the lock', async () => {
+      redisMock.set.mockResolvedValue(null);
+
+      await service.refreshPopularAll();
+
+      expect(recomputeSpy).not.toHaveBeenCalled();
+    });
+
+    it('skips the tick when Redis is unreachable', async () => {
+      redisMock.set.mockRejectedValue(new Error('redis down'));
+
+      await service.refreshPopularAll();
+
+      expect(recomputeSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses a lock TTL below the all-window refresh interval', async () => {
+      redisMock.set.mockResolvedValue('OK');
+
+      await service.refreshPopularAll();
+
+      const ttl = redisMock.set.mock.calls[0][3];
+      expect(ttl).toBeLessThan(600);
+    });
+
+    // Guards against re-introducing the wasted work: GET /posts/popular is
+    // all-time only, so nothing reads the 24h/7d caches and they must not be
+    // recomputed on a schedule.
+    it('does not schedule recomputes for the deprecated 24h/7d windows', () => {
+      const svc = service as unknown as Record<string, unknown>;
+      expect(svc.refreshPopular24h).toBeUndefined();
+      expect(svc.refreshPopular7d).toBeUndefined();
+    });
+  });
+
   describe('explain', () => {
     it('returns unified shape with personalized flag for default path', async () => {
       const post = {
@@ -1057,21 +1345,13 @@ describe('PopularRankingService', () => {
         topics: [],
       };
       const candidateQB = createCandidateQueryBuilder([post]);
-      const commentQB = {
-        innerJoin: jest.fn().mockReturnThis(),
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([]),
-      };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
         innerJoin: jest.fn().mockReturnThis(),
         addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
+        setParameter: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
         getRawMany: jest.fn().mockResolvedValue([]),
       };
@@ -1086,10 +1366,8 @@ describe('PopularRankingService', () => {
 
       const svc = new PopularRankingService(
         {
-          createQueryBuilder: jest
-            .fn()
-            .mockReturnValueOnce(candidateQB)
-            .mockReturnValueOnce(commentQB),
+          createQueryBuilder: jest.fn().mockReturnValue(candidateQB),
+          query: jest.fn().mockResolvedValue([]),
           find: jest.fn().mockResolvedValue([post]),
           findBy: jest.fn().mockResolvedValue([post]),
         } as any,

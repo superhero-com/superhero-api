@@ -99,6 +99,56 @@ describe('Content Parser Utilities', () => {
 
       expect(topics).toEqual(['VALID']);
     });
+
+    it('finds a hashtag with no whitespace before it, as CJK is written', () => {
+      // Chinese has no inter-word spaces, so a split-on-whitespace scan sees one
+      // long "word" that does not start with '#' and yields nothing.
+      expect(extractTopics('我喜欢#汉字')).toEqual(['汉字']);
+      expect(extractTopics('看看#汉字，很好')).toEqual(['汉字']);
+    });
+
+    it('ends an undelimited hashtag greedily, exactly as it does in ASCII', () => {
+      // With no space or punctuation after it there is no boundary to find, so
+      // the trailing character is absorbed. This is the same semantics ASCII has
+      // always had ('#WORDSfoo' -> 'WORDSFOO'), not a CJK-specific regression.
+      expect(extractTopics('看看#汉字和吧')).toEqual(['汉字和吧']);
+      expect(extractTopics('buy #WORDSfoo now')).toEqual(['WORDSFOO']);
+    });
+
+    it('agrees with extractTrendMentions on which hashtags exist', () => {
+      // The two extractors used to disagree for CJK: mentions used a regex scan,
+      // topics split on whitespace. They must find the same set.
+      for (const content of [
+        '我喜欢#汉字',
+        '看看#汉字，很好',
+        '看看#汉字和吧',
+      ]) {
+        expect(extractTopics(content)).toEqual(
+          extractTrendMentions(content).map((m) => m.toUpperCase()),
+        );
+      }
+    });
+
+    it('drops trailing punctuation so the topic stays addressable', () => {
+      // `#汉字。` used to be stored as `汉字。`, which TopicParamPipe rejects with a
+      // 400 — the topic existed but its own page was unreachable.
+      expect(extractTopics('i like #汉字。 a lot')).toEqual(['汉字']);
+      expect(extractTopics('i like #مرحبا؟ a lot')).toEqual(['مرحبا']);
+      expect(extractTopics('wow #hello! there')).toEqual(['HELLO']);
+    });
+
+    it('produces topic names the topic param validator accepts', () => {
+      const TOPIC_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N} _.-]{0,127}$/u;
+      const content =
+        '#汉字。 #مرحبا؟ #ПРИВЕТ! #hello! #CamelCase #valid_tag #123 #-lead #_lead';
+
+      const topics = extractTopics(content, 20);
+
+      expect(topics.length).toBeGreaterThan(0);
+      for (const topic of topics) {
+        expect(TOPIC_PATTERN.test(topic)).toBe(true);
+      }
+    });
   });
 
   describe('extractTrendMentions', () => {
@@ -123,6 +173,29 @@ describe('Content Parser Utilities', () => {
       expect(extractTrendMentions('Discussing #CamelCase')).toEqual([
         'CAMELCASE',
       ]);
+    });
+
+    it('extracts mentions of tokens from the non-Latin collections', () => {
+      expect(extractTrendMentions('buying #汉字 today')).toEqual(['汉字']);
+      expect(extractTrendMentions('buying #مرحبا today')).toEqual(['مرحبا']);
+      expect(extractTrendMentions('buying #ПРИВЕТ today')).toEqual(['ПРИВЕТ']);
+    });
+
+    it('uppercases a Cyrillic mention to the symbol the token is stored under', () => {
+      // The RUSSIAN collection only permits А-Я, so the on-chain symbol is
+      // uppercase; a lowercase hashtag has to fold onto it to resolve.
+      expect(extractTrendMentions('держим #привет крепко')).toEqual(['ПРИВЕТ']);
+      expect(extractTrendMentions('и #ёлка тоже')).toEqual(['ЁЛКА']);
+    });
+
+    it('extracts Latin and non-Latin mentions from the same post', () => {
+      expect(
+        extractTrendMentions('swapping #WORDS-1 for #汉字 and #привет'),
+      ).toEqual(['WORDS-1', '汉字', 'ПРИВЕТ']);
+    });
+
+    it('deduplicates a non-Latin mention repeated in one post', () => {
+      expect(extractTrendMentions('#汉字 then #汉字 again')).toEqual(['汉字']);
     });
   });
 

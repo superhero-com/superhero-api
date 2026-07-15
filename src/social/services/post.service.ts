@@ -29,6 +29,7 @@ import {
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
+import { normalizeTopicName } from '../utils/topic-name.util';
 import { TokensService } from '@/tokens/tokens.service';
 
 @Injectable()
@@ -962,7 +963,7 @@ export class PostService {
         continue;
       }
 
-      const normalizedName = topicName.trim().toLowerCase();
+      const normalizedName = normalizeTopicName(topicName);
 
       // Try to find existing topic
       let topic = await this.topicRepository.findOne({

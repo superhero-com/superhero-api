@@ -16,6 +16,9 @@ import { Topic } from './topic.entity';
 })
 @Index('IDX_POSTS_CREATED_AT', ['created_at'])
 @Index('IDX_POSTS_SENDER_ADDRESS_CREATED_AT', ['sender_address', 'created_at'])
+// Serves comment lookups and each level of the popular-ranking thread CTE;
+// Postgres does not index FK columns automatically.
+@Index('IDX_POSTS_POST_ID', ['post_id'])
 export class Post {
   @PrimaryColumn()
   id: string;

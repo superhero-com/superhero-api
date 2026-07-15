@@ -110,6 +110,11 @@ export class IndexerService implements OnModuleInit {
         await this.sync();
       }
     }, syncIntervalMs);
+    // Don't keep the process alive solely for this poll — onModuleDestroy
+    // clears it on a real shutdown, but a test that skips that lifecycle
+    // hook (e.g. constructs the service without closing the Nest app)
+    // should not hang on a live interval.
+    this.syncInterval.unref?.();
   }
 
   async sync() {
