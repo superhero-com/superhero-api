@@ -20,11 +20,13 @@ import { GovernancePluginModule } from '@/plugins/governance/governance-plugin.m
 import { getPopularRankingContributorProvider } from '@/plugins';
 import { ProfileModule } from '@/profile/profile.module';
 import { TokensModule } from '@/tokens/tokens.module';
+import { AeModule } from '@/ae/ae.module';
 
 @Module({
   imports: [
     ProfileModule,
     TokensModule,
+    AeModule,
     TransactionsModule,
     GovernancePluginModule, // Import to access GovernancePopularRankingService
     TypeOrmModule.forFeature([

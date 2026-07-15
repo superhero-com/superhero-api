@@ -114,4 +114,91 @@ describe('CommunityFactoryService', () => {
     expect(result.collections['name-ak_1']).toBeDefined();
     expect(result.collections['name-ak_1'].allowed_name_length).toBe('10');
   });
+
+  describe('mapCollectionInfo', () => {
+    const collectionId = 'CHINESE-ak_deployer' as const;
+    const factory = {
+      collections: {
+        [collectionId]: {
+          id: collectionId,
+          name: 'CHINESE',
+          description: 'Chinese collection',
+          allowed_name_length: '20',
+          // Bulky per-char rules that must NOT leak into the trimmed output.
+          allowed_name_chars: [{ ascii: [97, 98, 99] }],
+        },
+      },
+    } as unknown as ICommunityFactorySchema;
+
+    it('maps a known collection id to its trimmed metadata', () => {
+      expect(service.mapCollectionInfo(factory, collectionId)).toEqual({
+        id: collectionId,
+        name: 'CHINESE',
+        description: 'Chinese collection',
+        allowed_name_length: '20',
+      });
+    });
+
+    it('omits allowed_name_chars from the mapped result', () => {
+      const result = service.mapCollectionInfo(factory, collectionId);
+      expect(result).not.toHaveProperty('allowed_name_chars');
+    });
+
+    it('returns null for an unknown collection id', () => {
+      expect(service.mapCollectionInfo(factory, 'UNKNOWN-ak_x')).toBeNull();
+    });
+
+    it.each([[undefined], [null], ['']])(
+      'returns null for an empty collection id (%p)',
+      (collection) => {
+        expect(
+          service.mapCollectionInfo(factory, collection as any),
+        ).toBeNull();
+      },
+    );
+  });
+
+  describe('getCollectionInfo', () => {
+    const collectionId = 'CHINESE-ak_deployer' as const;
+
+    beforeEach(() => {
+      const factoryAddress = 'ct_cached' as Encoded.ContractAddress;
+      BCL_FACTORY[ACTIVE_NETWORK.networkId] = {
+        address: factoryAddress,
+      } as ICommunityFactorySchema;
+      // Prime the cache so getCurrentFactory resolves without touching the chain.
+      service.cachedFactorySchema[factoryAddress] = {
+        address: factoryAddress,
+        collections: {
+          [collectionId]: {
+            id: collectionId,
+            name: 'CHINESE',
+            description: 'Chinese collection',
+            allowed_name_length: '20',
+            allowed_name_chars: [],
+          },
+        },
+      } as unknown as ICommunityFactorySchema;
+    });
+
+    it('resolves a known collection id against the current factory', async () => {
+      await expect(service.getCollectionInfo(collectionId)).resolves.toEqual({
+        id: collectionId,
+        name: 'CHINESE',
+        description: 'Chinese collection',
+        allowed_name_length: '20',
+      });
+    });
+
+    it('short-circuits to null for an empty id without loading the factory', async () => {
+      await expect(service.getCollectionInfo('')).resolves.toBeNull();
+      expect(initCommunityFactory).not.toHaveBeenCalled();
+    });
+
+    it('returns null when the id is unknown to the current factory', async () => {
+      await expect(
+        service.getCollectionInfo('UNKNOWN-ak_x'),
+      ).resolves.toBeNull();
+    });
+  });
 });

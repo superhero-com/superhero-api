@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PerformancePeriodDto } from '@/tokens/dto/performance-period.dto';
+import { CollectionInfoDto } from '@/tokens/dto/collection-info.dto';
 
 export class TrendPerformanceSummaryDto {
   @ApiProperty({ type: () => PerformancePeriodDto, nullable: true })
@@ -27,6 +28,15 @@ export class PostTrendMentionDto {
     nullable: true,
   })
   sale_address?: string | null;
+
+  @ApiProperty({
+    description:
+      "Collection metadata for the mentioned token's collection, or null " +
+      'when the token is unresolved / has no known collection.',
+    type: () => CollectionInfoDto,
+    nullable: true,
+  })
+  collection_info?: CollectionInfoDto | null;
 
   @ApiProperty({
     description: 'Performance summary for 24h and 7d windows',
