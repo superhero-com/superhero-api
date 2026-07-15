@@ -806,6 +806,9 @@ export class PopularRankingService implements OnModuleDestroy {
 
     const trendingByTag = await this.loadTrendingByTagMap();
     const resolvedWeights = this.resolveWeights(weightOverrides);
+    // Personalized (weight-override) queries stay deterministic; only the
+    // default cached feed gets the daily rotation.
+    const applyDailyShuffle = !this.hasWeightOverrides(weightOverrides);
 
     const scoredPosts: PopularScoreItem[] = candidates.map((post) => {
       const tipsAgg = tipsByPost.get(post.id);
@@ -833,6 +836,7 @@ export class PopularRankingService implements OnModuleDestroy {
           },
           resolvedWeights,
           window,
+          applyDailyShuffle,
         ),
         type: 'post',
       };
@@ -856,6 +860,7 @@ export class PopularRankingService implements OnModuleDestroy {
           },
           resolvedWeights,
           window,
+          applyDailyShuffle,
         ),
         type: item.type,
         metadata: item.metadata,
@@ -1052,12 +1057,79 @@ export class PopularRankingService implements OnModuleDestroy {
       return 0;
     }
 
-    const boostHours = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS;
-    if (ageHours >= boostHours) {
+    const full = POPULAR_RANKING_CONFIG.FRESHNESS_FULL_BOOST_HOURS;
+    const zero = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS;
+
+    // Full lift for the first few days, then a linear fade to zero. A plateau
+    // (instead of decaying from age 0) gives new posts a real window to gather
+    // signal on a low-activity network before their boost starts eroding.
+    if (ageHours <= full) {
+      return 1;
+    }
+    if (ageHours >= zero) {
+      return 0;
+    }
+    return (zero - ageHours) / (zero - full);
+  }
+
+  /**
+   * Active demotion for posts past the freshness window that have gone quiet.
+   * Grows with age (deadest posts sink furthest) and is applied after gravity
+   * so an older dead post ranks below a younger dead one — the opposite of what
+   * dividing a fixed penalty by the gravity term would produce. Any interaction
+   * inside VELOCITY_WINDOW_HOURS (recentInteractions > 0) revives the post and
+   * cancels the penalty. Sources without recent-activity data (plugin items,
+   * recentInteractions === undefined) are never penalized.
+   */
+  private computeStalePenalty(input: PopularScoreInput): number {
+    const ageHours = this.computeAgeHours(input.createdAt, 0);
+    if (ageHours === null) {
       return 0;
     }
 
-    return Math.max(0, 1 - ageHours / boostHours);
+    const start = POPULAR_RANKING_CONFIG.STALE_PENALTY_START_HOURS;
+    if (ageHours <= start) {
+      return 0;
+    }
+
+    if (input.recentInteractions === undefined) {
+      return 0;
+    }
+    if (input.recentInteractions > 0) {
+      return 0;
+    }
+
+    const ramp = Math.min(
+      1,
+      (ageHours - start) / POPULAR_RANKING_CONFIG.STALE_PENALTY_RAMP_HOURS,
+    );
+    return POPULAR_RANKING_CONFIG.STALE_PENALTY_MAX * ramp;
+  }
+
+  /**
+   * Deterministic per-UTC-day multiplicative jitter in [-mag, +mag] seeded by
+   * (id + day) so the default feed's order rotates daily instead of being
+   * frozen between recomputes. Stable within a UTC day → pagination stays
+   * consistent; reseeds at midnight UTC. Only the default (non-personalized)
+   * feed is shuffled — personalized weight-override queries stay deterministic.
+   */
+  private computeDailyJitter(id?: string): number {
+    if (!id) {
+      return 0;
+    }
+
+    const dayBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+    const seed = `${id}:${dayBucket}`;
+    let hash = 0x811c9dc5; // FNV-1a
+    for (let i = 0; i < seed.length; i++) {
+      hash ^= seed.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+
+    const normalized = (hash >>> 0) / 0x100000000; // [0, 1)
+    return (
+      (normalized * 2 - 1) * POPULAR_RANKING_CONFIG.DAILY_SHUFFLE_MAGNITUDE
+    );
   }
 
   private computeScore(
@@ -1065,6 +1137,7 @@ export class PopularRankingService implements OnModuleDestroy {
     input: PopularScoreInput,
     weights: PopularRankingResolvedWeights,
     window: PopularWindow,
+    applyDailyShuffle = true,
   ): number {
     const { comments, tipsAmountAE, tipsCount, uniqueTippers, reads } = input;
 
@@ -1112,18 +1185,28 @@ export class PopularRankingService implements OnModuleDestroy {
       weights.interactionsPerHour * Math.log(1 + interactionsPerHour) +
       this.computeTieRotation(input.id);
 
+    // Daily rotation is applied before gravity/penalty so it scales the whole
+    // final score. Only the default feed is shuffled (see computeDailyJitter);
+    // an id-less input (unit tests, sources without an id) jitters by 0.
+    const shuffle = applyDailyShuffle
+      ? 1 + this.computeDailyJitter(input.id)
+      : 1;
+
     if (window !== 'all') {
-      return baseScore;
+      return baseScore * shuffle;
     }
 
     // Log-dampened engagement never decays on its own, so without gravity old
     // high-total posts pin the 'all' feed forever. +2 keeps brand-new posts
     // from being divided by ~0.
     const ageHours = this.computeAgeHours(input.createdAt, 1) ?? 1;
-    return (
-      baseScore /
-      Math.pow(ageHours + 2, POPULAR_RANKING_CONFIG.ALL_WINDOW_GRAVITY)
-    );
+    const decayed =
+      (baseScore * shuffle) /
+      Math.pow(ageHours + 2, POPULAR_RANKING_CONFIG.ALL_WINDOW_GRAVITY);
+
+    // Subtracted after gravity so a fully-stale old post lands below a merely
+    // old one (dividing the penalty by the gravity term would invert that).
+    return decayed - this.computeStalePenalty(input);
   }
 
   async explain(
