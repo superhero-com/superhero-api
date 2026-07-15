@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import compression from 'compression';
 import { join } from 'path';
 import hbs from 'hbs';
 import { readFileSync } from 'fs';
@@ -38,6 +39,10 @@ async function bootstrap() {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
+
+  // Compress JSON responses; list endpoints return 100-item pages that
+  // shrink 70-85% under gzip.
+  app.use(compression());
 
   // This is a public API — by default we allow every browser origin so
   // unknown third-party consumers (explorers, dashboards, embeds) can
