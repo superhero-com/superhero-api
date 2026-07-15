@@ -8,6 +8,11 @@ import {
   PrimaryColumn,
 } from 'typeorm';
 
+// Backs the holder-count query (`aex9_address = X AND balance > 0`) run on
+// every indexed buy/sell, plus the `ORDER BY balance DESC` holders listing.
+// Index name is shared with the idempotent migration bootstrap so
+// synchronize-based and production environments converge on one index.
+@Index('IDX_TOKEN_HOLDER_AEX9_BALANCE', ['aex9_address', 'balance'])
 @Entity()
 export class TokenHolder {
   @PrimaryColumn()
