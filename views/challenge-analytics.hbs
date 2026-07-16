@@ -213,10 +213,20 @@
         line-height: 1.2;
       }
 
+      /* Primary line: the chain name reads as the identity. */
       .chip .chip-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        font-family: "Inter", sans-serif;
+        color: #0f172a;
+      }
+
+      /* Secondary line: the address, de-emphasised. Inherits the mono family
+         from .chip. Only rendered when a chain name occupies the primary line —
+         with no name the address becomes the primary line instead. */
+      .chip .chip-addr {
         font-size: 0.7rem;
         font-weight: 400;
-        font-family: "Inter", sans-serif;
         color: #64748b;
       }
 
@@ -351,19 +361,26 @@
         text-decoration: underline;
       }
 
+      /* Primary line: the chain name reads as the identity. */
+      td.address .chain-primary {
+        font-weight: 600;
+        color: #1e293b;
+      }
+
+      /* Secondary line: the address, de-emphasised but still click-to-copy.
+         Only used when a chain name occupies the primary line. */
+      td.address .addr-sub {
+        font-size: 0.7rem;
+        font-weight: 400;
+        color: #94a3b8;
+        margin-top: 1px;
+      }
+
       .pnl-positive { color: #15803d; font-weight: 600; }
       .pnl-negative { color: #b91c1c; font-weight: 600; }
       .pnl-zero    { color: #94a3b8; }
 
       .pnl-sub {
-        display: block;
-        font-size: 0.7rem;
-        color: #94a3b8;
-        font-weight: 400;
-        margin-top: 1px;
-      }
-
-      .chain-sub {
         display: block;
         font-size: 0.7rem;
         color: #94a3b8;
@@ -848,9 +865,11 @@
           const name = chainNameFor(addr);
           chip.innerHTML =
             '<span class="swatch" style="background:' + colorFor(addr) + '"></span>' +
-            '<span class="chip-lines">' +
-              '<span title="' + addr + '">' + shortenAddress(addr) + '</span>' +
-              (name ? '<span class="chip-name">' + escapeHtml(name) + '</span>' : '') +
+            '<span class="chip-lines" title="' + addr + '">' +
+              (name
+                ? '<span class="chip-name">' + escapeHtml(name) + '</span>' +
+                  '<span class="chip-addr">' + shortenAddress(addr) + '</span>'
+                : '<span>' + shortenAddress(addr) + '</span>') +
             '</span>' +
             '<span class="remove" title="Remove">&times;</span>';
           chip.querySelector('.remove').addEventListener('click', () => {
@@ -1144,10 +1163,14 @@
               '<td class="address">' +
                 '<span class="swatch" style="background:' + c + '"></span>' +
                 '<span class="addr-lines">' +
-                  '<span class="mono" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
-                    shortenAddress(r.address) +
-                  '</span>' +
-                  (chainName ? '<span class="chain-sub">' + escapeHtml(chainName) + '</span>' : '') +
+                  (chainName
+                    ? '<span class="chain-primary">' + escapeHtml(chainName) + '</span>' +
+                      '<span class="mono addr-sub" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
+                        shortenAddress(r.address) +
+                      '</span>'
+                    : '<span class="mono" title="' + r.address + '" onclick="copyToClipboard(\'' + r.address + '\')">' +
+                        shortenAddress(r.address) +
+                      '</span>') +
                 '</span>' +
               '</td>' +
               '<td>' + r.date + '</td>' +
