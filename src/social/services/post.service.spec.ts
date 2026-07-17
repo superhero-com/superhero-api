@@ -29,9 +29,11 @@ describe('PostService', () => {
   };
   const mockTopicRepository = {
     findOne: jest.fn(),
+    find: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
     update: jest.fn(),
+    query: jest.fn(),
   };
   const mockTokensService = {
     queueTrendingScoresForSymbols: jest.fn(),
@@ -422,6 +424,62 @@ describe('PostService', () => {
 
       expect(result).toBe(newPost);
       expect(parsePostContent).toHaveBeenCalledWith('test content', []);
+    });
+  });
+
+  describe('createOrGetTopics', () => {
+    it('returns [] without querying when given no topic names', async () => {
+      const result = await (service as any).createOrGetTopics([]);
+
+      expect(result).toEqual([]);
+      expect(mockTopicRepository.query).not.toHaveBeenCalled();
+      expect(mockTopicRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('bulk-upserts missing topics with ON CONFLICT DO NOTHING, then reads them back in one query', async () => {
+      mockTopicRepository.query.mockResolvedValue(undefined);
+      mockTopicRepository.find.mockResolvedValue([
+        { name: 'alpha', post_count: 5 },
+        { name: 'beta', post_count: 0 },
+      ]);
+
+      const result = await (service as any).createOrGetTopics([
+        'Alpha',
+        'Beta',
+        'alpha',
+      ]);
+
+      expect(mockTopicRepository.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockTopicRepository.query.mock.calls[0];
+      expect(sql).toContain('ON CONFLICT (name) DO NOTHING');
+      expect(params[1]).toEqual(['alpha', 'beta']); // normalized, deduped
+
+      expect(mockTopicRepository.find).toHaveBeenCalledWith({
+        where: { name: expect.anything() },
+      });
+
+      // Existing topic's post_count (5) must survive -- DO NOTHING never
+      // overwrites it.
+      expect(result).toEqual([
+        { name: 'alpha', post_count: 5 },
+        { name: 'beta', post_count: 0 },
+      ]);
+    });
+
+    it('logs a warning but does not throw when a requested topic cannot be resolved', async () => {
+      mockTopicRepository.query.mockResolvedValue(undefined);
+      mockTopicRepository.find.mockResolvedValue([{ name: 'alpha' }]);
+
+      const result = await (service as any).createOrGetTopics([
+        'Alpha',
+        'Missing',
+      ]);
+
+      expect(result).toEqual([{ name: 'alpha' }]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Some topics could not be created or found',
+        expect.objectContaining({ requested: ['alpha', 'missing'] }),
+      );
     });
   });
 });

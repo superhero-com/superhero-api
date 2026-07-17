@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { In, Repository, EntityManager } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Post } from '../entities/post.entity';
 import { Topic } from '../entities/topic.entity';
 import {
@@ -952,42 +953,52 @@ export class PostService {
    * Creates or gets existing topics by name
    */
   private async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
-    if (!topicNames || topicNames.length === 0) {
+    const normalizedNames = [
+      ...new Set(
+        (topicNames || [])
+          .filter((topicName) => topicName && topicName.trim().length > 0)
+          .map((topicName) => normalizeTopicName(topicName)),
+      ),
+    ];
+
+    if (normalizedNames.length === 0) {
       return [];
     }
 
-    const topics: Topic[] = [];
+    // Bulk-upsert any missing topics in one round trip, then one IN() read,
+    // instead of a sequential findOne+save per topic name. DO NOTHING (not
+    // DO UPDATE) so an existing topic's accumulated post_count is never
+    // clobbered by a same-named insert racing in from another post.
+    await this.topicRepository.query(
+      `
+        INSERT INTO topics (id, name, post_count, version, created_at, updated_at)
+        SELECT unnest($1::uuid[]), unnest($2::text[]), 0, $3, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+        ON CONFLICT (name) DO NOTHING
+      `,
+      [
+        normalizedNames.map(() => randomUUID()),
+        normalizedNames,
+        this.syncVersion,
+      ],
+    );
 
-    for (const topicName of topicNames) {
-      if (!topicName || topicName.trim().length === 0) {
-        continue;
-      }
+    const topics = await this.topicRepository.find({
+      where: { name: In(normalizedNames) },
+    });
 
-      const normalizedName = normalizeTopicName(topicName);
+    const topicByName = new Map(topics.map((topic) => [topic.name, topic]));
+    const orderedTopics = normalizedNames
+      .map((name) => topicByName.get(name))
+      .filter((topic): topic is Topic => Boolean(topic));
 
-      // Try to find existing topic
-      let topic = await this.topicRepository.findOne({
-        where: { name: normalizedName },
+    if (orderedTopics.length !== normalizedNames.length) {
+      this.logger.warn('Some topics could not be created or found', {
+        requested: normalizedNames,
+        resolved: orderedTopics.map((topic) => topic.name),
       });
-
-      // Create new topic if it doesn't exist
-      if (!topic) {
-        topic = this.topicRepository.create({
-          name: normalizedName,
-          post_count: 0,
-          version: this.syncVersion,
-        });
-        topic = await this.topicRepository.save(topic);
-        this.logger.debug('Created new topic', {
-          topicName: normalizedName,
-          version: this.syncVersion,
-        });
-      }
-
-      topics.push(topic);
     }
 
-    return topics;
+    return orderedTopics;
   }
 
   /**
