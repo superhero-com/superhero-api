@@ -198,6 +198,98 @@ describe('BclPnlService', () => {
     expect(params).toEqual(['ak_test', [500], 50]);
   });
 
+  it('calculateTokenPnlsBatchForAddresses runs a single query for all addresses and heights', async () => {
+    const { service, transactionRepository } = createService();
+
+    transactionRepository.query.mockResolvedValue([
+      {
+        snapshot_height: 200,
+        address: 'ak_one',
+        sale_address: 'ct_alpha',
+        current_holdings: '3',
+        total_volume_bought: '3',
+        total_amount_spent_ae: '9',
+        total_amount_spent_usd: '18',
+        total_amount_received_ae: '0',
+        total_amount_received_usd: '0',
+        total_volume_sold: '0',
+        current_unit_price_ae: '4',
+        current_unit_price_usd: '8',
+      },
+      {
+        snapshot_height: 300,
+        address: 'ak_two',
+        sale_address: 'ct_alpha',
+        current_holdings: '5',
+        total_volume_bought: '5',
+        total_amount_spent_ae: '15',
+        total_amount_spent_usd: '30',
+        total_amount_received_ae: '0',
+        total_amount_received_usd: '0',
+        total_volume_sold: '0',
+        current_unit_price_ae: '6',
+        current_unit_price_usd: '12',
+      },
+    ]);
+
+    const result = await service.calculateTokenPnlsBatchForAddresses(
+      ['ak_one', 'ak_two'],
+      [200, 300],
+    );
+
+    // Single DB round-trip regardless of number of addresses or heights
+    expect(transactionRepository.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = transactionRepository.query.mock.calls[0];
+
+    expect(sql).toContain('unnest($2::int[])');
+    expect(sql).toContain('address = ANY($1::text[])');
+    expect(sql).toContain('AS MATERIALIZED');
+    expect(sql).toContain('addr_txs');
+    expect(sql).toContain('GROUP BY h.snapshot_height, tx.address, tx.sale_address');
+    expect(params).toEqual([['ak_one', 'ak_two'], [200, 300]]);
+
+    expect(result).toBeInstanceOf(Map);
+    expect(result.size).toBe(2);
+
+    const one = result.get('ak_one')!;
+    expect(one.get(200)!.pnls.ct_alpha.current_value.ae).toBe(12); // 3 * 4
+    expect(one.get(300)!.totalCurrentValueAe).toBe(0); // no rows for ak_one at 300
+
+    const two = result.get('ak_two')!;
+    expect(two.get(300)!.pnls.ct_alpha.current_value.ae).toBe(30); // 5 * 6
+    expect(two.get(200)!.totalCurrentValueAe).toBe(0); // no rows for ak_two at 200
+  });
+
+  it('calculateTokenPnlsBatchForAddresses returns empty map when addresses or heights are empty', async () => {
+    const { service, transactionRepository } = createService();
+
+    const emptyAddresses =
+      await service.calculateTokenPnlsBatchForAddresses([], [100]);
+    const emptyHeights = await service.calculateTokenPnlsBatchForAddresses(
+      ['ak_test'],
+      [],
+    );
+
+    expect(transactionRepository.query).not.toHaveBeenCalled();
+    expect(emptyAddresses.size).toBe(0);
+    expect(emptyHeights.size).toBe(0);
+  });
+
+  it('calculateTokenPnlsBatchForAddresses passes fromBlockHeight as $3 when provided', async () => {
+    const { service, transactionRepository } = createService();
+    transactionRepository.query.mockResolvedValue([]);
+
+    await service.calculateTokenPnlsBatchForAddresses(
+      ['ak_test'],
+      [500],
+      50,
+    );
+
+    const [sql, params] = transactionRepository.query.mock.calls[0];
+    expect(sql).toContain('block_height >= $3');
+    expect(params).toEqual([['ak_test'], [500], 50]);
+  });
+
   it('preserves range-based pnl result semantics (realized gains only)', async () => {
     const { service, transactionRepository } = createService();
 
