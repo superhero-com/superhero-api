@@ -5,6 +5,10 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { BCL_FUNCTIONS } from '@/configs';
 import { TransactionData } from './transaction-data.service';
+import {
+  TRADE_ELIGIBLE_TX_TYPES,
+  incrementTradeEligibilityCount,
+} from '../utils/trade-eligibility.util';
 
 @Injectable()
 export class TransactionPersistenceService {
@@ -62,12 +66,48 @@ export class TransactionPersistenceService {
   ): Promise<Transaction> {
     const transactionRepository = manager.getRepository(Transaction);
     const tokenRepository = manager.getRepository(Token);
+
+    // Serializes concurrent saves of the same tx_hash (e.g. overlapping
+    // forward/backward sync passes) so the exists-check below can't race
+    // with another connection's upsert and double-count the eligibility
+    // increment. Xact-scoped: released automatically on commit/rollback of
+    // the caller's transaction. Best-effort -- a failure here only reopens
+    // the (rare) race window, so it's logged rather than thrown, consistent
+    // with how the other non-critical steps in this method are handled.
+    try {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        txData.tx_hash,
+      ]);
+    } catch (error) {
+      this.logger.error(
+        `Failed to acquire trade-eligibility lock for ${txData.tx_hash}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+
+    // Checked before the upsert so a re-processed tx (backward sync/reorg
+    // replay of an already-persisted hash) is never double-counted below.
+    const isNewTransaction = !(await transactionRepository.exists({
+      where: { tx_hash: txData.tx_hash },
+    }));
+
     // Use upsert to handle race conditions where transaction might be created concurrently
     // Note: skipUpdateIfNoValuesChanged is removed because it causes PostgreSQL errors
     // when comparing JSON columns (operator does not exist: json = json)
     await transactionRepository.upsert(txData, {
       conflictPaths: ['tx_hash'],
     });
+
+    if (isNewTransaction && TRADE_ELIGIBLE_TX_TYPES.has(txData.tx_type)) {
+      try {
+        await incrementTradeEligibilityCount(txData.sale_address, manager);
+      } catch (error) {
+        this.logger.error(
+          `Failed to increment trade eligibility count for ${txData.sale_address}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     if (txData.address) {
       try {

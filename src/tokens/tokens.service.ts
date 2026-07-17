@@ -22,6 +22,7 @@ import { Queue } from 'bull';
 import moment from 'moment';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
+import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
 import { Token } from './entities/token.entity';
 import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
@@ -141,6 +142,9 @@ export class TokensService {
 
     @InjectRepository(TokenEligibilityCounts)
     private tokenEligibilityCountsRepository: Repository<TokenEligibilityCounts>,
+
+    @InjectRepository(TokenTradeEligibilityCounts)
+    private tokenTradeEligibilityCountsRepository: Repository<TokenTradeEligibilityCounts>,
 
     private aeSdkService: AeSdkService,
 
@@ -766,19 +770,6 @@ export class TokensService {
     return `${alias}.${orderColumn} ${orderDirection}`;
   }
 
-  private buildEligibilityTradeCountsSubquery(): string {
-    return `
-      (
-        SELECT
-          tx.sale_address,
-          COUNT(*) AS trade_count
-        FROM transactions tx
-        WHERE tx.tx_type IN ('buy', 'sell')
-        GROUP BY tx.sale_address
-      )
-    `.trim();
-  }
-
   applyListEligibilityFilters(
     queryBuilder: SelectQueryBuilder<Token>,
   ): SelectQueryBuilder<Token> {
@@ -789,7 +780,7 @@ export class TokensService {
     );
 
     queryBuilder.leftJoin(
-      this.buildEligibilityTradeCountsSubquery(),
+      TokenTradeEligibilityCounts,
       'eligibility_trade_counts',
       'eligibility_trade_counts.sale_address = token.sale_address',
     );
@@ -823,22 +814,14 @@ export class TokensService {
       this.tokenEligibilityCountsRepository.findOne({
         where: { symbol: normalizedSymbol },
       }),
-      this.tokensRepository.query(
-        `
-          SELECT COUNT(*) AS trade_count
-          FROM transactions tx
-          WHERE tx.sale_address = $1
-            AND tx.tx_type IN ('buy', 'sell')
-        `,
-        [token.sale_address],
-      ),
+      this.tokenTradeEligibilityCountsRepository.findOne({
+        where: { sale_address: token.sale_address },
+      }),
     ]);
-
-    const rawBreakdown = tradeCounts[0] ?? {};
 
     const holdersCount = Number(token.holders_count || 0);
     const postCount = Number(counts?.post_count || 0);
-    const tradeCount = Number(rawBreakdown?.trade_count || 0);
+    const tradeCount = Number(tradeCounts?.trade_count || 0);
 
     const passes = {
       holders: holdersCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,

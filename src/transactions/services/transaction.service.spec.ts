@@ -35,6 +35,7 @@ describe('TransactionService', () => {
       }),
       save: jest.fn(),
       update: jest.fn(),
+      manager: { query: jest.fn().mockResolvedValue(undefined) },
     } as any;
 
     tokenHolderRepository = {
@@ -185,6 +186,114 @@ describe('TransactionService', () => {
       expect(transactionRepository.save).toHaveBeenCalled();
       expect(result).toBeInstanceOf(Transaction);
     }
+  });
+
+  it('increments the trade eligibility counter for a new buy transaction', async () => {
+    const existingTxQuery = {
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    transactionRepository.createQueryBuilder.mockReturnValue(existingTxQuery);
+    tokenService.getToken = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      factory_address: 'test_factory',
+      collection: 'default',
+    } as Token);
+    service.parseTransactionData = jest.fn().mockResolvedValue({
+      volume: new BigNumber(10),
+      amount: new BigNumber(100),
+      total_supply: new BigNumber(1000),
+      protocol_reward: new BigNumber(1),
+      _should_revalidate: false,
+    });
+    const transaction = {
+      tx: {
+        function: BCL_FUNCTIONS.buy,
+        contractId: 'ct_123',
+        callerId: 'ak_123',
+        decodedData: [
+          { name: 'Mint', args: [null, '100'] },
+          { name: 'PriceChange', args: [1, 2] },
+        ],
+      },
+      hash: 'tx_buy',
+      blockHeight: 100,
+      microIndex: 1,
+      microTime: moment().subtract(1, 'hour').valueOf(),
+    };
+    service.decodeTransactionData = jest.fn().mockResolvedValue(transaction);
+    aePricingService.getPriceData = jest
+      .fn()
+      .mockResolvedValue(new BigNumber(1));
+    transactionRepository.save = jest.fn().mockResolvedValue(new Transaction());
+
+    await service.saveTransaction(transaction as any);
+
+    expect(transactionRepository.manager.query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
+      ['ct_123'],
+    );
+  });
+
+  it('does not increment the trade eligibility counter for a create_community transaction', async () => {
+    const deleteOldCreateCommunityQuery = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const existingTxQuery = {
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    transactionRepository.createQueryBuilder.mockImplementation(
+      (alias: string) =>
+        alias === 'transactions'
+          ? deleteOldCreateCommunityQuery
+          : existingTxQuery,
+    );
+    tokenService.getToken = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      factory_address: 'test_factory',
+      collection: 'default',
+    } as Token);
+    service.parseTransactionData = jest.fn().mockResolvedValue({
+      volume: new BigNumber(10),
+      amount: new BigNumber(100),
+      total_supply: new BigNumber(1000),
+      protocol_reward: new BigNumber(1),
+      _should_revalidate: false,
+    });
+    const transaction = {
+      tx: {
+        function: BCL_FUNCTIONS.create_community,
+        contractId: 'ct_123',
+        callerId: 'ak_123',
+        decodedData: [
+          { name: 'Mint', args: [null, '100'] },
+          { name: 'PriceChange', args: [1, 2] },
+        ],
+        return: {
+          value: [{ value: 'ct_123' }, { value: 'ct_456' }],
+        },
+      },
+      hash: 'tx_create',
+      blockHeight: 100,
+      microIndex: 1,
+      microTime: moment().subtract(1, 'hour').valueOf(),
+    };
+    service.decodeTransactionData = jest.fn().mockResolvedValue(transaction);
+    aePricingService.getPriceData = jest
+      .fn()
+      .mockResolvedValue(new BigNumber(1));
+    transactionRepository.save = jest.fn().mockResolvedValue(new Transaction());
+
+    await service.saveTransaction(transaction as any);
+
+    expect(transactionRepository.manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
+      expect.anything(),
+    );
   });
 
   it('should handle parseTransactionData correctly', async () => {

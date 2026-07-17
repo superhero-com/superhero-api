@@ -22,6 +22,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { UpdateTrendingTokensService } from './services/update-trending-tokens.service';
 import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
+import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
 import { TokenPerformanceView } from './entities/tokens-performance.view';
 import { RefreshTokenEligibilityCountsService } from './services/refresh-token-eligibility-counts.service';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
@@ -34,6 +35,7 @@ import { Post } from '@/social/entities/post.entity';
       Token,
       TokenHolder,
       TokenEligibilityCounts,
+      TokenTradeEligibilityCounts,
       TokenPerformanceView,
       Transaction,
       Post,

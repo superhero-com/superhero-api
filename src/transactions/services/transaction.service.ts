@@ -14,6 +14,10 @@ import moment from 'moment';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import {
+  TRADE_ELIGIBLE_TX_TYPES,
+  incrementTradeEligibilityCount,
+} from '@/plugins/bcl/utils/trade-eligibility.util';
 
 @Injectable()
 export class TransactionService {
@@ -172,6 +176,23 @@ export class TransactionService {
         moment().diff(moment(rawTransaction.microTime), 'hours') >= 5,
     };
     const transaction = await this.transactionRepository.save(txData);
+
+    // This legacy path's own `exists` check above already guarantees this is
+    // a first-time insert for tx_hash, so -- unlike TransactionPersistenceService --
+    // no extra race guard is needed here before incrementing.
+    if (TRADE_ELIGIBLE_TX_TYPES.has(txData.tx_type)) {
+      try {
+        await incrementTradeEligibilityCount(
+          saleAddress,
+          this.transactionRepository.manager,
+        );
+      } catch (error) {
+        this.logger.error(
+          `Failed to increment trade eligibility count for ${saleAddress}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
 
     if (!this.isTokenSupportedCollection(token)) {
       return transaction;
