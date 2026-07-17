@@ -40,4 +40,9 @@ export interface EntityConfig<TEntity = any> {
   orderByFields?: string[]; // Optional: specify allowed order_by fields for Swagger. If not provided, will be extracted from entity metadata
   customResolveFields?: CustomResolveFieldConfig<TEntity>[];
   relations?: RelationConfig[]; // Array of relation configurations
+  // Overrides the base controller/resolver's default deep-OFFSET-pagination
+  // cap (see MAX_PAGE/MAX_GRAPHQL_PAGE) for entities where legitimate use
+  // needs to page deeper than that default -- e.g. full-history blockchain
+  // mirror tables with no range-filter alternative to OFFSET paging.
+  maxPage?: number;
 }

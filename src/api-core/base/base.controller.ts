@@ -37,6 +37,15 @@ import {
 } from '../utils/relation-loader';
 import { RateLimitGuard } from '../guards/rate-limit.guard';
 
+// Deep OFFSET pagination (e.g. ?page=100000) forces Postgres to scan and
+// discard every prior row before returning a page; page size is already
+// capped at 100, but page itself had no ceiling. 500 pages * 100/page =
+// 50,000 rows deep, generous for real pagination UIs while bounding the
+// worst case. Entities with a legitimate deep-paging use case (e.g.
+// full-history blockchain mirror tables with no range-filter alternative to
+// OFFSET paging) can raise this via `EntityConfig.maxPage`.
+const MAX_PAGE = 500;
+
 /**
  * Builds a description of available relations for Swagger documentation
  * @param entityConfig - The entity config
@@ -161,6 +170,7 @@ export function createBaseController<T>(
   configRegistry?: EntityConfigRegistry,
 ) {
   const ResponseType = config.dto || config.entity;
+  const maxPage = config.maxPage ?? MAX_PAGE;
 
   // Read sortable and searchable fields from entity metadata
   const sortableFields = getSortableFields(config.entity);
@@ -296,6 +306,9 @@ export function createBaseController<T>(
         throw new BadRequestException(
           'Page must be greater than or equal to 1',
         );
+      }
+      if (page > maxPage) {
+        throw new BadRequestException(`Maximum page is ${maxPage}`);
       }
       if (limit < 1) {
         throw new BadRequestException(

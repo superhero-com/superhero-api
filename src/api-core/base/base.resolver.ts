@@ -16,11 +16,25 @@ import { EntityConfig } from '../types/entity-config.interface';
 import { getSortableFields } from '../utils/metadata-reader';
 
 const MAX_GRAPHQL_PAGE_SIZE = 100;
+// Deep OFFSET pagination (e.g. page: 100000) forces Postgres to scan and
+// discard every prior row before returning a page; page size is already
+// capped, but page itself had no ceiling. Entities with a legitimate
+// deep-paging use case (e.g. full-history blockchain mirror tables with no
+// range-filter alternative to OFFSET paging) can raise this via
+// `EntityConfig.maxPage`.
+const MAX_GRAPHQL_PAGE = 500;
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 
-function validateGraphqlPagination(page: number, limit: number): void {
+function validateGraphqlPagination(
+  page: number,
+  limit: number,
+  maxPage: number = MAX_GRAPHQL_PAGE,
+): void {
   if (page < 1) {
     throw new BadRequestException('Page must be greater than or equal to 1');
+  }
+  if (page > maxPage) {
+    throw new BadRequestException(`Maximum page is ${maxPage}`);
   }
   if (limit < 1) {
     throw new BadRequestException('Limit must be greater than or equal to 1');
@@ -99,7 +113,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
       orderDirection?: 'ASC' | 'DESC',
     ) {
       const query = this.repository.createQueryBuilder(config.tableAlias);
-      validateGraphqlPagination(page, limit);
+      validateGraphqlPagination(page, limit, config.maxPage);
       if (orderBy && !orderByFields.includes(orderBy)) {
         throw new BadRequestException(`Invalid orderBy value: ${orderBy}`);
       }
