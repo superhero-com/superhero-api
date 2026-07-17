@@ -16,6 +16,7 @@ import {
 } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { fetchJson } from '@/utils/common';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
 
 const SEARCH_DEFAULT_LIMIT = 8;
 const SEARCH_MIN_LIMIT = 1;
@@ -25,6 +26,22 @@ const SEARCH_MAX_LIMIT = 20;
 // that would scan the whole table for no useful typeahead value.
 const SEARCH_MIN_QUERY_LENGTH = 2;
 const CHAIN_NAMES_MAX_ADDRESSES = 25;
+// Bounded concurrency + a tight per-call timeout for verifying candidate
+// chain names against middleware, so one slow/hanging name lookup can't
+// stall (or blow past fetchJson's much longer default timeout for) the
+// whole account's chain-name resolution.
+//
+// refreshChainNamesPeriodically (below) already runs 10 accounts concurrently
+// via its own batching, and calls getChainNameForAccount -- which uses this
+// constant -- for each. That nests per-account concurrency inside the
+// per-batch concurrency, so the real worst-case fan-out is
+// (outer batch size) x CHAIN_NAME_VERIFY_CONCURRENCY, not just this value on
+// its own. Kept low (2, not the 8 a single account's verification alone
+// would justify) so that product stays a reasonable ceiling (20) on
+// concurrent outbound middleware requests; raise either number only with the
+// other in mind.
+const CHAIN_NAME_VERIFY_CONCURRENCY = 2;
+const CHAIN_NAME_VERIFY_TIMEOUT_MS = 5_000;
 
 type AggregatedAccountRow = {
   address: string;
@@ -330,62 +347,73 @@ export class AccountService {
       }
 
       // Verify current pointer state for each name by querying the name directly
-      // The /names/pointees endpoint returns historical records, so we need to check current state
-      const verifiedNames: Array<{
-        name: string;
-        blockHeight: number;
-        time: number;
-      }> = [];
+      // The /names/pointees endpoint returns historical records, so we need to check current state.
+      // Bounded concurrency + a per-call timeout instead of one sequential
+      // fetchJson per candidate name, so an account with several candidate
+      // names (or one slow/hanging lookup) doesn't serialize the whole check.
+      type VerifiedName = { name: string; blockHeight: number; time: number };
 
-      // Check each name's current state
-      for (const name of latestByName.values()) {
-        try {
-          // Query the name directly to get its current pointer state
-          const nameUrl = `${middlewareUrl}/v3/names/${encodeURIComponent(name.name)}`;
-          const nameResponse = await fetchJson<{
-            active: boolean;
-            pointers: Array<{ id: string }>;
-          }>(nameUrl);
-
-          // If response doesn't have pointers array, the name doesn't exist (e.g., 404)
-          // Skip it - don't fall back to historical data as it would be stale
-          if (
-            !nameResponse?.pointers ||
-            !Array.isArray(nameResponse.pointers)
-          ) {
-            continue;
-          }
-
-          // Check if the name is active AND the CURRENT pointer points to this account address
-          // An inactive name shouldn't be considered as "currently pointing" to the account
-          const isActive = nameResponse.active === true;
-          const hasMatchingPointer = nameResponse.pointers.some(
-            (pointer: any) => pointer && pointer.id === accountAddress,
-          );
-
-          if (isActive && hasMatchingPointer) {
-            verifiedNames.push({
-              name: name.name,
-              blockHeight: name.block_height ?? 0,
-              time: name.block_time ?? 0,
+      const verificationResults = await mapWithConcurrency(
+        [...latestByName.values()],
+        CHAIN_NAME_VERIFY_CONCURRENCY,
+        async (name): Promise<VerifiedName | null> => {
+          try {
+            // Query the name directly to get its current pointer state
+            const nameUrl = `${middlewareUrl}/v3/names/${encodeURIComponent(name.name)}`;
+            const nameResponse = await fetchJson<{
+              active: boolean;
+              pointers: Array<{ id: string }>;
+            }>(nameUrl, {
+              signal: AbortSignal.timeout(CHAIN_NAME_VERIFY_TIMEOUT_MS),
             });
+
+            // If response doesn't have pointers array, the name doesn't exist (e.g., 404)
+            // Skip it - don't fall back to historical data as it would be stale
+            if (
+              !nameResponse?.pointers ||
+              !Array.isArray(nameResponse.pointers)
+            ) {
+              return null;
+            }
+
+            // Check if the name is active AND the CURRENT pointer points to this account address
+            // An inactive name shouldn't be considered as "currently pointing" to the account
+            const isActive = nameResponse.active === true;
+            const hasMatchingPointer = nameResponse.pointers.some(
+              (pointer: any) => pointer && pointer.id === accountAddress,
+            );
+
+            if (isActive && hasMatchingPointer) {
+              return {
+                name: name.name,
+                blockHeight: name.block_height ?? 0,
+                time: name.block_time ?? 0,
+              };
+            }
+            return null;
+          } catch (e) {
+            // Only fall back to historical data on true network errors (caught exceptions,
+            // including our own timeout abort). This handles cases like network timeouts,
+            // connection failures, etc. HTTP errors (like 404) are not caught here - they
+            // return parsed JSON without pointers.
+            const hasMatchingPointer = name.tx.pointers.some(
+              (pointer) => pointer && pointer.id === accountAddress,
+            );
+            if (hasMatchingPointer && name.active) {
+              return {
+                name: name.name,
+                blockHeight: name.block_height ?? 0,
+                time: name.block_time ?? 0,
+              };
+            }
+            return null;
           }
-        } catch (e) {
-          // Only fall back to historical data on true network errors (caught exceptions)
-          // This handles cases like network timeouts, connection failures, etc.
-          // HTTP errors (like 404) are not caught here - they return parsed JSON without pointers
-          const hasMatchingPointer = name.tx.pointers.some(
-            (pointer) => pointer && pointer.id === accountAddress,
-          );
-          if (hasMatchingPointer && name.active) {
-            verifiedNames.push({
-              name: name.name,
-              blockHeight: name.block_height ?? 0,
-              time: name.block_time ?? 0,
-            });
-          }
-        }
-      }
+        },
+      );
+
+      const verifiedNames = verificationResults.filter(
+        (result): result is VerifiedName => result !== null,
+      );
 
       if (verifiedNames.length === 0) {
         return null;

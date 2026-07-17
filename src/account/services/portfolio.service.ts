@@ -18,6 +18,7 @@ import {
   TokenPnlResult,
 } from './bcl-pnl.service';
 import { fetchJson } from '@/utils/common';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
@@ -260,7 +261,7 @@ export class PortfolioService {
     };
 
     const balanceCache = new Map<number, Promise<string>>();
-    const data = await this.mapWithConcurrency(
+    const data = await mapWithConcurrency(
       timestamps,
       this.snapshotConcurrency,
       async (timestamp, index) => {
@@ -594,32 +595,5 @@ export class PortfolioService {
     }
 
     return closestPrice;
-  }
-
-  private async mapWithConcurrency<T, R>(
-    items: T[],
-    concurrency: number,
-    mapper: (item: T, index: number) => Promise<R>,
-  ): Promise<R[]> {
-    if (items.length === 0) {
-      return [];
-    }
-
-    const results = new Array<R>(items.length);
-    let nextIndex = 0;
-    const workerCount = Math.min(Math.max(concurrency, 1), items.length);
-
-    const workers = Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const currentIndex = nextIndex++;
-        if (currentIndex >= items.length) {
-          return;
-        }
-        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-      }
-    });
-
-    await Promise.all(workers);
-    return results;
   }
 }
