@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigType } from '@nestjs/config';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Account } from '@/account/entities/account.entity';
@@ -111,6 +111,54 @@ export class IdentityService {
     if (!hex) return null;
     this.setCacheEntry(address, hex);
     return hex;
+  }
+
+  /**
+   * Batch variant of {@link getPubkeyForAddress} for room-wide recomputes
+   * (thousands of holders): one `IN (...)` read instead of one `findOne`
+   * per member. The in-memory cache only stores resolved hits (a `null`
+   * result is never cached, since it's a single-address cache miss most
+   * callers hit at most once anyway) so this always queries for every
+   * address not already cached, then seeds the cache for any hits.
+   */
+  async getPubkeysForAddresses(
+    addresses: string[],
+  ): Promise<Map<string, string | null>> {
+    const result = new Map<string, string | null>();
+    const uncached: string[] = [];
+
+    for (const address of addresses) {
+      const cached = this.addressToPubkey.get(address);
+      if (cached) {
+        result.set(address, cached);
+      } else {
+        uncached.push(address);
+      }
+    }
+
+    if (uncached.length === 0) {
+      return result;
+    }
+
+    const accounts = await this.accountRepo.find({
+      where: { address: In(uncached) },
+      select: ['address', 'links'],
+    });
+    const accountByAddress = new Map(
+      accounts.map((account) => [account.address, account]),
+    );
+
+    for (const address of uncached) {
+      const hex = normalizePubkey(
+        accountByAddress.get(address)?.links?.[this.provider],
+      );
+      if (hex) {
+        this.setCacheEntry(address, hex);
+      }
+      result.set(address, hex ?? null);
+    }
+
+    return result;
   }
 
   /**
