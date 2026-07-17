@@ -325,4 +325,15 @@ describe('AccountService', () => {
       expect(result).toBeNull();
     });
   });
+
+  describe('scheduledFullAccountsRebuild', () => {
+    it('is a no-op while PULL_ACCOUNTS_ENABLED is false (current config)', async () => {
+      const { service } = createService();
+      const rebuildSpy = jest.spyOn(service, 'saveAllActiveAccounts');
+
+      await service.scheduledFullAccountsRebuild();
+
+      expect(rebuildSpy).not.toHaveBeenCalled();
+    });
+  });
 });

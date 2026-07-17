@@ -66,10 +66,18 @@ export class AccountService {
     //
   }
 
-  onModuleInit() {
-    if (PULL_ACCOUNTS_ENABLED) {
-      this.saveAllActiveAccounts();
+  // Full rebuild moved off the boot path onto an off-peak daily cron
+  // (`scheduledFullAccountsRebuild`) instead of running unconditionally on
+  // every process start/restart -- ensureAccountFromTransactions already
+  // keeps individual accounts fresh incrementally, so a full GROUP BY over
+  // the whole transactions table doesn't need to happen on every boot,
+  // just periodically as a consistency catch-up sweep.
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async scheduledFullAccountsRebuild() {
+    if (!PULL_ACCOUNTS_ENABLED) {
+      return;
     }
+    await this.saveAllActiveAccounts();
   }
 
   /**
