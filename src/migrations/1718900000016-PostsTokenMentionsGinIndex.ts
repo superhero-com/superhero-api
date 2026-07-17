@@ -11,23 +11,28 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * TypeORM's `@Index` decorator cannot express `USING GIN` + opclass, so
  * this index is migration-only (see `community_room.moderators`/`muted`
  * for the existing precedent) with no matching entity decorator.
- * `CONCURRENTLY` cannot run inside a transaction, hence `transaction = false`.
+ *
+ * Plain (non-CONCURRENTLY) index creation, matching this migration folder's
+ * existing convention -- migration:run defaults to `transaction: 'all'`
+ * (one batch transaction for every pending migration), and CONCURRENTLY
+ * cannot run inside a transaction at all, so a per-migration
+ * `transaction = false` override is rejected by TypeORM
+ * (ForbiddenTransactionModeOverrideError) rather than actually skip it.
  */
 export class PostsTokenMentionsGinIndex1718900000016
   implements MigrationInterface
 {
   name = 'PostsTokenMentionsGinIndex1718900000016';
-  public transaction = false;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `CREATE INDEX CONCURRENTLY IF NOT EXISTS "IDX_POSTS_TOKEN_MENTIONS_GIN" ON "posts" USING GIN ("token_mentions" jsonb_path_ops)`,
+      `CREATE INDEX IF NOT EXISTS "IDX_POSTS_TOKEN_MENTIONS_GIN" ON "posts" USING GIN ("token_mentions" jsonb_path_ops)`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `DROP INDEX CONCURRENTLY IF EXISTS "public"."IDX_POSTS_TOKEN_MENTIONS_GIN"`,
+      `DROP INDEX IF EXISTS "public"."IDX_POSTS_TOKEN_MENTIONS_GIN"`,
     );
   }
 }
