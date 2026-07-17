@@ -26,6 +26,7 @@ describe('TokensService', () => {
   let tokenTradeEligibilityCountsRepository: any;
   let communityFactoryService: any;
   let pullTokenInfoQueue: any;
+  let updateTrendingScoresQueue: any;
 
   beforeEach(() => {
     (fetchJson as jest.Mock).mockReset();
@@ -56,6 +57,9 @@ describe('TokensService', () => {
     pullTokenInfoQueue = {
       add: jest.fn(),
     };
+    updateTrendingScoresQueue = {
+      add: jest.fn(),
+    };
 
     service = new TokensService(
       tokensRepository as any,
@@ -69,6 +73,7 @@ describe('TokensService', () => {
       {} as any,
       communityFactoryService as any,
       pullTokenInfoQueue as any,
+      updateTrendingScoresQueue as any,
     );
   });
 
@@ -729,6 +734,45 @@ describe('TokensService', () => {
       expect(params).toEqual(['ct_factory', ['ct_x']]);
       expect(sql).toContain('ANY($2::text[])');
       expect(result.get('ct_x')).toBe(3);
+    });
+  });
+
+  describe('queueTrendingScoresForSymbols', () => {
+    it('enqueues one deduped, delayed job per normalized symbol', async () => {
+      await service.queueTrendingScoresForSymbols(['alpha', 'ALPHA', ' beta ']);
+
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledTimes(2);
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'ALPHA' },
+        expect.objectContaining({
+          jobId: 'updateTrendingScores-ALPHA',
+          delay: 5_000,
+          removeOnComplete: true,
+          removeOnFail: true,
+        }),
+      );
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'BETA' },
+        expect.objectContaining({ jobId: 'updateTrendingScores-BETA' }),
+      );
+    });
+
+    it('does not enqueue anything for blank symbols', async () => {
+      await service.queueTrendingScoresForSymbols(['', '   ']);
+
+      expect(updateTrendingScoresQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('configures retries so a transient failure does not permanently drop the recompute', async () => {
+      await service.queueTrendingScoresForSymbols(['alpha']);
+
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'ALPHA' },
+        expect.objectContaining({
+          attempts: 3,
+          backoff: expect.objectContaining({ type: 'exponential' }),
+        }),
+      );
     });
   });
 });

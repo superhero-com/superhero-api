@@ -11,10 +11,12 @@ import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
   SYNC_TOKEN_HOLDERS_QUEUE,
+  UPDATE_TRENDING_SCORES_QUEUE,
 } from './queues/constants';
 import { PullTokenInfoQueue } from './queues/pull-token-info.queue';
 import { RemoveOldTokensQueue } from './queues/remove-old-tokens.queue';
 import { SyncTokenHoldersQueue } from './queues/sync-token-holders.queue';
+import { UpdateTrendingScoresQueue } from './queues/update-trending-scores.queue';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';
@@ -52,6 +54,9 @@ import { Post } from '@/social/entities/post.entity';
       {
         name: DELETE_OLD_TOKENS_QUEUE,
       },
+      {
+        name: UPDATE_TRENDING_SCORES_QUEUE,
+      },
     ),
   ],
   controllers: [
@@ -65,6 +70,7 @@ import { Post } from '@/social/entities/post.entity';
     TokenWebsocketGateway,
     PullTokenInfoQueue,
     SyncTokenHoldersQueue,
+    UpdateTrendingScoresQueue,
     RemoveOldTokensQueue,
     TokenHoldersLockService,
     UpdateTrendingTokensService,

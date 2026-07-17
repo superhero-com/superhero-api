@@ -62,7 +62,7 @@ export class SocialTippingTransactionProcessorService {
             where: { id: postId },
           }),
         updateTrendingScoresForSymbols: (symbols) =>
-          this.tokensService.updateTrendingScoresForSymbols(symbols),
+          this.tokensService.queueTrendingScoresForSymbols(symbols),
         logError: (message, trace) => this.logger.error(message, trace),
         errorMessage:
           'Failed to refresh trending scores after processing tip transaction',

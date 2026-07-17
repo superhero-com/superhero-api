@@ -34,7 +34,7 @@ describe('PostService', () => {
     update: jest.fn(),
   };
   const mockTokensService = {
-    updateTrendingScoresForSymbols: jest.fn(),
+    queueTrendingScoresForSymbols: jest.fn(),
   };
 
   const createMockTransaction = (

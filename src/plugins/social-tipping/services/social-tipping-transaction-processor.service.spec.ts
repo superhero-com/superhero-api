@@ -20,7 +20,7 @@ describe('SocialTippingTransactionProcessorService', () => {
       ensureAccountExists: jest.fn(),
     };
     tokensService = {
-      updateTrendingScoresForSymbols: jest.fn().mockResolvedValue(undefined),
+      queueTrendingScoresForSymbols: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new SocialTippingTransactionProcessorService(
@@ -49,7 +49,7 @@ describe('SocialTippingTransactionProcessorService', () => {
     postRepository.findOne.mockResolvedValue({
       token_mentions: ['BETA'],
     });
-    tokensService.updateTrendingScoresForSymbols.mockImplementation(
+    tokensService.queueTrendingScoresForSymbols.mockImplementation(
       async () => {
         callOrder.push('recalculate');
       },
@@ -78,7 +78,7 @@ describe('SocialTippingTransactionProcessorService', () => {
       'transaction-commit',
       'recalculate',
     ]);
-    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
       'BETA',
     ]);
@@ -93,7 +93,7 @@ describe('SocialTippingTransactionProcessorService', () => {
       tip: { tx_hash: 'th_tip' },
       post: { sender_address: 'ak_receiver', token_mentions: ['ALPHA'] },
     });
-    tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
+    tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
       new Error('refresh failed'),
     );
     tipRepository.manager.transaction.mockImplementation(async (handler: any) =>
@@ -110,7 +110,7 @@ describe('SocialTippingTransactionProcessorService', () => {
     );
 
     expect(result).toEqual({ tx_hash: 'th_tip' });
-    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
     ]);
   });
@@ -136,7 +136,7 @@ describe('SocialTippingTransactionProcessorService', () => {
     );
 
     expect(result).toBeNull();
-    expect(tokensService.updateTrendingScoresForSymbols).not.toHaveBeenCalled();
+    expect(tokensService.queueTrendingScoresForSymbols).not.toHaveBeenCalled();
   });
 
   it('does not persist self-tips on a profile', async () => {

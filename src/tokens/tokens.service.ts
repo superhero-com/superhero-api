@@ -24,7 +24,10 @@ import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
 import { Token } from './entities/token.entity';
-import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
+import {
+  PULL_TOKEN_INFO_QUEUE,
+  UPDATE_TRENDING_SCORES_QUEUE,
+} from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Post } from '@/social/entities/post.entity';
@@ -156,6 +159,9 @@ export class TokensService {
 
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenInfoQueue: Queue,
+
+    @InjectQueue(UPDATE_TRENDING_SCORES_QUEUE)
+    private readonly updateTrendingScoresQueue: Queue,
   ) {
     this.init();
   }
@@ -1398,6 +1404,44 @@ export class TokensService {
       .sort((a, b) => b.getTime() - a.getTime());
 
     return validDates[0] ?? null;
+  }
+
+  /**
+   * Enqueues a trending-score recompute per symbol instead of running it
+   * inline. Saving a post synchronously ran a RECURSIVE thread CTE + tips +
+   * reads aggregation (`calculateTokenTrendingMetrics`) per mentioned symbol
+   * on the request path; each job here is deduped by symbol (`jobId`) with a
+   * short delay so a burst of posts mentioning the same symbol collapses
+   * into one recompute instead of one per post.
+   */
+  async queueTrendingScoresForSymbols(symbols: string[]): Promise<void> {
+    const normalizedSymbols = [
+      ...new Set(
+        symbols
+          .map((symbol) => (symbol || '').trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+
+    await Promise.all(
+      normalizedSymbols.map((symbol) =>
+        this.updateTrendingScoresQueue.add(
+          { symbol },
+          {
+            jobId: `updateTrendingScores-${symbol}`,
+            delay: 5_000,
+            removeOnComplete: true,
+            removeOnFail: true,
+            // Bull defaults `attempts` to 1 -- without this, a transient DB
+            // blip during calculateTokenTrendingMetrics fails the job once
+            // and it's gone, silently leaving that symbol's trending score
+            // stale until another post happens to mention it again.
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5_000 },
+          },
+        ),
+      ),
+    );
   }
 
   async updateTrendingScoresForSymbols(symbols: string[]): Promise<void> {
