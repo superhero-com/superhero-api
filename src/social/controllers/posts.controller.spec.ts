@@ -73,7 +73,7 @@ describe('PostsController', () => {
     });
   });
 
-  it('uses all-time ranking for popular posts and ignores legacy window queries', async () => {
+  function buildPopularController() {
     const popularPost = {
       id: 'post-popular',
       sender_address: 'ak_author',
@@ -108,6 +108,13 @@ describe('PostsController', () => {
       } as any,
     );
 
+    return { popularController, popularRankingService };
+  }
+
+  it('uses all-time ranking for popular posts and ignores legacy window queries', async () => {
+    const { popularController, popularRankingService } =
+      buildPopularController();
+
     await popularController.popular({
       page: 1,
       limit: 20,
@@ -120,6 +127,27 @@ describe('PostsController', () => {
       0,
       undefined,
       expect.any(Object),
+      undefined,
+    );
+  });
+
+  it('forwards the shuffle seed to the ranking service', async () => {
+    const { popularController, popularRankingService } =
+      buildPopularController();
+
+    await popularController.popular({
+      page: 1,
+      limit: 20,
+      seed: 'refresh-seed-1',
+    } as any);
+
+    expect(popularRankingService.getPopularPostsPage).toHaveBeenCalledWith(
+      'all',
+      20,
+      0,
+      undefined,
+      expect.any(Object),
+      'refresh-seed-1',
     );
   });
 

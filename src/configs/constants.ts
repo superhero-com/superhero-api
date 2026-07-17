@@ -292,13 +292,15 @@ export const POPULAR_RANKING_CONFIG = {
   STALE_PENALTY_RAMP_HOURS: 240, // reaches the full penalty 10 days later
   STALE_PENALTY_MAX: 5, // max score subtracted from a fully-stale post
 
-  // Deterministic per-UTC-day multiplicative jitter applied to the default
-  // (non-personalized) feed's final score so the visible order rotates daily
-  // instead of being frozen between recomputes. Stable within a UTC day so
-  // pagination stays consistent through the day; reseeds at midnight UTC.
+  // Deterministic multiplicative jitter applied at read time to the cached
+  // ranking when a request carries a `seed`, so the feed reshuffles per refresh
+  // instead of being frozen between cron recomputes. Applied over the cached
+  // scores — no re-scoring — and keyed by (postId + seed), so one seed yields
+  // one stable order across every page of a browsing session (pagination stays
+  // consistent) while a new seed yields a new order.
   // ±20%: enough to reshuffle the dense engaged middle, too small to let a
   // clearly weaker post leapfrog a clearly stronger one.
-  DAILY_SHUFFLE_MAGNITUDE: 0.2,
+  SHUFFLE_MAGNITUDE: 0.2,
 
   // velocity looks at interactions inside this window (divided by post age
   // when the post is younger), so an old post catching fire still registers

@@ -404,6 +404,7 @@ export class PostsController {
       contentQuality,
       reads,
       interactionsPerHour,
+      seed,
     } = query;
     const window = 'all' as const;
     const offset = (page - 1) * limit;
@@ -428,6 +429,7 @@ export class PostsController {
         offset,
         undefined,
         weightOverrides,
+        seed,
       );
       const totalPages = Math.ceil(totalItems / limit);
 
@@ -484,6 +486,7 @@ export class PostsController {
           offset,
           weightOverrides,
           scoredItems,
+          seed,
         );
       }
       return response;

@@ -1,6 +1,14 @@
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import {
   POPULAR_RANKING_WEIGHT_SCALES,
   type PopularRankingWeightScale,
@@ -52,6 +60,21 @@ export class PopularPostsQueryDto {
   @IsNumber()
   @Type(() => Number)
   debug?: number;
+
+  @ApiPropertyOptional({
+    type: String,
+    maxLength: 64,
+    description:
+      'Shuffle seed. Ranking (freshness, engagement, decay) is unchanged; the ' +
+      'seed only re-orders the ranked result deterministically. Pass the same ' +
+      'seed for every page of one browsing session so pagination stays ' +
+      'consistent, and a new seed on refresh to reshuffle the feed. Omit for ' +
+      'the stable, unshuffled ranking.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  seed?: string;
 
   @ApiPropertyOptional({
     enum: POPULAR_RANKING_WEIGHT_SCALES,

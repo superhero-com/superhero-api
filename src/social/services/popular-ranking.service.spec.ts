@@ -1263,18 +1263,56 @@ describe('PopularRankingService', () => {
       expect(svc.computeStalePenalty(scoreInput(start + ramp))).toBe(0);
     });
 
-    it('applies bounded, per-day-deterministic shuffle jitter', () => {
+    it('applies bounded, seed-deterministic shuffle jitter', () => {
       const svc = service as any;
-      const mag = POPULAR_RANKING_CONFIG.DAILY_SHUFFLE_MAGNITUDE;
-      const first = svc.computeDailyJitter('post-a');
-      const second = svc.computeDailyJitter('post-a');
-      const other = svc.computeDailyJitter('post-b');
+      const mag = POPULAR_RANKING_CONFIG.SHUFFLE_MAGNITUDE;
 
-      expect(first).toBe(second);
-      expect(Math.abs(first)).toBeLessThanOrEqual(mag);
-      expect(other).not.toBe(first);
-      expect(svc.computeDailyJitter(undefined)).toBe(0);
-      expect(svc.computeDailyJitter('')).toBe(0);
+      // Same (id, seed) always lands on the same jitter, so every page of a
+      // session agrees on the order; a new seed re-rolls it.
+      expect(svc.computeShuffleJitter('post-a', 'seed-1')).toBe(
+        svc.computeShuffleJitter('post-a', 'seed-1'),
+      );
+      expect(svc.computeShuffleJitter('post-a', 'seed-2')).not.toBe(
+        svc.computeShuffleJitter('post-a', 'seed-1'),
+      );
+      expect(svc.computeShuffleJitter('post-b', 'seed-1')).not.toBe(
+        svc.computeShuffleJitter('post-a', 'seed-1'),
+      );
+      expect(
+        Math.abs(svc.computeShuffleJitter('post-a', 'seed-1')),
+      ).toBeLessThanOrEqual(mag);
+      expect(svc.computeShuffleJitter('', 'seed-1')).toBe(0);
+    });
+
+    it('reorders a cached ranking only when a seed is supplied', () => {
+      const svc = service as any;
+      const entries: Array<[string, number]> = Array.from(
+        { length: 40 },
+        (_, i) => [`post-${i}`, 100 - i],
+      );
+      const byScore = (e: [string, number]) => e[1];
+      const byId = (e: [string, number]) => e[0];
+
+      // No seed: pure score order, untouched.
+      expect(
+        svc.shuffleScoredEntries(entries, undefined, byId, byScore),
+      ).toEqual(entries);
+
+      // Seeded: same members, reordered, and stable across calls.
+      const shuffled = svc.shuffleScoredEntries(
+        entries,
+        'seed-1',
+        byId,
+        byScore,
+      );
+      expect(shuffled).not.toEqual(entries);
+      expect([...shuffled].sort()).toEqual([...entries].sort());
+      expect(
+        svc.shuffleScoredEntries(entries, 'seed-1', byId, byScore),
+      ).toEqual(shuffled);
+      expect(
+        svc.shuffleScoredEntries(entries, 'seed-2', byId, byScore),
+      ).not.toEqual(shuffled);
     });
 
     it('penalizes short emoji-only posts in content quality', () => {

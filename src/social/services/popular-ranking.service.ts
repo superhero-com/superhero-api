@@ -256,6 +256,7 @@ export class PopularRankingService implements OnModuleDestroy {
   private async getVerifiedPopularIds(
     window: PopularWindow,
     maxCandidates?: number,
+    seed?: string,
   ): Promise<string[]> {
     const key = this.getRedisKey(window);
 
@@ -303,9 +304,14 @@ export class PopularRankingService implements OnModuleDestroy {
       return [];
     }
 
-    const allPopularIds = Array.from(popularRanks.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([id]) => id);
+    // The full scored set is already in memory and already has to be sorted, so
+    // the per-refresh shuffle rides along for one hash per entry.
+    const allPopularIds = this.shuffleScoredEntries(
+      Array.from(popularRanks.entries()),
+      seed,
+      ([id]) => id,
+      ([, score]) => score,
+    ).map(([id]) => id);
 
     const postIds: string[] = [];
     const pluginContentIds: string[] = [];
@@ -548,8 +554,13 @@ export class PopularRankingService implements OnModuleDestroy {
     limit = 50,
     offset = 0,
     maxCandidates?: number,
+    seed?: string,
   ): Promise<(Post | PopularRankingContentItem)[]> {
-    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
+    const verifiedIds = await this.getVerifiedPopularIds(
+      window,
+      maxCandidates,
+      seed,
+    );
 
     if (verifiedIds.length === 0) {
       return this.fetchRecentFallback(window, limit, offset);
@@ -570,6 +581,7 @@ export class PopularRankingService implements OnModuleDestroy {
     offset = 0,
     maxCandidates?: number,
     weightOverrides?: PopularRankingWeightOverrides,
+    seed?: string,
   ): Promise<{
     items: (Post | PopularRankingContentItem)[];
     totalItems: number;
@@ -582,14 +594,20 @@ export class PopularRankingService implements OnModuleDestroy {
         limit,
         offset,
         maxCandidates,
+        seed,
       );
       return { items, totalItems };
     }
 
-    const scored = await this.buildScoredItems(
-      window,
-      maxCandidates ?? this.getDefaultMaxCandidates(window),
-      weightOverrides,
+    const scored = this.shuffleScoredEntries(
+      await this.buildScoredItems(
+        window,
+        maxCandidates ?? this.getDefaultMaxCandidates(window),
+        weightOverrides,
+      ),
+      seed,
+      (item) => item.postId,
+      (item) => item.score,
     );
     const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
     const paginatedIds = scored
@@ -806,9 +824,6 @@ export class PopularRankingService implements OnModuleDestroy {
 
     const trendingByTag = await this.loadTrendingByTagMap();
     const resolvedWeights = this.resolveWeights(weightOverrides);
-    // Personalized (weight-override) queries stay deterministic; only the
-    // default cached feed gets the daily rotation.
-    const applyDailyShuffle = !this.hasWeightOverrides(weightOverrides);
 
     const scoredPosts: PopularScoreItem[] = candidates.map((post) => {
       const tipsAgg = tipsByPost.get(post.id);
@@ -836,7 +851,6 @@ export class PopularRankingService implements OnModuleDestroy {
           },
           resolvedWeights,
           window,
-          applyDailyShuffle,
         ),
         type: 'post',
       };
@@ -860,7 +874,6 @@ export class PopularRankingService implements OnModuleDestroy {
           },
           resolvedWeights,
           window,
-          applyDailyShuffle,
         ),
         type: item.type,
         metadata: item.metadata,
@@ -1107,29 +1120,55 @@ export class PopularRankingService implements OnModuleDestroy {
   }
 
   /**
-   * Deterministic per-UTC-day multiplicative jitter in [-mag, +mag] seeded by
-   * (id + day) so the default feed's order rotates daily instead of being
-   * frozen between recomputes. Stable within a UTC day → pagination stays
-   * consistent; reseeds at midnight UTC. Only the default (non-personalized)
-   * feed is shuffled — personalized weight-override queries stay deterministic.
+   * Deterministic multiplicative jitter in [-mag, +mag] keyed by (id + seed).
+   * Applied at read time over already-cached scores, never during scoring: the
+   * cron keeps producing one stable freshness-ranked cache, and each refresh
+   * re-orders that cache under its own seed. Same seed → same order (so every
+   * page of a session agrees); new seed → new order.
    */
-  private computeDailyJitter(id?: string): number {
+  private computeShuffleJitter(id: string, seed: string): number {
     if (!id) {
       return 0;
     }
 
-    const dayBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
-    const seed = `${id}:${dayBucket}`;
+    const key = `${id}:${seed}`;
     let hash = 0x811c9dc5; // FNV-1a
-    for (let i = 0; i < seed.length; i++) {
-      hash ^= seed.charCodeAt(i);
+    for (let i = 0; i < key.length; i++) {
+      hash ^= key.charCodeAt(i);
       hash = Math.imul(hash, 0x01000193);
     }
 
     const normalized = (hash >>> 0) / 0x100000000; // [0, 1)
-    return (
-      (normalized * 2 - 1) * POPULAR_RANKING_CONFIG.DAILY_SHUFFLE_MAGNITUDE
-    );
+    return (normalized * 2 - 1) * POPULAR_RANKING_CONFIG.SHUFFLE_MAGNITUDE;
+  }
+
+  /**
+   * Re-order already-scored entries under a request seed. Cheap by design — the
+   * caller has already loaded and must already sort these scores, so shuffling
+   * costs one hash per entry and no extra Redis/DB work. Without a seed the
+   * ranking is returned untouched (stable, freshness-ranked cron order).
+   */
+  private shuffleScoredEntries<T>(
+    entries: T[],
+    seed: string | undefined,
+    getId: (entry: T) => string,
+    getScore: (entry: T) => number,
+  ): T[] {
+    if (!seed) {
+      return [...entries].sort((a, b) => getScore(b) - getScore(a));
+    }
+
+    return entries
+      .map(
+        (entry) =>
+          [
+            entry,
+            getScore(entry) *
+              (1 + this.computeShuffleJitter(getId(entry), seed)),
+          ] as const,
+      )
+      .sort((a, b) => b[1] - a[1])
+      .map(([entry]) => entry);
   }
 
   private computeScore(
@@ -1137,7 +1176,6 @@ export class PopularRankingService implements OnModuleDestroy {
     input: PopularScoreInput,
     weights: PopularRankingResolvedWeights,
     window: PopularWindow,
-    applyDailyShuffle = true,
   ): number {
     const { comments, tipsAmountAE, tipsCount, uniqueTippers, reads } = input;
 
@@ -1185,15 +1223,8 @@ export class PopularRankingService implements OnModuleDestroy {
       weights.interactionsPerHour * Math.log(1 + interactionsPerHour) +
       this.computeTieRotation(input.id);
 
-    // Daily rotation is applied before gravity/penalty so it scales the whole
-    // final score. Only the default feed is shuffled (see computeDailyJitter);
-    // an id-less input (unit tests, sources without an id) jitters by 0.
-    const shuffle = applyDailyShuffle
-      ? 1 + this.computeDailyJitter(input.id)
-      : 1;
-
     if (window !== 'all') {
-      return baseScore * shuffle;
+      return baseScore;
     }
 
     // Log-dampened engagement never decays on its own, so without gravity old
@@ -1201,7 +1232,7 @@ export class PopularRankingService implements OnModuleDestroy {
     // from being divided by ~0.
     const ageHours = this.computeAgeHours(input.createdAt, 1) ?? 1;
     const decayed =
-      (baseScore * shuffle) /
+      baseScore /
       Math.pow(ageHours + 2, POPULAR_RANKING_CONFIG.ALL_WINDOW_GRAVITY);
 
     // Subtracted after gravity so a fully-stale old post lands below a merely
@@ -1215,6 +1246,7 @@ export class PopularRankingService implements OnModuleDestroy {
     offset = 0,
     weightOverrides?: PopularRankingWeightOverrides,
     precomputedScored?: PopularScoreItem[],
+    seed?: string,
   ) {
     const personalized = this.hasWeightOverrides(weightOverrides);
     const appliedWeights = personalized
@@ -1226,11 +1258,16 @@ export class PopularRankingService implements OnModuleDestroy {
     if (personalized) {
       const scored =
         precomputedScored ??
-        (await this.buildScoredItems(
-          window,
-          this.getDefaultMaxCandidates(window),
-          weightOverrides,
-        ));
+        this.shuffleScoredEntries(
+          await this.buildScoredItems(
+            window,
+            this.getDefaultMaxCandidates(window),
+            weightOverrides,
+          ),
+          seed,
+          (item) => item.postId,
+          (item) => item.score,
+        );
       const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
       const ids = scored.slice(0, candidateEnd).map((item) => item.postId);
       const candidateItems = await this.hydrateRankedItems(window, ids);
@@ -1240,9 +1277,19 @@ export class PopularRankingService implements OnModuleDestroy {
         offset,
       );
     } else {
-      const key = this.getRedisKey(window);
       const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
-      const ids = await this.redis.zrevrange(key, 0, candidateEnd - 1);
+      // A seeded request is re-ordered over the whole cached set, so the top
+      // slice can only be read back through the same shuffle the feed used.
+      const ids = seed
+        ? (await this.getVerifiedPopularIds(window, undefined, seed)).slice(
+            0,
+            candidateEnd,
+          )
+        : await this.redis.zrevrange(
+            this.getRedisKey(window),
+            0,
+            candidateEnd - 1,
+          );
       if (ids.length) {
         const candidateItems = await this.hydrateRankedItems(window, ids);
         items = this.paginateDiversifiedRankedItems(
