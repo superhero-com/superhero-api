@@ -652,11 +652,18 @@ export class PopularRankingService implements OnModuleDestroy {
     const candidateOrder = new Map<string, number>(
       candidateIds.map((id, index) => [id, index] as const),
     );
+    // Only id/content/created_at + topic names ever reach computeScore below
+    // (see the `candidates.map` scoring pass) -- select just those instead of
+    // full Post rows (media, tx_args, token_mentions, ...) for up to
+    // maxCandidates (10k) rows every recompute.
     const hydratedCandidates = candidateIds.length
-      ? await this.postRepository.find({
-          where: { id: In(candidateIds) },
-          relations: ['topics'],
-        })
+      ? await this.postRepository
+          .createQueryBuilder('post')
+          .leftJoin('post.topics', 'topic')
+          .select(['post.id', 'post.content', 'post.created_at'])
+          .addSelect(['topic.name'])
+          .where('post.id IN (:...candidateIds)', { candidateIds })
+          .getMany()
       : [];
     const candidates = hydratedCandidates.sort(
       (a, b) => candidateOrder.get(a.id)! - candidateOrder.get(b.id)!,
