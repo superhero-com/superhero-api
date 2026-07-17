@@ -130,9 +130,27 @@ describe('token-mentions-sql util', () => {
     it('scopes the exists check to the given alias and symbol', () => {
       const sql = buildTokenMentionExistsSql('post', '$2');
 
+      expect(sql).toContain('post.token_mentions');
+      // Explicit ::text cast: jsonb_build_array is VARIADIC "any", so a bare
+      // bind parameter here fails with "could not determine data type of
+      // parameter $2" (Postgres can't infer a type with no other context).
+      expect(sql).toContain('@> jsonb_build_array(($2)::text)');
       expect(sql).toContain('EXISTS (');
-      expect(sql).toContain('normalized_mentions.symbol = $2');
       expect(sql).toContain(`'${TOKEN_HASHTAG_REGEX_SOURCE}'`);
+      expect(sql).toContain('UPPER(content_match[1]) = $2');
+    });
+
+    it('does not wrap token_mentions in COALESCE on the containment check, so IDX_POSTS_TOKEN_MENTIONS_GIN can match it', () => {
+      const sql = buildTokenMentionExistsSql('post', '$2');
+      const containmentClause = sql.split('@>')[0];
+
+      // The clause feeding the `@>` operator must be the bare column -- any
+      // wrapping function (COALESCE included) stops Postgres from matching
+      // the GIN index built on the plain column.
+      expect(containmentClause.trim().endsWith('post.token_mentions')).toBe(
+        true,
+      );
+      expect(containmentClause).not.toContain('COALESCE');
     });
   });
 });
