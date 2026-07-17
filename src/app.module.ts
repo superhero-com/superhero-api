@@ -39,6 +39,7 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -118,6 +119,7 @@ import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.mod
     // all load here; the relay duties self-enable iff a relay is configured
     // (`TG_RELAY_URL` + `TG_BOT_NSEC`). See deworker-plan.md.
     TokenGatedRoomsModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],
