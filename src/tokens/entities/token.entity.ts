@@ -13,6 +13,9 @@ import {
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 
+// Backs the home feed's token-creation source (`unlisted = false ORDER BY
+// created_at DESC`), which previously had no covering index on this table.
+@Index('IDX_TOKEN_UNLISTED_CREATED_AT', ['unlisted', 'created_at'])
 @Entity({ name: 'token' })
 export class Token {
   @PrimaryColumn()

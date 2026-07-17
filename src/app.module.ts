@@ -40,6 +40,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.module';
 import { SearchModule } from './search/search.module';
+import { FeedModule } from './feed/feed.module';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { SearchModule } from './search/search.module';
     // (`TG_RELAY_URL` + `TG_BOT_NSEC`). See deworker-plan.md.
     TokenGatedRoomsModule,
     SearchModule,
+    FeedModule,
   ],
   controllers: [AppController],
   providers: [AppService],
