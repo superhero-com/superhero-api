@@ -23,6 +23,9 @@ describe('AccountsController', () => {
     findOne: jest.Mock;
     update: jest.Mock;
   };
+  let tokenHolderRepository: {
+    count: jest.Mock;
+  };
   let queryBuilder: ReturnType<typeof createQueryBuilder>;
   let accountService: {
     getChainNameForAccount: jest.Mock;
@@ -49,6 +52,9 @@ describe('AccountsController', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue(undefined),
     };
+    tokenHolderRepository = {
+      count: jest.fn().mockResolvedValue(0),
+    };
     accountService = {
       getChainNameForAccount: jest.fn(),
       ensureAccountFromTransactions: jest.fn().mockResolvedValue(null),
@@ -69,6 +75,7 @@ describe('AccountsController', () => {
 
     controller = new AccountsController(
       accountRepository as any,
+      tokenHolderRepository as any,
       portfolioService as any,
       bclPnlService as any,
       accountService as any,
@@ -189,13 +196,20 @@ describe('AccountsController', () => {
       profile: null,
       public_name: null,
     });
+    tokenHolderRepository.count.mockResolvedValue(3);
 
     const result = await controller.getAccount(account.address);
 
     expect(accountRepository.findOne).toHaveBeenCalledWith({
       where: { address: account.address },
     });
-    expect(result).toMatchObject({ address: account.address });
+    expect(tokenHolderRepository.count).toHaveBeenCalledWith({
+      where: { address: account.address, balance: expect.anything() },
+    });
+    expect(result).toMatchObject({
+      address: account.address,
+      holdings_count: 3,
+    });
     expect(loggerError).toHaveBeenCalled();
     loggerError.mockRestore();
   });
@@ -219,6 +233,7 @@ describe('AccountsController', () => {
     );
     expect(accountRepository.findOne).not.toHaveBeenCalled();
     expect(result).toMatchObject({ address: account.address });
+    expect(result.holdings_count).toBe(0);
   });
 
   describe('getPortfolioPnlChart', () => {

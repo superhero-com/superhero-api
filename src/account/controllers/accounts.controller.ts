@@ -23,8 +23,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, MoreThan, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
+import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { PortfolioService } from '../services/portfolio.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
 import { AccountService } from '../services/account.service';
@@ -76,6 +77,8 @@ export class AccountsController {
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    @InjectRepository(TokenHolder)
+    private readonly tokenHolderRepository: Repository<TokenHolder>,
     private readonly portfolioService: PortfolioService,
     private readonly bclPnlService: BclPnlService,
     private readonly accountService: AccountService,
@@ -615,7 +618,12 @@ export class AccountsController {
       }
     }
 
-    const profile = await this.profileReadService.getProfile(address);
+    const [profile, holdingsCount] = await Promise.all([
+      this.profileReadService.getProfile(address),
+      this.tokenHolderRepository.count({
+        where: { address, balance: MoreThan(0) },
+      }),
+    ]);
 
     return {
       ...account,
@@ -623,6 +631,7 @@ export class AccountsController {
       chain_name_updated_at: chainNameUpdatedAt,
       profile: profile.profile,
       public_name: profile.public_name,
+      holdings_count: holdingsCount,
     };
   }
 
