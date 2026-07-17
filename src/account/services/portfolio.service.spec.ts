@@ -27,6 +27,7 @@ describe('PortfolioService', () => {
     const aeSdkService = {
       sdk: {
         getBalance: jest.fn(),
+        getHeight: jest.fn(),
       },
     };
     const coinGeckoService = {
@@ -446,6 +447,60 @@ describe('PortfolioService', () => {
 
       expect(result).toEqual([]);
       expect(bclPnlService.calculateDailyPnlBatch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCurrentPortfolioValue', () => {
+    it('sums the live AE balance and current token holdings value at the latest height', async () => {
+      const { service, aeSdkService, coinGeckoService, bclPnlService } =
+        createService();
+
+      aeSdkService.sdk.getBalance.mockResolvedValue('5000000000000000000'); // 5 AE
+      aeSdkService.sdk.getHeight.mockResolvedValue(123456);
+      coinGeckoService.getPriceData.mockResolvedValue({ usd: 2 });
+      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
+        new Map([
+          [
+            123456,
+            {
+              ...basePnlResult,
+              totalCurrentValueAe: 10,
+              totalCurrentValueUsd: 20,
+            },
+          ],
+        ]),
+      );
+
+      const resultAe = await service.getCurrentPortfolioValue('ak_test', 'ae');
+      expect(resultAe.value).toBeCloseTo(15); // 5 AE balance + 10 AE tokens
+      expect(resultAe.timestamp).toBeInstanceOf(Date);
+
+      const resultUsd = await service.getCurrentPortfolioValue(
+        'ak_test',
+        'usd',
+      );
+      expect(resultUsd.value).toBeCloseTo(30); // 5*2 + 20
+
+      expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+        'ak_test',
+        [123456],
+        undefined,
+      );
+      expect(aeSdkService.sdk.getBalance).toHaveBeenCalledWith('ak_test');
+    });
+
+    it('falls back to zero token value when no pnl data exists for the current height', async () => {
+      const { service, aeSdkService, coinGeckoService, bclPnlService } =
+        createService();
+
+      aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000'); // 1 AE
+      aeSdkService.sdk.getHeight.mockResolvedValue(999);
+      coinGeckoService.getPriceData.mockResolvedValue({ usd: 3 });
+      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+
+      const result = await service.getCurrentPortfolioValue('ak_test', 'ae');
+
+      expect(result.value).toBeCloseTo(1);
     });
   });
 });

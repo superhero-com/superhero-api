@@ -363,6 +363,46 @@ export class PortfolioService {
   }
 
   /**
+   * Latest portfolio value only — no historical series.
+   *
+   * Callers polling for a live ticker (e.g. every 30-60s) previously had to
+   * hit `getPortfolioHistory`, which generates a full timestamp range,
+   * batch-resolves block heights, and buckets the AE-node balance lookup to
+   * a 300-block window (acceptable staleness for a daily chart, not for a
+   * "current" value). This reads the current height/balance directly instead.
+   */
+  async getCurrentPortfolioValue(
+    address: string,
+    convertTo: 'ae' | 'usd' = 'ae',
+  ): Promise<{ value: number; timestamp: Date }> {
+    const resolvedAddress = await this.resolveAccountAddress(address);
+
+    const [aeBalance, currentHeight, currentAePrice] = await Promise.all([
+      this.aeSdkService.sdk.getBalance(resolvedAddress as any),
+      this.aeSdkService.sdk.getHeight(),
+      this.coinGeckoService.getPriceData(new BigNumber(1)),
+    ]);
+
+    const pnlMap = await this.bclPnlService.calculateTokenPnlsBatch(
+      resolvedAddress,
+      [currentHeight],
+      undefined,
+    );
+    const tokensPnl = pnlMap.get(currentHeight);
+
+    const balance = Number(toAe(aeBalance));
+    const price = currentAePrice?.usd || 0;
+    const totalValueAe = balance + (tokensPnl?.totalCurrentValueAe ?? 0);
+    const totalValueUsd =
+      balance * price + (tokensPnl?.totalCurrentValueUsd ?? 0);
+
+    return {
+      value: convertTo === 'usd' ? totalValueUsd : totalValueAe,
+      timestamp: new Date(),
+    };
+  }
+
+  /**
    * Lightweight PnL time-series for charting.
    *
    * Only runs `calculateDailyPnlBatch` (one SQL query). Skips block-height

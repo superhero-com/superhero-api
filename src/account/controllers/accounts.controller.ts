@@ -574,6 +574,25 @@ export class AccountsController {
     };
   }
 
+  // Lightweight current portfolio value - MUST come before :address route to avoid route conflict
+  @ApiOperation({
+    operationId: 'getCurrentPortfolioValue',
+    summary: 'Latest portfolio value',
+    description:
+      'Returns only the latest portfolio value snapshot ({ value, timestamp }), ' +
+      'for callers polling for a live ticker. Use :address/portfolio/history for a full series.',
+  })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiQuery({ name: 'convertTo', enum: ['ae', 'usd'], required: false })
+  @CacheTTL(30_000)
+  @Get(':address/portfolio/value')
+  async getCurrentPortfolioValue(
+    @Param('address', AeAccountReferencePipe) address: string,
+    @Query('convertTo') convertTo: 'ae' | 'usd' = 'ae',
+  ): Promise<{ value: number; timestamp: Date }> {
+    return this.portfolioService.getCurrentPortfolioValue(address, convertTo);
+  }
+
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
