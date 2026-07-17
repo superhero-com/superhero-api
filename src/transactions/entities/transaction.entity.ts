@@ -27,6 +27,7 @@ import {
   'address',
   'tx_type',
 ])
+@Index('IDX_TRANSACTION_SALE_ADDRESS_TX_TYPE', ['sale_address', 'tx_type'])
 export class Transaction {
   @Index()
   @PrimaryColumn()
