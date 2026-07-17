@@ -563,6 +563,7 @@ export class TokensService {
       price_data: any;
       sell_price_data: any;
       market_cap_data: any;
+      circulating_supply: BigNumber;
     }>
   > {
     const contract = await this.getTokenContracts(token);
@@ -610,6 +611,8 @@ export class TokensService {
     ]);
 
     const market_cap = total_supply.multipliedBy(price);
+    const aex9Address =
+      metaInfo?.token?.address || tokenContractInstance?.$options.address;
 
     const [price_data, sell_price_data, market_cap_data, dao_balance] =
       await Promise.all([
@@ -629,15 +632,45 @@ export class TokensService {
       price_data,
       market_cap,
       market_cap_data,
-      address:
-        metaInfo?.token?.address || tokenContractInstance?.$options.address,
+      address: aex9Address,
       name: metaInfo?.token?.name,
       symbol: metaInfo?.token?.symbol,
       beneficiary_address: metaInfo?.beneficiary,
       bonding_curve_address: metaInfo?.bondingCurve,
       owner_address: metaInfo?.owner,
       dao_balance: new BigNumber(dao_balance),
+      circulating_supply: await this.fetchCirculatingSupply(aex9Address),
     };
+  }
+
+  /**
+   * Middleware's AEX9 endpoint tracks `event_supply` off the token's
+   * Mint/Burn/Transfer event log independently of the bonding-curve
+   * contract's own `total_supply()` view read above; persisting it here lets
+   * the token page stop calling `{mdw}/v3/aex9/{address}` from the browser
+   * just to read this one field.
+   */
+  private async fetchCirculatingSupply(
+    aex9Address: string | undefined,
+  ): Promise<BigNumber | undefined> {
+    if (!aex9Address) {
+      return undefined;
+    }
+
+    try {
+      const data = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}`,
+      );
+      return data?.eventSupply != null
+        ? new BigNumber(data.eventSupply)
+        : undefined;
+    } catch (error) {
+      this.logger.error(
+        `fetchCirculatingSupply->error:: ${aex9Address}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   async updateTokenMetaDataFromCreateTx(

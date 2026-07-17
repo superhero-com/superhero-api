@@ -100,6 +100,9 @@ export class TokenDto {
   @ApiProperty()
   total_supply: string;
 
+  @ApiProperty({ nullable: true })
+  circulating_supply: string | null;
+
   @ApiProperty()
   dao_balance: string;
 

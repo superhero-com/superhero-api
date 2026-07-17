@@ -169,6 +169,16 @@ export class Token {
   })
   total_supply: BigNumber;
 
+  // Middleware's AEX9 `event_supply`, tracked off the token's Mint/Burn/
+  // Transfer event log; persisted so the token page can stop calling
+  // `{mdw}/v3/aex9/{address}` from the browser just to read this field.
+  @Column({
+    type: 'numeric',
+    nullable: true,
+    transformer: BigNumberTransformer,
+  })
+  circulating_supply: BigNumber | null;
+
   @Index()
   @Column({
     type: 'decimal',
