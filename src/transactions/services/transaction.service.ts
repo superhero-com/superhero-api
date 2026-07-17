@@ -1,9 +1,7 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { BCL_FUNCTIONS } from '@/configs';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
@@ -27,13 +25,9 @@ export class TransactionService {
     private readonly communityFactoryService: CommunityFactoryService,
     private readonly aePricingService: AePricingService,
     private readonly tokenService: TokensService,
-    private readonly tokenWebsocketGateway: TokenWebsocketGateway,
 
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
-
-    @InjectRepository(TokenHolder)
-    private tokenHolderRepository: Repository<TokenHolder>,
   ) {
     // this._testTransaction(
     //   'th_8B9qcMtArB59kBAHKKzPo4JXyECgBUBDH415gy8a3K69yr837',
@@ -48,7 +42,6 @@ export class TransactionService {
   async saveTransaction(
     rawTransaction: ITransaction,
     token?: Token,
-    shouldBroadcast?: boolean,
   ): Promise<Transaction> {
     if (
       !Object.keys(BCL_FUNCTIONS).includes(rawTransaction?.tx?.function) ||
@@ -194,21 +187,6 @@ export class TransactionService {
       }
     }
 
-    if (!this.isTokenSupportedCollection(token)) {
-      return transaction;
-    }
-    if (shouldBroadcast) {
-      // it should only broadcast if token is within supported collections
-      await this.tokenService.syncTokenPrice(token);
-      this.tokenWebsocketGateway?.handleTokenHistory({
-        sale_address: saleAddress,
-        data: txData,
-        token: token,
-      });
-      // update token holder
-      await this.updateTokenHolder(token, rawTransaction, volume);
-      await this.tokenService.updateTokenTrendingScore(token);
-    }
     return transaction;
   }
 
@@ -399,101 +377,6 @@ export class TransactionService {
   //     total_supply,
   //   } = await this.parseTransactionData(rawTransaction);
   // }
-
-  async updateTokenHolder(
-    token: Token,
-    rawTransaction: ITransaction,
-    volume: BigNumber,
-  ): Promise<void> {
-    try {
-      const bigNumberVolume = new BigNumber(volume).multipliedBy(10 ** 18);
-
-      const tokenHolder = await this.tokenHolderRepository
-        .createQueryBuilder('token_holders')
-        .where('token_holders.aex9_address = :aex9_address', {
-          aex9_address: token.address,
-        })
-        .andWhere('token_holders.address = :address', {
-          address: rawTransaction.tx.callerId,
-        })
-        .getOne();
-      if (tokenHolder) {
-        let tokenHolderBalance = tokenHolder.balance;
-        // if balance is negative, set it to 0
-        if (tokenHolderBalance.isNegative()) {
-          tokenHolderBalance = new BigNumber(0);
-        }
-        const wasHolder = tokenHolderBalance.gt(0);
-        let newBalance = tokenHolderBalance;
-        // if is buy
-        if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
-          newBalance = tokenHolderBalance.plus(bigNumberVolume);
-        }
-        // if is sell
-        if (rawTransaction.tx.function === BCL_FUNCTIONS.sell) {
-          newBalance = tokenHolderBalance.minus(bigNumberVolume);
-          if (newBalance.isNegative()) {
-            newBalance = new BigNumber(0);
-          }
-        }
-        await this.tokenHolderRepository.update(tokenHolder.id, {
-          balance: newBalance,
-          last_tx_hash: rawTransaction.hash,
-          block_number: rawTransaction.blockHeight,
-        });
-
-        const isHolder = newBalance.gt(0);
-        if (wasHolder !== isHolder || (isHolder && token.holders_count == 0)) {
-          const currentHolderCount = await this.tokenHolderRepository
-            .createQueryBuilder('token_holders')
-            .where('token_holders.aex9_address = :aex9_address', {
-              aex9_address: token.address,
-            })
-            .andWhere('token_holders.balance > 0')
-            .getCount();
-          await this.tokenService.update(token, {
-            holders_count: currentHolderCount,
-          });
-        }
-      } else {
-        if (rawTransaction.tx.function === BCL_FUNCTIONS.buy) {
-          const tokenHolderCount = await this.tokenHolderRepository
-            .createQueryBuilder('token_holders')
-            .where('token_holders.aex9_address = :aex9_address', {
-              aex9_address: token.address,
-            })
-            .andWhere('token_holders.balance > 0')
-            .getCount();
-          // create token holder
-          await this.tokenHolderRepository.save({
-            id: `${rawTransaction.tx.callerId}_${token.address}`,
-            aex9_address: token.address,
-            address: rawTransaction.tx.callerId,
-            balance: bigNumberVolume,
-            last_tx_hash: rawTransaction.hash,
-            block_number: rawTransaction.blockHeight,
-          });
-          // increment token holders count
-          await this.tokenService.update(token, {
-            holders_count: tokenHolderCount + 1,
-          });
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error updating token holder', error);
-    }
-    try {
-      await this.tokenService.loadAndSaveTokenHoldersFromMdw(
-        token.sale_address as Encoded.ContractAddress,
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Error loading and saving token holders from mdw`,
-        error,
-        error.stack,
-      );
-    }
-  }
 
   async deleteNonValidTransactionsInBlock(
     blockNumber: number,

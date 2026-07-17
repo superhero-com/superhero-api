@@ -5,10 +5,8 @@ import { Transaction } from '../entities/transaction.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { BCL_FUNCTIONS } from '@/configs';
 import BigNumber from 'bignumber.js';
 import moment from 'moment';
@@ -16,7 +14,6 @@ import moment from 'moment';
 jest.mock('@/tokens/tokens.service');
 jest.mock('@/ae-pricing/ae-pricing.service');
 jest.mock('@/ae/community-factory.service');
-jest.mock('@/tokens/token-websocket.gateway');
 
 describe('TransactionService', () => {
   let service: TransactionService;
@@ -24,8 +21,6 @@ describe('TransactionService', () => {
   let tokenService: jest.Mocked<TokensService>;
   let aePricingService: jest.Mocked<AePricingService>;
   let communityFactoryService: jest.Mocked<CommunityFactoryService>;
-  let tokenWebsocketGateway: jest.Mocked<TokenWebsocketGateway>;
-  let tokenHolderRepository: any | jest.Mocked<Repository<TokenHolder>>;
 
   beforeEach(async () => {
     transactionRepository = {
@@ -36,17 +31,6 @@ describe('TransactionService', () => {
       save: jest.fn(),
       update: jest.fn(),
       manager: { query: jest.fn().mockResolvedValue(undefined) },
-    } as any;
-
-    tokenHolderRepository = {
-      createQueryBuilder: jest.fn().mockReturnValue({
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        getCount: jest.fn().mockResolvedValue(0),
-        getOne: jest.fn().mockResolvedValue(null),
-      }),
-      save: jest.fn(),
-      update: jest.fn(),
     } as any;
 
     tokenService = {
@@ -74,10 +58,6 @@ describe('TransactionService', () => {
       }),
     } as any;
 
-    tokenWebsocketGateway = {
-      handleTokenHistory: jest.fn(),
-    } as any;
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TransactionService,
@@ -88,11 +68,6 @@ describe('TransactionService', () => {
         { provide: TokensService, useValue: tokenService },
         { provide: AePricingService, useValue: aePricingService },
         { provide: CommunityFactoryService, useValue: communityFactoryService },
-        { provide: TokenWebsocketGateway, useValue: tokenWebsocketGateway },
-        {
-          provide: getRepositoryToken(TokenHolder),
-          useValue: tokenHolderRepository,
-        },
       ],
     }).compile();
 
@@ -314,91 +289,5 @@ describe('TransactionService', () => {
     expect(result.volume).toBeInstanceOf(BigNumber);
     expect(result.amount).toBeInstanceOf(BigNumber);
     expect(result.total_supply).toBeInstanceOf(BigNumber);
-  });
-
-  it('should not create a holder row for a sell with no existing holder', async () => {
-    const existingHolderQuery = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue(null),
-    };
-
-    tokenHolderRepository.createQueryBuilder.mockReturnValueOnce(
-      existingHolderQuery,
-    );
-
-    await service.updateTokenHolder(
-      {
-        address: 'ct_token',
-        sale_address: 'ct_sale',
-        holders_count: 0,
-      } as Token,
-      {
-        tx: {
-          function: BCL_FUNCTIONS.sell,
-          callerId: 'ak_user',
-        },
-        hash: 'th_sell',
-        blockHeight: 42,
-      } as any,
-      new BigNumber(1),
-    );
-
-    // A sell with no existing holder is a no-op branch: no holder-count
-    // query should run (that query only happens on the buy-creates-a-new-
-    // holder path), and only the one createQueryBuilder call (the
-    // existence check) should have happened.
-    expect(tokenHolderRepository.createQueryBuilder).toHaveBeenCalledTimes(1);
-    expect(tokenHolderRepository.save).not.toHaveBeenCalled();
-    expect(tokenService.update).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ holders_count: expect.any(Number) }),
-    );
-    expect(tokenService.loadAndSaveTokenHoldersFromMdw).toHaveBeenCalledWith(
-      'ct_sale',
-    );
-  });
-
-  it('should query the holder count exactly once when a buy creates a new holder', async () => {
-    const existingHolderQuery = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue(null),
-    };
-    const holderCountQuery = {
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getCount: jest.fn().mockResolvedValue(4),
-    };
-
-    tokenHolderRepository.createQueryBuilder
-      .mockReturnValueOnce(existingHolderQuery)
-      .mockReturnValueOnce(holderCountQuery);
-
-    await service.updateTokenHolder(
-      {
-        address: 'ct_token',
-        sale_address: 'ct_sale',
-        holders_count: 4,
-      } as Token,
-      {
-        tx: {
-          function: BCL_FUNCTIONS.buy,
-          callerId: 'ak_user',
-        },
-        hash: 'th_buy',
-        blockHeight: 42,
-      } as any,
-      new BigNumber(1),
-    );
-
-    expect(tokenHolderRepository.createQueryBuilder).toHaveBeenCalledTimes(2);
-    expect(tokenHolderRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ address: 'ak_user', aex9_address: 'ct_token' }),
-    );
-    expect(tokenService.update).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ holders_count: 5 }),
-    );
   });
 });
