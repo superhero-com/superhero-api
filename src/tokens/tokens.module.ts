@@ -28,6 +28,7 @@ import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-
 import { TokenPerformanceView } from './entities/tokens-performance.view';
 import { RefreshTokenEligibilityCountsService } from './services/refresh-token-eligibility-counts.service';
 import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
+import { RefreshTokenRanksService } from './services/refresh-token-ranks.service';
 import { TokenHoldersLockService } from './services/token-holders-lock.service';
 import { Post } from '@/social/entities/post.entity';
 
@@ -76,6 +77,7 @@ import { Post } from '@/social/entities/post.entity';
     UpdateTrendingTokensService,
     RefreshTokenEligibilityCountsService,
     RefreshPerformanceViewService,
+    RefreshTokenRanksService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],
 })

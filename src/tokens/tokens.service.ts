@@ -728,14 +728,10 @@ export class TokensService {
 
     const rankedQuery = `
       WITH all_ranked_tokens AS (
-        SELECT 
-          token.*,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN token.market_cap = 0 THEN 1 ELSE 0 END,
-              token.market_cap DESC,
-              token.created_at ASC
-          ) AS INTEGER) as rank
+        -- token.rank is persisted (RefreshTokenRanksService) instead of
+        -- computed here via RANK() OVER (...); that used to re-sort the
+        -- whole table on every list request regardless of orderBy.
+        SELECT token.*
         FROM token
         WHERE token.unlisted = false
       ),

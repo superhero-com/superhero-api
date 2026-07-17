@@ -13,6 +13,11 @@ import {
 } from 'typeorm';
 import { IPriceDto } from '../dto/price.dto';
 
+// Postgres int4 max -- safely outside any real rank (real ranks are ≤ the
+// count of unlisted=false tokens). Used as the "not yet ranked" sentinel for
+// `Token.rank` so an unranked row sorts last, not first, under `rank ASC`.
+export const UNRANKED_TOKEN_RANK = 2147483647;
+
 // Backs the home feed's token-creation source (`unlisted = false ORDER BY
 // created_at DESC`), which previously had no covering index on this table.
 @Index('IDX_TOKEN_UNLISTED_CREATED_AT', ['unlisted', 'created_at'])
@@ -164,6 +169,21 @@ export class Token {
     nullable: true,
   })
   market_cap_data!: IPriceDto;
+
+  // Persisted market-cap rank among unlisted=false tokens, refreshed
+  // periodically by RefreshTokenRanksService. Reading this column instead
+  // of a live `RANK() OVER (...)` window function is what lets
+  // queryTokensWithRanks skip re-sorting the whole token table on every
+  // list request.
+  //
+  // Defaults to UNRANKED_TOKEN_RANK (last place), not 0: listings sort
+  // `rank ASC` (1 = highest market cap), so a brand-new token would
+  // otherwise outrank every real token until the next refresh cron tick.
+  @Index()
+  @Column({
+    default: UNRANKED_TOKEN_RANK,
+  })
+  rank: number;
 
   @Column({
     default: 0n,
