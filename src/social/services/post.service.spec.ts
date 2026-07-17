@@ -23,6 +23,7 @@ describe('PostService', () => {
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    query: jest.fn(),
     manager: {
       transaction: jest.fn(),
     },
@@ -479,6 +480,59 @@ describe('PostService', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         'Some topics could not be created or found',
         expect.objectContaining({ requested: ['alpha', 'missing'] }),
+      );
+    });
+  });
+
+  describe('fixOrphanedComments', () => {
+    it('runs one UPDATE to unlink still-orphaned comments and one to recount parents', async () => {
+      mockRepository.query
+        .mockResolvedValueOnce([[], 3]) // 3 comments converted to standalone posts
+        .mockResolvedValueOnce([[], 2]); // 2 parents recounted
+
+      await service.fixOrphanedComments();
+
+      expect(mockRepository.query).toHaveBeenCalledTimes(2);
+      const [unlinkSql] = mockRepository.query.mock.calls[0];
+      expect(unlinkSql).toContain('UPDATE posts');
+      expect(unlinkSql).toContain('SET post_id = NULL');
+      expect(unlinkSql).toContain('NOT EXISTS');
+
+      const [recountSql] = mockRepository.query.mock.calls[1];
+      expect(recountSql).toContain('SET total_comments = counts.cnt');
+      expect(recountSql).toContain('GROUP BY post_id');
+
+      expect(logger.log).toHaveBeenCalledWith(
+        'Orphaned comments cleanup completed',
+        { convertedToStandalonePosts: 3, parentsRecounted: 2 },
+      );
+    });
+
+    it('only unlinks comments old enough to rule out an in-progress sync race, not just any missing parent', async () => {
+      // A comment can be persisted before its parent post if MDW backward
+      // sync processes them out of order; without a grace period, a comment
+      // whose parent is seconds away from syncing would be permanently
+      // detached the instant this runs. The unlink UPDATE must therefore
+      // also require the comment to be older than the grace period, not
+      // just "parent currently missing".
+      mockRepository.query
+        .mockResolvedValueOnce([[], 0])
+        .mockResolvedValueOnce([[], 0]);
+
+      await service.fixOrphanedComments();
+
+      const [unlinkSql] = mockRepository.query.mock.calls[0];
+      expect(unlinkSql).toMatch(/created_at\s*<\s*NOW\(\)\s*-\s*INTERVAL/);
+    });
+
+    it('logs and swallows errors instead of throwing', async () => {
+      mockRepository.query.mockRejectedValue(new Error('db unavailable'));
+
+      await expect(service.fixOrphanedComments()).resolves.toBeUndefined();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        'Failed to run orphaned comments cleanup',
+        expect.objectContaining({ error: 'db unavailable' }),
       );
     });
   });
