@@ -50,6 +50,7 @@ export class TipsController {
   @ApiQuery({ name: 'sender', type: 'string', required: false })
   @ApiQuery({ name: 'receiver', type: 'string', required: false })
   @ApiQuery({ name: 'type', type: 'string', required: false })
+  @ApiQuery({ name: 'post_id', type: 'string', required: false })
   @ApiOperation({
     operationId: 'listTips',
     summary: 'List tips',
@@ -65,6 +66,7 @@ export class TipsController {
     @Query('sender', OptionalAeAccountAddressPipe) sender?: string,
     @Query('receiver', OptionalAeAccountAddressPipe) receiver?: string,
     @Query('type') type?: string,
+    @Query('post_id') postId?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -103,6 +105,9 @@ export class TipsController {
     }
     if (type) {
       query.andWhere('tip.type = :type', { type });
+    }
+    if (postId) {
+      query.andWhere('tip.post_id = :postId', { postId });
     }
 
     // amount stored as string; order by numeric cast to preserve numeric ordering
