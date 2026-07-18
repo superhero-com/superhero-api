@@ -384,12 +384,21 @@ export class PortfolioService {
       this.coinGeckoService.getPriceData(new BigNumber(1)),
     ]);
 
+    // getBalance reflects the chain tip *inclusive* of the current block, but
+    // the holdings aggregation uses `tx.block_height < snapshot_height` (strict).
+    // Passing `currentHeight` would omit trades mined in the current block from
+    // token holdings while their AE effect is already in the balance, so a poll
+    // right after latest-block activity would be inconsistent. Use
+    // `currentHeight + 1` so `block_height < currentHeight + 1` includes the
+    // current block; the price lateral joins (`block_height <= snapshot_height`)
+    // are unaffected since no rows exist above currentHeight yet.
+    const holdingsHeight = currentHeight + 1;
     const pnlMap = await this.bclPnlService.calculateTokenPnlsBatch(
       resolvedAddress,
-      [currentHeight],
+      [holdingsHeight],
       undefined,
     );
-    const tokensPnl = pnlMap.get(currentHeight);
+    const tokensPnl = pnlMap.get(holdingsHeight);
 
     const balance = Number(toAe(aeBalance));
     const price = currentAePrice?.usd || 0;

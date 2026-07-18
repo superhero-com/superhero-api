@@ -458,10 +458,13 @@ describe('PortfolioService', () => {
       aeSdkService.sdk.getBalance.mockResolvedValue('5000000000000000000'); // 5 AE
       aeSdkService.sdk.getHeight.mockResolvedValue(123456);
       coinGeckoService.getPriceData.mockResolvedValue({ usd: 2 });
+      // Holdings are valued at currentHeight + 1 so the strict
+      // `block_height < snapshot_height` rule includes current-block trades,
+      // matching the tip-inclusive AE balance from getBalance.
       bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
         new Map([
           [
-            123456,
+            123457,
             {
               ...basePnlResult,
               totalCurrentValueAe: 10,
@@ -483,7 +486,7 @@ describe('PortfolioService', () => {
 
       expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
         'ak_test',
-        [123456],
+        [123457],
         undefined,
       );
       expect(aeSdkService.sdk.getBalance).toHaveBeenCalledWith('ak_test');
