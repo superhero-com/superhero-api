@@ -19,10 +19,12 @@ describe('TransactionPersistenceService', () => {
     const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_1' });
     const count = jest.fn().mockResolvedValue(7);
     const update = jest.fn().mockResolvedValue(undefined);
+    const exists = jest.fn().mockResolvedValue(false);
     const manager = {
+      query: jest.fn().mockResolvedValue(undefined),
       getRepository: jest.fn((entity) => {
         if (entity === Transaction) {
-          return { upsert, findOne, count };
+          return { upsert, findOne, count, exists };
         }
 
         if (entity === Token) {
@@ -55,6 +57,185 @@ describe('TransactionPersistenceService', () => {
       manager,
     );
     expect(transaction).toEqual({ tx_hash: 'th_1' });
+  });
+
+  it('acquires an advisory lock on tx_hash before checking whether the transaction is new', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_lock' });
+    const count = jest.fn().mockResolvedValue(1);
+    const exists = jest.fn().mockResolvedValue(false);
+    const query = jest.fn().mockResolvedValue(undefined);
+    const manager = {
+      query,
+      getRepository: jest.fn((entity) => {
+        if (entity === Transaction) {
+          return { upsert, findOne, count, exists };
+        }
+        if (entity === Token) {
+          return { update: jest.fn() };
+        }
+        throw new Error('Unexpected repository request');
+      }),
+    };
+
+    await service.saveTransaction(
+      {
+        tx_hash: 'th_lock',
+        sale_address: 'ct_sale',
+        tx_type: 'buy',
+      } as any,
+      manager as any,
+    );
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('pg_advisory_xact_lock(hashtext($1))'),
+      ['th_lock'],
+    );
+    const lockCallOrder = query.mock.invocationCallOrder[0];
+    const existsCallOrder = exists.mock.invocationCallOrder[0];
+    expect(lockCallOrder).toBeLessThan(existsCallOrder);
+  });
+
+  it('does not fail transaction persistence when the advisory lock cannot be acquired', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_lockfail' });
+    const count = jest.fn().mockResolvedValue(1);
+    const exists = jest.fn().mockResolvedValue(false);
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const query = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('lock unavailable'))
+      .mockResolvedValue(undefined);
+    const manager = {
+      query,
+      getRepository: jest.fn((entity) => {
+        if (entity === Transaction) {
+          return { upsert, findOne, count, exists };
+        }
+        if (entity === Token) {
+          return { update: jest.fn() };
+        }
+        throw new Error('Unexpected repository request');
+      }),
+    };
+
+    const transaction = await service.saveTransaction(
+      {
+        tx_hash: 'th_lockfail',
+        sale_address: 'ct_sale',
+        tx_type: 'buy',
+      } as any,
+      manager as any,
+    );
+
+    expect(transaction).toEqual({ tx_hash: 'th_lockfail' });
+    expect(loggerError).toHaveBeenCalled();
+    loggerError.mockRestore();
+  });
+
+  it('increments the trade eligibility counter for a new buy/sell transaction', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_buy' });
+    const count = jest.fn().mockResolvedValue(1);
+    const exists = jest.fn().mockResolvedValue(false);
+    const query = jest.fn().mockResolvedValue(undefined);
+    const manager = {
+      query,
+      getRepository: jest.fn((entity) => {
+        if (entity === Transaction) {
+          return { upsert, findOne, count, exists };
+        }
+        if (entity === Token) {
+          return { update: jest.fn() };
+        }
+        throw new Error('Unexpected repository request');
+      }),
+    };
+
+    await service.saveTransaction(
+      {
+        tx_hash: 'th_buy',
+        sale_address: 'ct_sale',
+        tx_type: 'buy',
+      } as any,
+      manager as any,
+    );
+
+    expect(exists).toHaveBeenCalledWith({ where: { tx_hash: 'th_buy' } });
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
+      ['ct_sale'],
+    );
+  });
+
+  it('does not increment the trade eligibility counter for a re-processed transaction', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_buy' });
+    const count = jest.fn().mockResolvedValue(1);
+    const exists = jest.fn().mockResolvedValue(true);
+    const query = jest.fn().mockResolvedValue(undefined);
+    const manager = {
+      query,
+      getRepository: jest.fn((entity) => {
+        if (entity === Transaction) {
+          return { upsert, findOne, count, exists };
+        }
+        if (entity === Token) {
+          return { update: jest.fn() };
+        }
+        throw new Error('Unexpected repository request');
+      }),
+    };
+
+    await service.saveTransaction(
+      {
+        tx_hash: 'th_buy',
+        sale_address: 'ct_sale',
+        tx_type: 'buy',
+      } as any,
+      manager as any,
+    );
+
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
+      expect.anything(),
+    );
+  });
+
+  it('does not increment the trade eligibility counter for non-trade tx types', async () => {
+    const upsert = jest.fn().mockResolvedValue(undefined);
+    const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_create' });
+    const count = jest.fn().mockResolvedValue(1);
+    const exists = jest.fn().mockResolvedValue(false);
+    const query = jest.fn().mockResolvedValue(undefined);
+    const manager = {
+      query,
+      getRepository: jest.fn((entity) => {
+        if (entity === Transaction) {
+          return { upsert, findOne, count, exists };
+        }
+        if (entity === Token) {
+          return { update: jest.fn() };
+        }
+        throw new Error('Unexpected repository request');
+      }),
+    };
+
+    await service.saveTransaction(
+      {
+        tx_hash: 'th_create',
+        sale_address: 'ct_sale',
+        tx_type: 'create_community',
+      } as any,
+      manager as any,
+    );
+
+    expect(query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
+      expect.anything(),
+    );
   });
 
   it('returns cleaned up account addresses so callers can refresh stale totals', async () => {
@@ -99,10 +280,12 @@ describe('TransactionPersistenceService', () => {
     const loggerError = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
+    const exists = jest.fn().mockResolvedValue(false);
     const manager = {
+      query: jest.fn().mockResolvedValue(undefined),
       getRepository: jest.fn((entity) => {
         if (entity === Transaction) {
-          return { upsert, findOne, count };
+          return { upsert, findOne, count, exists };
         }
 
         if (entity === Token) {
@@ -136,11 +319,12 @@ describe('TransactionPersistenceService', () => {
     const loggerError = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
+    const exists = jest.fn().mockResolvedValue(false);
     const manager = {
       query,
       getRepository: jest.fn((entity) => {
         if (entity === Transaction) {
-          return { upsert, findOne };
+          return { upsert, findOne, exists };
         }
         if (entity === Token) {
           return { update: jest.fn() };

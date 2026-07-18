@@ -23,18 +23,21 @@ describe('PostService', () => {
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    query: jest.fn(),
     manager: {
       transaction: jest.fn(),
     },
   };
   const mockTopicRepository = {
     findOne: jest.fn(),
+    find: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
     update: jest.fn(),
+    query: jest.fn(),
   };
   const mockTokensService = {
-    updateTrendingScoresForSymbols: jest.fn(),
+    queueTrendingScoresForSymbols: jest.fn(),
   };
 
   const createMockTransaction = (
@@ -422,6 +425,115 @@ describe('PostService', () => {
 
       expect(result).toBe(newPost);
       expect(parsePostContent).toHaveBeenCalledWith('test content', []);
+    });
+  });
+
+  describe('createOrGetTopics', () => {
+    it('returns [] without querying when given no topic names', async () => {
+      const result = await (service as any).createOrGetTopics([]);
+
+      expect(result).toEqual([]);
+      expect(mockTopicRepository.query).not.toHaveBeenCalled();
+      expect(mockTopicRepository.find).not.toHaveBeenCalled();
+    });
+
+    it('bulk-upserts missing topics with ON CONFLICT DO NOTHING, then reads them back in one query', async () => {
+      mockTopicRepository.query.mockResolvedValue(undefined);
+      mockTopicRepository.find.mockResolvedValue([
+        { name: 'alpha', post_count: 5 },
+        { name: 'beta', post_count: 0 },
+      ]);
+
+      const result = await (service as any).createOrGetTopics([
+        'Alpha',
+        'Beta',
+        'alpha',
+      ]);
+
+      expect(mockTopicRepository.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockTopicRepository.query.mock.calls[0];
+      expect(sql).toContain('ON CONFLICT (name) DO NOTHING');
+      expect(params[1]).toEqual(['alpha', 'beta']); // normalized, deduped
+
+      expect(mockTopicRepository.find).toHaveBeenCalledWith({
+        where: { name: expect.anything() },
+      });
+
+      // Existing topic's post_count (5) must survive -- DO NOTHING never
+      // overwrites it.
+      expect(result).toEqual([
+        { name: 'alpha', post_count: 5 },
+        { name: 'beta', post_count: 0 },
+      ]);
+    });
+
+    it('logs a warning but does not throw when a requested topic cannot be resolved', async () => {
+      mockTopicRepository.query.mockResolvedValue(undefined);
+      mockTopicRepository.find.mockResolvedValue([{ name: 'alpha' }]);
+
+      const result = await (service as any).createOrGetTopics([
+        'Alpha',
+        'Missing',
+      ]);
+
+      expect(result).toEqual([{ name: 'alpha' }]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Some topics could not be created or found',
+        expect.objectContaining({ requested: ['alpha', 'missing'] }),
+      );
+    });
+  });
+
+  describe('fixOrphanedComments', () => {
+    it('runs one UPDATE to unlink still-orphaned comments and one to recount parents', async () => {
+      mockRepository.query
+        .mockResolvedValueOnce([[], 3]) // 3 comments converted to standalone posts
+        .mockResolvedValueOnce([[], 2]); // 2 parents recounted
+
+      await service.fixOrphanedComments();
+
+      expect(mockRepository.query).toHaveBeenCalledTimes(2);
+      const [unlinkSql] = mockRepository.query.mock.calls[0];
+      expect(unlinkSql).toContain('UPDATE posts');
+      expect(unlinkSql).toContain('SET post_id = NULL');
+      expect(unlinkSql).toContain('NOT EXISTS');
+
+      const [recountSql] = mockRepository.query.mock.calls[1];
+      expect(recountSql).toContain('SET total_comments = counts.cnt');
+      expect(recountSql).toContain('GROUP BY post_id');
+
+      expect(logger.log).toHaveBeenCalledWith(
+        'Orphaned comments cleanup completed',
+        { convertedToStandalonePosts: 3, parentsRecounted: 2 },
+      );
+    });
+
+    it('only unlinks comments old enough to rule out an in-progress sync race, not just any missing parent', async () => {
+      // A comment can be persisted before its parent post if MDW backward
+      // sync processes them out of order; without a grace period, a comment
+      // whose parent is seconds away from syncing would be permanently
+      // detached the instant this runs. The unlink UPDATE must therefore
+      // also require the comment to be older than the grace period, not
+      // just "parent currently missing".
+      mockRepository.query
+        .mockResolvedValueOnce([[], 0])
+        .mockResolvedValueOnce([[], 0]);
+
+      await service.fixOrphanedComments();
+
+      const [unlinkSql] = mockRepository.query.mock.calls[0];
+      expect(unlinkSql).toMatch(/created_at\s*<\s*NOW\(\)\s*-\s*INTERVAL/);
+    });
+
+    it('logs and swallows errors instead of throwing', async () => {
+      mockRepository.query.mockRejectedValue(new Error('db unavailable'));
+
+      await expect(service.fixOrphanedComments()).resolves.toBeUndefined();
+
+      expect(logger.error).toHaveBeenCalledWith(
+        'Failed to run orphaned comments cleanup',
+        expect.objectContaining({ error: 'db unavailable' }),
+      );
     });
   });
 });

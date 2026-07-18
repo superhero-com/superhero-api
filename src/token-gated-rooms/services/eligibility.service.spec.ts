@@ -506,6 +506,9 @@ describe('EligibilityService.recomputeRoom (cursor batching, mocked QB)', () => 
     };
     const identity = {
       getPubkeyForAddress: jest.fn().mockResolvedValue(HEX),
+      getPubkeysForAddresses: jest.fn((addresses: string[]) =>
+        Promise.resolve(new Map(addresses.map((address) => [address, HEX]))),
+      ),
     };
     const emitter = new EventEmitter2();
     const emitSpy = jest.spyOn(emitter, 'emit');
@@ -525,6 +528,9 @@ describe('EligibilityService.recomputeRoom (cursor batching, mocked QB)', () => 
     expect(flips).toBe(3);
     expect(membershipRepo.update).toHaveBeenCalledTimes(3);
     expect(emitSpy).toHaveBeenCalledTimes(3);
+    // Batched: one getPubkeysForAddresses call per page, zero per-member reads.
+    expect(identity.getPubkeysForAddresses).toHaveBeenCalledTimes(2);
+    expect(identity.getPubkeyForAddress).not.toHaveBeenCalled();
   });
 });
 
@@ -546,7 +552,12 @@ describe('EligibilityService.recomputeRoomFromHolders (seed, batched reads)', ()
       update: jest.fn().mockResolvedValue(undefined),
       insert: jest.fn().mockResolvedValue(undefined),
     };
-    const identity = { getPubkeyForAddress: jest.fn().mockResolvedValue(HEX) };
+    const identity = {
+      getPubkeyForAddress: jest.fn().mockResolvedValue(HEX),
+      getPubkeysForAddresses: jest.fn((addresses: string[]) =>
+        Promise.resolve(new Map(addresses.map((address) => [address, HEX]))),
+      ),
+    };
     const emitter = new EventEmitter2();
     const service = new EligibilityService(
       communityRoomRepo as any,
@@ -571,5 +582,8 @@ describe('EligibilityService.recomputeRoomFromHolders (seed, batched reads)', ()
     expect(membershipRepo.findOne).not.toHaveBeenCalled();
     expect(tokenBalanceRepo.find).toHaveBeenCalledTimes(1);
     expect(membershipRepo.find).toHaveBeenCalledTimes(1);
+    // Pubkeys resolved once for the whole room roster, not per member.
+    expect(identity.getPubkeysForAddresses).toHaveBeenCalledTimes(1);
+    expect(identity.getPubkeyForAddress).not.toHaveBeenCalled();
   });
 });

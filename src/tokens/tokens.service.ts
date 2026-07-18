@@ -22,8 +22,12 @@ import { Queue } from 'bull';
 import moment from 'moment';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
+import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
 import { Token } from './entities/token.entity';
-import { PULL_TOKEN_INFO_QUEUE } from './queues/constants';
+import {
+  PULL_TOKEN_INFO_QUEUE,
+  UPDATE_TRENDING_SCORES_QUEUE,
+} from './queues/constants';
 import { TokenWebsocketGateway } from './token-websocket.gateway';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Post } from '@/social/entities/post.entity';
@@ -142,6 +146,9 @@ export class TokensService {
     @InjectRepository(TokenEligibilityCounts)
     private tokenEligibilityCountsRepository: Repository<TokenEligibilityCounts>,
 
+    @InjectRepository(TokenTradeEligibilityCounts)
+    private tokenTradeEligibilityCountsRepository: Repository<TokenTradeEligibilityCounts>,
+
     private aeSdkService: AeSdkService,
 
     private tokenWebsocketGateway: TokenWebsocketGateway,
@@ -152,6 +159,9 @@ export class TokensService {
 
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenInfoQueue: Queue,
+
+    @InjectQueue(UPDATE_TRENDING_SCORES_QUEUE)
+    private readonly updateTrendingScoresQueue: Queue,
   ) {
     this.init();
   }
@@ -559,6 +569,7 @@ export class TokensService {
       price_data: any;
       sell_price_data: any;
       market_cap_data: any;
+      circulating_supply: BigNumber;
     }>
   > {
     const contract = await this.getTokenContracts(token);
@@ -606,6 +617,8 @@ export class TokensService {
     ]);
 
     const market_cap = total_supply.multipliedBy(price);
+    const aex9Address =
+      metaInfo?.token?.address || tokenContractInstance?.$options.address;
 
     const [price_data, sell_price_data, market_cap_data, dao_balance] =
       await Promise.all([
@@ -625,15 +638,45 @@ export class TokensService {
       price_data,
       market_cap,
       market_cap_data,
-      address:
-        metaInfo?.token?.address || tokenContractInstance?.$options.address,
+      address: aex9Address,
       name: metaInfo?.token?.name,
       symbol: metaInfo?.token?.symbol,
       beneficiary_address: metaInfo?.beneficiary,
       bonding_curve_address: metaInfo?.bondingCurve,
       owner_address: metaInfo?.owner,
       dao_balance: new BigNumber(dao_balance),
+      circulating_supply: await this.fetchCirculatingSupply(aex9Address),
     };
+  }
+
+  /**
+   * Middleware's AEX9 endpoint tracks `event_supply` off the token's
+   * Mint/Burn/Transfer event log independently of the bonding-curve
+   * contract's own `total_supply()` view read above; persisting it here lets
+   * the token page stop calling `{mdw}/v3/aex9/{address}` from the browser
+   * just to read this one field.
+   */
+  private async fetchCirculatingSupply(
+    aex9Address: string | undefined,
+  ): Promise<BigNumber | undefined> {
+    if (!aex9Address) {
+      return undefined;
+    }
+
+    try {
+      const data = await fetchJson(
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${aex9Address}`,
+      );
+      return data?.eventSupply != null
+        ? new BigNumber(data.eventSupply)
+        : undefined;
+    } catch (error) {
+      this.logger.error(
+        `fetchCirculatingSupply->error:: ${aex9Address}`,
+        error,
+      );
+      return undefined;
+    }
   }
 
   async updateTokenMetaDataFromCreateTx(
@@ -685,14 +728,10 @@ export class TokensService {
 
     const rankedQuery = `
       WITH all_ranked_tokens AS (
-        SELECT 
-          token.*,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN token.market_cap = 0 THEN 1 ELSE 0 END,
-              token.market_cap DESC,
-              token.created_at ASC
-          ) AS INTEGER) as rank
+        -- token.rank is persisted (RefreshTokenRanksService) instead of
+        -- computed here via RANK() OVER (...); that used to re-sort the
+        -- whole table on every list request regardless of orderBy.
+        SELECT token.*
         FROM token
         WHERE token.unlisted = false
       ),
@@ -766,19 +805,6 @@ export class TokensService {
     return `${alias}.${orderColumn} ${orderDirection}`;
   }
 
-  private buildEligibilityTradeCountsSubquery(): string {
-    return `
-      (
-        SELECT
-          tx.sale_address,
-          COUNT(*) AS trade_count
-        FROM transactions tx
-        WHERE tx.tx_type IN ('buy', 'sell')
-        GROUP BY tx.sale_address
-      )
-    `.trim();
-  }
-
   applyListEligibilityFilters(
     queryBuilder: SelectQueryBuilder<Token>,
   ): SelectQueryBuilder<Token> {
@@ -789,7 +815,7 @@ export class TokensService {
     );
 
     queryBuilder.leftJoin(
-      this.buildEligibilityTradeCountsSubquery(),
+      TokenTradeEligibilityCounts,
       'eligibility_trade_counts',
       'eligibility_trade_counts.sale_address = token.sale_address',
     );
@@ -823,22 +849,14 @@ export class TokensService {
       this.tokenEligibilityCountsRepository.findOne({
         where: { symbol: normalizedSymbol },
       }),
-      this.tokensRepository.query(
-        `
-          SELECT COUNT(*) AS trade_count
-          FROM transactions tx
-          WHERE tx.sale_address = $1
-            AND tx.tx_type IN ('buy', 'sell')
-        `,
-        [token.sale_address],
-      ),
+      this.tokenTradeEligibilityCountsRepository.findOne({
+        where: { sale_address: token.sale_address },
+      }),
     ]);
-
-    const rawBreakdown = tradeCounts[0] ?? {};
 
     const holdersCount = Number(token.holders_count || 0);
     const postCount = Number(counts?.post_count || 0);
-    const tradeCount = Number(rawBreakdown?.trade_count || 0);
+    const tradeCount = Number(tradeCounts?.trade_count || 0);
 
     const passes = {
       holders: holdersCount >= TOKEN_LIST_ELIGIBILITY_CONFIG.MIN_HOLDERS,
@@ -1382,6 +1400,44 @@ export class TokensService {
       .sort((a, b) => b.getTime() - a.getTime());
 
     return validDates[0] ?? null;
+  }
+
+  /**
+   * Enqueues a trending-score recompute per symbol instead of running it
+   * inline. Saving a post synchronously ran a RECURSIVE thread CTE + tips +
+   * reads aggregation (`calculateTokenTrendingMetrics`) per mentioned symbol
+   * on the request path; each job here is deduped by symbol (`jobId`) with a
+   * short delay so a burst of posts mentioning the same symbol collapses
+   * into one recompute instead of one per post.
+   */
+  async queueTrendingScoresForSymbols(symbols: string[]): Promise<void> {
+    const normalizedSymbols = [
+      ...new Set(
+        symbols
+          .map((symbol) => (symbol || '').trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+
+    await Promise.all(
+      normalizedSymbols.map((symbol) =>
+        this.updateTrendingScoresQueue.add(
+          { symbol },
+          {
+            jobId: `updateTrendingScores-${symbol}`,
+            delay: 5_000,
+            removeOnComplete: true,
+            removeOnFail: true,
+            // Bull defaults `attempts` to 1 -- without this, a transient DB
+            // blip during calculateTokenTrendingMetrics fails the job once
+            // and it's gone, silently leaving that symbol's trending score
+            // stale until another post happens to mention it again.
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5_000 },
+          },
+        ),
+      ),
+    );
   }
 
   async updateTrendingScoresForSymbols(symbols: string[]): Promise<void> {

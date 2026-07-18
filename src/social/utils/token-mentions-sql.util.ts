@@ -215,15 +215,43 @@ export function buildNormalizedTokenMentionSelectSql(
   `;
 }
 
+/**
+ * Checks whether `postAlias` mentions `normalizedSymbolSql` (an already
+ * UPPER()-cased symbol expression or bind parameter). Stored `token_mentions`
+ * entries are always upper-cased at write time (`extractTrendMentions`), so
+ * the common case is a plain jsonb containment check — servable by
+ * `IDX_POSTS_TOKEN_MENTIONS_GIN` (`jsonb_path_ops`) instead of the per-row
+ * `jsonb_array_elements_text` scan the old EXISTS subquery required. The
+ * regex-over-`content` fallback only runs for the (increasingly rare) rows
+ * where `token_mentions` was never populated.
+ *
+ * The containment predicate below deliberately does NOT wrap `token_mentions`
+ * in `COALESCE(...)` (the column is `NOT NULL DEFAULT '[]'`, so it's never
+ * needed) — Postgres only matches a GIN index to a query predicate that is
+ * shaped exactly like the indexed expression, so wrapping the column here
+ * would silently defeat `IDX_POSTS_TOKEN_MENTIONS_GIN` and fall back to a
+ * full scan.
+ */
 export function buildTokenMentionExistsSql(
   postAlias: string,
   normalizedSymbolSql: string,
 ): string {
   return `
-    EXISTS (
-      SELECT 1
-      FROM (${buildNormalizedTokenMentionSelectSql(postAlias)}) normalized_mentions
-      WHERE normalized_mentions.symbol = ${normalizedSymbolSql}
+    (
+      ${postAlias}.token_mentions
+        @> jsonb_build_array((${normalizedSymbolSql})::text)
+      OR (
+        jsonb_array_length(COALESCE(${postAlias}.token_mentions, '[]'::jsonb)) = 0
+        AND EXISTS (
+          SELECT 1
+          FROM regexp_matches(
+            COALESCE(${postAlias}.content, ''),
+            '${TOKEN_HASHTAG_REGEX_SOURCE}',
+            'g'
+          ) AS content_match
+          WHERE UPPER(content_match[1]) = ${normalizedSymbolSql}
+        )
+      )
     )
   `;
 }

@@ -23,8 +23,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
 import { paginate } from 'nestjs-typeorm-paginate';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, MoreThan, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
+import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { PortfolioService } from '../services/portfolio.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
 import { AccountService } from '../services/account.service';
@@ -76,6 +77,8 @@ export class AccountsController {
   constructor(
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    @InjectRepository(TokenHolder)
+    private readonly tokenHolderRepository: Repository<TokenHolder>,
     private readonly portfolioService: PortfolioService,
     private readonly bclPnlService: BclPnlService,
     private readonly accountService: AccountService,
@@ -571,6 +574,25 @@ export class AccountsController {
     };
   }
 
+  // Lightweight current portfolio value - MUST come before :address route to avoid route conflict
+  @ApiOperation({
+    operationId: 'getCurrentPortfolioValue',
+    summary: 'Latest portfolio value',
+    description:
+      'Returns only the latest portfolio value snapshot ({ value, timestamp }), ' +
+      'for callers polling for a live ticker. Use :address/portfolio/history for a full series.',
+  })
+  @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
+  @ApiQuery({ name: 'convertTo', enum: ['ae', 'usd'], required: false })
+  @CacheTTL(30_000)
+  @Get(':address/portfolio/value')
+  async getCurrentPortfolioValue(
+    @Param('address', AeAccountReferencePipe) address: string,
+    @Query('convertTo') convertTo: 'ae' | 'usd' = 'ae',
+  ): Promise<{ value: number; timestamp: Date }> {
+    return this.portfolioService.getCurrentPortfolioValue(address, convertTo);
+  }
+
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
@@ -615,7 +637,12 @@ export class AccountsController {
       }
     }
 
-    const profile = await this.profileReadService.getProfile(address);
+    const [profile, holdingsCount] = await Promise.all([
+      this.profileReadService.getProfile(address),
+      this.tokenHolderRepository.count({
+        where: { address, balance: MoreThan(0) },
+      }),
+    ]);
 
     return {
       ...account,
@@ -623,6 +650,7 @@ export class AccountsController {
       chain_name_updated_at: chainNameUpdatedAt,
       profile: profile.profile,
       public_name: profile.public_name,
+      holdings_count: holdingsCount,
     };
   }
 

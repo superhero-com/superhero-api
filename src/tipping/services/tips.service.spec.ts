@@ -19,7 +19,7 @@ describe('TipService', () => {
       ensureAccountExists: jest.fn(),
     };
     tokensService = {
-      updateTrendingScoresForSymbols: jest.fn(),
+      queueTrendingScoresForSymbols: jest.fn(),
     };
 
     service = new TipService(
@@ -43,7 +43,7 @@ describe('TipService', () => {
       .spyOn(accountService, 'ensureAccountExists')
       .mockResolvedValueOnce({ address: 'ak_sender' })
       .mockResolvedValueOnce({ address: 'ak_receiver' });
-    tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
+    tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
       new Error('refresh failed'),
     );
 
@@ -60,7 +60,7 @@ describe('TipService', () => {
     );
 
     expect(result).toBe(savedTip);
-    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
     ]);
   });
@@ -92,7 +92,7 @@ describe('TipService', () => {
     expect(result).toBeNull();
     expect(ensureAccountExists).not.toHaveBeenCalled();
     expect(tipRepository.save).not.toHaveBeenCalled();
-    expect(tokensService.updateTrendingScoresForSymbols).not.toHaveBeenCalled();
+    expect(tokensService.queueTrendingScoresForSymbols).not.toHaveBeenCalled();
   });
 
   it('does not persist self-tips on a profile', async () => {
@@ -118,7 +118,7 @@ describe('TipService', () => {
     expect(postRepository.findOne).not.toHaveBeenCalled();
     expect(ensureAccountExists).not.toHaveBeenCalled();
     expect(tipRepository.save).not.toHaveBeenCalled();
-    expect(tokensService.updateTrendingScoresForSymbols).not.toHaveBeenCalled();
+    expect(tokensService.queueTrendingScoresForSymbols).not.toHaveBeenCalled();
   });
 
   it('marks self-tips as skipped during live handling', async () => {

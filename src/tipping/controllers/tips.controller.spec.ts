@@ -1,4 +1,9 @@
 import { TipsController } from './tips.controller';
+import { paginate } from 'nestjs-typeorm-paginate';
+
+jest.mock('nestjs-typeorm-paginate', () => ({
+  paginate: jest.fn().mockResolvedValue({ items: [], meta: {} }),
+}));
 
 describe('TipsController', () => {
   let controller: TipsController;
@@ -51,5 +56,50 @@ describe('TipsController', () => {
       totalTipsSent: '5',
       totalTipsReceived: '7',
     });
+  });
+
+  it('filters listTips by post_id when provided', async () => {
+    const listQueryBuilder = {
+      leftJoinAndMapOne: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+    };
+    tipRepository.createQueryBuilder.mockReturnValue(listQueryBuilder);
+
+    await controller.listTips(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      undefined,
+      undefined,
+      undefined,
+      'post_123',
+    );
+
+    expect(listQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'tip.post_id = :postId',
+      { postId: 'post_123' },
+    );
+    expect(paginate).toHaveBeenCalledWith(listQueryBuilder, {
+      page: 1,
+      limit: 100,
+    });
+  });
+
+  it('does not filter listTips by post_id when absent', async () => {
+    const listQueryBuilder = {
+      leftJoinAndMapOne: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+    };
+    tipRepository.createQueryBuilder.mockReturnValue(listQueryBuilder);
+
+    await controller.listTips(1, 100, 'created_at', 'DESC');
+
+    expect(listQueryBuilder.andWhere).not.toHaveBeenCalledWith(
+      'tip.post_id = :postId',
+      expect.anything(),
+    );
   });
 });

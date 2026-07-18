@@ -46,7 +46,7 @@ describe('PostTransactionProcessorService', () => {
       emitCommentCreatedEvent: jest.fn(),
     };
     tokensService = {
-      updateTrendingScoresForSymbols: jest.fn(),
+      queueTrendingScoresForSymbols: jest.fn(),
     };
 
     service = new PostTransactionProcessorService(
@@ -86,7 +86,7 @@ describe('PostTransactionProcessorService', () => {
     );
     persistenceService.savePost.mockResolvedValue(savedPost);
     topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
-    tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
+    tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
       new Error('refresh failed'),
     );
 
@@ -102,7 +102,7 @@ describe('PostTransactionProcessorService', () => {
       success: true,
       skipped: false,
     });
-    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
     ]);
   });
@@ -142,7 +142,7 @@ describe('PostTransactionProcessorService', () => {
     persistenceService.savePost.mockResolvedValue(savedComment);
     persistenceService.updatePostCommentCount.mockResolvedValue(undefined);
     topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
-    tokensService.updateTrendingScoresForSymbols.mockResolvedValue(undefined);
+    tokensService.queueTrendingScoresForSymbols.mockResolvedValue(undefined);
 
     await service.processTransaction({
       hash: 'th_comment',
@@ -187,7 +187,7 @@ describe('PostTransactionProcessorService', () => {
       token_mentions: [],
     });
     topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
-    tokensService.updateTrendingScoresForSymbols.mockResolvedValue(undefined);
+    tokensService.queueTrendingScoresForSymbols.mockResolvedValue(undefined);
 
     await service.processTransaction({
       hash: 'th_orphan',

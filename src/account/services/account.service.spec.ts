@@ -1,4 +1,13 @@
 import { AccountService } from './account.service';
+import { fetchJson } from '@/utils/common';
+
+jest.mock('@/utils/common', () => {
+  const actual = jest.requireActual('@/utils/common');
+  return {
+    ...actual,
+    fetchJson: jest.fn(),
+  };
+});
 
 describe('AccountService', () => {
   const createQueryBuilder = () => ({
@@ -163,6 +172,168 @@ describe('AccountService', () => {
 
       expect(Object.keys(result)).toHaveLength(25);
       expect(Object.keys(result)).toEqual(addresses.slice(0, 25));
+    });
+  });
+
+  describe('getChainNameForAccount', () => {
+    const ACCOUNT = 'ak_owner';
+
+    beforeEach(() => {
+      (fetchJson as jest.Mock).mockReset();
+    });
+
+    it('verifies candidate names in parallel and returns the newest match', async () => {
+      const { service } = createService();
+
+      (fetchJson as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('/names/pointees')) {
+          return Promise.resolve({
+            data: [
+              {
+                active: true,
+                name: 'old.chain',
+                block_height: 100,
+                tx: { pointers: [{ id: ACCOUNT, key: '', encoded_key: '' }] },
+              },
+              {
+                active: true,
+                name: 'new.chain',
+                block_height: 200,
+                tx: { pointers: [{ id: ACCOUNT, key: '', encoded_key: '' }] },
+              },
+            ],
+          });
+        }
+        // Per-name verification calls
+        if (url.includes('old.chain')) {
+          return Promise.resolve({
+            active: true,
+            pointers: [{ id: ACCOUNT }],
+          });
+        }
+        if (url.includes('new.chain')) {
+          return Promise.resolve({
+            active: true,
+            pointers: [{ id: ACCOUNT }],
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const result = await service.getChainNameForAccount(ACCOUNT);
+
+      expect(result).toBe('new.chain'); // higher block_height wins
+      // 1 pointees call + 2 per-name verification calls
+      expect(fetchJson).toHaveBeenCalledTimes(3);
+      // Per-name verification calls pass a timeout signal
+      const verifyCalls = (fetchJson as jest.Mock).mock.calls.filter(([url]) =>
+        url.includes('/v3/names/'),
+      );
+      expect(verifyCalls).toHaveLength(2);
+      for (const [, options] of verifyCalls) {
+        expect(options?.signal).toBeInstanceOf(AbortSignal);
+      }
+    });
+
+    it('never exceeds CHAIN_NAME_VERIFY_CONCURRENCY in-flight verification calls for an account with many candidate names', async () => {
+      const { service } = createService();
+      const CANDIDATE_COUNT = 20;
+      // Mirrors the CHAIN_NAME_VERIFY_CONCURRENCY constant in account.service.ts.
+      // Kept low deliberately: refreshChainNamesPeriodically already runs 10
+      // accounts concurrently, so this value multiplies into the real
+      // worst-case outbound fan-out (see the constant's own comment).
+      const EXPECTED_MAX_CONCURRENCY = 2;
+
+      let inFlight = 0;
+      let peakInFlight = 0;
+
+      (fetchJson as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('/names/pointees')) {
+          return Promise.resolve({
+            data: Array.from({ length: CANDIDATE_COUNT }, (_, i) => ({
+              active: true,
+              name: `name${i}.chain`,
+              block_height: i,
+              tx: { pointers: [{ id: ACCOUNT, key: '', encoded_key: '' }] },
+            })),
+          });
+        }
+
+        // Per-name verification calls: track how many are in flight at once.
+        inFlight += 1;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            inFlight -= 1;
+            resolve({ active: true, pointers: [{ id: ACCOUNT }] });
+          }, 1);
+        });
+      });
+
+      await service.getChainNameForAccount(ACCOUNT);
+
+      expect(peakInFlight).toBeLessThanOrEqual(EXPECTED_MAX_CONCURRENCY);
+      expect(peakInFlight).toBeGreaterThan(0);
+    });
+
+    it('falls back to historical pointer data when the per-name verification call throws', async () => {
+      const { service } = createService();
+
+      (fetchJson as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('/names/pointees')) {
+          return Promise.resolve({
+            data: [
+              {
+                active: true,
+                name: 'flaky.chain',
+                block_height: 100,
+                tx: { pointers: [{ id: ACCOUNT, key: '', encoded_key: '' }] },
+              },
+            ],
+          });
+        }
+        return Promise.reject(new Error('network timeout'));
+      });
+
+      const result = await service.getChainNameForAccount(ACCOUNT);
+
+      expect(result).toBe('flaky.chain');
+    });
+
+    it('skips a name whose current state no longer points to the account', async () => {
+      const { service } = createService();
+
+      (fetchJson as jest.Mock).mockImplementation((url: string) => {
+        if (url.includes('/names/pointees')) {
+          return Promise.resolve({
+            data: [
+              {
+                active: true,
+                name: 'stale.chain',
+                block_height: 100,
+                tx: { pointers: [{ id: ACCOUNT, key: '', encoded_key: '' }] },
+              },
+            ],
+          });
+        }
+        // Current state: no longer active
+        return Promise.resolve({ active: false, pointers: [{ id: ACCOUNT }] });
+      });
+
+      const result = await service.getChainNameForAccount(ACCOUNT);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('scheduledFullAccountsRebuild', () => {
+    it('is a no-op while PULL_ACCOUNTS_ENABLED is false (current config)', async () => {
+      const { service } = createService();
+      const rebuildSpy = jest.spyOn(service, 'saveAllActiveAccounts');
+
+      await service.scheduledFullAccountsRebuild();
+
+      expect(rebuildSpy).not.toHaveBeenCalled();
     });
   });
 });

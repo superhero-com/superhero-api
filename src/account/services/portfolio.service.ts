@@ -18,6 +18,7 @@ import {
   TokenPnlResult,
 } from './bcl-pnl.service';
 import { fetchJson } from '@/utils/common';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
 
 export interface PortfolioHistorySnapshot {
   timestamp: Moment | Date;
@@ -260,7 +261,7 @@ export class PortfolioService {
     };
 
     const balanceCache = new Map<number, Promise<string>>();
-    const data = await this.mapWithConcurrency(
+    const data = await mapWithConcurrency(
       timestamps,
       this.snapshotConcurrency,
       async (timestamp, index) => {
@@ -360,6 +361,55 @@ export class PortfolioService {
     );
 
     return data;
+  }
+
+  /**
+   * Latest portfolio value only — no historical series.
+   *
+   * Callers polling for a live ticker (e.g. every 30-60s) previously had to
+   * hit `getPortfolioHistory`, which generates a full timestamp range,
+   * batch-resolves block heights, and buckets the AE-node balance lookup to
+   * a 300-block window (acceptable staleness for a daily chart, not for a
+   * "current" value). This reads the current height/balance directly instead.
+   */
+  async getCurrentPortfolioValue(
+    address: string,
+    convertTo: 'ae' | 'usd' = 'ae',
+  ): Promise<{ value: number; timestamp: Date }> {
+    const resolvedAddress = await this.resolveAccountAddress(address);
+
+    const [aeBalance, currentHeight, currentAePrice] = await Promise.all([
+      this.aeSdkService.sdk.getBalance(resolvedAddress as any),
+      this.aeSdkService.sdk.getHeight(),
+      this.coinGeckoService.getPriceData(new BigNumber(1)),
+    ]);
+
+    // getBalance reflects the chain tip *inclusive* of the current block, but
+    // the holdings aggregation uses `tx.block_height < snapshot_height` (strict).
+    // Passing `currentHeight` would omit trades mined in the current block from
+    // token holdings while their AE effect is already in the balance, so a poll
+    // right after latest-block activity would be inconsistent. Use
+    // `currentHeight + 1` so `block_height < currentHeight + 1` includes the
+    // current block; the price lateral joins (`block_height <= snapshot_height`)
+    // are unaffected since no rows exist above currentHeight yet.
+    const holdingsHeight = currentHeight + 1;
+    const pnlMap = await this.bclPnlService.calculateTokenPnlsBatch(
+      resolvedAddress,
+      [holdingsHeight],
+      undefined,
+    );
+    const tokensPnl = pnlMap.get(holdingsHeight);
+
+    const balance = Number(toAe(aeBalance));
+    const price = currentAePrice?.usd || 0;
+    const totalValueAe = balance + (tokensPnl?.totalCurrentValueAe ?? 0);
+    const totalValueUsd =
+      balance * price + (tokensPnl?.totalCurrentValueUsd ?? 0);
+
+    return {
+      value: convertTo === 'usd' ? totalValueUsd : totalValueAe,
+      timestamp: new Date(),
+    };
   }
 
   /**
@@ -554,32 +604,5 @@ export class PortfolioService {
     }
 
     return closestPrice;
-  }
-
-  private async mapWithConcurrency<T, R>(
-    items: T[],
-    concurrency: number,
-    mapper: (item: T, index: number) => Promise<R>,
-  ): Promise<R[]> {
-    if (items.length === 0) {
-      return [];
-    }
-
-    const results = new Array<R>(items.length);
-    let nextIndex = 0;
-    const workerCount = Math.min(Math.max(concurrency, 1), items.length);
-
-    const workers = Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const currentIndex = nextIndex++;
-        if (currentIndex >= items.length) {
-          return;
-        }
-        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-      }
-    });
-
-    await Promise.all(workers);
-    return results;
   }
 }

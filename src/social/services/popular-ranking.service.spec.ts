@@ -26,9 +26,14 @@ jest.mock('ioredis', () => {
 import { PopularRankingService } from './popular-ranking.service';
 import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
 
+// Serves both queries built off `postRepository.createQueryBuilder('post')`:
+// the candidate-id scan (select/where/andWhere/orderBy/limit/getRawMany) and
+// the slim hydration query (leftJoin/select/addSelect/where/getMany).
 function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
   return {
     select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
@@ -36,6 +41,7 @@ function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
     getRawMany: jest
       .fn()
       .mockResolvedValue(posts.map((post) => ({ id: post.id }))),
+    getMany: jest.fn().mockResolvedValue(posts),
   };
 }
 
@@ -700,7 +706,9 @@ describe('PopularRankingService', () => {
       };
       const candidateQB = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
@@ -708,6 +716,7 @@ describe('PopularRankingService', () => {
         getRawMany: jest
           .fn()
           .mockResolvedValue([{ id: 'topic-heavy' }, { id: 'target-post' }]),
+        getMany: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
       };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
@@ -751,10 +760,15 @@ describe('PopularRankingService', () => {
 
       expect(candidateQB.leftJoinAndSelect).not.toHaveBeenCalled();
       expect(candidateQB.select).toHaveBeenCalledWith('post.id', 'id');
-      expect(repo.find).toHaveBeenCalledWith({
-        where: { id: expect.anything() },
-        relations: ['topics'],
-      });
+      // Slim hydration: joins topics for their name only, selects id/content/created_at.
+      expect(candidateQB.leftJoin).toHaveBeenCalledWith('post.topics', 'topic');
+      expect(candidateQB.select).toHaveBeenCalledWith([
+        'post.id',
+        'post.content',
+        'post.created_at',
+      ]);
+      expect(candidateQB.addSelect).toHaveBeenCalledWith(['topic.name']);
+      expect(repo.find).not.toHaveBeenCalled();
       expect(result.scoredItems!.map((item) => item.postId)).toEqual([
         'target-post',
         'topic-heavy',
