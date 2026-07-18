@@ -97,9 +97,7 @@ export class InvitationsController {
         claimed: invitation.status === 'claimed',
         claimer_address: invitation.invitee_address ?? null,
         claimed_at:
-          invitation.status === 'claimed'
-            ? invitation.status_updated_at
-            : null,
+          invitation.status === 'claimed' ? invitation.status_updated_at : null,
         claim_tx_hash: invitation.claim_tx_hash ?? null,
       })),
     };

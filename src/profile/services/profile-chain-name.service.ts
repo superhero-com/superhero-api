@@ -332,10 +332,8 @@ export class ProfileChainNameService {
         order: { next_retry_at: 'ASC', updated_at: 'ASC' },
         take: BATCH_SIZE,
       });
-      await mapWithConcurrency(
-        dueClaims,
-        CLAIM_PROCESS_CONCURRENCY,
-        (claim) => this.processClaimWithGuard(claim.address),
+      await mapWithConcurrency(dueClaims, CLAIM_PROCESS_CONCURRENCY, (claim) =>
+        this.processClaimWithGuard(claim.address),
       );
     } catch (error) {
       this.logger.error('Failed to process due chain name claims', error);

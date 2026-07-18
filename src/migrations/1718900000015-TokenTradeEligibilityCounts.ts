@@ -8,9 +8,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * date going forward by an incremental upsert in
  * `TransactionPersistenceService.saveTransaction`.
  */
-export class TokenTradeEligibilityCounts1718900000015
-  implements MigrationInterface
-{
+export class TokenTradeEligibilityCounts1718900000015 implements MigrationInterface {
   name = 'TokenTradeEligibilityCounts1718900000015';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

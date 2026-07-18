@@ -71,9 +71,9 @@ describe('SearchController', () => {
   });
 
   it('rejects an overly long query', async () => {
-    await expect(
-      controller.search('a'.repeat(101), 5),
-    ).rejects.toThrow('q must be at most 100 characters');
+    await expect(controller.search('a'.repeat(101), 5)).rejects.toThrow(
+      'q must be at most 100 characters',
+    );
   });
 
   it('runs the three lookups in parallel, each capped at the clamped limit', async () => {

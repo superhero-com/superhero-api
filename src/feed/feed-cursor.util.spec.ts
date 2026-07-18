@@ -1,7 +1,4 @@
-import {
-  decodeFeedCursor,
-  encodeFeedCursor,
-} from './feed-cursor.util';
+import { decodeFeedCursor, encodeFeedCursor } from './feed-cursor.util';
 
 describe('feed cursor util', () => {
   it('round-trips a latest cursor including seenIds', () => {

@@ -433,11 +433,9 @@ describe('TokensService', () => {
     expect(tokenEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
       where: { symbol: 'TEST' },
     });
-    expect(tokenTradeEligibilityCountsRepository.findOne).toHaveBeenCalledWith(
-      {
-        where: { sale_address: 'ct_sale' },
-      },
-    );
+    expect(tokenTradeEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
+      where: { sale_address: 'ct_sale' },
+    });
     expect(breakdown).toEqual({
       sale_address: 'ct_sale',
       symbol: 'TEST',

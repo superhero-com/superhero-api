@@ -24,10 +24,7 @@ export class UpdateTrendingScoresQueue {
     try {
       await this.tokenService.updateTrendingScoresForSymbols([symbol]);
     } catch (error) {
-      this.logger.error(
-        `UpdateTrendingScoresQueue->error:${symbol}`,
-        error,
-      );
+      this.logger.error(`UpdateTrendingScoresQueue->error:${symbol}`, error);
       throw error;
     }
   }

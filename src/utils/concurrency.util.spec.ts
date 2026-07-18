@@ -11,10 +11,13 @@ describe('mapWithConcurrency', () => {
 
   it('preserves result order regardless of completion order', async () => {
     const delays = [30, 10, 20, 0];
-    const result = await mapWithConcurrency(delays, 4, (delay, index) =>
-      new Promise<number>((resolve) =>
-        setTimeout(() => resolve(index), delay),
-      ),
+    const result = await mapWithConcurrency(
+      delays,
+      4,
+      (delay, index) =>
+        new Promise<number>((resolve) =>
+          setTimeout(() => resolve(index), delay),
+        ),
     );
 
     expect(result).toEqual([0, 1, 2, 3]);

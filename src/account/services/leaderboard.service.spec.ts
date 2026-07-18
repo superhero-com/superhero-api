@@ -398,11 +398,9 @@ describe('LeaderboardService', () => {
       points: 2,
     });
 
-    expect(bclPnlService.calculateTokenPnlsBatchForAddresses).toHaveBeenCalledWith(
-      ['ak_transfer_gain', 'ak_trader'],
-      [100, 101],
-      100,
-    );
+    expect(
+      bclPnlService.calculateTokenPnlsBatchForAddresses,
+    ).toHaveBeenCalledWith(['ak_transfer_gain', 'ak_trader'], [100, 101], 100);
     expect(result.items[0]).toMatchObject({
       address: 'ak_trader',
       aum_usd: 130,

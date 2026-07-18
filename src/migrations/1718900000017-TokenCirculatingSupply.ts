@@ -6,9 +6,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * so the token detail page can stop calling `{mdw}/v3/aex9/{address}` from
  * the browser just to read this one field.
  */
-export class TokenCirculatingSupply1718900000017
-  implements MigrationInterface
-{
+export class TokenCirculatingSupply1718900000017 implements MigrationInterface {
   name = 'TokenCirculatingSupply1718900000017';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

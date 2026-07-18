@@ -19,8 +19,12 @@ describe('FeedController', () => {
   });
 
   beforeEach(() => {
-    postsRepository = { createQueryBuilder: jest.fn(() => makeQueryBuilder([])) };
-    tokensRepository = { createQueryBuilder: jest.fn(() => makeQueryBuilder([])) };
+    postsRepository = {
+      createQueryBuilder: jest.fn(() => makeQueryBuilder([])),
+    };
+    tokensRepository = {
+      createQueryBuilder: jest.fn(() => makeQueryBuilder([])),
+    };
     transactionsRepository = {
       createQueryBuilder: jest.fn(() => makeQueryBuilder([])),
     };
@@ -47,7 +51,10 @@ describe('FeedController', () => {
 
   describe('sort=latest', () => {
     it('merges posts, token creations, and trades by created_at desc', async () => {
-      const post = { id: 'post_1', created_at: new Date('2026-01-03T00:00:00Z') };
+      const post = {
+        id: 'post_1',
+        created_at: new Date('2026-01-03T00:00:00Z'),
+      };
       const token = {
         sale_address: 'ct_1',
         created_at: new Date('2026-01-02T00:00:00Z'),
@@ -150,15 +157,24 @@ describe('FeedController', () => {
       ] as const) {
         expect(qb.andWhere).toHaveBeenCalledWith(expect.any(Brackets));
         const brackets = qb.andWhere.mock.calls[0][0] as Brackets;
-        const outer = { where: jest.fn().mockReturnThis(), orWhere: jest.fn().mockReturnThis() };
+        const outer = {
+          where: jest.fn().mockReturnThis(),
+          orWhere: jest.fn().mockReturnThis(),
+        };
         brackets.whereFactory(outer as any);
 
-        expect(outer.where).toHaveBeenCalledWith(`${createdAtColumn} < :before`, {
-          before,
-        });
+        expect(outer.where).toHaveBeenCalledWith(
+          `${createdAtColumn} < :before`,
+          {
+            before,
+          },
+        );
         expect(outer.orWhere).toHaveBeenCalledWith(expect.any(Brackets));
         const inner = outer.orWhere.mock.calls[0][0] as Brackets;
-        const innerQb = { where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis() };
+        const innerQb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+        };
         inner.whereFactory(innerQb as any);
 
         expect(innerQb.where).toHaveBeenCalledWith(
@@ -209,11 +225,7 @@ describe('FeedController', () => {
       postsRepository.createQueryBuilder.mockReturnValue(
         makeQueryBuilder(allPosts.slice(4, 8)),
       );
-      const page2 = await controller.getFeed(
-        'latest',
-        page1.next_cursor!,
-        4,
-      );
+      const page2 = await controller.getFeed('latest', page1.next_cursor!, 4);
       expect(page2.items.map((i) => (i.data as any).id)).toEqual([
         'post_4',
         'post_5',
@@ -242,11 +254,7 @@ describe('FeedController', () => {
       postsRepository.createQueryBuilder.mockReturnValue(
         makeQueryBuilder(allPosts.slice(8, 10)),
       );
-      const page3 = await controller.getFeed(
-        'latest',
-        page2.next_cursor!,
-        4,
-      );
+      const page3 = await controller.getFeed('latest', page2.next_cursor!, 4);
       expect(page3.items.map((i) => (i.data as any).id)).toEqual([
         'post_8',
         'post_9',
@@ -257,15 +265,18 @@ describe('FeedController', () => {
     it('rejects a hot cursor passed while sorting latest', async () => {
       const cursor = encodeFeedCursor({ sort: 'hot', offset: 10 });
 
-      await expect(
-        controller.getFeed('latest', cursor, 20),
-      ).rejects.toThrow('Invalid cursor for sort=latest');
+      await expect(controller.getFeed('latest', cursor, 20)).rejects.toThrow(
+        'Invalid cursor for sort=latest',
+      );
     });
   });
 
   describe('sort=hot', () => {
     it('delegates to PopularRankingService and paginates by offset', async () => {
-      const post = { id: 'post_1', created_at: new Date('2026-01-01T00:00:00Z') };
+      const post = {
+        id: 'post_1',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+      };
       popularRankingService.getPopularPostsPage.mockResolvedValue({
         items: [post],
         totalItems: 5,
@@ -328,10 +339,7 @@ function makeRealisticQueryBuilder<T extends Record<string, any>>(
   const conditions: Array<(row: T) => boolean> = [];
   let limitN = Infinity;
 
-  function buildStringPredicate(
-    sql: string,
-    params: any,
-  ): (row: T) => boolean {
+  function buildStringPredicate(sql: string, params: any): (row: T) => boolean {
     if (sql.includes(`${createdAtField} < :before`)) {
       const before = params.before as Date;
       return (row) => row[createdAtField].getTime() < before.getTime();
@@ -454,8 +462,7 @@ describe('FeedController sort=latest full pagination sweep (no skips/duplicates)
     do {
       const result: any = await controller.getFeed('latest', cursor, 5);
       for (const item of result.items) {
-        const id =
-          item.type === 'trade' ? item.data.tx_hash : item.data.id;
+        const id = item.type === 'trade' ? item.data.tx_hash : item.data.id;
         expect(seen.has(id)).toBe(false); // never re-served
         seen.add(id);
       }

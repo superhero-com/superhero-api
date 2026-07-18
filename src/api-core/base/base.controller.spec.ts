@@ -5,7 +5,13 @@ import { EntityConfig } from '../types/entity-config.interface';
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn().mockResolvedValue({
     items: [],
-    meta: { itemCount: 0, totalItems: 0, itemsPerPage: 100, totalPages: 0, currentPage: 1 },
+    meta: {
+      itemCount: 0,
+      totalItems: 0,
+      itemsPerPage: 100,
+      totalPages: 0,
+      currentPage: 1,
+    },
   }),
 }));
 
@@ -57,9 +63,7 @@ describe('createBaseController maxPage', () => {
   });
 
   it('accepts a page beyond 500 when the entity config raises maxPage', async () => {
-    const Controller = createBaseController(
-      makeConfig({ maxPage: 1_000_000 }),
-    );
+    const Controller = createBaseController(makeConfig({ maxPage: 1_000_000 }));
     const controller = new Controller(makeRepository() as any);
 
     await expect(
@@ -68,9 +72,7 @@ describe('createBaseController maxPage', () => {
   });
 
   it('still rejects a page beyond the raised cap', async () => {
-    const Controller = createBaseController(
-      makeConfig({ maxPage: 1_000_000 }),
-    );
+    const Controller = createBaseController(makeConfig({ maxPage: 1_000_000 }));
     const controller = new Controller(makeRepository() as any);
 
     await expect(

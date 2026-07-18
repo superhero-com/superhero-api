@@ -8,7 +8,12 @@ import {
   Query,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
@@ -138,21 +143,27 @@ export class FeedController {
     ]);
 
     const candidates: FeedItem[] = [
-      ...posts.map((post): FeedItem => ({
-        type: 'post',
-        created_at: post.created_at,
-        data: post,
-      })),
-      ...tokens.map((token): FeedItem => ({
-        type: 'token_created',
-        created_at: token.created_at,
-        data: token,
-      })),
-      ...trades.map((trade): FeedItem => ({
-        type: 'trade',
-        created_at: trade.created_at,
-        data: trade,
-      })),
+      ...posts.map(
+        (post): FeedItem => ({
+          type: 'post',
+          created_at: post.created_at,
+          data: post,
+        }),
+      ),
+      ...tokens.map(
+        (token): FeedItem => ({
+          type: 'token_created',
+          created_at: token.created_at,
+          data: token,
+        }),
+      ),
+      ...trades.map(
+        (trade): FeedItem => ({
+          type: 'trade',
+          created_at: trade.created_at,
+          data: trade,
+        }),
+      ),
     ].sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
 
     const items = candidates.slice(0, limit);

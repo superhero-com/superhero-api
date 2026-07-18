@@ -49,11 +49,9 @@ describe('SocialTippingTransactionProcessorService', () => {
     postRepository.findOne.mockResolvedValue({
       token_mentions: ['BETA'],
     });
-    tokensService.queueTrendingScoresForSymbols.mockImplementation(
-      async () => {
-        callOrder.push('recalculate');
-      },
-    );
+    tokensService.queueTrendingScoresForSymbols.mockImplementation(async () => {
+      callOrder.push('recalculate');
+    });
 
     tipRepository.manager.transaction.mockImplementation(
       async (handler: any) => {

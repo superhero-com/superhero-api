@@ -5,7 +5,13 @@ import { EntityConfig } from '../types/entity-config.interface';
 jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn().mockResolvedValue({
     items: [],
-    meta: { itemCount: 0, totalItems: 0, itemsPerPage: 100, totalPages: 0, currentPage: 1 },
+    meta: {
+      itemCount: 0,
+      totalItems: 0,
+      itemsPerPage: 100,
+      totalPages: 0,
+      currentPage: 1,
+    },
   }),
 }));
 

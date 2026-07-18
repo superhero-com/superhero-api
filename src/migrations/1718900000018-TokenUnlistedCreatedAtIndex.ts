@@ -11,9 +11,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * `transaction = false` override is rejected by TypeORM
  * (ForbiddenTransactionModeOverrideError) rather than actually skip it.
  */
-export class TokenUnlistedCreatedAtIndex1718900000018
-  implements MigrationInterface
-{
+export class TokenUnlistedCreatedAtIndex1718900000018 implements MigrationInterface {
   name = 'TokenUnlistedCreatedAtIndex1718900000018';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

@@ -41,9 +41,7 @@ export class RefreshTokenRanksService {
           AND "token".rank IS DISTINCT FROM ranked.rank
       `);
 
-      this.logger.log(
-        `Refreshed token ranks in ${Date.now() - startTime}ms`,
-      );
+      this.logger.log(`Refreshed token ranks in ${Date.now() - startTime}ms`);
     } catch (error) {
       this.logger.error(
         'Failed to refresh token ranks',

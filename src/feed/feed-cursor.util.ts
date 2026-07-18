@@ -51,9 +51,7 @@ export function decodeFeedCursor(
     typeof parsed !== 'object' ||
     (parsed as { sort?: unknown }).sort !== sort
   ) {
-    throw new BadRequestException(
-      `Invalid cursor for sort=${sort}`,
-    );
+    throw new BadRequestException(`Invalid cursor for sort=${sort}`);
   }
 
   if (sort === 'latest') {

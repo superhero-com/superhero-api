@@ -27,9 +27,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * `transaction = false` override is rejected by TypeORM
  * (ForbiddenTransactionModeOverrideError) rather than actually skip it.
  */
-export class TransactionsBuySellIndexes1718900000014
-  implements MigrationInterface
-{
+export class TransactionsBuySellIndexes1718900000014 implements MigrationInterface {
   name = 'TransactionsBuySellIndexes1718900000014';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

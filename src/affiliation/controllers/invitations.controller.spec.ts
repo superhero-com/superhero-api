@@ -103,8 +103,8 @@ describe('InvitationsController', () => {
   });
 
   it('rejects an out-of-range limit', async () => {
-    await expect(
-      controller.listAll(1, 500, 'amount', 'DESC'),
-    ).rejects.toThrow('Limit must be between 1 and 100');
+    await expect(controller.listAll(1, 500, 'amount', 'DESC')).rejects.toThrow(
+      'Limit must be between 1 and 100',
+    );
   });
 });

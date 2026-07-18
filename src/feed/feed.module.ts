@@ -9,10 +9,7 @@ import { FeedController } from './feed.controller';
 // Kept a leaf module: PostModule already imports TokensModule/TransactionsModule,
 // so importing either of those back here would risk a circular module graph.
 @Module({
-  imports: [
-    PostModule,
-    TypeOrmModule.forFeature([Post, Token, Transaction]),
-  ],
+  imports: [PostModule, TypeOrmModule.forFeature([Post, Token, Transaction])],
   controllers: [FeedController],
 })
 export class FeedModule {}

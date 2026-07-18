@@ -245,8 +245,13 @@ describe('BclPnlService', () => {
     expect(sql).toContain('address = ANY($1::text[])');
     expect(sql).toContain('AS MATERIALIZED');
     expect(sql).toContain('addr_txs');
-    expect(sql).toContain('GROUP BY h.snapshot_height, tx.address, tx.sale_address');
-    expect(params).toEqual([['ak_one', 'ak_two'], [200, 300]]);
+    expect(sql).toContain(
+      'GROUP BY h.snapshot_height, tx.address, tx.sale_address',
+    );
+    expect(params).toEqual([
+      ['ak_one', 'ak_two'],
+      [200, 300],
+    ]);
 
     expect(result).toBeInstanceOf(Map);
     expect(result.size).toBe(2);
@@ -263,8 +268,10 @@ describe('BclPnlService', () => {
   it('calculateTokenPnlsBatchForAddresses returns empty map when addresses or heights are empty', async () => {
     const { service, transactionRepository } = createService();
 
-    const emptyAddresses =
-      await service.calculateTokenPnlsBatchForAddresses([], [100]);
+    const emptyAddresses = await service.calculateTokenPnlsBatchForAddresses(
+      [],
+      [100],
+    );
     const emptyHeights = await service.calculateTokenPnlsBatchForAddresses(
       ['ak_test'],
       [],
@@ -279,11 +286,7 @@ describe('BclPnlService', () => {
     const { service, transactionRepository } = createService();
     transactionRepository.query.mockResolvedValue([]);
 
-    await service.calculateTokenPnlsBatchForAddresses(
-      ['ak_test'],
-      [500],
-      50,
-    );
+    await service.calculateTokenPnlsBatchForAddresses(['ak_test'], [500], 50);
 
     const [sql, params] = transactionRepository.query.mock.calls[0];
     expect(sql).toContain('block_height >= $3');
