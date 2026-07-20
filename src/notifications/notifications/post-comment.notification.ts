@@ -1,6 +1,7 @@
 import { Notifiable } from '../core/notifiable.interface';
 import {
   AppNotification,
+  DatabaseNotificationContent,
   ExpoMessageContent,
   NotificationChannelName,
   NotificationMeta,
@@ -40,7 +41,7 @@ export class PostCommentNotification implements AppNotification {
   constructor(private readonly params: PostCommentParams) {}
 
   via(): NotificationChannelName[] {
-    return ['expo'];
+    return ['expo', 'database', 'web-push'];
   }
 
   dedupKey(notifiable: Notifiable): string {
@@ -62,5 +63,10 @@ export class PostCommentNotification implements AppNotification {
         commentId: this.params.commentId,
       },
     };
+  }
+
+  /** Feed copy mirrors the push for now; `data` carries the deep-link hints. */
+  toDatabase(): DatabaseNotificationContent {
+    return this.toExpo();
   }
 }

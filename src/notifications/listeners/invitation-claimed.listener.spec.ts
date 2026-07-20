@@ -1,7 +1,6 @@
 import { InvitationClaimedListener } from './invitation-claimed.listener';
 
 describe('InvitationClaimedListener', () => {
-  let registry: any;
   let notifications: any;
   let accountLabel: any;
   let listener: InvitationClaimedListener;
@@ -17,32 +16,28 @@ describe('InvitationClaimedListener', () => {
   });
 
   beforeEach(() => {
-    registry = { hasDevices: jest.fn().mockResolvedValue(true) };
     notifications = { send: jest.fn().mockResolvedValue({ outcome: 'sent' }) };
     accountLabel = { labelFor: jest.fn().mockResolvedValue('claimer.chain') };
     listener = new InvitationClaimedListener(
-      registry,
       notifications,
       accountLabel,
       config,
     );
   });
 
-  it('notifies the inviter when they have a device', async () => {
+  it('dispatches regardless of whether the inviter has a mobile device', async () => {
+    // No device gate: a web-only inviter must still reach the database channel.
     await listener.onClaimed(payload());
-    expect(registry.hasDevices).toHaveBeenCalledWith('ak_inviter');
     const [target, notification] = notifications.send.mock.calls[0];
     expect(target).toEqual({ address: 'ak_inviter' });
     expect(notification.type).toBe('invitation-claimed');
+    expect(notification.via()).toContain('database');
   });
 
   it('skips when the feature flag is disabled', async () => {
-    listener = new InvitationClaimedListener(
-      registry,
-      notifications,
-      accountLabel,
-      { enabled: false } as any,
-    );
+    listener = new InvitationClaimedListener(notifications, accountLabel, {
+      enabled: false,
+    } as any);
     await listener.onClaimed(payload());
     expect(notifications.send).not.toHaveBeenCalled();
   });
@@ -54,14 +49,6 @@ describe('InvitationClaimedListener', () => {
 
   it('skips when required fields are missing', async () => {
     await listener.onClaimed(payload({ txHash: undefined }));
-    expect(registry.hasDevices).not.toHaveBeenCalled();
-    expect(notifications.send).not.toHaveBeenCalled();
-  });
-
-  it('short-circuits before label resolution when the inviter has no device', async () => {
-    registry.hasDevices.mockResolvedValue(false);
-    await listener.onClaimed(payload());
-    expect(accountLabel.labelFor).not.toHaveBeenCalled();
     expect(notifications.send).not.toHaveBeenCalled();
   });
 

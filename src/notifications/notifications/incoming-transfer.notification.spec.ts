@@ -1,4 +1,5 @@
 import { IncomingTransferNotification } from './incoming-transfer.notification';
+import { AppNotification } from '../core/notification.interface';
 
 describe('IncomingTransferNotification', () => {
   const base = {
@@ -8,10 +9,15 @@ describe('IncomingTransferNotification', () => {
     txHash: 'th_abc',
   };
 
-  it('routes through the expo channel', () => {
+  it('routes through the expo channel only (no web feed for SpendTx)', () => {
     const n = new IncomingTransferNotification(base);
     expect(n.via()).toEqual(['expo']);
     expect(n.type).toBe('incoming-transfer');
+  });
+
+  it('does not render for the database feed', () => {
+    const n: AppNotification = new IncomingTransferNotification(base);
+    expect(n.toDatabase).toBeUndefined();
   });
 
   it('exposes catalog META mirrored onto the instance', () => {

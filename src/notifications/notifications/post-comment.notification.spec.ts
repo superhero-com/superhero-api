@@ -9,10 +9,15 @@ describe('PostCommentNotification', () => {
     txHash: 'th_comment',
   };
 
-  it('routes through the expo channel', () => {
+  it('routes through the expo, database and web-push channels', () => {
     const n = new PostCommentNotification(base);
-    expect(n.via()).toEqual(['expo']);
+    expect(n.via()).toEqual(['expo', 'database', 'web-push']);
     expect(n.type).toBe('post-comment');
+  });
+
+  it('renders the same content for the database feed as for expo', () => {
+    const n = new PostCommentNotification(base);
+    expect(n.toDatabase()).toEqual(n.toExpo());
   });
 
   it('exposes catalog META mirrored onto the instance', () => {
