@@ -17,6 +17,12 @@ import { Pair } from './pair.entity';
 // bootstrap so synchronize-based and production environments converge on one
 // index. Keep both in sync if you rename it.
 @Index('IDX_pair_transactions_pair_created_at', ['pair', 'created_at'])
+// Backs the account swap-history filter (`account_address = X`, ordered by
+// created_at), which the pair-scoped index above can't serve.
+@Index('IDX_pair_transactions_account_created_at', [
+  'account_address',
+  'created_at',
+])
 export class PairTransaction {
   @PrimaryColumn()
   tx_hash: string;

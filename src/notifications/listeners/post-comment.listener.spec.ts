@@ -1,7 +1,6 @@
 import { PostCommentListener } from './post-comment.listener';
 
 describe('PostCommentListener', () => {
-  let registry: any;
   let notifications: any;
   let accountLabel: any;
   let redis: any;
@@ -22,7 +21,6 @@ describe('PostCommentListener', () => {
   };
 
   beforeEach(() => {
-    registry = { hasDevices: jest.fn().mockResolvedValue(true) };
     notifications = {
       send: jest.fn().mockResolvedValue({ outcome: 'sent' }),
     };
@@ -34,7 +32,6 @@ describe('PostCommentListener', () => {
     };
     preferences = { isEnabled: jest.fn().mockResolvedValue(true) };
     listener = new PostCommentListener(
-      registry,
       notifications,
       accountLabel,
       redis,
@@ -55,6 +52,16 @@ describe('PostCommentListener', () => {
       20,
     );
     expect(notifications.send).toHaveBeenCalledTimes(1);
+    // No device gate: the notification must route to the web feed too.
+    const [, notification] = notifications.send.mock.calls[0];
+    expect(notification.via()).toContain('database');
+  });
+
+  it('dispatches even when the author has no mobile device (web-only author)', async () => {
+    // There is no hasDevices gate anymore — the only suppressors are opt-out
+    // and the rate cap, both stubbed permissive here.
+    await listener.onCommented(payload);
+    expect(notifications.send).toHaveBeenCalledTimes(1);
   });
 
   it('drops the dispatch when the per-recipient rate cap is hit', async () => {
@@ -70,20 +77,12 @@ describe('PostCommentListener', () => {
     expect(notifications.send).not.toHaveBeenCalled();
   });
 
-  it('skips when the recipient has no registered devices', async () => {
-    registry.hasDevices.mockResolvedValue(false);
-    await listener.onCommented(payload);
-    expect(preferences.isEnabled).not.toHaveBeenCalled();
-    expect(redis.incrementWithCap).not.toHaveBeenCalled();
-    expect(notifications.send).not.toHaveBeenCalled();
-  });
-
   it('skips self-comments', async () => {
     await listener.onCommented({
       ...payload,
       commenterAddress: payload.postAuthorAddress,
     });
-    expect(registry.hasDevices).not.toHaveBeenCalled();
+    expect(preferences.isEnabled).not.toHaveBeenCalled();
     expect(notifications.send).not.toHaveBeenCalled();
   });
 

@@ -72,6 +72,7 @@ export class CoinGeckoService {
   last_pull_time: Moment;
   private ratesPullInFlight: Promise<void> | null = null;
   private readonly marketCacheKeyPrefix = 'coingecko:market:v1';
+  private fallbackPricingData: FallbackPriceData | null = null;
 
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -635,7 +636,12 @@ export class CoinGeckoService {
         this.logger.log(
           `Loaded fallback price data from JSON file: ${data.prices.length} price points`,
         );
-        return data.prices;
+        // Return a shallow copy: `readFallbackPricingData()` is memoized, so
+        // `data.prices` is a shared reference, and some callers sort the
+        // returned array in place (e.g. PortfolioService). Handing out the
+        // backing array directly would let one caller reorder the cache for
+        // everyone.
+        return [...data.prices];
       }
 
       this.logger.error(
@@ -652,9 +658,12 @@ export class CoinGeckoService {
   }
 
   private readFallbackPricingData(): FallbackPriceData {
-    const filePath = join(process.cwd(), 'src', 'data', 'ae-pricing.json');
-    const fileContent = readFileSync(filePath, 'utf-8');
-    return JSON.parse(fileContent) as FallbackPriceData;
+    if (!this.fallbackPricingData) {
+      const filePath = join(process.cwd(), 'src', 'data', 'ae-pricing.json');
+      const fileContent = readFileSync(filePath, 'utf-8');
+      this.fallbackPricingData = JSON.parse(fileContent) as FallbackPriceData;
+    }
+    return this.fallbackPricingData;
   }
 
   /**

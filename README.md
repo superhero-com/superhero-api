@@ -128,6 +128,9 @@ src/
    - New token creation
    - Transaction notifications
    - Collection updates
+   - Web in-app notification feed (live `notification` / `unread-count` on the
+     `/notifications` namespace) + native browser push (Web Push / VAPID) for
+     closed-tab delivery — see [docs/notifications-web-feed.md](docs/notifications-web-feed.md)
 
 4. 📚 **Collection Management**
    - Collection configuration

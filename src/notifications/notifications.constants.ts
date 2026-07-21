@@ -17,6 +17,8 @@ export const REDIS_KEYS = {
   dedup: (logicalKey: string) => `notif:dedup:${logicalKey}`,
   /** Short-lived ticketId -> push token map, for receipt-time token pruning. */
   ticketToken: (ticketId: string) => `notif:ticket:${ticketId}`,
+  /** Web-feed bearer session token -> owner address (TTL-bound). */
+  feedSession: (token: string) => `notif:feed-session:${token}`,
 } as const;
 
 /**
@@ -97,6 +99,39 @@ export function buildPreferencesUpdateMessage(
   return `Superhero Notifications\nUpdate preferences for ${address}\nbody: ${canonicalPreferencesHash(
     preferences,
   )}\nnonce: ${nonce}`;
+}
+
+/**
+ * Intent-bound message a user signs to mint a web-feed bearer session. Reuses the
+ * shared nonce table; the distinct message format prevents a signature captured
+ * for device-link / preferences from being replayed to open a feed session (and
+ * vice versa). One signature → one session that then authorizes feed reads,
+ * mark-read, and the socket handshake (the SIWE-style bootstrap).
+ */
+export function buildFeedSessionMessage(
+  address: string,
+  nonce: string,
+): string {
+  return `Superhero Notifications\nOpen notification feed session for ${address}\nnonce: ${nonce}`;
+}
+
+/**
+ * Parse a bearer token out of an `Authorization` header value. Returns the raw
+ * token for `Bearer <token>` (scheme is case-sensitive, matching the existing
+ * admin auth), or null for a missing/malformed/other-scheme header. Shared by
+ * the feed REST guard and the socket gateway so the header contract lives in one
+ * place.
+ */
+export function extractBearerToken(header: unknown): string | null {
+  if (typeof header !== 'string') {
+    return null;
+  }
+  const [scheme, value] = header.split(' ');
+  if (scheme !== 'Bearer' || !value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 /** `ak_2sQwEr...wXyZ` -> shortened, human-readable form for notification copy. */

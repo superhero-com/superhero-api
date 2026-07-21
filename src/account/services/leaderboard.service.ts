@@ -5,7 +5,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
 import { Account } from '../entities/account.entity';
 import { AccountLeaderboardSnapshot } from '../entities/account-leaderboard-snapshot.entity';
-import { BclPnlService } from './bcl-pnl.service';
+import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
 import {
   GetLeadersParams,
   LEADERBOARD_SNAPSHOT_MAX_CANDIDATES,
@@ -452,49 +452,45 @@ export class LeaderboardService {
     heights: number[];
     tradingOnly: boolean;
   }): Promise<LeaderboardItem[]> {
+    // Single set-based query for every candidate instead of one
+    // calculateTokenPnlsBatch call per address (previously concurrency 8,
+    // cap 500 — up to 500 separate PnL queries per request).
+    const startHeight = params.heights[0];
+    const pnlByAddress =
+      await this.bclPnlService.calculateTokenPnlsBatchForAddresses(
+        params.addresses,
+        params.heights,
+        params.tradingOnly ? startHeight : undefined,
+      );
+
     const items: LeaderboardItem[] = [];
-    const concurrency = 8;
-    const queue = [...params.addresses];
-
-    const workers = Array.from({ length: concurrency }, async () => {
-      while (queue.length) {
-        const address = queue.shift();
-        if (!address) {
-          continue;
-        }
-
-        const item = await this.computeEventItem({
-          address,
-          activeRow: params.activeByAddress.get(address),
-          account: params.accountByAddress.get(address),
-          sampleTimestamps: params.sampleTimestamps,
-          heights: params.heights,
-          tradingOnly: params.tradingOnly,
-        });
-        if (item) {
-          items.push(item);
-        }
+    for (const address of params.addresses) {
+      const item = this.buildEventItem({
+        address,
+        pnlByHeight: pnlByAddress.get(address) ?? new Map(),
+        activeRow: params.activeByAddress.get(address),
+        account: params.accountByAddress.get(address),
+        sampleTimestamps: params.sampleTimestamps,
+        heights: params.heights,
+        tradingOnly: params.tradingOnly,
+      });
+      if (item) {
+        items.push(item);
       }
-    });
-
-    await Promise.all(workers);
+    }
     return items;
   }
 
-  private async computeEventItem(params: {
+  private buildEventItem(params: {
     address: string;
+    pnlByHeight: Map<number, TokenPnlResult>;
     activeRow?: EventActiveAddressRow;
     account?: Account;
     sampleTimestamps: number[];
     heights: number[];
     tradingOnly: boolean;
-  }): Promise<LeaderboardItem | undefined> {
-    const startHeight = params.heights[0];
-    const pnlByHeight = await this.bclPnlService.calculateTokenPnlsBatch(
-      params.address,
-      params.heights,
-      params.tradingOnly ? startHeight : undefined,
-    );
+  }): LeaderboardItem | undefined {
+    const pnlByHeight = params.pnlByHeight;
     const sparkline = params.heights.map((height, index): [number, number] => {
       const pnl = pnlByHeight.get(height);
       return [

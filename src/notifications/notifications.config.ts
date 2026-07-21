@@ -114,4 +114,105 @@ export default registerAs(NOTIFICATIONS_CONFIG, () => ({
     3600,
     'NOTIF_POST_COMMENT_RATE_WINDOW_SEC',
   ),
+
+  /**
+   * Lifetime of a web-feed bearer session, minted from a single æternity
+   * signature (the SIWE-style bootstrap) and used to authorize feed reads,
+   * mark-read, and the socket handshake. Default 7 days = re-sign weekly.
+   * Lives in Redis (revocable), so shortening it is a safe ops dial.
+   */
+  feedSessionTtlMs: parsePositiveInt(
+    process.env.NOTIF_FEED_SESSION_TTL_MS,
+    7 * 24 * 60 * 60 * 1000,
+    'NOTIF_FEED_SESSION_TTL_MS',
+  ),
+
+  /**
+   * Retention horizon for the per-recipient web feed. A read notification older
+   * than this is pruned by the cleanup cron — the feed is a convenience cache
+   * over chain-derived events, not a system of record, so we don't hoard a
+   * central activity log indefinitely.
+   */
+  feedRetentionDays: parsePositiveInt(
+    process.env.NOTIF_FEED_RETENTION_DAYS,
+    90,
+    'NOTIF_FEED_RETENTION_DAYS',
+  ),
+
+  /**
+   * Hard cap on stored feed rows per address. The cleanup cron trims the oldest
+   * rows beyond this count so a high-traffic address can't grow unbounded.
+   */
+  feedMaxRowsPerAddress: parsePositiveInt(
+    process.env.NOTIF_FEED_MAX_ROWS_PER_ADDRESS,
+    500,
+    'NOTIF_FEED_MAX_ROWS_PER_ADDRESS',
+  ),
+
+  /**
+   * Max rows the age-based retention sweep deletes in a single tick. Bounds
+   * the worst case (a first sweep after a long cron outage, or a
+   * `NOTIF_FEED_RETENTION_DAYS` cut that instantly ages out months of
+   * backlog) to one bounded statement instead of one unbounded DELETE holding
+   * row locks / generating a WAL burst for however many rows have aged out
+   * since the last successful tick. A backlog larger than this is simply
+   * finished off over the next few hourly ticks.
+   */
+  feedRetentionDeleteBatchSize: parsePositiveInt(
+    process.env.NOTIF_FEED_RETENTION_DELETE_BATCH_SIZE,
+    10_000,
+    'NOTIF_FEED_RETENTION_DELETE_BATCH_SIZE',
+  ),
+
+  /**
+   * Max page size a single feed-list request may return. Guards against a
+   * client asking for an unbounded page.
+   */
+  feedMaxPageSize: parsePositiveInt(
+    process.env.NOTIF_FEED_MAX_PAGE_SIZE,
+    50,
+    'NOTIF_FEED_MAX_PAGE_SIZE',
+  ),
+
+  /**
+   * Max concurrent socket connections accepted per address (in-memory cap;
+   * single-container deploy). Stops one address from exhausting sockets.
+   */
+  socketMaxConnsPerAddress: parsePositiveInt(
+    process.env.NOTIF_SOCKET_MAX_CONNS_PER_ADDRESS,
+    10,
+    'NOTIF_SOCKET_MAX_CONNS_PER_ADDRESS',
+  ),
+
+  /**
+   * Max socket-handshake ATTEMPTS accepted per source IP per rolling minute
+   * (in-memory; single-container deploy), checked before any session lookup.
+   * `socketMaxConnsPerAddress` only bounds sockets that resolve to a real
+   * address — a flood of junk-token handshakes never reaches that counter, so
+   * this is the only thing bounding the cost (one Redis GET per attempt) of an
+   * anonymous connect flood.
+   */
+  socketMaxHandshakesPerIpPerMinute: parsePositiveInt(
+    process.env.NOTIF_SOCKET_MAX_HANDSHAKES_PER_IP_PER_MIN,
+    30,
+    'NOTIF_SOCKET_MAX_HANDSHAKES_PER_IP_PER_MIN',
+  ),
+
+  /**
+   * VAPID keypair + subject for browser Web Push (the `web-push` channel).
+   * Generate with `npx web-push generate-vapid-keys`. When the public/private
+   * pair is absent the channel logs once and no-ops — the feature stays dark
+   * until configured, mirroring how `expoAccessToken` gates enhanced Expo.
+   * `vapidSubject` must be a `mailto:` or `https:` URL identifying the sender.
+   */
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY || undefined,
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || undefined,
+  vapidSubject: process.env.VAPID_SUBJECT || 'mailto:admin@superhero.com',
+
+  /** Wall-clock timeout for a single Web Push HTTP send. */
+  webPushFetchTimeoutMs: parsePositiveInt(
+    process.env.WEB_PUSH_FETCH_TIMEOUT_MS,
+    10_000,
+    'WEB_PUSH_FETCH_TIMEOUT_MS',
+  ),
 }));

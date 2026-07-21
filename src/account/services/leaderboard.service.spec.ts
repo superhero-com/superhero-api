@@ -58,22 +58,27 @@ describe('LeaderboardService', () => {
       .fn()
       .mockResolvedValue(options?.activeRows ?? []);
     const find = jest.fn().mockResolvedValue(options?.accounts ?? []);
-    const calculateTokenPnlsBatch = jest.fn(
-      (address: string, heights: number[]) => {
-        const values = options?.pnlByAddress?.[address] ?? [];
-        return Promise.resolve(
-          new Map(
-            heights.map((height, index) => {
-              const value = values[index] ?? 0;
-              return [
-                height,
-                typeof value === 'number'
-                  ? pnlResult(value)
-                  : pnlResult(value.aum, value.gain ?? 0, value.cost ?? 0),
-              ];
-            }),
-          ),
-        );
+    const calculateTokenPnlsBatchForAddresses = jest.fn(
+      (addresses: string[], heights: number[]) => {
+        const result = new Map<string, Map<number, unknown>>();
+        for (const address of addresses) {
+          const values = options?.pnlByAddress?.[address] ?? [];
+          result.set(
+            address,
+            new Map(
+              heights.map((height, index) => {
+                const value = values[index] ?? 0;
+                return [
+                  height,
+                  typeof value === 'number'
+                    ? pnlResult(value)
+                    : pnlResult(value.aum, value.gain ?? 0, value.cost ?? 0),
+                ];
+              }),
+            ),
+          );
+        }
+        return Promise.resolve(result);
       },
     );
 
@@ -82,13 +87,13 @@ describe('LeaderboardService', () => {
         { query } as never,
         { query: transactionQuery } as never,
         { find } as never,
-        { calculateTokenPnlsBatch } as never,
+        { calculateTokenPnlsBatchForAddresses } as never,
         {} as never,
       ),
       snapshotRepository: { query },
       transactionsRepository: { query: transactionQuery },
       accountRepository: { find },
-      bclPnlService: { calculateTokenPnlsBatch },
+      bclPnlService: { calculateTokenPnlsBatchForAddresses },
     };
   };
 
@@ -272,7 +277,9 @@ describe('LeaderboardService', () => {
       100,
     ]);
     expect(batchTimestampToAeHeightMock).toHaveBeenCalledTimes(1);
-    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(2);
+    expect(
+      bclPnlService.calculateTokenPnlsBatchForAddresses,
+    ).toHaveBeenCalledTimes(1);
 
     expect(result.timeFilter).toEqual({
       start: new Date('2026-04-28T10:00:00.000Z'),
@@ -391,16 +398,9 @@ describe('LeaderboardService', () => {
       points: 2,
     });
 
-    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
-      'ak_transfer_gain',
-      [100, 101],
-      100,
-    );
-    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
-      'ak_trader',
-      [100, 101],
-      100,
-    );
+    expect(
+      bclPnlService.calculateTokenPnlsBatchForAddresses,
+    ).toHaveBeenCalledWith(['ak_transfer_gain', 'ak_trader'], [100, 101], 100);
     expect(result.items[0]).toMatchObject({
       address: 'ak_trader',
       aum_usd: 130,

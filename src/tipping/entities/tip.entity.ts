@@ -4,11 +4,20 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
 
+// FK join columns (sender_address, receiver_address, post_id) are not
+// auto-indexed by Postgres. Backs the tips list filter+order and the
+// post-summary aggregate. Index names are shared with the idempotent
+// migration bootstrap so synchronize-based and production environments
+// converge on the same indexes.
+@Index('IDX_TIPS_SENDER_CREATED', ['sender', 'created_at'])
+@Index('IDX_TIPS_RECEIVER_CREATED', ['receiver', 'created_at'])
+@Index('IDX_TIPS_POST_ID', ['post'])
 @Entity({
   name: 'tips',
 })

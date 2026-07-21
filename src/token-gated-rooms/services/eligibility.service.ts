@@ -246,11 +246,19 @@ export class EligibilityService {
         break;
       }
 
+      // Batch-resolve pubkeys for this page in one IN(...) read instead of
+      // one findOne per member.
+      const pubkeyByAddress = await this.identity.getPubkeysForAddresses(
+        batch.map((row) => row.member_address),
+      );
+
       for (const existing of batch) {
         const flipped = await this.recomputeMember(
           room,
           existing.member_address,
           existing,
+          undefined,
+          pubkeyByAddress.get(existing.member_address) ?? null,
         );
         if (flipped) {
           flips += 1;
@@ -321,6 +329,12 @@ export class EligibilityService {
       addresses.add(moderator);
     }
 
+    // 4) Batch-resolve pubkeys for the WHOLE room roster in one IN(...) read
+    //    instead of one findOne per member (identity.getPubkeyForAddress).
+    const pubkeyByAddress = await this.identity.getPubkeysForAddresses([
+      ...addresses,
+    ]);
+
     let flips = 0;
     for (const address of addresses) {
       // Pass the pre-loaded membership row + balance (0 for a union member with no
@@ -330,6 +344,7 @@ export class EligibilityService {
         address,
         membershipByAddress.get(address) ?? null,
         balanceByAddress.get(address) ?? new BigNumber(0),
+        pubkeyByAddress.get(address) ?? null,
       );
       if (flipped) {
         flips += 1;
@@ -353,6 +368,7 @@ export class EligibilityService {
     memberAddress: string,
     existing?: RoomMembership | null,
     balanceRaw?: BigNumber.Value | null,
+    pubkeyOverride?: string | null,
   ): Promise<boolean> {
     // `existing === undefined` ⇒ not provided, load it. `existing === null` ⇒ the
     // caller already loaded the full room roster and this member has NO row (the
@@ -368,7 +384,13 @@ export class EligibilityService {
         : existing;
 
     // Resolved hex pubkey (or null) for the member — read-only (Task 05).
-    const memberPubkey = await this.identity.getPubkeyForAddress(memberAddress);
+    // `pubkeyOverride === undefined` ⇒ not provided, look it up (single-member
+    // reactive paths). Any other value (including null) ⇒ the caller already
+    // batch-resolved pubkeys for the whole room/page — skip the per-member read.
+    const memberPubkey =
+      pubkeyOverride === undefined
+        ? await this.identity.getPubkeyForAddress(memberAddress)
+        : pubkeyOverride;
 
     // Role: configured moderator → admin, else member.
     const role: RoomMembershipRole = (room.moderators ?? []).includes(

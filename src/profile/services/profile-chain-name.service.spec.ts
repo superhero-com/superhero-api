@@ -41,6 +41,7 @@ describe('ProfileChainNameService', () => {
   const getService = () => {
     const claimRepository = {
       findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       save: jest.fn().mockImplementation(async (value) => value),
       create: jest.fn().mockImplementation((value) => value),
@@ -817,5 +818,54 @@ describe('ProfileChainNameService', () => {
         next_retry_at: null,
       }),
     );
+  });
+
+  describe('processDueClaims', () => {
+    it('processes due claims concurrently instead of one at a time', async () => {
+      const { service, claimRepository } = getService();
+      const dueClaims = Array.from({ length: 8 }, (_, i) => ({
+        address: `ak_claim_${i}`,
+      }));
+      claimRepository.find.mockResolvedValue(dueClaims);
+
+      let active = 0;
+      let maxActive = 0;
+      const processSpy = jest
+        .spyOn(service as any, 'processClaimWithGuard')
+        .mockImplementation(async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active--;
+        });
+
+      await service.processDueClaims();
+
+      expect(processSpy).toHaveBeenCalledTimes(8);
+      dueClaims.forEach((claim) => {
+        expect(processSpy).toHaveBeenCalledWith(claim.address);
+      });
+      // Bounded concurrency (5), not one sequential await at a time.
+      expect(maxActive).toBeGreaterThan(1);
+      expect(maxActive).toBeLessThanOrEqual(5);
+    });
+
+    it('does not run a second pass while one is already in flight', async () => {
+      const { service, claimRepository } = getService();
+      claimRepository.find.mockResolvedValue([{ address: 'ak_claim_0' }]);
+      let resolveGuard: () => void;
+      jest.spyOn(service as any, 'processClaimWithGuard').mockReturnValue(
+        new Promise<void>((resolve) => {
+          resolveGuard = resolve;
+        }),
+      );
+
+      const first = service.processDueClaims();
+      await service.processDueClaims(); // should return immediately (isCronRunning guard)
+
+      expect(claimRepository.find).toHaveBeenCalledTimes(1);
+      resolveGuard!();
+      await first;
+    });
   });
 });

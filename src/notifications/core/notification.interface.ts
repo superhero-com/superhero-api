@@ -1,11 +1,28 @@
 import { Notifiable } from './notifiable.interface';
 
-export type NotificationChannelName = 'expo' | 'database' | 'websocket';
+// The live websocket push is a transport detail of the 'database' channel (it
+// re-emits the persisted row), not a channel of its own — there is no separate
+// renderer or registry entry for it, so it is intentionally NOT a channel name.
+// 'web-push' (browser VAPID push) IS a real channel: it has its own registry
+// entry and delivery queue, and renders via toDatabase() (the web copy).
+export type NotificationChannelName = 'expo' | 'database' | 'web-push';
 
 export interface ExpoMessageContent {
   title: string;
   body: string;
   /** Deep-link payload handed to the app on tap. */
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Rendered content persisted as one `notifications` row for the web in-app feed
+ * (and emitted live over the gateway). Same shape as the push content; kept as a
+ * distinct type so the feed copy can diverge from the push copy later without a
+ * signature change.
+ */
+export interface DatabaseNotificationContent {
+  title: string;
+  body: string;
   data?: Record<string, unknown>;
 }
 
@@ -38,10 +55,15 @@ export interface AppNotification extends NotificationMeta {
   /** Idempotency key (per recipient). Two sends with the same key collapse to one. */
   dedupKey(notifiable: Notifiable): string;
 
-  /** Render for Expo. Required because 'expo' is the only v1 channel. */
+  /** Render for Expo. Required because 'expo' is the only mobile push channel. */
   toExpo(notifiable: Notifiable): ExpoMessageContent;
 
-  // Future channels add optional renderers; engine + existing notifications stay untouched:
-  // toDatabase?(notifiable: Notifiable): Record<string, unknown>;
-  // toWebsocket?(notifiable: Notifiable): unknown;
+  /**
+   * Render for the persisted web feed. Required whenever `via()` includes
+   * `'database'`; the `DatabaseChannel` throws if it is routed a notification
+   * that omits this, surfacing a mis-wired type instead of silently dropping it.
+   * The live websocket emit reuses the persisted row, so there is no separate
+   * `toWebsocket` renderer — the feed row IS the realtime payload.
+   */
+  toDatabase?(notifiable: Notifiable): DatabaseNotificationContent;
 }

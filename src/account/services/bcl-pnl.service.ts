@@ -95,6 +95,49 @@ export class BclPnlService {
   }
 
   /**
+   * Calculate PNL for each token, for MANY addresses, across multiple shared
+   * block heights, in a single SQL query.
+   *
+   * Built for the leaderboard's event-window path, which previously called
+   * `calculateTokenPnlsBatch` once per candidate address (concurrency 8, cap
+   * 500) even though every candidate shares the same sample heights. This
+   * adds `address` as a grouping dimension to the same aggregation so the
+   * whole candidate set resolves in one query.
+   *
+   * @param addresses - Candidate account addresses
+   * @param blockHeights - Array of block heights to calculate PNL at (shared across all addresses)
+   * @param fromBlockHeight - Optional: If provided, restrict cost-basis aggregates to this range
+   * @returns Map from address to its Map from block height to TokenPnlResult
+   */
+  async calculateTokenPnlsBatchForAddresses(
+    addresses: string[],
+    blockHeights: number[],
+    fromBlockHeight?: number,
+  ): Promise<Map<string, Map<number, TokenPnlResult>>> {
+    const uniqueAddresses = [...new Set(addresses)];
+    const uniqueHeights = [...new Set(blockHeights)];
+    if (uniqueAddresses.length === 0 || uniqueHeights.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.transactionRepository.query(
+      this.buildBatchTokenPnlsQueryForAddresses(fromBlockHeight),
+      this.buildBatchQueryParametersForAddresses(
+        uniqueAddresses,
+        uniqueHeights,
+        fromBlockHeight,
+      ),
+    );
+
+    return this.mapTokenPnlsBatchForAddresses(
+      rows,
+      uniqueAddresses,
+      uniqueHeights,
+      fromBlockHeight,
+    );
+  }
+
+  /**
    * Calculate per-day realized PnL for each token using timestamp-based windows.
    * Each window defines an isolated [dayStartTs, snapshotTs) sell range so the
    * result for each day only reflects trades closed on that specific day.
@@ -508,6 +551,246 @@ export class BclPnlService {
     return fromBlockHeight !== undefined && fromBlockHeight !== null
       ? [address, blockHeights, fromBlockHeight]
       : [address, blockHeights];
+  }
+
+  // Mirrors buildBatchTokenPnlsQuery, adding `address` as an extra grouping
+  // dimension so many candidates resolve in one query instead of one per
+  // address. Keep the aggregation CASE expressions identical to the
+  // single-address version above.
+  private buildBatchTokenPnlsQueryForAddresses(
+    fromBlockHeight?: number,
+  ): string {
+    const hasRange = fromBlockHeight !== undefined && fromBlockHeight !== null;
+    const rangeCondition = hasRange ? ' AND tx.block_height >= $3' : '';
+
+    const cumulativeColumns = hasRange
+      ? `,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS cumulative_volume_bought,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS cumulative_amount_spent_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS cumulative_amount_spent_usd`
+      : '';
+
+    const cumulativeSelectColumns = hasRange
+      ? `
+        agg.cumulative_volume_bought,
+        agg.cumulative_amount_spent_ae,
+        agg.cumulative_amount_spent_usd,`
+      : '';
+
+    return `
+      WITH heights AS (
+        SELECT unnest($2::int[]) AS snapshot_height
+      ),
+      -- Scan every candidate's transactions exactly once and materialise the
+      -- result, same rationale as address_txs in buildBatchTokenPnlsQuery.
+      addr_txs AS MATERIALIZED (
+        SELECT address, sale_address, block_height, tx_type, volume, amount
+        FROM transactions
+        WHERE address = ANY($1::text[])
+      ),
+      aggregated_holdings AS (
+        SELECT
+          h.snapshot_height,
+          tx.address AS address,
+          tx.sale_address AS sale_address,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ) -
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN tx.tx_type = 'sell'
+                    THEN CAST(tx.volume AS DECIMAL)
+                  ELSE 0
+                END
+              ),
+              0
+            ),
+            0
+          ) AS current_holdings,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_volume_bought,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_spent_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_spent_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_ae,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_amount_received_usd,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN tx.tx_type = 'sell'${rangeCondition}
+                  THEN CAST(tx.volume AS DECIMAL)
+                ELSE 0
+              END
+            ),
+            0
+          ) AS total_volume_sold${cumulativeColumns}
+        FROM heights h
+        JOIN addr_txs tx ON tx.block_height < h.snapshot_height
+        GROUP BY h.snapshot_height, tx.address, tx.sale_address
+      )
+      SELECT
+        agg.snapshot_height,
+        agg.address,
+        agg.sale_address,
+        agg.current_holdings,
+        agg.total_volume_bought,
+        agg.total_amount_spent_ae,
+        agg.total_amount_spent_usd,
+        agg.total_amount_received_ae,
+        agg.total_amount_received_usd,
+        agg.total_volume_sold,${cumulativeSelectColumns}
+        ae_price.current_unit_price_ae,
+        usd_price.current_unit_price_usd
+      FROM aggregated_holdings agg
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= agg.snapshot_height
+          AND p.buy_price->>'ae' IS NOT NULL
+          AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) ae_price ON true
+      LEFT JOIN LATERAL (
+        SELECT CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
+        FROM transactions p
+        WHERE p.sale_address = agg.sale_address
+          AND p.block_height <= agg.snapshot_height
+          AND p.buy_price->>'usd' IS NOT NULL
+          AND p.buy_price->>'usd' NOT IN ('NaN', 'null', '')
+        ORDER BY p.block_height DESC, p.created_at DESC
+        LIMIT 1
+      ) usd_price ON true
+      WHERE agg.current_holdings > 0
+         OR agg.total_volume_bought > 0
+         OR agg.total_volume_sold > 0
+    `;
+  }
+
+  private buildBatchQueryParametersForAddresses(
+    addresses: string[],
+    blockHeights: number[],
+    fromBlockHeight?: number,
+  ): Array<string[] | number[] | number> {
+    return fromBlockHeight !== undefined && fromBlockHeight !== null
+      ? [addresses, blockHeights, fromBlockHeight]
+      : [addresses, blockHeights];
+  }
+
+  private mapTokenPnlsBatchForAddresses(
+    rows: Array<Record<string, any>>,
+    addresses: string[],
+    heights: number[],
+    fromBlockHeight?: number,
+  ): Map<string, Map<number, TokenPnlResult>> {
+    const isRangeBased =
+      fromBlockHeight !== undefined && fromBlockHeight !== null;
+
+    const rowsByAddressHeight = new Map<
+      string,
+      Map<number, Array<Record<string, any>>>
+    >();
+    for (const address of addresses) {
+      const byHeight = new Map<number, Array<Record<string, any>>>();
+      for (const height of heights) {
+        byHeight.set(height, []);
+      }
+      rowsByAddressHeight.set(address, byHeight);
+    }
+    for (const row of rows) {
+      const byHeight = rowsByAddressHeight.get(row.address);
+      const group = byHeight?.get(Number(row.snapshot_height));
+      if (group) {
+        group.push(row);
+      }
+    }
+
+    const result = new Map<string, Map<number, TokenPnlResult>>();
+    for (const [address, byHeight] of rowsByAddressHeight.entries()) {
+      const heightMap = new Map<number, TokenPnlResult>();
+      for (const [height, heightRows] of byHeight.entries()) {
+        heightMap.set(height, this.mapTokenPnls(heightRows, isRangeBased));
+      }
+      result.set(address, heightMap);
+    }
+    return result;
   }
 
   private buildDailyPnlQuery(): string {

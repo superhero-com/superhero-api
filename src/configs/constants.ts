@@ -275,9 +275,30 @@ export const POPULAR_RANKING_CONFIG = {
   // trending scaling
   TRENDING_MAX_SCORE: 100, // scale trending tag score to [0..1]
 
-  // live popular behavior — 48h, not 24h: on a low-activity network posts
-  // need longer to gather their fair share of signal
-  FRESHNESS_BOOST_HOURS: 48,
+  // Freshness curve (all-time feed de-staling). A new post carries a full
+  // freshness lift for its first ~5 days, then the lift fades linearly to zero
+  // by ~10 days. After that the stale penalty below takes over. On a
+  // low-activity network posts need days, not hours, to gather their signal.
+  FRESHNESS_FULL_BOOST_HOURS: 120, // 5 days at full freshness factor (=1)
+  FRESHNESS_BOOST_HOURS: 240, // freshness factor reaches 0 by 10 days
+
+  // Beyond the freshness window a post with no interaction inside
+  // VELOCITY_WINDOW_HOURS is actively demoted so dead evergreen content sinks
+  // instead of pinning the feed forever. The penalty grows with age (deadest
+  // posts sink furthest) and is applied after age gravity. Any recent activity
+  // (a fresh comment/tip) revives the post and zeroes the penalty — "become
+  // minus unless new activity appears".
+  STALE_PENALTY_START_HOURS: 240, // begins where the freshness lift ends
+  STALE_PENALTY_RAMP_HOURS: 240, // reaches the full penalty 10 days later
+  STALE_PENALTY_MAX: 5, // max score subtracted from a fully-stale post
+
+  // Deterministic per-UTC-day multiplicative jitter applied to the default
+  // (non-personalized) feed's final score so the visible order rotates daily
+  // instead of being frozen between recomputes. Stable within a UTC day so
+  // pagination stays consistent through the day; reseeds at midnight UTC.
+  // ±20%: enough to reshuffle the dense engaged middle, too small to let a
+  // clearly weaker post leapfrog a clearly stronger one.
+  DAILY_SHUFFLE_MAGNITUDE: 0.2,
 
   // velocity looks at interactions inside this window (divided by post age
   // when the post is younger), so an old post catching fire still registers

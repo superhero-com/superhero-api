@@ -5,6 +5,13 @@ import { SyncState } from '../entities/sync-state.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { EntityConfig } from '@/api-core/types/entity-config.interface';
 
+// Full-history blockchain mirror tables: no range-filter alternative to
+// OFFSET paging exists for these (unlike app tables, a client walking chain
+// history has no other way to reach old rows), so they need a far higher
+// cap than the base controller/resolver's default MAX_PAGE/MAX_GRAPHQL_PAGE
+// (500) to stay usable for explorer/backfill clients.
+const MDW_MIRROR_MAX_PAGE = 1_000_000;
+
 export const TX_CONFIG: EntityConfig<Tx> = {
   entity: Tx,
   primaryKey: 'hash',
@@ -17,6 +24,7 @@ export const TX_CONFIG: EntityConfig<Tx> = {
     singular: 'tx',
   },
   swaggerTag: 'MDW Transactions',
+  maxPage: MDW_MIRROR_MAX_PAGE,
   orderByFields: [
     'hash',
     'block_hash',
@@ -59,6 +67,7 @@ export const MICRO_BLOCK_CONFIG: EntityConfig<MicroBlock> = {
     singular: 'microBlock',
   },
   swaggerTag: 'MDW Micro Blocks',
+  maxPage: MDW_MIRROR_MAX_PAGE,
   orderByFields: [
     'height',
     'hash',
@@ -120,6 +129,7 @@ export const KEY_BLOCK_CONFIG: EntityConfig<KeyBlock> = {
     singular: 'keyBlock',
   },
   swaggerTag: 'MDW Key Blocks',
+  maxPage: MDW_MIRROR_MAX_PAGE,
   orderByFields: [
     'height',
     'hash',

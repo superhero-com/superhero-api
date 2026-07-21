@@ -45,6 +45,7 @@ import {
 } from '../profile.constants';
 import { verifyAeAddressSignature } from './profile-signature.util';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
 
 const RETRYABLE_STATUSES: ChainNameClaimStatus[] = [
   'pending',
@@ -52,6 +53,10 @@ const RETRYABLE_STATUSES: ChainNameClaimStatus[] = [
   'claimed',
 ];
 const BATCH_SIZE = 50;
+// processClaimWithGuard already dedupes per-address, so different claims in
+// the same due-batch are safe to run concurrently -- was one on-chain claim
+// processed at a time (up to BATCH_SIZE sequential awaits every 30s).
+const CLAIM_PROCESS_CONCURRENCY = 5;
 const MAX_PRECLAIM_AGE_BLOCKS = 250;
 const STUB_ADDRESS: `ak_${string}` =
   'ak_11111111111111111111111111111111273Yts';
@@ -327,9 +332,9 @@ export class ProfileChainNameService {
         order: { next_retry_at: 'ASC', updated_at: 'ASC' },
         take: BATCH_SIZE,
       });
-      for (const claim of dueClaims) {
-        await this.processClaimWithGuard(claim.address);
-      }
+      await mapWithConcurrency(dueClaims, CLAIM_PROCESS_CONCURRENCY, (claim) =>
+        this.processClaimWithGuard(claim.address),
+      );
     } catch (error) {
       this.logger.error('Failed to process due chain name claims', error);
     } finally {

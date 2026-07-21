@@ -26,9 +26,14 @@ jest.mock('ioredis', () => {
 import { PopularRankingService } from './popular-ranking.service';
 import { POPULAR_RANKING_CONFIG } from '@/configs/constants';
 
+// Serves both queries built off `postRepository.createQueryBuilder('post')`:
+// the candidate-id scan (select/where/andWhere/orderBy/limit/getRawMany) and
+// the slim hydration query (leftJoin/select/addSelect/where/getMany).
 function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
   return {
     select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    leftJoin: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
@@ -36,6 +41,7 @@ function createCandidateQueryBuilder(posts: Array<{ id: string }>) {
     getRawMany: jest
       .fn()
       .mockResolvedValue(posts.map((post) => ({ id: post.id }))),
+    getMany: jest.fn().mockResolvedValue(posts),
   };
 }
 
@@ -700,7 +706,9 @@ describe('PopularRankingService', () => {
       };
       const candidateQB = {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
@@ -708,6 +716,7 @@ describe('PopularRankingService', () => {
         getRawMany: jest
           .fn()
           .mockResolvedValue([{ id: 'topic-heavy' }, { id: 'target-post' }]),
+        getMany: jest.fn().mockResolvedValue([targetPost, topicHeavyPost]),
       };
       const tipQB = {
         select: jest.fn().mockReturnThis(),
@@ -751,10 +760,15 @@ describe('PopularRankingService', () => {
 
       expect(candidateQB.leftJoinAndSelect).not.toHaveBeenCalled();
       expect(candidateQB.select).toHaveBeenCalledWith('post.id', 'id');
-      expect(repo.find).toHaveBeenCalledWith({
-        where: { id: expect.anything() },
-        relations: ['topics'],
-      });
+      // Slim hydration: joins topics for their name only, selects id/content/created_at.
+      expect(candidateQB.leftJoin).toHaveBeenCalledWith('post.topics', 'topic');
+      expect(candidateQB.select).toHaveBeenCalledWith([
+        'post.id',
+        'post.content',
+        'post.created_at',
+      ]);
+      expect(candidateQB.addSelect).toHaveBeenCalledWith(['topic.name']);
+      expect(repo.find).not.toHaveBeenCalled();
       expect(result.scoredItems!.map((item) => item.postId)).toEqual([
         'target-post',
         'topic-heavy',
@@ -1014,21 +1028,21 @@ describe('PopularRankingService', () => {
     });
 
     it('keeps a positive velocity contribution past the freshness window on default weights', () => {
-      // Both posts are past FRESHNESS_BOOST_HOURS with identical totals, so
-      // freshness-gated terms are zero for both and any score gap comes from
-      // the always-on interactionsPerHour term.
+      // Both posts are the same age and past FRESHNESS_BOOST_HOURS, so the
+      // freshness-gated terms are zero for both and there is no gravity/penalty
+      // to confound them (7d window). The only gap comes from the always-on
+      // interactionsPerHour term, driven here by recent activity.
+      const age = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS + 60;
       const weights = (service as any).resolveWeights();
       const momentum = (service as any).computeScore(
         noTrending,
-        scoreInput(POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS + 10, {
-          comments: 48,
-        }),
+        scoreInput(age, { comments: 48, recentInteractions: 96 }),
         weights,
         '7d',
       );
       const slowBurn = (service as any).computeScore(
         noTrending,
-        scoreInput(160, { comments: 48 }),
+        scoreInput(age, { comments: 48, recentInteractions: 0 }),
         weights,
         '7d',
       );
@@ -1209,6 +1223,72 @@ describe('PopularRankingService', () => {
       const svc = service as any;
       expect(svc.computeTieRotation(undefined)).toBe(0);
       expect(svc.computeTieRotation('')).toBe(0);
+    });
+
+    it('holds full freshness for the boost plateau then fades to zero', () => {
+      const svc = service as any;
+      const full = POPULAR_RANKING_CONFIG.FRESHNESS_FULL_BOOST_HOURS;
+      const zero = POPULAR_RANKING_CONFIG.FRESHNESS_BOOST_HOURS;
+
+      // Anywhere inside the plateau the factor is a flat 1.
+      expect(svc.computeFreshnessFactor(scoreInput(1))).toBeCloseTo(1);
+      expect(svc.computeFreshnessFactor(scoreInput(full - 1))).toBeCloseTo(1);
+      // Midway through the fade it is partial, and it hits 0 at the window end.
+      const mid = svc.computeFreshnessFactor(scoreInput((full + zero) / 2));
+      expect(mid).toBeGreaterThan(0);
+      expect(mid).toBeLessThan(1);
+      expect(svc.computeFreshnessFactor(scoreInput(zero + 1))).toBe(0);
+    });
+
+    it('demotes stale posts by age unless recent activity revives them', () => {
+      const svc = service as any;
+      const start = POPULAR_RANKING_CONFIG.STALE_PENALTY_START_HOURS;
+      const ramp = POPULAR_RANKING_CONFIG.STALE_PENALTY_RAMP_HOURS;
+      const max = POPULAR_RANKING_CONFIG.STALE_PENALTY_MAX;
+
+      // Inside the freshness window: never penalized.
+      expect(
+        svc.computeStalePenalty(
+          scoreInput(start - 10, { recentInteractions: 0 }),
+        ),
+      ).toBe(0);
+      // Past the window with no recent activity: penalty grows with age...
+      const younger = svc.computeStalePenalty(
+        scoreInput(start + ramp / 4, { recentInteractions: 0 }),
+      );
+      const older = svc.computeStalePenalty(
+        scoreInput(start + ramp / 2, { recentInteractions: 0 }),
+      );
+      expect(older).toBeGreaterThan(younger);
+      expect(younger).toBeGreaterThan(0);
+      // ...and is capped.
+      expect(
+        svc.computeStalePenalty(
+          scoreInput(start + ramp * 10, { recentInteractions: 0 }),
+        ),
+      ).toBeCloseTo(max);
+      // Recent activity revives the post; unknown activity (plugin items) is
+      // never penalized.
+      expect(
+        svc.computeStalePenalty(
+          scoreInput(start + ramp, { recentInteractions: 1 }),
+        ),
+      ).toBe(0);
+      expect(svc.computeStalePenalty(scoreInput(start + ramp))).toBe(0);
+    });
+
+    it('applies bounded, per-day-deterministic shuffle jitter', () => {
+      const svc = service as any;
+      const mag = POPULAR_RANKING_CONFIG.DAILY_SHUFFLE_MAGNITUDE;
+      const first = svc.computeDailyJitter('post-a');
+      const second = svc.computeDailyJitter('post-a');
+      const other = svc.computeDailyJitter('post-b');
+
+      expect(first).toBe(second);
+      expect(Math.abs(first)).toBeLessThanOrEqual(mag);
+      expect(other).not.toBe(first);
+      expect(svc.computeDailyJitter(undefined)).toBe(0);
+      expect(svc.computeDailyJitter('')).toBe(0);
     });
 
     it('penalizes short emoji-only posts in content quality', () => {

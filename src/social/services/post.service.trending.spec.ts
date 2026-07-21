@@ -29,7 +29,7 @@ describe('PostService trending refresh', () => {
     };
     topicRepository = {};
     tokensService = {
-      updateTrendingScoresForSymbols: jest.fn(),
+      queueTrendingScoresForSymbols: jest.fn(),
     };
 
     service = new PostService(
@@ -53,7 +53,7 @@ describe('PostService trending refresh', () => {
       .spyOn(service as any, 'updateTopicPostCounts')
       .mockResolvedValue(undefined);
     postRepository.findOne.mockResolvedValue(null);
-    tokensService.updateTrendingScoresForSymbols.mockRejectedValue(
+    tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
       new Error('refresh failed'),
     );
 
@@ -80,7 +80,7 @@ describe('PostService trending refresh', () => {
         token_mentions: ['ALPHA'],
       }),
     );
-    expect(tokensService.updateTrendingScoresForSymbols).toHaveBeenCalledWith([
+    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
       'ALPHA',
     ]);
   });

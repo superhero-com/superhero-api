@@ -97,7 +97,14 @@ export class TransactionsController {
         'token.sale_address = transactions.sale_address',
       );
     } else {
-      queryBuilder.leftJoinAndSelect(
+      // No relation is declared for `token` on the Transaction entity, so
+      // this join is never hydrated onto the response (see the
+      // leftJoinAndMapOne branch above for the explicit-mapping path) --
+      // it exists solely to support the `token.factory_address` filter
+      // below. `leftJoin` (not `leftJoinAndSelect`) avoids transferring
+      // token.* columns, including large JSON price fields, that are
+      // discarded on every row.
+      queryBuilder.leftJoin(
         'token',
         'token',
         'token.sale_address = transactions.sale_address',

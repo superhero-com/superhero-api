@@ -23,8 +23,10 @@ describe('TokensService', () => {
   let transactionsRepository: any;
   let postsRepository: any;
   let tokenEligibilityCountsRepository: any;
+  let tokenTradeEligibilityCountsRepository: any;
   let communityFactoryService: any;
   let pullTokenInfoQueue: any;
+  let updateTrendingScoresQueue: any;
 
   beforeEach(() => {
     (fetchJson as jest.Mock).mockReset();
@@ -46,10 +48,16 @@ describe('TokensService', () => {
     tokenEligibilityCountsRepository = {
       findOne: jest.fn(),
     };
+    tokenTradeEligibilityCountsRepository = {
+      findOne: jest.fn(),
+    };
     communityFactoryService = {
       getCurrentFactory: jest.fn(),
     };
     pullTokenInfoQueue = {
+      add: jest.fn(),
+    };
+    updateTrendingScoresQueue = {
       add: jest.fn(),
     };
 
@@ -59,11 +67,13 @@ describe('TokensService', () => {
       transactionsRepository as any,
       postsRepository as any,
       tokenEligibilityCountsRepository as any,
+      tokenTradeEligibilityCountsRepository as any,
       {} as any,
       {} as any,
       {} as any,
       communityFactoryService as any,
       pullTokenInfoQueue as any,
+      updateTrendingScoresQueue as any,
     );
   });
 
@@ -281,8 +291,7 @@ describe('TokensService', () => {
       'eligibility_post_counts.symbol = UPPER(token.symbol)',
     );
     expect(tradeCountsAlias).toBe('eligibility_trade_counts');
-    expect(tradeCountsSql.startsWith('(')).toBe(true);
-    expect(tradeCountsSql).toContain('COUNT(*) AS trade_count');
+    expect(tradeCountsSql.name).toBe('TokenTradeEligibilityCounts');
     expect(tradeCountsCondition).toBe(
       'eligibility_trade_counts.sale_address = token.sale_address',
     );
@@ -415,22 +424,18 @@ describe('TokensService', () => {
       stored_post_count: 1,
       content_post_count: 2,
     });
-    tokensRepository.query.mockResolvedValue([
-      {
-        trade_count: '4',
-      },
-    ]);
+    tokenTradeEligibilityCountsRepository.findOne.mockResolvedValue({
+      trade_count: 4,
+    });
 
     const breakdown = await service.getTrendingEligibilityBreakdown('ct_sale');
 
-    const [eligibilityQuery, eligibilityParams] =
-      tokensRepository.query.mock.calls[0];
     expect(tokenEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
       where: { symbol: 'TEST' },
     });
-    expect(eligibilityQuery).toContain('COUNT(*) AS trade_count');
-    expect(eligibilityQuery).toContain('tx.sale_address = $1');
-    expect(eligibilityParams).toEqual(['ct_sale']);
+    expect(tokenTradeEligibilityCountsRepository.findOne).toHaveBeenCalledWith({
+      where: { sale_address: 'ct_sale' },
+    });
     expect(breakdown).toEqual({
       sale_address: 'ct_sale',
       symbol: 'TEST',
@@ -727,6 +732,45 @@ describe('TokensService', () => {
       expect(params).toEqual(['ct_factory', ['ct_x']]);
       expect(sql).toContain('ANY($2::text[])');
       expect(result.get('ct_x')).toBe(3);
+    });
+  });
+
+  describe('queueTrendingScoresForSymbols', () => {
+    it('enqueues one deduped, delayed job per normalized symbol', async () => {
+      await service.queueTrendingScoresForSymbols(['alpha', 'ALPHA', ' beta ']);
+
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledTimes(2);
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'ALPHA' },
+        expect.objectContaining({
+          jobId: 'updateTrendingScores-ALPHA',
+          delay: 5_000,
+          removeOnComplete: true,
+          removeOnFail: true,
+        }),
+      );
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'BETA' },
+        expect.objectContaining({ jobId: 'updateTrendingScores-BETA' }),
+      );
+    });
+
+    it('does not enqueue anything for blank symbols', async () => {
+      await service.queueTrendingScoresForSymbols(['', '   ']);
+
+      expect(updateTrendingScoresQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('configures retries so a transient failure does not permanently drop the recompute', async () => {
+      await service.queueTrendingScoresForSymbols(['alpha']);
+
+      expect(updateTrendingScoresQueue.add).toHaveBeenCalledWith(
+        { symbol: 'ALPHA' },
+        expect.objectContaining({
+          attempts: 3,
+          backoff: expect.objectContaining({ type: 'exponential' }),
+        }),
+      );
     });
   });
 });

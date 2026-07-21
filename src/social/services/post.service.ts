@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { In, Repository, EntityManager } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Post } from '../entities/post.entity';
 import { Topic } from '../entities/topic.entity';
 import {
@@ -31,6 +32,13 @@ import { parsePostContent } from '../utils/content-parser.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { normalizeTopicName } from '../utils/topic-name.util';
 import { TokensService } from '@/tokens/tokens.service';
+
+// How old a comment must be before fixOrphanedComments will permanently
+// detach it from a still-missing parent. Backward MDW sync doesn't guarantee
+// parent-before-child ordering, so a comment can be briefly "orphaned" simply
+// because its parent hasn't synced yet; this grace period gives that window
+// time to close before the cleanup commits to treating it as a real orphan.
+const ORPHAN_CLEANUP_GRACE_PERIOD = '1 hour';
 
 @Injectable()
 export class PostService {
@@ -411,7 +419,7 @@ export class PostService {
                 where: { id: postId },
               }),
             updateTrendingScoresForSymbols: (symbols) =>
-              this.tokensService.updateTrendingScoresForSymbols(symbols),
+              this.tokensService.queueTrendingScoresForSymbols(symbols),
             logError: (message, trace) => this.logger.error(message, trace),
             errorMessage: 'Failed to refresh trending scores after saving post',
           });
@@ -543,7 +551,7 @@ export class PostService {
             where: { id: postId },
           }),
         updateTrendingScoresForSymbols: (symbols) =>
-          this.tokensService.updateTrendingScoresForSymbols(symbols),
+          this.tokensService.queueTrendingScoresForSymbols(symbols),
         logError: (message, trace) => this.logger.error(message, trace),
         errorMessage: 'Failed to refresh trending scores after saving post',
       });
@@ -874,73 +882,57 @@ export class PostService {
   }
 
   /**
-   * Fixes orphaned comments by linking them to their parent posts
-   * This is a cleanup method for comments that were created before their parent posts
+   * Fixes orphaned comments by linking them to their parent posts.
+   * This is a cleanup method for comments that were created before their parent posts.
+   *
+   * Set-based instead of a per-comment validate+getCount() loop: one UPDATE
+   * converts every comment whose parent is still missing back to a standalone
+   * post, then one UPDATE (joined via a single GROUP BY) recomputes
+   * total_comments for every parent whose count is out of date -- this also
+   * catches up parents that only just appeared (their comment count update
+   * was a no-op while the parent row didn't exist yet), which is the actual
+   * race this cleanup exists for.
+   *
+   * This runs once, ~10s after boot (see `onModuleInit`/`sync`), with no
+   * later re-run -- so unlinking is permanent for whatever it decides is
+   * orphaned at that moment. Because comment/parent ordering during MDW
+   * backward sync isn't guaranteed, a comment can still be legitimately
+   * mid-flight (its parent post not synced yet, but on its way) at that
+   * instant; only comments older than `ORPHAN_CLEANUP_GRACE_PERIOD` are
+   * eligible for unlinking, so a parent that's merely running behind still
+   * has time to arrive before its children are permanently detached.
    */
   async fixOrphanedComments(): Promise<void> {
     try {
       this.logger.log('Starting orphaned comments cleanup...');
 
-      let fixedCount = 0;
-      let batchNumber = 0;
+      const orphanResult = await this.postRepository.query(`
+        UPDATE posts
+        SET post_id = NULL
+        WHERE post_id IS NOT NULL
+          AND created_at < NOW() - INTERVAL '${ORPHAN_CLEANUP_GRACE_PERIOD}'
+          AND NOT EXISTS (
+            SELECT 1 FROM posts parent WHERE parent.id = posts.post_id
+          )
+      `);
 
-      while (true) {
-        const orphanedComments = await this.postRepository
-          .createQueryBuilder('comment')
-          .leftJoin('posts', 'parent', 'parent.id = comment.post_id')
-          .where('comment.post_id IS NOT NULL')
-          .andWhere('parent.id IS NULL')
-          .take(500)
-          .getMany();
+      const recountResult = await this.postRepository.query(`
+        UPDATE posts parent
+        SET total_comments = counts.cnt
+        FROM (
+          SELECT post_id, COUNT(*)::int AS cnt
+          FROM posts
+          WHERE post_id IS NOT NULL
+          GROUP BY post_id
+        ) counts
+        WHERE parent.id = counts.post_id
+          AND parent.total_comments IS DISTINCT FROM counts.cnt
+      `);
 
-        if (orphanedComments.length === 0) {
-          break;
-        }
-
-        batchNumber++;
-        this.logger.log(
-          `Orphan cleanup batch ${batchNumber}: processing ${orphanedComments.length} comments`,
-        );
-
-        let batchProgress = 0;
-        for (const comment of orphanedComments) {
-          try {
-            const parentExists = await this.validateParentPost(
-              comment.post_id,
-              1,
-              0,
-            );
-            if (parentExists) {
-              await this.updatePostCommentCount(comment.post_id);
-              fixedCount++;
-            } else {
-              await this.postRepository.update(comment.id, { post_id: null });
-              this.logger.warn('Converted orphaned comment to regular post', {
-                commentId: comment.id,
-                originalParentId: comment.post_id,
-              });
-            }
-            batchProgress++;
-          } catch (error) {
-            this.logger.error('Failed to fix orphaned comment', {
-              commentId: comment.id,
-              parentId: comment.post_id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-
-        if (batchProgress === 0) {
-          this.logger.error(
-            `Orphan cleanup batch ${batchNumber}: no progress (all ${orphanedComments.length} comments failed), aborting to prevent infinite loop`,
-          );
-          break;
-        }
-      }
-
-      this.logger.log(
-        `Orphaned comments cleanup completed: ${fixedCount} fixed across ${batchNumber} batch(es)`,
-      );
+      this.logger.log('Orphaned comments cleanup completed', {
+        convertedToStandalonePosts: orphanResult[1] ?? 0,
+        parentsRecounted: recountResult[1] ?? 0,
+      });
     } catch (error) {
       this.logger.error('Failed to run orphaned comments cleanup', {
         error: error instanceof Error ? error.message : String(error),
@@ -952,42 +944,52 @@ export class PostService {
    * Creates or gets existing topics by name
    */
   private async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
-    if (!topicNames || topicNames.length === 0) {
+    const normalizedNames = [
+      ...new Set(
+        (topicNames || [])
+          .filter((topicName) => topicName && topicName.trim().length > 0)
+          .map((topicName) => normalizeTopicName(topicName)),
+      ),
+    ];
+
+    if (normalizedNames.length === 0) {
       return [];
     }
 
-    const topics: Topic[] = [];
+    // Bulk-upsert any missing topics in one round trip, then one IN() read,
+    // instead of a sequential findOne+save per topic name. DO NOTHING (not
+    // DO UPDATE) so an existing topic's accumulated post_count is never
+    // clobbered by a same-named insert racing in from another post.
+    await this.topicRepository.query(
+      `
+        INSERT INTO topics (id, name, post_count, version, created_at, updated_at)
+        SELECT unnest($1::uuid[]), unnest($2::text[]), 0, $3, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+        ON CONFLICT (name) DO NOTHING
+      `,
+      [
+        normalizedNames.map(() => randomUUID()),
+        normalizedNames,
+        this.syncVersion,
+      ],
+    );
 
-    for (const topicName of topicNames) {
-      if (!topicName || topicName.trim().length === 0) {
-        continue;
-      }
+    const topics = await this.topicRepository.find({
+      where: { name: In(normalizedNames) },
+    });
 
-      const normalizedName = normalizeTopicName(topicName);
+    const topicByName = new Map(topics.map((topic) => [topic.name, topic]));
+    const orderedTopics = normalizedNames
+      .map((name) => topicByName.get(name))
+      .filter((topic): topic is Topic => Boolean(topic));
 
-      // Try to find existing topic
-      let topic = await this.topicRepository.findOne({
-        where: { name: normalizedName },
+    if (orderedTopics.length !== normalizedNames.length) {
+      this.logger.warn('Some topics could not be created or found', {
+        requested: normalizedNames,
+        resolved: orderedTopics.map((topic) => topic.name),
       });
-
-      // Create new topic if it doesn't exist
-      if (!topic) {
-        topic = this.topicRepository.create({
-          name: normalizedName,
-          post_count: 0,
-          version: this.syncVersion,
-        });
-        topic = await this.topicRepository.save(topic);
-        this.logger.debug('Created new topic', {
-          topicName: normalizedName,
-          version: this.syncVersion,
-        });
-      }
-
-      topics.push(topic);
     }
 
-    return topics;
+    return orderedTopics;
   }
 
   /**
@@ -1007,13 +1009,36 @@ export class PostService {
       ? manager.getRepository(Topic)
       : this.topicRepository;
 
+    if (topics.length === 0) {
+      return;
+    }
+
+    let countByTopicId = new Map<string, number>();
+    try {
+      const rows = await postRepository
+        .createQueryBuilder('post')
+        .innerJoin('post.topics', 'topic')
+        .select('topic.id', 'topic_id')
+        .addSelect('COUNT(post.id)', 'count')
+        .where('topic.id IN (:...topicIds)', {
+          topicIds: topics.map((topic) => topic.id),
+        })
+        .groupBy('topic.id')
+        .getRawMany<{ topic_id: string; count: string }>();
+      countByTopicId = new Map(
+        rows.map((row) => [row.topic_id, parseInt(row.count, 10)]),
+      );
+    } catch (error) {
+      this.logger.error('Failed to load topic post counts', {
+        topicIds: topics.map((topic) => topic.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
     for (const topic of topics) {
       try {
-        const count = await postRepository
-          .createQueryBuilder('post')
-          .innerJoin('post.topics', 'topic')
-          .where('topic.id = :topicId', { topicId: topic.id })
-          .getCount();
+        const count = countByTopicId.get(topic.id) ?? 0;
 
         await topicRepository.update(topic.id, {
           post_count: count,

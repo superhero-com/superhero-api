@@ -39,6 +39,8 @@ import { AddressLinksModule } from './plugins/address-links/address-links.module
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.module';
+import { SearchModule } from './search/search.module';
+import { FeedModule } from './feed/feed.module';
 
 @Module({
   imports: [
@@ -49,7 +51,13 @@ import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.mod
       useFactory: () => ({
         stores: [
           new Keyv({
-            store: new LRUCache<string, any>({ max: 2000 }),
+            // Shared by every CacheInterceptor URL variant (search/order/page
+            // permutations) plus manual cache keys (trending, profile, etc.).
+            // 2000 evicted too fast to keep the hottest list-endpoint entries
+            // warm; raised to 10000 to improve hit rate. Entries are mostly
+            // small token/price JSON objects, so this stays well within
+            // typical container memory limits.
+            store: new LRUCache<string, any>({ max: 10000 }),
           }),
         ],
       }),
@@ -112,6 +120,8 @@ import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.mod
     // all load here; the relay duties self-enable iff a relay is configured
     // (`TG_RELAY_URL` + `TG_BOT_NSEC`). See deworker-plan.md.
     TokenGatedRoomsModule,
+    SearchModule,
+    FeedModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,8 +1,9 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import compression from 'compression';
 import { join } from 'path';
 import hbs from 'hbs';
 import { readFileSync } from 'fs';
@@ -12,9 +13,11 @@ import {
   hasExplicitAllowlist,
   parseAllowedOrigins,
 } from './configs/allowed-origins';
+import { resolveTrustProxyValue } from './configs/trust-proxy';
 import { registerProcessGuards } from './process-guards';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const bootstrapLogger = new Logger('Bootstrap');
 
 // Global process-level guards to surface and prevent silent killers
 // (uncaughtException / unhandledRejection → log + exit 1).
@@ -39,6 +42,10 @@ async function bootstrap() {
     }),
   );
 
+  // Compress JSON responses; list endpoints return 100-item pages that
+  // shrink 70-85% under gzip.
+  app.use(compression());
+
   // This is a public API — by default we allow every browser origin so
   // unknown third-party consumers (explorers, dashboards, embeds) can
   // call us. Operators can still pin to an allowlist via
@@ -52,6 +59,27 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: hasExplicitAllowlist(),
   });
+  // Behind a reverse proxy (nginx / ELB / Cloudflare) Express otherwise reports
+  // the proxy's IP as `req.ip` for every client, which collapses the per-IP
+  // RateLimitGuard into one shared bucket (self-DoS) and blinds any IP-based
+  // logging. `TRUST_PROXY` lets ops declare the hop count / preset so Express
+  // resolves the real client IP from X-Forwarded-For. Left UNSET by default
+  // because trusting XFF without a proxy in front makes the client IP spoofable
+  // — only enable it when something trustworthy actually sets the header.
+  // Accept a hop count ("1"), a boolean ("true"/"false"), or a preset/CIDR
+  // ("loopback", "10.0.0.0/8") passed straight through to Express.
+  const trustProxyValue = resolveTrustProxyValue(
+    process.env.TRUST_PROXY,
+    (rawValue, resolvedValue) => {
+      bootstrapLogger.warn(
+        `TRUST_PROXY="${rawValue}" is not a hop count or true/false; passing "${resolvedValue}" to Express as a preset/CIDR value. Double-check this is intentional.`,
+      );
+    },
+  );
+  if (trustProxyValue !== undefined) {
+    app.set('trust proxy', trustProxyValue);
+  }
+
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({

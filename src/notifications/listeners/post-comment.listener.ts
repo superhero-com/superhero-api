@@ -7,7 +7,6 @@ import {
   PostCommentCreatedEventPayload,
 } from '@/plugins/social/events';
 import { NotificationService } from '../core/notification.service';
-import { DeviceRegistryService } from '../services/device-registry.service';
 import { AccountLabelService } from '../services/account-label.service';
 import { NotificationRedisService } from '../services/notification-redis.service';
 import { NotificationPreferencesService } from '../services/notification-preferences.service';
@@ -16,15 +15,17 @@ import notificationsConfig from '../notifications.config';
 
 /**
  * Bridges POST_COMMENT_CREATED_EVENT from the social plugin into the
- * notification engine. Cheap hot-path gate: short-circuits if the post
- * author has no registered device before doing any label resolution.
+ * notification engine. NOT gated on the recipient having a mobile device:
+ * post-comment also delivers to the web feed (the 'database' channel), so a
+ * web-only post author must still be dispatched. ExpoChannel no-ops when there
+ * is no device token, the opt-out is enforced in NotificationService.send, and
+ * the per-recipient rate cap below still bounds a comment storm.
  */
 @Injectable()
 export class PostCommentListener {
   private readonly logger = new Logger(PostCommentListener.name);
 
   constructor(
-    private readonly registry: DeviceRegistryService,
     private readonly notifications: NotificationService,
     private readonly accountLabel: AccountLabelService,
     private readonly redis: NotificationRedisService,
@@ -50,9 +51,6 @@ export class PostCommentListener {
         return;
       }
       if (postAuthorAddress === commenterAddress) {
-        return;
-      }
-      if (!(await this.registry.hasDevices(postAuthorAddress))) {
         return;
       }
 
