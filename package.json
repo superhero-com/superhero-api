@@ -106,6 +106,7 @@
     ],
     "rootDir": "src/",
     "testRegex": ".*\\.spec\\.ts$",
+    "globalSetup": "<rootDir>/../test/harness/jest-global-setup.ts",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },

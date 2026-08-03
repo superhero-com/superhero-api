@@ -6,6 +6,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { paginate, Pagination } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
+import { fetchJson } from '@/utils/common';
 import { Transaction } from '../entities/transaction.entity';
 import { TransactionService } from '../services/transaction.service';
 import { TransactionsController } from './transactions.controller';
@@ -14,6 +15,13 @@ jest.mock('nestjs-typeorm-paginate', () => ({
   paginate: jest.fn(),
 }));
 jest.mock('@/ae/community-factory.service');
+// getTransactionByHash falls back to the live middleware via fetchJson when the
+// row is absent; stub it so the not-found path is deterministic and offline
+// (a real fetch here was a >5s flake).
+jest.mock('@/utils/common', () => ({
+  ...jest.requireActual('@/utils/common'),
+  fetchJson: jest.fn(),
+}));
 
 describe('TransactionsController', () => {
   let controller: TransactionsController;
@@ -24,6 +32,7 @@ describe('TransactionsController', () => {
 
   beforeEach(async () => {
     (paginate as jest.Mock).mockReset();
+    (fetchJson as jest.Mock).mockReset();
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TransactionsController],
@@ -220,9 +229,9 @@ describe('TransactionsController', () => {
         select: jest.fn().mockReturnThis(),
         getRawOne: jest.fn().mockResolvedValue(null),
       } as any);
-      transactionService.saveTransaction.mockRejectedValueOnce(
-        new Error('transaction not found'),
-      );
+      // Middleware miss → the controller throws NotFoundException. Stubbed so this
+      // resolves instantly instead of hitting the live middleware.
+      (fetchJson as jest.Mock).mockRejectedValueOnce(new Error('mdw miss'));
 
       await expect(
         controller.getTransactionByHash('invalid_hash'),

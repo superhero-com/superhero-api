@@ -18,6 +18,18 @@ import { Relay } from 'nostr-tools';
 export const RELAY_URL = process.env.TG_RELAY_URL || 'ws://localhost:7777';
 
 /**
+ * Whether a relay answered the one-shot probe run by the Jest `globalSetup`
+ * (`test/harness/jest-global-setup.ts`), read synchronously so specs can pick
+ * `describe`/`describe.skip` at collection time and Jest *counts* the skips.
+ *
+ * Deliberately NOT `!!process.env.TG_RELAY_URL`: the repo `.env` sets
+ * `TG_RELAY_URL` as a default endpoint, so trusting its mere presence made
+ * relay-backed specs run against a dead relay instead of skipping. This reflects
+ * an actual reachability probe; it is `false` when no `globalSetup` ran.
+ */
+export const RELAY_REACHABLE = process.env.TGR_RELAY_REACHABLE === '1';
+
+/**
  * The relay-admin keypair (D7: the bot key under test == the relay admin so it
  * may create managed groups on a freshly-booted relay). Defaults to the
  * `groups_relay/config/settings.test.yml` pair; override via `TG_BOT_NSEC`.
@@ -36,17 +48,26 @@ export async function relayReachable(
   timeoutMs = 3000,
 ): Promise<boolean> {
   let relay: Relay | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     relay = await Promise.race([
       Relay.connect(url),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('relay connect timeout')), timeoutMs),
-      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('relay connect timeout')),
+          timeoutMs,
+        );
+      }),
     ]);
     return true;
   } catch {
     return false;
   } finally {
+    // Clear the race timer so a fast connect/refusal doesn't keep the event loop
+    // alive (Jest "did not exit" / a dangling 3s handle).
+    if (timer) {
+      clearTimeout(timer);
+    }
     try {
       relay?.close();
     } catch {

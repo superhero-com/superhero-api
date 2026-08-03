@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { DataSource, Repository } from 'typeorm';
-import { getPublicKey, nip19, Relay } from 'nostr-tools';
+import { getPublicKey, nip19 } from 'nostr-tools';
 import WebSocket from 'ws';
 import { DATABASE_CONFIG } from '@/configs/database';
 import { Token } from '@/tokens/entities/token.entity';
@@ -13,6 +13,11 @@ import { RoomMessageSeen } from '../../entities/room-message-seen.entity';
 import { TokenBalance } from '../../entities/token-balance.entity';
 import { RoomBackfillState } from '../../entities/room-backfill-state.entity';
 import { RoomPreferencesService } from '../../services/room-preferences.service';
+import {
+  RELAY_ADMIN_NSEC,
+  RELAY_REACHABLE,
+  RELAY_URL,
+} from '@/test/harness/relay';
 import { RelaySubscriberService } from '../relay-subscriber.service';
 
 if (typeof (globalThis as { WebSocket?: unknown }).WebSocket === 'undefined') {
@@ -38,19 +43,13 @@ const SCHEMA = 'tgr14_test';
 const GID = 'ct_tgr14_sale';
 const TOKEN_ADDR = 'ct_tgr14_token';
 
-const RELAY_ADMIN_NSEC =
-  process.env.TG_BOT_NSEC ||
-  'nsec1dwg3l5mumawgr4xq4kc6klagytkj2w4s4kd2rrthy47g3v5mwx8qwrh7sx';
-const RELAY_URL = process.env.TG_RELAY_URL || 'ws://localhost:7777';
-
-async function relayReachable(url: string): Promise<boolean> {
-  try {
-    const relay = await Relay.connect(url);
-    relay.close();
-    return true;
-  } catch {
-    return false;
-  }
+// Relay cases skip loudly (counted) when the harness probe found no relay.
+const describeRelay = RELAY_REACHABLE ? describe : describe.skip;
+if (!RELAY_REACHABLE) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[relay-subscriber.integration] skipping relay cases — no relay at ${RELAY_URL}`,
+  );
 }
 
 function makeConfig(): any {
@@ -275,36 +274,12 @@ d('RelaySubscriberService (integration)', () => {
   });
 
   // ── relay-backed (auto-skip when unreachable) ────────────────────────────────
-  describe('against a live groups_relay', () => {
-    let available = false;
-    beforeAll(async () => {
-      available =
-        !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
-      if (!available) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[relay-subscriber.integration] skipping relay cases — no relay at ${RELAY_URL}`,
-        );
-      }
-    }, 30_000);
-
-    const itRelay = (name: string, fn: () => Promise<void>, timeout = 20_000) =>
-      it(
-        name,
-        async () => {
-          if (!available) {
-            return;
-          }
-          await fn();
-        },
-        timeout,
-      );
-
-    itRelay('connects + completes NIP-42 AUTH as relay admin', async () => {
+  describeRelay('against a live groups_relay', () => {
+    it('connects + completes NIP-42 AUTH as relay admin', async () => {
       await (svc as any).ensureConnected();
       expect(svc.isHealthy()).toBe(true);
       expect(svc.pubkey).toBe(adminPubkey());
       svc.onApplicationShutdown();
-    });
+    }, 20_000);
   });
 });

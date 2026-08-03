@@ -4,7 +4,7 @@ import { DATABASE_CONFIG } from '@/configs/database';
 import {
   createIsolatedDatabase,
   dropDatabase,
-  MINIMAL_TOKEN_TABLE_SQL,
+  MINIMAL_PREEXISTING_TABLES_SQL,
 } from '@/test/harness/db';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from '@/token-gated-rooms/entities/community-room.entity';
@@ -59,7 +59,7 @@ d('harness/db: isolated throwaway database (self-test)', () => {
         TokenBalance,
         RoomBackfillState,
       ],
-      seedSql: [MINIMAL_TOKEN_TABLE_SQL],
+      seedSql: MINIMAL_PREEXISTING_TABLES_SQL,
     });
 
     try {

@@ -185,13 +185,49 @@ export async function dropDatabase(name: string): Promise<void> {
 }
 
 /**
- * Minimal stand-in for the production `token` table so migration #1
- * (`ALTER TABLE "token" ADD COLUMN ...`) has a target inside the throwaway DB.
- * The TGR migrations only add columns/indexes to `token`, so a single PK column
- * is enough; we never need the full token schema here.
+ * Minimal stand-in for the production `token` table so the mainline migration
+ * chain (which the throwaway DB replays in full) has a `token` to alter/index.
+ * `token` itself predates the migrations (it originated from `synchronize`), so
+ * the seed must supply every pre-existing column a migration references —
+ * `address` (PK) plus `collection`, indexed by
+ * `1718900000010-TokenCollectionNameIdx`. Add columns here as migrations start
+ * touching them; we never need the full token schema.
  */
 export const MINIMAL_TOKEN_TABLE_SQL =
-  'CREATE TABLE "token" ("address" character varying NOT NULL, CONSTRAINT "PK_token_address" PRIMARY KEY ("address"))';
+  'CREATE TABLE "token" ("address" character varying NOT NULL, "collection" character varying, CONSTRAINT "PK_token_address" PRIMARY KEY ("address"))';
+
+/**
+ * Other pre-existing, entity-managed tables the mainline chain assumes already
+ * exist (created by `synchronize`, never by a migration). The non-TGR hot-path
+ * index migrations `CREATE INDEX ... ON` them, so a throwaway DB that replays the
+ * whole chain needs the indexed columns present or the chain fails part-way:
+ *   - `posts(post_id)`               — `1718900000011-PostsPostIdIdx`
+ *   - `token_holder(aex9_address,balance)`, `tips(sender_address,receiver_address,
+ *     post_id,created_at)`, `pair_transactions(account_address,created_at)`
+ *                                    — `1718900000012-QueryHotPathIndexes`
+ * Only the referenced columns are seeded; we never need the full schemas.
+ */
+export const MINIMAL_POSTS_TABLE_SQL =
+  'CREATE TABLE "posts" ("post_id" character varying)';
+export const MINIMAL_TOKEN_HOLDER_TABLE_SQL =
+  'CREATE TABLE "token_holder" ("aex9_address" character varying, "balance" numeric)';
+export const MINIMAL_TIPS_TABLE_SQL =
+  'CREATE TABLE "tips" ("sender_address" character varying, "receiver_address" character varying, "post_id" character varying, "created_at" TIMESTAMP WITH TIME ZONE)';
+export const MINIMAL_PAIR_TRANSACTIONS_TABLE_SQL =
+  'CREATE TABLE "pair_transactions" ("account_address" character varying, "created_at" TIMESTAMP WITH TIME ZONE)';
+
+/**
+ * Every pre-existing table the mainline migration chain touches, in a single
+ * `seedSql` payload. Pass this to {@link createIsolatedDatabase} before
+ * `runMigrations()` so the real up()/revert() path replays end-to-end.
+ */
+export const MINIMAL_PREEXISTING_TABLES_SQL = [
+  MINIMAL_TOKEN_TABLE_SQL,
+  MINIMAL_POSTS_TABLE_SQL,
+  MINIMAL_TOKEN_HOLDER_TABLE_SQL,
+  MINIMAL_TIPS_TABLE_SQL,
+  MINIMAL_PAIR_TRANSACTIONS_TABLE_SQL,
+];
 
 /** Options for the dedicated-schema isolation helper. */
 export interface IsolatedSchemaOptions {

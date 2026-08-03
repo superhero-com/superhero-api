@@ -4,9 +4,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type { Queue } from 'bull';
 import { BigNumber } from 'bignumber.js';
-import { Relay } from 'nostr-tools';
 import WebSocket from 'ws';
 import { DATABASE_CONFIG } from '@/configs/database';
+import {
+  RELAY_ADMIN_NSEC,
+  RELAY_REACHABLE,
+  RELAY_URL,
+} from '@/test/harness/relay';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from '../entities/community-room.entity';
 import { RoomMembership } from '../entities/room-membership.entity';
@@ -55,19 +59,13 @@ const TOKEN_ADDR = 'ct_tgr10_token';
 const MEMBER = 'ak_tgr10_member';
 const PUBKEY = 'a'.repeat(64);
 
-const RELAY_URL = process.env.TG_RELAY_URL || 'ws://localhost:8080';
-const RELAY_ADMIN_NSEC =
-  process.env.TG_BOT_NSEC ||
-  'nsec1dwg3l5mumawgr4xq4kc6klagytkj2w4s4kd2rrthy47g3v5mwx8qwrh7sx';
-
-async function relayReachable(url: string): Promise<boolean> {
-  try {
-    const relay = await Relay.connect(url);
-    relay.close();
-    return true;
-  } catch {
-    return false;
-  }
+// Relay section skips loudly (counted) when the harness probe found no relay.
+const describeRelay = RELAY_REACHABLE ? describe : describe.skip;
+if (!RELAY_REACHABLE) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[membership-sync.integration] relay section skipped — no relay at ${RELAY_URL}`,
+  );
 }
 
 d('MembershipSyncService (integration)', () => {
@@ -445,128 +443,103 @@ d('MembershipSyncService (integration)', () => {
   });
 
   // ── relay-backed section (auto-skips without a reachable groups_relay) ───────
-  describe('relay-backed', () => {
-    let relayAvailable = false;
+  describeRelay('relay-backed', () => {
     let writer: RelayWriterService;
 
     beforeAll(async () => {
-      relayAvailable =
-        !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
-      if (relayAvailable) {
-        writer = new RelayWriterService({
-          nostrRelayUrl: RELAY_URL,
-          nostrBotNsec: RELAY_ADMIN_NSEC,
-          publishAckTimeoutMs: 5000,
-          publishRatePerSec: 100,
-          publishMaxRetries: 5,
-          relayHealthPauseSec: 1,
-        } as any);
-        await writer.onModuleInit();
-      } else {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[membership-sync.integration] relay section skipped — no relay at ${RELAY_URL}`,
-        );
-      }
+      writer = new RelayWriterService({
+        nostrRelayUrl: RELAY_URL,
+        nostrBotNsec: RELAY_ADMIN_NSEC,
+        publishAckTimeoutMs: 5000,
+        publishRatePerSec: 100,
+        publishMaxRetries: 5,
+        relayHealthPauseSec: 1,
+      } as any);
+      await writer.onModuleInit();
     }, 30_000);
 
     afterAll(() => {
       writer?.onApplicationShutdown();
     });
 
-    const itRelay = (name: string, fn: () => Promise<void>, timeout = 20000) =>
-      it(
-        name,
-        async () => {
-          if (!relayAvailable) {
-            return;
-          }
-          await fn();
-        },
-        timeout,
+    it('enqueued 9000 published to the relay shows in 39002 members; 9001 removes it', async () => {
+      const { createGroup, editMetadata } = await import('../nostr/nip29');
+      const gid = `ct_TgrSync10_${Date.now()}`;
+      await writer.publish(createGroup(gid));
+      await writer.publish(
+        editMetadata(gid, { name: 'SYNC', isPrivate: true }),
       );
 
-    itRelay(
-      'enqueued 9000 published to the relay shows in 39002 members; 9001 removes it',
-      async () => {
-        const { createGroup, editMetadata } = await import('../nostr/nip29');
-        const gid = `ct_TgrSync10_${Date.now()}`;
-        await writer.publish(createGroup(gid));
-        await writer.publish(
-          editMetadata(gid, { name: 'SYNC', isPrivate: true }),
-        );
+      const { generateSecretKey, getPublicKey } = await import('nostr-tools');
+      const memberPubkey = getPublicKey(generateSecretKey());
 
-        const { generateSecretKey, getPublicKey } = await import('nostr-tools');
-        const memberPubkey = getPublicKey(generateSecretKey());
-
-        // Seed a created room for this gid + an eligible pending_add member, then
-        // drive the service: it enqueues a 9000 which we publish through the writer
-        // (what the processor does), then assert 39002 reflects the member.
-        await tokenRepo.save(
-          tokenRepo.create({
-            sale_address: gid,
-            address: 'ct_t_' + gid,
-            name: 'SYNC',
-            symbol: 'SYNC',
-            owner_address: 'ak_o',
-            nostr_group_id: gid,
-            nostr_room_state: 'created',
-            has_nostr_room: true,
-          } as Partial<Token>),
-        );
-        await roomRepo.save(
-          roomRepo.create({
-            sale_address: gid,
-            token_address: 'ct_t_' + gid,
-            symbol: 'SYNC',
-            owner_address: 'ak_o',
-            is_private: true,
-            min_token_threshold: new BigNumber('1'),
-            moderators: [],
-            muted: [],
-            is_community: true,
-            deleted: false,
-          }),
-        );
-        await membershipRepo.save(
-          membershipRepo.create({
-            sale_address: gid,
-            member_address: 'ak_relay_member',
-            member_pubkey: memberPubkey,
-            eligible: true,
-            relay_state: 'pending_add',
-          }),
-        );
-
-        await service.onEligibilityChanged({
-          saleAddress: gid,
-          memberAddress: 'ak_relay_member',
+      // Seed a created room for this gid + an eligible pending_add member, then
+      // drive the service: it enqueues a 9000 which we publish through the writer
+      // (what the processor does), then assert 39002 reflects the member.
+      await tokenRepo.save(
+        tokenRepo.create({
+          sale_address: gid,
+          address: 'ct_t_' + gid,
+          name: 'SYNC',
+          symbol: 'SYNC',
+          owner_address: 'ak_o',
+          nostr_group_id: gid,
+          nostr_room_state: 'created',
+          has_nostr_room: true,
+        } as Partial<Token>),
+      );
+      await roomRepo.save(
+        roomRepo.create({
+          sale_address: gid,
+          token_address: 'ct_t_' + gid,
+          symbol: 'SYNC',
+          owner_address: 'ak_o',
+          is_private: true,
+          min_token_threshold: new BigNumber('1'),
+          moderators: [],
+          muted: [],
+          is_community: true,
+          deleted: false,
+        }),
+      );
+      await membershipRepo.save(
+        membershipRepo.create({
+          sale_address: gid,
+          member_address: 'ak_relay_member',
+          member_pubkey: memberPubkey,
           eligible: true,
-        });
-        const addJob = publishQueue.add.mock.calls.at(-1)![0];
-        expect((await writer.publish(addJob.template)).ok).toBe(true);
-        await new Promise((r) => setTimeout(r, 600));
+          relay_state: 'pending_add',
+        }),
+      );
 
-        let members = await writer.fetchGroupMembers(gid);
-        expect(members.has(memberPubkey)).toBe(true);
+      await service.onEligibilityChanged({
+        saleAddress: gid,
+        memberAddress: 'ak_relay_member',
+        eligible: true,
+      });
+      const addJob = publishQueue.add.mock.calls.at(-1)![0];
+      expect((await writer.publish(addJob.template)).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 600));
 
-        // Flip eligible=false → 9001 → member gone from 39002.
-        await membershipRepo.update(
-          { sale_address: gid, member_address: 'ak_relay_member' },
-          { eligible: false, relay_state: 'pending_remove' },
-        );
-        await service.onEligibilityChanged({
-          saleAddress: gid,
-          memberAddress: 'ak_relay_member',
-          eligible: false,
-        });
-        const removeJob = publishQueue.add.mock.calls.at(-1)![0];
-        expect((await writer.publish(removeJob.template)).ok).toBe(true);
-        await new Promise((r) => setTimeout(r, 600));
+      let members = await writer.fetchGroupMembers(gid);
+      expect(members.has(memberPubkey)).toBe(true);
 
-        members = await writer.fetchGroupMembers(gid);
-        expect(members.has(memberPubkey)).toBe(false);
-      },
-    );
+      // Flip eligible=false → 9001 → member gone from 39002.
+      await membershipRepo.update(
+        { sale_address: gid, member_address: 'ak_relay_member' },
+        { eligible: false, relay_state: 'pending_remove' },
+      );
+      await service.onEligibilityChanged({
+        saleAddress: gid,
+        memberAddress: 'ak_relay_member',
+        eligible: false,
+      });
+      const removeJob = publishQueue.add.mock.calls.at(-1)![0];
+      expect((await writer.publish(removeJob.template)).ok).toBe(true);
+      await new Promise((r) => setTimeout(r, 600));
+
+      members = await writer.fetchGroupMembers(gid);
+      expect(members.has(memberPubkey)).toBe(false);
+    }, 20000);
   });
 });
