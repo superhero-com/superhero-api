@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import {
   createIsolatedDatabase,
   IsolatedDb,
-  MINIMAL_TOKEN_TABLE_SQL,
+  MINIMAL_PREEXISTING_TABLES_SQL,
 } from '@/test/harness/db';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from './community-room.entity';
@@ -53,7 +53,7 @@ d('TGR migrations (integration)', () => {
         RoomBackfillState,
       ],
       migrations: [__dirname + '/../../migrations/*{.ts,.js}'],
-      seedSql: [MINIMAL_TOKEN_TABLE_SQL],
+      seedSql: MINIMAL_PREEXISTING_TABLES_SQL,
     });
     ds = db.dataSource;
     await ds.runMigrations();
@@ -204,14 +204,18 @@ d('TGR migrations (integration)', () => {
 
   it('reverting every migration removes the tables, Token columns and enum types', async () => {
     // Drain ALL applied migrations (count-independent, so adding a migration never
-    // silently leaves a hardcoded loop under-reverting). `undoLastMigration` throws
-    // once there is nothing left to revert.
-    for (let i = 0; i < 100; i++) {
-      try {
-        await ds.undoLastMigration();
-      } catch {
-        break;
-      }
+    // silently leaves a hardcoded loop under-reverting). Terminate on the history
+    // table emptying rather than on a throw: `undoLastMigration` is a no-op (not a
+    // throw) once nothing remains, so a fixed catch-break loop would spin the full
+    // bound and thrash the connection pool.
+    const appliedMigrations = async (): Promise<number> => {
+      const rows = await ds.query(
+        `SELECT COUNT(*)::int AS n FROM "migrations"`,
+      );
+      return rows[0].n;
+    };
+    for (let i = 0; i < 100 && (await appliedMigrations()) > 0; i++) {
+      await ds.undoLastMigration();
     }
 
     for (const t of [
@@ -242,5 +246,8 @@ d('TGR migrations (integration)', () => {
     ]) {
       expect(await enumExists(e)).toBe(false);
     }
-  });
+    // Reverting the whole chain is real per-migration DDL in its own
+    // transaction, well past Jest's 5 s default (the up-migration `beforeAll`
+    // is likewise budgeted 60 s).
+  }, 60_000);
 });
