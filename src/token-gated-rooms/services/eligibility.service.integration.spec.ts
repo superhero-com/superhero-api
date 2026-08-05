@@ -50,18 +50,23 @@ const TOKEN = 'ct_int_token_eligibility';
 
 async function dropTgrObjects(ds: DataSource): Promise<void> {
   const stmts = [
+    `DROP TABLE IF EXISTS "room_membership_event"`,
     `DROP TABLE IF EXISTS "room_backfill_state"`,
     `DROP TABLE IF EXISTS "token_balance"`,
     `DROP TABLE IF EXISTS "room_message_seen"`,
     `DROP TABLE IF EXISTS "room_notification_preference"`,
     `DROP TABLE IF EXISTS "room_membership"`,
     `DROP TABLE IF EXISTS "community_room"`,
+    `DROP TYPE IF EXISTS "room_membership_event_event_enum"`,
+    `DROP TYPE IF EXISTS "room_membership_access_state_enum"`,
     `DROP TYPE IF EXISTS "room_membership_relay_state_enum"`,
     `DROP TYPE IF EXISTS "room_membership_role_enum"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_state"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_created_at"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "has_nostr_room"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_group_id"`,
+    // Migration #8 (TgrTokenRoomId) re-adds this; drop it so the replay is clean.
+    `ALTER TABLE "token" DROP COLUMN IF EXISTS "room_id"`,
     `DROP TYPE IF EXISTS "token_nostr_room_state_enum"`,
   ];
   for (const s of stmts) {

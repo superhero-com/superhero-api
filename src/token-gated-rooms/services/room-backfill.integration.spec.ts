@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { BigNumber } from 'bignumber.js';
 import { DataSource, Repository } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Queue } from 'bull';
@@ -56,6 +57,9 @@ d('Eager room backfill (integration)', () => {
     symbol,
     owner_address: 'ak_owner_' + sale,
     creator_address: 'ak_creator_' + sale,
+    // Clear the working-set worth-gate (market_cap > 0 AND holders_count >= 2).
+    market_cap: new BigNumber(1000),
+    holders_count: 2,
   });
 
   /** Replay the ACK the publish processor would emit for one publish job. */
