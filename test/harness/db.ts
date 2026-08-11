@@ -188,13 +188,17 @@ export async function dropDatabase(name: string): Promise<void> {
  * Minimal stand-in for the production `token` table so the mainline migration
  * chain (which the throwaway DB replays in full) has a `token` to alter/index.
  * `token` itself predates the migrations (it originated from `synchronize`), so
- * the seed must supply every pre-existing column a migration references —
- * `address` (PK) plus `collection`, indexed by
- * `1718900000010-TokenCollectionNameIdx`. Add columns here as migrations start
- * touching them; we never need the full token schema.
+ * the seed must supply every pre-existing column a migration references:
+ *   - `address` (PK) + `collection` — `1718900000010-TokenCollectionNameIdx`
+ *   - `unlisted`, `created_at`       — `1718900000018-TokenUnlistedCreatedAtIndex`
+ *   - `sale_address`, `market_cap`   — `1718900000019-TokenRankColumn` (the rank
+ *     backfill's `WHERE token.sale_address = ...` / `ORDER BY market_cap`)
+ * Columns a migration ADDs itself (e.g. `circulating_supply`, `rank`) are not
+ * seeded — the migration creates them. Add columns here as migrations start
+ * touching pre-existing ones; we never need the full token schema.
  */
 export const MINIMAL_TOKEN_TABLE_SQL =
-  'CREATE TABLE "token" ("address" character varying NOT NULL, "collection" character varying, CONSTRAINT "PK_token_address" PRIMARY KEY ("address"))';
+  'CREATE TABLE "token" ("address" character varying NOT NULL, "collection" character varying, "sale_address" character varying, "unlisted" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP WITH TIME ZONE, "market_cap" numeric, CONSTRAINT "PK_token_address" PRIMARY KEY ("address"))';
 
 /**
  * Other pre-existing, entity-managed tables the mainline chain assumes already
@@ -202,19 +206,26 @@ export const MINIMAL_TOKEN_TABLE_SQL =
  * index migrations `CREATE INDEX ... ON` them, so a throwaway DB that replays the
  * whole chain needs the indexed columns present or the chain fails part-way:
  *   - `posts(post_id)`               — `1718900000011-PostsPostIdIdx`
+ *   - `posts(token_mentions jsonb)`  — `1718900000016-PostsTokenMentionsGinIndex`
  *   - `token_holder(aex9_address,balance)`, `tips(sender_address,receiver_address,
  *     post_id,created_at)`, `pair_transactions(account_address,created_at)`
  *                                    — `1718900000012-QueryHotPathIndexes`
+ *   - `transactions(address,sale_address,tx_type)` —
+ *     `1718900000014-TransactionsBuySellIndexes` (indexes) and
+ *     `1718900000015-TokenTradeEligibilityCounts` (backfill `GROUP BY
+ *     sale_address WHERE tx_type IN ('buy','sell')`)
  * Only the referenced columns are seeded; we never need the full schemas.
  */
 export const MINIMAL_POSTS_TABLE_SQL =
-  'CREATE TABLE "posts" ("post_id" character varying)';
+  'CREATE TABLE "posts" ("post_id" character varying, "token_mentions" jsonb)';
 export const MINIMAL_TOKEN_HOLDER_TABLE_SQL =
   'CREATE TABLE "token_holder" ("aex9_address" character varying, "balance" numeric)';
 export const MINIMAL_TIPS_TABLE_SQL =
   'CREATE TABLE "tips" ("sender_address" character varying, "receiver_address" character varying, "post_id" character varying, "created_at" TIMESTAMP WITH TIME ZONE)';
 export const MINIMAL_PAIR_TRANSACTIONS_TABLE_SQL =
   'CREATE TABLE "pair_transactions" ("account_address" character varying, "created_at" TIMESTAMP WITH TIME ZONE)';
+export const MINIMAL_TRANSACTIONS_TABLE_SQL =
+  'CREATE TABLE "transactions" ("address" character varying, "sale_address" character varying, "tx_type" character varying)';
 
 /**
  * Every pre-existing table the mainline migration chain touches, in a single
@@ -227,6 +238,7 @@ export const MINIMAL_PREEXISTING_TABLES_SQL = [
   MINIMAL_TOKEN_HOLDER_TABLE_SQL,
   MINIMAL_TIPS_TABLE_SQL,
   MINIMAL_PAIR_TRANSACTIONS_TABLE_SQL,
+  MINIMAL_TRANSACTIONS_TABLE_SQL,
 ];
 
 /** Options for the dedicated-schema isolation helper. */

@@ -160,7 +160,19 @@ d('EligibilityService (integration)', () => {
       await moduleRef.close();
     }
     if (ds?.isInitialized) {
-      for (let i = 0; i < 7; i++) {
+      // Drain ALL applied migrations, count-driven off the private history table,
+      // so growing the chain never leaves a hardcoded loop under-reverting (a
+      // fixed `7` left 13 migrations applied — including `010`'s bare CREATE INDEX
+      // — so the next run replayed onto surviving objects and failed). Terminate
+      // on the history emptying, not a throw: `undoLastMigration` is a no-op once
+      // nothing remains. Mirrors `entities/migrations.integration.spec.ts`.
+      const appliedMigrations = async (): Promise<number> => {
+        const rows = await ds.query(
+          `SELECT COUNT(*)::int AS n FROM "migrations_tgr_eligibility_test"`,
+        );
+        return rows[0].n;
+      };
+      for (let i = 0; i < 100 && (await appliedMigrations()) > 0; i++) {
         await ds.undoLastMigration();
       }
       await ds.query('DROP TABLE IF EXISTS "migrations_tgr_eligibility_test"');
