@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
 import { AddressLinksService } from './address-links.service';
 import { NostrLinkVerifierService } from './verification/nostr-link-verifier.service';
 import { ClaimNostrLinkDto } from './dto/nostr/claim-nostr-link.dto';
@@ -22,6 +23,11 @@ export class NostrLinkController {
   }
 
   @Post('submit')
+  @ApiResponse({ status: 400, description: 'Invalid link request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submit(@Body() dto: SubmitNostrLinkDto) {
     const message = this.service.buildLinkMessage(
       dto.address,
@@ -45,6 +51,11 @@ export class NostrLinkController {
   }
 
   @Post('unclaim/submit')
+  @ApiResponse({ status: 400, description: 'Invalid unlink request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submitUnlink(@Body() dto: SubmitNostrUnlinkDto) {
     return this.service.submitUnlink(
       dto.address,

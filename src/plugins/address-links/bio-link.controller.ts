@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
 import { AddressLinksService } from './address-links.service';
 import { BioLinkVerifierService } from './verification/bio-link-verifier.service';
 import { ClaimBioLinkDto } from './dto/bio/claim-bio-link.dto';
@@ -30,6 +31,11 @@ export class BioLinkController {
   }
 
   @Post('submit')
+  @ApiResponse({ status: 400, description: 'Invalid link request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submit(@Body() dto: SubmitBioLinkDto) {
     await this.verifier.verifySubmit(dto);
     return this.service.submitLink(
@@ -47,6 +53,11 @@ export class BioLinkController {
   }
 
   @Post('unclaim/submit')
+  @ApiResponse({ status: 400, description: 'Invalid unlink request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submitUnlink(@Body() dto: SubmitBioUnlinkDto) {
     return this.service.submitUnlink(
       dto.address,

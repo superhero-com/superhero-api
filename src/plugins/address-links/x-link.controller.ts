@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
 import { AddressLinksService } from './address-links.service';
 import { XLinkVerifierService } from './verification/x-link-verifier.service';
 import { ClaimXLinkDto } from './dto/x/claim-x-link.dto';
@@ -30,6 +31,11 @@ export class XLinkController {
   }
 
   @Post('submit')
+  @ApiResponse({ status: 400, description: 'Invalid link request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submit(@Body() dto: SubmitXLinkDto) {
     await this.verifier.verifySubmit(dto);
     return this.service.submitLink(
@@ -47,6 +53,11 @@ export class XLinkController {
   }
 
   @Post('unclaim/submit')
+  @ApiResponse({ status: 400, description: 'Invalid unlink request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submitUnlink(@Body() dto: SubmitXUnlinkDto) {
     return this.service.submitUnlink(
       dto.address,

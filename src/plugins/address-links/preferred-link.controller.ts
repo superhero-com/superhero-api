@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
 import { AddressLinksService } from './address-links.service';
 import { PreferredLinkVerifierService } from './verification/preferred-link-verifier.service';
 import { ClaimPreferredLinkDto } from './dto/preferred/claim-preferred-link.dto';
@@ -32,6 +33,11 @@ export class PreferredLinkController {
   }
 
   @Post('submit')
+  @ApiResponse({ status: 400, description: 'Invalid link request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submit(@Body() dto: SubmitPreferredLinkDto) {
     await this.verifier.verifySubmit(dto);
     const value = this.verifier.normalizeChainName(dto.value);
@@ -51,6 +57,11 @@ export class PreferredLinkController {
   }
 
   @Post('unclaim/submit')
+  @ApiResponse({ status: 400, description: 'Invalid unlink request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submitUnlink(@Body() dto: SubmitPreferredUnlinkDto) {
     const principal = this.verifier.verifyUnlinkPrincipal(dto);
     return this.service.submitUnlinkPrincipal(

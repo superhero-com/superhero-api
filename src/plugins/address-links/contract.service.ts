@@ -3,6 +3,7 @@ import { Contract, MemoryAccount } from '@aeternity/aepp-sdk';
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   OnModuleInit,
   ServiceUnavailableException,
@@ -198,22 +199,44 @@ export class AddressLinksContractService implements OnModuleInit {
     }
   }
 
-  private static readonly KNOWN_CONTRACT_ERRORS: Record<string, string> = {
+  // Caller-fixable aborts: the request itself is wrong, so a different request
+  // succeeds. These map to 400.
+  private static readonly CLIENT_CONTRACT_ERRORS: Record<string, string> = {
     INVALID_SIGNATURE:
       'Wallet signature verification failed. Ensure the message was signed with the correct AE account using the signed-message format.',
     INVALID_NONCE:
       'Nonce mismatch. The nonce may have changed — request a new claim and try again.',
     ALREADY_CLAIMED:
       'This provider is already linked to a different value for this address.',
-    NOT_LINKED: 'No link exists for this provider and address.',
     NO_LINKS: 'No link exists for this provider and address.',
-    NOT_PROVIDER_OWNER:
-      'The backend wallet is not the registered owner for this provider on the contract.',
+    LINK_NOT_FOUND: 'No link exists for this provider and address.',
+    EMPTY_VALUE: 'Value must not be empty.',
+    VALUE_TOO_LONG: 'Value must be 200 characters or fewer.',
+    INVALID_VALUE: 'Value must not contain ":".',
+    EMPTY_PRINCIPAL: 'Principal must not be empty.',
+    PRINCIPAL_TOO_LONG: 'Principal must be 200 characters or fewer.',
     PRINCIPAL_NOT_FOUND:
       'AENS name not found. The name must be registered on-chain.',
     PRINCIPAL_MISMATCH:
       'AENS name is not owned by this address. Only the name owner can link or unlink.',
     INVALID_PRINCIPAL: 'Invalid AENS name principal.',
+    INVALID_DID: 'Invalid DID. Expected a "did:ae:" principal.',
+    MESSAGE_TOO_LONG: 'Signed message is too long.',
+    EMPTY_PROVIDER: 'Provider must not be empty.',
+    PROVIDER_TOO_LONG: 'Provider must be 10 characters or fewer.',
+    INVALID_PROVIDER: 'Provider must contain lowercase letters a–z only.',
+    PROVIDER_EXISTS: 'This provider is already registered.',
+  };
+
+  // Deployment-wiring aborts: this API instance is not correctly wired to the
+  // contract it is pointed at. The caller cannot fix these — a retry succeeds
+  // only once the deployment is corrected (e.g. register_provider is run), so
+  // they map to 503, matching the env-missing case in getContractInstance().
+  private static readonly WIRING_CONTRACT_ERRORS: Record<string, string> = {
+    PROVIDER_NOT_FOUND:
+      'This provider is not registered on the AddressLink contract this service is configured to use.',
+    NOT_PROVIDER_OWNER:
+      'The backend wallet is not the registered owner for this provider on the contract.',
   };
 
   private decodeSignature(hex: string): Buffer {
@@ -227,16 +250,32 @@ export class AddressLinksContractService implements OnModuleInit {
 
   private mapContractError(error: any, operation: string): Error {
     const message: string = error?.message || String(error);
+
     for (const [code, description] of Object.entries(
-      AddressLinksContractService.KNOWN_CONTRACT_ERRORS,
+      AddressLinksContractService.WIRING_CONTRACT_ERRORS,
+    )) {
+      if (message.includes(code)) {
+        this.logger.error(`Contract ${operation} misconfigured: ${code}`);
+        return new ServiceUnavailableException(description);
+      }
+    }
+
+    for (const [code, description] of Object.entries(
+      AddressLinksContractService.CLIENT_CONTRACT_ERRORS,
     )) {
       if (message.includes(code)) {
         this.logger.warn(`Contract ${operation} rejected: ${code}`);
         return new BadRequestException(description);
       }
     }
+
+    // Never re-throw the raw SDK error: it can leak node URLs, tx detail and
+    // the backend wallet address through an unauthenticated endpoint. Log it,
+    // return a fixed generic 500.
     this.logger.error(`Contract ${operation} failed unexpectedly`, message);
-    return error;
+    return new InternalServerErrorException(
+      'Address link transaction failed unexpectedly.',
+    );
   }
 
   private async getContractInstance(): Promise<any> {

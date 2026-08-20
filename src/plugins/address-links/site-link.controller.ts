@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiResponse } from '@nestjs/swagger';
 import { AddressLinksService } from './address-links.service';
 import { SiteLinkVerifierService } from './verification/site-link-verifier.service';
 import { ClaimSiteLinkDto } from './dto/site/claim-site-link.dto';
@@ -30,6 +31,11 @@ export class SiteLinkController {
   }
 
   @Post('submit')
+  @ApiResponse({ status: 400, description: 'Invalid link request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submit(@Body() dto: SubmitSiteLinkDto) {
     await this.verifier.verifySubmit(dto);
     const value = this.verifier.normalizeSite(dto.value);
@@ -48,6 +54,11 @@ export class SiteLinkController {
   }
 
   @Post('unclaim/submit')
+  @ApiResponse({ status: 400, description: 'Invalid unlink request.' })
+  @ApiResponse({
+    status: 503,
+    description: 'AddressLink contract is not correctly configured.',
+  })
   async submitUnlink(@Body() dto: SubmitSiteUnlinkDto) {
     return this.service.submitUnlink(
       dto.address,
