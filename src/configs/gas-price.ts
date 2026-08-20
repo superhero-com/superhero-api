@@ -48,6 +48,25 @@ export function resolveMinGasPrice(raw: string | undefined): bigint {
   return parsed;
 }
 
+// A zero window is "no traffic this interval", not a price of zero. The SDK reads
+// only the 1-minute window, so an idle minute would price off the floor alone; read
+// the nearest window that actually carries data instead. Never inflates a genuinely
+// falling price — a populated window is used as reported, not maxed against stale ones.
+function reportedGasPrice(
+  prices: { minGasPrice?: string | number | bigint }[],
+  index: number,
+): bigint {
+  const at = BigInt(prices[index]?.minGasPrice ?? 0);
+  if (at > 0n) return at;
+  for (let step = 1; step < prices.length; step += 1) {
+    const earlier = BigInt(prices[index - step]?.minGasPrice ?? 0);
+    if (earlier > 0n) return earlier;
+    const later = BigInt(prices[index + step]?.minGasPrice ?? 0);
+    if (later > 0n) return later;
+  }
+  return 0n;
+}
+
 // aepp-sdk prices off the network only above 70% reported utilization and stamps a
 // hardcoded 1e9 below it — under the relay floor as soon as the network raises it.
 // Reported utilization is the only lever it exposes, so pin it and lift the price.
@@ -59,8 +78,8 @@ export function pinNetworkGasPricing<T extends Node>(
 
   node.getRecentGasPrices = async (...args) => {
     const prices = await getRecentGasPrices(...args);
-    return prices.map((price) => {
-      const reported = BigInt(price.minGasPrice ?? 0);
+    return prices.map((price, index) => {
+      const reported = reportedGasPrice(prices, index);
       return {
         ...price,
         minGasPrice: reported > floor ? reported : floor,

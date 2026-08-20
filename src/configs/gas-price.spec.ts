@@ -22,6 +22,18 @@ const fakeNode = (utilization: number, minGasPrice: bigint): Node =>
     getRecentGasPrices: async () => [{ minGasPrice, utilization, minutes: 1 }],
   }) as unknown as Node;
 
+// The 1/5/15/60-minute windows the node reports, oldest listed last.
+const fakeWindows = (
+  windows: { minGasPrice: bigint; utilization: number }[],
+): Node =>
+  ({
+    getRecentGasPrices: async () =>
+      windows.map((window, index) => ({
+        ...window,
+        minutes: [1, 5, 15, 60][index] ?? 1,
+      })),
+  }) as unknown as Node;
+
 const buildSpend = async (onNode: Node) => {
   const tx = await buildTxAsync({
     tag: Tag.SpendTx,
@@ -96,6 +108,38 @@ describe('pinNetworkGasPricing', () => {
     expect(await node.getRecentGasPrices()).toEqual([
       { minGasPrice: RAMP_STEP_1, utilization: 70, minutes: 1 },
     ]);
+  });
+
+  it('borrows the nearest populated window when the 1-minute one is idle', async () => {
+    // An empty minute reports 0 @ 0%; the SDK reads only that window and would
+    // otherwise price off the floor. Borrow the still-busy 5/15/60 windows.
+    const node = pinNetworkGasPricing(
+      fakeWindows([
+        { minGasPrice: 0n, utilization: 0 },
+        { minGasPrice: 30_000_000_000n, utilization: 71 },
+        { minGasPrice: 30_000_000_000n, utilization: 71 },
+        { minGasPrice: 30_000_000_000n, utilization: 71 },
+      ]),
+      1_000_000_000n,
+    );
+
+    await expect(getEffectiveGasPrice(node)).resolves.toBe(30_300_000_000n);
+  });
+
+  it('keeps a falling 1-minute price and ignores a stale higher window', async () => {
+    // The 1-minute window carries data, so it is used as reported — a stale 60-minute
+    // window never lifts a genuinely falling price back up.
+    const node = pinNetworkGasPricing(
+      fakeWindows([
+        { minGasPrice: 1_000_000_000n, utilization: 18 },
+        { minGasPrice: 1_000_000_000n, utilization: 18 },
+        { minGasPrice: 1_000_000_000n, utilization: 18 },
+        { minGasPrice: 30_000_000_000n, utilization: 71 },
+      ]),
+      1_000_000_000n,
+    );
+
+    await expect(getEffectiveGasPrice(node)).resolves.toBe(1_010_000_000n);
   });
 
   it('keeps a reported price above the floor', async () => {
