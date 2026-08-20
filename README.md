@@ -219,6 +219,7 @@ REDIS_PORT=6379
 
 # Network Configuration
 AE_NETWORK_ID=ae_mainnet  # or ae_uat for testnet
+AE_MIN_GAS_PRICE=         # optional aettos floor for broadcast transactions
 
 # Application Configuration
 APP_PORT=3000

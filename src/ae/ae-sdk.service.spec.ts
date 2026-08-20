@@ -13,7 +13,9 @@ jest.mock('@aeternity/aepp-sdk', () => {
     CompilerHttp: jest
       .fn()
       .mockImplementation((url) => new actualAeppSdk.CompilerHttp(url)), // Ensures a real instance is returned
-    Node: jest.fn().mockImplementation(() => ({})),
+    Node: jest.fn().mockImplementation(() => ({
+      getRecentGasPrices: jest.fn().mockResolvedValue([]),
+    })),
   };
 });
 
