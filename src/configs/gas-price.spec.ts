@@ -6,7 +6,12 @@ import {
   Tag,
   unpackTx,
 } from '@aeternity/aepp-sdk';
-import { pinNetworkGasPricing, resolveMinGasPrice } from './gas-price';
+import {
+  getEffectiveGasPrice,
+  pinNetworkGasPricing,
+  resolveMinGasPrice,
+  scaleFeeToGasPrice,
+} from './gas-price';
 
 const RAMP_STEP_1 = 2_220_000_000n;
 const CALL_DATA = encode(Buffer.alloc(32, 1), Encoding.ContractBytearray);
@@ -131,5 +136,69 @@ describe('pinNetworkGasPricing', () => {
         pinNetworkGasPricing(fakeNode(17, 1_000_000_000n), RAMP_STEP_1),
       ),
     ).toEqual({ fee: 409_201_500_000_000n, gasPrice: 2_242_200_000n });
+  });
+});
+
+// aetx.erl:375 — the node admits on min(declared gasPrice, fee div min_gas).
+describe('admission rule across the relay-floor ramp', () => {
+  const RAMP = [
+    2_220_000_000n,
+    10_000_000_000n,
+    100_000_000_000n,
+    1_000_000_000_000n,
+  ];
+
+  // A tx built with no floor carries min_gas * 1e9, which is how we recover min_gas.
+  const minGas = async (build: (node: Node) => Promise<bigint>) =>
+    (await build(fakeNode(16, 1_000_000_000n))) / 1_000_000_000n;
+
+  it.each(RAMP)('clears a spend at floor %s', async (floor) => {
+    const gas = await minGas(buildSpend);
+    const fee = await buildSpend(
+      pinNetworkGasPricing(fakeNode(16, 1_000_000_000n), floor),
+    );
+
+    expect(fee / gas).toBeGreaterThanOrEqual(floor);
+  });
+
+  it.each(RAMP)('clears a contract call at floor %s', async (floor) => {
+    const gas = await minGas(
+      async (node) => (await buildContractCall(node)).fee,
+    );
+    const { fee, gasPrice } = await buildContractCall(
+      pinNetworkGasPricing(fakeNode(16, 1_000_000_000n), floor),
+    );
+    const effective = fee / gas < gasPrice ? fee / gas : gasPrice;
+
+    expect(effective).toBeGreaterThanOrEqual(floor);
+  });
+
+  it('leaves an unpinned node below the floor at every step', async () => {
+    const gas = await minGas(buildSpend);
+    const fee = await buildSpend(fakeNode(16, 1_000_000_000n));
+
+    expect(fee / gas).toBe(1_000_000_000n);
+    RAMP.forEach((floor) => expect(fee / gas).toBeLessThan(floor));
+  });
+});
+
+describe('claim-cost estimation helpers', () => {
+  it('reports the price the SDK will stamp, 1% included', async () => {
+    await expect(
+      getEffectiveGasPrice(
+        pinNetworkGasPricing(fakeNode(16, 1_000_000_000n), 2_220_000_000n),
+      ),
+    ).resolves.toBe(2_242_200_000n);
+  });
+
+  it('rescales a fee built at the SDK minimum, rounding up', () => {
+    expect(scaleFeeToGasPrice(68_400_000_000_000n, 1_000_000_000n)).toBe(
+      68_400_000_000_000n,
+    );
+    // The long-name case: 292% under-estimate at the top of the ramp if unscaled.
+    expect(scaleFeeToGasPrice(68_400_000_000_000n, 1_000_000_000_000n)).toBe(
+      68_400_000_000_000_000n,
+    );
+    expect(scaleFeeToGasPrice(1n, 1_000_000_001n)).toBe(2n);
   });
 });

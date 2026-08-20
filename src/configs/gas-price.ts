@@ -12,6 +12,18 @@ export const AE_MIN_GAS_PRICE = resolveMinGasPrice(
   process.env.AE_MIN_GAS_PRICE,
 );
 
+/** What aepp-sdk will stamp on a tx built against this node, its 1% included. */
+export async function getEffectiveGasPrice(node: Node): Promise<bigint> {
+  const [recent] = await node.getRecentGasPrices();
+  const reported = BigInt(recent?.minGasPrice ?? SDK_MIN_GAS_PRICE);
+  return (reported * 101n + 99n) / 100n;
+}
+
+/** Rescale a fee built at the SDK minimum to `gasPrice`, rounding up. */
+export function scaleFeeToGasPrice(fee: bigint, gasPrice: bigint): bigint {
+  return (fee * gasPrice + SDK_MIN_GAS_PRICE - 1n) / SDK_MIN_GAS_PRICE;
+}
+
 export function resolveMinGasPrice(raw: string | undefined): bigint {
   const trimmed = raw?.trim();
   if (!trimmed) return SDK_MIN_GAS_PRICE;

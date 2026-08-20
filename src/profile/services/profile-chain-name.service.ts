@@ -18,6 +18,7 @@ import {
   getExecutionCost,
   getMinimumNameFee,
   isEncoded,
+  Node,
   produceNameId,
   sendTransaction,
   Tag,
@@ -46,6 +47,7 @@ import {
 import { verifyAeAddressSignature } from './profile-signature.util';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
 import { mapWithConcurrency } from '@/utils/concurrency.util';
+import { getEffectiveGasPrice, scaleFeeToGasPrice } from '@/configs/gas-price';
 
 const RETRYABLE_STATUSES: ChainNameClaimStatus[] = [
   'pending',
@@ -241,7 +243,7 @@ export class ProfileChainNameService {
     reason: string | null;
   }> {
     const fullName = `${name}.chain`;
-    const requiredBalance = this.estimateTotalClaimCost(fullName);
+    const requiredBalance = await this.estimateTotalClaimCost(fullName);
     const requiredBalanceAettos = requiredBalance.toString();
 
     if (!PROFILE_CHAIN_NAME_PRIVATE_KEY) {
@@ -751,7 +753,7 @@ export class ProfileChainNameService {
   }
 
   private async assertSponsorHasFunds(fullName: string): Promise<void> {
-    const requiredBalance = this.estimateTotalClaimCost(fullName);
+    const requiredBalance = await this.estimateTotalClaimCost(fullName);
     const funds = await this.getSponsorFundsStatus(fullName);
     if (!funds.balanceAvailable) {
       throw new ServiceUnavailableException(
@@ -788,9 +790,10 @@ export class ProfileChainNameService {
     }
   }
 
-  private estimateTotalClaimCost(fullName: string): bigint {
+  private async estimateTotalClaimCost(fullName: string): Promise<bigint> {
     const nameTyped = fullName as `${string}.chain`;
     const nameId = produceNameId(nameTyped);
+    const nameFee = getMinimumNameFee(nameTyped);
 
     const preclaimCost = getExecutionCost(
       buildTx({
@@ -808,7 +811,7 @@ export class ProfileChainNameService {
         nonce: STUB_NONCE,
         name: nameTyped,
         nameSalt: 0,
-        nameFee: getMinimumNameFee(nameTyped),
+        nameFee,
       }),
     );
 
@@ -832,7 +835,30 @@ export class ProfileChainNameService {
       }),
     );
 
-    return preclaimCost + claimCost + updateCost + transferCost;
+    // nameFee is fixed; only the fee part of each tx tracks the gas price, and
+    // these are built offline so they carry the SDK minimum.
+    const nameFeeAettos = BigInt(nameFee.toFixed());
+    const feeAtSdkMinimum =
+      preclaimCost + (claimCost - nameFeeAettos) + updateCost + transferCost;
+    return (
+      nameFeeAettos +
+      scaleFeeToGasPrice(feeAtSdkMinimum, await this.getGasPrice())
+    );
+  }
+
+  private async getGasPrice(): Promise<bigint> {
+    try {
+      return await getEffectiveGasPrice(
+        this.aeSdkService.sdk.getContext().onNode as Node,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read the network gas price, estimating at the SDK minimum: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return 1_000_000_000n;
+    }
   }
 
   private assertValidAddress(address: string): void {
