@@ -12,6 +12,20 @@ export class CommunityFactoryService {
     ICommunityFactorySchema
   > = {};
   factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
+
+  // A cold load is a chain round-trip (`initCommunityFactory`, then
+  // `get_state`), and the factory sits on nearly every hot read path. Caching
+  // only the resolved value means every request that arrives before the first
+  // one settles fires its own round-trip — a thundering herd on boot. Cache the
+  // in-flight promise too so concurrent callers share one. Rejections are
+  // evicted, so a failed load doesn't poison later retries.
+  private inFlightFactories: Partial<
+    Record<Encoded.ContractAddress, Promise<CommunityFactory>>
+  > = {};
+  private inFlightSchemas: Partial<
+    Record<Encoded.ContractAddress, Promise<ICommunityFactorySchema>>
+  > = {};
+
   constructor(private aeSdkService: AeSdkService) {
     //
   }
@@ -26,14 +40,23 @@ export class CommunityFactoryService {
       return this.factories[address];
     }
 
-    const factory = await initCommunityFactory(
-      this.aeSdkService.sdk as any,
-      address,
-    );
+    const inFlight = this.inFlightFactories[address];
+    if (inFlight) {
+      return inFlight;
+    }
 
-    this.factories[address] = factory;
+    const resolvedAddress = address;
+    const pending = initCommunityFactory(this.aeSdkService.sdk as any, address)
+      .then((factory) => {
+        this.factories[resolvedAddress] = factory;
+        return factory;
+      })
+      .finally(() => {
+        delete this.inFlightFactories[resolvedAddress];
+      });
+    this.inFlightFactories[resolvedAddress] = pending;
 
-    return factory;
+    return pending;
   }
 
   /**
@@ -50,6 +73,22 @@ export class CommunityFactoryService {
       return this.cachedFactorySchema[factory.address];
     }
 
+    const inFlight = this.inFlightSchemas[factory.address];
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const pending = this.buildFactorySchema(factory).finally(() => {
+      delete this.inFlightSchemas[factory.address];
+    });
+    this.inFlightSchemas[factory.address] = pending;
+
+    return pending;
+  }
+
+  private async buildFactorySchema(
+    factory: ICommunityFactorySchema,
+  ): Promise<ICommunityFactorySchema> {
     if (!Object.keys(factory.collections).length) {
       const factoryInstance = await this.loadFactory(factory.address);
       const collection_registry: any = await factoryInstance.contract
