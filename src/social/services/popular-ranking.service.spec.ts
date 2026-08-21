@@ -154,13 +154,26 @@ describe('PopularRankingService', () => {
       limit: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([fallbackPost]),
     };
+    const countQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(1),
+    };
     postRepository.createQueryBuilder = jest
       .fn()
-      .mockReturnValueOnce(fallbackQueryBuilder);
+      .mockReturnValueOnce(fallbackQueryBuilder)
+      .mockReturnValueOnce(countQueryBuilder);
 
-    const result = await service.getPopularPosts('24h', 10, 0);
+    const result = await service.getPopularPostsPage(
+      '24h',
+      10,
+      0,
+      undefined,
+      {},
+    );
 
-    expect(result).toEqual([fallbackPost]);
+    expect(result.items).toEqual([fallbackPost]);
+    expect(result.totalItems).toBe(1);
     expect(fallbackQueryBuilder.orderBy).toHaveBeenCalledWith(
       'post.created_at',
       'DESC',
@@ -298,6 +311,13 @@ describe('PopularRankingService', () => {
 
       expect(result.items.length).toBe(2);
       expect(result.scoredItems).toBeUndefined();
+      // One resolution serves both page and count.
+      expect((redisMock as any).zrevrange).toHaveBeenCalledTimes(1);
+      // Existence scan projects to id; hydration fetches full rows.
+      expect(postRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { id: true } }),
+      );
+      expect(postRepository.findBy).toHaveBeenCalledTimes(1);
 
       redisMock.zcard.mockResolvedValue(1);
     });
@@ -1402,7 +1422,6 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-explain']);
       postRepository.findBy = jest.fn().mockResolvedValue([post]);
-      postRepository.find = jest.fn().mockResolvedValue([post]);
 
       const result = await service.explain('24h', 10, 0);
 
@@ -1478,11 +1497,6 @@ describe('PopularRankingService', () => {
     it('accepts precomputed scored items to avoid redundant computation', async () => {
       const precomputed = [{ postId: 'post-1', score: 42, type: 'post' }];
       postRepository.findBy = jest
-        .fn()
-        .mockResolvedValue([
-          { id: 'post-1', tx_hash: 'tx_1', sender_address: 'ak_1' },
-        ]);
-      postRepository.find = jest
         .fn()
         .mockResolvedValue([
           { id: 'post-1', tx_hash: 'tx_1', sender_address: 'ak_1' },

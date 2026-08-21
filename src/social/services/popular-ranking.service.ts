@@ -322,10 +322,8 @@ export class PopularRankingService implements OnModuleDestroy {
 
     for (let i = 0; i < postIds.length; i += CHUNK_SIZE) {
       const chunk = postIds.slice(i, i + CHUNK_SIZE);
-      // Existence check only: project to `id`. The ranked set spans every
-      // cached post (thousands), and this runs on each feed request — without
-      // the projection every `content`/`tx_args`/`media` JSON blob is read and
-      // deserialized just to be discarded.
+      // Existence check over every ranked id per request — don't drag the JSON
+      // blob columns back.
       const existingPosts = await this.postRepository.find({
         where: {
           id: In(chunk),
@@ -517,8 +515,6 @@ export class PopularRankingService implements OnModuleDestroy {
               since,
               10000,
             );
-            // Set, not `typeIds.includes`: `allItems` is capped at 10k, so the
-            // linear scan made this O(candidates * requested) per request.
             const typeIdSet = new Set(typeIds);
             const requestedItems = allItems.filter((item) =>
               typeIdSet.has(item.id),
@@ -553,27 +549,6 @@ export class PopularRankingService implements OnModuleDestroy {
     return result;
   }
 
-  async getPopularPosts(
-    window: PopularWindow,
-    limit = 50,
-    offset = 0,
-    maxCandidates?: number,
-  ): Promise<(Post | PopularRankingContentItem)[]> {
-    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
-
-    if (verifiedIds.length === 0) {
-      return this.fetchRecentFallback(window, limit, offset);
-    }
-
-    const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
-    const items = await this.hydrateRankedItems(
-      window,
-      verifiedIds.slice(0, candidateEnd),
-    );
-
-    return this.paginateDiversifiedRankedItems(items, limit, offset);
-  }
-
   async getPopularPostsPage(
     window: PopularWindow,
     limit = 50,
@@ -586,11 +561,8 @@ export class PopularRankingService implements OnModuleDestroy {
     scoredItems?: PopularScoreItem[];
   }> {
     if (!this.hasWeightOverrides(weightOverrides)) {
-      // `getTotalPostsCount` and `getPopularPosts` each resolve the verified id
-      // set — the full Redis read plus the chunked existence scan. Calling both
-      // ran that twice per request on the hot feed; resolve it once and derive
-      // the count and the page from the same snapshot (which also removes the
-      // window where the two calls disagree).
+      // Resolve the verified id set once — page and count derive from the same
+      // snapshot instead of two full Redis reads + existence scans.
       const verifiedIds = await this.getVerifiedPopularIds(
         window,
         maxCandidates,
@@ -632,31 +604,6 @@ export class PopularRankingService implements OnModuleDestroy {
       totalItems: scored.length,
       scoredItems: scored,
     };
-  }
-
-  async getTotalCached(window: PopularWindow): Promise<number | undefined> {
-    const key = this.getRedisKey(window);
-    try {
-      return await this.redis.zcard(key);
-    } catch {
-      return undefined;
-    }
-  }
-
-  async getTotalPostsCount(window: PopularWindow): Promise<number> {
-    try {
-      const verifiedIds = await this.getVerifiedPopularIds(window);
-      if (verifiedIds.length > 0) {
-        return verifiedIds.length;
-      }
-      return this.countRecentFallback(window);
-    } catch (error) {
-      this.logger.error(
-        `Error in getTotalPostsCount for window ${window}:`,
-        error,
-      );
-      return 0;
-    }
   }
 
   private async buildScoredItems(
