@@ -173,8 +173,7 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
    */
   private extractTransfers(tx: Tx): DecodedAex9Event[] {
     const persisted = tx.logs?.[AEX9_TRANSFER_PLUGIN_NAME]?.data as
-      | DecodedAex9Event[]
-      | undefined;
+      DecodedAex9Event[] | undefined;
     if (Array.isArray(persisted)) {
       return persisted.filter((event) => event?.name === 'Transfer');
     }

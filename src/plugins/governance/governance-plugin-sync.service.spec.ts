@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { fetchJson } from '@/utils/common';
 import { GovernancePluginSyncService } from './governance-plugin-sync.service';
 import { GovernancePollRegistry } from './services/governance-poll-registry.service';

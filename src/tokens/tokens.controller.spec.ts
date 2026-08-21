@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TokensController } from './tokens.controller';
 import { TokensService } from './tokens.service';

@@ -95,7 +95,6 @@ describe('Task 08 relay admins (integration)', () => {
   beforeAll(async () => {
     available = !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
     if (!available) {
-      // eslint-disable-next-line no-console
       console.warn(
         `[room-admins.integration] skipping — no reachable relay at ${RELAY_URL}`,
       );

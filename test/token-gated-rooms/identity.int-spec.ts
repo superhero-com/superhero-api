@@ -16,6 +16,7 @@ import { IdentityService } from '@/token-gated-rooms/services/identity.service';
 import { IdentityBackfillService } from '@/token-gated-rooms/services/identity-backfill.service';
 import { TGR_LINK_CHANGED } from '@/token-gated-rooms/events';
 import tgrConfig from '@/token-gated-rooms/config/tgr.config';
+import { TGR_MIGRATIONS } from '@/test/harness/db';
 
 /**
  * DB integration for Task 05 identity resolution. Applies the TGR migrations on
@@ -58,16 +59,24 @@ const A_MALFORMED = 'ak_int_malformed';
 const A_LATELINK = 'ak_int_latelink'; // unlinked at backfill, linked later
 const SALE = 'ct_int_sale_identity';
 
+/**
+ * Must stay in lockstep with {@link TGR_MIGRATIONS}: anything a migration creates
+ * but this misses survives into the next run and fails it with `already exists`.
+ */
 async function dropTgrObjects(ds: DataSource): Promise<void> {
   const stmts = [
+    `DROP TABLE IF EXISTS "room_membership_event"`,
+    `DROP TYPE IF EXISTS "room_membership_event_event_enum"`,
     `DROP TABLE IF EXISTS "room_backfill_state"`,
     `DROP TABLE IF EXISTS "token_balance"`,
     `DROP TABLE IF EXISTS "room_message_seen"`,
     `DROP TABLE IF EXISTS "room_notification_preference"`,
     `DROP TABLE IF EXISTS "room_membership"`,
     `DROP TABLE IF EXISTS "community_room"`,
+    `DROP TYPE IF EXISTS "room_membership_access_state_enum"`,
     `DROP TYPE IF EXISTS "room_membership_relay_state_enum"`,
     `DROP TYPE IF EXISTS "room_membership_role_enum"`,
+    `ALTER TABLE "token" DROP COLUMN IF EXISTS "room_id"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_state"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_created_at"`,
     `ALTER TABLE "token" DROP COLUMN IF EXISTS "has_nostr_room"`,
@@ -106,7 +115,7 @@ d('IdentityService / IdentityBackfillService (integration)', () => {
         TokenBalance,
         RoomBackfillState,
       ],
-      migrations: [__dirname + '/../../src/migrations/*{.ts,.js}'],
+      migrations: TGR_MIGRATIONS,
       migrationsTableName: 'migrations_tgr_identity_test',
     });
     await ds.initialize();

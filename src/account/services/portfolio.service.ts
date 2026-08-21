@@ -79,15 +79,7 @@ export interface GetPortfolioHistoryOptions {
   endDate?: Moment;
   interval?: number; // seconds, default 86400 (daily)
   convertTo?:
-    | 'ae'
-    | 'usd'
-    | 'eur'
-    | 'aud'
-    | 'brl'
-    | 'cad'
-    | 'chf'
-    | 'gbp'
-    | 'xau';
+    'ae' | 'usd' | 'eur' | 'aud' | 'brl' | 'cad' | 'chf' | 'gbp' | 'xau';
   includePnl?: boolean; // Whether to include PNL data
   useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
   includeTokensPnl?: boolean; // Whether to include per-token PNL breakdown (large payload)

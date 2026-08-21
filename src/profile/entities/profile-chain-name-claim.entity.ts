@@ -8,11 +8,7 @@ import {
 } from 'typeorm';
 
 export type ChainNameClaimStatus =
-  | 'pending'
-  | 'preclaimed'
-  | 'claimed'
-  | 'completed'
-  | 'failed';
+  'pending' | 'preclaimed' | 'claimed' | 'completed' | 'failed';
 
 @Entity({
   name: 'profile_chain_name_claims',

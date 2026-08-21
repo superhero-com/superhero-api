@@ -56,15 +56,7 @@ export class GetPortfolioHistoryQueryDto {
   @IsOptional()
   @IsIn(['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'])
   convertTo?:
-    | 'ae'
-    | 'usd'
-    | 'eur'
-    | 'aud'
-    | 'brl'
-    | 'cad'
-    | 'chf'
-    | 'gbp'
-    | 'xau';
+    'ae' | 'usd' | 'eur' | 'aud' | 'brl' | 'cad' | 'chf' | 'gbp' | 'xau';
 
   @ApiProperty({
     name: 'include',
