@@ -1,10 +1,22 @@
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+} from 'typeorm';
 import BigNumber from 'bignumber.js';
 
 @Entity({
   name: 'accounts',
 })
+// Backs the default sort of the accounts list endpoint
+// (`order_by=total_volume`, the only sort a caller gets without asking) and
+// the `total_volume DESC` tie-break in `searchByNameOrAddress`. Without it
+// both fall back to a full scan plus a top-N sort of the whole table.
+// Single-column btrees scan either direction, so this serves ASC as well.
+@Index('IDX_ACCOUNTS_TOTAL_VOLUME', ['total_volume'])
 export class Account {
   @PrimaryColumn()
   address: string;
