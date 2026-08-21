@@ -35,6 +35,7 @@ import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { NostrAccountRefDto } from '../dto/nostr-account-ref.dto';
 import { AccountSearchResultDto } from '../dto/account-search-result.dto';
+import { GetAccountResponseDto } from '../dto/get-account-response.dto';
 import { normalizePubkey } from '@/token-gated-rooms/nostr/pubkey';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
@@ -596,6 +597,7 @@ export class AccountsController {
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
+  @ApiOkResponse({ type: GetAccountResponseDto })
   @CacheTTL(10 * 60_000)
   @Get(':address')
   async getAccount(@Param('address', AeAccountAddressPipe) address: string) {

@@ -9,20 +9,12 @@ import {
   SocialGraphRelationshipDto,
 } from './dto/social-graph.dto';
 
-/**
- * Precheck outcome: `null` means the action would succeed, otherwise the abort
- * code the contract would raise first.
- */
+// `null` means the action would succeed, otherwise the abort code the contract
+// would raise first.
 export type SocialGraphPrecheckResult = SocialGraphAbortCode | null;
 
-/**
- * Read side of the social graph. Counts and the relationship are served from
- * the index (never a per-request chain read); the precheck derives every abort
- * the contract can produce from the indexed edges plus the boot-verified caps.
- * The precheck is advisory — the chain is authoritative and the index lags it,
- * so a green precheck can still abort on chain (that case is Bucket A: the
- * client re-reads the relationship and reconciles silently).
- */
+// Read side of the social graph: counts and relationship served from the index,
+// and an advisory precheck derived from the index plus the boot-verified caps.
 @Injectable()
 export class SocialGraphService {
   constructor(
@@ -78,15 +70,10 @@ export class SocialGraphService {
     };
   }
 
-  /**
-   * Would `action` from `from` to `to` succeed on chain? Derived entirely from
-   * the indexed edges and the boot-verified caps — no node call, so nothing to
-   * amplify and nothing to rate-limit. The check order mirrors the contract's
-   * own require() order so the code returned matches what the chain would abort
-   * with first. FOLLOW_COOLDOWN is not derivable from the index (it needs the
-   * caller's last_follow_height) and is unreachable while follow_cooldown = 0;
-   * it stays in the abort map for a future non-zero redeploy.
-   */
+  // Check order mirrors the contract's require() order so the returned code
+  // matches what the chain would abort with first. FOLLOW_COOLDOWN is not
+  // index-derivable (needs the caller's last_follow_height) and is unreachable
+  // at follow_cooldown=0, so the precheck never emits it.
   async precheck(
     action: SocialGraphAction,
     from: string,
