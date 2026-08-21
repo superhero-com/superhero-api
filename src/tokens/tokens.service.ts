@@ -127,6 +127,9 @@ export class TokensService {
   private readonly maxHoldersPages = Number(
     process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
   );
+  // 4 bound columns per holder row: one upsert statement tops out at ~16k rows
+  // against Postgres's 65,535-bind limit, while maxHoldersPages admits 30k.
+  private readonly holderUpsertChunkRows = 5000;
   // 2-arg advisory keyspace, disjoint from the 1-arg keys held by
   // DexSchemaBootstrapService (4019283746), DexSyncService (4019283747) and
   // DeviceChallengeService (0x6e636861). The second key is
@@ -1103,9 +1106,9 @@ export class TokensService {
       return;
     }
 
-    // Sorted so both the upsert and its row locks are acquired in a stable
-    // order. The source order is balance-ranked and shifts between reads,
-    // which is what lets two overlapping syncs of one token cycle.
+    // Sorted so both the upsert chunks and their row locks are acquired in a
+    // stable order. The source order is balance-ranked and shifts between
+    // reads, which is what lets two overlapping syncs of one token cycle.
     const uniqueHolders = Array.from(
       new Map(totalHolders.map((holder) => [holder.id, holder])).values(),
     ).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -1141,16 +1144,26 @@ export class TokensService {
             return false;
           }
 
-          await runWithDatabaseIssueLogging({
-            logger: this.logger,
-            stage: 'token holders upsert',
-            context,
-            operation: () =>
-              manager.getRepository(TokenHolder).upsert(uniqueHolders, {
-                conflictPaths: ['id'],
-                skipUpdateIfNoValuesChanged: true,
-              }),
-          });
+          for (
+            let start = 0;
+            start < uniqueHolders.length;
+            start += this.holderUpsertChunkRows
+          ) {
+            const chunk = uniqueHolders.slice(
+              start,
+              start + this.holderUpsertChunkRows,
+            );
+            await runWithDatabaseIssueLogging({
+              logger: this.logger,
+              stage: 'token holders upsert',
+              context,
+              operation: () =>
+                manager.getRepository(TokenHolder).upsert(chunk, {
+                  conflictPaths: ['id'],
+                  skipUpdateIfNoValuesChanged: true,
+                }),
+            });
+          }
           await runWithDatabaseIssueLogging({
             logger: this.logger,
             stage: 'token holders prune',

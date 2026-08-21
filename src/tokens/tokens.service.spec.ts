@@ -582,6 +582,74 @@ describe('TokensService', () => {
     );
   });
 
+  it('skips the holder swap entirely when the middleware response was truncated', async () => {
+    const holdersRepository = {
+      manager: { transaction: jest.fn() },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: [{ id: 'h1' }],
+      truncated: true,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    // Pruning on partial data would delete live holders.
+    expect(holdersRepository.manager.transaction).not.toHaveBeenCalled();
+    expect(tokensRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('chunks an oversized holder upsert below the bind-param limit', async () => {
+    const upsertRepository = { upsert: jest.fn() };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(upsertRepository),
+      query: holderSyncQuery(),
+    };
+    const holdersRepository = {
+      manager: { transaction: jest.fn(async (cb: any) => cb(manager)) },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    const holders = Array.from({ length: 5001 }, (_, i) => ({ id: `h${i}` }));
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders,
+      truncated: false,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    // One statement per 5000 rows stays under Postgres's 65,535-bind limit.
+    expect(upsertRepository.upsert).toHaveBeenCalledTimes(2);
+    expect(upsertRepository.upsert.mock.calls[0][0]).toHaveLength(5000);
+    expect(upsertRepository.upsert.mock.calls[1][0]).toHaveLength(1);
+    // Nothing is lost or duplicated by the chunking, and every statement stays
+    // inside the bind budget the chunk size exists to respect.
+    const upserted = upsertRepository.upsert.mock.calls.flatMap(
+      (call: any[]) => call[0],
+    );
+    expect(upserted.map((holder: { id: string }) => holder.id)).toEqual(
+      holders.map((holder) => holder.id).sort(),
+    );
+    for (const call of upsertRepository.upsert.mock.calls as any[][]) {
+      expect(call[0].length * 4).toBeLessThanOrEqual(65535);
+    }
+    // The prune still sees every id as one array bind.
+    const pruneCalls = manager.query.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('DELETE FROM token_holder'),
+    );
+    expect(pruneCalls).toHaveLength(1);
+    expect(pruneCalls[0][1][1]).toHaveLength(5001);
+  });
+
   it('writes nothing when another sync holds the per-token advisory lock', async () => {
     const upsertRepository = { upsert: jest.fn() };
     const manager = {
@@ -643,9 +711,16 @@ describe('TokensService', () => {
     expect(lockParams[0]).toBe(0x746b686c);
   });
 
-  it('skips the holder swap entirely when the middleware response was truncated', async () => {
+  it('does not prune when the holder upsert fails', async () => {
+    const upsertRepository = {
+      upsert: jest.fn().mockRejectedValue(new Error('db down')),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(upsertRepository),
+      query: holderSyncQuery(),
+    };
     const holdersRepository = {
-      manager: { transaction: jest.fn() },
+      manager: { transaction: jest.fn(async (cb: any) => cb(manager)) },
       delete: jest.fn(),
     };
     (service as any).tokenHoldersRepository = holdersRepository;
@@ -655,13 +730,15 @@ describe('TokensService', () => {
     } as any);
     jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
       holders: [{ id: 'h1' }],
-      truncated: true,
+      truncated: false,
     } as any);
 
-    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+    // A swallowed upsert error here would let the prune delete live holders.
+    await expect(
+      service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any),
+    ).rejects.toThrow('db down');
 
-    // Pruning on partial data would delete live holders.
-    expect(holdersRepository.manager.transaction).not.toHaveBeenCalled();
+    expect(pruneIndexOf(manager.query)).toBe(-1);
     expect(tokensRepository.update).not.toHaveBeenCalled();
   });
 
