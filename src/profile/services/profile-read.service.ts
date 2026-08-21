@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
+import { SocialGraphEdge } from '@/plugins/social-graph/entities/social-graph-edge.entity';
 import { ProfileCache } from '../entities/profile-cache.entity';
 
 @Injectable()
@@ -11,15 +12,18 @@ export class ProfileReadService {
     private readonly profileCacheRepository: Repository<ProfileCache>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    @InjectRepository(SocialGraphEdge)
+    private readonly socialGraphEdgeRepository: Repository<SocialGraphEdge>,
   ) {}
 
   async getProfile(address: string) {
-    const [cache, account] = await Promise.all([
+    const [cache, account, counts] = await Promise.all([
       this.profileCacheRepository.findOne({ where: { address } }),
       this.accountRepository.findOne({ where: { address } }),
+      this.getFollowCounts(address),
     ]);
 
-    const profile = this.mergeProfile(cache, account);
+    const profile = { ...this.mergeProfile(cache, account), ...counts };
 
     const publicName = this.resolvePublicName(profile, address);
     return {
@@ -27,6 +31,23 @@ export class ProfileReadService {
       profile,
       public_name: publicName,
     };
+  }
+
+  // Follower/following counts are chain-truth served from the social-graph
+  // index (0 when the plugin is unconfigured). Only the single-profile read
+  // carries them — the profile page the counts are for.
+  private async getFollowCounts(
+    address: string,
+  ): Promise<{ followers_count: number; following_count: number }> {
+    const [followers_count, following_count] = await Promise.all([
+      this.socialGraphEdgeRepository.count({
+        where: { to_address: address, kind: 'follow' },
+      }),
+      this.socialGraphEdgeRepository.count({
+        where: { from_address: address, kind: 'follow' },
+      }),
+    ]);
+    return { followers_count, following_count };
   }
 
   async getProfilesByAddresses(addresses: string[]) {
