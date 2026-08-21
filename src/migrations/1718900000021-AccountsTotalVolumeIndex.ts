@@ -9,11 +9,17 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * accounts list endpoint therefore did a full scan plus a top-N sort, and
  * `order_by=total_volume` is the default a caller gets without asking.
  *
- * Measured on 200k rows: `ORDER BY total_volume DESC LIMIT 100` drops from a
- * parallel seq scan + top-N heapsort (34.3ms, 2794 buffers) to a plain index
- * scan (0.26ms, 103 buffers). Note the `COUNT(*)` that `paginate` issues
- * alongside it is NOT helped -- it still seq-scans at ~17ms -- so the endpoint
- * improves roughly 3x overall, not by the ratio of the sort alone.
+ * Measured at the real table size (3.5k rows, mainnet): `ORDER BY total_volume
+ * DESC LIMIT 100` drops from 1.21ms to 0.055ms, and the `COUNT(*)` that
+ * `paginate` issues alongside it is unchanged at ~0.29ms because it still
+ * seq-scans. So this saves roughly 1.15ms per uncached request -- real, but
+ * small against a 60s response cache and the surrounding request overhead.
+ * The index is 128kB and `accounts` is written by batched upserts during
+ * aggregate rebuilds, so it costs close to nothing to carry.
+ *
+ * Sizing note for whoever reads this next: the same query at 200k rows takes
+ * 34.3ms unindexed versus 0.26ms indexed. This index matters when the table
+ * grows, not today -- do not cite it as a current win.
  *
  * Only `total_volume` is indexed. The endpoint exposes nine sort columns, but
  * indexing all nine would multiply write cost on every aggregate rebuild for
