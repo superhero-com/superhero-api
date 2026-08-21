@@ -157,7 +157,6 @@ if (
   process.env.NODE_ENV === 'production' &&
   TRENDING_TAGS_API_KEY.length < 16
 ) {
-  // eslint-disable-next-line no-console
   console.error(
     '[security] TRENDING_TAGS_API_KEY is missing or too short in production' +
       ' (min 16 chars required). POST /trending-tags will reject all' +

@@ -12,21 +12,17 @@ We follow the standard NestJS project conventions and best practices:
 
 ### Code Style & Linting
 
-- We use ESLint with the default NestJS configuration
-- The project extends `@nestjs/eslint-config` and `prettier`
-- Run `npm run lint` to check your code style
+- We use ESLint 9 with the standard NestJS setup (`typescript-eslint` + `prettier`)
+- Config lives in `eslint.config.mjs` (flat config; the old `.eslintrc.js` is gone)
+- Run `npm run lint` to check your code style, or `npm run lint:fix` to autofix
 - Run `npm run format` to automatically format your code
 
-```json
-// .eslintrc.js example
-{
-  "parser": "@typescript-eslint/parser",
-  "extends": ["plugin:@typescript-eslint/recommended"],
-  "parserOptions": {
-    "ecmaVersion": 2020,
-    "sourceType": "module"
-  }
-}
+```js
+// eslint.config.mjs example
+export default tseslint.config(
+  ...tseslint.configs.recommended,
+  eslintPluginPrettierRecommended,
+);
 ```
 
 ### Testing

@@ -30,7 +30,6 @@ describe('harness/relay: reachability probe (self-test)', () => {
   it('detects the local relay when one is running (auto-skip otherwise)', async () => {
     const up = await relayReachable(RELAY_URL, 3000);
     if (!up) {
-      // eslint-disable-next-line no-console
       console.warn(
         `[harness/relay self-test] no relay at ${RELAY_URL} — skipping live check`,
       );

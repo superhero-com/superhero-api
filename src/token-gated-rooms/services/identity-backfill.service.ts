@@ -87,7 +87,7 @@ export class IdentityBackfillService implements OnApplicationBootstrap {
     };
 
     let cursor = '';
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       const addresses = await this.nextMemberBatch(cursor, batchSize);
       if (addresses.length === 0) break;

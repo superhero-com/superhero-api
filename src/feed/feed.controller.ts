@@ -143,27 +143,21 @@ export class FeedController {
     ]);
 
     const candidates: FeedItem[] = [
-      ...posts.map(
-        (post): FeedItem => ({
-          type: 'post',
-          created_at: post.created_at,
-          data: post,
-        }),
-      ),
-      ...tokens.map(
-        (token): FeedItem => ({
-          type: 'token_created',
-          created_at: token.created_at,
-          data: token,
-        }),
-      ),
-      ...trades.map(
-        (trade): FeedItem => ({
-          type: 'trade',
-          created_at: trade.created_at,
-          data: trade,
-        }),
-      ),
+      ...posts.map((post): FeedItem => ({
+        type: 'post',
+        created_at: post.created_at,
+        data: post,
+      })),
+      ...tokens.map((token): FeedItem => ({
+        type: 'token_created',
+        created_at: token.created_at,
+        data: token,
+      })),
+      ...trades.map((trade): FeedItem => ({
+        type: 'trade',
+        created_at: trade.created_at,
+        data: trade,
+      })),
     ].sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
 
     const items = candidates.slice(0, limit);
