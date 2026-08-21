@@ -5,6 +5,7 @@ import {
   createIsolatedDatabase,
   IsolatedDb,
   MINIMAL_TOKEN_TABLE_SQL,
+  TGR_MIGRATIONS,
 } from '@/test/harness/db';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from './community-room.entity';
@@ -52,7 +53,7 @@ d('TGR migrations (integration)', () => {
         TokenBalance,
         RoomBackfillState,
       ],
-      migrations: [__dirname + '/../../migrations/*{.ts,.js}'],
+      migrations: TGR_MIGRATIONS,
       seedSql: [MINIMAL_TOKEN_TABLE_SQL],
     });
     ds = db.dataSource;

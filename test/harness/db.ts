@@ -1,5 +1,14 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { DATABASE_CONFIG } from '@/configs/database';
+import { TgrTokenColumns1718900000001 } from '@/migrations/1718900000001-TgrTokenColumns';
+import { TgrCommunityRoom1718900000002 } from '@/migrations/1718900000002-TgrCommunityRoom';
+import { TgrRoomMembership1718900000003 } from '@/migrations/1718900000003-TgrRoomMembership';
+import { TgrRoomNotificationPreference1718900000004 } from '@/migrations/1718900000004-TgrRoomNotificationPreference';
+import { TgrRoomMessageSeen1718900000005 } from '@/migrations/1718900000005-TgrRoomMessageSeen';
+import { TgrTokenBalance1718900000006 } from '@/migrations/1718900000006-TgrTokenBalance';
+import { TgrRoomBackfillState1718900000007 } from '@/migrations/1718900000007-TgrRoomBackfillState';
+import { TgrTokenRoomId1718900000008 } from '@/migrations/1718900000008-TgrTokenRoomId';
+import { TgrRoomMembershipEvent1718900000009 } from '@/migrations/1718900000009-TgrRoomMembershipEvent';
 
 /**
  * Isolated throwaway-database helper for DB integration specs (Task 02 harness).
@@ -35,9 +44,8 @@ import { DATABASE_CONFIG } from '@/configs/database';
 /** Connection/config knobs for a throwaway database. */
 export interface IsolatedDbOptions {
   /**
-   * Glob(s) or class list passed to the DataSource `migrations` option. When
-   * omitted, defaults to the repo's ordered migration files so callers can just
-   * `runMigrations()`.
+   * Migrations for the throwaway DataSource. Defaults to {@link TGR_MIGRATIONS};
+   * specs for other features pass their own (see the notification-feed specs).
    */
   migrations?: DataSourceOptions['migrations'];
   /** Entity classes/globs to register on the throwaway DataSource. */
@@ -132,9 +140,7 @@ export async function createIsolatedDatabase(
     database: name,
     synchronize: false,
     entities: options.entities ?? [],
-    migrations: options.migrations ?? [
-      __dirname + '/../../src/migrations/*{.ts,.js}',
-    ],
+    migrations: options.migrations ?? TGR_MIGRATIONS,
     migrationsTableName: options.migrationsTableName,
     logging: false,
   } as DataSourceOptions);
@@ -190,6 +196,23 @@ export async function dropDatabase(name: string): Promise<void> {
  * The TGR migrations only add columns/indexes to `token`, so a single PK column
  * is enough; we never need the full token schema here.
  */
+/**
+ * Listed explicitly rather than globbed: later app migrations assume base tables
+ * (`posts`, notifications, `token.collection`) that a MINIMAL_TOKEN_TABLE_SQL
+ * database has never had, so a glob silently drags them in and breaks these specs.
+ */
+export const TGR_MIGRATIONS = [
+  TgrTokenColumns1718900000001,
+  TgrCommunityRoom1718900000002,
+  TgrRoomMembership1718900000003,
+  TgrRoomNotificationPreference1718900000004,
+  TgrRoomMessageSeen1718900000005,
+  TgrTokenBalance1718900000006,
+  TgrRoomBackfillState1718900000007,
+  TgrTokenRoomId1718900000008,
+  TgrRoomMembershipEvent1718900000009,
+];
+
 export const MINIMAL_TOKEN_TABLE_SQL =
   'CREATE TABLE "token" ("address" character varying NOT NULL, CONSTRAINT "PK_token_address" PRIMARY KEY ("address"))';
 
