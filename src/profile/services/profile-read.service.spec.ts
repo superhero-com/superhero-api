@@ -22,7 +22,14 @@ describe('ProfileReadService', () => {
       findOne: jest.fn().mockResolvedValue(account ?? null),
       find: jest.fn().mockResolvedValue(accounts),
     } as any;
-    return new ProfileReadService(profileCacheRepository, accountRepository);
+    const socialGraphEdgeRepository = {
+      count: jest.fn().mockResolvedValue(0),
+    } as any;
+    return new ProfileReadService(
+      profileCacheRepository,
+      accountRepository,
+      socialGraphEdgeRepository,
+    );
   };
 
   it('falls back to address when no selected name has a value', async () => {
@@ -32,6 +39,19 @@ describe('ProfileReadService', () => {
     const result = await service.getProfile(address);
 
     expect(result.public_name).toBe(address);
+  });
+
+  it('surfaces follower and following counts on the profile object', async () => {
+    const service = createService({});
+
+    const result = await service.getProfile('ak_counts');
+
+    expect(result.profile).toEqual(
+      expect.objectContaining({
+        followers_count: 0,
+        following_count: 0,
+      }),
+    );
   });
 
   it('prefers chain_name over other name sources', async () => {
