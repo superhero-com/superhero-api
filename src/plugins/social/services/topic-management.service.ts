@@ -19,16 +19,9 @@ export class TopicManagementService {
   ) {}
 
   /**
-   * Creates or gets existing topics by name.
-   *
-   * Bulk-upserts any missing topics in one round trip, then one IN() read,
-   * instead of a sequential findOne+save per topic name. DO NOTHING (not
-   * DO UPDATE) so an existing topic's accumulated post_count is never
-   * clobbered by a same-named insert racing in from another post.
-   *
-   * Names are de-duplicated first: two raw names that normalize to the same
-   * topic previously produced the same Topic twice in the returned array,
-   * which the caller then fed into a ManyToMany relation.
+   * One bulk upsert plus one read instead of a findOne+save per name; same
+   * approach as `PostService.createOrGetTopics`, which this was ported from.
+   * DO NOTHING so a racing insert never clobbers an accumulated post_count.
    */
   async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
     const normalizedNames = [
@@ -96,9 +89,8 @@ export class TopicManagementService {
       return;
     }
 
-    // One grouped read for every topic instead of a getCount() per topic.
-    // The rows counted are the same either way -- this collapses the round
-    // trips, it does not make the count itself cheaper.
+    // One grouped read instead of a getCount() per topic. Collapses round
+    // trips only -- the same rows are counted either way.
     let countByTopicId = new Map<string, number>();
     try {
       const rows = await postRepository

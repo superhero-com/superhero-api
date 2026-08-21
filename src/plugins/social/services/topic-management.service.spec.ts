@@ -1,13 +1,6 @@
 import { TopicManagementService } from './topic-management.service';
 import { Topic } from '@/social/entities/topic.entity';
 
-/**
- * `TopicManagementService` resolves and counts topics on the live indexing
- * path, once per indexed post. These cover the two properties that make that
- * affordable — one bulk upsert instead of a findOne+save per name, and one
- * grouped count instead of a getCount() per topic — plus the DO NOTHING
- * semantics that keep a racing insert from clobbering an accumulated count.
- */
 describe('TopicManagementService', () => {
   let service: TopicManagementService;
   let topicRepository: any;
