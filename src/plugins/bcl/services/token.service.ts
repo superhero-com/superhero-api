@@ -53,49 +53,20 @@ export class TokenService {
    */
   async findByAddress(
     address: string,
-    withoutRank = false,
     manager?: EntityManager,
   ): Promise<Token | null> {
     const repository = manager?.getRepository(Token) || this.tokensRepository;
-    const token = await repository
+    // `token.rank` is already selected here, maintained by
+    // RefreshTokenRanksService. This used to recompute RANK() OVER (...) across
+    // every token of the factory on each call -- 135ms against 63k tokens, on
+    // the indexer's hot path, for a value no caller here reads.
+    return repository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
       .orWhere('token.sale_address = :address', { address })
       .orWhere('token.name = :address', { address })
       .orWhere('token.symbol = :address', { address })
       .getOne();
-
-    if (!token) {
-      return null;
-    }
-
-    if (withoutRank) {
-      return token;
-    }
-
-    const rankedQuery = `
-      WITH ranked_tokens AS (
-        SELECT 
-          sale_address,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
-              market_cap DESC,
-              created_at ASC
-          ) AS INTEGER) as rank
-        FROM token
-        WHERE factory_address = '${token.factory_address}'
-      )
-      SELECT rank
-      FROM ranked_tokens
-      WHERE sale_address = '${token.sale_address}'
-    `;
-
-    const [rankResult] = await repository.query(rankedQuery);
-    return {
-      ...token,
-      rank: rankResult?.rank,
-    } as Token & { rank: number };
   }
 
   /**
@@ -162,11 +133,7 @@ export class TokenService {
     // TODO: should only update if the data is different
     if (tokenExists?.sale_address) {
       await repository.update(tokenExists.sale_address, tokenData);
-      token = await this.findByAddress(
-        tokenExists.sale_address,
-        false,
-        manager,
-      );
+      token = await this.findByAddress(tokenExists.sale_address, manager);
     } else {
       // Use upsert to handle race conditions where token might be created concurrently.
       // Do not use skipUpdateIfNoValuesChanged because Token has json columns and
@@ -174,7 +141,7 @@ export class TokenService {
       await repository.upsert(tokenData, {
         conflictPaths: ['sale_address'],
       });
-      token = await this.findByAddress(saleAddress, false, manager);
+      token = await this.findByAddress(saleAddress, manager);
       isNewToken = true;
     }
 
@@ -293,7 +260,7 @@ export class TokenService {
   ): Promise<Token> {
     const repository = manager?.getRepository(Token) || this.tokensRepository;
     await repository.update(token.sale_address, data);
-    return this.findByAddress(token.sale_address, false, manager);
+    return this.findByAddress(token.sale_address, manager);
   }
 
   /**
