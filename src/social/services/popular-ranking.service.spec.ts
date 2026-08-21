@@ -286,6 +286,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-a', '10', 'post-b', '5']);
       postRepository.findBy = jest.fn().mockResolvedValue([postA, postB]);
+      postRepository.find = jest.fn().mockResolvedValue([postA, postB]);
 
       const result = await service.getPopularPostsPage(
         '24h',
@@ -347,6 +348,7 @@ describe('PopularRankingService', () => {
           '0',
         ]);
       postRepository.findBy = jest.fn().mockResolvedValue(posts);
+      postRepository.find = jest.fn().mockResolvedValue(posts);
 
       const firstPage = await service.getPopularPostsPage('all', 2, 0);
       const secondPage = await service.getPopularPostsPage('all', 2, 2);
@@ -445,6 +447,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-w', '10']);
       (svc as any).postRepository.findBy = jest.fn().mockResolvedValue([postW]);
+      (svc as any).postRepository.find = jest.fn().mockResolvedValue([postW]);
 
       const result = await svc.getPopularPostsPage('24h', 10, 0, undefined, {
         comments: undefined,
@@ -1399,6 +1402,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-explain']);
       postRepository.findBy = jest.fn().mockResolvedValue([post]);
+      postRepository.find = jest.fn().mockResolvedValue([post]);
 
       const result = await service.explain('24h', 10, 0);
 
@@ -1474,6 +1478,11 @@ describe('PopularRankingService', () => {
     it('accepts precomputed scored items to avoid redundant computation', async () => {
       const precomputed = [{ postId: 'post-1', score: 42, type: 'post' }];
       postRepository.findBy = jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'post-1', tx_hash: 'tx_1', sender_address: 'ak_1' },
+        ]);
+      postRepository.find = jest
         .fn()
         .mockResolvedValue([
           { id: 'post-1', tx_hash: 'tx_1', sender_address: 'ak_1' },

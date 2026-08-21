@@ -322,10 +322,17 @@ export class PopularRankingService implements OnModuleDestroy {
 
     for (let i = 0; i < postIds.length; i += CHUNK_SIZE) {
       const chunk = postIds.slice(i, i + CHUNK_SIZE);
-      const existingPosts = await this.postRepository.findBy({
-        id: In(chunk),
-        is_hidden: false,
-        post_id: null,
+      // Existence check only: project to `id`. The ranked set spans every
+      // cached post (thousands), and this runs on each feed request — without
+      // the projection every `content`/`tx_args`/`media` JSON blob is read and
+      // deserialized just to be discarded.
+      const existingPosts = await this.postRepository.find({
+        where: {
+          id: In(chunk),
+          is_hidden: false,
+          post_id: null,
+        },
+        select: { id: true },
       });
       existingPosts.forEach((p) => existingIdsSet.add(p.id));
     }
@@ -510,8 +517,11 @@ export class PopularRankingService implements OnModuleDestroy {
               since,
               10000,
             );
+            // Set, not `typeIds.includes`: `allItems` is capped at 10k, so the
+            // linear scan made this O(candidates * requested) per request.
+            const typeIdSet = new Set(typeIds);
             const requestedItems = allItems.filter((item) =>
-              typeIds.includes(item.id),
+              typeIdSet.has(item.id),
             );
             pluginItems.push(...requestedItems);
           } catch (error) {
@@ -576,14 +586,34 @@ export class PopularRankingService implements OnModuleDestroy {
     scoredItems?: PopularScoreItem[];
   }> {
     if (!this.hasWeightOverrides(weightOverrides)) {
-      const totalItems = await this.getTotalPostsCount(window);
-      const items = await this.getPopularPosts(
+      // `getTotalPostsCount` and `getPopularPosts` each resolve the verified id
+      // set — the full Redis read plus the chunked existence scan. Calling both
+      // ran that twice per request on the hot feed; resolve it once and derive
+      // the count and the page from the same snapshot (which also removes the
+      // window where the two calls disagree).
+      const verifiedIds = await this.getVerifiedPopularIds(
         window,
-        limit,
-        offset,
         maxCandidates,
       );
-      return { items, totalItems };
+
+      if (verifiedIds.length === 0) {
+        const [items, totalItems] = await Promise.all([
+          this.fetchRecentFallback(window, limit, offset),
+          this.countRecentFallback(window),
+        ]);
+        return { items, totalItems };
+      }
+
+      const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
+      const hydrated = await this.hydrateRankedItems(
+        window,
+        verifiedIds.slice(0, candidateEnd),
+      );
+
+      return {
+        items: this.paginateDiversifiedRankedItems(hydrated, limit, offset),
+        totalItems: verifiedIds.length,
+      };
     }
 
     const scored = await this.buildScoredItems(
