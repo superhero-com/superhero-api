@@ -520,6 +520,151 @@ describe('TokensService', () => {
     expect((service as any).sleep).toHaveBeenNthCalledWith(2, 1000);
   });
 
+  // The holder write opens with a per-token advisory try-lock, so the prune is
+  // no longer the first statement on the transaction. Match on the statement
+  // rather than its position, so adding another one cannot silently retarget
+  // these assertions.
+  const holderSyncQuery = (locked = true): jest.Mock =>
+    jest.fn((sql: string) =>
+      Promise.resolve(
+        sql.includes('pg_try_advisory_xact_lock') ? [{ locked }] : undefined,
+      ),
+    );
+  const pruneIndexOf = (query: jest.Mock): number =>
+    query.mock.calls.findIndex((call: any[]) =>
+      String(call[0]).includes('DELETE FROM token_holder'),
+    );
+
+  it('syncs holders by upserting then pruning inside one transaction', async () => {
+    const upsertRepository = { upsert: jest.fn() };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(upsertRepository),
+      query: holderSyncQuery(),
+    };
+    const holdersRepository = {
+      manager: { transaction: jest.fn(async (cb: any) => cb(manager)) },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: [{ id: 'h1' }, { id: 'h2' }],
+      truncated: false,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    // The whole holder set must never be deleted and re-inserted: that rewrote
+    // every row on every sync and left readers seeing zero holders in between.
+    expect(holdersRepository.delete).not.toHaveBeenCalled();
+    expect(holdersRepository.manager.transaction).toHaveBeenCalledTimes(1);
+    expect(upsertRepository.upsert).toHaveBeenCalledTimes(1);
+
+    const pruneIndex = pruneIndexOf(manager.query);
+    const [sql, params] = manager.query.mock.calls[pruneIndex];
+    expect(sql).toContain('DELETE FROM token_holder');
+    expect(sql).toContain('aex9_address = $1');
+    expect(sql).toContain('id <> ALL($2::text[])');
+    expect(params).toEqual(['ct_aex9', ['h1', 'h2']]);
+    // Upsert first, so the set is never smaller than it should be.
+    expect(upsertRepository.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.query.mock.invocationCallOrder[pruneIndex],
+    );
+    // ...and the lock before either, or neither is protected.
+    expect(manager.query.mock.calls[0][0]).toContain(
+      'pg_try_advisory_xact_lock',
+    );
+    expect(manager.query.mock.invocationCallOrder[0]).toBeLessThan(
+      upsertRepository.upsert.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('writes nothing when another sync holds the per-token advisory lock', async () => {
+    const upsertRepository = { upsert: jest.fn() };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(upsertRepository),
+      query: holderSyncQuery(false),
+    };
+    const holdersRepository = {
+      manager: { transaction: jest.fn(async (cb: any) => cb(manager)) },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: [{ id: 'h1' }],
+      truncated: false,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    // Bailing out is the point: the holder of the lock is mid-write on the
+    // same token, and racing it is what deadlocks.
+    expect(upsertRepository.upsert).not.toHaveBeenCalled();
+    expect(pruneIndexOf(manager.query)).toBe(-1);
+    // holders_count must not advance past rows that were never written.
+    expect(tokensRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('scopes the advisory lock to the token, not the whole table', async () => {
+    const upsertRepository = { upsert: jest.fn() };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(upsertRepository),
+      query: holderSyncQuery(),
+    };
+    const holdersRepository = {
+      manager: { transaction: jest.fn(async (cb: any) => cb(manager)) },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: [{ id: 'h1' }],
+      truncated: false,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    const [lockSql, lockParams] = manager.query.mock.calls[0];
+    // A global lock would serialise every token's sync behind one writer.
+    expect(lockSql).toContain('hashtext($2)');
+    expect(lockParams[1]).toBe('ct_aex9');
+    // 2-arg keyspace, so it cannot collide with the single-key advisory locks
+    // held elsewhere in the app.
+    expect(lockParams[0]).toBe(0x746b686c);
+  });
+
+  it('skips the holder swap entirely when the middleware response was truncated', async () => {
+    const holdersRepository = {
+      manager: { transaction: jest.fn() },
+      delete: jest.fn(),
+    };
+    (service as any).tokenHoldersRepository = holdersRepository;
+    jest.spyOn(service, 'getToken').mockResolvedValue({
+      address: 'ct_aex9',
+      sale_address: 'ct_sale',
+    } as any);
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: [{ id: 'h1' }],
+      truncated: true,
+    } as any);
+
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+
+    // Pruning on partial data would delete live holders.
+    expect(holdersRepository.manager.transaction).not.toHaveBeenCalled();
+    expect(tokensRepository.update).not.toHaveBeenCalled();
+  });
+
   it('marks middleware holder loading as truncated when the response is missing data before any holders are loaded', async () => {
     jest.spyOn(service, '_loadHoldersFromContract').mockResolvedValue([]);
     (fetchJson as jest.Mock).mockResolvedValueOnce({ data: null, next: null });

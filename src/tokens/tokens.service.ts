@@ -127,6 +127,11 @@ export class TokensService {
   private readonly maxHoldersPages = Number(
     process.env.TOKEN_HOLDERS_MAX_PAGES || 300,
   );
+  // 2-arg advisory keyspace, disjoint from the 1-arg keys held by
+  // DexSchemaBootstrapService (4019283746), DexSyncService (4019283747) and
+  // DeviceChallengeService (0x6e636861). The second key is
+  // hashtext(aex9_address), so holder syncs serialise per token, not globally.
+  private static readonly HOLDER_SYNC_LOCK_NS = 0x746b686c; // 'tkhl'
   private static readonly MAX_CACHED_CONTRACTS = 200;
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
@@ -1098,38 +1103,80 @@ export class TokensService {
       return;
     }
 
+    // Sorted so both the upsert and its row locks are acquired in a stable
+    // order. The source order is balance-ranked and shifts between reads,
+    // which is what lets two overlapping syncs of one token cycle.
     const uniqueHolders = Array.from(
       new Map(totalHolders.map((holder) => [holder.id, holder])).values(),
-    );
+    ).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
     if (uniqueHolders.length > 0) {
-      await runWithDatabaseIssueLogging({
-        logger: this.logger,
-        stage: 'token holders delete before sync',
-        context: {
-          saleAddress,
-          aex9Address,
-          holderCount: uniqueHolders.length,
+      const context = {
+        saleAddress,
+        aex9Address,
+        holderCount: uniqueHolders.length,
+      };
+      const holderIds = uniqueHolders.map((holder) => holder.id);
+
+      // Upsert-then-prune in one transaction, rather than deleting every row
+      // for the token and re-inserting it. The old shape rewrote the whole
+      // holder set on every sync even when nothing had changed (4.9M inserts
+      // against 4.9M deletes on mainnet), and because the two statements were
+      // not atomic, readers between them saw the token with zero holders.
+      // Upserting first also means the set is never smaller than it should be.
+      const wrote = await this.tokenHoldersRepository.manager.transaction(
+        async (manager) => {
+          // Non-blocking by design. Overlapping syncs of one token take holder
+          // row locks in an order that shifts between reads, so their writes can
+          // cycle; the try- variant never waits, so it can neither tie up a pool
+          // connection nor become an edge in a lock cycle. The xact scope
+          // releases it on commit and on rollback alike, and being server-side
+          // it also covers the window where the queue's Redis lock has expired
+          // or been released early while this sync is still running.
+          const [lock] = await manager.query(
+            'SELECT pg_try_advisory_xact_lock($1::int4, hashtext($2)) AS locked',
+            [TokensService.HOLDER_SYNC_LOCK_NS, aex9Address],
+          );
+          if (!lock?.locked) {
+            return false;
+          }
+
+          await runWithDatabaseIssueLogging({
+            logger: this.logger,
+            stage: 'token holders upsert',
+            context,
+            operation: () =>
+              manager.getRepository(TokenHolder).upsert(uniqueHolders, {
+                conflictPaths: ['id'],
+                skipUpdateIfNoValuesChanged: true,
+              }),
+          });
+          await runWithDatabaseIssueLogging({
+            logger: this.logger,
+            stage: 'token holders prune',
+            context,
+            // `<> ALL($2::text[])` rather than `NOT IN (:...ids)`: a popular
+            // token's holder set would otherwise become thousands of bind params.
+            operation: () =>
+              manager.query(
+                `DELETE FROM token_holder WHERE aex9_address = $1 AND id <> ALL($2::text[])`,
+                [aex9Address, holderIds],
+              ),
+          });
+
+          return true;
         },
-        operation: () =>
-          this.tokenHoldersRepository.delete({
-            aex9_address: aex9Address,
-          }),
-      });
-      await runWithDatabaseIssueLogging({
-        logger: this.logger,
-        stage: 'token holders upsert',
-        context: {
-          saleAddress,
-          aex9Address,
-          holderCount: uniqueHolders.length,
-        },
-        operation: () =>
-          this.tokenHoldersRepository.upsert(uniqueHolders, {
-            conflictPaths: ['id'],
-            skipUpdateIfNoValuesChanged: true,
-          }),
-      });
+      );
+
+      // Nothing was persisted, so leave holders_count alone rather than
+      // writing a total that does not match the rows on disk. The sync that
+      // holds the lock is writing the same token and will set it.
+      if (!wrote) {
+        this.logger.warn(
+          `SyncTokenHoldersQueue: another sync holds the write lock for ${aex9Address}, skipping holder write`,
+        );
+        return;
+      }
     }
     await runWithDatabaseIssueLogging({
       logger: this.logger,
