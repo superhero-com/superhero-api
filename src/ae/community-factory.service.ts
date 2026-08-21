@@ -13,12 +13,8 @@ export class CommunityFactoryService {
   > = {};
   factories: Record<Encoded.ContractAddress, CommunityFactory> = {};
 
-  // A cold load is a chain round-trip (`initCommunityFactory`, then
-  // `get_state`), and the factory sits on nearly every hot read path. Caching
-  // only the resolved value means every request that arrives before the first
-  // one settles fires its own round-trip — a thundering herd on boot. Cache the
-  // in-flight promise too so concurrent callers share one. Rejections are
-  // evicted, so a failed load doesn't poison later retries.
+  // Share the in-flight chain round-trip between concurrent cold callers;
+  // rejections are evicted so a failed load doesn't poison retries.
   private inFlightFactories: Partial<
     Record<Encoded.ContractAddress, Promise<CommunityFactory>>
   > = {};
@@ -45,16 +41,15 @@ export class CommunityFactoryService {
       return inFlight;
     }
 
-    const resolvedAddress = address;
     const pending = initCommunityFactory(this.aeSdkService.sdk as any, address)
       .then((factory) => {
-        this.factories[resolvedAddress] = factory;
+        this.factories[address] = factory;
         return factory;
       })
       .finally(() => {
-        delete this.inFlightFactories[resolvedAddress];
+        delete this.inFlightFactories[address];
       });
-    this.inFlightFactories[resolvedAddress] = pending;
+    this.inFlightFactories[address] = pending;
 
     return pending;
   }

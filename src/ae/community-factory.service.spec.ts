@@ -58,6 +58,43 @@ describe('CommunityFactoryService', () => {
     expect(result).toEqual(mockFactory);
   });
 
+  it('shares one in-flight load between concurrent callers', async () => {
+    const mockFactory = { contract: {} } as any;
+    let resolveLoad: (factory: any) => void;
+    (initCommunityFactory as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveLoad = resolve;
+      }),
+    );
+
+    const address = 'ct_concurrent' as Encoded.ContractAddress;
+    const loads = Promise.all([
+      service.loadFactory(address),
+      service.loadFactory(address),
+      service.loadFactory(address),
+    ]);
+    resolveLoad!(mockFactory);
+    const [first, second, third] = await loads;
+
+    expect(initCommunityFactory).toHaveBeenCalledTimes(1);
+    expect(first).toBe(mockFactory);
+    expect(second).toBe(mockFactory);
+    expect(third).toBe(mockFactory);
+    expect(service.factories[address]).toBe(mockFactory);
+  });
+
+  it('retries after a failed load instead of caching the rejection', async () => {
+    const mockFactory = { contract: {} } as any;
+    (initCommunityFactory as jest.Mock)
+      .mockRejectedValueOnce(new Error('chain down'))
+      .mockResolvedValueOnce(mockFactory);
+
+    const address = 'ct_retry' as Encoded.ContractAddress;
+    await expect(service.loadFactory(address)).rejects.toThrow('chain down');
+    await expect(service.loadFactory(address)).resolves.toBe(mockFactory);
+    expect(initCommunityFactory).toHaveBeenCalledTimes(2);
+  });
+
   it('should return cached factory if already loaded', async () => {
     const address = 'ct_123' as Encoded.ContractAddress;
     const mockFactory = { contract: {} } as any;
@@ -113,6 +150,37 @@ describe('CommunityFactoryService', () => {
     );
     expect(result.collections['name-ak_1']).toBeDefined();
     expect(result.collections['name-ak_1'].allowed_name_length).toBe('10');
+  });
+
+  it('shares one in-flight schema build between concurrent callers', async () => {
+    const factoryAddress = 'ct_schema' as Encoded.ContractAddress;
+    let resolveState: (state: any) => void;
+    const mockFactoryInstance = {
+      contract: {
+        get_state: jest.fn().mockReturnValue(
+          new Promise((resolve) => {
+            resolveState = resolve;
+          }),
+        ),
+      },
+    };
+    (initCommunityFactory as jest.Mock).mockResolvedValue(mockFactoryInstance);
+    BCL_FACTORY[ACTIVE_NETWORK.networkId] = {
+      address: factoryAddress,
+      collections: {},
+    } as ICommunityFactorySchema;
+
+    const builds = Promise.all([
+      service.getCurrentFactory(),
+      service.getCurrentFactory(),
+    ]);
+    // Let both callers reach the schema build before the state resolves.
+    await new Promise((resolve) => setImmediate(resolve));
+    resolveState!({ decodedResult: {} });
+    const [first, second] = await builds;
+
+    expect(mockFactoryInstance.contract.get_state).toHaveBeenCalledTimes(1);
+    expect(first).toBe(second);
   });
 
   describe('mapCollectionInfo', () => {
