@@ -95,6 +95,29 @@ describe('CommunityFactoryService', () => {
     expect(initCommunityFactory).toHaveBeenCalledTimes(2);
   });
 
+  it('shares one rejection between concurrent callers and then retries', async () => {
+    const mockFactory = { contract: {} } as any;
+    let rejectLoad: (error: Error) => void;
+    (initCommunityFactory as jest.Mock)
+      .mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          rejectLoad = reject;
+        }),
+      )
+      .mockResolvedValueOnce(mockFactory);
+
+    const address = 'ct_concurrentFail' as Encoded.ContractAddress;
+    const first = service.loadFactory(address);
+    const second = service.loadFactory(address);
+    rejectLoad!(new Error('chain down'));
+
+    // Every waiter gets the error — nobody hangs on an evicted promise.
+    await expect(first).rejects.toThrow('chain down');
+    await expect(second).rejects.toThrow('chain down');
+    await expect(service.loadFactory(address)).resolves.toBe(mockFactory);
+    expect(initCommunityFactory).toHaveBeenCalledTimes(2);
+  });
+
   it('should return cached factory if already loaded', async () => {
     const address = 'ct_123' as Encoded.ContractAddress;
     const mockFactory = { contract: {} } as any;
@@ -181,6 +204,31 @@ describe('CommunityFactoryService', () => {
 
     expect(mockFactoryInstance.contract.get_state).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
+  });
+
+  it('retries after a failed schema build instead of caching the rejection', async () => {
+    const factoryAddress = 'ct_schemaRetry' as Encoded.ContractAddress;
+    const mockFactoryInstance = {
+      contract: {
+        get_state: jest
+          .fn()
+          .mockRejectedValueOnce(new Error('chain down'))
+          .mockResolvedValueOnce({ decodedResult: {} }),
+      },
+    };
+    (initCommunityFactory as jest.Mock).mockResolvedValue(mockFactoryInstance);
+    BCL_FACTORY[ACTIVE_NETWORK.networkId] = {
+      address: factoryAddress,
+      collections: {},
+    } as ICommunityFactorySchema;
+
+    // A cached rejection would break every schema consumer until restart.
+    await expect(service.getCurrentFactory()).rejects.toThrow('chain down');
+    const schema = await service.getCurrentFactory();
+
+    expect(schema.address).toBe(factoryAddress);
+    expect(mockFactoryInstance.contract.get_state).toHaveBeenCalledTimes(2);
+    expect(service.cachedFactorySchema[factoryAddress]).toBe(schema);
   });
 
   describe('mapCollectionInfo', () => {
