@@ -184,6 +184,46 @@ describe('PopularRankingService', () => {
     );
   });
 
+  it('still serves the fallback page when the fallback count query fails', async () => {
+    jest.spyOn(service, 'recompute').mockResolvedValue(undefined);
+    redisMock.zcard.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    const fallbackPost = {
+      id: 'fallback-1',
+      created_at: new Date().toISOString(),
+      content: 'hello',
+    };
+    const fallbackQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([fallbackPost]),
+    };
+    const countQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockRejectedValue(new Error('db down')),
+    };
+    postRepository.createQueryBuilder = jest
+      .fn()
+      .mockReturnValueOnce(fallbackQueryBuilder)
+      .mockReturnValueOnce(countQueryBuilder);
+
+    const result = await service.getPopularPostsPage(
+      '24h',
+      10,
+      0,
+      undefined,
+      {},
+    );
+
+    // A servable page must not become a 500 over its count.
+    expect(result.items).toEqual([fallbackPost]);
+    expect(result.totalItems).toBe(0);
+  });
+
   it('reorders personalized popular results by interactions per hour', async () => {
     const now = Date.now();
     const fastPost = {

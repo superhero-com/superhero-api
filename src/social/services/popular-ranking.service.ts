@@ -571,7 +571,15 @@ export class PopularRankingService implements OnModuleDestroy {
       if (verifiedIds.length === 0) {
         const [items, totalItems] = await Promise.all([
           this.fetchRecentFallback(window, limit, offset),
-          this.countRecentFallback(window),
+          // A failed count must not turn a servable page into a 500; the
+          // pre-refactor count path swallowed its errors the same way.
+          this.countRecentFallback(window).catch((error) => {
+            this.logger.error(
+              `Error counting recent fallback for window ${window}:`,
+              error,
+            );
+            return 0;
+          }),
         ]);
         return { items, totalItems };
       }
