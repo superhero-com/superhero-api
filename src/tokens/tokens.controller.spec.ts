@@ -4,7 +4,7 @@ import { TokensService } from './tokens.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { Repository } from 'typeorm';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Token } from './entities/token.entity';
+import { Token, UNRANKED_TOKEN_RANK } from './entities/token.entity';
 import { TokenHolder } from './entities/token-holders.entity';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -431,8 +431,13 @@ describe('TokensController', () => {
 
   it('should return paginated token rankings', async () => {
     const result = await controller.listTokenRankings('ct_123');
-    expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');
-    expect(tokensRepository.query).toHaveBeenCalled();
+    expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123', true);
+    // Anchored on the token's own rank, not a rank range.
+    expect(tokensRepository.query).toHaveBeenCalledWith(expect.any(String), [
+      'ct_123',
+      5,
+      5,
+    ]);
     expect(result).toEqual({
       items: [],
       meta: {
@@ -443,6 +448,125 @@ describe('TokensController', () => {
         totalPages: 1,
       },
     });
+  });
+
+  it('centres the window on the token and fills from both sides', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      rank: 10,
+      factory_address: 'ct_123',
+    });
+    jest.spyOn(tokensRepository, 'query').mockResolvedValue([
+      { sale_address: 'a', rank: 8 },
+      { sale_address: 'b', rank: 9 },
+      { sale_address: 'c', rank: 10 },
+      { sale_address: 'd', rank: 11 },
+      { sale_address: 'e', rank: 12 },
+    ]);
+
+    const result = await controller.listTokenRankings('ct_123');
+
+    // floor(5/2) = 2 above, the target, then 2 below -- ascending by rank.
+    expect(result.items.map((item: any) => item.rank)).toEqual([
+      8, 9, 10, 11, 12,
+    ]);
+  });
+
+  it('still returns a full page when ranks inside the window are unoccupied', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      rank: 10,
+      factory_address: 'ct_123',
+    });
+    // Ranks 8, 9 and 11 belong to tokens this board does not contain -- a
+    // BETWEEN 8 AND 12 window would have returned two rows.
+    jest.spyOn(tokensRepository, 'query').mockResolvedValue([
+      { sale_address: 'a', rank: 3 },
+      { sale_address: 'b', rank: 6 },
+      { sale_address: 'c', rank: 10 },
+      { sale_address: 'd', rank: 12 },
+      { sale_address: 'e', rank: 17 },
+    ]);
+
+    const result = await controller.listTokenRankings('ct_123');
+
+    expect(result.items.map((item: any) => item.rank)).toEqual([
+      3, 6, 10, 12, 17,
+    ]);
+    expect(result.meta.itemCount).toBe(5);
+  });
+
+  it('should clamp the ranking window at the top of the board', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      rank: 1,
+      factory_address: 'ct_123',
+    });
+    jest.spyOn(tokensRepository, 'query').mockResolvedValue([
+      { sale_address: 'c', rank: 1 },
+      { sale_address: 'd', rank: 2 },
+      { sale_address: 'e', rank: 3 },
+      { sale_address: 'f', rank: 4 },
+      { sale_address: 'g', rank: 5 },
+    ]);
+
+    const result = await controller.listTokenRankings('ct_123');
+
+    expect(tokensRepository.query).toHaveBeenCalledWith(expect.any(String), [
+      'ct_123',
+      1,
+      5,
+    ]);
+    // Nothing above rank 1, so every slot is spent below it.
+    expect(result.items.map((item: any) => item.rank)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('gives a token from another factory no neighbours on this board', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue({
+      sale_address: 'ct_other',
+      rank: 4,
+      factory_address: 'ct_previous_factory',
+    });
+    const querySpy = jest.spyOn(tokensRepository, 'query');
+    querySpy.mockClear();
+
+    const result = await controller.listTokenRankings('ct_other');
+
+    // Its global rank lands inside this board, so a rank window would have
+    // handed back the current factory's tokens as its peers.
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(result.items).toEqual([]);
+    expect(result.meta.totalItems).toBe(0);
+  });
+
+  it('gives an unlisted token no neighbours', async () => {
+    tokensService.findByAddress = jest.fn().mockResolvedValue({
+      sale_address: 'ct_123',
+      rank: 4,
+      factory_address: 'ct_123',
+      unlisted: true,
+    });
+    const querySpy = jest.spyOn(tokensRepository, 'query');
+    querySpy.mockClear();
+
+    const result = await controller.listTokenRankings('ct_123');
+
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(result.items).toEqual([]);
+  });
+
+  it('should not query neighbours for a token that has no rank yet', async () => {
+    tokensService.findByAddress = jest
+      .fn()
+      .mockResolvedValue({ sale_address: 'ct_123', rank: UNRANKED_TOKEN_RANK });
+    const querySpy = jest.spyOn(tokensRepository, 'query');
+    querySpy.mockClear();
+
+    const result = await controller.listTokenRankings('ct_123');
+
+    expect(querySpy).not.toHaveBeenCalled();
+    expect(result.items).toEqual([]);
+    expect(result.meta.totalItems).toBe(0);
   });
 
   it('should return an updated token score breakdown', async () => {
