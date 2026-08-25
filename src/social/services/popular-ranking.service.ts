@@ -322,10 +322,15 @@ export class PopularRankingService implements OnModuleDestroy {
 
     for (let i = 0; i < postIds.length; i += CHUNK_SIZE) {
       const chunk = postIds.slice(i, i + CHUNK_SIZE);
-      const existingPosts = await this.postRepository.findBy({
-        id: In(chunk),
-        is_hidden: false,
-        post_id: null,
+      // Existence check over every ranked id per request — don't drag the JSON
+      // blob columns back.
+      const existingPosts = await this.postRepository.find({
+        where: {
+          id: In(chunk),
+          is_hidden: false,
+          post_id: null,
+        },
+        select: { id: true },
       });
       existingPosts.forEach((p) => existingIdsSet.add(p.id));
     }
@@ -510,8 +515,9 @@ export class PopularRankingService implements OnModuleDestroy {
               since,
               10000,
             );
+            const typeIdSet = new Set(typeIds);
             const requestedItems = allItems.filter((item) =>
-              typeIds.includes(item.id),
+              typeIdSet.has(item.id),
             );
             pluginItems.push(...requestedItems);
           } catch (error) {
@@ -543,27 +549,6 @@ export class PopularRankingService implements OnModuleDestroy {
     return result;
   }
 
-  async getPopularPosts(
-    window: PopularWindow,
-    limit = 50,
-    offset = 0,
-    maxCandidates?: number,
-  ): Promise<(Post | PopularRankingContentItem)[]> {
-    const verifiedIds = await this.getVerifiedPopularIds(window, maxCandidates);
-
-    if (verifiedIds.length === 0) {
-      return this.fetchRecentFallback(window, limit, offset);
-    }
-
-    const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
-    const items = await this.hydrateRankedItems(
-      window,
-      verifiedIds.slice(0, candidateEnd),
-    );
-
-    return this.paginateDiversifiedRankedItems(items, limit, offset);
-  }
-
   async getPopularPostsPage(
     window: PopularWindow,
     limit = 50,
@@ -576,14 +561,39 @@ export class PopularRankingService implements OnModuleDestroy {
     scoredItems?: PopularScoreItem[];
   }> {
     if (!this.hasWeightOverrides(weightOverrides)) {
-      const totalItems = await this.getTotalPostsCount(window);
-      const items = await this.getPopularPosts(
+      // Resolve the verified id set once — page and count derive from the same
+      // snapshot instead of two full Redis reads + existence scans.
+      const verifiedIds = await this.getVerifiedPopularIds(
         window,
-        limit,
-        offset,
         maxCandidates,
       );
-      return { items, totalItems };
+
+      if (verifiedIds.length === 0) {
+        const [items, totalItems] = await Promise.all([
+          this.fetchRecentFallback(window, limit, offset),
+          // A failed count must not turn a servable page into a 500; the
+          // pre-refactor count path swallowed its errors the same way.
+          this.countRecentFallback(window).catch((error) => {
+            this.logger.error(
+              `Error counting recent fallback for window ${window}:`,
+              error,
+            );
+            return 0;
+          }),
+        ]);
+        return { items, totalItems };
+      }
+
+      const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
+      const hydrated = await this.hydrateRankedItems(
+        window,
+        verifiedIds.slice(0, candidateEnd),
+      );
+
+      return {
+        items: this.paginateDiversifiedRankedItems(hydrated, limit, offset),
+        totalItems: verifiedIds.length,
+      };
     }
 
     const scored = await this.buildScoredItems(
@@ -602,31 +612,6 @@ export class PopularRankingService implements OnModuleDestroy {
       totalItems: scored.length,
       scoredItems: scored,
     };
-  }
-
-  async getTotalCached(window: PopularWindow): Promise<number | undefined> {
-    const key = this.getRedisKey(window);
-    try {
-      return await this.redis.zcard(key);
-    } catch {
-      return undefined;
-    }
-  }
-
-  async getTotalPostsCount(window: PopularWindow): Promise<number> {
-    try {
-      const verifiedIds = await this.getVerifiedPopularIds(window);
-      if (verifiedIds.length > 0) {
-        return verifiedIds.length;
-      }
-      return this.countRecentFallback(window);
-    } catch (error) {
-      this.logger.error(
-        `Error in getTotalPostsCount for window ${window}:`,
-        error,
-      );
-      return 0;
-    }
   }
 
   private async buildScoredItems(

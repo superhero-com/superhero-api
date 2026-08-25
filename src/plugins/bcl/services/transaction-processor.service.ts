@@ -132,7 +132,6 @@ export class TransactionProcessorService {
           );
           transactionToken = await this.tokenService.findByAddress(
             transactionToken.sale_address,
-            false,
             manager,
           );
           if (!transactionToken) {

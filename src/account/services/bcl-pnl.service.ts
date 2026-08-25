@@ -220,19 +220,25 @@ export class BclPnlService {
         FROM address_txs
         GROUP BY sale_address
       ),
-      -- Latest market price per token (from any trader, not just this address)
+      -- Latest market price per token (from any trader, not just this address).
+      -- LATERAL rather than DISTINCT ON + IN: the IN-subquery join blocks the
+      -- (sale_address, created_at) index, forcing a seq scan + on-disk sort of
+      -- every transaction. CROSS JOIN (not LEFT) keeps DISTINCT ON's behaviour
+      -- of dropping tokens with no usable price row.
       token_price AS (
-        SELECT DISTINCT ON (p.sale_address)
-          p.sale_address,
-          CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS unit_price_ae,
-          CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS unit_price_usd
-        FROM transactions p
-        WHERE p.sale_address IN (
-          SELECT sale_address FROM token_agg WHERE current_holdings > 0
-        )
-          AND p.buy_price->>'ae' IS NOT NULL
-          AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
-        ORDER BY p.sale_address, p.created_at DESC
+        SELECT t.sale_address, x.unit_price_ae, x.unit_price_usd
+        FROM (SELECT sale_address FROM token_agg WHERE current_holdings > 0) t
+        CROSS JOIN LATERAL (
+          SELECT
+            CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS unit_price_ae,
+            CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS unit_price_usd
+          FROM transactions p
+          WHERE p.sale_address = t.sale_address
+            AND p.buy_price->>'ae' IS NOT NULL
+            AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
+          ORDER BY p.created_at DESC
+          LIMIT 1
+        ) x
       ),
       -- Each sell transaction within the requested date range, enriched with
       -- avg cost from token_agg so we can compute per-sell realized gain.
