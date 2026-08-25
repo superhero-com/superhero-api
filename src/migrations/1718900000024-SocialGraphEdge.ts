@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class SocialGraphEdge1718900000021 implements MigrationInterface {
-  name = 'SocialGraphEdge1718900000021';
+export class SocialGraphEdge1718900000024 implements MigrationInterface {
+  name = 'SocialGraphEdge1718900000024';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
