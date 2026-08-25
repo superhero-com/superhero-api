@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Logger,
   Param,
   Query,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -20,6 +22,8 @@ import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 @Controller('accounts')
 @ApiTags('Accounts')
 export class BclPnlController {
+  private readonly logger = new Logger(BclPnlController.name);
+
   constructor(
     private readonly bclPnlService: BclPnlService,
     private readonly aeSdkService: AeSdkService,
@@ -43,9 +47,19 @@ export class BclPnlController {
       }
       targetBlockHeight = query.blockHeight;
     } else {
-      const currentGeneration =
-        await this.aeSdkService.sdk.getCurrentGeneration();
-      targetBlockHeight = currentGeneration.keyBlock.height;
+      try {
+        const currentGeneration =
+          await this.aeSdkService.sdk.getCurrentGeneration();
+        targetBlockHeight = currentGeneration.keyBlock.height;
+      } catch (error) {
+        this.logger.warn(
+          'Failed to fetch current generation from the AE node',
+          error instanceof Error ? error.stack : String(error),
+        );
+        throw new ServiceUnavailableException(
+          'Unable to reach the AE node right now, please try again',
+        );
+      }
     }
 
     const pnlResult = await this.bclPnlService.calculateTokenPnls(
