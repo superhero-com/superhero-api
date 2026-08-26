@@ -45,8 +45,12 @@ export class AddressLinksContractService implements OnModuleInit {
 
   async getNonce(address: string): Promise<number> {
     const contract = await this.getContractInstance();
-    const result: any = await contract.get_nonce(address);
-    return Number(result?.decodedResult ?? result);
+    try {
+      const result: any = await contract.get_nonce(address);
+      return Number(result?.decodedResult ?? result);
+    } catch (error) {
+      throw this.mapReadError(error, 'get_nonce');
+    }
   }
 
   buildLinkMessage(
@@ -81,13 +85,22 @@ export class AddressLinksContractService implements OnModuleInit {
 
   async getNoncePrincipal(principal: string, signer: string): Promise<number> {
     const contract = await this.getContractInstance();
-    const result: any = await contract.get_nonce_principal(principal, signer);
-    return Number(result?.decodedResult ?? result);
+    try {
+      const result: any = await contract.get_nonce_principal(principal, signer);
+      return Number(result?.decodedResult ?? result);
+    } catch (error) {
+      throw this.mapReadError(error, 'get_nonce_principal');
+    }
   }
 
   async getLink(address: string, provider: string): Promise<string | null> {
     const contract = await this.getContractInstance();
-    const result: any = await contract.get_link(address, provider);
+    let result: any;
+    try {
+      result = await contract.get_link(address, provider);
+    } catch (error) {
+      throw this.mapReadError(error, 'get_link');
+    }
     const value = result?.decodedResult ?? result;
     if (value === undefined || value === null || value === false) {
       return null;
@@ -275,6 +288,16 @@ export class AddressLinksContractService implements OnModuleInit {
     this.logger.error(`Contract ${operation} failed unexpectedly`, message);
     return new InternalServerErrorException(
       'Address link transaction failed unexpectedly.',
+    );
+  }
+
+  private mapReadError(error: any, operation: string): Error {
+    const mapped = this.mapContractError(error, operation);
+    if (mapped instanceof BadRequestException) {
+      return mapped;
+    }
+    return new ServiceUnavailableException(
+      'Unable to reach the address-link contract right now, please try again',
     );
   }
 

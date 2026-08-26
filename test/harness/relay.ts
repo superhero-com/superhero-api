@@ -74,7 +74,6 @@ export async function relayDescribe(
 ): Promise<jest.Describe> {
   const reachable = !!process.env.TG_RELAY_URL || (await relayReachable(url));
   if (!reachable) {
-    // eslint-disable-next-line no-console
     console.warn(
       `[harness/relay] skipping relay-backed cases — no relay at ${url}`,
     );

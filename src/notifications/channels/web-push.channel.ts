@@ -93,13 +93,11 @@ export class WebPushChannel implements NotificationChannel {
     const logicalKey = notification.dedupKey(notifiable);
     for (const sub of subs) {
       const dedupKey = `${this.name}:${notification.type}:${logicalKey}:${sub.endpoint}`;
-      // eslint-disable-next-line no-await-in-loop
       const acquired = await this.dedup.tryAcquire(dedupKey);
       if (!acquired) {
         continue; // this device already got (or is getting) this notification
       }
       try {
-        // eslint-disable-next-line no-await-in-loop
         await this.queue.add(
           {
             subscription: {
@@ -120,7 +118,6 @@ export class WebPushChannel implements NotificationChannel {
         // having been attempted. Release-then-continue (not rethrow): one
         // subscription's enqueue failure must not stop delivery to the rest of
         // this address's devices.
-        // eslint-disable-next-line no-await-in-loop
         await this.dedup.release(dedupKey).catch((releaseError) => {
           this.logger.warn(
             `Failed to release dedup key "${dedupKey}" after a failed enqueue: ${

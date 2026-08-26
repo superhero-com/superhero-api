@@ -116,7 +116,6 @@ d('NotificationFeedService.prune (integration)', () => {
     const cap = 5;
     const ids: number[] = [];
     for (let i = 0; i < cap + 3; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
       ids.push(
         await seed({
           address: 'ak_b',
@@ -145,13 +144,11 @@ d('NotificationFeedService.prune (integration)', () => {
     const cap = 5;
     const underCapIds: number[] = [];
     for (let i = 0; i < 3; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
       underCapIds.push(
         await seed({ address: 'ak_under', read: false, createdAt: daysAgo(0) }),
       );
     }
     for (let i = 0; i < 8; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
       await seed({ address: 'ak_over', read: false, createdAt: daysAgo(0) });
     }
 

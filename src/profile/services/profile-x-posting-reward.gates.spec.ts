@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Each gate needs a different module-level constants config (KEYWORDS empty vs
 // post-fetch disabled), so the service is re-required under an isolated mock per
 // case (require, not import, so the doMock takes effect). These gates

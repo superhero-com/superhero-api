@@ -19,12 +19,12 @@ import { RoomConfigViewDto } from '../dto/room-config.view.dto';
 // and are on the jest transform whitelist (`nostr-tools|@noble|@scure`).
 const nip19: {
   decode: (value: string) => { type: string; data: unknown };
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
 } = require('nostr-tools/nip19');
 
 const nostrPure: {
   getPublicKey: (sk: Uint8Array) => string;
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
 } = require('nostr-tools/pure');
 
 const HEX64 = /^[0-9a-f]{64}$/;

@@ -21,7 +21,7 @@ jest.mock('@aeternity/aepp-sdk', () => ({
   AeSdk: class {},
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { LiveIndexerService } = require('./live-indexer.service');
 
 /**

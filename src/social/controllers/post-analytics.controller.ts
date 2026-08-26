@@ -44,6 +44,9 @@ export class PostAnalyticsController {
     ).toDate();
     const endDate = moment(end_date ?? moment().format('YYYY-MM-DD')).toDate();
 
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new BadRequestException('start_date/end_date must be valid dates');
+    }
     if (startDate > endDate) {
       throw new BadRequestException('Start date must be before end date');
     }
@@ -94,6 +97,9 @@ export class PostAnalyticsController {
       end_date ?? moment().add(1, 'day').format('YYYY-MM-DD'),
     ).toDate();
 
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new BadRequestException('start_date/end_date must be valid dates');
+    }
     if (startDate > endDate) {
       throw new BadRequestException('Start date must be before end date');
     }
@@ -146,6 +152,9 @@ export class PostAnalyticsController {
       end_date ?? moment().add(1, 'day').format('YYYY-MM-DD'),
     ).toDate();
 
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new BadRequestException('start_date/end_date must be valid dates');
+    }
     if (startDate > endDate) {
       throw new BadRequestException('Start date must be before end date');
     }

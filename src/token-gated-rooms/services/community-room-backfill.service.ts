@@ -260,7 +260,6 @@ export class CommunityRoomBackfillService
     let batches = 0;
     let lastSynced = new Set<string>();
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       if (options.maxBatches !== undefined && batches >= options.maxBatches) {
         break;

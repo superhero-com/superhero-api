@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import moment, { Moment } from 'moment';
@@ -79,15 +83,7 @@ export interface GetPortfolioHistoryOptions {
   endDate?: Moment;
   interval?: number; // seconds, default 86400 (daily)
   convertTo?:
-    | 'ae'
-    | 'usd'
-    | 'eur'
-    | 'aud'
-    | 'brl'
-    | 'cad'
-    | 'chf'
-    | 'gbp'
-    | 'xau';
+    'ae' | 'usd' | 'eur' | 'aud' | 'brl' | 'cad' | 'chf' | 'gbp' | 'xau';
   includePnl?: boolean; // Whether to include PNL data
   useRangeBasedPnl?: boolean; // If true, calculate PNL for range between timestamps; if false, use all previous transactions
   includeTokensPnl?: boolean; // Whether to include per-token PNL breakdown (large payload)
@@ -378,11 +374,53 @@ export class PortfolioService {
   ): Promise<{ value: number; timestamp: Date }> {
     const resolvedAddress = await this.resolveAccountAddress(address);
 
-    const [aeBalance, currentHeight, currentAePrice] = await Promise.all([
-      this.aeSdkService.sdk.getBalance(resolvedAddress as any),
-      this.aeSdkService.sdk.getHeight(),
-      this.coinGeckoService.getPriceData(new BigNumber(1)),
-    ]);
+    // Settled, not all-or-nothing: two dependencies here, and one catch
+    // would report whichever of them broke as the other.
+    const [balanceResult, heightResult, priceResult] = await Promise.allSettled(
+      [
+        this.aeSdkService.sdk.getBalance(resolvedAddress as any),
+        this.aeSdkService.sdk.getHeight(),
+        this.coinGeckoService.getPriceData(new BigNumber(1)),
+      ],
+    );
+
+    if (
+      balanceResult.status === 'rejected' ||
+      heightResult.status === 'rejected'
+    ) {
+      const reason =
+        balanceResult.status === 'rejected'
+          ? balanceResult.reason
+          : (heightResult as PromiseRejectedResult).reason;
+      this.logger.warn(
+        `Failed to reach the AE node for ${resolvedAddress}`,
+        reason instanceof Error ? reason.stack : String(reason),
+      );
+      throw new ServiceUnavailableException(
+        'Unable to reach the AE node right now, please try again',
+      );
+    }
+
+    const aeBalance = balanceResult.value;
+    const currentHeight = heightResult.value;
+    const currentAePrice =
+      priceResult.status === 'fulfilled' ? priceResult.value : undefined;
+
+    // Only `usd` needs a price, and pricing degrades to null rather than
+    // throwing -- without this, `|| 0` values the whole AE balance at zero.
+    if (convertTo === 'usd' && currentAePrice?.usd == null) {
+      this.logger.warn(
+        `No AE/USD rate available for ${resolvedAddress}`,
+        priceResult.status === 'rejected'
+          ? priceResult.reason instanceof Error
+            ? priceResult.reason.stack
+            : String(priceResult.reason)
+          : 'pricing returned no usd rate',
+      );
+      throw new ServiceUnavailableException(
+        'Unable to price AE in USD right now, please try again',
+      );
+    }
 
     // getBalance reflects the chain tip *inclusive* of the current block, but
     // the holdings aggregation uses `tx.block_height < snapshot_height` (strict).
@@ -571,12 +609,17 @@ export class PortfolioService {
       return cached;
     }
 
-    const promise = this.aeSdkService.sdk.getBalance(
-      address as any,
-      {
-        height: bucketHeight,
-      } as any,
-    );
+    const promise = this.aeSdkService.sdk
+      .getBalance(address as any, { height: bucketHeight } as any)
+      .catch((error) => {
+        this.logger.warn(
+          `Failed to fetch balance for ${address} at height ${bucketHeight}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+        throw new ServiceUnavailableException(
+          'Unable to reach the AE node right now, please try again',
+        );
+      });
     cache.set(bucketHeight, promise);
     return promise;
   }

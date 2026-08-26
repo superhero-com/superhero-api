@@ -1,10 +1,17 @@
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+} from 'typeorm';
 import BigNumber from 'bignumber.js';
 
 @Entity({
   name: 'accounts',
 })
+@Index('IDX_ACCOUNTS_TOTAL_VOLUME', ['total_volume'])
 export class Account {
   @PrimaryColumn()
   address: string;

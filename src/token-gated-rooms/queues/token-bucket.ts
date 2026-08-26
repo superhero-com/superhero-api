@@ -75,7 +75,7 @@ export class TokenBucket {
 
   private async reserve(): Promise<void> {
     // Loop: refill, spend if possible, else sleep the deficit and retry.
-    // eslint-disable-next-line no-constant-condition
+
     while (true) {
       this.refill();
       if (this.tokens >= 1) {

@@ -29,11 +29,7 @@
  * is the schema/doc source of truth only and is exported for the unit tests.
  */
 export type NostrRoomState =
-  | 'none'
-  | 'pending'
-  | 'created'
-  | 'failed'
-  | 'deleted';
+  'none' | 'pending' | 'created' | 'failed' | 'deleted';
 
 /** All values of {@link NostrRoomState}, in canonical order (used by the migration enum). */
 export const NOSTR_ROOM_STATES: readonly NostrRoomState[] = [

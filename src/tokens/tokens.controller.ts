@@ -25,7 +25,7 @@ import { Repository, SelectQueryBuilder } from 'typeorm';
 import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenDto } from './dto/token.dto';
 import { TokenHolder } from './entities/token-holders.entity';
-import { Token } from './entities/token.entity';
+import { Token, UNRANKED_TOKEN_RANK } from './entities/token.entity';
 import { ApiOkResponsePaginated } from '../utils/api-type';
 import { TokensService } from './tokens.service';
 import {
@@ -418,8 +418,22 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(5), ParseIntPipe) limit = 5,
   ): Promise<Pagination<Token>> {
     this.validatePagination(page, limit);
-    const token = await this.tokensService.findByAddress(address);
+    const token = await this.tokensService.findByAddress(address, true);
     if (!token) {
+      return {
+        items: [],
+        meta: {
+          currentPage: page,
+          itemCount: 0,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
+    // Sentinel rank -- the refresh cron has not placed this token yet.
+    if (token.rank >= UNRANKED_TOKEN_RANK) {
       return {
         items: [],
         meta: {
@@ -434,59 +448,78 @@ export class TokensController {
 
     const factory = await this.communityFactoryService.getCurrentFactory();
 
-    // All values below are bound as parameters rather than interpolated
-    // into the SQL string. Even though `factory.address` and
-    // `token.sale_address` come from our own DB today, string
-    // interpolation here would mean a single compromised upstream row
-    // becomes SQL injection. `Math.floor(limit / 2)` is numeric and still
-    // bound as a parameter for consistency.
-    const halfLimit = Math.floor(limit / 2);
-    const rankedQuery = `
-      WITH ranked_tokens AS (
-        SELECT 
-          t.*,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
-              t.market_cap DESC,
-              t.created_at ASC
-          ) AS INTEGER) as rank
-        FROM token t
-        WHERE t.factory_address = $1
-      ),
-      target_rank AS (
-        SELECT rank
-        FROM ranked_tokens
-        WHERE sale_address = $2
-      ),
-      adjusted_limits AS (
+    // `rank` spans every factory, so a token off this board still lands
+    // inside it -- and would come back with a set of strangers.
+    if (token.factory_address !== factory.address || token.unlisted) {
+      return {
+        items: [],
+        meta: {
+          currentPage: page,
+          itemCount: 0,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
+    // `rank` is not dense over this board -- other factories, unlisting and
+    // the refresh lag all leave holes a BETWEEN window would return short on.
+    const neighboursQuery = `
+      (
         SELECT
-          CASE
-            WHEN (SELECT rank FROM target_rank) <= 2
-            THEN $3::int - (SELECT rank FROM target_rank) + 1
-            ELSE $3::int
-          END as upper_limit,
-          $3::int as lower_limit
+          token.*,
+          row_to_json(token_performance_view.*) as performance
+        FROM token
+        LEFT JOIN token_performance_view
+          ON token.sale_address = token_performance_view.sale_address
+        WHERE token.factory_address = $1
+          AND token.unlisted = false
+          AND token.rank < $2
+        ORDER BY token.rank DESC
+        LIMIT $3
       )
-      SELECT 
-        ranked_tokens.*,
-        row_to_json(token_performance_view.*) as performance
-      FROM ranked_tokens
-      LEFT JOIN token_performance_view ON ranked_tokens.sale_address = token_performance_view.sale_address
-      WHERE rank >= (
-        SELECT rank FROM target_rank
-      ) - (SELECT lower_limit FROM adjusted_limits)
-      AND rank <= (
-        SELECT rank FROM target_rank
-      ) + (SELECT upper_limit FROM adjusted_limits)
-      ORDER BY market_cap DESC
+      UNION ALL
+      (
+        SELECT
+          token.*,
+          row_to_json(token_performance_view.*) as performance
+        FROM token
+        LEFT JOIN token_performance_view
+          ON token.sale_address = token_performance_view.sale_address
+        WHERE token.factory_address = $1
+          AND token.unlisted = false
+          AND token.rank >= $2
+        ORDER BY token.rank ASC
+        LIMIT $3
+      )
     `;
 
-    const rankedTokens = await this.tokensRepository.query(rankedQuery, [
+    const neighbours = await this.tokensRepository.query(neighboursQuery, [
       factory.address,
-      token.sale_address,
-      halfLimit,
+      token.rank,
+      limit,
     ]);
+
+    const above = neighbours
+      .filter((row) => row.rank < token.rank)
+      .sort((a, b) => b.rank - a.rank);
+    const below = neighbours
+      .filter((row) => row.rank >= token.rank)
+      .sort((a, b) => a.rank - b.rank);
+
+    // Centre on the target, then spend whatever the short side could not use
+    // on the other one, so an edge-of-board token still returns `limit` rows.
+    const takeAbove = Math.min(
+      above.length,
+      Math.max(Math.floor(limit / 2), limit - below.length),
+    );
+    const takeBelow = Math.min(below.length, limit - takeAbove);
+
+    const rankedTokens = [
+      ...above.slice(0, takeAbove).reverse(),
+      ...below.slice(0, takeBelow),
+    ];
 
     for (const rankedToken of rankedTokens) {
       rankedToken.collection_info =

@@ -86,7 +86,6 @@ describe('RelayWriterService (integration)', () => {
   beforeAll(async () => {
     available = !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
     if (!available) {
-      // eslint-disable-next-line no-console
       console.warn(
         `[relay-writer.integration] skipping — no reachable relay at ${RELAY_URL}`,
       );

@@ -580,6 +580,26 @@ describe('BclPnlService', () => {
     expect(params[2]).toBe(end);
   });
 
+  it('calculateTradingStats resolves token_price via LATERAL, not DISTINCT ON', async () => {
+    const { service, transactionRepository } = createService();
+    transactionRepository.query.mockResolvedValue([]);
+
+    await service.calculateTradingStats('ak_test', new Date(), new Date());
+    const [sql] = transactionRepository.query.mock.calls[0];
+
+    // DISTINCT ON + `sale_address IN (subquery)` cannot use the
+    // (sale_address, created_at) index -- it seq-scanned and sorted every
+    // transaction. Measured on ~868k rows: 4080ms -> 631ms.
+    expect(sql).toContain('CROSS JOIN LATERAL');
+    expect(sql).toContain('ORDER BY p.created_at DESC');
+    expect(sql).toContain('LIMIT 1');
+    expect(sql).not.toContain('DISTINCT ON (p.sale_address)');
+    expect(sql).not.toContain('WHERE p.sale_address IN (');
+    // CROSS, not LEFT: DISTINCT ON emitted no row for a token whose prices are
+    // all NaN/null, and the rewrite has to drop it too.
+    expect(sql).not.toContain('LEFT JOIN LATERAL');
+  });
+
   it('calculateTradingStats returns correct stats from mock row', async () => {
     const { service, transactionRepository } = createService();
 

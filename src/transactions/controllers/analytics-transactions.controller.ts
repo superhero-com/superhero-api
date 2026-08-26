@@ -1,5 +1,5 @@
 import { TokensService } from '@/tokens/tokens.service';
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
@@ -16,6 +16,9 @@ import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DailyMarketCapSumDto } from '@/tokens/dto/daily-market-cap-sum.dto';
 import { CacheTTL } from '@nestjs/cache-manager';
 import { Token } from '@/tokens/entities/token.entity';
+
+const MAX_TOKEN_SALE_ADDRESSES = 100;
+
 @Controller('analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
@@ -157,6 +160,11 @@ export class AnalyticsTransactionsController {
     if (token_sale_addresses && !Array.isArray(token_sale_addresses)) {
       token_sale_addresses = [token_sale_addresses];
     }
+    if (token_sale_addresses?.length > MAX_TOKEN_SALE_ADDRESSES) {
+      throw new BadRequestException(
+        `Too many token_sale_addresses: max ${MAX_TOKEN_SALE_ADDRESSES} per request (got ${token_sale_addresses.length})`,
+      );
+    }
     // Count all unique users across the entire system
     const queryBuilder =
       this.transactionsRepository.createQueryBuilder('transactions');
@@ -168,6 +176,10 @@ export class AnalyticsTransactionsController {
         },
       });
       const uniqueTokenSaleAddresses = tokens.map((t) => t.sale_address);
+      // An empty list would expand to `IN ()`, which Postgres rejects.
+      if (!uniqueTokenSaleAddresses.length) {
+        return { total_users: 0 };
+      }
       queryBuilder.andWhere(
         'transactions.sale_address IN (:...uniqueTokenSaleAddresses)',
         {

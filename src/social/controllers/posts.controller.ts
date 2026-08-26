@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   DefaultValuePipe,
   Get,
@@ -34,6 +35,12 @@ import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
 } from '@/common/validation/request-validation';
+
+// order_by is interpolated into the ORDER BY expression, so it must never
+// carry anything but a known column name.
+const ALLOWED_ORDER_BY = new Set(['created_at', 'total_comments']);
+const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
+const MAX_SEARCH_LENGTH = 100;
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -232,6 +239,25 @@ export class PostsController {
     account_address?: string,
     @Query('topics') topics?: string,
   ) {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_BY.has(orderBy)) {
+      throw new BadRequestException(`Invalid order_by value: ${orderBy}`);
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
+    if (search && search.length > MAX_SEARCH_LENGTH) {
+      throw new BadRequestException(
+        `search must be at most ${MAX_SEARCH_LENGTH} characters`,
+      );
+    }
     // Build base query for filtering to get distinct post IDs
     // This prevents duplicates when posts have multiple topics
     const baseQuery = this.postRepository
@@ -576,6 +602,17 @@ export class PostsController {
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
     @Query('order_direction') orderDirection: 'ASC' | 'DESC' = 'ASC',
   ) {
+    if (page < 1) {
+      throw new BadRequestException('Page must be greater than or equal to 1');
+    }
+    if (limit < 1 || limit > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+    if (!ALLOWED_ORDER_DIRECTIONS.has(orderDirection)) {
+      throw new BadRequestException(
+        `Invalid order_direction value: ${orderDirection}`,
+      );
+    }
     // First check if the parent post exists
     const parentPost = await this.postRepository.findOne({
       where: { id },

@@ -463,7 +463,6 @@ d('MembershipSyncService (integration)', () => {
         } as any);
         await writer.onModuleInit();
       } else {
-        // eslint-disable-next-line no-console
         console.warn(
           `[membership-sync.integration] relay section skipped — no relay at ${RELAY_URL}`,
         );

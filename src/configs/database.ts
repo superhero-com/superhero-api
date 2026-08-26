@@ -65,7 +65,6 @@ const DB_SYNC_ENABLED =
   process.env.NODE_ENV !== 'production' && process.env.DB_SYNC === 'true';
 
 if (process.env.NODE_ENV === 'production' && process.env.DB_SYNC === 'true') {
-  // eslint-disable-next-line no-console
   console.error(
     '[security] DB_SYNC=true was set in production and is being ignored.' +
       ' Use migrations to evolve the schema.',
