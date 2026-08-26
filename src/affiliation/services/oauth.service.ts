@@ -48,27 +48,33 @@ export class OAuthService {
       ).toString('base64');
       headers.Authorization = `Basic ${basicAuth}`;
     }
-    const response = await fetch('https://api.x.com/2/oauth2/token', {
-      method: 'POST',
-      headers,
-      body: body.toString(),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.access_token) {
-      this.logger.warn('X token exchange failed', {
-        status: response.status,
-        www_authenticate: response.headers.get('www-authenticate'),
-        error: data.error,
-        error_description: data.error_description,
-        detail: data.detail,
+    try {
+      const response = await fetch('https://api.x.com/2/oauth2/token', {
+        method: 'POST',
+        headers,
+        body: body.toString(),
       });
-      throw new BadRequestException(
-        data.error_description ||
-          data.detail ||
-          'Failed to exchange X authorization code',
-      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.access_token) {
+        this.logger.warn('X token exchange failed', {
+          status: response.status,
+          www_authenticate: response.headers.get('www-authenticate'),
+          error: data.error,
+          error_description: data.error_description,
+          detail: data.detail,
+        });
+        throw new BadRequestException(
+          data.error_description ||
+            data.detail ||
+            'Failed to exchange X authorization code',
+        );
+      }
+      return data.access_token;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error('X token exchange request failed:', error);
+      throw new BadRequestException('Failed to exchange X authorization code');
     }
-    return data.access_token;
   }
 
   async verifyAccessToken(
