@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /** The `profile` sub-object of `GET /api/accounts/:address`. */
 export class AccountProfileDto {
@@ -29,11 +29,17 @@ export class AccountProfileDto {
   @ApiProperty({ type: String, nullable: true })
   chain_expires_at: string | null;
 
-  @ApiProperty({ description: 'Followers, chain-truth served from the index.' })
-  followers_count: number;
+  // Present only when the social graph is configured; omitted (not 0/null) when
+  // the feature is disabled, so a disabled deployment never asserts a count.
+  @ApiPropertyOptional({
+    description: 'Followers, chain-truth served from the index.',
+  })
+  followers_count?: number;
 
-  @ApiProperty({ description: 'Following, chain-truth served from the index.' })
-  following_count: number;
+  @ApiPropertyOptional({
+    description: 'Following, chain-truth served from the index.',
+  })
+  following_count?: number;
 }
 
 /**

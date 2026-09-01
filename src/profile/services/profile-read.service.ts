@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
 import { SocialGraphEdge } from '@/plugins/social-graph/entities/social-graph-edge.entity';
+import { SOCIAL_GRAPH_ENABLED } from '@/plugins/social-graph/social-graph.constants';
 import { ProfileCache } from '../entities/profile-cache.entity';
 
 @Injectable()
@@ -20,7 +21,9 @@ export class ProfileReadService {
     const [cache, account, counts] = await Promise.all([
       this.profileCacheRepository.findOne({ where: { address } }),
       this.accountRepository.findOne({ where: { address } }),
-      this.getFollowCounts(address),
+      SOCIAL_GRAPH_ENABLED
+        ? this.getFollowCounts(address)
+        : Promise.resolve({}),
     ]);
 
     const profile = { ...this.mergeProfile(cache, account), ...counts };
@@ -34,7 +37,8 @@ export class ProfileReadService {
   }
 
   // Follower/following counts are chain-truth served from the social-graph
-  // index (0 when the plugin is unconfigured). Only the single-profile read
+  // index. Called only when the feature is enabled; a disabled deployment omits
+  // the keys rather than counting an empty table. Only the single-profile read
   // carries them — the profile page the counts are for.
   private async getFollowCounts(
     address: string,

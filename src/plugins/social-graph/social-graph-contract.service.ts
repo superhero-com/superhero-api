@@ -9,6 +9,7 @@ import {
 import { loadSocialContractAci } from './social-graph-aci';
 import {
   SOCIAL_GRAPH_CONTRACT_ADDRESS,
+  SOCIAL_GRAPH_ENABLED,
   SOCIAL_GRAPH_EXPECTED_FOLLOW_COOLDOWN,
   SOCIAL_GRAPH_EXPECTED_MAX_BLOCKED,
   SOCIAL_GRAPH_EXPECTED_MAX_FOLLOWING,
@@ -38,7 +39,7 @@ export class SocialGraphContractService implements OnModuleInit {
   constructor(private readonly aeSdkService: AeSdkService) {}
 
   isConfigured(): boolean {
-    return Boolean(this.contractAddress);
+    return SOCIAL_GRAPH_ENABLED;
   }
 
   /**
