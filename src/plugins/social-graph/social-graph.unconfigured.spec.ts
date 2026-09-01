@@ -28,8 +28,10 @@ describe('social-graph (unconfigured — SOCIAL_GRAPH_CONTRACT_ADDRESS unset)', 
     };
     jest.isolateModules(() => {
       mod = {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         SocialGraphContractService: require('./social-graph-contract.service')
           .SocialGraphContractService,
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         SocialGraphPlugin: require('./social-graph.plugin').SocialGraphPlugin,
       };
     });
