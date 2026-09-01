@@ -41,17 +41,43 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe(address);
   });
 
-  it('surfaces follower and following counts on the profile object', async () => {
-    const service = createService({});
+  it('surfaces follower and following counts when the social graph is configured', async () => {
+    const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
+    const original = process.env[KEY];
+    process.env[KEY] = 'ct_configured';
+    try {
+      // Re-require so the module-level SOCIAL_GRAPH_ENABLED reads the set env.
+      let ConfiguredProfileReadService: any;
+      jest.isolateModules(() => {
+        ConfiguredProfileReadService =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./profile-read.service').ProfileReadService;
+      });
+      const count = jest
+        .fn()
+        .mockResolvedValueOnce(7) // followers (to_address)
+        .mockResolvedValueOnce(3); // following (from_address)
+      const service = new ConfiguredProfileReadService(
+        { findOne: jest.fn().mockResolvedValue(null) },
+        { findOne: jest.fn().mockResolvedValue(null) },
+        { count },
+      );
 
-    const result = await service.getProfile('ak_counts');
+      const result = await service.getProfile('ak_counts');
 
-    expect(result.profile).toEqual(
-      expect.objectContaining({
-        followers_count: 0,
-        following_count: 0,
-      }),
-    );
+      expect(result.profile).toEqual(
+        expect.objectContaining({
+          followers_count: 7,
+          following_count: 3,
+        }),
+      );
+    } finally {
+      if (original === undefined) {
+        delete process.env[KEY];
+      } else {
+        process.env[KEY] = original;
+      }
+    }
   });
 
   it('prefers chain_name over other name sources', async () => {

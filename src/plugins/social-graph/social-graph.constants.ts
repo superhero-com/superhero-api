@@ -9,6 +9,14 @@ export const SOCIAL_GRAPH_CONTRACT_ADDRESS =
   process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS || '';
 
 /**
+ * The one predicate for "is the social graph configured". Everything that gates
+ * on the switch — the contract service, the profile counts, the controller
+ * guard — reads this, so the feature is enabled or disabled in exactly one
+ * place.
+ */
+export const SOCIAL_GRAPH_ENABLED = Boolean(SOCIAL_GRAPH_CONTRACT_ADDRESS);
+
+/**
  * The block height the configured contract was deployed at. Config for the same
  * reason the address is: a redeploy moves both, and a start height left behind
  * an address that moved is how a plugin silently indexes from the wrong block

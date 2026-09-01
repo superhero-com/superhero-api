@@ -7,9 +7,11 @@ import {
   HttpException,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SocialGraphContractService } from './social-graph-contract.service';
+import { SocialGraphConfiguredGuard } from './social-graph-configured.guard';
 import { SocialGraphService } from './social-graph.service';
 import { SOCIAL_GRAPH_ABORT_STATUS } from './social-graph.errors';
 import {
@@ -21,6 +23,7 @@ import {
 
 @ApiTags('Social Graph')
 @Controller('social-graph')
+@UseGuards(SocialGraphConfiguredGuard)
 export class SocialGraphController {
   constructor(
     private readonly socialGraphService: SocialGraphService,
@@ -36,6 +39,7 @@ export class SocialGraphController {
   @ApiQuery({ name: 'to', required: true, example: 'ak_...' })
   @ApiResponse({ status: 200, type: SocialGraphRelationshipDto })
   @ApiResponse({ status: 400, description: 'Invalid address.' })
+  @ApiResponse({ status: 503, description: 'Contract not configured.' })
   async getRelationship(
     @Query('from') from: string,
     @Query('to') to: string,
@@ -80,6 +84,7 @@ export class SocialGraphController {
     status: 429,
     description: 'FOLLOW_COOLDOWN (unreachable while follow_cooldown = 0).',
   })
+  @ApiResponse({ status: 503, description: 'Contract not configured.' })
   async precheck(@Body() body: SocialGraphPrecheckDto): Promise<void> {
     const code = await this.socialGraphService.precheck(
       body.action,
