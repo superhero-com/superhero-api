@@ -5,15 +5,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
-import {
-  Brackets,
-  EntityManager,
-  In,
-  IsNull,
-  LessThan,
-  Not,
-  Repository,
-} from 'typeorm';
+import { Brackets, EntityManager, In, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
 import { fetchJson } from '@/utils/common';
 import { mapWithConcurrency } from '@/utils/concurrency.util';
@@ -42,6 +34,12 @@ const CHAIN_NAMES_MAX_ADDRESSES = 25;
 // other in mind.
 const CHAIN_NAME_VERIFY_CONCURRENCY = 2;
 const CHAIN_NAME_VERIFY_TIMEOUT_MS = 5_000;
+
+// How long a stored chain name stays usable before a read path refetches it.
+export const CHAIN_NAME_STALE_MS = 24 * 60 * 60 * 1000;
+// One @Cron(EVERY_HOUR) tick of headroom, so the sweep refreshes a name before
+// AccountsController's read path calls it stale.
+export const CHAIN_NAME_SWEEP_MS = CHAIN_NAME_STALE_MS - 60 * 60 * 1000;
 
 type AggregatedAccountRow = {
   address: string;
@@ -450,8 +448,11 @@ export class AccountService {
   }
 
   /**
-   * Periodically refresh chain names for accounts that have them
-   * Runs every hour to keep chain names up to date
+   * Hourly sweep keeping `accounts.chain_name` fresh, for accounts that already
+   * have a name and for linked accounts that may have claimed one since.
+   *
+   * Blind spot: an account that owns a name but never linked anything is not
+   * swept, and picks its name up only via the read path in AccountsController.
    */
   private isRefreshingChainNames = false;
 
@@ -463,20 +464,31 @@ export class AccountService {
 
     this.isRefreshingChainNames = true;
     try {
-      // Find accounts with chain names that haven't been updated in the last 23 hours
-      // This ensures we refresh them before they become stale (24h threshold)
-      const staleThreshold = new Date(Date.now() - 23 * 60 * 60 * 1000);
+      const staleThreshold = new Date(Date.now() - CHAIN_NAME_SWEEP_MS);
 
-      const accountsToRefresh = await this.accountRepository.find({
-        where: [
-          {
-            chain_name: Not(IsNull()),
-            chain_name_updated_at: LessThan(staleThreshold),
-          },
-          { chain_name: Not(IsNull()), chain_name_updated_at: IsNull() },
-        ],
-        take: 100, // Process in batches to avoid overwhelming middleware
-      });
+      const accountsToRefresh = await this.accountRepository
+        .createQueryBuilder('account')
+        .where(
+          new Brackets((qb) => {
+            qb.where('account.chain_name IS NOT NULL')
+              // A name claimed after the account was created has no other way
+              // into the column. Gated on links to keep the batch small.
+              .orWhere(`account.links <> '{}'::jsonb`);
+          }),
+        )
+        .andWhere(
+          new Brackets((qb) => {
+            qb.where('account.chain_name_checked_at IS NULL').orWhere(
+              'account.chain_name_checked_at < :staleThreshold',
+              { staleThreshold },
+            );
+          }),
+        )
+        // Ordered by last attempt, not last success: a row whose lookup keeps
+        // failing rotates to the tail instead of retaking a slot every hour.
+        .orderBy('account.chain_name_checked_at', 'ASC', 'NULLS FIRST')
+        .take(100) // Process in batches to avoid overwhelming middleware
+        .getMany();
 
       this.logger.log(
         `Refreshing chain names for ${accountsToRefresh.length} accounts`,
@@ -492,20 +504,21 @@ export class AccountService {
               const chainName = await this.getChainNameForAccount(
                 account.address,
               );
+              const checkedAt = new Date();
 
-              // Only update if fetch succeeded (not undefined)
-              // undefined means fetch failed - preserve existing chain_name to avoid data loss
-              if (chainName !== undefined) {
-                const updateData: Partial<Account> = {
-                  chain_name: chainName,
-                  chain_name_updated_at: new Date(),
-                };
-                await this.accountRepository.update(
-                  account.address,
-                  updateData,
-                );
-              }
-              // If chainName is undefined, skip update to preserve existing chain_name
+              // undefined = the lookup failed; stamp the attempt so the row
+              // leaves the queue head, but keep the stored name rather than
+              // overwriting it with an absence we never verified.
+              const updateData: Partial<Account> =
+                chainName === undefined
+                  ? { chain_name_checked_at: checkedAt }
+                  : {
+                      chain_name: chainName,
+                      chain_name_updated_at: checkedAt,
+                      chain_name_checked_at: checkedAt,
+                    };
+
+              await this.accountRepository.update(account.address, updateData);
             } catch (error) {
               this.logger.warn(
                 `Failed to refresh chain name for ${account.address}`,

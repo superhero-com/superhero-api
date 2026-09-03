@@ -1,5 +1,11 @@
-import { AccountService } from './account.service';
+import {
+  AccountService,
+  CHAIN_NAME_SWEEP_MS,
+  CHAIN_NAME_STALE_MS,
+} from './account.service';
+import { DataSource } from 'typeorm';
 import { fetchJson } from '@/utils/common';
+import { Account } from '../entities/account.entity';
 
 jest.mock('@/utils/common', () => {
   const actual = jest.requireActual('@/utils/common');
@@ -13,9 +19,11 @@ describe('AccountService', () => {
   const createQueryBuilder = () => ({
     select: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
     addOrderBy: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
     getMany: jest.fn().mockResolvedValue([]),
   });
 
@@ -24,6 +32,7 @@ describe('AccountService', () => {
     const accountRepository = {
       createQueryBuilder: jest.fn(() => queryBuilder),
       find: jest.fn().mockResolvedValue([]),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const transactionRepository = {
       query: jest.fn(),
@@ -323,6 +332,157 @@ describe('AccountService', () => {
       const result = await service.getChainNameForAccount(ACCOUNT);
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('refreshChainNamesPeriodically', () => {
+    beforeEach(() => {
+      (fetchJson as jest.Mock).mockReset();
+    });
+
+    // Executes the Brackets callbacks the sweep passes to where()/andWhere() so
+    // the predicate can be asserted without a database or emitted-SQL matching.
+    const collectPredicates = (queryBuilder: any): string[] => {
+      const clauses: string[] = [];
+      const recorder: any = {
+        where: (clause: string) => {
+          clauses.push(clause);
+          return recorder;
+        },
+        orWhere: (clause: string) => {
+          clauses.push(clause);
+          return recorder;
+        },
+      };
+      for (const [brackets] of [
+        ...queryBuilder.where.mock.calls,
+        ...queryBuilder.andWhere.mock.calls,
+      ]) {
+        brackets.whereFactory(recorder);
+      }
+      return clauses;
+    };
+
+    // The sweep window and the read path's staleness window are a pair: the
+    // sweep has to refresh a name before AccountsController calls it stale, or
+    // every read falls through to a live middleware lookup.
+    it('sweeps before the read path treats a name as stale', () => {
+      expect(CHAIN_NAME_SWEEP_MS).toBeLessThan(CHAIN_NAME_STALE_MS);
+    });
+
+    // Asserted as emitted SQL, not builder calls, so equivalent rewrites don't
+    // churn the test.
+    it('emits the intended sweep SQL', async () => {
+      const dataSource = new DataSource({
+        type: 'postgres',
+        entities: [Account],
+      });
+      // Builds entity metadata without a connection, so this runs in the plain
+      // unit suite (protected API -- a typeorm bump will break this).
+      await (dataSource as any).buildMetadatas();
+      const entityRepository = dataSource.getRepository(Account);
+
+      let sql = '';
+      let params: Record<string, any> = {};
+      const accountRepository: any = {
+        createQueryBuilder: (alias: string) => {
+          const qb = entityRepository.createQueryBuilder(alias);
+          (qb as any).getMany = async () => {
+            sql = qb.getSql();
+            params = qb.getParameters();
+            return [];
+          };
+          return qb;
+        },
+        update: jest.fn(),
+      };
+      const service = new AccountService(accountRepository, {
+        query: jest.fn(),
+      } as any);
+
+      await service.refreshChainNamesPeriodically();
+
+      expect(sql.slice(sql.indexOf('FROM'))).toBe(
+        'FROM "accounts" "account" WHERE ("account"."chain_name" IS NOT NULL' +
+          ' OR "account"."links" <> \'{}\'::jsonb) AND' +
+          ' ("account"."chain_name_checked_at" IS NULL OR' +
+          ' "account"."chain_name_checked_at" < $1) ORDER BY' +
+          ' "account"."chain_name_checked_at" ASC NULLS FIRST LIMIT 100',
+      );
+
+      // The threshold only ever reaches SQL as $1, so a sign flip (a window in
+      // the future, sweeping every row every hour) is invisible above.
+      const threshold: Date = params.staleThreshold;
+      expect(threshold.getTime()).toBeLessThanOrEqual(
+        Date.now() - CHAIN_NAME_SWEEP_MS,
+      );
+      expect(threshold.getTime()).toBeGreaterThan(
+        Date.now() - CHAIN_NAME_SWEEP_MS - 60_000,
+      );
+    });
+
+    it('writes a name resolved for a linked account that never had one', async () => {
+      const { service, accountRepository, queryBuilder } = createService();
+      queryBuilder.getMany.mockResolvedValue([
+        { address: 'ak_alice', chain_name: null, links: { x: 'alice' } },
+      ]);
+      (fetchJson as jest.Mock).mockImplementation(async (url: string) =>
+        url.includes('/names/pointees')
+          ? {
+              data: [
+                {
+                  active: true,
+                  name: 'alice.chain',
+                  block_height: 5,
+                  block_time: 1,
+                  tx: { pointers: [{ id: 'ak_alice' }] },
+                },
+              ],
+            }
+          : { active: true, pointers: [{ id: 'ak_alice' }] },
+      );
+
+      await service.refreshChainNamesPeriodically();
+
+      // The linked-account clause is what puts ak_alice in the batch at all;
+      // without it the sweep only ever sees accounts that already have a name.
+      expect(collectPredicates(queryBuilder)).toContain(
+        `account.links <> '{}'::jsonb`,
+      );
+      expect(accountRepository.update).toHaveBeenCalledWith('ak_alice', {
+        chain_name: 'alice.chain',
+        chain_name_updated_at: expect.any(Date),
+        chain_name_checked_at: expect.any(Date),
+      });
+    });
+
+    // The null/undefined split is the subtlest rule here: null is a verified
+    // absence and is written, while undefined means the lookup failed and a
+    // good name must survive. Both stamp the attempt, or a row that always
+    // fails would retake a queue slot every hour forever.
+    it('stamps a verified absence but preserves the name when the fetch fails', async () => {
+      const { service, accountRepository, queryBuilder } = createService();
+      queryBuilder.getMany.mockResolvedValue([
+        { address: 'ak_none', chain_name: null, links: { x: 'n' } },
+        { address: 'ak_kept', chain_name: 'kept.chain', links: {} },
+      ]);
+      (fetchJson as jest.Mock).mockImplementation(async (url: string) => {
+        if (url.includes('ak_kept')) {
+          throw new Error('middleware 500');
+        }
+        return { data: [] };
+      });
+
+      await service.refreshChainNamesPeriodically();
+
+      expect(accountRepository.update).toHaveBeenCalledWith('ak_none', {
+        chain_name: null,
+        chain_name_updated_at: expect.any(Date),
+        chain_name_checked_at: expect.any(Date),
+      });
+      expect(accountRepository.update).toHaveBeenCalledWith('ak_kept', {
+        chain_name_checked_at: expect.any(Date),
+      });
     });
   });
 
