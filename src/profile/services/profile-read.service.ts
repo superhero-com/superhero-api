@@ -143,7 +143,9 @@ export class ProfileReadService {
       username: cache?.username ?? null,
       prefered_aens_name: this.getLinkedPreferedAensName(account),
       x_username: this.getLinkedXUsername(account),
-      chain_name: cache?.chain_name ?? account?.chain_name ?? null,
+      // The cached copy has had no writer since the ProfileRegistry indexer
+      // was removed, so it freezes; accounts.chain_name is refreshed hourly.
+      chain_name: account?.chain_name ?? cache?.chain_name ?? null,
       chain_expires_at: cache?.chain_expires_at ?? null,
     };
   }
