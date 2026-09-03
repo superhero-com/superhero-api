@@ -98,6 +98,61 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe('hero.chain');
   });
 
+  it('prefers the live account chain_name over the cached copy', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_renamed',
+        chain_name: 'frozen.chain',
+      } as ProfileCache,
+      account: {
+        address: 'ak_renamed',
+        chain_name: 'current.chain',
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_renamed');
+
+    expect(result.profile.chain_name).toBe('current.chain');
+    expect(result.public_name).toBe('current.chain');
+  });
+
+  it('falls back to the cached chain_name when the account has none', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_cache_only',
+        chain_name: 'cached.chain',
+      } as ProfileCache,
+      account: {
+        address: 'ak_cache_only',
+        chain_name: null,
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_cache_only');
+
+    expect(result.profile.chain_name).toBe('cached.chain');
+    expect(result.public_name).toBe('cached.chain');
+  });
+
+  it('still prefers the linked prefered AENS name over a live chain_name', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_pref_over_live',
+        chain_name: 'frozen.chain',
+      } as ProfileCache,
+      account: {
+        address: 'ak_pref_over_live',
+        chain_name: 'current.chain',
+        links: { prefaens: 'hero.chain' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_pref_over_live');
+
+    expect(result.profile.chain_name).toBe('current.chain');
+    expect(result.public_name).toBe('hero.chain');
+  });
+
   it('uses AddressLink x value from account links', async () => {
     const service = createService({
       cache: {
