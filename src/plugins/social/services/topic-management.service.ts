@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { In, Repository, EntityManager } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Topic } from '@/social/entities/topic.entity';
 import { Post } from '@/social/entities/post.entity';
 import { normalizeTopicName } from '@/social/utils/topic-name.util';
@@ -18,45 +19,53 @@ export class TopicManagementService {
   ) {}
 
   /**
-   * Creates or gets existing topics by name
+   * One bulk upsert plus one read instead of a findOne+save per name; same
+   * approach as `PostService.createOrGetTopics`, which this was ported from.
+   * DO NOTHING so a racing insert never clobbers an accumulated post_count.
    */
   async createOrGetTopics(topicNames: string[]): Promise<Topic[]> {
-    if (!topicNames || topicNames.length === 0) {
+    const normalizedNames = [
+      ...new Set(
+        (topicNames || [])
+          .filter((topicName) => topicName && topicName.trim().length > 0)
+          .map((topicName) => normalizeTopicName(topicName)),
+      ),
+    ];
+
+    if (normalizedNames.length === 0) {
       return [];
     }
 
-    const topics: Topic[] = [];
+    await this.topicRepository.query(
+      `
+        INSERT INTO topics (id, name, post_count, version, created_at, updated_at)
+        SELECT unnest($1::uuid[]), unnest($2::text[]), 0, $3, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+        ON CONFLICT (name) DO NOTHING
+      `,
+      [
+        normalizedNames.map(() => randomUUID()),
+        normalizedNames,
+        this.syncVersion,
+      ],
+    );
 
-    for (const topicName of topicNames) {
-      if (!topicName || topicName.trim().length === 0) {
-        continue;
-      }
+    const topics = await this.topicRepository.find({
+      where: { name: In(normalizedNames) },
+    });
 
-      const normalizedName = normalizeTopicName(topicName);
+    const topicByName = new Map(topics.map((topic) => [topic.name, topic]));
+    const orderedTopics = normalizedNames
+      .map((name) => topicByName.get(name))
+      .filter((topic): topic is Topic => Boolean(topic));
 
-      // Try to find existing topic
-      let topic = await this.topicRepository.findOne({
-        where: { name: normalizedName },
+    if (orderedTopics.length !== normalizedNames.length) {
+      this.logger.warn('Some topics could not be created or found', {
+        requested: normalizedNames,
+        resolved: orderedTopics.map((topic) => topic.name),
       });
-
-      // Create new topic if it doesn't exist
-      if (!topic) {
-        topic = this.topicRepository.create({
-          name: normalizedName,
-          post_count: 0,
-          version: this.syncVersion,
-        });
-        topic = await this.topicRepository.save(topic);
-        this.logger.debug('Created new topic', {
-          topicName: normalizedName,
-          version: this.syncVersion,
-        });
-      }
-
-      topics.push(topic);
     }
 
-    return topics;
+    return orderedTopics;
   }
 
   /**
@@ -76,13 +85,38 @@ export class TopicManagementService {
       ? manager.getRepository(Topic)
       : this.topicRepository;
 
+    if (topics.length === 0) {
+      return;
+    }
+
+    // One grouped read instead of a getCount() per topic. Collapses round
+    // trips only -- the same rows are counted either way.
+    let countByTopicId = new Map<string, number>();
+    try {
+      const rows = await postRepository
+        .createQueryBuilder('post')
+        .innerJoin('post.topics', 'topic')
+        .select('topic.id', 'topic_id')
+        .addSelect('COUNT(post.id)', 'count')
+        .where('topic.id IN (:...topicIds)', {
+          topicIds: topics.map((topic) => topic.id),
+        })
+        .groupBy('topic.id')
+        .getRawMany<{ topic_id: string; count: string }>();
+      countByTopicId = new Map(
+        rows.map((row) => [row.topic_id, parseInt(row.count, 10)]),
+      );
+    } catch (error) {
+      this.logger.error('Failed to load topic post counts', {
+        topicIds: topics.map((topic) => topic.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
     for (const topic of topics) {
       try {
-        const count = await postRepository
-          .createQueryBuilder('post')
-          .innerJoin('post.topics', 'topic')
-          .where('topic.id = :topicId', { topicId: topic.id })
-          .getCount();
+        const count = countByTopicId.get(topic.id) ?? 0;
 
         await topicRepository.update(topic.id, {
           post_count: count,

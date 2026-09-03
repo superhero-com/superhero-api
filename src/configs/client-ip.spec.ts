@@ -24,7 +24,7 @@ describe('resolveClientIp', () => {
     } else {
       process.env.TRUST_PROXY = value;
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('./client-ip').resolveClientIp;
   }
 

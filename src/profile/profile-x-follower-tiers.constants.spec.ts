@@ -8,7 +8,7 @@ describe('PROFILE_X_FOLLOWER_TIERS parsing', () => {
     } else {
       process.env.PROFILE_X_FOLLOWER_TIERS = value;
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('./profile.constants').PROFILE_X_FOLLOWER_TIERS;
   };
 

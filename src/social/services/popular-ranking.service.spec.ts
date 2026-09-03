@@ -154,13 +154,26 @@ describe('PopularRankingService', () => {
       limit: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([fallbackPost]),
     };
+    const countQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(1),
+    };
     postRepository.createQueryBuilder = jest
       .fn()
-      .mockReturnValueOnce(fallbackQueryBuilder);
+      .mockReturnValueOnce(fallbackQueryBuilder)
+      .mockReturnValueOnce(countQueryBuilder);
 
-    const result = await service.getPopularPosts('24h', 10, 0);
+    const result = await service.getPopularPostsPage(
+      '24h',
+      10,
+      0,
+      undefined,
+      {},
+    );
 
-    expect(result).toEqual([fallbackPost]);
+    expect(result.items).toEqual([fallbackPost]);
+    expect(result.totalItems).toBe(1);
     expect(fallbackQueryBuilder.orderBy).toHaveBeenCalledWith(
       'post.created_at',
       'DESC',
@@ -169,6 +182,46 @@ describe('PopularRankingService', () => {
       'post.created_at >= :since',
       expect.objectContaining({ since: expect.any(Date) }),
     );
+  });
+
+  it('still serves the fallback page when the fallback count query fails', async () => {
+    jest.spyOn(service, 'recompute').mockResolvedValue(undefined);
+    redisMock.zcard.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    const fallbackPost = {
+      id: 'fallback-1',
+      created_at: new Date().toISOString(),
+      content: 'hello',
+    };
+    const fallbackQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([fallbackPost]),
+    };
+    const countQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockRejectedValue(new Error('db down')),
+    };
+    postRepository.createQueryBuilder = jest
+      .fn()
+      .mockReturnValueOnce(fallbackQueryBuilder)
+      .mockReturnValueOnce(countQueryBuilder);
+
+    const result = await service.getPopularPostsPage(
+      '24h',
+      10,
+      0,
+      undefined,
+      {},
+    );
+
+    // A servable page must not become a 500 over its count.
+    expect(result.items).toEqual([fallbackPost]);
+    expect(result.totalItems).toBe(0);
   });
 
   it('reorders personalized popular results by interactions per hour', async () => {
@@ -286,6 +339,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-a', '10', 'post-b', '5']);
       postRepository.findBy = jest.fn().mockResolvedValue([postA, postB]);
+      postRepository.find = jest.fn().mockResolvedValue([postA, postB]);
 
       const result = await service.getPopularPostsPage(
         '24h',
@@ -297,6 +351,13 @@ describe('PopularRankingService', () => {
 
       expect(result.items.length).toBe(2);
       expect(result.scoredItems).toBeUndefined();
+      // One resolution serves both page and count.
+      expect((redisMock as any).zrevrange).toHaveBeenCalledTimes(1);
+      // Existence scan projects to id; hydration fetches full rows.
+      expect(postRepository.find).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { id: true } }),
+      );
+      expect(postRepository.findBy).toHaveBeenCalledTimes(1);
 
       redisMock.zcard.mockResolvedValue(1);
     });
@@ -347,6 +408,7 @@ describe('PopularRankingService', () => {
           '0',
         ]);
       postRepository.findBy = jest.fn().mockResolvedValue(posts);
+      postRepository.find = jest.fn().mockResolvedValue(posts);
 
       const firstPage = await service.getPopularPostsPage('all', 2, 0);
       const secondPage = await service.getPopularPostsPage('all', 2, 2);
@@ -445,6 +507,7 @@ describe('PopularRankingService', () => {
         .fn()
         .mockResolvedValue(['post-w', '10']);
       (svc as any).postRepository.findBy = jest.fn().mockResolvedValue([postW]);
+      (svc as any).postRepository.find = jest.fn().mockResolvedValue([postW]);
 
       const result = await svc.getPopularPostsPage('24h', 10, 0, undefined, {
         comments: undefined,

@@ -28,13 +28,17 @@ import { Account } from '../entities/account.entity';
 import { TokenHolder } from '@/tokens/entities/token-holders.entity';
 import { PortfolioService } from '../services/portfolio.service';
 import { BclPnlService } from '../services/bcl-pnl.service';
-import { AccountService } from '../services/account.service';
+import {
+  AccountService,
+  CHAIN_NAME_STALE_MS,
+} from '../services/account.service';
 import { GetPortfolioHistoryQueryDto } from '../dto/get-portfolio-history-query.dto';
 import { PortfolioHistorySnapshotDto } from '../dto/portfolio-history-response.dto';
 import { TradingStatsQueryDto } from '../dto/trading-stats-query.dto';
 import { TradingStatsResponseDto } from '../dto/trading-stats-response.dto';
 import { NostrAccountRefDto } from '../dto/nostr-account-ref.dto';
 import { AccountSearchResultDto } from '../dto/account-search-result.dto';
+import { GetAccountResponseDto } from '../dto/get-account-response.dto';
 import { normalizePubkey } from '@/token-gated-rooms/nostr/pubkey';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { ProfileCache } from '@/profile/entities/profile-cache.entity';
@@ -596,6 +600,7 @@ export class AccountsController {
   // single account - MUST come after more specific routes
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
+  @ApiOkResponse({ type: GetAccountResponseDto })
   @CacheTTL(10 * 60_000)
   @Get(':address')
   async getAccount(@Param('address', AeAccountAddressPipe) address: string) {
@@ -609,12 +614,13 @@ export class AccountsController {
       throw new NotFoundException('Account not found');
     }
 
-    // Fetch chain name from middleware if stale (older than 24 hours) or never checked
-    const CHAIN_NAME_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    // Fetch chain name from middleware if stale or never checked. The hourly
+    // sweep in AccountService refreshes on a shorter window, so this normally
+    // only fires for accounts that sweep does not cover.
     const now = new Date();
     const isStale = account.chain_name_updated_at
       ? now.getTime() - account.chain_name_updated_at.getTime() >
-        CHAIN_NAME_STALE_THRESHOLD_MS
+        CHAIN_NAME_STALE_MS
       : true;
 
     let chainName = account.chain_name;

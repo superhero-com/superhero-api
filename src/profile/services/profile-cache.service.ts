@@ -20,8 +20,8 @@ import { ProfileCache } from '../entities/profile-cache.entity';
  * This service re-establishes a writer: whenever a user links/unlinks profile
  * info we refresh the searchable name and bump `updated_at` so the feed
  * re-orders and link-only accounts become visible. Registry-only legacy fields
- * (fullname, avatarurl, username) are no longer sourced by any contract, so
- * they are preserved on update rather than overwritten.
+ * (fullname, avatarurl, username, chain_name) are no longer sourced by any
+ * contract, so they are preserved on update rather than overwritten.
  */
 @Injectable()
 export class ProfileCacheService {

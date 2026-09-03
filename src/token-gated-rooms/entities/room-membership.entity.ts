@@ -8,10 +8,7 @@ import {
 
 /** On-relay membership lifecycle for a desired-state row (plan §4.3). */
 export type RoomMembershipRelayState =
-  | 'pending_add'
-  | 'added'
-  | 'pending_remove'
-  | 'removed';
+  'pending_add' | 'added' | 'pending_remove' | 'removed';
 
 /** NIP-29 role of a member within a room (plan §4.3). */
 export type RoomMembershipRole = 'member' | 'admin';

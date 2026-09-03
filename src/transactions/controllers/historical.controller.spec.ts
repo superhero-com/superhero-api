@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { HistoricalController } from './historical.controller';
 import { TokensService } from '@/tokens/tokens.service';
@@ -27,6 +28,9 @@ describe('HistoricalController', () => {
           provide: TransactionHistoryService,
           useValue: {
             getHistoricalData: jest.fn().mockResolvedValue([{ price: 10 }]),
+            getPaginatedHistoricalData: jest
+              .fn()
+              .mockResolvedValue({ items: [] }),
             getForPreview: jest.fn().mockResolvedValue({ preview: 'data' }),
           },
         },
@@ -63,6 +67,22 @@ describe('HistoricalController', () => {
       expect(result).toEqual([{ price: 10 }]);
       expect(tokenService.getToken).toHaveBeenCalledWith('test_token');
       expect(tokenHistoryService.getHistoricalData).toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the token does not resolve', async () => {
+      jest.spyOn(tokenService, 'getToken').mockResolvedValueOnce(null);
+      await expect(controller.findByAddress('missing_token')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('getPaginatedHistory', () => {
+    it('should throw NotFoundException when the token does not resolve', async () => {
+      jest.spyOn(tokenService, 'getToken').mockResolvedValueOnce(null);
+      await expect(
+        controller.getPaginatedHistory('missing_token'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

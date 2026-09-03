@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { DataSource, Repository } from 'typeorm';
+import { BigNumber } from 'bignumber.js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Queue } from 'bull';
 import { DATABASE_CONFIG } from '@/configs/database';
@@ -49,6 +50,10 @@ d('Eager room backfill (integration)', () => {
   let backfillQueue: jest.Mocked<Pick<Queue, 'add'>>;
   let seedRoomAdmins: jest.Mock;
 
+  /**
+   * market_cap/holders_count must clear `workingSetPage`'s worth-gate — both
+   * default to 0, which silently drops the row and makes every assertion vacuous.
+   */
   const makeTokenRow = (sale: string, symbol: string): Partial<Token> => ({
     sale_address: sale,
     address: 'ct_token_' + sale,
@@ -56,6 +61,8 @@ d('Eager room backfill (integration)', () => {
     symbol,
     owner_address: 'ak_owner_' + sale,
     creator_address: 'ak_creator_' + sale,
+    market_cap: new BigNumber(1_000),
+    holders_count: 2,
   });
 
   /** Replay the ACK the publish processor would emit for one publish job. */

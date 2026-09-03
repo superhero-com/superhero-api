@@ -48,29 +48,14 @@ const PROVIDER = 'nostr';
 const SALE = 'ct_int_sale_eligibility';
 const TOKEN = 'ct_int_token_eligibility';
 
-async function dropTgrObjects(ds: DataSource): Promise<void> {
-  const stmts = [
-    `DROP TABLE IF EXISTS "room_backfill_state"`,
-    `DROP TABLE IF EXISTS "token_balance"`,
-    `DROP TABLE IF EXISTS "room_message_seen"`,
-    `DROP TABLE IF EXISTS "room_notification_preference"`,
-    `DROP TABLE IF EXISTS "room_membership"`,
-    `DROP TABLE IF EXISTS "community_room"`,
-    `DROP TYPE IF EXISTS "room_membership_relay_state_enum"`,
-    `DROP TYPE IF EXISTS "room_membership_role_enum"`,
-    `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_state"`,
-    `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_room_created_at"`,
-    `ALTER TABLE "token" DROP COLUMN IF EXISTS "has_nostr_room"`,
-    `ALTER TABLE "token" DROP COLUMN IF EXISTS "nostr_group_id"`,
-    `DROP TYPE IF EXISTS "token_nostr_room_state_enum"`,
-  ];
-  for (const s of stmts) {
-    await ds.query(s);
-  }
-  await ds
-    .query(`DELETE FROM "migrations" WHERE "name" LIKE 'Tgr%'`)
-    .catch(() => undefined);
-}
+/**
+ * Private schema built by `synchronize`, same approach as
+ * `community-room-state.integration.spec.ts`. This spec covers EligibilityService,
+ * not migration SQL, so it has no reason to run migrations against the shared
+ * `public` schema — doing so leaked TGR objects between runs and raced with
+ * `balance-indexer.integration.spec.ts` in a parallel worker.
+ */
+const SCHEMA = 'tgr_eligibility_test';
 
 d('EligibilityService (integration)', () => {
   let ds: DataSource;
@@ -84,9 +69,20 @@ d('EligibilityService (integration)', () => {
   let eventEmitter: EventEmitter2;
 
   beforeAll(async () => {
-    ds = new DataSource({
+    const boot = new DataSource({
       ...(DATABASE_CONFIG as any),
       synchronize: false,
+      entities: [],
+    });
+    await boot.initialize();
+    await boot.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
+    await boot.query(`CREATE SCHEMA "${SCHEMA}"`);
+    await boot.destroy();
+
+    ds = new DataSource({
+      ...(DATABASE_CONFIG as any),
+      schema: SCHEMA,
+      synchronize: true, // empty schema → entities create every table this spec needs
       entities: [
         Token,
         Account,
@@ -97,19 +93,16 @@ d('EligibilityService (integration)', () => {
         TokenBalance,
         RoomBackfillState,
       ],
-      migrations: [__dirname + '/../../migrations/*{.ts,.js}'],
-      migrationsTableName: 'migrations_tgr_eligibility_test',
     });
     await ds.initialize();
-    await dropTgrObjects(ds);
-    await ds.runMigrations();
 
     moduleRef = await Test.createTestingModule({
       imports: [
         EventEmitterModule.forRoot(),
         TypeOrmModule.forRoot({
           ...(DATABASE_CONFIG as any),
-          synchronize: false,
+          schema: SCHEMA,
+          synchronize: false, // `ds` above already materialized the schema
           entities: [
             Account,
             CommunityRoom,
@@ -155,10 +148,7 @@ d('EligibilityService (integration)', () => {
       await moduleRef.close();
     }
     if (ds?.isInitialized) {
-      for (let i = 0; i < 7; i++) {
-        await ds.undoLastMigration();
-      }
-      await ds.query('DROP TABLE IF EXISTS "migrations_tgr_eligibility_test"');
+      await ds.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`);
       await ds.destroy();
     }
   }, 90_000);

@@ -1,6 +1,6 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import moment from 'moment';
@@ -44,6 +44,11 @@ export class AnalyticTokensController {
 
     const startDate = start_date ? moment(start_date) : defaultStartDate;
     const endDate = end_date ? moment(end_date) : defaultEndDate;
+
+    if (!startDate.isValid() || !endDate.isValid()) {
+      throw new BadRequestException('start_date/end_date must be valid dates');
+    }
+
     const queryBuilder = this.tokensRepository.createQueryBuilder('token');
 
     // Select date and count of tokens for each day

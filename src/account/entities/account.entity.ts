@@ -1,10 +1,17 @@
 import { BigNumberTransformer } from '@/utils/BigNumberTransformer';
-import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+} from 'typeorm';
 import BigNumber from 'bignumber.js';
 
 @Entity({
   name: 'accounts',
 })
+@Index('IDX_ACCOUNTS_TOTAL_VOLUME', ['total_volume'])
 export class Account {
   @PrimaryColumn()
   address: string;
@@ -19,11 +26,24 @@ export class Account {
   })
   chain_name: string;
 
+  /** Last successful resolution. Drives the read path's staleness check. */
   @Column({
     nullable: true,
     type: 'timestamp',
   })
   chain_name_updated_at: Date;
+
+  /**
+   * Last attempt, successful or not. Orders the sweep so failures rotate out.
+   * `select: false` keeps this internal bookkeeping out of the account
+   * responses, which spread the entity directly.
+   */
+  @Column({
+    nullable: true,
+    type: 'timestamp',
+    select: false,
+  })
+  chain_name_checked_at: Date;
 
   /**
    * Total volume of the account

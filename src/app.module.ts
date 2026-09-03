@@ -36,6 +36,7 @@ import { SyncState } from './mdw-sync/entities/sync-state.entity';
 import { ProfileModule } from './profile/profile.module';
 import { StabilizationModule } from './stabilization/stabilization.module';
 import { AddressLinksModule } from './plugins/address-links/address-links.module';
+import { SocialGraphModule } from './plugins/social-graph/social-graph.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { TokenGatedRoomsModule } from './token-gated-rooms/token-gated-rooms.module';
@@ -113,6 +114,7 @@ import { FeedModule } from './feed/feed.module';
     ProfileModule,
     StabilizationModule,
     AddressLinksModule,
+    SocialGraphModule,
     NotificationsModule,
     AnnouncementsModule,
     // Token-gated rooms (NIP-29). Single always-on process — indexing listeners,

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { PostsController } from './posts.controller';
 import { paginate } from 'nestjs-typeorm-paginate';
 
@@ -58,6 +59,45 @@ describe('PostsController', () => {
       {} as any,
       {} as any,
     );
+  });
+
+  it('rejects a page below 1', async () => {
+    await expect(
+      controller.listAll(0, 100, 'created_at', 'DESC'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects a limit above 100', async () => {
+    await expect(
+      controller.listAll(1, 101, 'created_at', 'DESC'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  // order_by lands in the ORDER BY expression verbatim, so anything outside
+  // the allowlist would be injected SQL.
+  it('rejects an order_by outside the allowlist', async () => {
+    await expect(
+      controller.listAll(1, 100, 'id)||(SELECT version()', 'DESC'),
+    ).rejects.toThrow(BadRequestException);
+    expect(baseQueryBuilder.addSelect).not.toHaveBeenCalled();
+  });
+
+  it('accepts the documented order_by values', async () => {
+    await expect(
+      controller.listAll(1, 100, 'total_comments', 'DESC'),
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects an order_direction outside ASC/DESC', async () => {
+    await expect(
+      controller.listAll(1, 100, 'created_at', 'asc' as any),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects an over-long search term', async () => {
+    await expect(
+      controller.listAll(1, 100, 'created_at', 'DESC', 'x'.repeat(101)),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('applies search to post content and topic names', async () => {
@@ -121,6 +161,28 @@ describe('PostsController', () => {
       undefined,
       expect.any(Object),
     );
+  });
+
+  // paginate() offsets by (page - 1) * limit without clamping, so an
+  // unguarded page below 1 reaches Postgres as a negative OFFSET.
+  describe('getComments pagination guards', () => {
+    it('rejects a page below 1', async () => {
+      await expect(controller.getComments('post-1', 0, 50)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects a limit above 100', async () => {
+      await expect(controller.getComments('post-1', 1, 101)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects an order_direction outside ASC/DESC', async () => {
+      await expect(
+        controller.getComments('post-1', 1, 50, 'asc' as any),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('trend mention performance', () => {

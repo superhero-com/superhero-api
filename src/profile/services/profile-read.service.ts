@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
+import { SocialGraphEdge } from '@/plugins/social-graph/entities/social-graph-edge.entity';
+import { SOCIAL_GRAPH_ENABLED } from '@/plugins/social-graph/social-graph.constants';
 import { ProfileCache } from '../entities/profile-cache.entity';
 
 @Injectable()
@@ -11,15 +13,20 @@ export class ProfileReadService {
     private readonly profileCacheRepository: Repository<ProfileCache>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
+    @InjectRepository(SocialGraphEdge)
+    private readonly socialGraphEdgeRepository: Repository<SocialGraphEdge>,
   ) {}
 
   async getProfile(address: string) {
-    const [cache, account] = await Promise.all([
+    const [cache, account, counts] = await Promise.all([
       this.profileCacheRepository.findOne({ where: { address } }),
       this.accountRepository.findOne({ where: { address } }),
+      SOCIAL_GRAPH_ENABLED
+        ? this.getFollowCounts(address)
+        : Promise.resolve({}),
     ]);
 
-    const profile = this.mergeProfile(cache, account);
+    const profile = { ...this.mergeProfile(cache, account), ...counts };
 
     const publicName = this.resolvePublicName(profile, address);
     return {
@@ -27,6 +34,24 @@ export class ProfileReadService {
       profile,
       public_name: publicName,
     };
+  }
+
+  // Follower/following counts are chain-truth served from the social-graph
+  // index. Called only when the feature is enabled; a disabled deployment omits
+  // the keys rather than counting an empty table. Only the single-profile read
+  // carries them — the profile page the counts are for.
+  private async getFollowCounts(
+    address: string,
+  ): Promise<{ followers_count: number; following_count: number }> {
+    const [followers_count, following_count] = await Promise.all([
+      this.socialGraphEdgeRepository.count({
+        where: { to_address: address, kind: 'follow' },
+      }),
+      this.socialGraphEdgeRepository.count({
+        where: { from_address: address, kind: 'follow' },
+      }),
+    ]);
+    return { followers_count, following_count };
   }
 
   async getProfilesByAddresses(addresses: string[]) {
@@ -143,7 +168,9 @@ export class ProfileReadService {
       username: cache?.username ?? null,
       prefered_aens_name: this.getLinkedPreferedAensName(account),
       x_username: this.getLinkedXUsername(account),
-      chain_name: cache?.chain_name ?? account?.chain_name ?? null,
+      // The cached copy has had no writer since the ProfileRegistry indexer
+      // was removed, so it freezes; accounts.chain_name is refreshed hourly.
+      chain_name: account?.chain_name ?? cache?.chain_name ?? null,
       chain_expires_at: cache?.chain_expires_at ?? null,
     };
   }

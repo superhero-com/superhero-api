@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import moment from 'moment';
 import { PortfolioService } from './portfolio.service';
 import { batchTimestampToAeHeight } from '@/utils/getBlochHeight';
@@ -162,6 +163,34 @@ describe('PortfolioService', () => {
       undefined,
     );
     expect(snapshots.map((snapshot) => snapshot.ae_price)).toEqual([1, 2, 3]);
+  });
+
+  it('surfaces a node-call failure as ServiceUnavailableException', async () => {
+    const { service, aeSdkService, coinGeckoService, bclPnlService } =
+      createService();
+
+    (batchTimestampToAeHeight as jest.Mock).mockImplementation(
+      async (timestamps: number[]) => {
+        const map = new Map<number, number>();
+        timestamps.forEach((ts) => map.set(ts, 123));
+        return map;
+      },
+    );
+
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
+      [Date.UTC(2026, 0, 1), 1],
+    ]);
+    coinGeckoService.getPriceData.mockResolvedValue({ usd: 1 });
+    bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+    aeSdkService.sdk.getBalance.mockRejectedValue(new Error('node timeout'));
+
+    await expect(
+      service.getPortfolioHistory('ak_test', {
+        startDate: moment.utc('2026-01-01T00:00:00.000Z'),
+        endDate: moment.utc('2026-01-01T00:00:00.000Z'),
+        interval: 86400,
+      }),
+    ).rejects.toThrow(ServiceUnavailableException);
   });
 
   it('buckets block heights to multiples of 300 to share getBalance calls', async () => {
@@ -504,6 +533,72 @@ describe('PortfolioService', () => {
       const result = await service.getCurrentPortfolioValue('ak_test', 'ae');
 
       expect(result.value).toBeCloseTo(1);
+    });
+
+    it('surfaces a node-call failure as ServiceUnavailableException', async () => {
+      const { service, aeSdkService } = createService();
+
+      aeSdkService.sdk.getBalance.mockRejectedValue(new Error('node down'));
+      aeSdkService.sdk.getHeight.mockResolvedValue(123456);
+
+      await expect(
+        service.getCurrentPortfolioValue('ak_test', 'ae'),
+      ).rejects.toThrow(ServiceUnavailableException);
+      await expect(
+        service.getCurrentPortfolioValue('ak_test', 'ae'),
+      ).rejects.toThrow(/AE node/);
+    });
+
+    it('does not blame the AE node when pricing is the dependency that failed', async () => {
+      const { service, aeSdkService, coinGeckoService, bclPnlService } =
+        createService();
+
+      aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000');
+      aeSdkService.sdk.getHeight.mockResolvedValue(999);
+      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      coinGeckoService.getPriceData.mockRejectedValue(
+        new Error('coingecko down'),
+      );
+
+      // Reporting a pricing outage as an AE-node outage sends operators to
+      // the wrong dependency.
+      await expect(
+        service.getCurrentPortfolioValue('ak_test', 'usd'),
+      ).rejects.toThrow(/price AE in USD/);
+    });
+
+    it('still answers an ae request when pricing is unavailable', async () => {
+      const { service, aeSdkService, coinGeckoService, bclPnlService } =
+        createService();
+
+      aeSdkService.sdk.getBalance.mockResolvedValue('2000000000000000000');
+      aeSdkService.sdk.getHeight.mockResolvedValue(999);
+      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      coinGeckoService.getPriceData.mockRejectedValue(
+        new Error('coingecko down'),
+      );
+
+      // The AE price is only ever used for the USD figure, so it is not a
+      // dependency of this answer at all.
+      const result = await service.getCurrentPortfolioValue('ak_test', 'ae');
+
+      expect(result.value).toBeCloseTo(2);
+    });
+
+    it('refuses to value a usd request at a zero AE price', async () => {
+      const { service, aeSdkService, coinGeckoService, bclPnlService } =
+        createService();
+
+      aeSdkService.sdk.getBalance.mockResolvedValue('5000000000000000000');
+      aeSdkService.sdk.getHeight.mockResolvedValue(999);
+      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      // Pricing degrades to null rates rather than throwing; the old `|| 0`
+      // would have answered 0 USD for a 5 AE balance and called it success.
+      coinGeckoService.getPriceData.mockResolvedValue({ usd: null });
+
+      await expect(
+        service.getCurrentPortfolioValue('ak_test', 'usd'),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
   });
 });

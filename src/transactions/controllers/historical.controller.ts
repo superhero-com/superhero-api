@@ -5,6 +5,7 @@ import {
   DefaultValuePipe,
   Get,
   Header,
+  NotFoundException,
   Param,
   ParseIntPipe,
   Query,
@@ -75,6 +76,9 @@ export class HistoricalController {
       ? this.parseDate(startDate)
       : moment().subtract(2, 'days');
     const token = await this.tokenService.getToken(address);
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
     return this.tokenHistoryService.getHistoricalData({
       token,
       interval,
@@ -114,6 +118,9 @@ export class HistoricalController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
     const token = await this.tokenService.getToken(address);
+    if (!token) {
+      throw new NotFoundException('Token not found');
+    }
     return this.tokenHistoryService.getPaginatedHistoricalData({
       token,
       interval,

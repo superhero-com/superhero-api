@@ -281,7 +281,6 @@ d('RelaySubscriberService (integration)', () => {
       available =
         !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
       if (!available) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[relay-subscriber.integration] skipping relay cases — no relay at ${RELAY_URL}`,
         );
