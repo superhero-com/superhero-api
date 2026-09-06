@@ -44,8 +44,6 @@ function makeMembershipRepo(opts: {
 function makeTokenRepo(opts: {
   roomStateRows?: { state: string; count: string }[];
   total?: number;
-  created?: number;
-  failed?: number;
 }): any {
   const qb: any = {
     select: () => qb,
@@ -55,12 +53,7 @@ function makeTokenRepo(opts: {
   };
   return {
     createQueryBuilder: () => qb,
-    count: async (arg?: any) => {
-      const state = arg?.where?.nostr_room_state;
-      if (state === 'created') return opts.created ?? 0;
-      if (state === 'failed') return opts.failed ?? 0;
-      return opts.total ?? 0;
-    },
+    count: async () => opts.total ?? 0,
   };
 }
 
@@ -113,8 +106,6 @@ describe('TgrMetricsService.collect', () => {
         { state: 'failed', count: '1' },
       ],
       total: 10,
-      created: 7,
-      failed: 1,
     });
 
     const service = new TgrMetricsService(
