@@ -68,6 +68,11 @@ export class Token {
   })
   create_tx_hash: string;
 
+  // Partial index: the 10-minute `dao_address IS NULL` cleanup sweep in
+  // FastPullTokensService would otherwise sequentially scan `token` per tick.
+  @Index('idx_token_dao_address_null', ['dao_address'], {
+    where: 'dao_address IS NULL',
+  })
   @Column({
     nullable: true,
   })
