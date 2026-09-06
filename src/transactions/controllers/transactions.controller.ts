@@ -115,7 +115,7 @@ export class TransactionsController {
     if (token_address) {
       let token = null;
       try {
-        token = await this.tokenService.getToken(token_address);
+        token = await this.tokenService.getToken(token_address, true);
       } catch (error) {
         return this.createEmptyPagination(page, limit);
       }
