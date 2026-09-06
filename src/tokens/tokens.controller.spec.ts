@@ -408,7 +408,7 @@ describe('TokensController', () => {
 
   it('should return paginated list of token holders', async () => {
     const result = await controller.listTokenHolders('ct_123');
-    expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123');
+    expect(tokensService.findByAddress).toHaveBeenCalledWith('ct_123', true);
     expect(tokenHolderQueryBuilder.andWhere).toHaveBeenCalledWith(
       'token_holder.balance > 0',
     );

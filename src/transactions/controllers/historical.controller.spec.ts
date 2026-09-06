@@ -65,7 +65,7 @@ describe('HistoricalController', () => {
     it('should return historical data', async () => {
       const result = await controller.findByAddress('test_token');
       expect(result).toEqual([{ price: 10 }]);
-      expect(tokenService.getToken).toHaveBeenCalledWith('test_token');
+      expect(tokenService.getToken).toHaveBeenCalledWith('test_token', true);
       expect(tokenHistoryService.getHistoricalData).toHaveBeenCalled();
     });
 
@@ -90,7 +90,7 @@ describe('HistoricalController', () => {
     it('should return preview data', async () => {
       const result = await controller.getForPreview('test_token');
       expect(result).toEqual({ preview: 'data' });
-      expect(tokenService.getToken).toHaveBeenCalledWith('test_token');
+      expect(tokenService.getToken).toHaveBeenCalledWith('test_token', true);
       expect(tokenHistoryService.getForPreview).toHaveBeenCalled();
     });
   });

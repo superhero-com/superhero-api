@@ -73,7 +73,7 @@ export class AnalyticsTransactionsController {
 
     // Add token filter if provided
     if (query.token_address) {
-      const token = await this.tokenService.getToken(query.token_address);
+      const token = await this.tokenService.getToken(query.token_address, true);
       if (token) {
         queryBuilder.andWhere('transactions.sale_address = :sale_address', {
           sale_address: token.sale_address,
@@ -131,7 +131,7 @@ export class AnalyticsTransactionsController {
 
     // Add token filter if provided
     if (query.token_address) {
-      const token = await this.tokenService.getToken(query.token_address);
+      const token = await this.tokenService.getToken(query.token_address, true);
       if (token) {
         queryBuilder.andWhere('transactions.sale_address = :sale_address', {
           sale_address: token.sale_address,

@@ -39,13 +39,8 @@ export class TokenService {
       return existingToken;
     }
 
-    if (!address.startsWith('ct_')) {
-      // For non-contract addresses, delegate to TokensService
-      return this.tokensService.getToken(address);
-    }
-
-    // Create token from address (delegate to TokensService for complex logic)
-    return this.tokensService.getToken(address);
+    // Handles both a name/symbol lookup and lazy creation from a contract address.
+    return this.tokensService.getToken(address, true);
   }
 
   /**
