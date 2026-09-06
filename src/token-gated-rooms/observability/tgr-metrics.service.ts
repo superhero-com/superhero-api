@@ -140,6 +140,10 @@ export class TgrMetricsService {
    *   in this process (true in the worker; the controller passes false from main).
    */
   async collect(processLocal = true): Promise<TgrMetricsReport> {
+    // Shared with `collectBackfillProgress` so the created/failed gauges come
+    // from this one GROUP BY rather than two extra full-table counts.
+    const roomStatePromise = this.collectRoomStateDistribution();
+
     const [
       queues,
       relayState,
@@ -150,10 +154,10 @@ export class TgrMetricsService {
     ] = await Promise.all([
       this.collectQueueGauges(),
       this.collectRelayStateDistribution(),
-      this.collectRoomStateDistribution(),
+      roomStatePromise,
       this.membershipRepo.count(),
       this.collectReconcileAge(),
-      this.collectBackfillProgress(),
+      this.collectBackfillProgress(roomStatePromise),
     ]);
 
     const driftCount = relayState.pending_add + relayState.pending_remove;
@@ -365,17 +369,20 @@ export class TgrMetricsService {
    * Backfill progress (Req 1.7): created/total/failed + percentage, tied to the
    * `room_backfill_state` cursor height when present.
    */
-  private async collectBackfillProgress(): Promise<{
+  private async collectBackfillProgress(
+    roomState: Promise<RoomStateDistribution>,
+  ): Promise<{
     created: number;
     total: number;
     failed: number;
     percent: number;
     cursorHeight: number | null;
   }> {
-    const [total, created, failed, cursor] = await Promise.all([
+    // `total` stays a COUNT(*): summing the distribution would silently
+    // under-count if a NostrRoomState were added without extending `dist`.
+    const [{ created, failed }, total, cursor] = await Promise.all([
+      roomState,
       this.tokenRepo.count(),
-      this.tokenRepo.count({ where: { nostr_room_state: 'created' as any } }),
-      this.tokenRepo.count({ where: { nostr_room_state: 'failed' as any } }),
       this.backfillStateRepo
         .findOne({ where: { id: 'global' } })
         .catch(() => null),
