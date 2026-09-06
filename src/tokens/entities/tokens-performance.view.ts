@@ -30,230 +30,160 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
   materialized: true,
   synchronize: true,
   expression: `
-    WITH base_data AS (
+    WITH valid_tx AS (
+      SELECT
+        tx.sale_address,
+        tx.buy_price,
+        tx.created_at,
+        CAST(tx.buy_price->>'ae' AS NUMERIC) AS price_ae
+      FROM transactions tx
+      WHERE tx.buy_price->>'ae' IS NOT NULL
+        AND tx.buy_price->>'ae' != 'NaN'
+    ),
+    volumes AS (
+      SELECT
+        tx.sale_address,
+        SUM(tx.volume) FILTER (WHERE tx.created_at > NOW() - INTERVAL '24 hours') AS volume_24h,
+        SUM(tx.volume) FILTER (WHERE tx.created_at > NOW() - INTERVAL '7 days') AS volume_7d,
+        SUM(tx.volume) FILTER (WHERE tx.created_at > NOW() - INTERVAL '30 days') AS volume_30d
+      FROM transactions tx
+      GROUP BY tx.sale_address
+    ),
+    ranked_24h AS (
+      SELECT
+        sale_address,
+        buy_price,
+        created_at,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at ASC) AS r_first,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at DESC) AS r_last,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae DESC, created_at ASC) AS r_high,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae ASC, created_at ASC) AS r_low
+      FROM valid_tx
+      WHERE created_at > NOW() - INTERVAL '24 hours'
+    ),
+    agg_24h AS (
+      SELECT
+        sale_address,
+        MIN(created_at) FILTER (WHERE r_first = 1) AS first_at,
+        (array_agg(buy_price) FILTER (WHERE r_first = 1))[1] AS first_price,
+        MIN(created_at) FILTER (WHERE r_last = 1) AS latest_at,
+        (array_agg(buy_price) FILTER (WHERE r_last = 1))[1] AS latest_price,
+        MIN(created_at) FILTER (WHERE r_high = 1) AS high_at,
+        (array_agg(buy_price) FILTER (WHERE r_high = 1))[1] AS high_price,
+        MIN(created_at) FILTER (WHERE r_low = 1) AS low_at,
+        (array_agg(buy_price) FILTER (WHERE r_low = 1))[1] AS low_price
+      FROM ranked_24h
+      WHERE r_first = 1 OR r_last = 1 OR r_high = 1 OR r_low = 1
+      GROUP BY sale_address
+    ),
+    ranked_7d AS (
+      SELECT
+        sale_address,
+        buy_price,
+        created_at,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at ASC) AS r_first,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at DESC) AS r_last,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae DESC, created_at ASC) AS r_high,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae ASC, created_at ASC) AS r_low
+      FROM valid_tx
+      WHERE created_at > NOW() - INTERVAL '7 days'
+    ),
+    agg_7d AS (
+      SELECT
+        sale_address,
+        MIN(created_at) FILTER (WHERE r_first = 1) AS first_at,
+        (array_agg(buy_price) FILTER (WHERE r_first = 1))[1] AS first_price,
+        MIN(created_at) FILTER (WHERE r_last = 1) AS latest_at,
+        (array_agg(buy_price) FILTER (WHERE r_last = 1))[1] AS latest_price,
+        MIN(created_at) FILTER (WHERE r_high = 1) AS high_at,
+        (array_agg(buy_price) FILTER (WHERE r_high = 1))[1] AS high_price,
+        MIN(created_at) FILTER (WHERE r_low = 1) AS low_at,
+        (array_agg(buy_price) FILTER (WHERE r_low = 1))[1] AS low_price
+      FROM ranked_7d
+      WHERE r_first = 1 OR r_last = 1 OR r_high = 1 OR r_low = 1
+      GROUP BY sale_address
+    ),
+    ranked_30d AS (
+      SELECT
+        sale_address,
+        buy_price,
+        created_at,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at ASC) AS r_first,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at DESC) AS r_last,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae DESC, created_at ASC) AS r_high,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae ASC, created_at ASC) AS r_low
+      FROM valid_tx
+      WHERE created_at > NOW() - INTERVAL '30 days'
+    ),
+    agg_30d AS (
+      SELECT
+        sale_address,
+        MIN(created_at) FILTER (WHERE r_first = 1) AS first_at,
+        (array_agg(buy_price) FILTER (WHERE r_first = 1))[1] AS first_price,
+        MIN(created_at) FILTER (WHERE r_last = 1) AS latest_at,
+        (array_agg(buy_price) FILTER (WHERE r_last = 1))[1] AS latest_price,
+        MIN(created_at) FILTER (WHERE r_high = 1) AS high_at,
+        (array_agg(buy_price) FILTER (WHERE r_high = 1))[1] AS high_price,
+        MIN(created_at) FILTER (WHERE r_low = 1) AS low_at,
+        (array_agg(buy_price) FILTER (WHERE r_low = 1))[1] AS low_price
+      FROM ranked_30d
+      WHERE r_first = 1 OR r_last = 1 OR r_high = 1 OR r_low = 1
+      GROUP BY sale_address
+    ),
+    ranked_all AS (
+      SELECT
+        sale_address,
+        buy_price,
+        created_at,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY created_at DESC) AS r_last,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae DESC, created_at ASC) AS r_high,
+        ROW_NUMBER() OVER (PARTITION BY sale_address ORDER BY price_ae ASC, created_at ASC) AS r_low
+      FROM valid_tx
+    ),
+    agg_all AS (
+      SELECT
+        sale_address,
+        MIN(created_at) FILTER (WHERE r_last = 1) AS latest_at,
+        (array_agg(buy_price) FILTER (WHERE r_last = 1))[1] AS latest_price,
+        MIN(created_at) FILTER (WHERE r_high = 1) AS high_at,
+        (array_agg(buy_price) FILTER (WHERE r_high = 1))[1] AS high_price,
+        MIN(created_at) FILTER (WHERE r_low = 1) AS low_at,
+        (array_agg(buy_price) FILTER (WHERE r_low = 1))[1] AS low_price
+      FROM ranked_all
+      WHERE r_last = 1 OR r_high = 1 OR r_low = 1
+      GROUP BY sale_address
+    ),
+    base_data AS (
       SELECT
         t.sale_address,
-      -- Past 24h
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '24 hours'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_24h,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '24 hours'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) DESC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_24h_high,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '24 hours'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) ASC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_24h_low,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '24 hours'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at DESC
-          LIMIT 1
-        ) x
-      ) as past_24h_latest,
-      -- Volume sums
-      (
-        SELECT SUM(tx.volume)
-        FROM transactions tx
-        WHERE tx.sale_address = t.sale_address
-          AND tx.created_at > NOW() - INTERVAL '24 hours'
-      ) as volume_24h,
-      (
-        SELECT SUM(tx.volume)
-        FROM transactions tx
-        WHERE tx.sale_address = t.sale_address
-          AND tx.created_at > NOW() - INTERVAL '7 days'
-      ) as volume_7d,
-      (
-        SELECT SUM(tx.volume)
-        FROM transactions tx
-        WHERE tx.sale_address = t.sale_address
-          AND tx.created_at > NOW() - INTERVAL '30 days'
-      ) as volume_30d,
-      -- Past 7d
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '7 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_7d,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '7 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) DESC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_7d_high,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '7 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) ASC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_7d_low,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '7 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at DESC
-          LIMIT 1
-        ) x
-      ) as past_7d_latest,
-      -- Past 30d
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '30 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_30d,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '30 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) DESC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_30d_high,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '30 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) ASC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as past_30d_low,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.created_at > NOW() - INTERVAL '30 days'
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at DESC
-          LIMIT 1
-        ) x
-      ) as past_30d_latest,
-      -- All time
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY created_at DESC
-          LIMIT 1
-        ) x
-      ) as all_time_latest,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) DESC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as all_time_high,
-      (
-        SELECT row_to_json(x)
-        FROM (
-          SELECT buy_price, created_at
-          FROM transactions tx
-          WHERE tx.sale_address = t.sale_address
-            AND tx.buy_price->>'ae' != 'NaN'
-            AND tx.buy_price->>'ae' IS NOT NULL
-          ORDER BY CAST(tx.buy_price->>'ae' AS NUMERIC) ASC, created_at ASC
-          LIMIT 1
-        ) x
-      ) as all_time_low
+        CASE WHEN a24.first_at IS NULL THEN NULL ELSE json_build_object('buy_price', a24.first_price, 'created_at', a24.first_at) END as past_24h,
+        CASE WHEN a24.high_at IS NULL THEN NULL ELSE json_build_object('buy_price', a24.high_price, 'created_at', a24.high_at) END as past_24h_high,
+        CASE WHEN a24.low_at IS NULL THEN NULL ELSE json_build_object('buy_price', a24.low_price, 'created_at', a24.low_at) END as past_24h_low,
+        CASE WHEN a24.latest_at IS NULL THEN NULL ELSE json_build_object('buy_price', a24.latest_price, 'created_at', a24.latest_at) END as past_24h_latest,
+        v.volume_24h,
+        v.volume_7d,
+        v.volume_30d,
+        CASE WHEN a7.first_at IS NULL THEN NULL ELSE json_build_object('buy_price', a7.first_price, 'created_at', a7.first_at) END as past_7d,
+        CASE WHEN a7.high_at IS NULL THEN NULL ELSE json_build_object('buy_price', a7.high_price, 'created_at', a7.high_at) END as past_7d_high,
+        CASE WHEN a7.low_at IS NULL THEN NULL ELSE json_build_object('buy_price', a7.low_price, 'created_at', a7.low_at) END as past_7d_low,
+        CASE WHEN a7.latest_at IS NULL THEN NULL ELSE json_build_object('buy_price', a7.latest_price, 'created_at', a7.latest_at) END as past_7d_latest,
+        CASE WHEN a30.first_at IS NULL THEN NULL ELSE json_build_object('buy_price', a30.first_price, 'created_at', a30.first_at) END as past_30d,
+        CASE WHEN a30.high_at IS NULL THEN NULL ELSE json_build_object('buy_price', a30.high_price, 'created_at', a30.high_at) END as past_30d_high,
+        CASE WHEN a30.low_at IS NULL THEN NULL ELSE json_build_object('buy_price', a30.low_price, 'created_at', a30.low_at) END as past_30d_low,
+        CASE WHEN a30.latest_at IS NULL THEN NULL ELSE json_build_object('buy_price', a30.latest_price, 'created_at', a30.latest_at) END as past_30d_latest,
+        CASE WHEN aall.latest_at IS NULL THEN NULL ELSE json_build_object('buy_price', aall.latest_price, 'created_at', aall.latest_at) END as all_time_latest,
+        CASE WHEN aall.high_at IS NULL THEN NULL ELSE json_build_object('buy_price', aall.high_price, 'created_at', aall.high_at) END as all_time_high,
+        CASE WHEN aall.low_at IS NULL THEN NULL ELSE json_build_object('buy_price', aall.low_price, 'created_at', aall.low_at) END as all_time_low
       FROM token t
-      WHERE EXISTS (
-        SELECT 1
-        FROM transactions tx
-        WHERE tx.sale_address = t.sale_address
-      )
+      -- The inner join on volumes reproduces the previous
+      -- WHERE EXISTS (SELECT 1 FROM transactions ...) base filter: volumes
+      -- groups every transaction, so its key set is exactly the tokens that
+      -- have one.
+      JOIN volumes v ON v.sale_address = t.sale_address
+      LEFT JOIN agg_24h a24 ON a24.sale_address = t.sale_address
+      LEFT JOIN agg_7d a7 ON a7.sale_address = t.sale_address
+      LEFT JOIN agg_30d a30 ON a30.sale_address = t.sale_address
+      LEFT JOIN agg_all aall ON aall.sale_address = t.sale_address
     )
     SELECT
       sale_address,
@@ -385,7 +315,10 @@ import { Index, ViewColumn, ViewEntity } from 'typeorm';
 })
 export class TokenPerformanceView {
   @ViewColumn()
-  @Index({ unique: true })
+  // Named explicitly: REFRESH MATERIALIZED VIEW CONCURRENTLY requires this
+  // unique index, and the migration that (re)creates the view has to recreate
+  // it under a name that does not depend on TypeORM's generated hash.
+  @Index('IDX_TOKEN_PERFORMANCE_VIEW_SALE_ADDRESS', { unique: true })
   sale_address: string;
 
   @ViewColumn()
