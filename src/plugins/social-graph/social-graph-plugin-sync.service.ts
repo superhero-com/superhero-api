@@ -10,6 +10,7 @@ import {
   SocialGraphEdge,
   SocialGraphEdgeKind,
 } from './entities/social-graph-edge.entity';
+import { recomputeSocialGraphCounts } from './social-graph-counts';
 import { loadSocialContractAci } from './social-graph-aci';
 import {
   SOCIAL_GRAPH_CONTRACT_ADDRESS,
@@ -123,25 +124,33 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     }
   }
 
+  // Each mutation and the recompute of its two affected addresses share one
+  // transaction, so a crash between them can never leave a stale counter. The
+  // counters are recomputed from the edge table, never incremented, so an
+  // `.orIgnore()`d re-insert or an unconditional delete stays correct.
   private async insertEdge(
     from: string,
     to: string,
     kind: SocialGraphEdgeKind,
     tx: Tx,
   ): Promise<void> {
-    await this.edgeRepo
-      .createQueryBuilder()
-      .insert()
-      .into(SocialGraphEdge)
-      .values({
-        from_address: from,
-        to_address: to,
-        kind,
-        height: tx.block_height,
-        tx_hash: tx.hash,
-      })
-      .orIgnore() // ON CONFLICT (from,to,kind) DO NOTHING — safe to re-apply
-      .execute();
+    await this.edgeRepo.manager.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(SocialGraphEdge)
+        .values({
+          from_address: from,
+          to_address: to,
+          kind,
+          height: tx.block_height,
+          tx_hash: tx.hash,
+        })
+        .orIgnore() // ON CONFLICT (from,to,kind) DO NOTHING — safe to re-apply
+        .execute();
+      await recomputeSocialGraphCounts(manager, from);
+      await recomputeSocialGraphCounts(manager, to);
+    });
     this.logger.log(`${kind}: ${from} -> ${to}`);
   }
 
@@ -150,10 +159,14 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     to: string,
     kind: SocialGraphEdgeKind,
   ): Promise<void> {
-    await this.edgeRepo.delete({
-      from_address: from,
-      to_address: to,
-      kind,
+    await this.edgeRepo.manager.transaction(async (manager) => {
+      await manager.delete(SocialGraphEdge, {
+        from_address: from,
+        to_address: to,
+        kind,
+      });
+      await recomputeSocialGraphCounts(manager, from);
+      await recomputeSocialGraphCounts(manager, to);
     });
     this.logger.log(`un${kind}: ${from} -> ${to}`);
   }
@@ -168,6 +181,20 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     if (!txHashes.length) {
       return;
     }
-    await this.edgeRepo.delete({ tx_hash: In(txHashes) });
+    await this.edgeRepo.manager.transaction(async (manager) => {
+      const removed = await manager.find(SocialGraphEdge, {
+        where: { tx_hash: In(txHashes) },
+        select: ['from_address', 'to_address'],
+      });
+      const affected = new Set<string>();
+      for (const edge of removed) {
+        affected.add(edge.from_address);
+        affected.add(edge.to_address);
+      }
+      await manager.delete(SocialGraphEdge, { tx_hash: In(txHashes) });
+      for (const address of affected) {
+        await recomputeSocialGraphCounts(manager, address);
+      }
+    });
   }
 }
