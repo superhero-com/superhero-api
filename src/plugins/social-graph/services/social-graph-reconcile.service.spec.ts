@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { SocialGraphReconcileService } from './social-graph-reconcile.service';
 
+const ADDR = 'ak_alice';
+
 type Edge = { id: number; from_address: string; to_address: string };
 /** [followers, following] */
 type Counts = Record<string, [number, number]>;
@@ -9,7 +11,11 @@ type Counts = Record<string, [number, number]>;
  * Query-builder stub honouring the `edge.id > :lastCheckedId` bound the service
  * pages on, so consecutive passes see only edges added since the previous one.
  */
-const edgeRepo = (edges: Edge[]) => ({
+const edgeRepo = (
+  edges: Edge[],
+  query = jest.fn().mockResolvedValue(undefined),
+) => ({
+  manager: { query },
   createQueryBuilder: () => {
     let after = 0;
     const qb: any = {
@@ -32,12 +38,49 @@ const countsOf = (counts: Counts) => ({
   getFollowingCount: async (address: string) => counts[address][1],
 });
 
+const storedCountsOf = (counts: Counts) => ({
+  findOne: async ({ where: { address } }: { where: { address: string } }) => {
+    const count = counts[address];
+    if (!count) {
+      return null;
+    }
+    return { followers_count: count[0], following_count: count[1] };
+  },
+});
+
 const build = (edges: Edge[], indexed: Counts, chain: Counts) =>
   new SocialGraphReconcileService(
     edgeRepo(edges) as any,
+    storedCountsOf(indexed) as any,
     { isConfigured: () => true, ...countsOf(chain) } as any,
     countsOf(indexed) as any,
   );
+
+function makeService({
+  stored,
+  edgeFollowers,
+  edgeFollowing,
+}: {
+  stored: { followers_count: number; following_count: number } | null;
+  edgeFollowers: number;
+  edgeFollowing: number;
+}) {
+  const query = jest.fn().mockResolvedValue(undefined);
+  const countRepo: any = { findOne: jest.fn().mockResolvedValue(stored) };
+  const socialGraphService: any = {
+    getFollowersCount: jest.fn().mockResolvedValue(edgeFollowers),
+    getFollowingCount: jest.fn().mockResolvedValue(edgeFollowing),
+  };
+  const contractService: any = {};
+
+  const service = new SocialGraphReconcileService(
+    edgeRepo([], query) as any,
+    countRepo,
+    contractService,
+    socialGraphService,
+  );
+  return { service, query };
+}
 
 describe('SocialGraphReconcileService drift alarm', () => {
   let errors: string[];
@@ -89,5 +132,44 @@ describe('SocialGraphReconcileService drift alarm', () => {
     await service.reconcile();
 
     expect(errors).toEqual([]);
+  });
+});
+
+describe('SocialGraphReconcileService.repairCounterDrift', () => {
+  it('recomputes the counter when it disagrees with the edge table', async () => {
+    const { service, query } = makeService({
+      stored: { followers_count: 5, following_count: 0 },
+      edgeFollowers: 6,
+      edgeFollowing: 0,
+    });
+
+    await (service as any).repairCounterDrift(ADDR);
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][1]).toEqual([ADDR]);
+  });
+
+  it('does nothing when the counter already matches the edge table', async () => {
+    const { service, query } = makeService({
+      stored: { followers_count: 2, following_count: 3 },
+      edgeFollowers: 2,
+      edgeFollowing: 3,
+    });
+
+    await (service as any).repairCounterDrift(ADDR);
+
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('treats a missing row as zero and recomputes when edges exist', async () => {
+    const { service, query } = makeService({
+      stored: null,
+      edgeFollowers: 1,
+      edgeFollowing: 0,
+    });
+
+    await (service as any).repairCounterDrift(ADDR);
+
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });

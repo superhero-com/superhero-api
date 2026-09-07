@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
-import { SocialGraphEdge } from '@/plugins/social-graph/entities/social-graph-edge.entity';
+import { SocialGraphCount } from '@/plugins/social-graph/entities/social-graph-count.entity';
 import { SOCIAL_GRAPH_ENABLED } from '@/plugins/social-graph/social-graph.constants';
 import { ProfileCache } from '../entities/profile-cache.entity';
 
@@ -13,8 +13,8 @@ export class ProfileReadService {
     private readonly profileCacheRepository: Repository<ProfileCache>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
-    @InjectRepository(SocialGraphEdge)
-    private readonly socialGraphEdgeRepository: Repository<SocialGraphEdge>,
+    @InjectRepository(SocialGraphCount)
+    private readonly socialGraphCountRepository: Repository<SocialGraphCount>,
   ) {}
 
   async getProfile(address: string) {
@@ -36,22 +36,22 @@ export class ProfileReadService {
     };
   }
 
-  // Follower/following counts are chain-truth served from the social-graph
-  // index. Called only when the feature is enabled; a disabled deployment omits
-  // the keys rather than counting an empty table. Only the single-profile read
-  // carries them — the profile page the counts are for.
+  // Follower/following counts are chain-truth served from the maintained
+  // social_graph_counts table — one primary-key lookup, no COUNT(*) on the read
+  // path. Called only when the feature is enabled; a disabled deployment omits
+  // the keys rather than reading an empty table. A missing row is an address
+  // nobody follows and who follows nobody: zero, not absent. Only the
+  // single-profile read carries them — the profile page the counts are for.
   private async getFollowCounts(
     address: string,
   ): Promise<{ followers_count: number; following_count: number }> {
-    const [followers_count, following_count] = await Promise.all([
-      this.socialGraphEdgeRepository.count({
-        where: { to_address: address, kind: 'follow' },
-      }),
-      this.socialGraphEdgeRepository.count({
-        where: { from_address: address, kind: 'follow' },
-      }),
-    ]);
-    return { followers_count, following_count };
+    const counts = await this.socialGraphCountRepository.findOne({
+      where: { address },
+    });
+    return {
+      followers_count: counts?.followers_count ?? 0,
+      following_count: counts?.following_count ?? 0,
+    };
   }
 
   async getProfilesByAddresses(addresses: string[]) {
