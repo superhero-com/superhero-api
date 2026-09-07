@@ -165,24 +165,24 @@ describe('social-graph (unconfigured — SOCIAL_GRAPH_CONTRACT_ADDRESS unset)', 
     );
   });
 
-  it('getProfile omits both count keys and never queries the edge index', async () => {
+  it('getProfile omits both count keys and never reads the counts table', async () => {
     let ProfileReadService: any;
     jest.isolateModules(() => {
       ProfileReadService =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('@/profile/services/profile-read.service').ProfileReadService;
     });
-    const count = jest.fn();
+    const findOne = jest.fn();
     const service = new ProfileReadService(
       { findOne: jest.fn().mockResolvedValue(null) },
       { findOne: jest.fn().mockResolvedValue(null) },
-      { count },
+      { findOne },
     );
 
     const result = await service.getProfile('ak_test');
 
     expect(result.profile).not.toHaveProperty('followers_count');
     expect(result.profile).not.toHaveProperty('following_count');
-    expect(count).not.toHaveBeenCalled();
+    expect(findOne).not.toHaveBeenCalled();
   });
 });

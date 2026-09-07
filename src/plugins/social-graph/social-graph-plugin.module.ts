@@ -4,12 +4,18 @@ import { AeModule } from '@/ae/ae.module';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { SocialGraphEdge } from './entities/social-graph-edge.entity';
+import { SocialGraphCount } from './entities/social-graph-count.entity';
 import { SocialGraphPlugin } from './social-graph.plugin';
 import { SocialGraphPluginSyncService } from './social-graph-plugin-sync.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Tx, PluginSyncState, SocialGraphEdge]),
+    TypeOrmModule.forFeature([
+      Tx,
+      PluginSyncState,
+      SocialGraphEdge,
+      SocialGraphCount,
+    ]),
     AeModule,
   ],
   providers: [SocialGraphPluginSyncService, SocialGraphPlugin],

@@ -22,13 +22,13 @@ describe('ProfileReadService', () => {
       findOne: jest.fn().mockResolvedValue(account ?? null),
       find: jest.fn().mockResolvedValue(accounts),
     } as any;
-    const socialGraphEdgeRepository = {
-      count: jest.fn().mockResolvedValue(0),
+    const socialGraphCountRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
     } as any;
     return new ProfileReadService(
       profileCacheRepository,
       accountRepository,
-      socialGraphEdgeRepository,
+      socialGraphCountRepository,
     );
   };
 
@@ -53,14 +53,16 @@ describe('ProfileReadService', () => {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           require('./profile-read.service').ProfileReadService;
       });
-      const count = jest
-        .fn()
-        .mockResolvedValueOnce(7) // followers (to_address)
-        .mockResolvedValueOnce(3); // following (from_address)
       const service = new ConfiguredProfileReadService(
         { findOne: jest.fn().mockResolvedValue(null) },
         { findOne: jest.fn().mockResolvedValue(null) },
-        { count },
+        {
+          findOne: jest.fn().mockResolvedValue({
+            address: 'ak_counts',
+            followers_count: 7,
+            following_count: 3,
+          }),
+        },
       );
 
       const result = await service.getProfile('ak_counts');
@@ -69,6 +71,40 @@ describe('ProfileReadService', () => {
         expect.objectContaining({
           followers_count: 7,
           following_count: 3,
+        }),
+      );
+    } finally {
+      if (original === undefined) {
+        delete process.env[KEY];
+      } else {
+        process.env[KEY] = original;
+      }
+    }
+  });
+
+  it('returns zero counts when the address has no counts row', async () => {
+    const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
+    const original = process.env[KEY];
+    process.env[KEY] = 'ct_configured';
+    try {
+      let ConfiguredProfileReadService: any;
+      jest.isolateModules(() => {
+        ConfiguredProfileReadService =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('./profile-read.service').ProfileReadService;
+      });
+      const service = new ConfiguredProfileReadService(
+        { findOne: jest.fn().mockResolvedValue(null) },
+        { findOne: jest.fn().mockResolvedValue(null) },
+        { findOne: jest.fn().mockResolvedValue(null) },
+      );
+
+      const result = await service.getProfile('ak_nobody');
+
+      expect(result.profile).toEqual(
+        expect.objectContaining({
+          followers_count: 0,
+          following_count: 0,
         }),
       );
     } finally {
