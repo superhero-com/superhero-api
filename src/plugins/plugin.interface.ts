@@ -8,6 +8,17 @@ import { Repository } from 'typeorm';
 export { Tx };
 export { SyncDirection, SyncDirectionEnum };
 
+/**
+ * Keyset cursor over `txs`, ordered (block_height, micro_time, hash). `hash`
+ * breaks the tie because micro_time is shared across a microblock. Compare with
+ * a row constructor, never an OR chain, or the planner loses the index bound.
+ */
+export interface TxPageCursor {
+  block_height: number;
+  micro_time: string;
+  hash: string;
+}
+
 export interface PluginFilter {
   type?: 'contract_call' | 'spend';
   contractIds?: string[];
@@ -63,7 +74,7 @@ export interface Plugin {
    * @param pluginName - The plugin name
    * @param currentVersion - The current plugin version
    * @returns Array of query functions that return transactions needing updates
-   * @param cursor - Optional cursor with block_height and micro_time for pagination
+   * @param cursor - Optional keyset cursor for pagination; see `TxPageCursor`
    */
   getUpdateQueries(
     pluginName: string,
@@ -72,7 +83,7 @@ export interface Plugin {
     (
       repository: Repository<Tx>,
       limit: number,
-      cursor?: { block_height: number; micro_time: string },
+      cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   >;
   /**
