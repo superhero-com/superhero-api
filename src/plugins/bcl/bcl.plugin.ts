@@ -107,14 +107,7 @@ export class BclPlugin extends BasePlugin {
     }
   }
 
-  /**
-   * Get queries to retrieve transactions that need auto-updating.
-   * Default implementation extracts contract IDs from filters and creates a query.
-   * Plugins can override this method to provide custom queries.
-   * @param pluginName - The plugin name
-   * @param currentVersion - The current plugin version
-   * @returns Array of query functions that return transactions needing updates
-   */
+  /** Selects on `logs`: this plugin implements only `decodeLogs`. */
   getUpdateQueries(
     pluginName: string,
     currentVersion: number,
@@ -125,47 +118,19 @@ export class BclPlugin extends BasePlugin {
       cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
+    void pluginName;
     const supportedFunctions = Object.values(BCL_CONTRACT.FUNCTIONS);
 
     return [
-      async (repo, limit, cursor) => {
-        const query = repo
-          .createQueryBuilder('tx')
-          .where('tx.function IN (:...supportedFunctions)', {
-            supportedFunctions,
-          })
-          // Tests `logs`, not `data`: this plugin only implements `decodeLogs`,
-          // so `data->'bcl'` has no writer and the row would match again on
-          // every sweep forever -- 873k transactions re-read per restart,
-          // retiring none of them.
-          .andWhere(
-            `(tx.logs->>'${pluginName}' IS NULL OR (tx.logs->'${pluginName}'->>'_version')::int != :version)`,
-            { version: currentVersion },
-          );
-
-        // Keyset pagination. Must stay a row constructor: the equivalent
-        // OR chain cannot give the planner an index lower bound, so the scan
-        // restarts at the start of the index and discards every row before
-        // the cursor -- measured at 596ms/page 600k rows deep, against 1.2ms
-        // for this form at the same cursor.
-        if (cursor) {
-          query.andWhere(
-            '(tx.block_height, tx.micro_time, tx.hash) > (CAST(:cursorHeight AS int), CAST(:cursorMicroTime AS bigint), CAST(:cursorHash AS text))',
-            {
-              cursorHeight: cursor.block_height,
-              cursorMicroTime: cursor.micro_time,
-              cursorHash: cursor.hash,
-            },
-          );
-        }
-
-        return query
-          .orderBy('tx.block_height', 'ASC')
-          .addOrderBy('tx.micro_time', 'ASC')
-          .addOrderBy('tx.hash', 'ASC')
-          .take(limit)
-          .getMany();
-      },
+      (repo, limit, cursor) =>
+        this.buildUpdateQueryPage(
+          repo,
+          'logs',
+          supportedFunctions,
+          currentVersion,
+          limit,
+          cursor,
+        ),
     ];
   }
 }

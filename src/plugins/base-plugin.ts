@@ -28,14 +28,49 @@ export abstract class BasePlugin implements Plugin {
   protected abstract getSyncService(): BasePluginSyncService;
 
   /**
-   * Get queries to retrieve transactions that need auto-updating.
-   * Default implementation extracts contract IDs from filters and creates a query.
-   * Plugins can override this method to provide custom queries.
-   * @param pluginName - The plugin name
-   * @param currentVersion - The current plugin version
-   * @returns Array of query functions that return transactions needing updates
-   * @param cursor - Optional cursor with block_height and micro_time for pagination
+   * One page of the auto-update sweep, walked by `TxPageCursor`. `field` must be
+   * one the plugin's decode actually writes: rows it never stamps stay stale and
+   * come back on every sweep.
    */
+  protected buildUpdateQueryPage(
+    repository: Repository<Tx>,
+    field: 'logs' | 'data',
+    functions: string[],
+    currentVersion: number,
+    limit: number,
+    cursor?: TxPageCursor,
+  ): Promise<Tx[]> {
+    const query = repository
+      .createQueryBuilder('tx')
+      .where('tx.function IN (:...supportedFunctions)', {
+        supportedFunctions: functions,
+      })
+      .andWhere(
+        `(tx.${field}->>'${this.name}' IS NULL OR (tx.${field}->'${this.name}'->>'_version')::int != :version)`,
+        { version: currentVersion },
+      );
+
+    // Row constructor, not an OR chain -- see `TxPageCursor`.
+    if (cursor) {
+      query.andWhere(
+        '(tx.block_height, tx.micro_time, tx.hash) > (CAST(:cursorHeight AS int), CAST(:cursorMicroTime AS bigint), CAST(:cursorHash AS text))',
+        {
+          cursorHeight: cursor.block_height,
+          cursorMicroTime: cursor.micro_time,
+          cursorHash: cursor.hash,
+        },
+      );
+    }
+
+    return query
+      .orderBy('tx.block_height', 'ASC')
+      .addOrderBy('tx.micro_time', 'ASC')
+      .addOrderBy('tx.hash', 'ASC')
+      .take(limit)
+      .getMany();
+  }
+
+  /** Defaults to none: a plugin storing no decoded output has nothing to refresh. */
   getUpdateQueries(
     pluginName: string,
     currentVersion: number,
