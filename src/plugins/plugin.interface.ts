@@ -49,7 +49,6 @@ export interface Plugin {
   version: number;
   startFromHeight(): number;
   filters(): PluginFilter[];
-  syncHistoricalTransactions(): Promise<void>;
   /**
    * Process a batch of transactions. Plugins can override for optimized batch processing.
    * @param txs - Transactions to process

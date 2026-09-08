@@ -166,8 +166,8 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
 
   /**
    * Read the `Transfer` legs for a tx from the persisted decoded version on
-   * `tx.logs[name]` (written by `BasePlugin.processBatch`/`syncHistoricalTransactions`
-   * via `decodeLogs` BEFORE `processTransaction` runs). Returns `[]` when there is
+   * `tx.logs[name]` (written by `BasePlugin.processBatch` via `decodeLogs`
+   * BEFORE `processTransaction` runs). Returns `[]` when there is
    * no decoded payload — there is nothing to apply. Already filtered to `Transfer`
    * at decode time; filtered again here defensively.
    */
