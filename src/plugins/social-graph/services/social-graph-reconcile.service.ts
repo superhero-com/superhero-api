@@ -2,14 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Repository } from 'typeorm';
-import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { SocialGraphEdge } from '../entities/social-graph-edge.entity';
 import { SocialGraphContractService } from '../social-graph-contract.service';
 import { SocialGraphService } from '../social-graph.service';
-import {
-  SOCIAL_GRAPH_PLUGIN_NAME,
-  SOCIAL_GRAPH_START_HEIGHT,
-} from '../social-graph.constants';
 
 // Bound how many recently-active addresses one reconcile pass checks against the
 // chain, so a burst of activity can never fan out into an unbounded node load.
@@ -21,21 +16,18 @@ const MAX_ADDRESSES_PER_RUN = 100;
  * following/followers counters, so there is an authoritative number to check
  * against. This job is bounded — it only re-checks addresses with edge activity
  * since the last run, never sweeps the whole graph — and its remit is detect and
- * alarm. Repair is coarse (re-sync the plugin from its start height), never a
- * per-address rebuild: there is no chain-side enumeration to rebuild an address
- * from, only counts and pair-wise reads.
+ * alarm only: the chain exposes counts and pair-wise reads, not enumeration, so
+ * there is nothing to rebuild an address from.
  */
 @Injectable()
 export class SocialGraphReconcileService implements OnModuleInit {
   private readonly logger = new Logger(SocialGraphReconcileService.name);
   private lastCheckedId = 0;
-  private resyncRequested = false;
+  private driftAlarmed = false;
 
   constructor(
     @InjectRepository(SocialGraphEdge)
     private readonly edgeRepo: Repository<SocialGraphEdge>,
-    @InjectRepository(PluginSyncState)
-    private readonly pluginSyncStateRepo: Repository<PluginSyncState>,
     private readonly contractService: SocialGraphContractService,
     private readonly socialGraphService: SocialGraphService,
   ) {}
@@ -67,7 +59,7 @@ export class SocialGraphReconcileService implements OnModuleInit {
         }
       }
       if (drifted > 0) {
-        await this.requestResync();
+        await this.reportUnrepairedDrift();
       }
     } catch (error) {
       // A throw from a Cron handler is unhandled; log and swallow.
@@ -133,21 +125,17 @@ export class SocialGraphReconcileService implements OnModuleInit {
   }
 
   /**
-   * Coarse repair: reset the plugin's backward checkpoint to its start height so
-   * the indexer re-syncs the graph from the deploy block. Fired at most once per
-   * process so a persistent drift does not thrash the checkpoint every pass.
+   * Once per process, so persistent drift does not spam. This used to reset
+   * `backward_synced_height`, which read as a repair but was a no-op.
    */
-  private async requestResync(): Promise<void> {
-    if (this.resyncRequested) {
+  private async reportUnrepairedDrift(): Promise<void> {
+    if (this.driftAlarmed) {
       return;
     }
-    this.resyncRequested = true;
-    await this.pluginSyncStateRepo.update(
-      { plugin_name: SOCIAL_GRAPH_PLUGIN_NAME },
-      { backward_synced_height: SOCIAL_GRAPH_START_HEIGHT - 1 },
-    );
-    this.logger.warn(
-      'social-graph drift detected — requested plugin re-sync from start height',
+    this.driftAlarmed = true;
+    this.logger.error(
+      'social-graph drift detected — NO automatic repair exists; ' +
+        'a re-sync from the deploy block must be run manually',
     );
   }
 }

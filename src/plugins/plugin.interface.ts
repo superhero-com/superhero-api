@@ -44,7 +44,8 @@ export interface PluginBatchResult {
 export interface Plugin {
   name: string;
   /**
-   * When the plugin version changes, it will cause a full re-sync of the plugin transactions.
+   * Bumping this re-decodes indexed transactions, but only via
+   * `getUpdateQueries` -- a plugin without one gets no re-decode.
    */
   version: number;
   startFromHeight(): number;
