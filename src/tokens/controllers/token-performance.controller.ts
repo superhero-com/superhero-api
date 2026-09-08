@@ -37,7 +37,7 @@ export class TokenPerformanceController {
     type: TokenPriceMovementDto,
   })
   async performance(@Param('address') address: string) {
-    const token = await this.tokensService.getToken(address);
+    const token = await this.tokensService.getToken(address, true);
 
     if (!token) {
       throw new NotFoundException('Token not found');

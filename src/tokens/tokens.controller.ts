@@ -361,7 +361,7 @@ export class TokensController {
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ): Promise<Pagination<TokenHolder>> {
     this.validatePagination(page, limit);
-    const token = await this.tokensService.findByAddress(address);
+    const token = await this.tokensService.findByAddress(address, true);
     if (!token) {
       throw new NotFoundException('Token not found');
     }

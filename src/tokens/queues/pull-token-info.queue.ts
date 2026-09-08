@@ -29,7 +29,10 @@ export class PullTokenInfoQueue {
   async process(job: Job<IPullTokenInfoQueue>) {
     this.logger.log(`PullTokenInfoQueue->started:${job.data.saleAddress}`);
     try {
-      const token = await this.tokenService.getToken(job.data.saleAddress);
+      const token = await this.tokenService.getToken(
+        job.data.saleAddress,
+        true,
+      );
       await this.tokenService.syncTokenPrice(token);
       this.logger.debug(
         `PullTokenInfoQueue->completed:${job.data.saleAddress}`,

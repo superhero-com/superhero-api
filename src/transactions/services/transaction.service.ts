@@ -79,7 +79,7 @@ export class TransactionService {
        * if the token doesn't exists get token will create it.
        */
       try {
-        token = await this.tokenService.getToken(saleAddress);
+        token = await this.tokenService.getToken(saleAddress, true);
       } catch (error) {
         this.logger.error(`Error getting token ${saleAddress}`, error);
       }
@@ -123,7 +123,7 @@ export class TransactionService {
         token,
         rawTransaction,
       );
-      token = await this.tokenService.findByAddress(token.sale_address);
+      token = await this.tokenService.findByAddress(token.sale_address, true);
     }
 
     const decodedData = rawTransaction.tx.decodedData;

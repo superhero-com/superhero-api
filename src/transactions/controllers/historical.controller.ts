@@ -75,7 +75,7 @@ export class HistoricalController {
     const newStartDate = startDate
       ? this.parseDate(startDate)
       : moment().subtract(2, 'days');
-    const token = await this.tokenService.getToken(address);
+    const token = await this.tokenService.getToken(address, true);
     if (!token) {
       throw new NotFoundException('Token not found');
     }
@@ -117,7 +117,7 @@ export class HistoricalController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
   ) {
-    const token = await this.tokenService.getToken(address);
+    const token = await this.tokenService.getToken(address, true);
     if (!token) {
       throw new NotFoundException('Token not found');
     }
@@ -152,7 +152,7 @@ export class HistoricalController {
     if (!address || address == 'null') {
       throw new BadRequestException('Address is required');
     }
-    const token = await this.tokenService.getToken(address);
+    const token = await this.tokenService.getToken(address, true);
     return this.tokenHistoryService.getForPreview(token, interval);
   }
 
@@ -192,7 +192,7 @@ export class HistoricalController {
     if (!address || address === 'null') {
       throw new BadRequestException('Address is required');
     }
-    const token = await this.tokenService.getToken(address);
+    const token = await this.tokenService.getToken(address, true);
     const preview = await this.tokenHistoryService.getForPreview(
       token,
       interval,

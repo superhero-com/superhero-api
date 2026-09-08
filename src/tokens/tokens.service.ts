@@ -221,7 +221,7 @@ export class TokensService {
 
   async update(token: Token, data): Promise<Token> {
     await this.tokensRepository.update(token.sale_address, data);
-    return this.findByAddress(token.sale_address);
+    return this.findByAddress(token.sale_address, true);
   }
 
   async findById(sale_address: string): Promise<Token | null> {
@@ -236,6 +236,14 @@ export class TokensService {
       .getOne();
   }
 
+  /**
+   * `withoutRank: true` returns the plain row. The default path additionally
+   * runs a RANK() over every token of the factory plus a performance-view join
+   * -- hundreds of ms against 64k tokens -- so pass `true` unless the caller
+   * actually reads `rank`/`performance`. Note the ranks differ: this one is
+   * per-factory and includes unlisted tokens, while the persisted `token.rank`
+   * column (RefreshTokenRanksService) spans factories over `unlisted = false`.
+   */
   async findByAddress(
     address: string,
     withoutRank = false,
@@ -318,8 +326,8 @@ export class TokensService {
     }
   }
 
-  async getToken(address: string): Promise<Token> {
-    const existingToken = await this.findByAddress(address);
+  async getToken(address: string, withoutRank = false): Promise<Token> {
+    const existingToken = await this.findByAddress(address, withoutRank);
 
     if (existingToken) {
       return existingToken;
@@ -330,7 +338,7 @@ export class TokensService {
       return this.pullLatestCreatedTokensByNameOrSymbol(address);
     }
 
-    return this.createToken(address as Encoded.ContractAddress);
+    return this.createToken(address as Encoded.ContractAddress, withoutRank);
   }
 
   async getTokenAex9Address(token: Token | null | undefined): Promise<string> {
@@ -358,6 +366,7 @@ export class TokensService {
 
   async createToken(
     saleAddress: Encoded.ContractAddress,
+    withoutRank = false,
   ): Promise<Token | null> {
     if (!saleAddress?.startsWith('ct_')) {
       this.logger.error(
@@ -390,7 +399,7 @@ export class TokensService {
     }
 
     // prevent duplicate tokens
-    const existingToken = await this.findByAddress(saleAddress);
+    const existingToken = await this.findByAddress(saleAddress, withoutRank);
     if (existingToken) {
       return existingToken;
     }
@@ -409,7 +418,7 @@ export class TokensService {
     await this.tokensRepository.upsert(tokenData, {
       conflictPaths: ['sale_address'],
     });
-    const newToken = await this.findByAddress(saleAddress);
+    const newToken = await this.findByAddress(saleAddress, true);
     if (!newToken) {
       throw new Error(
         `Failed to create or retrieve token for sale address: ${saleAddress}`,
@@ -425,7 +434,7 @@ export class TokensService {
     }
     await this.syncTokenPrice(newToken);
 
-    return this.findByAddress(newToken.sale_address);
+    return this.findByAddress(newToken.sale_address, withoutRank);
   }
 
   async updateTokenFactoryAddress(
@@ -846,7 +855,7 @@ export class TokensService {
   async getTrendingEligibilityBreakdown(
     address: string,
   ): Promise<TokenTrendingEligibilityBreakdown> {
-    const token = await this.findByAddress(address);
+    const token = await this.findByAddress(address, true);
 
     if (!token) {
       throw new NotFoundException(`Token with address ${address} not found`);
@@ -1077,7 +1086,7 @@ export class TokensService {
   }
 
   async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
-    const token = await this.getToken(saleAddress);
+    const token = await this.getToken(saleAddress, true);
     if (!token) {
       this.logger.warn(
         `SyncTokenHoldersQueue: token not found for ${saleAddress}, skipping holders sync`,
