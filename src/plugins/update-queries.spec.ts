@@ -69,7 +69,7 @@ describe('plugin getUpdateQueries pagination', () => {
   describe.each(plugins)('%s', (name, plugin) => {
     it('pages with a row constructor, never an OR chain', async () => {
       const { repo, fragments, params } = recordingRepo();
-      const [query] = plugin.getUpdateQueries(name, 1);
+      const [query] = plugin.getUpdateQueries(1);
       await query(repo, 100, CURSOR);
 
       const cursorSql = fragments.find((f) => f.includes('cursorHeight'));
@@ -86,7 +86,7 @@ describe('plugin getUpdateQueries pagination', () => {
 
     it('includes hash in the sort key so a page cannot end mid-microblock', async () => {
       const { repo, orderBys } = recordingRepo();
-      const [query] = plugin.getUpdateQueries(name, 1);
+      const [query] = plugin.getUpdateQueries(1);
       await query(repo, 100, CURSOR);
 
       expect(orderBys).toEqual(['tx.block_height', 'tx.micro_time', 'tx.hash']);
@@ -96,7 +96,7 @@ describe('plugin getUpdateQueries pagination', () => {
   it('bcl selects on logs, the only field it writes', async () => {
     const { repo, fragments } = recordingRepo();
     const plugin = new BclPlugin({} as any, {} as any, {} as any, {} as any);
-    const [query] = plugin.getUpdateQueries('bcl', 1);
+    const [query] = plugin.getUpdateQueries(1);
     await query(repo, 100, undefined);
 
     const versionSql = fragments.find((f) => f.includes('_version'));
@@ -116,7 +116,7 @@ describe('plugin getUpdateQueries pagination', () => {
       {} as any,
       {} as any,
     );
-    const [query] = plugin.getUpdateQueries('governance', 1);
+    const [query] = plugin.getUpdateQueries(1);
     await query(repo, 100, undefined);
 
     const versionSql = fragments.find((f) => f.includes('_version'));

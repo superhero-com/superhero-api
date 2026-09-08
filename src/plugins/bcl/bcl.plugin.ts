@@ -109,7 +109,6 @@ export class BclPlugin extends BasePlugin {
 
   /** Selects on `logs`: this plugin implements only `decodeLogs`. */
   getUpdateQueries(
-    pluginName: string,
     currentVersion: number,
   ): Array<
     (
@@ -118,7 +117,6 @@ export class BclPlugin extends BasePlugin {
       cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
-    void pluginName;
     const supportedFunctions = Object.values(BCL_CONTRACT.FUNCTIONS);
 
     return [
