@@ -8,6 +8,7 @@ import {
   PluginFilter,
   SyncDirection,
   SyncDirectionEnum,
+  TxPageCursor,
 } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 import { sanitizeJsonForPostgres } from '@/utils/common';
@@ -43,7 +44,7 @@ export abstract class BasePlugin implements Plugin {
     (
       repository: Repository<Tx>,
       limit: number,
-      cursor?: { block_height: number; micro_time: string },
+      cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
     void pluginName;
@@ -378,8 +379,7 @@ export abstract class BasePlugin implements Plugin {
       // Process each query
       for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
         const query = queries[queryIndex];
-        let cursor: { block_height: number; micro_time: string } | undefined =
-          undefined;
+        let cursor: TxPageCursor | undefined = undefined;
         let hasMore = true;
 
         this.logger.log(
@@ -502,6 +502,7 @@ export abstract class BasePlugin implements Plugin {
               cursor = {
                 block_height: lastTx.block_height,
                 micro_time: lastTx.micro_time,
+                hash: lastTx.hash,
               };
               this.logger.debug(
                 `[${this.name}] Query ${queryIndex + 1}: Updated cursor to (height: ${cursor.block_height}, micro_time: ${cursor.micro_time})`,
