@@ -102,8 +102,8 @@ export class PluginRegistryService implements OnModuleInit {
               plugin_name: plugin.name,
               version: plugin.version,
               last_synced_height: startFromHeight - 1,
-              backward_synced_height: null, // Will be set when backward sync starts
-              live_synced_height: null, // Will be set when live sync starts
+              backward_synced_height: null,
+              live_synced_height: null,
               start_from_height: startFromHeight,
             });
             this.logger.log(
@@ -154,11 +154,12 @@ export class PluginRegistryService implements OnModuleInit {
             const startFromHeight = plugin.startFromHeight();
             await this.pluginSyncStateRepository.update(
               { plugin_name: plugin.name },
+              // Reporting state only -- the re-decode is `updateTransactions`.
               {
                 version: plugin.version,
                 last_synced_height: startFromHeight - 1,
-                backward_synced_height: null, // Reset to trigger re-sync
-                live_synced_height: null, // Reset to trigger re-sync
+                backward_synced_height: null,
+                live_synced_height: null,
                 start_from_height: startFromHeight,
               },
             );
