@@ -7,7 +7,7 @@ import {
   PluginBatchResult,
   PluginFilter,
   SyncDirection,
-  SyncDirectionEnum,
+  TxPageCursor,
 } from './plugin.interface';
 import { BasePluginSyncService } from './base-plugin-sync.service';
 import { sanitizeJsonForPostgres } from '@/utils/common';
@@ -28,25 +28,58 @@ export abstract class BasePlugin implements Plugin {
   protected abstract getSyncService(): BasePluginSyncService;
 
   /**
-   * Get queries to retrieve transactions that need auto-updating.
-   * Default implementation extracts contract IDs from filters and creates a query.
-   * Plugins can override this method to provide custom queries.
-   * @param pluginName - The plugin name
-   * @param currentVersion - The current plugin version
-   * @returns Array of query functions that return transactions needing updates
-   * @param cursor - Optional cursor with block_height and micro_time for pagination
+   * One page of the auto-update sweep, walked by `TxPageCursor`. `field` must be
+   * one the plugin's decode actually writes: rows it never stamps stay stale and
+   * come back on every sweep.
    */
+  protected buildUpdateQueryPage(
+    repository: Repository<Tx>,
+    field: 'logs' | 'data',
+    functions: string[],
+    currentVersion: number,
+    limit: number,
+    cursor?: TxPageCursor,
+  ): Promise<Tx[]> {
+    const query = repository
+      .createQueryBuilder('tx')
+      .where('tx.function IN (:...supportedFunctions)', {
+        supportedFunctions: functions,
+      })
+      .andWhere(
+        `(tx.${field}->>'${this.name}' IS NULL OR (tx.${field}->'${this.name}'->>'_version')::int != :version)`,
+        { version: currentVersion },
+      );
+
+    // Row constructor, not an OR chain -- see `TxPageCursor`.
+    if (cursor) {
+      query.andWhere(
+        '(tx.block_height, tx.micro_time, tx.hash) > (CAST(:cursorHeight AS int), CAST(:cursorMicroTime AS bigint), CAST(:cursorHash AS text))',
+        {
+          cursorHeight: cursor.block_height,
+          cursorMicroTime: cursor.micro_time,
+          cursorHash: cursor.hash,
+        },
+      );
+    }
+
+    return query
+      .orderBy('tx.block_height', 'ASC')
+      .addOrderBy('tx.micro_time', 'ASC')
+      .addOrderBy('tx.hash', 'ASC')
+      .take(limit)
+      .getMany();
+  }
+
+  /** Defaults to none: a plugin storing no decoded output has nothing to refresh. */
   getUpdateQueries(
-    pluginName: string,
     currentVersion: number,
   ): Array<
     (
       repository: Repository<Tx>,
       limit: number,
-      cursor?: { block_height: number; micro_time: string },
+      cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
-    void pluginName;
     void currentVersion;
     return [];
   }
@@ -137,202 +170,6 @@ export abstract class BasePlugin implements Plugin {
   }
 
   /**
-   * Sync historical transactions from the database
-   */
-  async syncHistoricalTransactions(): Promise<void> {
-    this.logger.log(`[${this.name}] Starting historical transaction sync`);
-
-    try {
-      // Get plugin sync state
-      const syncState = await this.pluginSyncStateRepository.findOne({
-        where: { plugin_name: this.name },
-      });
-
-      if (!syncState) {
-        this.logger.warn(`[${this.name}] Plugin sync state not found`);
-        return;
-      }
-
-      // Use backward_synced_height if available, otherwise fall back to last_synced_height
-      const syncedHeight =
-        syncState.backward_synced_height ??
-        syncState.last_synced_height ??
-        syncState.start_from_height - 1;
-      const startHeight = syncedHeight + 1;
-      const batchSize = 100;
-      let processedCount = 0;
-
-      this.logger.log(`[${this.name}] Syncing from height ${startHeight}`);
-
-      let hasMore = true;
-      let currentOffset = 0;
-
-      while (hasMore) {
-        // Fetch batch of transactions
-        const transactions = await this.fetchTransactionBatch(
-          startHeight,
-          batchSize,
-          currentOffset,
-        );
-
-        if (transactions.length === 0) {
-          hasMore = false;
-          break;
-        }
-
-        // Process each transaction
-        const syncService = this.getSyncService();
-        for (const tx of transactions) {
-          try {
-            // Decode logs and data before processing
-            try {
-              // Step 1: Decode logs
-              const decodedLogs = await syncService.decodeLogs(tx);
-              if (decodedLogs !== null) {
-                const currentLogs = tx.logs || {};
-                tx.logs = {
-                  ...currentLogs,
-                  [this.name]: {
-                    _version: this.version,
-                    data: decodedLogs,
-                  },
-                };
-                await this.txRepository.save(tx);
-              }
-
-              // Step 2: Decode data (after logs are saved)
-              const decodedData = await syncService.decodeData(tx);
-              if (decodedData !== null) {
-                const currentData = tx.data || {};
-                tx.data = {
-                  ...currentData,
-                  [this.name]: {
-                    _version: this.version,
-                    data: decodedData,
-                  },
-                };
-                await this.txRepository.save(tx);
-              }
-            } catch (decodeError: any) {
-              // Log decode error but continue processing
-              this.logger.error(
-                `[${this.name}] Failed to decode logs/data for transaction ${tx.hash}`,
-                decodeError.stack,
-              );
-            }
-
-            await syncService.processTransaction(
-              tx,
-              SyncDirectionEnum.Backward,
-            );
-            processedCount++;
-
-            // Update sync state periodically
-            if (processedCount % 10 === 0) {
-              await this.pluginSyncStateRepository.update(
-                { plugin_name: this.name },
-                {
-                  last_synced_height: tx.block_height, // Keep for backward compatibility
-                  backward_synced_height: tx.block_height,
-                },
-              );
-            }
-          } catch (error: any) {
-            this.logger.error(
-              `[${this.name}] Failed to process transaction ${tx.hash}`,
-              error.stack,
-            );
-          }
-        }
-
-        currentOffset += batchSize;
-
-        // Check if we should continue
-        if (transactions.length < batchSize) {
-          hasMore = false;
-        }
-      }
-
-      this.logger.log(
-        `[${this.name}] Historical sync completed. Processed ${processedCount} transactions`,
-      );
-    } catch (error: any) {
-      this.logger.error(`[${this.name}] Historical sync failed`, error.stack);
-    }
-  }
-
-  /**
-   * Fetch a batch of transactions that match the plugin's filters
-   */
-  private async fetchTransactionBatch(
-    startHeight: number,
-    limit: number,
-    offset: number,
-  ): Promise<Tx[]> {
-    const filters = this.filters();
-    const query = this.txRepository
-      .createQueryBuilder('tx')
-      .where('tx.block_height >= :startHeight', { startHeight })
-      .orderBy('tx.block_height', 'ASC')
-      .addOrderBy('tx.micro_time', 'ASC')
-      .skip(offset)
-      .take(limit);
-
-    // Build WHERE conditions based on filters
-    const contractIds: string[] = [];
-    const functions: string[] = [];
-    let hasSpendFilter = false;
-    let hasContractCallFilter = false;
-
-    for (const filter of filters) {
-      if (filter.type === 'spend') {
-        hasSpendFilter = true;
-      }
-      if (filter.type === 'contract_call') {
-        hasContractCallFilter = true;
-      }
-      if (filter.contractIds) {
-        contractIds.push(...filter.contractIds);
-      }
-      if (filter.functions) {
-        functions.push(...filter.functions);
-      }
-    }
-
-    // Apply type filters
-    if (hasSpendFilter && !hasContractCallFilter) {
-      query.andWhere('tx.type = :type', { type: 'SpendTx' });
-    } else if (hasContractCallFilter && !hasSpendFilter) {
-      query.andWhere('tx.type = :type', { type: 'ContractCallTx' });
-    }
-
-    // Apply contract ID filter
-    if (contractIds.length > 0) {
-      query.andWhere('tx.contract_id IN (:...contractIds)', { contractIds });
-    }
-
-    // Apply function filter
-    if (functions.length > 0) {
-      query.andWhere('tx.function IN (:...functions)', { functions });
-    }
-
-    const transactions = await query.getMany();
-
-    // If we have predicate filters, we need to filter in memory
-    const hasPredicateFilters = filters.some((f) => f.predicate);
-    if (hasPredicateFilters) {
-      const syncService = this.getSyncService();
-      return transactions.filter((tx) =>
-        filters.some((filter) =>
-          (syncService as any).matchesFilter(tx, filter),
-        ),
-      );
-    }
-
-    return transactions;
-  }
-
-  /**
    * Check if a transaction needs re-decoding based on version mismatch
    * @param tx - Transaction to check
    * @returns Object indicating what needs re-decoding (logs and/or data)
@@ -364,7 +201,7 @@ export abstract class BasePlugin implements Plugin {
     this.logger.log(`[${this.name}] Starting update transactions`);
 
     try {
-      const queries = this.getUpdateQueries(this.name, this.version);
+      const queries = this.getUpdateQueries(this.version);
 
       if (queries.length === 0) {
         this.logger.log(`[${this.name}] No update queries defined`);
@@ -378,8 +215,7 @@ export abstract class BasePlugin implements Plugin {
       // Process each query
       for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
         const query = queries[queryIndex];
-        let cursor: { block_height: number; micro_time: string } | undefined =
-          undefined;
+        let cursor: TxPageCursor | undefined = undefined;
         let hasMore = true;
 
         this.logger.log(
@@ -502,6 +338,7 @@ export abstract class BasePlugin implements Plugin {
               cursor = {
                 block_height: lastTx.block_height,
                 micro_time: lastTx.micro_time,
+                hash: lastTx.hash,
               };
               this.logger.debug(
                 `[${this.name}] Query ${queryIndex + 1}: Updated cursor to (height: ${cursor.block_height}, micro_time: ${cursor.micro_time})`,

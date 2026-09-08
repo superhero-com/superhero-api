@@ -14,7 +14,12 @@ import { Searchable } from '@/api-core/decorators/searchable.decorator';
 @Entity({
   name: 'txs',
 })
-@Index(['block_height'])
+// Leading column serves block_height lookups too, so there is no separate index.
+@Index('IDX_TXS_BLOCK_HEIGHT_MICRO_TIME_HASH', [
+  'block_height',
+  'micro_time',
+  'hash',
+])
 @Index(['type'])
 @Index(['contract_id'])
 @Index(['function'])

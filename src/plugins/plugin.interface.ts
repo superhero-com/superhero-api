@@ -8,6 +8,17 @@ import { Repository } from 'typeorm';
 export { Tx };
 export { SyncDirection, SyncDirectionEnum };
 
+/**
+ * Keyset cursor over `txs`, ordered (block_height, micro_time, hash). `hash`
+ * breaks the tie because micro_time is shared across a microblock. Compare with
+ * a row constructor, never an OR chain, or the planner loses the index bound.
+ */
+export interface TxPageCursor {
+  block_height: number;
+  micro_time: string;
+  hash: string;
+}
+
 export interface PluginFilter {
   type?: 'contract_call' | 'spend';
   contractIds?: string[];
@@ -33,12 +44,12 @@ export interface PluginBatchResult {
 export interface Plugin {
   name: string;
   /**
-   * When the plugin version changes, it will cause a full re-sync of the plugin transactions.
+   * Bumping this re-decodes indexed transactions, but only via
+   * `getUpdateQueries` -- a plugin without one gets no re-decode.
    */
   version: number;
   startFromHeight(): number;
   filters(): PluginFilter[];
-  syncHistoricalTransactions(): Promise<void>;
   /**
    * Process a batch of transactions. Plugins can override for optimized batch processing.
    * @param txs - Transactions to process
@@ -60,19 +71,17 @@ export interface Plugin {
    * Get queries to retrieve transactions that need auto-updating.
    * Each query should filter transactions where plugin data doesn't exist or version doesn't match.
    * Uses cursor-based pagination to avoid skipping transactions when the dataset changes.
-   * @param pluginName - The plugin name
    * @param currentVersion - The current plugin version
    * @returns Array of query functions that return transactions needing updates
-   * @param cursor - Optional cursor with block_height and micro_time for pagination
+   * @param cursor - Optional keyset cursor for pagination; see `TxPageCursor`
    */
   getUpdateQueries(
-    pluginName: string,
     currentVersion: number,
   ): Array<
     (
       repository: Repository<Tx>,
       limit: number,
-      cursor?: { block_height: number; micro_time: string },
+      cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   >;
   /**
