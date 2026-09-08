@@ -23,7 +23,6 @@ const MAX_ADDRESSES_PER_RUN = 100;
 export class SocialGraphReconcileService implements OnModuleInit {
   private readonly logger = new Logger(SocialGraphReconcileService.name);
   private lastCheckedId = 0;
-  private driftAlarmed = false;
 
   constructor(
     @InjectRepository(SocialGraphEdge)
@@ -52,14 +51,8 @@ export class SocialGraphReconcileService implements OnModuleInit {
       if (addresses.length === 0) {
         return;
       }
-      let drifted = 0;
       for (const address of addresses) {
-        if (await this.hasDrift(address)) {
-          drifted += 1;
-        }
-      }
-      if (drifted > 0) {
-        await this.reportUnrepairedDrift();
+        await this.hasDrift(address);
       }
     } catch (error) {
       // A throw from a Cron handler is unhandled; log and swallow.
@@ -119,23 +112,9 @@ export class SocialGraphReconcileService implements OnModuleInit {
     this.logger.error(
       `social-graph index drift for ${address}: ` +
         `followers indexed=${indexedFollowers} chain=${chainFollowers}, ` +
-        `following indexed=${indexedFollowing} chain=${chainFollowing}`,
+        `following indexed=${indexedFollowing} chain=${chainFollowing}` +
+        ' — no automatic repair exists; re-sync from the deploy block manually',
     );
     return true;
-  }
-
-  /**
-   * Once per process, so persistent drift does not spam. This used to reset
-   * `backward_synced_height`, which read as a repair but was a no-op.
-   */
-  private async reportUnrepairedDrift(): Promise<void> {
-    if (this.driftAlarmed) {
-      return;
-    }
-    this.driftAlarmed = true;
-    this.logger.error(
-      'social-graph drift detected — NO automatic repair exists; ' +
-        'a re-sync from the deploy block must be run manually',
-    );
   }
 }
