@@ -72,7 +72,6 @@ export abstract class BasePlugin implements Plugin {
 
   /** Defaults to none: a plugin storing no decoded output has nothing to refresh. */
   getUpdateQueries(
-    pluginName: string,
     currentVersion: number,
   ): Array<
     (
@@ -81,7 +80,6 @@ export abstract class BasePlugin implements Plugin {
       cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
-    void pluginName;
     void currentVersion;
     return [];
   }
@@ -203,7 +201,7 @@ export abstract class BasePlugin implements Plugin {
     this.logger.log(`[${this.name}] Starting update transactions`);
 
     try {
-      const queries = this.getUpdateQueries(this.name, this.version);
+      const queries = this.getUpdateQueries(this.version);
 
       if (queries.length === 0) {
         this.logger.log(`[${this.name}] No update queries defined`);

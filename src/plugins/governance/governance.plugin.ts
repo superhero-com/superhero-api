@@ -110,7 +110,6 @@ export class GovernancePlugin extends BasePlugin {
 
   /** Selects on `data`: this plugin implements `decodeData` too. */
   getUpdateQueries(
-    pluginName: string,
     currentVersion: number,
   ): Array<
     (
@@ -119,7 +118,6 @@ export class GovernancePlugin extends BasePlugin {
       cursor?: TxPageCursor,
     ) => Promise<Tx[]>
   > {
-    void pluginName;
     const supportedFunctions = Object.values(GOVERNANCE_CONTRACT.FUNCTIONS);
 
     return [
