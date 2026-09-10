@@ -4,7 +4,7 @@ import {
   CHAIN_NAME_STALE_MS,
 } from './account.service';
 import { DataSource } from 'typeorm';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, FetchJsonHttpError } from '@/utils/common';
 import { Account } from '../entities/account.entity';
 
 jest.mock('@/utils/common', () => {
@@ -32,6 +32,8 @@ describe('AccountService', () => {
     const accountRepository = {
       createQueryBuilder: jest.fn(() => queryBuilder),
       find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     const transactionRepository = {
@@ -494,6 +496,59 @@ describe('AccountService', () => {
       await service.scheduledFullAccountsRebuild();
 
       expect(rebuildSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ensureAccountFromChain', () => {
+    const ADDRESS = 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ';
+
+    beforeEach(() => {
+      (fetchJson as jest.Mock).mockReset();
+    });
+
+    it('persists and returns a minimal row when the node knows the account', async () => {
+      const { service, accountRepository } = createService();
+      const stored = { address: ADDRESS };
+      (fetchJson as jest.Mock).mockResolvedValue({
+        id: ADDRESS,
+        balance: '100067982528000000000',
+      });
+      accountRepository.findOne.mockResolvedValue(stored);
+
+      const result = await service.ensureAccountFromChain(ADDRESS);
+
+      expect(fetchJson).toHaveBeenCalledWith(
+        expect.stringContaining(`/v3/accounts/${ADDRESS}`),
+      );
+      expect(accountRepository.upsert).toHaveBeenCalledWith(
+        { address: ADDRESS },
+        expect.objectContaining({ conflictPaths: ['address'] }),
+      );
+      expect(result).toBe(stored);
+    });
+
+    it('returns null without persisting when the node 404s', async () => {
+      const { service, accountRepository } = createService();
+      (fetchJson as jest.Mock).mockRejectedValue(
+        new FetchJsonHttpError('Account not found', 404),
+      );
+
+      const result = await service.ensureAccountFromChain(ADDRESS);
+
+      expect(result).toBeNull();
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('propagates non-404 fetch errors instead of creating a row', async () => {
+      const { service, accountRepository } = createService();
+      (fetchJson as jest.Mock).mockRejectedValue(
+        new FetchJsonHttpError('Bad gateway', 502),
+      );
+
+      await expect(service.ensureAccountFromChain(ADDRESS)).rejects.toThrow(
+        'Bad gateway',
+      );
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
     });
   });
 });
