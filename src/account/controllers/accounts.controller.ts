@@ -608,7 +608,8 @@ export class AccountsController {
       (await this.tryHydrateAccountFromTransactions(address)) ??
       (await this.accountRepository.findOne({
         where: { address },
-      }));
+      })) ??
+      (await this.tryHydrateAccountFromChain(address));
 
     if (!account) {
       throw new NotFoundException('Account not found');
@@ -668,6 +669,20 @@ export class AccountsController {
     } catch (error) {
       this.logger.error(
         `Failed to hydrate account from transactions for ${address}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return null;
+    }
+  }
+
+  private async tryHydrateAccountFromChain(
+    address: string,
+  ): Promise<Account | null> {
+    try {
+      return await this.accountService.ensureAccountFromChain(address);
+    } catch (error) {
+      this.logger.error(
+        `Failed to hydrate account from chain for ${address}`,
         error instanceof Error ? error.stack : String(error),
       );
       return null;
