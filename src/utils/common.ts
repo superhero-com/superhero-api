@@ -13,7 +13,7 @@ const FETCH_JSON_TIMEOUT_MS =
     ? rawTimeout
     : DEFAULT_FETCH_JSON_TIMEOUT_MS;
 
-class FetchJsonHttpError extends Error {
+export class FetchJsonHttpError extends Error {
   constructor(
     message: string,
     readonly status: number,

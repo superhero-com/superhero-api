@@ -7,7 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import { Brackets, EntityManager, In, Repository } from 'typeorm';
 import { Account } from '../entities/account.entity';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, FetchJsonHttpError } from '@/utils/common';
 import { mapWithConcurrency } from '@/utils/concurrency.util';
 
 const SEARCH_DEFAULT_LIMIT = 8;
@@ -133,6 +133,31 @@ export class AccountService {
     });
 
     return accountRepository.findOne({ where: { address } });
+  }
+
+  /**
+   * Confirms an address has on-chain account state at the node and, if so,
+   * persists a minimal account row. A read path calls this so a valid account
+   * that never appeared in indexed transactions — e.g. one reachable only
+   * through the social graph — resolves instead of 404ing. Returns null when
+   * the node reports no such account (HTTP 404).
+   */
+  async ensureAccountFromChain(address: string): Promise<Account | null> {
+    const accountUrl = `${ACTIVE_NETWORK.url}/v3/accounts/${encodeURIComponent(address)}`;
+
+    try {
+      const chainAccount = await fetchJson<{ id?: string }>(accountUrl);
+      if (!chainAccount?.id) {
+        return null;
+      }
+    } catch (error) {
+      if (error instanceof FetchJsonHttpError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+
+    return this.ensureAccountExists(address);
   }
 
   private async aggregateAccountRow(

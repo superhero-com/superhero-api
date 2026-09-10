@@ -30,6 +30,7 @@ describe('AccountsController', () => {
   let accountService: {
     getChainNameForAccount: jest.Mock;
     ensureAccountFromTransactions: jest.Mock;
+    ensureAccountFromChain: jest.Mock;
     searchByNameOrAddress: jest.Mock;
     getChainNamesForAddresses: jest.Mock;
   };
@@ -58,6 +59,7 @@ describe('AccountsController', () => {
     accountService = {
       getChainNameForAccount: jest.fn(),
       ensureAccountFromTransactions: jest.fn().mockResolvedValue(null),
+      ensureAccountFromChain: jest.fn().mockResolvedValue(null),
       searchByNameOrAddress: jest.fn().mockResolvedValue([]),
       getChainNamesForAddresses: jest.fn().mockResolvedValue({}),
     };
@@ -171,12 +173,38 @@ describe('AccountsController', () => {
     expect(accountRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('throws when account is missing', async () => {
+  it('throws when account is missing on chain too', async () => {
     accountRepository.findOne.mockResolvedValue(null);
+    accountService.ensureAccountFromChain.mockResolvedValue(null);
 
     await expect(controller.getAccount('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('hydrates from chain when absent from DB and transactions', async () => {
+    const account = {
+      address: 'ak_3yT4BoLMWVWtCEpbb3Sv3ArtetmR5kVMDANpFsezXpqHBiFGQ',
+      chain_name: null,
+      chain_name_updated_at: new Date(),
+    };
+    accountService.ensureAccountFromTransactions.mockResolvedValue(null);
+    accountRepository.findOne.mockResolvedValue(null);
+    accountService.ensureAccountFromChain.mockResolvedValue(account);
+    profileReadService.getProfile.mockResolvedValue({
+      profile: { followers_count: 1, following_count: 2 },
+      public_name: null,
+    });
+
+    const result = await controller.getAccount(account.address);
+
+    expect(accountService.ensureAccountFromChain).toHaveBeenCalledWith(
+      account.address,
+    );
+    expect(result).toMatchObject({
+      address: account.address,
+      profile: { followers_count: 1, following_count: 2 },
+    });
   });
 
   it('falls back to stored account when hydration fails', async () => {
