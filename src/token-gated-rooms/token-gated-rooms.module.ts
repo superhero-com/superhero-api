@@ -30,6 +30,9 @@ import { ReorgEvictionService } from './services/reorg-eviction.service';
 import { ReconcileProcessor } from './queues/reconcile.processor';
 import { RoomRecheckService } from './services/room-recheck.service';
 import { RoomRecheckController } from './controllers/room-recheck.controller';
+import { StaleTokenSyncService } from './services/stale-token-sync.service';
+import { Aex9TransferPluginModule } from './plugins/aex9-transfer-plugin.module';
+import { TokensModule } from '@/tokens/tokens.module';
 import { RoomNotificationsModule } from './room-notifications.module';
 import { ClientRoomApiModule } from './client-room-api.module';
 import { TgrObservabilityModule } from './observability/tgr-observability.module';
@@ -108,6 +111,10 @@ const TGR_ENTITIES = [
     // Metrics collector + `GET /api/tgr/metrics`. Imported AFTER the queues so its
     // @Optional() @InjectQueue tokens resolve.
     TgrObservabilityModule,
+    // Holder re-sync (TokensService) + the community-token balance ledger
+    // (BalanceIndexerService) that StaleTokenSyncService heals from.
+    TokensModule,
+    Aex9TransferPluginModule,
   ],
   providers: [
     // Shared: AE↔nostr resolution (eligibility + membership-sync inject it).
@@ -134,6 +141,9 @@ const TGR_ENTITIES = [
     // On-demand per-caller access recheck (relay→DB heal + provision) backing the
     // `POST /rooms/:saleAddress/recheck` controller below.
     RoomRecheckService,
+    // Rotating sweep that heals community-room tokens whose live sync fell behind
+    // the chain (holders + balance ledger + room eligibility + sync height).
+    StaleTokenSyncService,
   ],
   controllers: [RoomRecheckController],
   exports: [
