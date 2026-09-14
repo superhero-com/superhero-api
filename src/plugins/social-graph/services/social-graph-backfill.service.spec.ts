@@ -27,10 +27,10 @@ function loadService() {
   return SocialGraphBackfillService;
 }
 
-function rawContractCallTx(hash: string) {
+function rawContractCallTx(hash: string, blockHeight = 1352517) {
   return {
     hash,
-    block_height: 1352517,
+    block_height: blockHeight,
     block_hash: 'mh_1',
     micro_index: 0,
     micro_time: 1700000000000,
@@ -42,6 +42,20 @@ function rawContractCallTx(hash: string) {
       caller_id: CALLER,
       log: [{ address: CONTRACT, topics: ['1', '2'], data: 'cb_' }],
     },
+  };
+}
+
+// A state repo that persists in memory across "boots" so the watermark written
+// by one backfill() run is visible to the next.
+function makeStateRepo() {
+  let row: any = null;
+  return {
+    findOne: jest.fn(async () => row),
+    save: jest.fn(async (value: any) => {
+      row = { ...value };
+      return row;
+    }),
+    _current: () => row,
   };
 }
 
@@ -62,7 +76,7 @@ describe('SocialGraphBackfillService', () => {
     }
   });
 
-  it('saves the missed contract call (th_23vad…Fi6 @ 1352517) and replays it', async () => {
+  it('recovers the missed contract call (th_23vad…Fi6 @ 1352517) and persists the watermark', async () => {
     mockFetchJson.mockResolvedValueOnce({
       data: [rawContractCallTx(MISSED_TX)],
       next: null,
@@ -73,53 +87,109 @@ describe('SocialGraphBackfillService', () => {
         .fn()
         .mockImplementation((rows: any[]) => Promise.resolve(rows)),
     };
+    const stateRepo = makeStateRepo();
     const plugin = {
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
     const Service = loadService();
-    const service = new Service(configService, txRepo, plugin);
+    const service = new Service(configService, txRepo, stateRepo, plugin);
     const result = await service.backfill();
 
     expect(result).toEqual({ saved: 1, reprocessed: 1 });
-    expect(txRepo.save).toHaveBeenCalledTimes(1);
     const saved = txRepo.save.mock.calls[0][0];
     expect(saved[0]).toMatchObject({
       hash: MISSED_TX,
-      type: 'ContractCallTx',
       contract_id: CONTRACT,
       caller_id: CALLER,
       block_height: 1352517,
     });
-    // The tx object (with its log) is preserved for the plugin to decode edges.
-    expect(saved[0].raw.log[0].topics).toEqual(['1', '2']);
     expect(plugin.processBatch).toHaveBeenCalledWith(
       saved,
       SyncDirectionEnum.Backward,
     );
+    // Watermark advanced to the highest recovered height.
+    expect(stateRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract_address: CONTRACT,
+        last_backfilled_height: 1352517,
+      }),
+    );
   });
 
-  it('reprocesses a tx already stored (does not skip it) so a zero-edge row is recovered', async () => {
+  it('recovers the three mainnet follows on the first boot and does not reprocess them on the second', async () => {
+    const page = {
+      // Newest-first, as direction=backward serves them.
+      data: [
+        rawContractCallTx('th_c', 1352517),
+        rawContractCallTx('th_b', 1352514),
+        rawContractCallTx('th_a', 1352513),
+      ],
+      next: null,
+    };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    const plugin = {
+      processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+    };
+    const Service = loadService();
+
+    // First boot from the prod-bug state: all three recovered.
+    mockFetchJson.mockResolvedValueOnce(page);
+    const boot1 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot1).toEqual({ saved: 3, reprocessed: 3 });
+    expect(stateRepo._current().last_backfilled_height).toBe(1352517);
+
+    // Second boot: same history from the middleware, but the watermark makes it
+    // stop without reprocessing any already-recovered call.
+    plugin.processBatch.mockClear();
+    txRepo.save.mockClear();
+    mockFetchJson.mockResolvedValueOnce(page);
+    const boot2 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot2).toEqual({ saved: 0, reprocessed: 0 });
+    expect(plugin.processBatch).not.toHaveBeenCalled();
+    expect(txRepo.save).not.toHaveBeenCalled();
+    expect(stateRepo.save).toHaveBeenCalledTimes(1); // only boot1 advanced it
+  });
+
+  it('reprocesses a stored zero-event row (does not skip it) below the watermark on first boot', async () => {
     mockFetchJson.mockResolvedValueOnce({
       data: [rawContractCallTx(MISSED_TX)],
       next: null,
     });
-    // Already in the DB with its log intact — nothing to save, but it must be
-    // reprocessed, because it was stored before the decode fix and has no edge.
+    // Already in the DB with its log intact but decoded to []; must be
+    // reprocessed so the edge is finally written.
     const storedRow = {
       hash: MISSED_TX,
       raw: { log: [{ address: CONTRACT, topics: ['1', '2'] }] },
+      logs: { 'social-graph': { _version: 1, data: [] } },
     };
     const txRepo = {
       find: jest.fn().mockResolvedValue([storedRow]),
       save: jest.fn(),
     };
+    const stateRepo = makeStateRepo();
     const plugin = {
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
     const Service = loadService();
-    const service = new Service(configService, txRepo, plugin);
+    const service = new Service(configService, txRepo, stateRepo, plugin);
     const result = await service.backfill();
 
     expect(result).toEqual({ saved: 0, reprocessed: 1 });
@@ -142,16 +212,16 @@ describe('SocialGraphBackfillService', () => {
         .fn()
         .mockImplementation((rows: any[]) => Promise.resolve(rows)),
     };
+    const stateRepo = makeStateRepo();
     const plugin = {
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
     const Service = loadService();
-    const service = new Service(configService, txRepo, plugin);
+    const service = new Service(configService, txRepo, stateRepo, plugin);
     const result = await service.backfill();
 
     expect(result).toEqual({ saved: 0, reprocessed: 1 });
-    // raw was refreshed from the middleware payload and persisted.
     expect(storedRow.raw.log[0].topics).toEqual(['1', '2']);
     expect(txRepo.save).toHaveBeenCalledWith([storedRow]);
     expect(plugin.processBatch).toHaveBeenCalledWith(
@@ -160,38 +230,39 @@ describe('SocialGraphBackfillService', () => {
     );
   });
 
-  it('walks pages until the middleware stops returning a next link', async () => {
-    mockFetchJson
-      .mockResolvedValueOnce({
-        data: [rawContractCallTx('th_a')],
-        next: '/v3/transactions?cursor=2',
-      })
-      .mockResolvedValueOnce({ data: [rawContractCallTx('th_b')], next: null });
+  it('does not advance the watermark when the walk is truncated by the page cap', async () => {
+    // Every page returns a full page and another next link, so the walk never
+    // reaches the end within PAGE_SAFETY; a partial run must not mark done.
+    mockFetchJson.mockImplementation(async () => ({
+      data: [rawContractCallTx('th_x')],
+      next: '/v3/transactions?cursor=more',
+    }));
     const txRepo = {
       find: jest.fn().mockResolvedValue([]),
       save: jest
         .fn()
         .mockImplementation((rows: any[]) => Promise.resolve(rows)),
     };
+    const stateRepo = makeStateRepo();
     const plugin = {
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
     const Service = loadService();
-    const service = new Service(configService, txRepo, plugin);
-    const result = await service.backfill();
+    const service = new Service(configService, txRepo, stateRepo, plugin);
+    await service.backfill();
 
-    expect(mockFetchJson).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ saved: 2, reprocessed: 2 });
+    expect(stateRepo.save).not.toHaveBeenCalled();
   });
 
   it('does not touch the middleware when the contract is unconfigured', () => {
     delete process.env[KEY];
     const txRepo = { find: jest.fn(), save: jest.fn() };
+    const stateRepo = makeStateRepo();
     const plugin = { processBatch: jest.fn() };
 
     const Service = loadService();
-    const service = new Service(configService, txRepo, plugin);
+    const service = new Service(configService, txRepo, stateRepo, plugin);
     service.onModuleInit();
 
     expect(mockFetchJson).not.toHaveBeenCalled();

@@ -14,15 +14,20 @@ import {
 } from '@/utils/common';
 import { ITransaction } from '@/utils/types';
 import { SocialGraphPlugin } from '../social-graph.plugin';
+import { SocialGraphBackfillState } from '../entities/social-graph-backfill-state.entity';
 import {
   SOCIAL_GRAPH_CONTRACT_ADDRESS,
   SOCIAL_GRAPH_ENABLED,
 } from '../social-graph.constants';
 
 /**
- * Re-decodes and replays the contract's calls from the middleware to recover
- * follows the indexer stored but decoded to zero events (or never stored).
- * Idempotent per boot: edges ON CONFLICT DO NOTHING, counts recomputed.
+ * One-shot recovery: re-decodes the contract's calls from the middleware so a
+ * follow stored before the decode fix (in `txs` but decoded to zero events) or
+ * never stored gets its edge. A persisted watermark (`social_graph_backfill_state`)
+ * records the highest block already recovered, so the walk — newest-first —
+ * stops as soon as it reaches it: the first boot recovers, later boots do not
+ * replay the already-recovered history. Idempotent regardless (edges ON CONFLICT
+ * DO NOTHING, counts recomputed).
  */
 @Injectable()
 export class SocialGraphBackfillService implements OnModuleInit {
@@ -36,6 +41,8 @@ export class SocialGraphBackfillService implements OnModuleInit {
     private readonly configService: ConfigService,
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
+    @InjectRepository(SocialGraphBackfillState)
+    private readonly stateRepository: Repository<SocialGraphBackfillState>,
     private readonly plugin: SocialGraphPlugin,
   ) {}
 
@@ -54,33 +61,58 @@ export class SocialGraphBackfillService implements OnModuleInit {
   }
 
   /**
-   * Walk the contract's calls, save any the indexer never persisted, and hand
-   * EVERY tx on each page to the plugin — a tx stored before the decode fix is
-   * in `txs` but has zero edges, so skipping stored txs would strand exactly the
-   * follows we need to recover. Idempotent, so re-decoding a stored tx is safe.
+   * Walk the contract's calls newest-first, stopping at the persisted watermark,
+   * and hand every not-yet-recovered tx to the plugin (saving any never
+   * persisted, refreshing `raw` on a stored row that lost its log). A tx stored
+   * before the decode fix is in `txs` with zero edges, so it must be reprocessed
+   * — but only until the watermark, so a boot after recovery does not replay the
+   * whole history. Idempotent, so re-decoding a stored tx is safe.
    */
   async backfill(): Promise<{ saved: number; reprocessed: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
-    // Every call to the contract post-dates its deploy, so scoping to the
-    // contract already bounds the walk to the graph's own history.
+    const watermark = await this.loadWatermark();
+
+    // Newest-first so we can stop the moment we reach an already-recovered call.
     let nextUrl: string | null = resolveMiddlewareNextUrl(
       `/v3/transactions?type=contract_call&contract=${SOCIAL_GRAPH_CONTRACT_ADDRESS}` +
-        `&direction=forward&limit=100`,
+        `&direction=backward&limit=100`,
       middlewareUrl,
     );
 
     let saved = 0;
     let reprocessed = 0;
     let safety = 0;
+    let maxHeight = -1;
+    let reachedWatermark = false;
 
-    while (nextUrl && safety < SocialGraphBackfillService.PAGE_SAFETY) {
+    while (
+      nextUrl &&
+      !reachedWatermark &&
+      safety < SocialGraphBackfillService.PAGE_SAFETY
+    ) {
       safety += 1;
       const response = await fetchJson<any>(nextUrl);
       const page: any[] = response?.data ?? [];
 
-      const rows = page.filter(
-        (raw) => raw?.hash && raw?.tx?.type === 'ContractCallTx',
-      );
+      const rows: any[] = [];
+      for (const raw of page) {
+        if (!raw?.hash || raw?.tx?.type !== 'ContractCallTx') {
+          continue;
+        }
+        const height =
+          typeof raw.block_height === 'number' ? raw.block_height : undefined;
+        // Newest-first: once we hit a call at/below the watermark, everything
+        // after it is already recovered, so stop.
+        if (watermark != null && height != null && height <= watermark) {
+          reachedWatermark = true;
+          break;
+        }
+        rows.push(raw);
+        if (height != null && height > maxHeight) {
+          maxHeight = height;
+        }
+      }
+
       if (rows.length > 0) {
         // One query per page, not one findOne per tx.
         const stored = await this.txRepository.find({
@@ -121,6 +153,9 @@ export class SocialGraphBackfillService implements OnModuleInit {
         }
       }
 
+      if (reachedWatermark) {
+        break;
+      }
       nextUrl = resolveMiddlewareNextUrlSafely(
         typeof response?.next === 'string' ? response.next : null,
         middlewareUrl,
@@ -129,18 +164,41 @@ export class SocialGraphBackfillService implements OnModuleInit {
       );
     }
 
-    if (nextUrl && safety >= SocialGraphBackfillService.PAGE_SAFETY) {
+    const truncated =
+      !!nextUrl &&
+      !reachedWatermark &&
+      safety >= SocialGraphBackfillService.PAGE_SAFETY;
+    if (truncated) {
       this.logger.warn(
-        `social-graph backfill hit the page safety limit (${SocialGraphBackfillService.PAGE_SAFETY}); remaining pages were not scanned`,
+        `social-graph backfill hit the page safety limit (${SocialGraphBackfillService.PAGE_SAFETY}); watermark not advanced, remaining pages retried next boot`,
       );
+    } else if (maxHeight > (watermark ?? -1)) {
+      // Only advance once the walk finished (not truncated), so a partial run
+      // never marks unrecovered older calls as done.
+      await this.saveWatermark(maxHeight);
     }
 
     if (reprocessed > 0) {
       this.logger.log(
-        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}`,
+        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}, watermark ${Math.max(maxHeight, watermark ?? -1)}`,
       );
     }
     return { saved, reprocessed };
+  }
+
+  private async loadWatermark(): Promise<number | null> {
+    const state = await this.stateRepository.findOne({
+      where: { contract_address: SOCIAL_GRAPH_CONTRACT_ADDRESS },
+    });
+    return state?.last_backfilled_height ?? null;
+  }
+
+  private async saveWatermark(height: number): Promise<void> {
+    await this.stateRepository.save({
+      contract_address: SOCIAL_GRAPH_CONTRACT_ADDRESS,
+      last_backfilled_height: height,
+      updated_at: new Date(),
+    });
   }
 
   private getMiddlewareUrl(): string {
