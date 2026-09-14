@@ -11,7 +11,11 @@ jest.mock('@/utils/common', () => {
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 
 const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
-const CONTRACT = 'ct_socialgraph';
+// The mainnet identifiers from the bug report, so the page-shaped proof covers
+// the exact tx that was missed.
+const CONTRACT = 'ct_tC6G9MzysAvny8RBdq56oG3emgbUYEZhmfbaC3irfA8bbBJRS';
+const MISSED_TX = 'th_23vadMrrvjpvN3D2bdKk9kFmom5F4FPMPRb6oqquDYLFko7Fi6';
+const CALLER = 'ak_wqP6GiNVJeE6XyRGMjZE6Cq8rV6RRPbrVBr15TxB9GAFdqcph';
 
 function loadService() {
   let SocialGraphBackfillService: any;
@@ -36,7 +40,7 @@ function rawContractCallTx(hash: string) {
       type: 'ContractCallTx',
       contract_id: CONTRACT,
       // No `function` — mirrors the payload that used to be dropped.
-      caller_id: 'ak_caller',
+      caller_id: CALLER,
       log: [{ address: CONTRACT }],
     },
   };
@@ -59,9 +63,9 @@ describe('SocialGraphBackfillService', () => {
     }
   });
 
-  it('saves a missed contract call and replays it through the plugin', async () => {
+  it('saves the missed contract call (th_23vad…Fi6 @ 1352517) and replays it', async () => {
     mockFetchJson.mockResolvedValueOnce({
-      data: [rawContractCallTx('th_missed')],
+      data: [rawContractCallTx(MISSED_TX)],
       next: null,
     });
     const txRepo = {
@@ -82,9 +86,10 @@ describe('SocialGraphBackfillService', () => {
     expect(txRepo.save).toHaveBeenCalledTimes(1);
     const saved = txRepo.save.mock.calls[0][0];
     expect(saved[0]).toMatchObject({
-      hash: 'th_missed',
+      hash: MISSED_TX,
       type: 'ContractCallTx',
       contract_id: CONTRACT,
+      caller_id: CALLER,
       block_height: 1352517,
     });
     // The tx object (with its log) is preserved for the plugin to decode edges.
