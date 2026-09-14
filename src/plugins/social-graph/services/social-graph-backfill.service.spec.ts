@@ -338,7 +338,83 @@ describe('SocialGraphBackfillService', () => {
     const service = new Service(configService, txRepo, stateRepo, plugin);
     await service.backfill();
 
-    expect(stateRepo.save).not.toHaveBeenCalled();
+    // Watermark stays null (nothing marked done), but the resume state is
+    // recorded so the next boot continues instead of restarting from the top.
+    const state = stateRepo._current();
+    expect(state.last_backfilled_height ?? null).toBeNull();
+    expect(state.resume_from_height).toBe(1352517);
+    expect(state.pending_high_height).toBe(1352517);
+  });
+
+  it('resumes a null-watermark history larger than the page-safety window and completes on a later boot', async () => {
+    const TOP = 5100; // one call per page, > PAGE_SAFETY (50) pages of history
+    const BOTTOM = 5041; // 60 distinct heights: boot 1 truncates, boot 2 finishes
+    const heights = Array.from({ length: TOP - BOTTOM + 1 }, (_, i) => TOP - i);
+
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    const plugin = {
+      processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+    };
+    const Service = loadService();
+
+    // Serve one contract call per page, newest-first, from the first height at
+    // or below the resume ceiling the boot asked for; `next` is null only on the
+    // last (oldest) page so an incomplete walk keeps a next link.
+    const serveFrom = (ceiling: number) => {
+      let idx = heights.findIndex((h) => h <= ceiling);
+      if (idx < 0) idx = heights.length;
+      mockFetchJson.mockImplementation(async () => {
+        if (idx >= heights.length) {
+          return { data: [], next: null };
+        }
+        const height = heights[idx];
+        idx += 1;
+        return {
+          data: [rawContractCallTx(`th_${height}`, height)],
+          next: idx < heights.length ? '/v3/transactions?cursor=more' : null,
+        };
+      });
+    };
+
+    // Boot 1: no watermark, walk from the newest page and truncate at the cap.
+    serveFrom(Number.POSITIVE_INFINITY);
+    const boot1 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot1.reprocessed).toBe(50); // exactly PAGE_SAFETY pages walked
+    const afterBoot1 = stateRepo._current();
+    expect(afterBoot1.last_backfilled_height ?? null).toBeNull();
+    expect(afterBoot1.pending_high_height).toBe(TOP);
+    expect(afterBoot1.resume_from_height).toBe(TOP - 49); // lowest height reached
+
+    // Boot 2: resume below the truncation point, reach the oldest call, complete.
+    serveFrom(afterBoot1.resume_from_height);
+    const boot2 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot2.reprocessed).toBeGreaterThan(0);
+    const oldestWalked = plugin.processBatch.mock.calls
+      .flatMap((call: any[]) => call[0])
+      .some((tx: any) => tx.block_height === BOTTOM);
+    expect(oldestWalked).toBe(true);
+
+    const afterBoot2 = stateRepo._current();
+    // Walk complete: the carried top is promoted, resume state cleared.
+    expect(afterBoot2.last_backfilled_height).toBe(TOP);
+    expect(afterBoot2.resume_from_height).toBeNull();
+    expect(afterBoot2.pending_high_height).toBeNull();
   });
 
   it('does not touch the middleware when the contract is unconfigured', () => {
