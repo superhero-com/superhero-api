@@ -230,6 +230,92 @@ describe('SocialGraphBackfillService', () => {
     );
   });
 
+  it('holds the watermark one below a tx whose replay failed, never at or past it', async () => {
+    const page = {
+      // Newest-first; the middle call fails replay.
+      data: [
+        rawContractCallTx('th_c', 1352517),
+        rawContractCallTx('th_b', 1352514),
+        rawContractCallTx('th_a', 1352513),
+      ],
+      next: null,
+    };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    const plugin = {
+      processBatch: jest.fn(async (txs: any[]) => ({
+        failed: txs
+          .filter((tx) => tx.block_height === 1352514)
+          .map((tx) => ({ tx, error: new Error('replay failed') })),
+      })),
+    };
+
+    const Service = loadService();
+    mockFetchJson.mockResolvedValueOnce(page);
+    await new Service(configService, txRepo, stateRepo, plugin).backfill();
+
+    // Capped at failed_height - 1 (1352513), not the highest recovered (1352517).
+    expect(stateRepo._current().last_backfilled_height).toBe(1352513);
+  });
+
+  it('re-walks the failed height and above on the next boot, keeping the recovered call below the watermark untouched', async () => {
+    const page = {
+      data: [
+        rawContractCallTx('th_c', 1352517),
+        rawContractCallTx('th_b', 1352514),
+        rawContractCallTx('th_a', 1352513),
+      ],
+      next: null,
+    };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    let failReplay = true;
+    const plugin = {
+      processBatch: jest.fn(async (txs: any[]) => ({
+        failed: failReplay
+          ? txs
+              .filter((tx) => tx.block_height === 1352514)
+              .map((tx) => ({ tx, error: new Error('replay failed') }))
+          : [],
+      })),
+    };
+    const Service = loadService();
+
+    // Boot 1: th_b fails, watermark held at 1352513.
+    mockFetchJson.mockResolvedValueOnce(page);
+    await new Service(configService, txRepo, stateRepo, plugin).backfill();
+    expect(stateRepo._current().last_backfilled_height).toBe(1352513);
+
+    // Boot 2: replay now succeeds. th_a (<= watermark) is not re-walked; th_b
+    // and th_c are, idempotently, and the watermark reaches the top.
+    failReplay = false;
+    plugin.processBatch.mockClear();
+    mockFetchJson.mockResolvedValueOnce(page);
+    const boot2 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+
+    const rewalked = plugin.processBatch.mock.calls[0][0].map(
+      (tx: any) => tx.hash,
+    );
+    expect(rewalked).toEqual(['th_c', 'th_b']);
+    expect(boot2).toEqual({ saved: 2, reprocessed: 2 });
+    expect(stateRepo._current().last_backfilled_height).toBe(1352517);
+  });
+
   it('does not advance the watermark when the walk is truncated by the page cap', async () => {
     // Every page returns a full page and another next link, so the walk never
     // reaches the end within PAGE_SAFETY; a partial run must not mark done.
