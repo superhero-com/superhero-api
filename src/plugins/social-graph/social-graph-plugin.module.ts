@@ -7,6 +7,7 @@ import { SocialGraphEdge } from './entities/social-graph-edge.entity';
 import { SocialGraphCount } from './entities/social-graph-count.entity';
 import { SocialGraphPlugin } from './social-graph.plugin';
 import { SocialGraphPluginSyncService } from './social-graph-plugin-sync.service';
+import { SocialGraphBackfillService } from './services/social-graph-backfill.service';
 
 @Module({
   imports: [
@@ -18,7 +19,11 @@ import { SocialGraphPluginSyncService } from './social-graph-plugin-sync.service
     ]),
     AeModule,
   ],
-  providers: [SocialGraphPluginSyncService, SocialGraphPlugin],
+  providers: [
+    SocialGraphPluginSyncService,
+    SocialGraphPlugin,
+    SocialGraphBackfillService,
+  ],
   exports: [SocialGraphPlugin],
 })
 export class SocialGraphPluginModule {}

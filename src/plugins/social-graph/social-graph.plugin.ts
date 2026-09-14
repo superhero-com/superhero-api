@@ -52,12 +52,13 @@ export class SocialGraphPlugin extends BasePlugin {
         type: 'contract_call',
         contractIds: [SOCIAL_GRAPH_CONTRACT_ADDRESS],
         functions: [...SOCIAL_GRAPH_FUNCTIONS],
+        // Match on contract alone, not on tx.function: live websocket payloads
+        // carry contract_id and call_data but no decoded function, so gating on
+        // it drops every follow/unfollow at the tip. Non-graph calls to the
+        // contract emit no known events and decode to no edges.
         predicate: (tx: Partial<Tx>) =>
           tx.type === 'ContractCallTx' &&
-          tx.contract_id === SOCIAL_GRAPH_CONTRACT_ADDRESS &&
-          SOCIAL_GRAPH_FUNCTIONS.includes(
-            tx.function as (typeof SOCIAL_GRAPH_FUNCTIONS)[number],
-          ),
+          tx.contract_id === SOCIAL_GRAPH_CONTRACT_ADDRESS,
       },
     ];
   }

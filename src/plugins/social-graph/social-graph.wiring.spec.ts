@@ -3,6 +3,7 @@ import { SocialGraphPluginModule } from './social-graph-plugin.module';
 import { SocialGraphController } from './social-graph.controller';
 import { SocialGraphPlugin } from './social-graph.plugin';
 import { SocialGraphReconcileService } from './services/social-graph-reconcile.service';
+import { SocialGraphBackfillService } from './services/social-graph-backfill.service';
 import { SocialGraphContractService } from './social-graph-contract.service';
 
 // Import-and-reference so ts-jest type-checks the full wiring graph (controller,
@@ -15,6 +16,7 @@ describe('social-graph wiring', () => {
     expect(SocialGraphController).toBeDefined();
     expect(SocialGraphPlugin).toBeDefined();
     expect(SocialGraphReconcileService).toBeDefined();
+    expect(SocialGraphBackfillService).toBeDefined();
     expect(SocialGraphContractService).toBeDefined();
   });
 });
