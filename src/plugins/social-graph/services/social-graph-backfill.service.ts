@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
@@ -20,19 +20,9 @@ import {
 } from '../social-graph.constants';
 
 /**
- * Replays the configured contract's call transactions from the middleware so a
- * follow/unfollow/block dropped by live sync is recovered without a full
- * re-index. It exists because the two indexing paths do not overlap: backward
- * sync only ever walks DOWN from the tip it started at, so anything created
- * above that tip is seen exclusively by the live indexer — and a tip-region
- * ContractCallTx arrives over the websocket with no decoded `function`, which
- * used to fail the relevance filter and never reach the DB. The predicate no
- * longer gates on `function`, but already-missed txs are gone from the DB and
- * the drift reconcile cannot recover them (it only re-checks addresses that
- * already have an edge). This walk closes that gap.
- *
- * Safe to run on every boot: it skips txs already stored, and every mutation it
- * drives is idempotent (edges ON CONFLICT DO NOTHING, counts recomputed).
+ * Re-decodes and replays the contract's calls from the middleware to recover
+ * follows the indexer stored but decoded to zero events (or never stored).
+ * Idempotent per boot: edges ON CONFLICT DO NOTHING, counts recomputed.
  */
 @Injectable()
 export class SocialGraphBackfillService implements OnModuleInit {
@@ -64,11 +54,12 @@ export class SocialGraphBackfillService implements OnModuleInit {
   }
 
   /**
-   * Walk every contract-call tx to the social-graph contract, save the ones the
-   * indexer never persisted, and process them through the plugin. Returns the
-   * counts so a manual trigger (or a test) can assert what it did.
+   * Walk the contract's calls, save any the indexer never persisted, and hand
+   * EVERY tx on each page to the plugin — a tx stored before the decode fix is
+   * in `txs` but has zero edges, so skipping stored txs would strand exactly the
+   * follows we need to recover. Idempotent, so re-decoding a stored tx is safe.
    */
-  async backfill(): Promise<{ saved: number; skipped: number }> {
+  async backfill(): Promise<{ saved: number; reprocessed: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
     // Every call to the contract post-dates its deploy, so scoping to the
     // contract already bounds the walk to the graph's own history.
@@ -79,7 +70,7 @@ export class SocialGraphBackfillService implements OnModuleInit {
     );
 
     let saved = 0;
-    let skipped = 0;
+    let reprocessed = 0;
     let safety = 0;
 
     while (nextUrl && safety < SocialGraphBackfillService.PAGE_SAFETY) {
@@ -87,32 +78,47 @@ export class SocialGraphBackfillService implements OnModuleInit {
       const response = await fetchJson<any>(nextUrl);
       const page: any[] = response?.data ?? [];
 
-      const missing: Tx[] = [];
-      for (const raw of page) {
-        const hash: string | undefined = raw?.hash;
-        if (!hash || raw?.tx?.type !== 'ContractCallTx') {
-          continue;
-        }
-        const existing = await this.txRepository.findOne({
-          where: { hash },
-          select: ['hash'],
+      const rows = page.filter(
+        (raw) => raw?.hash && raw?.tx?.type === 'ContractCallTx',
+      );
+      if (rows.length > 0) {
+        // One query per page, not one findOne per tx.
+        const stored = await this.txRepository.find({
+          where: { hash: In(rows.map((raw) => raw.hash as string)) },
         });
-        if (existing) {
-          skipped += 1;
-          continue;
-        }
-        const entity = this.buildContractCallTxEntity(
-          camelcaseKeysDeep(raw) as ITransaction,
-        );
-        if (entity) {
-          missing.push(entity as Tx);
-        }
-      }
+        const storedByHash = new Map(stored.map((row) => [row.hash, row]));
 
-      if (missing.length > 0) {
-        const persisted = await this.txRepository.save(missing);
-        await this.plugin.processBatch(persisted, SyncDirectionEnum.Backward);
-        saved += persisted.length;
+        const toSave: Tx[] = [];
+        const pageTxs: Tx[] = [];
+        for (const raw of rows) {
+          const mdwTx = camelcaseKeysDeep(raw) as ITransaction;
+          const existing = storedByHash.get(raw.hash as string);
+          if (!existing) {
+            const entity = this.buildContractCallTxEntity(mdwTx);
+            if (!entity) {
+              continue;
+            }
+            toSave.push(entity as Tx);
+            pageTxs.push(entity as Tx);
+            saved += 1;
+          } else {
+            // Refresh `raw` from the middleware payload if the stored row lost
+            // its log, so the decode below has topics to work with.
+            if (!existing.raw?.log && mdwTx.tx) {
+              existing.raw = sanitizeJsonForPostgres(mdwTx.tx);
+              toSave.push(existing);
+            }
+            pageTxs.push(existing);
+          }
+        }
+
+        if (toSave.length > 0) {
+          await this.txRepository.save(toSave);
+        }
+        if (pageTxs.length > 0) {
+          await this.plugin.processBatch(pageTxs, SyncDirectionEnum.Backward);
+          reprocessed += pageTxs.length;
+        }
       }
 
       nextUrl = resolveMiddlewareNextUrlSafely(
@@ -129,12 +135,12 @@ export class SocialGraphBackfillService implements OnModuleInit {
       );
     }
 
-    if (saved > 0 || skipped > 0) {
+    if (reprocessed > 0) {
       this.logger.log(
-        `social-graph backfill complete: saved ${saved}, already-present ${skipped}`,
+        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}`,
       );
     }
-    return { saved, skipped };
+    return { saved, reprocessed };
   }
 
   private getMiddlewareUrl(): string {

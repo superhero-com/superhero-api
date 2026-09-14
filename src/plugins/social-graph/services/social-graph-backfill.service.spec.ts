@@ -39,9 +39,8 @@ function rawContractCallTx(hash: string) {
     tx: {
       type: 'ContractCallTx',
       contract_id: CONTRACT,
-      // No `function` — mirrors the payload that used to be dropped.
       caller_id: CALLER,
-      log: [{ address: CONTRACT }],
+      log: [{ address: CONTRACT, topics: ['1', '2'], data: 'cb_' }],
     },
   };
 }
@@ -69,7 +68,7 @@ describe('SocialGraphBackfillService', () => {
       next: null,
     });
     const txRepo = {
-      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
       save: jest
         .fn()
         .mockImplementation((rows: any[]) => Promise.resolve(rows)),
@@ -82,7 +81,7 @@ describe('SocialGraphBackfillService', () => {
     const service = new Service(configService, txRepo, plugin);
     const result = await service.backfill();
 
-    expect(result).toEqual({ saved: 1, skipped: 0 });
+    expect(result).toEqual({ saved: 1, reprocessed: 1 });
     expect(txRepo.save).toHaveBeenCalledTimes(1);
     const saved = txRepo.save.mock.calls[0][0];
     expect(saved[0]).toMatchObject({
@@ -93,31 +92,72 @@ describe('SocialGraphBackfillService', () => {
       block_height: 1352517,
     });
     // The tx object (with its log) is preserved for the plugin to decode edges.
-    expect(saved[0].raw.log).toEqual([{ address: CONTRACT }]);
+    expect(saved[0].raw.log[0].topics).toEqual(['1', '2']);
     expect(plugin.processBatch).toHaveBeenCalledWith(
       saved,
       SyncDirectionEnum.Backward,
     );
   });
 
-  it('skips a tx already stored and never re-saves or re-processes it', async () => {
+  it('reprocesses a tx already stored (does not skip it) so a zero-edge row is recovered', async () => {
     mockFetchJson.mockResolvedValueOnce({
-      data: [rawContractCallTx('th_present')],
+      data: [rawContractCallTx(MISSED_TX)],
       next: null,
     });
+    // Already in the DB with its log intact — nothing to save, but it must be
+    // reprocessed, because it was stored before the decode fix and has no edge.
+    const storedRow = {
+      hash: MISSED_TX,
+      raw: { log: [{ address: CONTRACT, topics: ['1', '2'] }] },
+    };
     const txRepo = {
-      findOne: jest.fn().mockResolvedValue({ hash: 'th_present' }),
+      find: jest.fn().mockResolvedValue([storedRow]),
       save: jest.fn(),
     };
-    const plugin = { processBatch: jest.fn() };
+    const plugin = {
+      processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+    };
 
     const Service = loadService();
     const service = new Service(configService, txRepo, plugin);
     const result = await service.backfill();
 
-    expect(result).toEqual({ saved: 0, skipped: 1 });
+    expect(result).toEqual({ saved: 0, reprocessed: 1 });
     expect(txRepo.save).not.toHaveBeenCalled();
-    expect(plugin.processBatch).not.toHaveBeenCalled();
+    expect(plugin.processBatch).toHaveBeenCalledWith(
+      [storedRow],
+      SyncDirectionEnum.Backward,
+    );
+  });
+
+  it('refreshes raw from the payload when a stored row lost its log, then reprocesses', async () => {
+    mockFetchJson.mockResolvedValueOnce({
+      data: [rawContractCallTx(MISSED_TX)],
+      next: null,
+    });
+    const storedRow: any = { hash: MISSED_TX, raw: null };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([storedRow]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const plugin = {
+      processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+    };
+
+    const Service = loadService();
+    const service = new Service(configService, txRepo, plugin);
+    const result = await service.backfill();
+
+    expect(result).toEqual({ saved: 0, reprocessed: 1 });
+    // raw was refreshed from the middleware payload and persisted.
+    expect(storedRow.raw.log[0].topics).toEqual(['1', '2']);
+    expect(txRepo.save).toHaveBeenCalledWith([storedRow]);
+    expect(plugin.processBatch).toHaveBeenCalledWith(
+      [storedRow],
+      SyncDirectionEnum.Backward,
+    );
   });
 
   it('walks pages until the middleware stops returning a next link', async () => {
@@ -128,7 +168,7 @@ describe('SocialGraphBackfillService', () => {
       })
       .mockResolvedValueOnce({ data: [rawContractCallTx('th_b')], next: null });
     const txRepo = {
-      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
       save: jest
         .fn()
         .mockImplementation((rows: any[]) => Promise.resolve(rows)),
@@ -142,12 +182,12 @@ describe('SocialGraphBackfillService', () => {
     const result = await service.backfill();
 
     expect(mockFetchJson).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ saved: 2, skipped: 0 });
+    expect(result).toEqual({ saved: 2, reprocessed: 2 });
   });
 
   it('does not touch the middleware when the contract is unconfigured', () => {
     delete process.env[KEY];
-    const txRepo = { findOne: jest.fn(), save: jest.fn() };
+    const txRepo = { find: jest.fn(), save: jest.fn() };
     const plugin = { processBatch: jest.fn() };
 
     const Service = loadService();

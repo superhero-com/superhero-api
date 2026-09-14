@@ -1,9 +1,6 @@
-// The relevance filter decides whether a tx is persisted at all. Live websocket
-// payloads carry a ContractCallTx to the configured contract with contract_id
-// and call_data but NO decoded `function`; the old predicate required
-// `function` ∈ {follow,unfollow,block,unblock} and so dropped every follow at
-// the tip before it ever reached the DB. These specs pin the fix: a configured-
-// contract call is relevant on contract_id alone.
+// The relevance filter should accept any call to the configured contract,
+// with or without a decoded `function`, so ingestion never depends on that
+// field being present — event decode is the single place a call is classified.
 describe('SocialGraphPlugin.filters()', () => {
   const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
   const CONTRACT = 'ct_socialgraph';
@@ -37,15 +34,11 @@ describe('SocialGraphPlugin.filters()', () => {
     return { filter: filters[0], predicate: filters[0].predicate };
   }
 
-  it('matches a configured-contract call that has NO decoded function (live payload)', () => {
+  it('matches a configured-contract call whether or not it carries a function', () => {
     const { predicate } = loadPredicate();
     expect(predicate({ type: 'ContractCallTx', contract_id: CONTRACT })).toBe(
       true,
     );
-  });
-
-  it('still matches a call that does carry a decoded function (backward/mdw payload)', () => {
-    const { predicate } = loadPredicate();
     expect(
       predicate({
         type: 'ContractCallTx',
@@ -63,14 +56,8 @@ describe('SocialGraphPlugin.filters()', () => {
     expect(predicate({ type: 'SpendTx', contract_id: CONTRACT })).toBe(false);
   });
 
-  it('still advertises the graph functions and contract id as filter metadata', () => {
+  it('scopes the filter to the configured contract id', () => {
     const { filter } = loadPredicate();
     expect(filter.contractIds).toEqual([CONTRACT]);
-    expect(filter.functions).toEqual([
-      'follow',
-      'unfollow',
-      'block',
-      'unblock',
-    ]);
   });
 });

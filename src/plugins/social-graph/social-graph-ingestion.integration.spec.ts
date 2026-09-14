@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { Contract } from '@aeternity/aepp-sdk';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
 import { SocialGraphEdge1718900000024 } from '@/migrations/1718900000024-SocialGraphEdge';
 import { SocialGraphCounts1718900000026 } from '@/migrations/1718900000026-SocialGraphCounts';
@@ -6,72 +7,73 @@ import { SocialGraphEdge } from './entities/social-graph-edge.entity';
 import { SocialGraphCount } from './entities/social-graph-count.entity';
 import { SocialGraphPluginSyncService } from './social-graph-plugin-sync.service';
 import { SocialGraphService } from './social-graph.service';
+import { loadSocialContractAci } from './social-graph-aci';
 import { SyncDirectionEnum } from '../plugin.interface';
 
 /**
- * End-to-end proof for the tip-ingestion fix, driven against the real Postgres
- * with the exact mainnet identifiers from the bug report:
- *
- *   1. Live path — a live/websocket-shaped ContractCallTx to the configured
- *      contract WITH NO decoded `function` (only contract_id / call_data) is
- *      relevant, so it is no longer dropped before the DB.
- *   2. Replay path — processing the follow that `th_23vad…Fi6` carried, exactly
- *      as the backfill would after decode, writes the follow edge (tagged with
- *      that tx hash and height 1352517).
- *   3. Read path — after processing, the follower count and the relationship
- *      read served to the API reflect the edge.
- *
- * Requires the local Postgres (`DB_HOST`); auto-skips otherwise.
+ * Proof for the real bug: MDW serialises event `topics` as decimal strings, and
+ * aepp-sdk's `$decodeEvents` matches them against the BigInt event-name hash with
+ * strict equality — so with `omitUnknown: true` every event was silently dropped
+ * and no edge was ever written. The fix normalises topics to BigInt in
+ * `decodeLogs`. Driven with the exact mainnet identifiers and the real on-chain
+ * log for `th_23vad…Fi6`.
  */
-const HAS_DB = !!process.env.DB_HOST;
-const d = HAS_DB ? describe : describe.skip;
-
 const CONTRACT = 'ct_tC6G9MzysAvny8RBdq56oG3emgbUYEZhmfbaC3irfA8bbBJRS';
 const FROM = 'ak_wqP6GiNVJeE6XyRGMjZE6Cq8rV6RRPbrVBr15TxB9GAFdqcph';
 const TO = 'ak_LF4siZQxMqjGBAcHS2MMacMYgYjHjRh4HkDwqF3sA59oLfcMA';
 const TX_HASH = 'th_23vadMrrvjpvN3D2bdKk9kFmom5F4FPMPRb6oqquDYLFko7Fi6';
 const HEIGHT = 1352517;
 
-describe('SocialGraphPlugin relevance filter — live payload (no DB)', () => {
-  const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
-  const original = process.env[KEY];
+// The real mainnet log for th_23vad…Fi6, topics exactly as MDW serves them:
+// decimal strings. This is the shape that decoded to zero events before the fix.
+const MAINNET_FOLLOW_LOG = [
+  {
+    address: CONTRACT,
+    data: 'cb_Xfbg4g==',
+    topics: [
+      '105979794572335484953012995442908340357737372754312854154575839712858115201185',
+      '56316410991042537755060616138119971247511670139290349113019571963818210418985',
+      '19762688511630024962944591000186071650780592299797255153211712050644163348338',
+    ],
+  },
+];
 
-  afterAll(() => {
-    if (original === undefined) {
-      delete process.env[KEY];
-    } else {
-      process.env[KEY] = original;
-    }
-  });
+// A real decoder built from the committed ACI. `$decodeEvents` needs only the
+// ACI; the stub onNode just satisfies initialize's address check offline.
+async function realContract(): Promise<any> {
+  const onNode: any = { getContract: async () => ({ active: true }) };
+  return Contract.initialize({
+    aci: loadSocialContractAci(),
+    address: CONTRACT,
+    onNode,
+  } as any);
+}
 
-  it('accepts a live ContractCallTx with contract_id/call_data but no function', () => {
-    process.env[KEY] = CONTRACT;
-    let SocialGraphPlugin: any;
-    jest.isolateModules(() => {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      SocialGraphPlugin = require('./social-graph.plugin').SocialGraphPlugin;
-    });
-    const predicate = new SocialGraphPlugin(
-      undefined as any,
-      undefined as any,
-      undefined as any,
-    ).filters()[0].predicate;
+const HAS_DB = !!process.env.DB_HOST;
+const d = HAS_DB ? describe : describe.skip;
 
-    // Shaped like live-indexer's convertToMdwTx output for the follow tx:
-    // the websocket payload has no decoded `function`.
-    const liveTx = {
+describe('social-graph decodeLogs — MDW decimal-string topics (no DB)', () => {
+  it('decodes the real Followed log after normalising topics; raw string topics decode to nothing', async () => {
+    const contract = await realContract();
+
+    // The bug, pinned: topics as MDW serves them (decimal strings) match no
+    // event definition, so decoding yields nothing.
+    expect(
+      contract.$decodeEvents(MAINNET_FOLLOW_LOG, { omitUnknown: true }),
+    ).toEqual([]);
+
+    // The fix: decodeLogs normalises topics to BigInt before $decodeEvents.
+    const service = new SocialGraphPluginSyncService({} as any, {} as any);
+    jest.spyOn(service as any, 'getContract').mockResolvedValue(contract);
+    const events = await service.decodeLogs({
       hash: TX_HASH,
-      type: 'ContractCallTx',
-      contract_id: CONTRACT,
-      caller_id: FROM,
-      function: undefined,
-      raw: { call_data: 'cb_...' },
-    };
-    expect(predicate(liveTx)).toBe(true);
+      raw: { log: MAINNET_FOLLOW_LOG },
+    } as any);
+    expect(events).toEqual([{ name: 'Followed', args: [FROM, TO] }]);
   });
 });
 
-d('social-graph ingestion → read (DB-backed, mainnet identifiers)', () => {
+d('social-graph ingestion → read (DB, decodes the real mainnet log)', () => {
   let db: IsolatedDb;
   let syncService: SocialGraphPluginSyncService;
   let readService: SocialGraphService;
@@ -87,6 +89,9 @@ d('social-graph ingestion → read (DB-backed, mainnet identifiers)', () => {
     await db.dataSource.runMigrations();
     const edgeRepo = db.dataSource.getRepository(SocialGraphEdge);
     syncService = new SocialGraphPluginSyncService({} as any, edgeRepo);
+    jest
+      .spyOn(syncService as any, 'getContract')
+      .mockImplementation(() => realContract());
     // contractService is only used by precheck(); the read paths under test
     // never touch it.
     readService = new SocialGraphService(edgeRepo, {} as any);
@@ -96,22 +101,17 @@ d('social-graph ingestion → read (DB-backed, mainnet identifiers)', () => {
     await db?.drop();
   });
 
-  it('replays the missed follow and serves the follower count + relationship', async () => {
-    // The decoded events the backfill hands to processTransaction after
-    // decoding th_23vad…Fi6's logs.
-    await syncService.processTransaction(
-      {
-        hash: TX_HASH,
-        block_height: HEIGHT,
-        logs: {
-          'social-graph': { data: [{ name: 'Followed', args: [FROM, TO] }] },
-        },
-      } as any,
-      SyncDirectionEnum.Backward,
-    );
+  it('processes the raw log through decodeLogs and serves the follower count + relationship', async () => {
+    // No pre-decoded logs: processTransaction must call decodeLogs itself, so
+    // this exercises the exact step that was broken — not a hand-fed event.
+    const tx = {
+      hash: TX_HASH,
+      block_height: HEIGHT,
+      raw: { log: MAINNET_FOLLOW_LOG },
+    } as any;
+    await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
 
-    // Read proof: the followed account now reports a follower, and the pair-wise
-    // relationship reports the edge — the two endpoints the bug showed empty.
+    // The two reads the bug showed empty now report the edge.
     expect(await readService.getFollowersCount(TO)).toBe(1);
     expect(await readService.getFollowingCount(FROM)).toBe(1);
     const relationship = await readService.getRelationship(FROM, TO);
@@ -127,16 +127,7 @@ d('social-graph ingestion → read (DB-backed, mainnet identifiers)', () => {
     expect(edge).toMatchObject({ tx_hash: TX_HASH, height: HEIGHT });
 
     // Idempotent replay: re-processing the same tx does not double-count.
-    await syncService.processTransaction(
-      {
-        hash: TX_HASH,
-        block_height: HEIGHT,
-        logs: {
-          'social-graph': { data: [{ name: 'Followed', args: [FROM, TO] }] },
-        },
-      } as any,
-      SyncDirectionEnum.Backward,
-    );
+    await syncService.processTransaction(tx, SyncDirectionEnum.Backward);
     expect(await readService.getFollowersCount(TO)).toBe(1);
   });
 });
