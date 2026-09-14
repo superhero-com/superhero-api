@@ -17,7 +17,6 @@ import { SocialGraphPlugin } from '../social-graph.plugin';
 import {
   SOCIAL_GRAPH_CONTRACT_ADDRESS,
   SOCIAL_GRAPH_ENABLED,
-  SOCIAL_GRAPH_START_HEIGHT,
 } from '../social-graph.constants';
 
 /**
@@ -71,9 +70,11 @@ export class SocialGraphBackfillService implements OnModuleInit {
    */
   async backfill(): Promise<{ saved: number; skipped: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
+    // Every call to the contract post-dates its deploy, so scoping to the
+    // contract already bounds the walk to the graph's own history.
     let nextUrl: string | null = resolveMiddlewareNextUrl(
       `/v3/transactions?type=contract_call&contract=${SOCIAL_GRAPH_CONTRACT_ADDRESS}` +
-        `&scope=gen:${SOCIAL_GRAPH_START_HEIGHT}-999999999&direction=forward&limit=100`,
+        `&direction=forward&limit=100`,
       middlewareUrl,
     );
 
