@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
+import { Account } from '@/account/entities/account.entity';
+import { ProfileCache } from '@/profile/entities/profile-cache.entity';
 import { SocialGraphEdge } from './entities/social-graph-edge.entity';
 import { SocialGraphContractService } from './social-graph-contract.service';
 import { SocialGraphAbortCode } from './social-graph.errors';
@@ -39,6 +41,74 @@ export class SocialGraphService {
     return this.edgeRepo.count({
       where: { from_address: address, kind: 'block' },
     });
+  }
+
+  // One page of an account's followers or following list. `followers` walks the
+  // edges pointing AT `address` (each `from_address` is a follower); `following`
+  // walks the edges FROM it (each `to_address` is someone it follows). Keyset
+  // paginated on the edge id (descending, most-recently-indexed first): stable
+  // under concurrent inserts and index-only, so scroll-down "load more" never
+  // re-reads or skips a row the way OFFSET does. `search` filters the
+  // counterparty by address, chain name, or cached profile name. Returns the
+  // ordered counterparty addresses plus the cursor to pass back, or `null` when
+  // the page is the last.
+  async listConnections(params: {
+    address: string;
+    direction: 'followers' | 'following';
+    search?: string;
+    cursor?: number;
+    limit: number;
+  }): Promise<{ addresses: string[]; nextCursor: number | null }> {
+    const { address, direction, search, cursor, limit } = params;
+    const ownerColumn =
+      direction === 'followers' ? 'to_address' : 'from_address';
+    const otherColumn =
+      direction === 'followers' ? 'from_address' : 'to_address';
+
+    const query = this.edgeRepo
+      .createQueryBuilder('edge')
+      .select('edge.id', 'id')
+      .addSelect(`edge.${otherColumn}`, 'address')
+      .where(`edge.${ownerColumn} = :address`, { address })
+      .andWhere('edge.kind = :kind', { kind: 'follow' });
+
+    const trimmedSearch = search?.trim();
+    if (trimmedSearch) {
+      const like = `%${trimmedSearch}%`;
+      query
+        .leftJoin(Account, 'account', `account.address = edge.${otherColumn}`)
+        .leftJoin(
+          ProfileCache,
+          'profile_cache',
+          `profile_cache.address = edge.${otherColumn}`,
+        )
+        .andWhere(
+          new Brackets((qb) => {
+            qb.where(`edge.${otherColumn} ILIKE :like`, { like })
+              .orWhere('account.chain_name ILIKE :like', { like })
+              .orWhere('profile_cache.public_name ILIKE :like', { like })
+              .orWhere('profile_cache.username ILIKE :like', { like })
+              .orWhere('profile_cache.fullname ILIKE :like', { like });
+          }),
+        );
+    }
+
+    if (cursor !== undefined) {
+      query.andWhere('edge.id < :cursor', { cursor });
+    }
+
+    // Peek one past the page: an extra row means there is a next page, and its
+    // predecessor's id is the cursor.
+    const rows = await query
+      .orderBy('edge.id', 'DESC')
+      .limit(limit + 1)
+      .getRawMany<{ id: number; address: string }>();
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? Number(page[page.length - 1].id) : null;
+
+    return { addresses: page.map((row) => row.address), nextCursor };
   }
 
   private async edgeExists(

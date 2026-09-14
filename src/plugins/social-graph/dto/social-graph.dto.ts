@@ -43,6 +43,65 @@ export class SocialGraphConfigDto {
   contract_address: string;
 }
 
+// Profile fields for one row of a followers/following list. Mirrors the shape
+// ProfileReadService serves for a single account, so both clients render a list
+// row from the same fields they already use on a profile — no per-row lookup.
+export class SocialGraphAccountProfileDto {
+  @ApiProperty({ nullable: true })
+  fullname: string;
+
+  @ApiProperty({ nullable: true })
+  bio: string;
+
+  @ApiProperty({ nullable: true, type: String })
+  site: string | null;
+
+  @ApiProperty({ nullable: true })
+  avatarurl: string;
+
+  @ApiProperty({ nullable: true, type: String })
+  username: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  prefered_aens_name: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  x_username: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  chain_name: string | null;
+
+  @ApiProperty({ nullable: true, type: String })
+  chain_expires_at: string | null;
+}
+
+export class SocialGraphAccountDto {
+  @ApiProperty({ example: 'ak_...' })
+  address: string;
+
+  @ApiProperty({ type: SocialGraphAccountProfileDto })
+  profile: SocialGraphAccountProfileDto;
+
+  @ApiProperty({
+    description: 'Best display name (preferred AENS → chain name → address).',
+  })
+  public_name: string;
+}
+
+export class SocialGraphConnectionsPageDto {
+  @ApiProperty({ type: [SocialGraphAccountDto] })
+  items: SocialGraphAccountDto[];
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Opaque cursor for the next page; pass back as `cursor`. `null` on the ' +
+      'last page.',
+  })
+  next_cursor: string | null;
+}
+
 export class SocialGraphPrecheckDto {
   @ApiProperty({
     enum: SOCIAL_GRAPH_ACTIONS,
