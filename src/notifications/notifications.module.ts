@@ -37,6 +37,7 @@ import { FeedSessionGuard } from './guards/feed-session.guard';
 import { ChainTransferListener } from './listeners/chain-transfer.listener';
 import { InvitationClaimedListener } from './listeners/invitation-claimed.listener';
 import { PostCommentListener } from './listeners/post-comment.listener';
+import { NewFollowListener } from './listeners/new-follow.listener';
 import { SendExpoNotificationQueue } from './queues/send-expo-notification.queue';
 import { ExpoReceiptQueue } from './queues/expo-receipt.queue';
 import { SendWebPushQueue } from './queues/send-web-push.queue';
@@ -136,6 +137,7 @@ function webPushSendLimiter(): { max: number; duration: number } {
     ChainTransferListener,
     InvitationClaimedListener,
     PostCommentListener,
+    NewFollowListener,
     // Channel registry: append a provider here to add a channel.
     {
       provide: NOTIFICATION_CHANNELS,
