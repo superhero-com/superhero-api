@@ -1085,13 +1085,26 @@ export class TokensService {
     return null;
   }
 
-  async loadAndSaveTokenHoldersFromMdw(saleAddress: Encoded.ContractAddress) {
+  // Returns the authoritative holder set it persisted (`null` on any skip) so a
+  // caller can seed a second projection — the `token_balance` ledger — from the
+  // same pull rather than re-reading the chain. Existing callers ignore it.
+  async loadAndSaveTokenHoldersFromMdw(
+    saleAddress: Encoded.ContractAddress,
+  ): Promise<{
+    aex9Address: string;
+    holders: Array<{
+      id: string;
+      aex9_address: string;
+      address: string;
+      balance: BigNumber;
+    }>;
+  } | null> {
     const token = await this.getToken(saleAddress, true);
     if (!token) {
       this.logger.warn(
         `SyncTokenHoldersQueue: token not found for ${saleAddress}, skipping holders sync`,
       );
-      return;
+      return null;
     }
 
     const aex9Address =
@@ -1100,7 +1113,7 @@ export class TokensService {
       this.logger.warn(
         `SyncTokenHoldersQueue: aex9 address unavailable for ${saleAddress}, skipping holders sync`,
       );
-      return;
+      return null;
     }
 
     const { holders: totalHolders, truncated } = await this._loadHoldersData(
@@ -1112,7 +1125,7 @@ export class TokensService {
       this.logger.warn(
         `SyncTokenHoldersQueue: skipping save for ${aex9Address} (partial data, max pages reached); holders_count unchanged`,
       );
-      return;
+      return null;
     }
 
     // Sorted so both the upsert chunks and their row locks are acquired in a
@@ -1197,7 +1210,7 @@ export class TokensService {
         this.logger.warn(
           `SyncTokenHoldersQueue: another sync holds the write lock for ${aex9Address}, skipping holder write`,
         );
-        return;
+        return null;
       }
     }
     await runWithDatabaseIssueLogging({
@@ -1213,6 +1226,8 @@ export class TokensService {
           holders_count: uniqueHolders.length,
         }),
     });
+
+    return { aex9Address, holders: uniqueHolders };
   }
 
   async _loadHoldersData(

@@ -20,7 +20,7 @@ export class SyncTokenHoldersQueue {
   private readonly jobTimeoutMs = Number(
     process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000,
   );
-  private readonly inFlightSyncs = new Map<string, Promise<void>>();
+  private readonly inFlightSyncs = new Map<string, Promise<unknown>>();
   private readonly inFlightStartedAt = new Map<string, number>();
 
   constructor(
