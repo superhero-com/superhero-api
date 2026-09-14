@@ -67,15 +67,31 @@ export class SocialGraphBackfillService implements OnModuleInit {
    * before the decode fix is in `txs` with zero edges, so it must be reprocessed
    * — but only until the watermark, so a boot after recovery does not replay the
    * whole history. Idempotent, so re-decoding a stored tx is safe.
+   *
+   * A call history larger than the page-safety window cannot be walked in one
+   * boot: the walk reaches only the newest ~5,000 calls before it stops. It then
+   * leaves the watermark unadvanced and records `resume_from_height` /
+   * `pendingHigh`, so the next boot resumes the walk below where it stopped
+   * (scope-bounded to older generations) instead of restarting at the newest page
+   * and truncating at the same point. Once the walk finally completes, the
+   * highest block seen across the whole effort becomes the watermark.
    */
   async backfill(): Promise<{ saved: number; reprocessed: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
-    const watermark = await this.loadWatermark();
+    const { watermark, resumeFrom, pendingHigh } = await this.loadState();
 
-    // Newest-first so we can stop the moment we reach an already-recovered call.
+    // Resume below where a prior boot's page-safety stop left off (older
+    // generations only) instead of restarting from the newest page; otherwise
+    // walk newest-first from the top so we can stop the moment we reach an
+    // already-recovered call.
+    const startPath =
+      resumeFrom != null
+        ? `/v3/transactions?type=contract_call&contract=${SOCIAL_GRAPH_CONTRACT_ADDRESS}` +
+          `&scope=gen:${resumeFrom}-0&limit=100`
+        : `/v3/transactions?type=contract_call&contract=${SOCIAL_GRAPH_CONTRACT_ADDRESS}` +
+          `&direction=backward&limit=100`;
     let nextUrl: string | null = resolveMiddlewareNextUrl(
-      `/v3/transactions?type=contract_call&contract=${SOCIAL_GRAPH_CONTRACT_ADDRESS}` +
-        `&direction=backward&limit=100`,
+      startPath,
       middlewareUrl,
     );
 
@@ -83,10 +99,16 @@ export class SocialGraphBackfillService implements OnModuleInit {
     let reprocessed = 0;
     let safety = 0;
     let maxHeight = -1;
+    // Lowest block height reached this run; where the next boot resumes if the
+    // walk truncates before completing.
+    let minHeight = Number.POSITIVE_INFINITY;
     // Lowest block height whose replay threw. The watermark must never cross it,
     // or the failed tx stops being re-walked and is lost — the same trap the
     // main indexer avoids by parking failures for retry.
     let minFailedHeight = Number.POSITIVE_INFINITY;
+    // Highest block height whose replay threw. On a truncated run the walk must
+    // resume above it so every failed call is retried, not skipped past.
+    let maxFailedHeight = -1;
     let reachedWatermark = false;
 
     while (
@@ -112,8 +134,13 @@ export class SocialGraphBackfillService implements OnModuleInit {
           break;
         }
         rows.push(raw);
-        if (height != null && height > maxHeight) {
-          maxHeight = height;
+        if (height != null) {
+          if (height > maxHeight) {
+            maxHeight = height;
+          }
+          if (height < minHeight) {
+            minHeight = height;
+          }
         }
       }
 
@@ -159,11 +186,13 @@ export class SocialGraphBackfillService implements OnModuleInit {
           reprocessed += pageTxs.length;
           for (const failure of batch?.failed ?? []) {
             const failedHeight = failure.tx?.block_height;
-            if (
-              typeof failedHeight === 'number' &&
-              failedHeight < minFailedHeight
-            ) {
-              minFailedHeight = failedHeight;
+            if (typeof failedHeight === 'number') {
+              if (failedHeight < minFailedHeight) {
+                minFailedHeight = failedHeight;
+              }
+              if (failedHeight > maxFailedHeight) {
+                maxFailedHeight = failedHeight;
+              }
             }
           }
         }
@@ -184,19 +213,43 @@ export class SocialGraphBackfillService implements OnModuleInit {
       !!nextUrl &&
       !reachedWatermark &&
       safety >= SocialGraphBackfillService.PAGE_SAFETY;
+    // Highest block recovered across the whole (possibly multi-boot) effort: this
+    // run's top, plus the top carried from earlier truncated runs.
+    const overallHigh = Math.max(maxHeight, pendingHigh ?? -1, watermark ?? -1);
     // Never let the watermark reach a height whose replay failed: cap it one
     // below the lowest failure so that tx (and any success above it) is
     // re-walked next boot. Re-decoding a recovered tx is idempotent.
-    const advanceTo = Math.min(maxHeight, minFailedHeight - 1);
+    const advanceTo = Math.min(overallHigh, minFailedHeight - 1);
+
     if (truncated) {
+      // Incomplete: never advance the watermark, or a partial run marks
+      // unrecovered older calls as done. Instead record where to resume — below
+      // the lowest call reached, or above the highest failure so it is retried —
+      // and carry the top forward so completion can promote it.
+      const resumeNext =
+        maxFailedHeight >= 0
+          ? maxFailedHeight
+          : Number.isFinite(minHeight)
+            ? minHeight
+            : resumeFrom;
+      await this.saveState({
+        watermark,
+        resumeFrom: resumeNext,
+        pendingHigh: overallHigh >= 0 ? overallHigh : pendingHigh,
+      });
       this.logger.warn(
-        `social-graph backfill hit the page safety limit (${SocialGraphBackfillService.PAGE_SAFETY}); watermark not advanced, remaining pages retried next boot`,
+        `social-graph backfill hit the page safety limit (${SocialGraphBackfillService.PAGE_SAFETY}); watermark not advanced, resuming below gen ${resumeNext} next boot`,
       );
     } else {
-      if (advanceTo > (watermark ?? -1)) {
-        // Only advance once the walk finished (not truncated), so a partial run
-        // never marks unrecovered older calls as done.
-        await this.saveWatermark(advanceTo);
+      // Walk complete: promote the carried top to the watermark and clear the
+      // in-progress resume state so later boots stop early again.
+      const wasInProgress = resumeFrom != null || pendingHigh != null;
+      if (advanceTo > (watermark ?? -1) || wasInProgress) {
+        await this.saveState({
+          watermark: Math.max(advanceTo, watermark ?? -1),
+          resumeFrom: null,
+          pendingHigh: null,
+        });
       }
       if (Number.isFinite(minFailedHeight)) {
         this.logger.warn(
@@ -213,17 +266,31 @@ export class SocialGraphBackfillService implements OnModuleInit {
     return { saved, reprocessed };
   }
 
-  private async loadWatermark(): Promise<number | null> {
+  private async loadState(): Promise<{
+    watermark: number | null;
+    resumeFrom: number | null;
+    pendingHigh: number | null;
+  }> {
     const state = await this.stateRepository.findOne({
       where: { contract_address: SOCIAL_GRAPH_CONTRACT_ADDRESS },
     });
-    return state?.last_backfilled_height ?? null;
+    return {
+      watermark: state?.last_backfilled_height ?? null,
+      resumeFrom: state?.resume_from_height ?? null,
+      pendingHigh: state?.pending_high_height ?? null,
+    };
   }
 
-  private async saveWatermark(height: number): Promise<void> {
+  private async saveState(next: {
+    watermark: number | null;
+    resumeFrom: number | null;
+    pendingHigh: number | null;
+  }): Promise<void> {
     await this.stateRepository.save({
       contract_address: SOCIAL_GRAPH_CONTRACT_ADDRESS,
-      last_backfilled_height: height,
+      last_backfilled_height: next.watermark,
+      resume_from_height: next.resumeFrom,
+      pending_high_height: next.pendingHigh,
       updated_at: new Date(),
     });
   }
