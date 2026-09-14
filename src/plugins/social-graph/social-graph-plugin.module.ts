@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AeModule } from '@/ae/ae.module';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
+import mdwConfig from '@/mdw-sync/config/mdw.config';
 import { SocialGraphEdge } from './entities/social-graph-edge.entity';
 import { SocialGraphCount } from './entities/social-graph-count.entity';
 import { SocialGraphBackfillState } from './entities/social-graph-backfill-state.entity';
@@ -19,6 +21,10 @@ import { SocialGraphBackfillService } from './services/social-graph-backfill.ser
       SocialGraphCount,
       SocialGraphBackfillState,
     ]),
+    // SocialGraphBackfillService injects ConfigService to read
+    // `mdw.middlewareUrl` — the same source the indexer uses. forFeature both
+    // provides ConfigService here and loads that namespace.
+    ConfigModule.forFeature(mdwConfig),
     AeModule,
   ],
   providers: [
