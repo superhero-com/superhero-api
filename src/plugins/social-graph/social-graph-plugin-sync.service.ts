@@ -58,9 +58,10 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
         SOCIAL_GRAPH_CONTRACT_ADDRESS as Encoded.ContractAddress,
         loadSocialContractAci(),
       );
-      const decoded = contract.$decodeEvents(tx.raw.log, {
-        omitUnknown: true,
-      });
+      const decoded = contract.$decodeEvents(
+        this.normalizeEventTopics(tx.raw.log),
+        { omitUnknown: true },
+      );
       // Event args are `address` per the ACI, so they decode to `ak_` strings;
       // map through String so the stored jsonb is always serialisable.
       return (decoded || []).map((event: any) => ({

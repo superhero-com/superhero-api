@@ -12,13 +12,6 @@ import {
   SOCIAL_GRAPH_START_HEIGHT,
 } from './social-graph.constants';
 
-const SOCIAL_GRAPH_FUNCTIONS = [
-  'follow',
-  'unfollow',
-  'block',
-  'unblock',
-] as const;
-
 @Injectable()
 export class SocialGraphPlugin extends BasePlugin {
   protected readonly logger = new Logger(SocialGraphPlugin.name);
@@ -51,13 +44,10 @@ export class SocialGraphPlugin extends BasePlugin {
       {
         type: 'contract_call',
         contractIds: [SOCIAL_GRAPH_CONTRACT_ADDRESS],
-        functions: [...SOCIAL_GRAPH_FUNCTIONS],
+        // Match on contract alone; non-graph calls decode to no known events.
         predicate: (tx: Partial<Tx>) =>
           tx.type === 'ContractCallTx' &&
-          tx.contract_id === SOCIAL_GRAPH_CONTRACT_ADDRESS &&
-          SOCIAL_GRAPH_FUNCTIONS.includes(
-            tx.function as (typeof SOCIAL_GRAPH_FUNCTIONS)[number],
-          ),
+          tx.contract_id === SOCIAL_GRAPH_CONTRACT_ADDRESS,
       },
     ];
   }
