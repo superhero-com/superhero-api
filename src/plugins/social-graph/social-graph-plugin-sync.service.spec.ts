@@ -1,5 +1,6 @@
 import { SocialGraphPluginSyncService } from './social-graph-plugin-sync.service';
 import { SyncDirectionEnum } from '../plugin.interface';
+import { SOCIAL_GRAPH_FOLLOWED_EVENT } from './events';
 
 const A = 'ak_alice';
 const B = 'ak_bob';
@@ -7,11 +8,15 @@ const B = 'ak_bob';
 function makeService(
   events: Array<{ name: string; args: string[] }>,
   removed: Array<{ from_address: string; to_address: string }> = [],
+  // Simulate the `RETURNING id` result: a row on a real insert, nothing on an
+  // `ON CONFLICT DO NOTHING` conflict (the idempotent duplicate-follow case).
+  insertReturnsRow = true,
 ) {
   const inserted: any[] = [];
   const deleted: any[] = [];
   // The address of every recompute (manager.query with the counts upsert).
   const recomputed: string[] = [];
+  const emitted: Array<{ name: string; payload: any }> = [];
 
   const qb: any = {
     insert: () => qb,
@@ -21,7 +26,10 @@ function makeService(
       return qb;
     },
     orIgnore: () => qb,
-    execute: jest.fn().mockResolvedValue(undefined),
+    returning: () => qb,
+    execute: jest
+      .fn()
+      .mockResolvedValue({ raw: insertReturnsRow ? [{ id: 1 }] : [] }),
   };
 
   // A manager that records the recompute upserts and the edge mutations, so the
@@ -45,14 +53,25 @@ function makeService(
     },
   };
 
-  const service = new SocialGraphPluginSyncService({} as any, edgeRepo);
+  const eventEmitter: any = {
+    emit: jest.fn().mockImplementation((name: string, payload: any) => {
+      emitted.push({ name, payload });
+      return true;
+    }),
+  };
+
+  const service = new SocialGraphPluginSyncService(
+    {} as any,
+    edgeRepo,
+    eventEmitter,
+  );
   // Decode is exercised elsewhere; here we inject the decoded events directly to
   // test the edge mutations, not the SDK.
   jest
     .spyOn(service as any, 'getContract')
     .mockResolvedValue({ $decodeEvents: () => events });
 
-  return { service, manager, inserted, deleted, recomputed };
+  return { service, manager, inserted, deleted, recomputed, emitted };
 }
 
 function txWithLog(): any {
@@ -156,5 +175,64 @@ describe('SocialGraphPluginSyncService', () => {
     expect(deleted).toContainEqual({ tx_hash: expect.anything() });
     // Every address whose edge was removed is recomputed.
     expect(recomputed.sort()).toEqual([A, B]);
+  });
+
+  describe('new-follow notification emit', () => {
+    it('emits SOCIAL_GRAPH_FOLLOWED_EVENT for a new follow indexed live', async () => {
+      const { service, emitted } = makeService([
+        { name: 'Followed', args: [A, B] },
+      ]);
+      await service.processTransaction(txWithLog(), SyncDirectionEnum.Live);
+      expect(emitted).toEqual([
+        {
+          name: SOCIAL_GRAPH_FOLLOWED_EVENT,
+          payload: { followerAddress: A, followedAddress: B, txHash: 'th_1' },
+        },
+      ]);
+    });
+
+    it('does not emit for a follow indexed during historical backfill', async () => {
+      const { service, emitted } = makeService([
+        { name: 'Followed', args: [A, B] },
+      ]);
+      await service.processTransaction(txWithLog(), SyncDirectionEnum.Backward);
+      expect(emitted).toEqual([]);
+    });
+
+    it('does not emit during a reorg replay', async () => {
+      const { service, emitted } = makeService([
+        { name: 'Followed', args: [A, B] },
+      ]);
+      await service.processTransaction(txWithLog(), SyncDirectionEnum.Reorg);
+      expect(emitted).toEqual([]);
+    });
+
+    it('does not emit for an idempotent duplicate follow (no row inserted)', async () => {
+      const { service, emitted } = makeService(
+        [{ name: 'Followed', args: [A, B] }],
+        [],
+        false, // ON CONFLICT DO NOTHING returned no row
+      );
+      await service.processTransaction(txWithLog(), SyncDirectionEnum.Live);
+      expect(emitted).toEqual([]);
+    });
+
+    it('does not emit on unfollow, block, or unblock (live)', async () => {
+      const { service, emitted } = makeService([
+        { name: 'Unfollowed', args: [A, B] },
+        { name: 'Blocked', args: [A, B] },
+        { name: 'Unblocked', args: [A, B] },
+      ]);
+      await service.processTransaction(txWithLog(), SyncDirectionEnum.Live);
+      expect(emitted).toEqual([]);
+    });
+
+    it('does not throw when no EventEmitter is wired (minimal DI)', async () => {
+      const { service } = makeService([{ name: 'Followed', args: [A, B] }]);
+      (service as any).eventEmitter = undefined;
+      await expect(
+        service.processTransaction(txWithLog(), SyncDirectionEnum.Live),
+      ).resolves.toBeUndefined();
+    });
   });
 });
