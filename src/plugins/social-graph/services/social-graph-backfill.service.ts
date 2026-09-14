@@ -83,6 +83,10 @@ export class SocialGraphBackfillService implements OnModuleInit {
     let reprocessed = 0;
     let safety = 0;
     let maxHeight = -1;
+    // Lowest block height whose replay threw. The watermark must never cross it,
+    // or the failed tx stops being re-walked and is lost — the same trap the
+    // main indexer avoids by parking failures for retry.
+    let minFailedHeight = Number.POSITIVE_INFINITY;
     let reachedWatermark = false;
 
     while (
@@ -148,8 +152,20 @@ export class SocialGraphBackfillService implements OnModuleInit {
           await this.txRepository.save(toSave);
         }
         if (pageTxs.length > 0) {
-          await this.plugin.processBatch(pageTxs, SyncDirectionEnum.Backward);
+          const batch = await this.plugin.processBatch(
+            pageTxs,
+            SyncDirectionEnum.Backward,
+          );
           reprocessed += pageTxs.length;
+          for (const failure of batch?.failed ?? []) {
+            const failedHeight = failure.tx?.block_height;
+            if (
+              typeof failedHeight === 'number' &&
+              failedHeight < minFailedHeight
+            ) {
+              minFailedHeight = failedHeight;
+            }
+          }
         }
       }
 
@@ -168,19 +184,30 @@ export class SocialGraphBackfillService implements OnModuleInit {
       !!nextUrl &&
       !reachedWatermark &&
       safety >= SocialGraphBackfillService.PAGE_SAFETY;
+    // Never let the watermark reach a height whose replay failed: cap it one
+    // below the lowest failure so that tx (and any success above it) is
+    // re-walked next boot. Re-decoding a recovered tx is idempotent.
+    const advanceTo = Math.min(maxHeight, minFailedHeight - 1);
     if (truncated) {
       this.logger.warn(
         `social-graph backfill hit the page safety limit (${SocialGraphBackfillService.PAGE_SAFETY}); watermark not advanced, remaining pages retried next boot`,
       );
-    } else if (maxHeight > (watermark ?? -1)) {
-      // Only advance once the walk finished (not truncated), so a partial run
-      // never marks unrecovered older calls as done.
-      await this.saveWatermark(maxHeight);
+    } else {
+      if (advanceTo > (watermark ?? -1)) {
+        // Only advance once the walk finished (not truncated), so a partial run
+        // never marks unrecovered older calls as done.
+        await this.saveWatermark(advanceTo);
+      }
+      if (Number.isFinite(minFailedHeight)) {
+        this.logger.warn(
+          `social-graph backfill held the watermark at ${advanceTo}; a replay at height ${minFailedHeight} failed and is retried next boot`,
+        );
+      }
     }
 
     if (reprocessed > 0) {
       this.logger.log(
-        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}, watermark ${Math.max(maxHeight, watermark ?? -1)}`,
+        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}, watermark ${Math.max(advanceTo, watermark ?? -1)}`,
       );
     }
     return { saved, reprocessed };
