@@ -89,6 +89,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -135,6 +136,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
     const Service = loadService();
@@ -185,6 +187,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -198,6 +201,100 @@ describe('SocialGraphBackfillService', () => {
       [storedRow],
       SyncDirectionEnum.Backward,
     );
+  });
+
+  // A version bump means the decode logic changed, so the whole history must be
+  // reprocessed to rebuild the edge table — the watermark that normally stops the
+  // walk must be ignored for one boot. Starts from the exact stale state: a call
+  // already in the DB, decoded to zero events under the old version, sitting at or
+  // below a watermark that was set under that old version.
+  describe('version-bump recovery', () => {
+    function seededStaleState(recoveredVersion: number) {
+      const storedRow = {
+        hash: MISSED_TX,
+        block_height: 1352517,
+        raw: { log: [{ address: CONTRACT, topics: ['1', '2'] }] },
+        logs: { 'social-graph': { _version: recoveredVersion, data: [] } },
+      };
+      const stateRepo = makeStateRepo();
+      // Recovered up to the top under the given version.
+      stateRepo.save({
+        contract_address: CONTRACT,
+        last_backfilled_height: 1352517,
+        resume_from_height: null,
+        pending_high_height: null,
+        version: recoveredVersion,
+      });
+      stateRepo.save.mockClear();
+      return { storedRow, stateRepo };
+    }
+
+    it('ignores the watermark and reprocesses the stale history when the plugin version is bumped', async () => {
+      const { storedRow, stateRepo } = seededStaleState(1);
+      // The call sits at the watermark, so an unbumped boot would stop before it.
+      mockFetchJson.mockResolvedValueOnce({
+        data: [rawContractCallTx(MISSED_TX, 1352517)],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([storedRow]),
+        save: jest.fn(),
+      };
+      // Decode fix shipped as version 2.
+      const plugin = {
+        version: 2,
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      // The stale row was handed back to the plugin so the edge it never wrote is
+      // finally written — the watermark did not short-circuit the walk.
+      expect(result).toEqual({ saved: 0, reprocessed: 1 });
+      expect(plugin.processBatch).toHaveBeenCalledWith(
+        [storedRow],
+        SyncDirectionEnum.Backward,
+      );
+      // Watermark re-affirmed and re-stamped with the new version, so the next
+      // boot at that version stops early again.
+      const state = stateRepo._current();
+      expect(state.last_backfilled_height).toBe(1352517);
+      expect(state.version).toBe(2);
+    });
+
+    it('respects the watermark when the stored version already matches the plugin', async () => {
+      const { storedRow, stateRepo } = seededStaleState(2);
+      mockFetchJson.mockResolvedValueOnce({
+        data: [rawContractCallTx(MISSED_TX, 1352517)],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([storedRow]),
+        save: jest.fn(),
+      };
+      const plugin = {
+        version: 2,
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      // No version change: the walk stops at the watermark, nothing reprocessed.
+      expect(result).toEqual({ saved: 0, reprocessed: 0 });
+      expect(plugin.processBatch).not.toHaveBeenCalled();
+    });
   });
 
   it('refreshes raw from the payload when a stored row lost its log, then reprocesses', async () => {
@@ -214,6 +311,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -248,6 +346,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn(async (txs: any[]) => ({
         failed: txs
           .filter((tx) => tx.block_height === 1352514)
@@ -281,6 +380,7 @@ describe('SocialGraphBackfillService', () => {
     const stateRepo = makeStateRepo();
     let failReplay = true;
     const plugin = {
+      version: 1,
       processBatch: jest.fn(async (txs: any[]) => ({
         failed: failReplay
           ? txs
@@ -331,6 +431,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -359,6 +460,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
     const Service = loadService();
@@ -421,7 +523,7 @@ describe('SocialGraphBackfillService', () => {
     delete process.env[KEY];
     const txRepo = { find: jest.fn(), save: jest.fn() };
     const stateRepo = makeStateRepo();
-    const plugin = { processBatch: jest.fn() };
+    const plugin = { version: 1, processBatch: jest.fn() };
 
     const Service = loadService();
     const service = new Service(configService, txRepo, stateRepo, plugin);

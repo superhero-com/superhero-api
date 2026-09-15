@@ -33,6 +33,15 @@ export class SocialGraphBackfillState {
   @Column({ type: 'int', nullable: true })
   pending_high_height: number | null;
 
+  // Plugin version this watermark was recovered at. A version bump means the
+  // decode logic changed, so the edge table must be rebuilt from the whole
+  // history — the re-decode sweep (`getUpdateQueries`) only re-stamps the tx
+  // jsonb and never touches the edge table. On a mismatch the next boot ignores
+  // the watermark and re-walks from the top, reprocessing every call through the
+  // idempotent `processBatch` path. Null on rows written before this column.
+  @Column({ type: 'int', nullable: true })
+  version: number | null;
+
   @Column({ type: 'timestamp', default: () => 'now()' })
   updated_at: Date;
 }

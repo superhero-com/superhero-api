@@ -3,6 +3,7 @@ import { QueryRunner } from 'typeorm';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
 import { SocialGraphBackfillState1718900000029 } from '@/migrations/1718900000029-SocialGraphBackfillState';
 import { SocialGraphBackfillResumeState1718900000030 } from '@/migrations/1718900000030-SocialGraphBackfillResumeState';
+import { SocialGraphBackfillVersion1718900000031 } from '@/migrations/1718900000031-SocialGraphBackfillVersion';
 import { SocialGraphBackfillState } from './social-graph-backfill-state.entity';
 
 /**
@@ -23,6 +24,7 @@ d('social_graph_backfill_state (migration + entity)', () => {
       migrations: [
         SocialGraphBackfillState1718900000029,
         SocialGraphBackfillResumeState1718900000030,
+        SocialGraphBackfillVersion1718900000031,
       ],
     });
     await db.dataSource.runMigrations();
@@ -100,6 +102,32 @@ d('social_graph_backfill_state (migration + entity)', () => {
     expect(done?.last_backfilled_height).toBe(5100);
     expect(done?.resume_from_height).toBeNull();
     expect(done?.pending_high_height).toBeNull();
+  });
+
+  it('round-trips the recovery version: absent → NULL → stamped', async () => {
+    const repo = db.dataSource.getRepository(SocialGraphBackfillState);
+    const contract = 'ct_version_roundtrip';
+
+    // A row written before the version column existed reads NULL.
+    await repo.save({
+      contract_address: contract,
+      last_backfilled_height: 1352517,
+      updated_at: new Date(),
+    });
+    expect(
+      (await repo.findOne({ where: { contract_address: contract } }))?.version,
+    ).toBeNull();
+
+    // A completed walk stamps the plugin version it recovered under.
+    await repo.save({
+      contract_address: contract,
+      last_backfilled_height: 1352517,
+      version: 2,
+      updated_at: new Date(),
+    });
+    expect(
+      (await repo.findOne({ where: { contract_address: contract } }))?.version,
+    ).toBe(2);
   });
 
   it('down() drops the table', async () => {

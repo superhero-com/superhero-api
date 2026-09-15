@@ -28,6 +28,13 @@ import {
  * stops as soon as it reaches it: the first boot recovers, later boots do not
  * replay the already-recovered history. Idempotent regardless (edges ON CONFLICT
  * DO NOTHING, counts recomputed).
+ *
+ * It is also the plugin's version-bump recovery lever: the watermark records the
+ * plugin version it was recovered at, and when that no longer matches the current
+ * plugin version the walk ignores the watermark and re-walks the whole history,
+ * rebuilding the edge table through the same `processBatch` path. The base
+ * re-decode sweep can't do this — it never touches the edge table — which is why
+ * this plugin leaves `getUpdateQueries` at its empty default.
  */
 @Injectable()
 export class SocialGraphBackfillService implements OnModuleInit {
@@ -78,7 +85,29 @@ export class SocialGraphBackfillService implements OnModuleInit {
    */
   async backfill(): Promise<{ saved: number; reprocessed: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
-    const { watermark, resumeFrom, pendingHigh } = await this.loadState();
+    const {
+      watermark: storedWatermark,
+      resumeFrom: storedResumeFrom,
+      pendingHigh: storedPendingHigh,
+      version,
+    } = await this.loadState();
+
+    // A plugin version bump means the decode logic changed, so the derived edge
+    // table has to be rebuilt from the whole history. Drop the watermark and any
+    // in-progress resume state so this boot re-walks from the top and reprocesses
+    // every call through the idempotent processBatch path. The re-decode sweep
+    // (`getUpdateQueries`) cannot stand in here: it re-stamps the tx jsonb but
+    // never touches the edge table, so it would clear the staleness signal while
+    // leaving the counts wrong.
+    const versionChanged = version !== this.plugin.version;
+    const watermark = versionChanged ? null : storedWatermark;
+    const resumeFrom = versionChanged ? null : storedResumeFrom;
+    const pendingHigh = versionChanged ? null : storedPendingHigh;
+    if (versionChanged && version != null) {
+      this.logger.log(
+        `social-graph plugin version changed (${version} -> ${this.plugin.version}); re-walking the full history to rebuild the edge table`,
+      );
+    }
 
     // Resume below where a prior boot's page-safety stop left off (older
     // generations only) instead of restarting from the newest page; otherwise
@@ -270,6 +299,7 @@ export class SocialGraphBackfillService implements OnModuleInit {
     watermark: number | null;
     resumeFrom: number | null;
     pendingHigh: number | null;
+    version: number | null;
   }> {
     const state = await this.stateRepository.findOne({
       where: { contract_address: SOCIAL_GRAPH_CONTRACT_ADDRESS },
@@ -278,6 +308,7 @@ export class SocialGraphBackfillService implements OnModuleInit {
       watermark: state?.last_backfilled_height ?? null,
       resumeFrom: state?.resume_from_height ?? null,
       pendingHigh: state?.pending_high_height ?? null,
+      version: state?.version ?? null,
     };
   }
 
@@ -291,6 +322,9 @@ export class SocialGraphBackfillService implements OnModuleInit {
       last_backfilled_height: next.watermark,
       resume_from_height: next.resumeFrom,
       pending_high_height: next.pendingHigh,
+      // Stamp the version every recovered call was reprocessed under, so a later
+      // version bump is detected and forces a full re-walk.
+      version: this.plugin.version,
       updated_at: new Date(),
     });
   }
