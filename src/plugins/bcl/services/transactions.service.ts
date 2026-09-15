@@ -5,6 +5,7 @@ import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { BCL_FUNCTIONS } from '@/configs';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
+import { normalizeEventTopics } from '@/utils/common';
 
 @Injectable()
 export class TransactionsService {
@@ -40,9 +41,12 @@ export class TransactionsService {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      let decodedData = factory.contract.$decodeEvents(tx.raw?.log || [], {
-        omitUnknown: true,
-      });
+      let decodedData = factory.contract.$decodeEvents(
+        normalizeEventTopics(tx.raw?.log || []),
+        {
+          omitUnknown: true,
+        },
+      );
 
       if (!decodedData?.length) {
         decodedData = await this.buildFallbackDecodedData(tx);

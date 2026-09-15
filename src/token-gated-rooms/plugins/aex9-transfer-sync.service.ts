@@ -63,9 +63,12 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
         tx.contract_id as Encoded.ContractAddress,
         FungibleTokenFullACI,
       );
-      const decoded = contract.$decodeEvents(tx.raw.log, {
-        omitUnknown: true,
-      });
+      const decoded = contract.$decodeEvents(
+        this.normalizeEventTopics(tx.raw.log),
+        {
+          omitUnknown: true,
+        },
+      );
       const transfers = (
         serializeBigInts(decoded) as DecodedAex9Event[]
       ).filter((event) => event?.name === 'Transfer');

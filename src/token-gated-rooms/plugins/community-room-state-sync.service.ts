@@ -50,7 +50,9 @@ export class CommunityRoomStateSyncService extends BasePluginSyncService {
         contractAddress as any,
         CommunityManagementACI,
       );
-      const decoded = contract.$decodeEvents(logs, { omitUnknown: true });
+      const decoded = contract.$decodeEvents(this.normalizeEventTopics(logs), {
+        omitUnknown: true,
+      });
       return (decoded || [])
         .map((e: any) => e?.name)
         .filter((n: any): n is string => typeof n === 'string');
