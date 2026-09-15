@@ -7,7 +7,7 @@
 
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 0.75rem;
     margin-bottom: 1.5rem;
   }
@@ -210,12 +210,26 @@
       <div class="subtitle">Settled per-post and streak AE for this cohort.</div>
       <div class="value" id="paidAe">-</div>
     </div>
+    <div class="stat-card">
+      <h2>Earning Per Post</h2>
+      <div class="subtitle">Separate reward path, not an onboarding step.</div>
+      <div class="value" id="perPostEarning">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Streak Bonuses</h2>
+      <div class="subtitle">Cohort members with a settled streak bonus.</div>
+      <div class="value" id="streakPaid">-</div>
+    </div>
   </div>
 
   <div class="charts-grid">
     <div class="chart-container tall full">
       <h2>Onboarding funnel</h2>
-      <div class="hint">Each step is a strict subset of the one above it.</div>
+      <div class="hint">
+        Each step counts users who reached at least that far, so a step can
+        never be larger than the one above it. Per-post and streak rewards are a
+        separate path and are reported in the cards above, not as deeper steps.
+      </div>
       <div class="chart-wrapper">
         <canvas id="funnelChart"></canvas>
       </div>
@@ -318,6 +332,8 @@
     document.getElementById("onboardingPaid").textContent = formatNumber(summary.onboarding_paid ?? 0);
     document.getElementById("conversion").textContent = formatPercent(summary.conversion_rate ?? 0);
     document.getElementById("paidAe").textContent = formatAe(summary.total_paid_ae ?? 0);
+    document.getElementById("perPostEarning").textContent = formatNumber(summary.per_post_earning ?? 0);
+    document.getElementById("streakPaid").textContent = formatNumber(summary.streak_bonus_paid ?? 0);
   }
 
   function renderFunnel(funnel) {

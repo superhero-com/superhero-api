@@ -200,11 +200,23 @@ describe('BclAffiliationAnalyticsService', () => {
 
     const result = await service.getXOnboardingData({});
 
-    expect(result.funnel.map((s) => s.count)).toEqual([10, 6, 4, 3, 2, 1, 0]);
+    // Per-post and streak rewards are a separate path, not deeper funnel
+    // stages, so they stay out of the funnel and cannot widen it.
+    expect(result.funnel.map((s) => s.key)).toEqual([
+      'linked_x',
+      'scanned',
+      'follower_eligible',
+      'qualifying_post',
+      'onboarding_paid',
+    ]);
+    expect(result.funnel.map((s) => s.count)).toEqual([10, 6, 4, 3, 2]);
     const counts = result.funnel.map((s) => s.count);
     counts.forEach((count, i) => {
       if (i > 0) expect(count).toBeLessThanOrEqual(counts[i - 1]);
     });
+    expect(result.funnel.every((s) => s.rate <= 1)).toBe(true);
+    expect(result.summary.per_post_earning).toBe(1);
+    expect(result.summary.streak_bonus_paid).toBe(0);
     expect(result.funnel[0].rate).toBe(1);
     expect(result.summary.conversion_rate).toBeCloseTo(0.2);
     expect(result.summary.total_paid_ae).toBeCloseTo(5);
@@ -212,6 +224,58 @@ describe('BclAffiliationAnalyticsService', () => {
       { date: '2026-03-01', linked: 7, per_post_paid: 0 },
       { date: '2026-03-02', linked: 0, per_post_paid: 1 },
     ]);
+  });
+
+  it('nests the cohort stage predicates so the funnel cannot widen', () => {
+    const reached = (BclAffiliationAnalyticsService as any).ONBOARDING_REACHED;
+
+    // Each predicate must contain the one below it, so every row counted at a
+    // deeper stage is also counted at every shallower one. A row can be `paid`
+    // while its scan fields were reset by a re-link, which is exactly the case
+    // that made plain per-stage predicates report a widening funnel.
+    expect(reached.post).toContain(reached.paid);
+    expect(reached.eligible).toContain('qualified_posts_count > 0');
+    expect(reached.eligible).toContain(reached.paid);
+    expect(reached.scanned).toContain('follower_count >= :minFollowers');
+    expect(reached.scanned).toContain(reached.paid);
+    expect(reached.scanned).toContain('last_x_api_scan_at IS NOT NULL');
+  });
+
+  it('does not file an informational notice as a blocker', async () => {
+    const select = jest.fn().mockReturnThis();
+    const postingRewardRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select,
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      }),
+    } as any;
+
+    const service = new BclAffiliationAnalyticsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      postingRewardRepo,
+      {} as any,
+      {} as any,
+    );
+
+    await (service as any).getOnboardingBlockers(
+      new Date('2026-03-01T00:00:00.000Z'),
+      new Date('2026-03-02T00:00:00.000Z'),
+    );
+
+    // `x_posts_scan_truncated` is written on a SUCCESSFUL scan that hit the
+    // post limit. Counting it as a blocker buries the real payout bottleneck.
+    const reasonSql = String(select.mock.calls[0]?.[0] ?? '');
+    expect(reasonSql).toContain("NOT IN ('x_posts_scan_truncated')");
+    expect(reasonSql).toContain('never_checked');
+    expect(reasonSql).toContain('no_qualifying_post');
   });
 
   it('reports a zero conversion rate instead of dividing by zero', async () => {

@@ -345,16 +345,6 @@ export class BclAffiliationAnalyticsService {
         label: 'Onboarding reward paid',
         count: cohort.onboarding_paid,
       },
-      {
-        key: 'per_post_earning',
-        label: 'Earning per post',
-        count: perPostEarning,
-      },
-      {
-        key: 'streak_bonus_paid',
-        label: 'Streak bonus paid',
-        count: streakPaid,
-      },
     ].map((stage) => ({ ...stage, rate: rate(stage.count) }));
 
     const series = this.buildXOnboardingSeries(startDate, endDate, {
@@ -383,25 +373,42 @@ export class BclAffiliationAnalyticsService {
   private static readonly ONBOARDING_COHORT_AT =
     'COALESCE(r.verified_at, r.created_at)';
 
+  /**
+   * Stage predicates, read as "reached at least this far".
+   *
+   * Each one ORs in the stage below it, so the counts are nested by
+   * construction and a later stage can never exceed an earlier one. Plain
+   * per-stage predicates would not be: the reward row's scan fields are reset
+   * when a user re-links a different handle, so a paid row can legitimately
+   * show `qualified_posts_count = 0`, and a follower count read after a drop
+   * can fall under the minimum. Testing the current field alone would then
+   * report a funnel that widens further down, which is exactly the signal this
+   * chart exists to give.
+   */
+  private static readonly ONBOARDING_REACHED = {
+    paid: `r.status = 'paid'`,
+    post: `(r.status = 'paid' OR r.qualified_posts_count > 0)`,
+    eligible: `(r.status = 'paid' OR r.qualified_posts_count > 0 OR r.follower_count >= :minFollowers)`,
+    scanned: `(r.status = 'paid' OR r.qualified_posts_count > 0 OR r.follower_count >= :minFollowers OR r.last_x_api_scan_at IS NOT NULL)`,
+  };
+
   private async getOnboardingCohortCounts(startDate: Date, endDate: Date) {
     const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const reached = BclAffiliationAnalyticsService.ONBOARDING_REACHED;
     const row = await this.postingRewardRepo
       .createQueryBuilder('r')
       .select('COUNT(*)::int', 'linked_x')
+      .addSelect(`COUNT(*) FILTER (WHERE ${reached.scanned})::int`, 'scanned')
       .addSelect(
-        'COUNT(*) FILTER (WHERE r.last_x_api_scan_at IS NOT NULL)::int',
-        'scanned',
-      )
-      .addSelect(
-        'COUNT(*) FILTER (WHERE r.follower_count >= :minFollowers)::int',
+        `COUNT(*) FILTER (WHERE ${reached.eligible})::int`,
         'follower_eligible',
       )
       .addSelect(
-        'COUNT(*) FILTER (WHERE r.qualified_posts_count > 0)::int',
+        `COUNT(*) FILTER (WHERE ${reached.post})::int`,
         'qualifying_post',
       )
       .addSelect(
-        `COUNT(*) FILTER (WHERE r.status = 'paid')::int`,
+        `COUNT(*) FILTER (WHERE ${reached.paid})::int`,
         'onboarding_paid',
       )
       .where(`${at} >= :startDate`, { startDate })
@@ -451,16 +458,30 @@ export class BclAffiliationAnalyticsService {
   }
 
   /**
-   * Why each unpaid member of the cohort is stuck. The pipeline's own `error`
-   * wins when it set one; otherwise the row's shape says where it stopped.
+   * `error` codes the reward pipeline sets on a SUCCESSFUL scan as a notice to
+   * the user, not as a reason it stopped. `x_posts_scan_truncated` is written
+   * alongside a completed scan that hit the per-check post limit, so treating
+   * it as a blocker would file users who do have qualifying posts under it and
+   * hide the real payout bottleneck.
+   */
+  private static readonly INFORMATIONAL_ERRORS = ['x_posts_scan_truncated'];
+
+  /**
+   * Why each unpaid member of the cohort is stuck. A real `error` from the
+   * pipeline wins; otherwise the row's shape says where it stopped.
    */
   private async getOnboardingBlockers(
     startDate: Date,
     endDate: Date,
   ): Promise<BclXOnboardingBlocker[]> {
     const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const informational =
+      BclAffiliationAnalyticsService.INFORMATIONAL_ERRORS.map(
+        (code) => `'${code}'`,
+      ).join(', ');
     const reason = `CASE
-        WHEN r.error IS NOT NULL AND r.error <> '' THEN r.error
+        WHEN r.error IS NOT NULL AND r.error <> ''
+          AND r.error NOT IN (${informational}) THEN r.error
         WHEN r.last_x_api_scan_at IS NULL THEN 'never_checked'
         WHEN r.qualified_posts_count = 0 THEN 'no_qualifying_post'
         ELSE 'awaiting_payout'
