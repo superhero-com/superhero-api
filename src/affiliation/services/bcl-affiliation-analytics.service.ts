@@ -6,6 +6,10 @@ import { Invitation } from '../entities/invitation.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { ADDRESS_LINK_CONTRACT_ADDRESS } from '@/plugins/address-links/address-links.constants';
 import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
+import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
+import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
+import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
+import { PROFILE_X_REWARD_MIN_FOLLOWERS } from '@/profile/profile.constants';
 
 export type BclAffiliationDailyPoint = {
   date: string; // YYYY-MM-DD
@@ -61,6 +65,51 @@ export type BclXInviteUsageSummary = {
   invite_bind_rate: number;
 };
 
+/** One step of the X onboarding funnel, ordered widest to narrowest. */
+export type BclXOnboardingStage = {
+  key: string;
+  label: string;
+  count: number;
+  /** Share of the `linked_x` cohort that reached this stage, 0..1. */
+  rate: number;
+};
+
+/** Why a user in the cohort has not been paid yet. */
+export type BclXOnboardingBlocker = {
+  reason: string;
+  count: number;
+};
+
+export type BclXOnboardingTierPoint = {
+  tier_index: number | null;
+  count: number;
+};
+
+/**
+ * Onboarding payouts write no ledger row and the aggregate row carries no
+ * settled-at timestamp, so there is no honest daily series for them. The funnel
+ * and summary carry the onboarding totals instead.
+ */
+export type BclXOnboardingDailyPoint = {
+  date: string; // YYYY-MM-DD
+  linked: number;
+  per_post_paid: number;
+};
+
+export type BclXOnboardingSummary = {
+  linked_x: number;
+  scanned: number;
+  follower_eligible: number;
+  qualifying_post: number;
+  onboarding_paid: number;
+  per_post_earning: number;
+  streak_bonus_paid: number;
+  /** onboarding_paid / linked_x, 0..1. */
+  conversion_rate: number;
+  min_followers_required: number;
+  total_paid_ae: number;
+};
+
 @Injectable()
 export class BclAffiliationAnalyticsService {
   /** `link(addr, …)` user address; not `caller_id` (sponsor broadcasts via onAccount). */
@@ -74,6 +123,12 @@ export class BclAffiliationAnalyticsService {
     private readonly txRepo: Repository<Tx>,
     @InjectRepository(ProfileXInvite)
     private readonly profileXInviteRepo: Repository<ProfileXInvite>,
+    @InjectRepository(ProfileXPostingReward)
+    private readonly postingRewardRepo: Repository<ProfileXPostingReward>,
+    @InjectRepository(ProfileXPostRewardLedger)
+    private readonly postRewardLedgerRepo: Repository<ProfileXPostRewardLedger>,
+    @InjectRepository(ProfileXStreakBonusReward)
+    private readonly streakBonusRepo: Repository<ProfileXStreakBonusReward>,
   ) {}
 
   async getDashboardData(params: {
@@ -223,6 +278,327 @@ export class BclAffiliationAnalyticsService {
       },
       queryMs: Date.now() - start,
     };
+  }
+
+  /**
+   * The X onboarding funnel for the cohort that linked X inside the window.
+   *
+   * Every stage is a strict subset of the one above it, so the drop between two
+   * rows is exactly where that slice of the cohort is stuck, and `blockers`
+   * names the reason in the reward pipeline's own words.
+   *
+   * Note the pipeline is on-demand: a user is only ever scanned after they come
+   * back and request a check, so a large `linked_x -> scanned` drop means people
+   * linked X and were never evaluated, not that they failed a requirement.
+   */
+  async getXOnboardingData(params: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    funnel: BclXOnboardingStage[];
+    blockers: BclXOnboardingBlocker[];
+    tiers: BclXOnboardingTierPoint[];
+    series: BclXOnboardingDailyPoint[];
+    summary: BclXOnboardingSummary;
+    queryMs: number;
+  }> {
+    const { startDate, endDate } = this.parseDateRange(params);
+    const start = Date.now();
+
+    const [
+      cohort,
+      perPostEarning,
+      streakPaid,
+      blockers,
+      tiers,
+      paidAettos,
+      linkedByDay,
+      perPostPaidByDay,
+    ] = await Promise.all([
+      this.getOnboardingCohortCounts(startDate, endDate),
+      this.getOnboardingPerPostEarners(startDate, endDate),
+      this.getOnboardingStreakEarners(startDate, endDate),
+      this.getOnboardingBlockers(startDate, endDate),
+      this.getOnboardingTierDistribution(startDate, endDate),
+      this.getOnboardingPaidAettos(startDate, endDate),
+      this.getDailyXVerifications(startDate, endDate),
+      this.getDailyPerPostPaidCounts(startDate, endDate),
+    ]);
+
+    const linked = cohort.linked_x;
+    const rate = (count: number) => (linked > 0 ? count / linked : 0);
+    const funnel: BclXOnboardingStage[] = [
+      { key: 'linked_x', label: 'Linked X', count: linked },
+      { key: 'scanned', label: 'Checked at least once', count: cohort.scanned },
+      {
+        key: 'follower_eligible',
+        label: `Followers >= ${PROFILE_X_REWARD_MIN_FOLLOWERS}`,
+        count: cohort.follower_eligible,
+      },
+      {
+        key: 'qualifying_post',
+        label: 'Has a qualifying post',
+        count: cohort.qualifying_post,
+      },
+      {
+        key: 'onboarding_paid',
+        label: 'Onboarding reward paid',
+        count: cohort.onboarding_paid,
+      },
+    ].map((stage) => ({ ...stage, rate: rate(stage.count) }));
+
+    const series = this.buildXOnboardingSeries(startDate, endDate, {
+      linked: linkedByDay,
+      per_post_paid: perPostPaidByDay,
+    });
+
+    return {
+      funnel,
+      blockers,
+      tiers,
+      series,
+      summary: {
+        ...cohort,
+        per_post_earning: perPostEarning,
+        streak_bonus_paid: streakPaid,
+        conversion_rate: rate(cohort.onboarding_paid),
+        min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
+        total_paid_ae: paidAettos / 1e18,
+      },
+      queryMs: Date.now() - start,
+    };
+  }
+
+  /** Cohort window: when the address linked X, falling back to row creation. */
+  private static readonly ONBOARDING_COHORT_AT =
+    'COALESCE(r.verified_at, r.created_at)';
+
+  /**
+   * Stage predicates, read as "reached at least this far".
+   *
+   * Each one ORs in the stage below it, so the counts are nested by
+   * construction and a later stage can never exceed an earlier one. Plain
+   * per-stage predicates would not be: the reward row's scan fields are reset
+   * when a user re-links a different handle, so a paid row can legitimately
+   * show `qualified_posts_count = 0`, and a follower count read after a drop
+   * can fall under the minimum. Testing the current field alone would then
+   * report a funnel that widens further down, which is exactly the signal this
+   * chart exists to give.
+   */
+  private static readonly ONBOARDING_REACHED = {
+    paid: `r.status = 'paid'`,
+    post: `(r.status = 'paid' OR r.qualified_posts_count > 0)`,
+    eligible: `(r.status = 'paid' OR r.qualified_posts_count > 0 OR r.follower_count >= :minFollowers)`,
+    scanned: `(r.status = 'paid' OR r.qualified_posts_count > 0 OR r.follower_count >= :minFollowers OR r.last_x_api_scan_at IS NOT NULL)`,
+  };
+
+  private async getOnboardingCohortCounts(startDate: Date, endDate: Date) {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const reached = BclAffiliationAnalyticsService.ONBOARDING_REACHED;
+    const row = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .select('COUNT(*)::int', 'linked_x')
+      .addSelect(`COUNT(*) FILTER (WHERE ${reached.scanned})::int`, 'scanned')
+      .addSelect(
+        `COUNT(*) FILTER (WHERE ${reached.eligible})::int`,
+        'follower_eligible',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE ${reached.post})::int`,
+        'qualifying_post',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE ${reached.paid})::int`,
+        'onboarding_paid',
+      )
+      .where(`${at} >= :startDate`, { startDate })
+      .andWhere(`${at} < :endDate`, { endDate })
+      .setParameter('minFollowers', PROFILE_X_REWARD_MIN_FOLLOWERS)
+      .getRawOne<{
+        linked_x: number;
+        scanned: number;
+        follower_eligible: number;
+        qualifying_post: number;
+        onboarding_paid: number;
+      }>();
+
+    return {
+      linked_x: Number(row?.linked_x || 0),
+      scanned: Number(row?.scanned || 0),
+      follower_eligible: Number(row?.follower_eligible || 0),
+      qualifying_post: Number(row?.qualifying_post || 0),
+      onboarding_paid: Number(row?.onboarding_paid || 0),
+    };
+  }
+
+  private async getOnboardingPerPostEarners(startDate: Date, endDate: Date) {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const row = await this.postRewardLedgerRepo
+      .createQueryBuilder('l')
+      .select('COUNT(DISTINCT l.address)::int', 'count')
+      .innerJoin(ProfileXPostingReward, 'r', 'r.address = l.address')
+      .where(`l.status = 'paid'`)
+      .andWhere(`${at} >= :startDate`, { startDate })
+      .andWhere(`${at} < :endDate`, { endDate })
+      .getRawOne<{ count: number }>();
+    return Number(row?.count || 0);
+  }
+
+  private async getOnboardingStreakEarners(startDate: Date, endDate: Date) {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const row = await this.streakBonusRepo
+      .createQueryBuilder('s')
+      .select('COUNT(DISTINCT s.address)::int', 'count')
+      .innerJoin(ProfileXPostingReward, 'r', 'r.address = s.address')
+      .where(`s.status = 'paid'`)
+      .andWhere(`${at} >= :startDate`, { startDate })
+      .andWhere(`${at} < :endDate`, { endDate })
+      .getRawOne<{ count: number }>();
+    return Number(row?.count || 0);
+  }
+
+  /**
+   * `error` codes the reward pipeline sets on a SUCCESSFUL scan as a notice to
+   * the user, not as a reason it stopped. `x_posts_scan_truncated` is written
+   * alongside a completed scan that hit the per-check post limit, so treating
+   * it as a blocker would file users who do have qualifying posts under it and
+   * hide the real payout bottleneck.
+   */
+  private static readonly INFORMATIONAL_ERRORS = ['x_posts_scan_truncated'];
+
+  /**
+   * Why each unpaid member of the cohort is stuck. A real `error` from the
+   * pipeline wins; otherwise the row's shape says where it stopped.
+   */
+  private async getOnboardingBlockers(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<BclXOnboardingBlocker[]> {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const informational =
+      BclAffiliationAnalyticsService.INFORMATIONAL_ERRORS.map(
+        (code) => `'${code}'`,
+      ).join(', ');
+    const reason = `CASE
+        WHEN r.error IS NOT NULL AND r.error <> ''
+          AND r.error NOT IN (${informational}) THEN r.error
+        WHEN r.last_x_api_scan_at IS NULL THEN 'never_checked'
+        WHEN r.qualified_posts_count = 0 THEN 'no_qualifying_post'
+        ELSE 'awaiting_payout'
+      END`;
+    const rows = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .select(reason, 'reason')
+      .addSelect('COUNT(*)::int', 'count')
+      .where(`r.status <> 'paid'`)
+      .andWhere(`${at} >= :startDate`, { startDate })
+      .andWhere(`${at} < :endDate`, { endDate })
+      .groupBy('reason')
+      .orderBy('count', 'DESC')
+      .limit(20)
+      .getRawMany<{ reason: string; count: number }>();
+
+    return rows.map((r) => ({
+      reason: r.reason || 'unknown',
+      count: Number(r.count || 0),
+    }));
+  }
+
+  private async getOnboardingTierDistribution(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<BclXOnboardingTierPoint[]> {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const rows = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .select('r.follower_tier_index', 'tier_index')
+      .addSelect('COUNT(*)::int', 'count')
+      .where('r.follower_tier_index IS NOT NULL')
+      .andWhere(`${at} >= :startDate`, { startDate })
+      .andWhere(`${at} < :endDate`, { endDate })
+      .groupBy('r.follower_tier_index')
+      .orderBy('r.follower_tier_index', 'ASC')
+      .getRawMany<{ tier_index: number | null; count: number }>();
+
+    return rows.map((r) => ({
+      tier_index: r.tier_index === null ? null : Number(r.tier_index),
+      count: Number(r.count || 0),
+    }));
+  }
+
+  /** Settled AE across per-post and streak payouts for the cohort, in aettos. */
+  private async getOnboardingPaidAettos(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
+    const sum = `COALESCE(SUM(NULLIF(%alias%.amount_aettos, '')::numeric), 0)::float`;
+    const [perPost, streak] = await Promise.all([
+      this.postRewardLedgerRepo
+        .createQueryBuilder('l')
+        .select(sum.replace('%alias%', 'l'), 'total')
+        .innerJoin(ProfileXPostingReward, 'r', 'r.address = l.address')
+        .where(`l.status = 'paid'`)
+        .andWhere(`${at} >= :startDate`, { startDate })
+        .andWhere(`${at} < :endDate`, { endDate })
+        .getRawOne<{ total: number }>(),
+      this.streakBonusRepo
+        .createQueryBuilder('s')
+        .select(sum.replace('%alias%', 's'), 'total')
+        .innerJoin(ProfileXPostingReward, 'r', 'r.address = s.address')
+        .where(`s.status = 'paid'`)
+        .andWhere(`${at} >= :startDate`, { startDate })
+        .andWhere(`${at} < :endDate`, { endDate })
+        .getRawOne<{ total: number }>(),
+    ]);
+
+    return Number(perPost?.total || 0) + Number(streak?.total || 0);
+  }
+
+  /** Per-post rewards settled per day, keyed on when the row was ledgered. */
+  private async getDailyPerPostPaidCounts(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<Record<string, number>> {
+    const rows = await this.postRewardLedgerRepo
+      .createQueryBuilder('l')
+      .select(`to_char(date_trunc('day', l.created_at), 'YYYY-MM-DD')`, 'date')
+      .addSelect('COUNT(*)::int', 'count')
+      .where(`l.status = 'paid'`)
+      .andWhere('l.created_at >= :startDate', { startDate })
+      .andWhere('l.created_at < :endDate', { endDate })
+      .groupBy('date')
+      .orderBy('date', 'ASC')
+      .getRawMany<{ date: string; count: number }>();
+
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.date] = Number(r.count || 0);
+    return out;
+  }
+
+  private buildXOnboardingSeries(
+    startDate: Date,
+    endDate: Date,
+    counts: {
+      linked: Record<string, number>;
+      per_post_paid: Record<string, number>;
+    },
+  ): BclXOnboardingDailyPoint[] {
+    const start = moment(startDate).startOf('day');
+    const end = moment(endDate).startOf('day');
+    const out: BclXOnboardingDailyPoint[] = [];
+
+    const cursor = start.clone();
+    while (cursor.isBefore(end)) {
+      const d = cursor.format('YYYY-MM-DD');
+      out.push({
+        date: d,
+        linked: counts.linked[d] ?? 0,
+        per_post_paid: counts.per_post_paid[d] ?? 0,
+      });
+      cursor.add(1, 'day');
+    }
+    return out;
   }
 
   async getTopInviters(params: {
@@ -489,7 +865,9 @@ export class BclAffiliationAnalyticsService {
       .createQueryBuilder('t')
       .select(linkedAddress, 'linked_address')
       .addSelect(
-        `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000000.0)), 'YYYY-MM-DD'))`,
+        // micro_time is milliseconds (see getMicroTimeRange); dividing by 1e6
+        // would bucket every row into 1970 and match no day in the series.
+        `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000.0)), 'YYYY-MM-DD'))`,
         'date',
       )
       .where('t.function = :fn', { fn: 'link' })
@@ -571,10 +949,23 @@ export class BclAffiliationAnalyticsService {
     return out;
   }
 
+  /**
+   * Bounds for filtering `txs.micro_time`.
+   *
+   * Despite the name, `micro_time` is stored in MILLISECONDS: `block-sync.service`
+   * and `live-indexer.service` write `tx.microTime` straight through, and build
+   * `created_at` from the same value with `new Date(...)`, which only yields sane
+   * timestamps for milliseconds. The middleware itself returns a 13-digit value.
+   *
+   * This used to scale the bounds to microseconds, which made every predicate
+   * `micro_time >= <16-digit bound>` false against a 13-digit column, so the X
+   * verification queries returned zero rows for every date range. Compare in
+   * milliseconds, the same unit the column is written in.
+   */
   private getMicroTimeRange(startDate: Date, endDate: Date) {
     return {
-      startMicro: (BigInt(startDate.getTime()) * 1000n).toString(),
-      endMicro: (BigInt(endDate.getTime()) * 1000n).toString(),
+      startMicro: BigInt(startDate.getTime()).toString(),
+      endMicro: BigInt(endDate.getTime()).toString(),
     };
   }
 

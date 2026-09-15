@@ -1,0 +1,489 @@
+{{#> main-layout title="X Onboarding Funnel" active="bcl-affiliation-x-onboarding"}}
+<style>
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    min-width: 0;
+  }
+
+  .stat-card h2 {
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+    color: #475569;
+  }
+
+  .stat-card .subtitle {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.2;
+    min-height: 2.2rem;
+  }
+
+  .stat-card .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0f172a;
+    margin-top: 0.35rem;
+  }
+
+  .date-range {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .date-range > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 150px;
+  }
+
+  .date-range label {
+    font-size: 0.875rem;
+    color: #475569;
+  }
+
+  .date-range input {
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    color: #1e293b;
+    width: 100%;
+  }
+
+  .date-range button {
+    padding: 0.5rem 1rem;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 0.25rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .chart-container {
+    background: white;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: 420px;
+  }
+
+  .chart-container.tall {
+    height: 480px;
+  }
+
+  .chart-container h2 {
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+    color: #475569;
+  }
+
+  .chart-container .hint {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    margin-bottom: 0.5rem;
+  }
+
+  .chart-wrapper {
+    height: calc(100% - 3.2rem);
+    position: relative;
+  }
+
+  .full {
+    grid-column: 1 / -1;
+  }
+
+  .note {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    padding: 0.7rem 0.9rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  @media (max-width: 1100px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 768px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+    .charts-grid {
+      grid-template-columns: 1fr;
+    }
+    .date-range {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .date-range button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
+</style>
+
+<div class="container">
+  <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
+    <span class="pill mono" id="queryMs">queryMs: -</span>
+  </div>
+
+  <div class="date-range">
+    <div>
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div>
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" />
+    </div>
+    <button onclick="updateDashboard()">Apply</button>
+  </div>
+
+  <div class="note">
+    Rewards are evaluated on demand: a user is only scanned after they return to
+    the app and request a check. A large drop from <strong>Linked X</strong> to
+    <strong>Checked at least once</strong> means those users linked X and were
+    never evaluated, not that they failed a requirement.
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <h2>Linked X</h2>
+      <div class="subtitle">Addresses that linked an X account in range.</div>
+      <div class="value" id="linkedX">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Checked</h2>
+      <div class="subtitle">Of those, how many were ever scanned.</div>
+      <div class="value" id="scanned">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Onboarding Paid</h2>
+      <div class="subtitle">Reached a settled onboarding reward.</div>
+      <div class="value" id="onboardingPaid">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Conversion</h2>
+      <div class="subtitle">Onboarding paid divided by linked.</div>
+      <div class="value" id="conversion">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Paid Out</h2>
+      <div class="subtitle">Settled per-post and streak AE for this cohort.</div>
+      <div class="value" id="paidAe">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Earning Per Post</h2>
+      <div class="subtitle">Separate reward path, not an onboarding step.</div>
+      <div class="value" id="perPostEarning">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Streak Bonuses</h2>
+      <div class="subtitle">Cohort members with a settled streak bonus.</div>
+      <div class="value" id="streakPaid">-</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-container tall full">
+      <h2>Onboarding funnel</h2>
+      <div class="hint">
+        Each step counts users who reached at least that far, so a step can
+        never be larger than the one above it. Per-post and streak rewards are a
+        separate path and are reported in the cards above, not as deeper steps.
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="funnelChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-container">
+      <h2>Where users are stuck</h2>
+      <div class="hint">Unpaid members of the cohort, by reason.</div>
+      <div class="chart-wrapper">
+        <canvas id="blockersChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-container">
+      <h2>Follower tier distribution</h2>
+      <div class="hint">Scanned users by resolved reward tier.</div>
+      <div class="chart-wrapper">
+        <canvas id="tiersChart"></canvas>
+      </div>
+    </div>
+
+    <div class="chart-container full">
+      <h2>Daily new X links and settled per-post rewards</h2>
+      <div class="hint">
+        Links come from on-chain AddressLink calls. Onboarding payouts have no
+        settled-at timestamp, so they are reported in the funnel only.
+      </div>
+      <div class="chart-wrapper">
+        <canvas id="dailyChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API_URL = "/api";
+  let funnelChart = null;
+  let blockersChart = null;
+  let tiersChart = null;
+  let dailyChart = null;
+
+  function destroyChart(chart) {
+    if (chart) chart.destroy();
+  }
+
+  function formatNumber(num) {
+    return (num ?? 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  function formatPercent(value) {
+    return `${((value ?? 0) * 100).toFixed(1)}%`;
+  }
+
+  function formatAe(value) {
+    const n = Number(value ?? 0);
+    return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })} AE`;
+  }
+
+  function setDefaultDateRange() {
+    const qs = new URLSearchParams(window.location.search);
+    const qsStart = qs.get("start_date");
+    const qsEnd = qs.get("end_date");
+
+    const endDate = qsEnd && moment(qsEnd, "YYYY-MM-DD", true).isValid()
+      ? moment(qsEnd, "YYYY-MM-DD")
+      : moment();
+    const startDate = qsStart && moment(qsStart, "YYYY-MM-DD", true).isValid()
+      ? moment(qsStart, "YYYY-MM-DD")
+      : moment().subtract(90, "days");
+
+    document.getElementById("startDate").value = startDate.format("YYYY-MM-DD");
+    document.getElementById("endDate").value = endDate.format("YYYY-MM-DD");
+  }
+
+  function getDateRange() {
+    const startDate = document.getElementById("startDate").value;
+    const endDate = document.getElementById("endDate").value;
+    return {
+      start_date: moment(startDate).format("YYYY-MM-DD"),
+      end_date: moment(endDate).format("YYYY-MM-DD"),
+    };
+  }
+
+  function persistDateRangeToUrl(start_date, end_date) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("start_date", start_date);
+    url.searchParams.set("end_date", end_date);
+    window.history.replaceState({}, "", url.toString());
+  }
+
+  async function fetchOnboardingData(start_date, end_date) {
+    const res = await fetch(`${API_URL}/bcl-affiliation/analytics/x-onboarding?start_date=${start_date}&end_date=${end_date}`);
+    return await res.json();
+  }
+
+  function renderSummary(summary, queryMs) {
+    document.getElementById("queryMs").textContent = `queryMs: ${queryMs ?? "-"}`;
+    document.getElementById("linkedX").textContent = formatNumber(summary.linked_x ?? 0);
+    document.getElementById("scanned").textContent = formatNumber(summary.scanned ?? 0);
+    document.getElementById("onboardingPaid").textContent = formatNumber(summary.onboarding_paid ?? 0);
+    document.getElementById("conversion").textContent = formatPercent(summary.conversion_rate ?? 0);
+    document.getElementById("paidAe").textContent = formatAe(summary.total_paid_ae ?? 0);
+    document.getElementById("perPostEarning").textContent = formatNumber(summary.per_post_earning ?? 0);
+    document.getElementById("streakPaid").textContent = formatNumber(summary.streak_bonus_paid ?? 0);
+  }
+
+  function renderFunnel(funnel) {
+    destroyChart(funnelChart);
+    funnelChart = new Chart(document.getElementById("funnelChart"), {
+      type: "bar",
+      data: {
+        labels: funnel.map((s) => s.label),
+        datasets: [
+          {
+            label: "Users",
+            data: funnel.map((s) => s.count),
+            backgroundColor: "rgba(14, 165, 233, 0.75)",
+            borderColor: "#0ea5e9",
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const stage = funnel[ctx.dataIndex] || {};
+                return `${formatNumber(ctx.parsed.x)} users (${formatPercent(stage.rate)} of linked)`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { precision: 0 } },
+          y: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function renderBlockers(blockers) {
+    destroyChart(blockersChart);
+    blockersChart = new Chart(document.getElementById("blockersChart"), {
+      type: "bar",
+      data: {
+        labels: blockers.map((b) => b.reason),
+        datasets: [
+          {
+            label: "Users",
+            data: blockers.map((b) => b.count),
+            backgroundColor: "rgba(239, 68, 68, 0.7)",
+            borderColor: "#ef4444",
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { precision: 0 } },
+          y: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function renderTiers(tiers) {
+    destroyChart(tiersChart);
+    tiersChart = new Chart(document.getElementById("tiersChart"), {
+      type: "bar",
+      data: {
+        labels: tiers.map((t) => `Tier ${t.tier_index}`),
+        datasets: [
+          {
+            label: "Users",
+            data: tiers.map((t) => t.count),
+            backgroundColor: "rgba(139, 92, 246, 0.7)",
+            borderColor: "#8b5cf6",
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { precision: 0 } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function renderDaily(series) {
+    const labels = series.map((p) => moment(p.date).format("MMM D"));
+    destroyChart(dailyChart);
+    dailyChart = new Chart(document.getElementById("dailyChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "New X links",
+            data: series.map((p) => p.linked ?? 0),
+            borderColor: "#0ea5e9",
+            backgroundColor: "rgba(14, 165, 233, 0.12)",
+            tension: 0.3,
+            fill: true,
+          },
+          {
+            label: "Per-post rewards settled",
+            data: series.map((p) => p.per_post_paid ?? 0),
+            borderColor: "#10b981",
+            backgroundColor: "rgba(16, 185, 129, 0.12)",
+            tension: 0.3,
+            fill: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true } },
+        scales: {
+          y: { beginAtZero: true, grid: { color: "rgba(0,0,0,0.05)" }, ticks: { precision: 0 } },
+          x: { grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  async function updateDashboard() {
+    const { start_date, end_date } = getDateRange();
+    persistDateRangeToUrl(start_date, end_date);
+    const data = await fetchOnboardingData(start_date, end_date);
+    renderSummary(data?.summary || {}, data?.queryMs);
+    renderFunnel(data?.funnel || []);
+    renderBlockers(data?.blockers || []);
+    renderTiers(data?.tiers || []);
+    renderDaily(data?.series || []);
+  }
+
+  (async function init() {
+    setDefaultDateRange();
+    await updateDashboard();
+  })();
+</script>
+{{/main-layout}}
