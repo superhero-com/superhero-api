@@ -173,9 +173,12 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
           registryAddress,
           GovernanceRegistryACI,
         );
-        const decodedLogs = contract.$decodeEvents(tx.raw.log, {
-          omitUnknown: true,
-        });
+        const decodedLogs = contract.$decodeEvents(
+          this.normalizeEventTopics(tx.raw.log),
+          {
+            omitUnknown: true,
+          },
+        );
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
@@ -210,9 +213,12 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
           tx.contract_id as Encoded.ContractAddress,
           GovernancePollACI,
         );
-        const decodedLogs = contract.$decodeEvents(tx.raw.log, {
-          omitUnknown: true,
-        });
+        const decodedLogs = contract.$decodeEvents(
+          this.normalizeEventTopics(tx.raw.log),
+          {
+            omitUnknown: true,
+          },
+        );
 
         return serializeBigInts(decodedLogs);
       } catch (error: any) {
