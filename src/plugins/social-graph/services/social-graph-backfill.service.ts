@@ -82,6 +82,10 @@ export class SocialGraphBackfillService implements OnModuleInit {
    * (scope-bounded to older generations) instead of restarting at the newest page
    * and truncating at the same point. Once the walk finally completes, the
    * highest block seen across the whole effort becomes the watermark.
+   *
+   * `saved` counts txs newly persisted (were missing); `reprocessed` counts
+   * already-stored txs re-decoded. They are disjoint — every walked tx is one or
+   * the other — so `saved + reprocessed` is the number handed to the plugin.
    */
   async backfill(): Promise<{ saved: number; reprocessed: number }> {
     const middlewareUrl = this.getMiddlewareUrl();
@@ -201,6 +205,7 @@ export class SocialGraphBackfillService implements OnModuleInit {
               toSave.push(existing);
             }
             pageTxs.push(existing);
+            reprocessed += 1;
           }
         }
 
@@ -212,7 +217,6 @@ export class SocialGraphBackfillService implements OnModuleInit {
             pageTxs,
             SyncDirectionEnum.Backward,
           );
-          reprocessed += pageTxs.length;
           for (const failure of batch?.failed ?? []) {
             const failedHeight = failure.tx?.block_height;
             if (typeof failedHeight === 'number') {
@@ -287,9 +291,9 @@ export class SocialGraphBackfillService implements OnModuleInit {
       }
     }
 
-    if (reprocessed > 0) {
+    if (saved > 0 || reprocessed > 0) {
       this.logger.log(
-        `social-graph backfill complete: saved ${saved}, reprocessed ${reprocessed}, watermark ${Math.max(advanceTo, watermark ?? -1)}`,
+        `social-graph backfill complete: ${saved} saved (new), ${reprocessed} reprocessed (already stored), watermark ${Math.max(advanceTo, watermark ?? -1)}`,
       );
     }
     return { saved, reprocessed };

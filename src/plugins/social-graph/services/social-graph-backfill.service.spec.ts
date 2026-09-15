@@ -97,7 +97,7 @@ describe('SocialGraphBackfillService', () => {
     const service = new Service(configService, txRepo, stateRepo, plugin);
     const result = await service.backfill();
 
-    expect(result).toEqual({ saved: 1, reprocessed: 1 });
+    expect(result).toEqual({ saved: 1, reprocessed: 0 });
     const saved = txRepo.save.mock.calls[0][0];
     expect(saved[0]).toMatchObject({
       hash: MISSED_TX,
@@ -149,7 +149,7 @@ describe('SocialGraphBackfillService', () => {
       stateRepo,
       plugin,
     ).backfill();
-    expect(boot1).toEqual({ saved: 3, reprocessed: 3 });
+    expect(boot1).toEqual({ saved: 3, reprocessed: 0 });
     expect(stateRepo._current().last_backfilled_height).toBe(1352517);
 
     // Second boot: same history from the middleware, but the watermark makes it
@@ -412,7 +412,7 @@ describe('SocialGraphBackfillService', () => {
       (tx: any) => tx.hash,
     );
     expect(rewalked).toEqual(['th_c', 'th_b']);
-    expect(boot2).toEqual({ saved: 2, reprocessed: 2 });
+    expect(boot2).toEqual({ saved: 2, reprocessed: 0 });
     expect(stateRepo._current().last_backfilled_height).toBe(1352517);
   });
 
@@ -492,7 +492,7 @@ describe('SocialGraphBackfillService', () => {
       stateRepo,
       plugin,
     ).backfill();
-    expect(boot1.reprocessed).toBe(50); // exactly PAGE_SAFETY pages walked
+    expect(boot1.saved).toBe(50); // exactly PAGE_SAFETY pages walked (all new)
     const afterBoot1 = stateRepo._current();
     expect(afterBoot1.last_backfilled_height ?? null).toBeNull();
     expect(afterBoot1.pending_high_height).toBe(TOP);
@@ -506,7 +506,7 @@ describe('SocialGraphBackfillService', () => {
       stateRepo,
       plugin,
     ).backfill();
-    expect(boot2.reprocessed).toBeGreaterThan(0);
+    expect(boot2.saved).toBeGreaterThan(0);
     const oldestWalked = plugin.processBatch.mock.calls
       .flatMap((call: any[]) => call[0])
       .some((tx: any) => tx.block_height === BOTTOM);
@@ -517,6 +517,119 @@ describe('SocialGraphBackfillService', () => {
     expect(afterBoot2.last_backfilled_height).toBe(TOP);
     expect(afterBoot2.resume_from_height).toBeNull();
     expect(afterBoot2.pending_high_height).toBeNull();
+  });
+
+  // saved and reprocessed must be disjoint: a tx is either newly persisted
+  // (saved) or already stored and re-decoded (reprocessed), never both, so
+  // saved + reprocessed is the number handed to the plugin with no double-count.
+  describe('counter semantics (saved and reprocessed are disjoint)', () => {
+    it('counts only-missing transactions as saved, reprocessed 0', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_new1', 1352517),
+          rawContractCallTx('th_new2', 1352516),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([]),
+        save: jest
+          .fn()
+          .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 2, reprocessed: 0 });
+      expect(plugin.processBatch.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it('counts only-already-present transactions as reprocessed, saved 0', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_old1', 1352517),
+          rawContractCallTx('th_old2', 1352516),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([
+          { hash: 'th_old1', raw: { log: [{ topics: ['1', '2'] }] } },
+          { hash: 'th_old2', raw: { log: [{ topics: ['1', '2'] }] } },
+        ]),
+        save: jest.fn(),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 0, reprocessed: 2 });
+      expect(txRepo.save).not.toHaveBeenCalled();
+      expect(plugin.processBatch.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it('splits a mixed page: new to saved, stored to reprocessed, all handed to the plugin', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_new1', 1352517),
+          rawContractCallTx('th_old1', 1352516),
+          rawContractCallTx('th_new2', 1352515),
+          rawContractCallTx('th_old2', 1352514),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([
+          { hash: 'th_old1', raw: { log: [{ topics: ['1', '2'] }] } },
+          { hash: 'th_old2', raw: { log: [{ topics: ['1', '2'] }] } },
+        ]),
+        save: jest
+          .fn()
+          .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 2, reprocessed: 2 });
+      // Disjoint and complete: every walked tx reached the plugin exactly once.
+      const handed = plugin.processBatch.mock.calls[0][0];
+      expect(handed).toHaveLength(result.saved + result.reprocessed);
+      expect(handed.map((tx: any) => tx.hash).sort()).toEqual([
+        'th_new1',
+        'th_new2',
+        'th_old1',
+        'th_old2',
+      ]);
+    });
   });
 
   it('does not touch the middleware when the contract is unconfigured', () => {
