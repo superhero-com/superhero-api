@@ -32,6 +32,7 @@ describe('ProfileXPostingRewardService disabled', () => {
       new ProfileXApiClientService(),
       { find: jest.fn(), update: jest.fn() } as any,
       { find: jest.fn(), update: jest.fn() } as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     await expect(
@@ -89,6 +90,7 @@ describe('ProfileXPostingRewardService disabled', () => {
       new ProfileXApiClientService(),
       postRewardLedgerRepository,
       { find: jest.fn(), update: jest.fn() } as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     await expect(service.getRewardStatus(ADDRESS)).resolves.toMatchObject({

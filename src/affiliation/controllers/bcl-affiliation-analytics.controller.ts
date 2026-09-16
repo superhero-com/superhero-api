@@ -98,6 +98,27 @@ export class BclAffiliationAnalyticsController {
     });
   }
 
+  @Get('x-onboarding')
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiOperation({ operationId: 'getBclAffiliationXOnboardingAnalytics' })
+  async getXOnboardingAnalytics(
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+  ) {
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      throw new BadRequestException('start_date must be YYYY-MM-DD');
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      throw new BadRequestException('end_date must be YYYY-MM-DD');
+    }
+
+    return this.bclAffiliationAnalyticsService.getXOnboardingData({
+      start_date,
+      end_date,
+    });
+  }
+
   @Get('preview')
   @Render('bcl-affiliation-analytics')
   @ApiOperation({ operationId: 'previewBclAffiliationAnalytics' })
@@ -116,6 +137,13 @@ export class BclAffiliationAnalyticsController {
   @Render('bcl-affiliation-x-invite')
   @ApiOperation({ operationId: 'previewBclAffiliationXInviteAnalytics' })
   xInvitePreview() {
+    return { message: 'Hello world!' };
+  }
+
+  @Get('x-onboarding/preview')
+  @Render('bcl-affiliation-x-onboarding')
+  @ApiOperation({ operationId: 'previewBclAffiliationXOnboardingAnalytics' })
+  xOnboardingPreview() {
     return { message: 'Hello world!' };
   }
 }

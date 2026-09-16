@@ -29,6 +29,12 @@ jest.mock('../profile.constants', () => ({
     { minFollowers: 0, amountAe: '0.1', index: 0 },
     { minFollowers: 1000, amountAe: '0.5', index: 1 },
   ],
+  // Real behaviour, not a stub: a truncated scan is a notice on a scan that
+  // completed, and the service asks this before deciding whether an attempt
+  // failed. Stubbing it to a constant would hide that distinction here.
+  X_INFORMATIONAL_ERROR_CODES: ['x_posts_scan_truncated'],
+  isInformationalXError: (code: string | null | undefined) =>
+    code === 'x_posts_scan_truncated',
 }));
 
 import { buildTx, buildTxHash, Tag } from '@aeternity/aepp-sdk';
@@ -488,6 +494,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       new ProfileXApiClientService(),
       postRewardLedgerRepository,
       streakBonusRewardRepository,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     return {

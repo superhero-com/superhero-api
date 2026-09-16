@@ -55,6 +55,7 @@ const runGate = async (constantsOverride: Record<string, unknown>) => {
       new ProfileXApiClientService(),
       { find: jest.fn(), update: jest.fn() } as any,
       { find: jest.fn(), update: jest.fn() } as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     await (service as any).processAddressInternal(ADDRESS);

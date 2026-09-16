@@ -13,6 +13,7 @@ import { ProfileXInviteMilestoneReward } from './entities/profile-x-invite-miles
 import { ProfileXPostingReward } from './entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from './entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from './entities/profile-x-streak-bonus-reward.entity';
+import { ProfileXVerificationAttempt } from './entities/profile-x-verification-attempt.entity';
 import { ProfileChainNameController } from './controllers/profile-chain-name.controller';
 import { ProfileRewardsController } from './controllers/profile-rewards.controller';
 import { ProfileCacheService } from './services/profile-cache.service';
@@ -21,6 +22,7 @@ import { ProfileSpendQueueService } from './services/profile-spend-queue.service
 import { ProfileXApiClientService } from './services/profile-x-api-client.service';
 import { ProfileXInviteService } from './services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from './services/profile-x-posting-reward.service';
+import { ProfileXVerificationAttemptService } from './services/profile-x-verification-attempt.service';
 import { ProfileChainNameChallenge } from './entities/profile-chain-name-challenge.entity';
 import { ProfileChainNameClaim } from './entities/profile-chain-name-claim.entity';
 import { ProfileChainNameService } from './services/profile-chain-name.service';
@@ -34,6 +36,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
       ProfileXPostingReward,
       ProfileXPostRewardLedger,
       ProfileXStreakBonusReward,
+      ProfileXVerificationAttempt,
       ProfileXInviteChallenge,
       ProfileXInvite,
       ProfileXInviteCredit,
@@ -52,6 +55,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileXApiClientService,
     ProfileXInviteService,
     ProfileXPostingRewardService,
+    ProfileXVerificationAttemptService,
     ProfileChainNameService,
   ],
   controllers: [ProfileChainNameController, ProfileRewardsController],
@@ -60,6 +64,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileReadService,
     ProfileCacheService,
     ProfileXPostingRewardService,
+    ProfileXVerificationAttemptService,
   ],
 })
 export class ProfileModule {}

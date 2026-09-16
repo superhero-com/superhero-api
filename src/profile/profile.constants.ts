@@ -211,3 +211,26 @@ export const PROFILE_X_FOLLOWER_TIERS: FollowerTier[] = (
   .filter((tier): tier is { minFollowers: number; amountAe: string } => !!tier)
   .sort((a, b) => a.minFollowers - b.minFollowers)
   .map((tier, index) => ({ ...tier, index }));
+
+/**
+ * `error` codes the reward pipeline writes on a scan that SUCCEEDED, as a
+ * notice to the user rather than a reason it stopped.
+ *
+ * `x_posts_scan_truncated` is set alongside a completed scan that hit the
+ * per-check post limit (see `profile-x-posting-reward.service.ts`, where the
+ * cursor still advances). Anything reading the `error` column to mean "this
+ * failed" has to exclude these first, or a successful check is filed as a
+ * failure: it made the funnel's blocker histogram hide the real bottleneck,
+ * and it would make the verification-attempt history spike on a notice and
+ * bury genuine failures. One definition, so the next reader cannot miss it.
+ */
+export const X_INFORMATIONAL_ERROR_CODES: readonly string[] = [
+  'x_posts_scan_truncated',
+];
+
+/** True when an `error` value is a notice on a successful scan, not a failure. */
+export function isInformationalXError(
+  code: string | null | undefined,
+): boolean {
+  return !!code && X_INFORMATIONAL_ERROR_CODES.includes(code);
+}
