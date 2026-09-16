@@ -1503,19 +1503,36 @@ export class BclAffiliationAnalyticsService {
     // list, the explorer links and the totals. Caught in review on #210.
     for (const r of rows) {
       const inFlight = !!r.tx_hash && !isRealTxHash(r.tx_hash);
+
+      // Detection keys on the DURABLE signals only. `error` is transient —
+      // every scan overwrites it — so an earlier version that looked for
+      // `payout_send_failed` lost a failed send the moment the next check ran:
+      // that path writes `tx_hash: null` and `status: 'failed'`, leaving
+      // nothing to find once the code was gone, and a wallet that earned but
+      // was never paid then looked like it had never been tried. On
+      // profile_x_posting_rewards `status: 'failed'` is written by exactly one
+      // place, the onboarding payout failure path, so it means this and
+      // nothing else.
       const attempted =
-        r.status === 'paid' ||
-        !!r.tx_hash ||
-        r.error === 'payout_send_failed' ||
-        r.error === 'payout_confirmation_pending';
+        r.status === 'paid' || r.status === 'failed' || !!r.tx_hash;
       if (!attempted) continue;
 
       const status =
         r.status === 'paid'
           ? 'paid'
-          : r.error === 'payout_send_failed'
+          : r.status === 'failed'
             ? 'failed'
             : 'pending';
+
+      // Only a payout error belongs on a payout row. This column is shared
+      // with the eligibility codes later scans write, and surfacing
+      // `below_min_followers` under a settled payout reads as "the send
+      // failed" — which would be a lie about money that did arrive.
+      const payoutError =
+        r.error === 'payout_send_failed' ||
+        r.error === 'payout_confirmation_pending'
+          ? r.error
+          : null;
       addPayout(r.address, {
         kind: 'onboarding',
         label: 'Onboarding reward',
@@ -1530,7 +1547,7 @@ export class BclAffiliationAnalyticsService {
         detail: inFlight
           ? 'send in progress; amount from current config'
           : 'amount from current config, not recorded on the row',
-        error: r.error ?? null,
+        error: payoutError,
       });
     }
 

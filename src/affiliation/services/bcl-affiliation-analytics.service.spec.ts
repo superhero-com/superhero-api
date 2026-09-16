@@ -435,6 +435,51 @@ describe('BclAffiliationAnalyticsService', () => {
       expect(result.users[0].total_ae_paid).toBe('0');
     });
 
+    it('keeps a failed onboarding send visible after a later scan', async () => {
+      // Caught in review. The failed path writes tx_hash: null and
+      // status: 'failed', and the next scan overwrites `error`. Detecting the
+      // failure from the error code lost it entirely at that point: a wallet
+      // that earned but was never paid looked like it had never been tried.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: null,
+          // The send failed long ago; this is a later scan's eligibility code.
+          error: 'below_min_followers',
+          follower_count: 0,
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding).toBeDefined();
+      expect(onboarding?.status).toBe('failed');
+      expect(result.summary.payouts_failed).toBe(1);
+    });
+
+    it('does not show a later scan error as the payout error', async () => {
+      // Caught in review. `error` is shared between payout state and
+      // eligibility codes. Showing `below_min_followers` under a settled
+      // payout reads as "the send failed" — a lie about money that arrived.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+          error: 'below_min_followers',
+          follower_count: 0,
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding?.status).toBe('paid');
+      expect(onboarding?.error).toBeNull();
+      // The blocker is still reported — as eligibility, where it belongs.
+      expect(result.users[0].eligibility.code).toBe('below_min_followers');
+    });
+
     it('does not call a never-scanned wallet eligible', async () => {
       // Nothing evaluates these rewards on a schedule -- only the user pressing
       // "Check rewards" triggers a scan. A wallet that linked X and never came
