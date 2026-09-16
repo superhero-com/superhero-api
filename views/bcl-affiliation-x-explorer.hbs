@@ -115,9 +115,17 @@
   </div>
 
   <div class="note">
+    <strong>Two different codes, do not confuse them.</strong>
+    A <em>post referral code</em> (<span class="mono">?ref=</span>) is what a
+    user puts in their own X posts to earn per-post rewards — it records no
+    person-to-person link, so a user can have one while having invited nobody.
+    An <em>invite link</em> (<span class="mono">?xInvite=</span>) is how you
+    invite a person; taking one binds invitee to inviter, and it is the only
+    edge the tree below can be drawn from.
+    <br /><br />
     The date range filters the <strong>chart</strong> only. The tables and the
-    referral tree always show the most recent wallets, so a range with no
-    activity does not make the page look empty when the flow does have users.
+    tree always show the most recent wallets, so a range with no activity does
+    not make the page look empty when the flow does have users.
   </div>
 
   <div class="stats-grid">
@@ -132,23 +140,23 @@
       <div class="value" id="sPending">-</div>
     </div>
     <div class="stat-card">
-      <h2>Referral links issued</h2>
-      <div class="subtitle">Invite codes minted by verified users.</div>
+      <h2>Invite links created</h2>
+      <div class="subtitle"><span class="mono">?xInvite=</span> links users have made.</div>
       <div class="value" id="sIssued">-</div>
     </div>
     <div class="stat-card">
-      <h2>Referral links taken</h2>
-      <div class="subtitle">Codes someone actually bound.</div>
+      <h2>Invite links taken</h2>
+      <div class="subtitle">Of those, the ones someone bound.</div>
       <div class="value" id="sBound">-</div>
     </div>
   </div>
 
   <div class="card">
-    <h2>Verifications and referral links over time</h2>
+    <h2>Verifications and invite links over time</h2>
     <div class="hint">
-      Two separate things on one axis: wallets completing verification, and
-      referral links being handed out. Links running far ahead of verifications
-      means the invites are not converting.
+      Two separate things on one axis: wallets completing X verification, and
+      <span class="mono">?xInvite=</span> links being created. Links running far
+      ahead of verifications means the invites are not converting.
     </div>
     <div style="height: 300px;"><canvas id="timeChart"></canvas></div>
   </div>
@@ -162,7 +170,9 @@
           <tr>
             <th>X username</th><th>Wallet</th><th>Verified</th>
             <th>Followers</th><th>Posts</th><th>Streak</th>
-            <th>Referral code</th><th>Invites</th><th>Status</th>
+            <th title="The ?ref= code they put in their X posts. Not a person-to-person link.">Post referral code</th>
+            <th title="?xInvite= links: taken / created.">Invite links</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody id="verifiedRows"></tbody>
@@ -202,12 +212,13 @@
   </div>
 
   <div class="card">
-    <h2>Referral tree</h2>
+    <h2>Invite tree</h2>
     <div class="hint">
-      Each verified user with the people they invited underneath. A dashed grey
-      box is a real, empty slot — the user is active and can invite, nobody has
-      taken it yet. Those fill in as invitees join and link their own X account.
-      Click a node with invitees to expand or collapse it.
+      Each verified user with the people they invited underneath, built from
+      <span class="mono">?xInvite=</span> links. A dashed grey box is a real,
+      empty slot — the user is active and can invite, nobody has taken it yet.
+      Those fill in as invitees join and link their own X account. Click a node
+      with invitees to expand or collapse it.
     </div>
     <div id="tree" class="tree"></div>
     <div id="treeEmpty" class="empty" style="display:none;">No verified users to chart yet.</div>
@@ -245,10 +256,10 @@
         <td>${u.follower_count ?? '—'}</td>
         <td>${u.qualified_posts_count}</td>
         <td>${u.current_streak_days}</td>
-        <td class="mono">${u.referral_link
-          ? `<a href="${esc(u.referral_link)}" target="_blank" rel="noopener">${esc(u.referral_code)}</a>`
+        <td class="mono">${u.post_referral_link
+          ? `<a href="${esc(u.post_referral_link)}" target="_blank" rel="noopener">${esc(u.post_referral_code)}</a>`
           : '—'}</td>
-        <td>${u.invites_bound}/${u.invites_issued}</td>
+        <td>${u.invite_links_taken}/${u.invite_links_created}</td>
         <td>${statusPill(u)}</td>
       </tr>`).join('');
     document.getElementById('verifiedEmpty').style.display = d.users.length ? 'none' : 'block';
@@ -283,9 +294,9 @@
       ['Follower tier', (u) => (u.follower_tier_index ?? '—')],
       ['Qualifying posts', (u) => u.qualified_posts_count],
       ['Current streak', (u) => u.current_streak_days],
-      ['Referral code', (u) => u.referral_code || '—'],
-      ['Invites issued', (u) => u.invites_issued],
-      ['Invites taken', (u) => u.invites_bound],
+      ['Post referral code', (u) => u.post_referral_code || '—'],
+      ['Invite links created', (u) => u.invite_links_created],
+      ['Invite links taken', (u) => u.invite_links_taken],
       ['Last checked', (u) => day(u.last_x_api_scan_at)],
       ['Status', (u) => u.status || '—'],
       ['Error', (u) => u.error || '—'],
@@ -307,12 +318,13 @@
   }
 
   function inviteeNode(inv) {
-    // A bound invitee is a real person; an unbound code is an empty slot the
+    // A bound invitee is a real person; an unbound link is an empty slot the
     // owner is still holding. Both are true states worth seeing.
     if (!inv.address) {
       return `<div class="node"><div class="box slot">
         <div class="name">Open invite</div>
-        <div class="sub">code issued · not taken</div>
+        <div class="sub mono">${esc(inv.invite_code)}</div>
+        <div class="sub">link created · not taken</div>
       </div></div>`;
     }
     const verified = !!inv.verified_at;
@@ -326,8 +338,8 @@
   function placeholderSlots(n) {
     return Array.from({ length: n }, () => `
       <div class="node"><div class="box slot">
-        <div class="name">Not invited yet</div>
-        <div class="sub">fills in when they invite someone</div>
+        <div class="name">No invite yet</div>
+        <div class="sub">fills in when they create an invite link</div>
       </div></div>`).join('');
   }
 
@@ -347,7 +359,7 @@
            ${hasInvitees ? `onclick="toggleNode(${i})"` : ''}>
         <div class="name">${esc(handle(u.x_username) || shortAddr(u.address))}</div>
         <div class="sub mono">${esc(shortAddr(u.address))}</div>
-        <div class="sub">${u.invites_bound}/${u.invites_issued} invites taken</div>
+        <div class="sub">${u.invite_links_taken}/${u.invite_links_created} invite links taken</div>
       </div>
       ${hasInvitees ? `<button class="toggle" onclick="toggleNode(${i})">${isCollapsed ? '▸ expand' : '▾ collapse'}</button>` : ''}
       ${children}
@@ -384,8 +396,8 @@
             tension: 0.25,
           },
           {
-            label: 'Referral links issued',
-            data: series.map((p) => p.referral_links),
+            label: 'Invite links created',
+            data: series.map((p) => p.invite_links),
             borderColor: '#2563eb',
             backgroundColor: 'rgba(37,99,235,0.1)',
             tension: 0.25,
@@ -420,8 +432,8 @@
     document.getElementById('queryMs').textContent = 'queryMs: ' + d.queryMs;
     document.getElementById('sVerified').textContent = d.summary.verified_users;
     document.getElementById('sPending').textContent = d.summary.pending_users;
-    document.getElementById('sIssued').textContent = d.summary.referral_links_issued;
-    document.getElementById('sBound').textContent = d.summary.referral_links_bound;
+    document.getElementById('sIssued').textContent = d.summary.invite_links_created;
+    document.getElementById('sBound').textContent = d.summary.invite_links_taken;
 
     renderTables(d);
     renderCompare(d.users);

@@ -9,6 +9,7 @@ import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-rewa
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
 import {
+  PROFILE_X_INVITE_LINK_BASE_URL,
   PROFILE_X_REFERRAL_LINK_BASE_URL,
   PROFILE_X_REWARD_MIN_FOLLOWERS,
   X_INFORMATIONAL_ERROR_CODES,
@@ -83,23 +84,45 @@ export type BclXOnboardingBlocker = {
   count: number;
 };
 
-/** One address someone referred, and how far that referral itself got. */
+/**
+ * One `?xInvite=` link a user created, and how far the person who took it got.
+ *
+ * Unbound links keep a null address on purpose: "a link is out and nobody has
+ * taken it" is a state worth seeing, not one to hide.
+ */
 export type BclXExplorerInvitee = {
   address: string | null;
   x_username: string | null;
   verified_at: string | null;
   bound_at: string | null;
-  /** `active` = code issued, nobody bound it yet. `bound` = someone took it. */
+  /** `active` = link created, nobody bound it yet. `bound` = someone took it. */
   status: string;
+  invite_code: string;
+  invite_link: string;
 };
 
-/** A wallet in the X flow, verified or still on the way. */
+/**
+ * A wallet in the X flow, verified or still on the way.
+ *
+ * Two unrelated codes live on this record and must not be conflated:
+ *
+ * - `post_referral_code` / `post_referral_link` (`?ref=`) is the code the user
+ *   puts in their own X POSTS. A matching post earns a per-post reward. It
+ *   creates no person-to-person edge and nothing counts who saw it.
+ * - `invite_*` (`?xInvite=`) is the invite-a-person link. Taking one writes a
+ *   `profile_x_invites` row binding inviter to invitee, and that is the only
+ *   edge the referral tree can be drawn from.
+ *
+ * Naming them both "referral" is what made an earlier version of this
+ * dashboard read as broken: a user with a referral code sat next to a count of
+ * zero referral links, which are two different true facts.
+ */
 export type BclXExplorerUser = {
   address: string;
   x_username: string | null;
   verified_at: string | null;
-  referral_code: string | null;
-  referral_link: string | null;
+  post_referral_code: string | null;
+  post_referral_link: string | null;
   follower_count: number | null;
   follower_tier_index: number | null;
   qualified_posts_count: number;
@@ -108,16 +131,39 @@ export type BclXExplorerUser = {
   error: string | null;
   last_x_api_scan_at: string | null;
   created_at: string | null;
-  invites_issued: number;
-  invites_bound: number;
+  invite_links_created: number;
+  invite_links_taken: number;
   invitees: BclXExplorerInvitee[];
 };
 
 export type BclXExplorerDailyPoint = {
   date: string;
   verified: number;
-  referral_links: number;
+  invite_links: number;
 };
+
+/**
+ * The `?ref=` link a user drops into their X posts, built the way
+ * `ProfileXPostingRewardService.buildReferralLink` builds it — the dashboard
+ * must show the string the user was actually handed, not an approximation.
+ */
+function buildPostReferralLink(code: string): string {
+  if (!PROFILE_X_REFERRAL_LINK_BASE_URL) return code;
+  const base = PROFILE_X_REFERRAL_LINK_BASE_URL.replace(/\/+$/, '');
+  return `${base}?ref=${encodeURIComponent(code)}`;
+}
+
+/**
+ * The `?xInvite=` link, mirroring `ProfileXInviteService.buildInviteLink`,
+ * including its fallback of returning the bare code when the base URL is
+ * unset — which is what a deployment missing PROFILE_X_INVITE_LINK_BASE_URL
+ * actually gave the user.
+ */
+function buildInviteLink(code: string): string {
+  if (!PROFILE_X_INVITE_LINK_BASE_URL) return code;
+  const base = PROFILE_X_INVITE_LINK_BASE_URL.replace(/\/+$/, '');
+  return `${base}?xInvite=${encodeURIComponent(code)}`;
+}
 
 export type BclXOnboardingTierPoint = {
   tier_index: number | null;
@@ -1087,7 +1133,7 @@ export class BclAffiliationAnalyticsService {
   }
 
   /**
-   * Per-wallet view of the X flow, plus each wallet's referral subtree.
+   * Per-wallet view of the X flow, plus each wallet's invite subtree.
    *
    * The aggregate dashboards answer "how many"; this answers "who", which is
    * the question actually asked when the flow looks broken. It deliberately
@@ -1096,12 +1142,13 @@ export class BclAffiliationAnalyticsService {
    * different situation from nobody having tried, and the counts alone cannot
    * tell those apart.
    *
-   * Invitees come from `profile_x_invites`, which is the referral edge the
-   * product actually creates (`inviter_address` → `invitee_address` once a
-   * code is bound). An issued-but-unbound code is returned too, with a null
-   * address: that is a real, meaningful state — someone has a link out and
-   * nobody has taken it — and the UI draws it as an empty slot rather than
-   * hiding it.
+   * The tree is built from `profile_x_invites` (`?xInvite=` links), which is
+   * the only inviter → invitee edge the product records. The `?ref=` post
+   * referral code is a different mechanism entirely and is reported per user
+   * rather than as an edge — see `BclXExplorerUser`. An unbound invite link is
+   * returned too, with a null address: that is a real, meaningful state —
+   * someone has a link out and nobody has taken it — and the UI draws it as an
+   * empty slot rather than hiding it.
    */
   async getXExplorerData(params: {
     start_date?: string;
@@ -1113,8 +1160,8 @@ export class BclAffiliationAnalyticsService {
     summary: {
       verified_users: number;
       pending_users: number;
-      referral_links_issued: number;
-      referral_links_bound: number;
+      invite_links_created: number;
+      invite_links_taken: number;
     };
     queryMs: number;
   }> {
@@ -1175,9 +1222,9 @@ export class BclAffiliationAnalyticsService {
         address: r.address,
         x_username: r.x_username ?? null,
         verified_at: iso(r.verified_at),
-        referral_code: r.referral_code ?? null,
-        referral_link: r.referral_code
-          ? `${PROFILE_X_REFERRAL_LINK_BASE_URL.replace(/\/+$/, '')}?ref=${encodeURIComponent(r.referral_code)}`
+        post_referral_code: r.referral_code ?? null,
+        post_referral_link: r.referral_code
+          ? buildPostReferralLink(r.referral_code)
           : null,
         follower_count: r.follower_count ?? null,
         follower_tier_index: r.follower_tier_index ?? null,
@@ -1187,8 +1234,8 @@ export class BclAffiliationAnalyticsService {
         error: r.error ?? null,
         last_x_api_scan_at: iso(r.last_x_api_scan_at),
         created_at: iso(r.created_at),
-        invites_issued: mine.length,
-        invites_bound: mine.filter((i) => !!i.invitee_address).length,
+        invite_links_created: mine.length,
+        invite_links_taken: mine.filter((i) => !!i.invitee_address).length,
         invitees: mine.map((i) => {
           const invitee = i.invitee_address
             ? byAddress.get(i.invitee_address)
@@ -1199,6 +1246,8 @@ export class BclAffiliationAnalyticsService {
             verified_at: iso(invitee?.verified_at),
             bound_at: iso(i.bound_at),
             status: i.status,
+            invite_code: i.code,
+            invite_link: buildInviteLink(i.code),
           };
         }),
       };
@@ -1208,7 +1257,7 @@ export class BclAffiliationAnalyticsService {
     const users = all.filter((u) => !!u.verified_at);
     const pending = all.filter((u) => !u.verified_at);
 
-    // Two lines on one chart: verifications, and referral links handed out.
+    // Two lines on one chart: verifications, and invite links created.
     // Bucketed in memory because both sides are already loaded and the row
     // count here is bounded by the limit above.
     const buckets = new Map<string, { verified: number; links: number }>();
@@ -1235,7 +1284,7 @@ export class BclAffiliationAnalyticsService {
       series.push({
         date: day,
         verified: b?.verified ?? 0,
-        referral_links: b?.links ?? 0,
+        invite_links: b?.links ?? 0,
       });
       cursor.add(1, 'day');
     }
@@ -1247,8 +1296,8 @@ export class BclAffiliationAnalyticsService {
       summary: {
         verified_users: users.length,
         pending_users: pending.length,
-        referral_links_issued: invites.length,
-        referral_links_bound: invites.filter((i) => !!i.invitee_address).length,
+        invite_links_created: invites.length,
+        invite_links_taken: invites.filter((i) => !!i.invitee_address).length,
       },
       queryMs: Date.now() - start,
     };
