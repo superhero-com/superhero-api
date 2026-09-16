@@ -363,6 +363,78 @@ describe('BclAffiliationAnalyticsService', () => {
       expect(eligibility.code).toBe('below_min_followers');
     });
 
+    it('still reports a blocker on a wallet that was paid earlier', async () => {
+      // Caught in review. `status` and `error` describe different moments: the
+      // onboarding payout sets status='paid' once and it stays, while every
+      // later scan overwrites `error` on the same row. Reading paid as
+      // "currently fine" hid exactly the wallets that stopped qualifying.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          follower_count: 0,
+          error: 'below_min_followers',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+        },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.code).toBe('below_min_followers');
+      expect(eligibility.detail).toContain('was paid earlier');
+      expect(result.summary.eligible_users).toBe(0);
+    });
+
+    it('counts the onboarding payout, which lives on the reward row not the ledger', async () => {
+      // Caught in review. profile_x_post_reward_ledger only ever receives
+      // reward_kind 'per_post'; the onboarding send writes tx_hash and status
+      // straight onto profile_x_posting_rewards. Reading only the ledger
+      // dropped every onboarding payout from the list, links and totals.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          follower_count: 500,
+          error: null,
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding).toBeDefined();
+      expect(onboarding?.status).toBe('paid');
+      expect(onboarding?.explorer_url).toBe(
+        `${result.explorer_base_url}/transactions/th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ`,
+      );
+      expect(result.summary.payouts_paid).toBe(1);
+    });
+
+    it('does not invent an onboarding payout for a wallet that never had one', async () => {
+      const result = await run({
+        reward: { status: 'pending', error: null, tx_hash: null },
+      });
+
+      expect(result.users[0].payouts).toEqual([]);
+      expect(result.users[0].total_ae_paid).toBe('0');
+    });
+
+    it('does not link the onboarding in-progress sentinel', async () => {
+      const result = await run({
+        reward: {
+          status: 'pending',
+          error: null,
+          tx_hash: '__posting_reward_payout_in_progress__',
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.kind).toBe('onboarding');
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.tx_hash).toBeNull();
+      expect(onboarding.explorer_url).toBeNull();
+      expect(result.users[0].total_ae_paid).toBe('0');
+    });
+
     it('does not treat a truncated scan as a failure', async () => {
       // A truncated scan is a COMPLETED check that hit the per-check post
       // limit. Filing it as "not eligible" is a bug this pipeline has already

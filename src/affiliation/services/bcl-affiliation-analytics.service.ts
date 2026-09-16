@@ -14,6 +14,7 @@ import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-rewa
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
 import {
   PROFILE_X_INVITE_LINK_BASE_URL,
+  PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
   PROFILE_X_REFERRAL_LINK_BASE_URL,
   PROFILE_X_REWARD_MIN_FOLLOWERS,
   X_INFORMATIONAL_ERROR_CODES,
@@ -257,10 +258,7 @@ function describeEligibility(
 ): BclXExplorerEligibility {
   const code = reward.error ?? null;
   const followers = reward.follower_count;
-
-  if (reward.status === 'paid') {
-    return { eligible: true, label: 'Earning', detail: 'Paid out', code: null };
-  }
+  const paid = reward.status === 'paid';
 
   // A truncated scan is a COMPLETED check that hit the per-check post limit.
   // It sits in `error` but is not a failure, and calling it one here would
@@ -274,12 +272,35 @@ function describeEligibility(
     };
   }
 
+  // `status` and `error` describe DIFFERENT moments, and an earlier version of
+  // this function read `status === 'paid'` as "currently fine" and discarded
+  // the code. It is not: the onboarding payout sets status='paid' once and it
+  // stays there forever, while every later scan overwrites `error` on the same
+  // row (reconcileConfirmationPending says so in its own comment — tx_hash and
+  // status persist, error does not). So a wallet that was paid and has since
+  // dropped below the follower gate carries both, and treating paid as healthy
+  // hid exactly the wallets that stopped qualifying. The error decides the
+  // verdict; being paid only colours it.
+  if (!code) {
+    return {
+      eligible: true,
+      label: 'Eligible',
+      detail: paid ? 'Paid; no blocker recorded' : 'No blocker recorded',
+      code: null,
+    };
+  }
+
   switch (code) {
     case 'below_min_followers':
       return {
         eligible: false,
         label: 'Not eligible — too few followers',
-        detail: `${followers ?? 0} followers, needs ${PROFILE_X_REWARD_MIN_FOLLOWERS}`,
+        detail:
+          `${followers ?? 0} followers, needs ${PROFILE_X_REWARD_MIN_FOLLOWERS}` +
+          // Worth saying out loud: this wallet HAS been paid and has since
+          // stopped qualifying, which is a different situation from one that
+          // never qualified at all.
+          (paid ? ' (was paid earlier, no longer qualifying)' : ''),
         code,
       };
     case 'follower_count_unavailable':
@@ -343,13 +364,6 @@ function describeEligibility(
         label: 'Eligible — payout in flight',
         detail: 'Sent, awaiting confirmation',
         code,
-      };
-    case null:
-      return {
-        eligible: true,
-        label: 'Eligible',
-        detail: 'No blocker recorded',
-        code: null,
       };
     default:
       // An unmapped code must not read as "fine". Say plainly that it is
@@ -1459,13 +1473,49 @@ export class BclAffiliationAnalyticsService {
       list.push(payout);
       payoutsByAddress.set(address, list);
     };
+    // The onboarding payout is NOT in the ledger, which is easy to assume and
+    // wrong: `profile_x_post_reward_ledger` only ever receives
+    // `reward_kind: 'per_post'` (its sole writer), while the onboarding send
+    // writes `tx_hash` and `status` straight onto the profile_x_posting_rewards
+    // row. Reading only the ledger dropped every onboarding payout from the
+    // list, the explorer links and the totals. Caught in review on #210.
+    for (const r of rows) {
+      const inFlight = !!r.tx_hash && !isRealTxHash(r.tx_hash);
+      const attempted =
+        r.status === 'paid' ||
+        !!r.tx_hash ||
+        r.error === 'payout_send_failed' ||
+        r.error === 'payout_confirmation_pending';
+      if (!attempted) continue;
+
+      const status =
+        r.status === 'paid'
+          ? 'paid'
+          : r.error === 'payout_send_failed'
+            ? 'failed'
+            : 'pending';
+      addPayout(r.address, {
+        kind: 'onboarding',
+        label: 'Onboarding reward',
+        // This row records no amount, unlike every other reward table, so this
+        // is the CURRENTLY configured value rather than what was actually sent
+        // — said plainly in `detail` rather than passed off as a recorded fact.
+        amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
+        status,
+        tx_hash: isRealTxHash(r.tx_hash) ? r.tx_hash : null,
+        explorer_url: explorerTxUrl(r.tx_hash),
+        created_at: iso(r.verified_at) ?? iso(r.created_at),
+        detail: inFlight
+          ? 'send in progress; amount from current config'
+          : 'amount from current config, not recorded on the row',
+        error: r.error ?? null,
+      });
+    }
+
     for (const l of perPostRows) {
       addPayout(l.address, {
-        kind: l.reward_kind === 'onboarding' ? 'onboarding' : 'per_post',
-        label:
-          l.reward_kind === 'onboarding'
-            ? 'Onboarding reward'
-            : 'Per-post reward',
+        kind: 'per_post',
+        label: 'Per-post reward',
         amount_ae: aettosToAe(l.amount_aettos),
         status: l.status,
         tx_hash: isRealTxHash(l.tx_hash) ? l.tx_hash : null,
