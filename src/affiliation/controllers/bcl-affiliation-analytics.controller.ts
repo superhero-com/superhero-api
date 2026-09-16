@@ -153,7 +153,7 @@ export class BclAffiliationAnalyticsController {
   @ApiOperation({
     operationId: 'getBclAffiliationXExplorer',
     summary:
-      "Per-wallet X verification detail, including each wallet's referral subtree",
+      "Per-wallet X verification detail, including each wallet's invite subtree",
   })
   async getXExplorer(
     @Query('start_date') start_date?: string,
