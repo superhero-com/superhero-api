@@ -14,6 +14,7 @@ import { BclAffiliationAnalyticsController } from './controllers/bcl-affiliation
 import { BclAffiliationTreeController } from './controllers/bcl-affiliation-tree.controller';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
+import { ProfileXInviteMilestoneReward } from '@/profile/entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
@@ -28,6 +29,7 @@ import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-b
       Invitation,
       Tx,
       ProfileXInvite,
+      ProfileXInviteMilestoneReward,
       ProfileXPostingReward,
       ProfileXPostRewardLedger,
       ProfileXStreakBonusReward,

@@ -2,17 +2,23 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import moment from 'moment';
+import BigNumber from 'bignumber.js';
+import { toAe } from '@aeternity/aepp-sdk';
 import { Invitation } from '../entities/invitation.entity';
+import { ACTIVE_NETWORK } from '@/configs/network';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
+import { ProfileXInviteMilestoneReward } from '@/profile/entities/profile-x-invite-milestone-reward.entity';
 import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
 import {
   PROFILE_X_INVITE_LINK_BASE_URL,
+  PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
   PROFILE_X_REFERRAL_LINK_BASE_URL,
   PROFILE_X_REWARD_MIN_FOLLOWERS,
   X_INFORMATIONAL_ERROR_CODES,
+  isInformationalXError,
 } from '@/profile/profile.constants';
 
 export type BclAffiliationDailyPoint = {
@@ -134,6 +140,51 @@ export type BclXExplorerUser = {
   invite_links_created: number;
   invite_links_taken: number;
   invitees: BclXExplorerInvitee[];
+  eligibility: BclXExplorerEligibility;
+  payouts: BclXExplorerPayout[];
+  total_ae_paid: string;
+  explorer_account_url: string;
+};
+
+/**
+ * Why a wallet is or is not currently earning, in operator language.
+ *
+ * `ProfileXPostingRewardService.toPublicError` says the same thing to the user
+ * in second person ("Your X account needs at least N followers"). This is the
+ * other audience: it names the gate and the wallet's own numbers against it, so
+ * "not eligible" is never a bare code you have to go look up.
+ */
+export type BclXExplorerEligibility = {
+  eligible: boolean;
+  /** Short verdict for the badge, e.g. "Not eligible — too few followers". */
+  label: string;
+  /** The measurement behind the verdict, e.g. "0 followers, needs 100". */
+  detail: string | null;
+  /** The raw pipeline code, kept so the page never hides the ground truth. */
+  code: string | null;
+};
+
+/**
+ * One on-chain payout attempt, from whichever reward table recorded it.
+ *
+ * `explorer_url` is null unless the hash is a real one. The payout services
+ * park sentinel strings in `tx_hash` while a send is in flight
+ * (`__streak_bonus_payout_in_progress__` and friends), and linking one of those
+ * to a block explorer would produce a confident 404 — worse than showing
+ * nothing. Requiring the `th_` prefix rejects every sentinel, including any
+ * added after this was written.
+ */
+export type BclXExplorerPayout = {
+  kind: 'onboarding' | 'per_post' | 'streak_bonus' | 'invite_milestone';
+  label: string;
+  amount_ae: string | null;
+  status: string;
+  tx_hash: string | null;
+  explorer_url: string | null;
+  created_at: string | null;
+  /** What earned it, e.g. "10-day streak" or "5 invites". */
+  detail: string | null;
+  error: string | null;
 };
 
 export type BclXExplorerDailyPoint = {
@@ -141,6 +192,40 @@ export type BclXExplorerDailyPoint = {
   verified: number;
   invite_links: number;
 };
+
+/**
+ * A real æternity transaction hash, as opposed to one of the in-progress
+ * sentinels the payout services write into `tx_hash` while a send is mid-flight.
+ * Every genuine hash is `th_`-prefixed base58; no sentinel is.
+ */
+function isRealTxHash(txHash: string | null | undefined): txHash is string {
+  return !!txHash && /^th_[1-9A-HJ-NP-Za-km-z]+$/.test(txHash);
+}
+
+function explorerTxUrl(txHash: string | null | undefined): string | null {
+  if (!isRealTxHash(txHash)) return null;
+  const base = (ACTIVE_NETWORK?.explorerUrl || '').replace(/\/+$/, '');
+  return base ? `${base}/transactions/${txHash}` : null;
+}
+
+function explorerAccountUrl(address: string): string {
+  const base = (ACTIVE_NETWORK?.explorerUrl || '').replace(/\/+$/, '');
+  return base ? `${base}/accounts/${address}` : '';
+}
+
+/**
+ * Amounts are stored in aettos. Formatted here rather than in the browser
+ * because 50 AE is 5e19 aettos — past Number.MAX_SAFE_INTEGER, so parsing it
+ * as a JS number in the page would quietly round it.
+ */
+function aettosToAe(amountAettos: string | null | undefined): string | null {
+  if (!amountAettos) return null;
+  try {
+    return new BigNumber(toAe(amountAettos)).toFixed();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The `?ref=` link a user drops into their X posts, built the way
@@ -159,6 +244,155 @@ function buildPostReferralLink(code: string): string {
  * unset — which is what a deployment missing PROFILE_X_INVITE_LINK_BASE_URL
  * actually gave the user.
  */
+/**
+ * Turn a pipeline error code into an operator-readable verdict.
+ *
+ * The codes come from `ProfileXPostingRewardService`; the follower threshold is
+ * read from the same constant the gate itself uses, so if
+ * PROFILE_X_REWARD_MIN_FOLLOWERS changes the dashboard follows rather than
+ * printing a stale number. The raw code travels alongside the prose — an
+ * operator debugging a wallet needs the string that is actually in the column.
+ */
+function describeEligibility(
+  reward: ProfileXPostingReward,
+): BclXExplorerEligibility {
+  const code = reward.error ?? null;
+  const followers = reward.follower_count;
+  const paid = reward.status === 'paid';
+
+  // A truncated scan is a COMPLETED check that hit the per-check post limit.
+  // It sits in `error` but is not a failure, and calling it one here would
+  // repeat a bug already fixed twice in this pipeline.
+  if (isInformationalXError(code)) {
+    return {
+      eligible: true,
+      label: 'Eligible',
+      detail: 'Latest scan hit the per-check post limit',
+      code,
+    };
+  }
+
+  // `status` and `error` describe DIFFERENT moments, and an earlier version of
+  // this function read `status === 'paid'` as "currently fine" and discarded
+  // the code. It is not: the onboarding payout sets status='paid' once and it
+  // stays there forever, while every later scan overwrites `error` on the same
+  // row (reconcileConfirmationPending says so in its own comment — tx_hash and
+  // status persist, error does not). So a wallet that was paid and has since
+  // dropped below the follower gate carries both, and treating paid as healthy
+  // hid exactly the wallets that stopped qualifying. The error decides the
+  // verdict; being paid only colours it.
+  if (!code) {
+    // No error is NOT the same as no problem. Nothing evaluates these rewards
+    // on a schedule: the only thing that scans an X account is the user
+    // pressing "Check rewards", which signs a challenge and calls the recheck
+    // endpoint. A wallet that linked X and never came back has never been
+    // looked at — null scan timestamp, null follower count — and calling that
+    // "Eligible" is the same "unknown looks healthy" failure the default case
+    // below exists to prevent. Observed live: a wallet linked on-chain in June
+    // still had no scan of any kind months later.
+    if (!paid && !reward.last_x_api_scan_at) {
+      return {
+        eligible: false,
+        label: 'Not evaluated — never scanned',
+        detail: 'Linked X, but no check has ever run for this wallet',
+        code: null,
+      };
+    }
+    return {
+      eligible: true,
+      label: 'Eligible',
+      detail: paid ? 'Paid; no blocker recorded' : 'No blocker recorded',
+      code: null,
+    };
+  }
+
+  switch (code) {
+    case 'below_min_followers':
+      return {
+        eligible: false,
+        label: 'Not eligible — too few followers',
+        detail:
+          `${followers ?? 0} followers, needs ${PROFILE_X_REWARD_MIN_FOLLOWERS}` +
+          // Worth saying out loud: this wallet HAS been paid and has since
+          // stopped qualifying, which is a different situation from one that
+          // never qualified at all.
+          (paid ? ' (was paid earlier, no longer qualifying)' : ''),
+        code,
+      };
+    case 'follower_count_unavailable':
+      return {
+        eligible: false,
+        label: 'Not eligible — follower count unreadable',
+        detail: `X did not return a follower count; the gate needs ${PROFILE_X_REWARD_MIN_FOLLOWERS}`,
+        code,
+      };
+    case 'missing_x_username':
+      return {
+        eligible: false,
+        label: 'Not eligible — no X account linked',
+        detail: null,
+        code,
+      };
+    case 'x_user_lookup_failed':
+    case 'x_user_lookup_blocked':
+      return {
+        eligible: false,
+        label: 'Not eligible — X account could not be resolved',
+        detail:
+          code === 'x_user_lookup_blocked'
+            ? 'Failed repeatedly; the user must re-link X'
+            : 'Single lookup failure',
+        code,
+      };
+    case 'x_identity_already_rewarded':
+      return {
+        eligible: false,
+        label: 'Not eligible — X account already claimed',
+        detail: 'Another wallet is already earning with this X identity',
+        code,
+      };
+    case 'x_posts_fetch_failed':
+      return {
+        eligible: false,
+        label: 'Blocked — posts could not be read',
+        detail: 'Transient; retried on the next check',
+        code,
+      };
+    case 'post_fetch_disabled':
+    case 'missing_keywords':
+    case 'invalid_address':
+      return {
+        eligible: false,
+        label: 'Blocked — program misconfigured',
+        detail: 'Not the user’s fault; a server setting is missing',
+        code,
+      };
+    case 'payout_send_failed':
+      return {
+        eligible: true,
+        label: 'Eligible — payout failed',
+        detail: 'Earned, but the on-chain send did not go through',
+        code,
+      };
+    case 'payout_confirmation_pending':
+      return {
+        eligible: true,
+        label: 'Eligible — payout in flight',
+        detail: 'Sent, awaiting confirmation',
+        code,
+      };
+    default:
+      // An unmapped code must not read as "fine". Say plainly that it is
+      // unrecognised and show it, rather than inventing a meaning for it.
+      return {
+        eligible: false,
+        label: 'Not eligible — unrecognised state',
+        detail: 'No description for this code yet',
+        code,
+      };
+  }
+}
+
 function buildInviteLink(code: string): string {
   if (!PROFILE_X_INVITE_LINK_BASE_URL) return code;
   const base = PROFILE_X_INVITE_LINK_BASE_URL.replace(/\/+$/, '');
@@ -210,6 +444,8 @@ export class BclAffiliationAnalyticsService {
     private readonly postRewardLedgerRepo: Repository<ProfileXPostRewardLedger>,
     @InjectRepository(ProfileXStreakBonusReward)
     private readonly streakBonusRepo: Repository<ProfileXStreakBonusReward>,
+    @InjectRepository(ProfileXInviteMilestoneReward)
+    private readonly inviteMilestoneRepo: Repository<ProfileXInviteMilestoneReward>,
   ) {}
 
   async getDashboardData(params: {
@@ -1162,7 +1398,19 @@ export class BclAffiliationAnalyticsService {
       pending_users: number;
       invite_links_created: number;
       invite_links_taken: number;
+      eligible_users: number;
+      /**
+       * Linked X and never scanned once. Nothing scans on a schedule, so this
+       * is the number of people waiting on a check that will not happen until
+       * they come back and press the button themselves.
+       */
+      never_scanned_users: number;
+      total_ae_paid: string;
+      payouts_paid: number;
+      payouts_failed: number;
     };
+    min_followers: number;
+    explorer_base_url: string;
     queryMs: number;
   }> {
     const { startDate, endDate } = this.parseDateRange(params);
@@ -1216,8 +1464,155 @@ export class BclAffiliationAnalyticsService {
     const iso = (d: Date | null | undefined) =>
       d instanceof Date ? d.toISOString() : null;
 
+    // Every table that can hold an on-chain payout, one bulk query each, so
+    // "did this wallet actually get paid" is answered from the ledgers rather
+    // than inferred from a status column. Three separate programs pay out here
+    // (onboarding, per-post, the streak bonus) plus invite milestones, and a
+    // page that showed only one of them would be quietly wrong about the rest.
+    const [perPostRows, streakRows, milestoneRows] = addresses.length
+      ? await Promise.all([
+          this.postRewardLedgerRepo
+            .createQueryBuilder('l')
+            .where('l.address IN (:...addresses)', { addresses })
+            .orderBy('l.created_at', 'DESC')
+            .getMany(),
+          this.streakBonusRepo
+            .createQueryBuilder('s')
+            .where('s.address IN (:...addresses)', { addresses })
+            .orderBy('s.created_at', 'DESC')
+            .getMany(),
+          this.inviteMilestoneRepo
+            .createQueryBuilder('m')
+            .where('m.inviter_address IN (:...addresses)', { addresses })
+            .orderBy('m.created_at', 'DESC')
+            .getMany(),
+        ])
+      : [[], [], []];
+
+    const payoutsByAddress = new Map<string, BclXExplorerPayout[]>();
+    const addPayout = (address: string, payout: BclXExplorerPayout) => {
+      const list = payoutsByAddress.get(address) || [];
+      list.push(payout);
+      payoutsByAddress.set(address, list);
+    };
+    // The onboarding payout is NOT in the ledger, which is easy to assume and
+    // wrong: `profile_x_post_reward_ledger` only ever receives
+    // `reward_kind: 'per_post'` (its sole writer), while the onboarding send
+    // writes `tx_hash` and `status` straight onto the profile_x_posting_rewards
+    // row. Reading only the ledger dropped every onboarding payout from the
+    // list, the explorer links and the totals. Caught in review on #210.
+    for (const r of rows) {
+      const inFlight = !!r.tx_hash && !isRealTxHash(r.tx_hash);
+
+      // Detection keys on the DURABLE signals only. `error` is transient —
+      // every scan overwrites it — so an earlier version that looked for
+      // `payout_send_failed` lost a failed send the moment the next check ran:
+      // that path writes `tx_hash: null` and `status: 'failed'`, leaving
+      // nothing to find once the code was gone, and a wallet that earned but
+      // was never paid then looked like it had never been tried. On
+      // profile_x_posting_rewards `status: 'failed'` is written by exactly one
+      // place, the onboarding payout failure path, so it means this and
+      // nothing else.
+      const attempted =
+        r.status === 'paid' || r.status === 'failed' || !!r.tx_hash;
+      if (!attempted) continue;
+
+      // Precedence matters, and it is not "status first". A retry does not
+      // reset the column: claimOnboardingPayoutAttempt writes the in-progress
+      // sentinel into tx_hash, and the broadcast-but-unconfirmed path writes a
+      // real hash, and NEITHER touches `status`. So a row retrying after an
+      // earlier failure still reads status 'failed' — and ranking status above
+      // tx_hash printed "failed" beside a live th_ explorer link, or beside
+      // "send in progress". tx_hash is written later in the lifecycle than the
+      // failed status, so it wins: only a failed row with no hash at all is
+      // genuinely a dead send.
+      const status =
+        r.status === 'paid'
+          ? 'paid'
+          : r.tx_hash
+            ? 'pending'
+            : r.status === 'failed'
+              ? 'failed'
+              : 'pending';
+
+      // Only a payout error belongs on a payout row. This column is shared
+      // with the eligibility codes later scans write, and surfacing
+      // `below_min_followers` under a settled payout reads as "the send
+      // failed" — which would be a lie about money that did arrive.
+      const payoutError =
+        r.error === 'payout_send_failed' ||
+        r.error === 'payout_confirmation_pending'
+          ? r.error
+          : null;
+      addPayout(r.address, {
+        kind: 'onboarding',
+        label: 'Onboarding reward',
+        // This row records no amount, unlike every other reward table, so this
+        // is the CURRENTLY configured value rather than what was actually sent
+        // — said plainly in `detail` rather than passed off as a recorded fact.
+        amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
+        status,
+        tx_hash: isRealTxHash(r.tx_hash) ? r.tx_hash : null,
+        explorer_url: explorerTxUrl(r.tx_hash),
+        created_at: iso(r.verified_at) ?? iso(r.created_at),
+        detail: inFlight
+          ? 'send in progress; amount from current config'
+          : isRealTxHash(r.tx_hash) && r.status !== 'paid'
+            ? 'broadcast, awaiting confirmation; amount from current config'
+            : 'amount from current config, not recorded on the row',
+        error: payoutError,
+      });
+    }
+
+    for (const l of perPostRows) {
+      addPayout(l.address, {
+        kind: 'per_post',
+        label: 'Per-post reward',
+        amount_ae: aettosToAe(l.amount_aettos),
+        status: l.status,
+        tx_hash: isRealTxHash(l.tx_hash) ? l.tx_hash : null,
+        explorer_url: explorerTxUrl(l.tx_hash),
+        created_at: iso(l.created_at),
+        detail: l.tweet_utc_day ? `post on ${l.tweet_utc_day}` : null,
+        error: l.error ?? null,
+      });
+    }
+    for (const s of streakRows) {
+      addPayout(s.address, {
+        kind: 'streak_bonus',
+        label: 'Streak bonus',
+        amount_ae: aettosToAe(s.amount_aettos),
+        status: s.status,
+        tx_hash: isRealTxHash(s.tx_hash) ? s.tx_hash : null,
+        explorer_url: explorerTxUrl(s.tx_hash),
+        created_at: iso(s.created_at),
+        detail: `${s.streak_length}-day streak to ${s.streak_completed_day}`,
+        error: s.error ?? null,
+      });
+    }
+    for (const m of milestoneRows) {
+      addPayout(m.inviter_address, {
+        kind: 'invite_milestone',
+        label: 'Invite milestone',
+        // This table records no amount; the payout is a fixed configured value.
+        amount_ae: null,
+        status: m.status,
+        tx_hash: isRealTxHash(m.tx_hash) ? m.tx_hash : null,
+        explorer_url: explorerTxUrl(m.tx_hash),
+        created_at: iso(m.created_at),
+        detail: `${m.threshold} invites`,
+        error: m.error ?? null,
+      });
+    }
+
     const toUser = (r: (typeof rows)[number]): BclXExplorerUser => {
       const mine = invitesByInviter.get(r.address) || [];
+      const payouts = payoutsByAddress.get(r.address) || [];
+      // Only settled payouts count toward the total. Summing pending or failed
+      // rows would report money that never left the wallet.
+      const totalPaid = payouts
+        .filter((p) => p.status === 'paid' && p.amount_ae)
+        .reduce((sum, p) => sum.plus(p.amount_ae as string), new BigNumber(0));
       return {
         address: r.address,
         x_username: r.x_username ?? null,
@@ -1250,6 +1645,10 @@ export class BclAffiliationAnalyticsService {
             invite_link: buildInviteLink(i.code),
           };
         }),
+        eligibility: describeEligibility(r),
+        payouts,
+        total_ae_paid: totalPaid.toFixed(),
+        explorer_account_url: explorerAccountUrl(r.address),
       };
     };
 
@@ -1289,6 +1688,8 @@ export class BclAffiliationAnalyticsService {
       cursor.add(1, 'day');
     }
 
+    const allPayouts = [...users, ...pending].flatMap((u) => u.payouts);
+
     return {
       users,
       pending,
@@ -1298,7 +1699,22 @@ export class BclAffiliationAnalyticsService {
         pending_users: pending.length,
         invite_links_created: invites.length,
         invite_links_taken: invites.filter((i) => !!i.invitee_address).length,
+        eligible_users: all.filter((u) => u.eligibility.eligible).length,
+        never_scanned_users: all.filter(
+          (u) => !u.last_x_api_scan_at && u.status !== 'paid',
+        ).length,
+        total_ae_paid: allPayouts
+          .filter((p) => p.status === 'paid' && p.amount_ae)
+          .reduce((sum, p) => sum.plus(p.amount_ae as string), new BigNumber(0))
+          .toFixed(),
+        payouts_paid: allPayouts.filter((p) => p.status === 'paid').length,
+        payouts_failed: allPayouts.filter((p) => p.status === 'failed').length,
       },
+      min_followers: PROFILE_X_REWARD_MIN_FOLLOWERS,
+      explorer_base_url: (ACTIVE_NETWORK?.explorerUrl || '').replace(
+        /\/+$/,
+        '',
+      ),
       queryMs: Date.now() - start,
     };
   }

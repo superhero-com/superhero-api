@@ -1,15 +1,37 @@
 import { BclAffiliationAnalyticsService } from './bcl-affiliation-analytics.service';
 
+/**
+ * The constructor takes seven positional repositories, and each test cares
+ * about one or two of them. Naming them here means adding a repository is one
+ * edit rather than a padding line in every test, and a test that wants
+ * `postingRewardRepo` says so instead of counting `{} as any` placeholders.
+ */
+function makeService(
+  overrides: Partial<{
+    invitationRepo: any;
+    txRepo: any;
+    profileXInviteRepo: any;
+    postingRewardRepo: any;
+    postRewardLedgerRepo: any;
+    streakBonusRepo: any;
+    inviteMilestoneRepo: any;
+  }> = {},
+) {
+  const stub = () => ({}) as any;
+  return new BclAffiliationAnalyticsService(
+    overrides.invitationRepo ?? stub(),
+    overrides.txRepo ?? stub(),
+    overrides.profileXInviteRepo ?? stub(),
+    overrides.postingRewardRepo ?? stub(),
+    overrides.postRewardLedgerRepo ?? stub(),
+    overrides.streakBonusRepo ?? stub(),
+    overrides.inviteMilestoneRepo ?? stub(),
+  );
+}
+
 describe('BclAffiliationAnalyticsService', () => {
   it('runs x verification queries in parallel with dashboard totals', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
     let releaseFirstBatch: (() => void) | null = null;
     const firstBatchGate = new Promise<void>((resolve) => {
       releaseFirstBatch = resolve;
@@ -102,14 +124,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      txRepo,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ txRepo, postingRewardRepo });
 
     const result = await (service as any).getDailyXVerifications(
       new Date('2026-03-01T00:00:00.000Z'),
@@ -138,14 +153,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ postingRewardRepo });
 
     await expect(
       (service as any).getTotalVerifiedUsers(
@@ -156,14 +164,7 @@ describe('BclAffiliationAnalyticsService', () => {
   });
 
   it('builds an onboarding funnel of strictly narrowing stages', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
 
     jest.spyOn(service as any, 'parseDateRange').mockReturnValue({
       startDate: new Date('2026-03-01T00:00:00.000Z'),
@@ -256,14 +257,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ postingRewardRepo });
 
     await (service as any).getOnboardingBlockers(
       new Date('2026-03-01T00:00:00.000Z'),
@@ -279,14 +273,7 @@ describe('BclAffiliationAnalyticsService', () => {
   });
 
   it('reports a zero conversion rate instead of dividing by zero', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
 
     jest.spyOn(service as any, 'parseDateRange').mockReturnValue({
       startDate: new Date('2026-03-01T00:00:00.000Z'),
@@ -319,5 +306,307 @@ describe('BclAffiliationAnalyticsService', () => {
 
     expect(result.summary.conversion_rate).toBe(0);
     expect(result.funnel.every((s) => s.rate === 0)).toBe(true);
+  });
+
+  describe('getXExplorerData', () => {
+    /** Chainable query-builder stub: every method returns itself. */
+    const qb = (rows: any[]) => {
+      const builder: any = new Proxy(
+        { getMany: async () => rows },
+        {
+          get: (target, prop) =>
+            prop in target ? (target as any)[prop] : () => builder,
+        },
+      );
+      return { createQueryBuilder: () => builder } as any;
+    };
+
+    const rewardRow = (over: Partial<any> = {}) => ({
+      address: 'ak_inviter',
+      x_username: 'someone',
+      verified_at: new Date('2026-06-24T00:00:00.000Z'),
+      referral_code: 'abc123',
+      follower_count: 0,
+      follower_tier_index: 0,
+      qualified_posts_count: 0,
+      current_streak_days: 0,
+      status: 'pending',
+      error: null,
+      last_x_api_scan_at: null,
+      created_at: new Date('2026-06-24T00:00:00.000Z'),
+      ...over,
+    });
+
+    const run = (over: { reward?: any; streak?: any[] } = {}) =>
+      makeService({
+        postingRewardRepo: qb([rewardRow(over.reward)]),
+        profileXInviteRepo: qb([]),
+        postRewardLedgerRepo: qb([]),
+        streakBonusRepo: qb(over.streak ?? []),
+        inviteMilestoneRepo: qb([]),
+      }).getXExplorerData({});
+
+    it('says why a wallet is not eligible, with the number it failed on', async () => {
+      // "below_min_followers" alone sends the reader to the source to find out
+      // what the threshold even is. The verdict has to carry both sides of the
+      // comparison, and the raw code alongside it.
+      const result = await run({
+        reward: { follower_count: 0, error: 'below_min_followers' },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.label).toMatch(/not eligible/i);
+      expect(eligibility.label).toMatch(/followers/i);
+      expect(eligibility.detail).toContain('0 followers');
+      expect(eligibility.detail).toContain(String(result.min_followers));
+      expect(eligibility.code).toBe('below_min_followers');
+    });
+
+    it('still reports a blocker on a wallet that was paid earlier', async () => {
+      // Caught in review. `status` and `error` describe different moments: the
+      // onboarding payout sets status='paid' once and it stays, while every
+      // later scan overwrites `error` on the same row. Reading paid as
+      // "currently fine" hid exactly the wallets that stopped qualifying.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          follower_count: 0,
+          error: 'below_min_followers',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+        },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.code).toBe('below_min_followers');
+      expect(eligibility.detail).toContain('was paid earlier');
+      expect(result.summary.eligible_users).toBe(0);
+    });
+
+    it('counts the onboarding payout, which lives on the reward row not the ledger', async () => {
+      // Caught in review. profile_x_post_reward_ledger only ever receives
+      // reward_kind 'per_post'; the onboarding send writes tx_hash and status
+      // straight onto profile_x_posting_rewards. Reading only the ledger
+      // dropped every onboarding payout from the list, links and totals.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          follower_count: 500,
+          error: null,
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding).toBeDefined();
+      expect(onboarding?.status).toBe('paid');
+      expect(onboarding?.explorer_url).toBe(
+        `${result.explorer_base_url}/transactions/th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ`,
+      );
+      expect(result.summary.payouts_paid).toBe(1);
+    });
+
+    it('does not invent an onboarding payout for a wallet that never had one', async () => {
+      const result = await run({
+        reward: { status: 'pending', error: null, tx_hash: null },
+      });
+
+      expect(result.users[0].payouts).toEqual([]);
+      expect(result.users[0].total_ae_paid).toBe('0');
+    });
+
+    it('does not link the onboarding in-progress sentinel', async () => {
+      const result = await run({
+        reward: {
+          status: 'pending',
+          error: null,
+          tx_hash: '__posting_reward_payout_in_progress__',
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.kind).toBe('onboarding');
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.tx_hash).toBeNull();
+      expect(onboarding.explorer_url).toBeNull();
+      expect(result.users[0].total_ae_paid).toBe('0');
+    });
+
+    it('keeps a failed onboarding send visible after a later scan', async () => {
+      // Caught in review. The failed path writes tx_hash: null and
+      // status: 'failed', and the next scan overwrites `error`. Detecting the
+      // failure from the error code lost it entirely at that point: a wallet
+      // that earned but was never paid looked like it had never been tried.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: null,
+          // The send failed long ago; this is a later scan's eligibility code.
+          error: 'below_min_followers',
+          follower_count: 0,
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding).toBeDefined();
+      expect(onboarding?.status).toBe('failed');
+      expect(result.summary.payouts_failed).toBe(1);
+    });
+
+    it('does not call a retrying payout failed', async () => {
+      // Caught in review. claimOnboardingPayoutAttempt writes the in-progress
+      // sentinel into tx_hash and never touches `status`, so a row retrying
+      // after an earlier failure still reads 'failed'. Ranking status above
+      // tx_hash printed "failed" beside a send that is actively in flight.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: '__posting_reward_payout_in_progress__',
+          error: null,
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.detail).toMatch(/in progress/i);
+      expect(result.summary.payouts_failed).toBe(0);
+    });
+
+    it('does not print failed beside a real broadcast hash', async () => {
+      // Same root cause: the broadcast-but-unconfirmed path persists a real
+      // th_ hash without resetting `status`. A live explorer link next to the
+      // word "failed" tells an operator the opposite of what happened.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+          error: 'payout_confirmation_pending',
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.explorer_url).toContain(
+        'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+      );
+      expect(onboarding.detail).toMatch(/awaiting confirmation/i);
+      expect(result.summary.payouts_failed).toBe(0);
+    });
+
+    it('does not show a later scan error as the payout error', async () => {
+      // Caught in review. `error` is shared between payout state and
+      // eligibility codes. Showing `below_min_followers` under a settled
+      // payout reads as "the send failed" — a lie about money that arrived.
+      const result = await run({
+        reward: {
+          status: 'paid',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+          error: 'below_min_followers',
+          follower_count: 0,
+        },
+      });
+
+      const onboarding = result.users[0].payouts.find(
+        (p) => p.kind === 'onboarding',
+      );
+      expect(onboarding?.status).toBe('paid');
+      expect(onboarding?.error).toBeNull();
+      // The blocker is still reported — as eligibility, where it belongs.
+      expect(result.users[0].eligibility.code).toBe('below_min_followers');
+    });
+
+    it('does not call a never-scanned wallet eligible', async () => {
+      // Nothing evaluates these rewards on a schedule -- only the user pressing
+      // "Check rewards" triggers a scan. A wallet that linked X and never came
+      // back has a null scan timestamp and a null error, and reporting that as
+      // "Eligible" claims an evaluation that never happened. Seen live on
+      // production months after the link.
+      const result = await run({
+        reward: {
+          status: 'pending',
+          error: null,
+          follower_count: null,
+          last_x_api_scan_at: null,
+        },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.label).toMatch(/never scanned/i);
+      expect(result.summary.eligible_users).toBe(0);
+    });
+
+    it('does not treat a truncated scan as a failure', async () => {
+      // A truncated scan is a COMPLETED check that hit the per-check post
+      // limit. Filing it as "not eligible" is a bug this pipeline has already
+      // had twice, in two other places.
+      const result = await run({
+        reward: { follower_count: 500, error: 'x_posts_scan_truncated' },
+      });
+
+      expect(result.users[0].eligibility.eligible).toBe(true);
+      expect(result.users[0].eligibility.label).not.toMatch(/not eligible/i);
+    });
+
+    it('never links a payout-in-progress sentinel to the block explorer', async () => {
+      // The payout services park sentinel strings in tx_hash while a send is
+      // in flight. Linking one produces a confident 404 on aescan, which reads
+      // as "the chain lost our money" rather than "not sent yet".
+      const result = await run({
+        streak: [
+          {
+            address: 'ak_inviter',
+            amount_aettos: '50000000000000000000',
+            status: 'pending',
+            tx_hash: '__streak_bonus_payout_in_progress__',
+            streak_length: 10,
+            streak_completed_day: '2026-07-01',
+            error: null,
+            created_at: new Date('2026-07-01T00:00:00.000Z'),
+          },
+        ],
+      });
+
+      const payout = result.users[0].payouts[0];
+      expect(payout.kind).toBe('streak_bonus');
+      expect(payout.tx_hash).toBeNull();
+      expect(payout.explorer_url).toBeNull();
+      // Unsettled money is not money paid.
+      expect(result.users[0].total_ae_paid).toBe('0');
+      expect(result.summary.payouts_paid).toBe(0);
+    });
+
+    it('links a settled payout to its real transaction and counts the AE', async () => {
+      const result = await run({
+        streak: [
+          {
+            address: 'ak_inviter',
+            // 50 AE in aettos is past Number.MAX_SAFE_INTEGER, so this also
+            // pins that the amount survives without being rounded.
+            amount_aettos: '50000000000000000000',
+            status: 'paid',
+            tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+            streak_length: 10,
+            streak_completed_day: '2026-07-01',
+            error: null,
+            created_at: new Date('2026-07-01T00:00:00.000Z'),
+          },
+        ],
+      });
+
+      const payout = result.users[0].payouts[0];
+      expect(payout.amount_ae).toBe('50');
+      expect(payout.explorer_url).toBe(
+        `${result.explorer_base_url}/transactions/th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ`,
+      );
+      expect(result.users[0].total_ae_paid).toBe('50');
+      expect(result.summary.total_ae_paid).toBe('50');
+      expect(result.summary.payouts_paid).toBe(1);
+    });
   });
 });
