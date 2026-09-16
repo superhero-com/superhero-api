@@ -4,7 +4,6 @@ import { Repository } from 'typeorm';
 import moment from 'moment';
 import { Invitation } from '../entities/invitation.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
-import { ADDRESS_LINK_CONTRACT_ADDRESS } from '@/plugins/address-links/address-links.constants';
 import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
 import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
@@ -115,10 +114,6 @@ export type BclXOnboardingSummary = {
 
 @Injectable()
 export class BclAffiliationAnalyticsService {
-  /** `link(addr, …)` user address; not `caller_id` (sponsor broadcasts via onAccount). */
-  private static readonly X_LINK_ADDRESS_SQL =
-    "t.raw->'arguments'->0->>'value'";
-
   constructor(
     @InjectRepository(Invitation)
     private readonly invitationRepo: Repository<Invitation>,
@@ -850,71 +845,71 @@ export class BclAffiliationAnalyticsService {
     };
   }
 
+  /**
+   * Daily count of newly X-verified addresses.
+   *
+   * Reads `profile_x_posting_rewards`, NOT the raw `link` transactions. The
+   * previous query re-derived verifications from `t.raw->'arguments'` and so
+   * counted only ONE of the four ways the pipeline actually records a link
+   * (see `address-links-plugin-sync.service.ts`):
+   *
+   *   - `link(addr, provider, …)`          addr at arg 0, provider at arg 1
+   *   - `link_principal(principal, signer, provider, …)`
+   *                                        signer at arg 1, provider at arg 2
+   *   - the contract-LOGS fallback, used whenever `raw.arguments` is absent —
+   *     which has no `arguments` to read at all
+   *
+   * It matched `function = 'link'` with provider fixed at arg 1, so every
+   * `link_principal` was dropped (wrong function, and its provider sits one
+   * index further along), and every log-recovered link was invisible. That is
+   * why this dashboard reported 0 while the onboarding funnel — which reads
+   * this same table — reported real linked accounts.
+   *
+   * `handleLinkEvent` stamps `verified_at` from the transaction's `micro_time`
+   * on every one of those paths, so this table is both authoritative and
+   * correctly dated. The plugin also looks its arguments up BY NAME before
+   * falling back to position, which positional SQL could never match.
+   */
   private async getDailyXVerifications(
     startDate: Date,
     endDate: Date,
   ): Promise<Record<string, number>> {
-    const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
-    const linkedAddress = BclAffiliationAnalyticsService.X_LINK_ADDRESS_SQL;
-    let qb = this.txRepo
-      .createQueryBuilder('t')
-      .select(linkedAddress, 'linked_address')
-      .addSelect(
-        // micro_time is milliseconds (see getMicroTimeRange); dividing by 1e6
-        // would bucket every row into 1970 and match no day in the series.
-        `MIN(to_char(date_trunc('day', to_timestamp((t.micro_time)::numeric / 1000.0)), 'YYYY-MM-DD'))`,
-        'date',
-      )
-      .where('t.function = :fn', { fn: 'link' })
-      .andWhere(`${linkedAddress} IS NOT NULL`)
-      .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
-        provider: 'x',
-      })
-      .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
-      .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
-
-    if (ADDRESS_LINK_CONTRACT_ADDRESS) {
-      qb = qb.andWhere('t.contract_id = :contractId', {
-        contractId: ADDRESS_LINK_CONTRACT_ADDRESS,
-      });
-    }
-
-    const rows = await qb
-      .groupBy(linkedAddress)
+    const rows = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .select(`to_char(date_trunc('day', r.verified_at), 'YYYY-MM-DD')`, 'date')
+      .addSelect('COUNT(DISTINCT r.address)::int', 'count')
+      .where('r.verified_at IS NOT NULL')
+      .andWhere('r.x_username IS NOT NULL')
+      .andWhere('r.verified_at >= :startDate', { startDate })
+      .andWhere('r.verified_at < :endDate', { endDate })
+      .groupBy(`to_char(date_trunc('day', r.verified_at), 'YYYY-MM-DD')`)
       .orderBy('date', 'ASC')
-      .getRawMany<{ linked_address: string; date: string }>();
+      .getRawMany<{ date: string; count: number }>();
 
     const out: Record<string, number> = {};
     for (const r of rows) {
       if (!r.date) {
         continue;
       }
-      out[r.date] = (out[r.date] || 0) + 1;
+      out[r.date] = Number(r.count || 0);
     }
     return out;
   }
 
+  /**
+   * Distinct addresses verified in the window. Same source as the daily series
+   * above, so the summary and the chart can no longer disagree — they did
+   * before, because only one of them was ever going to match a row.
+   */
   private async getTotalVerifiedUsers(startDate: Date, endDate: Date) {
-    const { startMicro, endMicro } = this.getMicroTimeRange(startDate, endDate);
-    const linkedAddress = BclAffiliationAnalyticsService.X_LINK_ADDRESS_SQL;
-    let qb = this.txRepo
-      .createQueryBuilder('t')
-      .select(`COUNT(DISTINCT ${linkedAddress})::int`, 'count')
-      .where('t.function = :fn', { fn: 'link' })
-      .andWhere(`${linkedAddress} IS NOT NULL`)
-      .andWhere("t.raw->'arguments'->1->>'value' = :provider", {
-        provider: 'x',
-      })
-      .andWhere('t.micro_time::numeric >= :startMicro', { startMicro })
-      .andWhere('t.micro_time::numeric < :endMicro', { endMicro });
-
-    if (ADDRESS_LINK_CONTRACT_ADDRESS) {
-      qb = qb.andWhere('t.contract_id = :contractId', {
-        contractId: ADDRESS_LINK_CONTRACT_ADDRESS,
-      });
-    }
-
-    const row = await qb.getRawOne<{ count: number }>();
+    const row = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .select('COUNT(DISTINCT r.address)::int', 'count')
+      .where('r.verified_at IS NOT NULL')
+      .andWhere('r.x_username IS NOT NULL')
+      .andWhere('r.verified_at >= :startDate', { startDate })
+      .andWhere('r.verified_at < :endDate', { endDate })
+      .getRawOne<{ count: number }>();
     return Number(row?.count || 0);
   }
 
@@ -942,26 +937,6 @@ export class BclAffiliationAnalyticsService {
     }
 
     return out;
-  }
-
-  /**
-   * Bounds for filtering `txs.micro_time`.
-   *
-   * Despite the name, `micro_time` is stored in MILLISECONDS: `block-sync.service`
-   * and `live-indexer.service` write `tx.microTime` straight through, and build
-   * `created_at` from the same value with `new Date(...)`, which only yields sane
-   * timestamps for milliseconds. The middleware itself returns a 13-digit value.
-   *
-   * This used to scale the bounds to microseconds, which made every predicate
-   * `micro_time >= <16-digit bound>` false against a 13-digit column, so the X
-   * verification queries returned zero rows for every date range. Compare in
-   * milliseconds, the same unit the column is written in.
-   */
-  private getMicroTimeRange(startDate: Date, endDate: Date) {
-    return {
-      startMicro: BigInt(startDate.getTime()).toString(),
-      endMicro: BigInt(endDate.getTime()).toString(),
-    };
   }
 
   private async getDailyXInviteCreatedCounts(startDate: Date, endDate: Date) {
