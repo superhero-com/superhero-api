@@ -1,9 +1,18 @@
 import { RateLimitGuard } from '@/api-core/guards/rate-limit.guard';
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CreateXPostingRecheckChallengeDto } from '../dto/create-x-posting-recheck-challenge.dto';
 import { SubmitXPostingRecheckDto } from '../dto/submit-x-posting-recheck.dto';
-import { XPostingRewardStatusDto } from '../dto/x-posting-reward-status.dto';
+import {
+  XPostingRewardStatusDto,
+  XPostingRewardUnavailableDto,
+} from '../dto/x-posting-reward-status.dto';
 import { ProfileXInviteService } from '../services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
 import { AeAccountAddressPipe } from '@/common/validation/request-validation';
@@ -50,7 +59,10 @@ export class ProfileRewardsController {
     summary:
       'Verify wallet ownership and run an on-demand X posting reward recheck',
   })
-  @ApiOkResponse({ type: XPostingRewardStatusDto })
+  // A @Post with no @HttpCode returns 201, so document Created (not 200); web
+  // only checks res.ok, so no runtime change is needed.
+  @ApiCreatedResponse({ type: XPostingRewardStatusDto })
+  @ApiServiceUnavailableResponse({ type: XPostingRewardUnavailableDto })
   async recheckXPostingReward(
     @Param('address', AeAccountAddressPipe) address: string,
     @Body() body: SubmitXPostingRecheckDto,

@@ -91,6 +91,9 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
   // Per-id HTTP status override for the by-id user lookup (e.g. 500 transient,
   // 404 definitively-gone). Absent id → normal success.
   let userIdLookupOverride: Record<string, number>;
+  // Per-username HTTP status override for the by-username lookup (the new-user
+  // path, before any x_user_id is cached). Absent → normal 200/404 resolution.
+  let usernameLookupOverride: Record<string, number>;
   // Ids whose profile should come back WITHOUT public_metrics (null followers).
   let noMetricsUserIds: Set<string>;
   // When true, the X app-token endpoint fails, so getXAppAccessToken resolves to
@@ -112,6 +115,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     tweetsByUserId = { '100': [] };
     confirmedTxHashes = new Set<string>();
     userIdLookupOverride = {};
+    usernameLookupOverride = {};
     noMetricsUserIds = new Set<string>();
     tokenEndpointFails = false;
     global.fetch = jest.fn().mockImplementation(async (input: string) => {
@@ -141,6 +145,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       }
       if (path.startsWith('/2/users/by/username/')) {
         const username = decodeURIComponent(path.split('/').pop() || '');
+        const override = usernameLookupOverride[username];
+        if (override) {
+          return { ok: false, status: override, json: async () => ({}) } as any;
+        }
         const id = userIdByUsername[username];
         if (!id) {
           return { ok: false, status: 404, json: async () => ({}) } as any;
@@ -1332,6 +1340,37 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
         new URL(input).pathname.startsWith('/2/users/by/username/'),
     );
     expect(usernameCalls).toHaveLength(1);
+  });
+
+  it("marks x_unavailable with no strike and keeps the slot when a new user's username lookup is rate-limited (429)", async () => {
+    // A new user has no cached x_user_id, so the first lookup goes by username.
+    usernameLookupOverride['poster'] = 429;
+    const { service, rows } = makeService({
+      account: { address: ADDRESS, links: { x: 'poster' } },
+      rows: [baseRow({ x_lookup_failure_count: 0 })],
+    });
+
+    await service.requestManualRecheck(ADDRESS);
+
+    expect(rows.get(ADDRESS)?.error).toBe('x_unavailable');
+    expect(rows.get(ADDRESS)?.x_lookup_failure_count).toBe(0);
+    // A metered username read WAS spent → the slot stays consumed (fail-closed).
+    expect(rows.get(ADDRESS)?.last_x_api_scan_at).toBeInstanceOf(Date);
+    const reclaimed = await (service as any).claimDailyScanSlot(ADDRESS);
+    expect(reclaimed).toBe(false);
+  });
+
+  it('strikes a new user when the username lookup is a definitive 404', async () => {
+    usernameLookupOverride['poster'] = 404;
+    const { service, rows } = makeService({
+      account: { address: ADDRESS, links: { x: 'poster' } },
+      rows: [baseRow({ x_lookup_failure_count: 0 })],
+    });
+
+    await service.requestManualRecheck(ADDRESS);
+
+    expect(rows.get(ADDRESS)?.error).toBe('x_user_lookup_failed');
+    expect(rows.get(ADDRESS)?.x_lookup_failure_count).toBe(1);
   });
 
   /* ---------------------------------------------------------------- */

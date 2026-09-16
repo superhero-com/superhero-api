@@ -92,7 +92,7 @@ interface XPostFetchResult {
 type PublicPostingRewardStatus = 'not_started' | 'pending' | 'paid' | 'failed';
 type PublicPaymentStatus = 'not_started' | 'pending' | 'paid' | 'failed';
 
-/** Program-level readiness surfaced to both client apps (see item 1 contract). */
+/** Program-level readiness surfaced in the public reward status payload. */
 type ProgramStatus = 'active' | 'disabled' | 'unavailable';
 
 type ProgramReadiness = {
@@ -203,6 +203,9 @@ export class ProfileXPostingRewardService {
   private readonly scanSlotRefunds = new Set<string>();
   private readonly recentSourceTxHashes = new Set<string>();
   private readonly recentSourceTxHashQueue: string[] = [];
+  // Program readiness is derived from startup constants only, so it is computed
+  // (and WARN-logged) once and reused across every status read.
+  private cachedReadiness?: ProgramReadiness;
 
   constructor(
     @InjectRepository(ProfileXPostingReward)
@@ -433,6 +436,18 @@ export class ProfileXPostingRewardService {
    * logged by name (never a value) and NOT exposed publicly.
    */
   private resolveProgramReadiness(): ProgramReadiness {
+    // Memoized: the inputs are constants loaded at startup and cannot change at
+    // runtime, and this runs on every status read (each page view). Computing —
+    // and, for `unavailable`, WARN-logging — once per process keeps a hot read
+    // side-effect-free after the first call.
+    if (this.cachedReadiness) {
+      return this.cachedReadiness;
+    }
+    this.cachedReadiness = this.computeProgramReadiness();
+    return this.cachedReadiness;
+  }
+
+  private computeProgramReadiness(): ProgramReadiness {
     if (
       PROFILE_REWARDS_DISABLED ||
       !PROFILE_X_POSTING_REWARD_ENABLED ||

@@ -100,4 +100,32 @@ d('ProfileSpendQueueService payout advisory lock (cross-process)', () => {
     });
     expect(ran).toBe(true);
   }, 20_000);
+
+  it('does not leak lock_timeout into the shared pool (RESET after the spend)', async () => {
+    // Pool of one: the spend's QueryRunner and the assertion below reuse the SAME
+    // physical connection, so a `SET lock_timeout` that survived release() would
+    // be visible here. With RESET in finally it must read back the default `0`.
+    const single = new DataSource({
+      ...(DATABASE_CONFIG as DataSourceOptions),
+      database: db.name,
+      synchronize: false,
+      entities: [],
+      migrations: [],
+      logging: false,
+      extra: { max: 1 },
+    } as DataSourceOptions);
+    await single.initialize();
+    try {
+      const service = new ProfileSpendQueueService(single);
+      const before = await single.query('SHOW lock_timeout');
+      expect(before[0].lock_timeout).toBe('0');
+
+      await service.enqueueSpend(REWARD_KEY, async () => undefined);
+
+      const after = await single.query('SHOW lock_timeout');
+      expect(after[0].lock_timeout).toBe('0');
+    } finally {
+      await single.destroy().catch(() => undefined);
+    }
+  }, 20_000);
 });

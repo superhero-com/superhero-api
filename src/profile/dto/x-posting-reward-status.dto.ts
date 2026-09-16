@@ -1,14 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Public payload of `GET /api/profile/:address/x-posting-reward` and the 200
- * body of the on-demand recheck. Both client apps regenerate their API layer
- * from this schema, so every field here is part of the contract; changes must
- * stay additive.
+ * Public payload of `GET /api/profile/:address/x-posting-reward` and the body
+ * of the on-demand recheck, published in OpenAPI. Every field here is part of
+ * the contract; changes must stay additive.
  *
  * `program_status` / `error_code` are the machine-readable readiness signals a
- * new client should branch on; `error` remains a human sentence rendered
- * verbatim by the existing web client.
+ * consumer should branch on; `error` remains a human sentence a client may
+ * render verbatim.
  */
 export class XPostingRewardStatusDto {
   @ApiProperty({
@@ -117,4 +116,23 @@ export class XPostingRewardStatusDto {
       'Human-readable status sentence, rendered verbatim by clients.',
   })
   error: string | null;
+}
+
+/**
+ * 503 body of the recheck route when the program is not `active` (disabled, or
+ * armed but a dependency is missing). Consumers branch on `error_code`
+ * (`rewards_disabled` / `rewards_unavailable`).
+ */
+export class XPostingRewardUnavailableDto {
+  @ApiProperty({ example: 503 })
+  status: number;
+
+  @ApiProperty({ description: 'Human-readable sentence.' })
+  message: string;
+
+  @ApiProperty({
+    nullable: true,
+    enum: ['rewards_disabled', 'rewards_unavailable'],
+  })
+  error_code: string | null;
 }

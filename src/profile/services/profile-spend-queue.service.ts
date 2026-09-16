@@ -12,12 +12,12 @@ import { parseProfilePrivateKeyBytes } from './profile-private-key.util';
  *  - a CROSS-PROCESS Postgres session advisory lock, keyed by the wallet's public
  *    `ak_` address, taken inside that chain (see `runWithWalletAdvisoryLock`).
  *
- * The advisory lock is what makes a horizontally scaled deployment safe: today's
- * deploy runs one container per environment, but the Dockerfile already expects
- * replicas and the client can change the topology without telling us. Two pods
- * sharing a reward wallet would otherwise broadcast at the same nonce. The
- * DB-atomic claim/`orIgnore` guards still prevent double-PAYING across instances;
- * this adds nonce serialization across them too.
+ * The advisory lock is what makes a horizontally scaled deployment safe: the
+ * current deploy runs one container per environment, but the Dockerfile already
+ * expects replicas, and the topology is not enforced here. Two pods sharing a
+ * reward wallet would otherwise broadcast at the same nonce. The DB-atomic
+ * claim/`orIgnore` guards still prevent double-PAYING across instances; this adds
+ * nonce serialization across them too.
  */
 @Injectable()
 export class ProfileSpendQueueService {
@@ -76,16 +76,25 @@ export class ProfileSpendQueueService {
     privateKey: string,
     work: () => Promise<void>,
   ): Promise<void> {
-    const lockKey = this.getRewardAccount(
-      privateKey,
-      'PROFILE_REWARD_PRIVATE_KEY',
-    ).address;
+    let lockKey: string;
+    try {
+      lockKey = this.deriveRewardAddressForLock(privateKey);
+    } catch {
+      // A malformed key has no wallet to serialize on, and it never reaches
+      // `spend` (getRewardAccount throws first). Run the work directly so the
+      // payout's own getRewardAccount surfaces the error under ITS real env var
+      // name, rather than caching a mislabelled one here.
+      return work();
+    }
     const queryRunner = this.dataSource.createQueryRunner();
     let locked = false;
     try {
       await queryRunner.connect();
-      // Session-scoped to this runner's connection; released with it. Bounds only
-      // the wait to acquire, not how long the lock is held.
+      // Session-scoped to this runner's connection. `SET` persists for the whole
+      // connection and survives release() back into the pool, so it MUST be RESET
+      // in finally — otherwise every later query on that pooled connection
+      // inherits a 30s lock_timeout (e.g. the blocking pg_advisory_lock in
+      // dex-schema-bootstrap). Bounds only the wait to acquire, not the hold.
       await queryRunner.query(
         `SET lock_timeout = '${ProfileSpendQueueService.PAYOUT_LOCK_TIMEOUT_MS}ms'`,
       );
@@ -111,8 +120,39 @@ export class ProfileSpendQueueService {
           );
         }
       }
+      // Always reset, taken or not: `connect()` succeeded, so the SET may have
+      // run, and this connection returns to the shared pool.
+      try {
+        await queryRunner.query('RESET lock_timeout');
+      } catch (resetError) {
+        this.logger.error(
+          'Failed to reset lock_timeout on the reward payout connection',
+          resetError instanceof Error ? resetError.stack : String(resetError),
+        );
+      }
       await queryRunner.release();
     }
+  }
+
+  /**
+   * Public `ak_` address for the wallet lock, WITHOUT writing to
+   * `accountInitErrorsByKey`. Reuses the success cache (name-agnostic), but a
+   * malformed key throws here uncached so it does not mislabel the later
+   * getRewardAccount call that reports under the caller's real env var name.
+   */
+  private deriveRewardAddressForLock(privateKey: string): string {
+    const cacheKey = this.queueKeyFor(privateKey);
+    const cached = this.accountsByKey.get(cacheKey);
+    if (cached) {
+      return cached.address;
+    }
+    const normalized = this.normalizePrivateKey(
+      privateKey,
+      'PROFILE_REWARD_PRIVATE_KEY',
+    );
+    const account = new MemoryAccount(normalized);
+    this.accountsByKey.set(cacheKey, account);
+    return account.address;
   }
 
   /**

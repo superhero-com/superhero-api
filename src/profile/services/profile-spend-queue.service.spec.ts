@@ -97,4 +97,19 @@ describe('ProfileSpendQueueService', () => {
     expect(order).toContain('second');
     expect(order.indexOf('first')).toBeLessThan(order.indexOf('second'));
   });
+
+  it('reports a malformed key under the caller env var, not the lock derivation name', async () => {
+    const service = new ProfileSpendQueueService(stubDataSource());
+    const badKey = 'zz'; // neither sk_, valid hex, nor a 32/64-byte base64 seed
+    // The lock derivation must NOT cache an error under its generic name; the
+    // payout's own getRewardAccount call is what should name the failure.
+    await expect(
+      service.enqueueSpend(badKey, async () => {
+        service.getRewardAccount(
+          badKey,
+          'PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY',
+        );
+      }),
+    ).rejects.toThrow('PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY');
+  });
 });
