@@ -9,6 +9,7 @@ import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-rewa
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
 import {
+  PROFILE_X_REFERRAL_LINK_BASE_URL,
   PROFILE_X_REWARD_MIN_FOLLOWERS,
   X_INFORMATIONAL_ERROR_CODES,
 } from '@/profile/profile.constants';
@@ -80,6 +81,42 @@ export type BclXOnboardingStage = {
 export type BclXOnboardingBlocker = {
   reason: string;
   count: number;
+};
+
+/** One address someone referred, and how far that referral itself got. */
+export type BclXExplorerInvitee = {
+  address: string | null;
+  x_username: string | null;
+  verified_at: string | null;
+  bound_at: string | null;
+  /** `active` = code issued, nobody bound it yet. `bound` = someone took it. */
+  status: string;
+};
+
+/** A wallet in the X flow, verified or still on the way. */
+export type BclXExplorerUser = {
+  address: string;
+  x_username: string | null;
+  verified_at: string | null;
+  referral_code: string | null;
+  referral_link: string | null;
+  follower_count: number | null;
+  follower_tier_index: number | null;
+  qualified_posts_count: number;
+  current_streak_days: number;
+  status: string;
+  error: string | null;
+  last_x_api_scan_at: string | null;
+  created_at: string | null;
+  invites_issued: number;
+  invites_bound: number;
+  invitees: BclXExplorerInvitee[];
+};
+
+export type BclXExplorerDailyPoint = {
+  date: string;
+  verified: number;
+  referral_links: number;
 };
 
 export type BclXOnboardingTierPoint = {
@@ -1047,5 +1084,173 @@ export class BclAffiliationAnalyticsService {
     const n = Number(limit);
     if (!Number.isFinite(n) || n <= 0) return fallback;
     return Math.min(100, Math.floor(n));
+  }
+
+  /**
+   * Per-wallet view of the X flow, plus each wallet's referral subtree.
+   *
+   * The aggregate dashboards answer "how many"; this answers "who", which is
+   * the question actually asked when the flow looks broken. It deliberately
+   * returns wallets that STARTED and never finished alongside the verified
+   * ones — an empty verified list and twenty stalled wallets is a very
+   * different situation from nobody having tried, and the counts alone cannot
+   * tell those apart.
+   *
+   * Invitees come from `profile_x_invites`, which is the referral edge the
+   * product actually creates (`inviter_address` → `invitee_address` once a
+   * code is bound). An issued-but-unbound code is returned too, with a null
+   * address: that is a real, meaningful state — someone has a link out and
+   * nobody has taken it — and the UI draws it as an empty slot rather than
+   * hiding it.
+   */
+  async getXExplorerData(params: {
+    start_date?: string;
+    end_date?: string;
+  }): Promise<{
+    users: BclXExplorerUser[];
+    pending: BclXExplorerUser[];
+    series: BclXExplorerDailyPoint[];
+    summary: {
+      verified_users: number;
+      pending_users: number;
+      referral_links_issued: number;
+      referral_links_bound: number;
+    };
+    queryMs: number;
+  }> {
+    const { startDate, endDate } = this.parseDateRange(params);
+    const start = Date.now();
+
+    const rows = await this.postingRewardRepo
+      .createQueryBuilder('r')
+      .orderBy('r.verified_at', 'DESC', 'NULLS LAST')
+      .addOrderBy('r.created_at', 'DESC')
+      .limit(200)
+      .getMany();
+
+    const addresses = rows.map((r) => r.address);
+
+    // One query for every edge, then grouped in memory. A per-user query here
+    // would be N+1 over a list the dashboard always renders whole.
+    const invites = addresses.length
+      ? await this.profileXInviteRepo
+          .createQueryBuilder('i')
+          .where('i.inviter_address IN (:...addresses)', { addresses })
+          .orderBy('i.created_at', 'ASC')
+          .getMany()
+      : [];
+
+    // Resolve invitee handles so the tree can show who someone actually
+    // brought in, not just an address.
+    const inviteeAddresses = Array.from(
+      new Set(
+        invites
+          .map((i) => i.invitee_address)
+          .filter((a): a is string => !!a && !addresses.includes(a)),
+      ),
+    );
+    const inviteeRows = inviteeAddresses.length
+      ? await this.postingRewardRepo
+          .createQueryBuilder('r')
+          .where('r.address IN (:...inviteeAddresses)', { inviteeAddresses })
+          .getMany()
+      : [];
+    const byAddress = new Map(
+      [...rows, ...inviteeRows].map((r) => [r.address, r]),
+    );
+
+    const invitesByInviter = new Map<string, typeof invites>();
+    for (const invite of invites) {
+      const list = invitesByInviter.get(invite.inviter_address) || [];
+      list.push(invite);
+      invitesByInviter.set(invite.inviter_address, list);
+    }
+
+    const iso = (d: Date | null | undefined) =>
+      d instanceof Date ? d.toISOString() : null;
+
+    const toUser = (r: (typeof rows)[number]): BclXExplorerUser => {
+      const mine = invitesByInviter.get(r.address) || [];
+      return {
+        address: r.address,
+        x_username: r.x_username ?? null,
+        verified_at: iso(r.verified_at),
+        referral_code: r.referral_code ?? null,
+        referral_link: r.referral_code
+          ? `${PROFILE_X_REFERRAL_LINK_BASE_URL.replace(/\/+$/, '')}?ref=${encodeURIComponent(r.referral_code)}`
+          : null,
+        follower_count: r.follower_count ?? null,
+        follower_tier_index: r.follower_tier_index ?? null,
+        qualified_posts_count: r.qualified_posts_count ?? 0,
+        current_streak_days: r.current_streak_days ?? 0,
+        status: r.status,
+        error: r.error ?? null,
+        last_x_api_scan_at: iso(r.last_x_api_scan_at),
+        created_at: iso(r.created_at),
+        invites_issued: mine.length,
+        invites_bound: mine.filter((i) => !!i.invitee_address).length,
+        invitees: mine.map((i) => {
+          const invitee = i.invitee_address
+            ? byAddress.get(i.invitee_address)
+            : undefined;
+          return {
+            address: i.invitee_address ?? null,
+            x_username: invitee?.x_username ?? null,
+            verified_at: iso(invitee?.verified_at),
+            bound_at: iso(i.bound_at),
+            status: i.status,
+          };
+        }),
+      };
+    };
+
+    const all = rows.map(toUser);
+    const users = all.filter((u) => !!u.verified_at);
+    const pending = all.filter((u) => !u.verified_at);
+
+    // Two lines on one chart: verifications, and referral links handed out.
+    // Bucketed in memory because both sides are already loaded and the row
+    // count here is bounded by the limit above.
+    const buckets = new Map<string, { verified: number; links: number }>();
+    const bump = (day: string, key: 'verified' | 'links') => {
+      const b = buckets.get(day) || { verified: 0, links: 0 };
+      b[key] += 1;
+      buckets.set(day, b);
+    };
+    for (const r of rows) {
+      if (r.verified_at)
+        bump(moment(r.verified_at).format('YYYY-MM-DD'), 'verified');
+    }
+    for (const i of invites) {
+      if (i.created_at)
+        bump(moment(i.created_at).format('YYYY-MM-DD'), 'links');
+    }
+
+    const series: BclXExplorerDailyPoint[] = [];
+    const cursor = moment(startDate).startOf('day');
+    const end = moment(endDate).startOf('day');
+    while (cursor.isBefore(end)) {
+      const day = cursor.format('YYYY-MM-DD');
+      const b = buckets.get(day);
+      series.push({
+        date: day,
+        verified: b?.verified ?? 0,
+        referral_links: b?.links ?? 0,
+      });
+      cursor.add(1, 'day');
+    }
+
+    return {
+      users,
+      pending,
+      series,
+      summary: {
+        verified_users: users.length,
+        pending_users: pending.length,
+        referral_links_issued: invites.length,
+        referral_links_bound: invites.filter((i) => !!i.invitee_address).length,
+      },
+      queryMs: Date.now() - start,
+    };
   }
 }
