@@ -1,15 +1,37 @@
 import { BclAffiliationAnalyticsService } from './bcl-affiliation-analytics.service';
 
+/**
+ * The constructor takes seven positional repositories, and each test cares
+ * about one or two of them. Naming them here means adding a repository is one
+ * edit rather than a padding line in every test, and a test that wants
+ * `postingRewardRepo` says so instead of counting `{} as any` placeholders.
+ */
+function makeService(
+  overrides: Partial<{
+    invitationRepo: any;
+    txRepo: any;
+    profileXInviteRepo: any;
+    postingRewardRepo: any;
+    postRewardLedgerRepo: any;
+    streakBonusRepo: any;
+    inviteMilestoneRepo: any;
+  }> = {},
+) {
+  const stub = () => ({}) as any;
+  return new BclAffiliationAnalyticsService(
+    overrides.invitationRepo ?? stub(),
+    overrides.txRepo ?? stub(),
+    overrides.profileXInviteRepo ?? stub(),
+    overrides.postingRewardRepo ?? stub(),
+    overrides.postRewardLedgerRepo ?? stub(),
+    overrides.streakBonusRepo ?? stub(),
+    overrides.inviteMilestoneRepo ?? stub(),
+  );
+}
+
 describe('BclAffiliationAnalyticsService', () => {
   it('runs x verification queries in parallel with dashboard totals', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
     let releaseFirstBatch: (() => void) | null = null;
     const firstBatchGate = new Promise<void>((resolve) => {
       releaseFirstBatch = resolve;
@@ -102,14 +124,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      txRepo,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ txRepo, postingRewardRepo });
 
     const result = await (service as any).getDailyXVerifications(
       new Date('2026-03-01T00:00:00.000Z'),
@@ -138,14 +153,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ postingRewardRepo });
 
     await expect(
       (service as any).getTotalVerifiedUsers(
@@ -156,14 +164,7 @@ describe('BclAffiliationAnalyticsService', () => {
   });
 
   it('builds an onboarding funnel of strictly narrowing stages', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
 
     jest.spyOn(service as any, 'parseDateRange').mockReturnValue({
       startDate: new Date('2026-03-01T00:00:00.000Z'),
@@ -256,14 +257,7 @@ describe('BclAffiliationAnalyticsService', () => {
       }),
     } as any;
 
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      postingRewardRepo,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService({ postingRewardRepo });
 
     await (service as any).getOnboardingBlockers(
       new Date('2026-03-01T00:00:00.000Z'),
@@ -279,14 +273,7 @@ describe('BclAffiliationAnalyticsService', () => {
   });
 
   it('reports a zero conversion rate instead of dividing by zero', async () => {
-    const service = new BclAffiliationAnalyticsService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
+    const service = makeService();
 
     jest.spyOn(service as any, 'parseDateRange').mockReturnValue({
       startDate: new Date('2026-03-01T00:00:00.000Z'),
@@ -319,5 +306,129 @@ describe('BclAffiliationAnalyticsService', () => {
 
     expect(result.summary.conversion_rate).toBe(0);
     expect(result.funnel.every((s) => s.rate === 0)).toBe(true);
+  });
+
+  describe('getXExplorerData', () => {
+    /** Chainable query-builder stub: every method returns itself. */
+    const qb = (rows: any[]) => {
+      const builder: any = new Proxy(
+        { getMany: async () => rows },
+        {
+          get: (target, prop) =>
+            prop in target ? (target as any)[prop] : () => builder,
+        },
+      );
+      return { createQueryBuilder: () => builder } as any;
+    };
+
+    const rewardRow = (over: Partial<any> = {}) => ({
+      address: 'ak_inviter',
+      x_username: 'someone',
+      verified_at: new Date('2026-06-24T00:00:00.000Z'),
+      referral_code: 'abc123',
+      follower_count: 0,
+      follower_tier_index: 0,
+      qualified_posts_count: 0,
+      current_streak_days: 0,
+      status: 'pending',
+      error: null,
+      last_x_api_scan_at: null,
+      created_at: new Date('2026-06-24T00:00:00.000Z'),
+      ...over,
+    });
+
+    const run = (over: { reward?: any; streak?: any[] } = {}) =>
+      makeService({
+        postingRewardRepo: qb([rewardRow(over.reward)]),
+        profileXInviteRepo: qb([]),
+        postRewardLedgerRepo: qb([]),
+        streakBonusRepo: qb(over.streak ?? []),
+        inviteMilestoneRepo: qb([]),
+      }).getXExplorerData({});
+
+    it('says why a wallet is not eligible, with the number it failed on', async () => {
+      // "below_min_followers" alone sends the reader to the source to find out
+      // what the threshold even is. The verdict has to carry both sides of the
+      // comparison, and the raw code alongside it.
+      const result = await run({
+        reward: { follower_count: 0, error: 'below_min_followers' },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.label).toMatch(/not eligible/i);
+      expect(eligibility.label).toMatch(/followers/i);
+      expect(eligibility.detail).toContain('0 followers');
+      expect(eligibility.detail).toContain(String(result.min_followers));
+      expect(eligibility.code).toBe('below_min_followers');
+    });
+
+    it('does not treat a truncated scan as a failure', async () => {
+      // A truncated scan is a COMPLETED check that hit the per-check post
+      // limit. Filing it as "not eligible" is a bug this pipeline has already
+      // had twice, in two other places.
+      const result = await run({
+        reward: { follower_count: 500, error: 'x_posts_scan_truncated' },
+      });
+
+      expect(result.users[0].eligibility.eligible).toBe(true);
+      expect(result.users[0].eligibility.label).not.toMatch(/not eligible/i);
+    });
+
+    it('never links a payout-in-progress sentinel to the block explorer', async () => {
+      // The payout services park sentinel strings in tx_hash while a send is
+      // in flight. Linking one produces a confident 404 on aescan, which reads
+      // as "the chain lost our money" rather than "not sent yet".
+      const result = await run({
+        streak: [
+          {
+            address: 'ak_inviter',
+            amount_aettos: '50000000000000000000',
+            status: 'pending',
+            tx_hash: '__streak_bonus_payout_in_progress__',
+            streak_length: 10,
+            streak_completed_day: '2026-07-01',
+            error: null,
+            created_at: new Date('2026-07-01T00:00:00.000Z'),
+          },
+        ],
+      });
+
+      const payout = result.users[0].payouts[0];
+      expect(payout.kind).toBe('streak_bonus');
+      expect(payout.tx_hash).toBeNull();
+      expect(payout.explorer_url).toBeNull();
+      // Unsettled money is not money paid.
+      expect(result.users[0].total_ae_paid).toBe('0');
+      expect(result.summary.payouts_paid).toBe(0);
+    });
+
+    it('links a settled payout to its real transaction and counts the AE', async () => {
+      const result = await run({
+        streak: [
+          {
+            address: 'ak_inviter',
+            // 50 AE in aettos is past Number.MAX_SAFE_INTEGER, so this also
+            // pins that the amount survives without being rounded.
+            amount_aettos: '50000000000000000000',
+            status: 'paid',
+            tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+            streak_length: 10,
+            streak_completed_day: '2026-07-01',
+            error: null,
+            created_at: new Date('2026-07-01T00:00:00.000Z'),
+          },
+        ],
+      });
+
+      const payout = result.users[0].payouts[0];
+      expect(payout.amount_ae).toBe('50');
+      expect(payout.explorer_url).toBe(
+        `${result.explorer_base_url}/transactions/th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ`,
+      );
+      expect(result.users[0].total_ae_paid).toBe('50');
+      expect(result.summary.total_ae_paid).toBe('50');
+      expect(result.summary.payouts_paid).toBe(1);
+    });
   });
 });

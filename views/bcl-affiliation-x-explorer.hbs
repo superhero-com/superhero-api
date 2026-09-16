@@ -38,6 +38,14 @@
   tbody tr:hover { background: #f8fafc; }
   .addr { font-size: 0.76rem; color: #64748b; }
   .empty { color: #94a3b8; font-style: italic; padding: 1rem 0; }
+  .sub-note { font-size: 0.7rem; color: #94a3b8; margin-top: 0.15rem; line-height: 1.3; }
+
+  tr.expandable { cursor: pointer; }
+  tr.expandable:hover { background: #f1f5f9; }
+  .payout-cell { background: #f8fafc; padding: 0.5rem 0.9rem 0.9rem; }
+  table.inner { font-size: 0.78rem; background: white; border-radius: 0.35rem; }
+  table.inner th { font-size: 0.68rem; }
+  table.inner td, table.inner th { padding: 0.35rem 0.5rem; }
 
   .date-range { display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; flex-wrap: wrap; }
   .date-range label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.2rem; }
@@ -123,6 +131,12 @@
     invite a person; taking one binds invitee to inviter, and it is the only
     edge the tree below can be drawn from.
     <br /><br />
+    <strong>Four separate programs can pay a wallet:</strong> the onboarding
+    reward, the per-post reward, the <em>streak bonus</em> (the large one, paid
+    once a streak completes) and the invite milestone. "Paid" in the table is
+    every settled payout across all four, read from their own ledgers — click a
+    row to see each transaction and open it on the block explorer.
+    <br /><br />
     The date range filters the <strong>chart</strong> only. The tables and the
     tree always show the most recent wallets, so a range with no activity does
     not make the page look empty when the flow does have users.
@@ -149,6 +163,17 @@
       <div class="subtitle">Of those, the ones someone bound.</div>
       <div class="value" id="sBound">-</div>
     </div>
+    <div class="stat-card">
+      <h2>Eligible now</h2>
+      <div class="subtitle">Passing every gate; the rest say why not.</div>
+      <div class="value" id="sEligible">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>AE actually paid</h2>
+      <div class="subtitle">Settled on chain, from the reward ledgers.</div>
+      <div class="value" id="sPaidAe">-</div>
+      <div class="subtitle" id="sPayoutCounts">&nbsp;</div>
+    </div>
   </div>
 
   <div class="card">
@@ -163,16 +188,23 @@
 
   <div class="card">
     <h2>Verified users</h2>
-    <div class="hint">Handle, wallet, and how far each one has got.</div>
+    <div class="hint">
+      Handle, wallet, and how far each one has got. <strong>Eligibility</strong>
+      says in words why a wallet is or is not earning, with the number it failed
+      on. <strong>Paid</strong> is what actually settled on chain — click a row
+      to see each payout and open it on
+      <span class="mono" id="explorerName">the block explorer</span>.
+    </div>
     <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
             <th>X username</th><th>Wallet</th><th>Verified</th>
             <th>Followers</th><th>Posts</th><th>Streak</th>
+            <th>Eligibility</th>
+            <th title="AE settled on chain across all reward programs.">Paid</th>
             <th title="The ?ref= code they put in their X posts. Not a person-to-person link.">Post referral code</th>
             <th title="?xInvite= links: taken / created.">Invite links</th>
-            <th>Status</th>
           </tr>
         </thead>
         <tbody id="verifiedRows"></tbody>
@@ -192,7 +224,7 @@
         <thead>
           <tr>
             <th>Wallet</th><th>X username</th><th>First seen</th>
-            <th>Last checked</th><th>Status</th><th>Error</th>
+            <th>Last checked</th><th>Eligibility</th><th>Status</th>
           </tr>
         </thead>
         <tbody id="pendingRows"></tbody>
@@ -246,21 +278,90 @@
     return '<span class="pill">—</span>';
   }
 
+  /**
+   * The verdict in words, with the measurement that produced it underneath —
+   * "Not eligible — too few followers" over "0 followers, needs 100". A bare
+   * error code sends the reader to the source to find out what it meant.
+   */
+  function eligibilityCell(u) {
+    const e = u.eligibility || {};
+    const cls = e.eligible ? 'ok' : 'bad';
+    return `<span class="pill ${cls}">${esc(e.label || '—')}</span>` +
+      (e.detail ? `<div class="sub-note">${esc(e.detail)}</div>` : '') +
+      (e.code ? `<div class="sub-note mono">${esc(e.code)}</div>` : '');
+  }
+
+  /** Paid AE, and a hint that the row opens to the individual transactions. */
+  function paidCell(u) {
+    const n = (u.payouts || []).length;
+    const settled = (u.payouts || []).filter((p) => p.status === 'paid').length;
+    const amount = Number(u.total_ae_paid || 0);
+    const body = amount > 0
+      ? `<strong>${esc(u.total_ae_paid)} AE</strong>`
+      : '<span class="addr">0 AE</span>';
+    if (!n) return body + '<div class="sub-note">no payout rows</div>';
+    return body + `<div class="sub-note">${settled}/${n} payout${n === 1 ? '' : 's'} settled</div>`;
+  }
+
+  /**
+   * One row per payout, each linking to the real transaction. The API only
+   * fills explorer_url for a genuine th_ hash — while a send is in flight the
+   * column holds a sentinel, and linking that would give a confident 404.
+   */
+  function payoutRows(u) {
+    if (!u.payouts || !u.payouts.length) {
+      return '<div class="empty" style="padding:0.5rem 0;">No payout has ever been recorded for this wallet.</div>';
+    }
+    return `<table class="inner">
+      <thead><tr>
+        <th>Reward</th><th>Amount</th><th>Status</th><th>When</th>
+        <th>For</th><th>Transaction</th>
+      </tr></thead>
+      <tbody>${u.payouts.map((p) => `
+        <tr>
+          <td>${esc(p.label)}</td>
+          <td>${p.amount_ae ? esc(p.amount_ae) + ' AE' : '—'}</td>
+          <td>${p.status === 'paid'
+            ? '<span class="pill ok">paid</span>'
+            : `<span class="pill ${p.status === 'failed' ? 'bad' : 'warn'}">${esc(p.status)}</span>`}
+            ${p.error ? `<div class="sub-note">${esc(p.error)}</div>` : ''}</td>
+          <td>${esc(day(p.created_at))}</td>
+          <td>${esc(p.detail || '—')}</td>
+          <td class="mono">${p.explorer_url
+            ? `<a href="${esc(p.explorer_url)}" target="_blank" rel="noopener">${esc(shortAddr(p.tx_hash))} ↗</a>`
+            : (p.status === 'paid'
+                ? '<span class="addr">paid, no hash recorded</span>'
+                : '<span class="addr">not sent yet</span>')}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  }
+
+  function toggleRow(index) {
+    const el = document.getElementById('payouts-' + index);
+    if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+  }
+
   function renderTables(d) {
     const vb = document.getElementById('verifiedRows');
-    vb.innerHTML = d.users.map((u) => `
-      <tr>
+    vb.innerHTML = d.users.map((u, i) => `
+      <tr class="expandable" onclick="toggleRow(${i})">
         <td><strong>${esc(handle(u.x_username) || '—')}</strong></td>
-        <td class="mono addr" title="${esc(u.address)}">${esc(shortAddr(u.address))}</td>
+        <td class="mono addr" title="${esc(u.address)}">${u.explorer_account_url
+          ? `<a href="${esc(u.explorer_account_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(shortAddr(u.address))} ↗</a>`
+          : esc(shortAddr(u.address))}</td>
         <td>${esc(day(u.verified_at))}</td>
         <td>${u.follower_count ?? '—'}</td>
         <td>${u.qualified_posts_count}</td>
         <td>${u.current_streak_days}</td>
+        <td>${eligibilityCell(u)}</td>
+        <td>${paidCell(u)}</td>
         <td class="mono">${u.post_referral_link
-          ? `<a href="${esc(u.post_referral_link)}" target="_blank" rel="noopener">${esc(u.post_referral_code)}</a>`
+          ? `<a href="${esc(u.post_referral_link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(u.post_referral_code)}</a>`
           : '—'}</td>
         <td>${u.invite_links_taken}/${u.invite_links_created}</td>
-        <td>${statusPill(u)}</td>
+      </tr>
+      <tr id="payouts-${i}" style="display:none;">
+        <td colspan="10" class="payout-cell">${payoutRows(u)}</td>
       </tr>`).join('');
     document.getElementById('verifiedEmpty').style.display = d.users.length ? 'none' : 'block';
 
@@ -271,8 +372,8 @@
         <td>${esc(handle(u.x_username) || '—')}</td>
         <td>${esc(day(u.created_at))}</td>
         <td>${esc(day(u.last_x_api_scan_at))}</td>
+        <td>${eligibilityCell(u)}</td>
         <td>${esc(u.status || '—')}</td>
-        <td>${u.error ? '<span class="pill bad">' + esc(u.error) + '</span>' : '—'}</td>
       </tr>`).join('');
     document.getElementById('pendingEmpty').style.display = d.pending.length ? 'none' : 'block';
   }
@@ -294,6 +395,10 @@
       ['Follower tier', (u) => (u.follower_tier_index ?? '—')],
       ['Qualifying posts', (u) => u.qualified_posts_count],
       ['Current streak', (u) => u.current_streak_days],
+      ['Eligible', (u) => (u.eligibility || {}).label || '—'],
+      ['Why', (u) => (u.eligibility || {}).detail || '—'],
+      ['AE paid on chain', (u) => (u.total_ae_paid || '0') + ' AE'],
+      ['Payouts recorded', (u) => (u.payouts || []).length],
       ['Post referral code', (u) => u.post_referral_code || '—'],
       ['Invite links created', (u) => u.invite_links_created],
       ['Invite links taken', (u) => u.invite_links_taken],
@@ -434,6 +539,14 @@
     document.getElementById('sPending').textContent = d.summary.pending_users;
     document.getElementById('sIssued').textContent = d.summary.invite_links_created;
     document.getElementById('sBound').textContent = d.summary.invite_links_taken;
+    document.getElementById('sEligible').textContent = d.summary.eligible_users;
+    document.getElementById('sPaidAe').textContent = d.summary.total_ae_paid + ' AE';
+    document.getElementById('sPayoutCounts').textContent =
+      d.summary.payouts_paid + ' settled · ' + d.summary.payouts_failed + ' failed';
+    if (d.explorer_base_url) {
+      document.getElementById('explorerName').textContent =
+        d.explorer_base_url.replace(/^https?:\/\//, '');
+    }
 
     renderTables(d);
     renderCompare(d.users);
