@@ -1,3 +1,7 @@
+import {
+  isInformationalXError,
+  X_INFORMATIONAL_ERROR_CODES,
+} from '../profile.constants';
 import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
 
 describe('ProfileXVerificationAttemptService', () => {
@@ -83,5 +87,36 @@ describe('ProfileXVerificationAttemptService', () => {
     });
 
     expect(insert.mock.calls[0][0].detail).toBeNull();
+  });
+});
+
+describe('informational X error codes', () => {
+  // The bug this pins, found in review and previously made in the analytics
+  // funnel too: `x_posts_scan_truncated` is written alongside a scan that
+  // COMPLETED but hit the per-check post limit. Reading the `error` column as
+  // "this failed" files a successful check as a failure — which would spike the
+  // very history this table exists to provide and bury the real failures.
+  it('treats a truncated scan as a notice, not a failure', () => {
+    expect(isInformationalXError('x_posts_scan_truncated')).toBe(true);
+  });
+
+  it('still treats real pipeline failures as failures', () => {
+    [
+      'x_user_lookup_failed',
+      'x_posts_fetch_failed',
+      'payout_send_failed',
+    ].forEach((code) => expect(isInformationalXError(code)).toBe(false));
+  });
+
+  it('handles an absent code', () => {
+    expect(isInformationalXError(null)).toBe(false);
+    expect(isInformationalXError(undefined)).toBe(false);
+    expect(isInformationalXError('')).toBe(false);
+  });
+
+  it('is the single shared definition both readers use', () => {
+    // If this list grows, the analytics blocker histogram and the attempt
+    // history must both pick it up — that is the point of exporting it.
+    expect(X_INFORMATIONAL_ERROR_CODES).toContain('x_posts_scan_truncated');
   });
 });

@@ -9,7 +9,10 @@ import { ProfileXInvite } from '@/profile/entities/profile-x-invite.entity';
 import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
-import { PROFILE_X_REWARD_MIN_FOLLOWERS } from '@/profile/profile.constants';
+import {
+  PROFILE_X_REWARD_MIN_FOLLOWERS,
+  X_INFORMATIONAL_ERROR_CODES,
+} from '@/profile/profile.constants';
 
 export type BclAffiliationDailyPoint = {
   date: string; // YYYY-MM-DD
@@ -458,15 +461,6 @@ export class BclAffiliationAnalyticsService {
   }
 
   /**
-   * `error` codes the reward pipeline sets on a SUCCESSFUL scan as a notice to
-   * the user, not as a reason it stopped. `x_posts_scan_truncated` is written
-   * alongside a completed scan that hit the per-check post limit, so treating
-   * it as a blocker would file users who do have qualifying posts under it and
-   * hide the real payout bottleneck.
-   */
-  private static readonly INFORMATIONAL_ERRORS = ['x_posts_scan_truncated'];
-
-  /**
    * Why each unpaid member of the cohort is stuck. A real `error` from the
    * pipeline wins; otherwise the row's shape says where it stopped.
    */
@@ -475,10 +469,11 @@ export class BclAffiliationAnalyticsService {
     endDate: Date,
   ): Promise<BclXOnboardingBlocker[]> {
     const at = BclAffiliationAnalyticsService.ONBOARDING_COHORT_AT;
-    const informational =
-      BclAffiliationAnalyticsService.INFORMATIONAL_ERRORS.map(
-        (code) => `'${code}'`,
-      ).join(', ');
+    // Shared with the reward pipeline and the verification-attempt history:
+    // one definition of "this code is a notice, not a failure".
+    const informational = X_INFORMATIONAL_ERROR_CODES.map(
+      (code) => `'${code}'`,
+    ).join(', ');
     const reason = `CASE
         WHEN r.error IS NOT NULL AND r.error <> ''
           AND r.error NOT IN (${informational}) THEN r.error

@@ -45,6 +45,7 @@ import {
   PROFILE_X_REWARD_STREAK_BONUS_ENABLED,
   PROFILE_X_REWARD_STREAK_BONUS_PRIVATE_KEY,
   PROFILE_X_REWARD_STREAK_LENGTH,
+  isInformationalXError,
 } from '../profile.constants';
 import { Account } from '@/account/entities/account.entity';
 import { ACTIVE_NETWORK } from '@/configs/network';
@@ -611,14 +612,22 @@ export class ProfileXPostingRewardService {
     // the request was a 200, the user was told nothing, and the only trace was
     // a column about to be overwritten by the next run. Read the settled row
     // and file what actually happened.
+    //
+    // Not every code is a failure, though. `x_posts_scan_truncated` is written
+    // alongside a scan that COMPLETED but hit the per-check post limit, so
+    // filing it as failed would spike this history on a notice and bury the
+    // real failures it exists to surface. Keep the notice as detail so it is
+    // not lost, and call the attempt what it was: a success.
     const settled = await this.postingRewardRepository.findOne({
       where: { address },
     });
+    const settledError = settled?.error ?? null;
+    const informational = isInformationalXError(settledError);
     await this.recordAttempt(
       address,
-      settled?.error ? 'failed' : 'succeeded',
-      settled?.error ?? null,
-      null,
+      settledError && !informational ? 'failed' : 'succeeded',
+      informational ? null : settledError,
+      informational ? `notice: ${settledError}` : null,
       settled?.x_username ?? reward.x_username,
     );
 
