@@ -488,6 +488,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       new ProfileXApiClientService(),
       postRewardLedgerRepository,
       streakBonusRewardRepository,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     return {

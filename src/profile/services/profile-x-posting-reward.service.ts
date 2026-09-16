@@ -53,6 +53,7 @@ import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '../entities/profile-x-streak-bonus-reward.entity';
+import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
 import {
@@ -155,7 +156,30 @@ export class ProfileXPostingRewardService {
     private readonly postRewardLedgerRepository: Repository<ProfileXPostRewardLedger>,
     @InjectRepository(ProfileXStreakBonusReward)
     private readonly streakBonusRewardRepository: Repository<ProfileXStreakBonusReward>,
+    private readonly verificationAttemptService: ProfileXVerificationAttemptService,
   ) {}
+
+  /**
+   * Files one attempt row. Never awaited for correctness and never allowed to
+   * throw — the history exists to explain verification failures, so it must not
+   * be able to cause one.
+   */
+  private async recordAttempt(
+    address: string,
+    outcome: 'succeeded' | 'failed',
+    errorCode: string | null,
+    detail?: string | null,
+    xUsername?: string | null,
+  ): Promise<void> {
+    await this.verificationAttemptService.record({
+      address,
+      source: 'manual_recheck',
+      outcome,
+      errorCode,
+      detail,
+      xUsername,
+    });
+  }
 
   /* ------------------------------------------------------------------ */
   /* Candidate intake (from on-chain X link events)                      */
@@ -503,6 +527,16 @@ export class ProfileXPostingRewardService {
 
     const reward = await this.prepareCheckCandidate(address);
     if (reward.status === 'blocked_x_identity_conflict') {
+      // Returns a normal status payload, so from the outside this looks like a
+      // successful check that simply never pays. Worth a row: it is one of the
+      // states people report as "verification is not working".
+      await this.recordAttempt(
+        address,
+        'failed',
+        'blocked_x_identity_conflict',
+        'This X account is already linked to a different address',
+        reward.x_username,
+      );
       return this.getRewardStatus(address);
     }
 
@@ -521,6 +555,15 @@ export class ProfileXPostingRewardService {
       const latest = await this.postingRewardRepository.findOne({
         where: { address },
       });
+      // The user pressed the button and got nothing. Not a pipeline fault, but
+      // it is indistinguishable from one to them, so it belongs in the history.
+      await this.recordAttempt(
+        address,
+        'failed',
+        'rate_limited',
+        'Daily X scan slot already used for this address',
+        latest?.x_username ?? reward.x_username,
+      );
       throw new HttpException(
         {
           status: HttpStatus.TOO_MANY_REQUESTS,
@@ -547,6 +590,13 @@ export class ProfileXPostingRewardService {
         `X reward recheck failed for ${address} after claiming the scan slot; slot released`,
         error instanceof Error ? error.stack : String(error),
       );
+      await this.recordAttempt(
+        address,
+        'failed',
+        'recheck_failed',
+        error instanceof Error ? error.message : String(error),
+        reward.x_username,
+      );
       throw new HttpException(
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
@@ -555,6 +605,23 @@ export class ProfileXPostingRewardService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
+
+    // A HANDLED scan failure does not throw — it records a code on the row and
+    // returns a normal status. Those are precisely the failures nobody sees:
+    // the request was a 200, the user was told nothing, and the only trace was
+    // a column about to be overwritten by the next run. Read the settled row
+    // and file what actually happened.
+    const settled = await this.postingRewardRepository.findOne({
+      where: { address },
+    });
+    await this.recordAttempt(
+      address,
+      settled?.error ? 'failed' : 'succeeded',
+      settled?.error ?? null,
+      null,
+      settled?.x_username ?? reward.x_username,
+    );
+
     return this.getRewardStatus(address);
   }
 
