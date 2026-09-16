@@ -282,6 +282,22 @@ function describeEligibility(
   // hid exactly the wallets that stopped qualifying. The error decides the
   // verdict; being paid only colours it.
   if (!code) {
+    // No error is NOT the same as no problem. Nothing evaluates these rewards
+    // on a schedule: the only thing that scans an X account is the user
+    // pressing "Check rewards", which signs a challenge and calls the recheck
+    // endpoint. A wallet that linked X and never came back has never been
+    // looked at — null scan timestamp, null follower count — and calling that
+    // "Eligible" is the same "unknown looks healthy" failure the default case
+    // below exists to prevent. Observed live: a wallet linked on-chain in June
+    // still had no scan of any kind months later.
+    if (!paid && !reward.last_x_api_scan_at) {
+      return {
+        eligible: false,
+        label: 'Not evaluated — never scanned',
+        detail: 'Linked X, but no check has ever run for this wallet',
+        code: null,
+      };
+    }
     return {
       eligible: true,
       label: 'Eligible',
@@ -1383,6 +1399,12 @@ export class BclAffiliationAnalyticsService {
       invite_links_created: number;
       invite_links_taken: number;
       eligible_users: number;
+      /**
+       * Linked X and never scanned once. Nothing scans on a schedule, so this
+       * is the number of people waiting on a check that will not happen until
+       * they come back and press the button themselves.
+       */
+      never_scanned_users: number;
       total_ae_paid: string;
       payouts_paid: number;
       payouts_failed: number;
@@ -1648,6 +1670,9 @@ export class BclAffiliationAnalyticsService {
         invite_links_created: invites.length,
         invite_links_taken: invites.filter((i) => !!i.invitee_address).length,
         eligible_users: all.filter((u) => u.eligibility.eligible).length,
+        never_scanned_users: all.filter(
+          (u) => !u.last_x_api_scan_at && u.status !== 'paid',
+        ).length,
         total_ae_paid: allPayouts
           .filter((p) => p.status === 'paid' && p.amount_ae)
           .reduce((sum, p) => sum.plus(p.amount_ae as string), new BigNumber(0))

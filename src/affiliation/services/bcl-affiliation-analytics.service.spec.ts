@@ -435,6 +435,27 @@ describe('BclAffiliationAnalyticsService', () => {
       expect(result.users[0].total_ae_paid).toBe('0');
     });
 
+    it('does not call a never-scanned wallet eligible', async () => {
+      // Nothing evaluates these rewards on a schedule -- only the user pressing
+      // "Check rewards" triggers a scan. A wallet that linked X and never came
+      // back has a null scan timestamp and a null error, and reporting that as
+      // "Eligible" claims an evaluation that never happened. Seen live on
+      // production months after the link.
+      const result = await run({
+        reward: {
+          status: 'pending',
+          error: null,
+          follower_count: null,
+          last_x_api_scan_at: null,
+        },
+      });
+
+      const { eligibility } = result.users[0];
+      expect(eligibility.eligible).toBe(false);
+      expect(eligibility.label).toMatch(/never scanned/i);
+      expect(result.summary.eligible_users).toBe(0);
+    });
+
     it('does not treat a truncated scan as a failure', async () => {
       // A truncated scan is a COMPLETED check that hit the per-check post
       // limit. Filing it as "not eligible" is a bug this pipeline has already
