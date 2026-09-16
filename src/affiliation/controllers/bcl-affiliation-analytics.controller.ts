@@ -146,4 +146,35 @@ export class BclAffiliationAnalyticsController {
   xOnboardingPreview() {
     return { message: 'Hello world!' };
   }
+
+  @Get('x-explorer')
+  @ApiQuery({ name: 'start_date', type: 'string', required: false })
+  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiOperation({
+    operationId: 'getBclAffiliationXExplorer',
+    summary:
+      "Per-wallet X verification detail, including each wallet's referral subtree",
+  })
+  async getXExplorer(
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
+  ) {
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      throw new BadRequestException('start_date must be YYYY-MM-DD');
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      throw new BadRequestException('end_date must be YYYY-MM-DD');
+    }
+    return this.bclAffiliationAnalyticsService.getXExplorerData({
+      start_date,
+      end_date,
+    });
+  }
+
+  @Get('x-explorer/preview')
+  @Render('bcl-affiliation-x-explorer')
+  @ApiOperation({ operationId: 'previewBclAffiliationXExplorer' })
+  xExplorerPreview() {
+    return { message: 'Hello world!' };
+  }
 }

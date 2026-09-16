@@ -1,0 +1,442 @@
+{{#> main-layout title="X User Explorer" active="bcl-affiliation-x-explorer"}}
+<style>
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .stat-card {
+    background: white; padding: 0.75rem; border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 0;
+  }
+  .stat-card h2 { font-size: 0.85rem; margin-bottom: 0.25rem; color: #475569; }
+  .stat-card .subtitle { font-size: 0.72rem; color: #94a3b8; margin-bottom: 0.35rem; line-height: 1.3; }
+  .stat-card .value { font-size: 1.5rem; font-weight: 600; }
+
+  .card {
+    background: white; padding: 1rem; border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem;
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 0.25rem; }
+  .card .hint { font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.75rem; line-height: 1.4; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .pill {
+    display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px;
+    font-size: 0.7rem; background: #f1f5f9; color: #475569;
+  }
+  .pill.ok { background: #dcfce7; color: #166534; }
+  .pill.warn { background: #fef9c3; color: #854d0e; }
+  .pill.bad { background: #fee2e2; color: #991b1b; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #f1f5f9; }
+  th { color: #64748b; font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  tbody tr:hover { background: #f8fafc; }
+  .addr { font-size: 0.76rem; color: #64748b; }
+  .empty { color: #94a3b8; font-style: italic; padding: 1rem 0; }
+
+  .date-range { display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1rem; flex-wrap: wrap; }
+  .date-range label { display: block; font-size: 0.75rem; color: #64748b; margin-bottom: 0.2rem; }
+  .date-range input { padding: 0.35rem 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.35rem; }
+  .date-range button {
+    padding: 0.4rem 0.9rem; border: 0; border-radius: 0.35rem;
+    background: #0f172a; color: white; cursor: pointer;
+  }
+
+  .note {
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af;
+    padding: 0.6rem 0.8rem; border-radius: 0.4rem;
+    font-size: 0.8rem; line-height: 1.45; margin-bottom: 1.25rem;
+  }
+
+  /* ---- comparison ---- */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .compare .col { border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.75rem; }
+  .compare .col h3 { font-size: 0.9rem; margin-bottom: 0.1rem; }
+  .compare dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.75rem; margin-top: 0.6rem; font-size: 0.8rem; }
+  .compare dt { color: #64748b; }
+  .compare dd { text-align: right; font-weight: 500; word-break: break-all; }
+  .diff { background: #fffbeb; }
+  @media (max-width: 800px) { .compare { grid-template-columns: 1fr; } }
+
+  /* ---- org chart ---- */
+  .tree { overflow-x: auto; padding: 0.5rem 0 1rem; }
+  .node {
+    display: inline-flex; flex-direction: column; align-items: center;
+    vertical-align: top; padding: 0 0.5rem;
+  }
+  .box {
+    border: 1px solid #cbd5e1; background: white; border-radius: 0.5rem;
+    padding: 0.5rem 0.7rem; min-width: 168px; text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .box .name { font-weight: 600; font-size: 0.85rem; }
+  .box .sub { font-size: 0.7rem; color: #64748b; margin-top: 0.1rem; word-break: break-all; }
+  .box.verified { border-color: #86efac; background: #f0fdf4; }
+  .box.slot {
+    border-style: dashed; border-color: #cbd5e1; background: #f8fafc; color: #94a3b8;
+  }
+  .box.slot .name { color: #94a3b8; font-weight: 500; }
+  .box.clickable { cursor: pointer; }
+  .box.clickable:hover { border-color: #0f172a; }
+  .children { display: flex; padding-top: 1rem; position: relative; }
+  .children::before {
+    content: ""; position: absolute; top: 0; left: 50%;
+    width: 1px; height: 1rem; background: #cbd5e1;
+  }
+  .node > .connector {
+    width: 1px; height: 0.75rem; background: #cbd5e1;
+  }
+  .toggle {
+    margin-top: 0.35rem; font-size: 0.68rem; color: #2563eb;
+    background: none; border: 0; cursor: pointer; padding: 0.1rem 0.3rem;
+  }
+</style>
+
+<div class="container">
+  <div style="display:flex; justify-content:flex-end; margin-bottom: 0.75rem;">
+    <span class="pill mono" id="queryMs">queryMs: -</span>
+  </div>
+
+  <div class="date-range">
+    <div>
+      <label for="startDate">Start Date:</label>
+      <input type="date" id="startDate" />
+    </div>
+    <div>
+      <label for="endDate">End Date:</label>
+      <input type="date" id="endDate" />
+    </div>
+    <button onclick="updateDashboard()">Apply</button>
+  </div>
+
+  <div class="note">
+    The date range filters the <strong>chart</strong> only. The tables and the
+    referral tree always show the most recent wallets, so a range with no
+    activity does not make the page look empty when the flow does have users.
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <h2>Verified</h2>
+      <div class="subtitle">Wallets with a confirmed X handle.</div>
+      <div class="value" id="sVerified">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Started, not verified</h2>
+      <div class="subtitle">Began the flow and stopped somewhere.</div>
+      <div class="value" id="sPending">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Referral links issued</h2>
+      <div class="subtitle">Invite codes minted by verified users.</div>
+      <div class="value" id="sIssued">-</div>
+    </div>
+    <div class="stat-card">
+      <h2>Referral links taken</h2>
+      <div class="subtitle">Codes someone actually bound.</div>
+      <div class="value" id="sBound">-</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Verifications and referral links over time</h2>
+    <div class="hint">
+      Two separate things on one axis: wallets completing verification, and
+      referral links being handed out. Links running far ahead of verifications
+      means the invites are not converting.
+    </div>
+    <div style="height: 300px;"><canvas id="timeChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>Verified users</h2>
+    <div class="hint">Handle, wallet, and how far each one has got.</div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>X username</th><th>Wallet</th><th>Verified</th>
+            <th>Followers</th><th>Posts</th><th>Streak</th>
+            <th>Referral code</th><th>Invites</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="verifiedRows"></tbody>
+      </table>
+    </div>
+    <div id="verifiedEmpty" class="empty" style="display:none;">No verified users in this dataset.</div>
+  </div>
+
+  <div class="card">
+    <h2>Wallets that started and did not finish</h2>
+    <div class="hint">
+      These are the ones worth chasing: they linked or began a check and never
+      reached a verified handle. The error column is the pipeline's own code.
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Wallet</th><th>X username</th><th>First seen</th>
+            <th>Last checked</th><th>Status</th><th>Error</th>
+          </tr>
+        </thead>
+        <tbody id="pendingRows"></tbody>
+      </table>
+    </div>
+    <div id="pendingEmpty" class="empty" style="display:none;">Nobody is mid-flow right now.</div>
+  </div>
+
+  <div class="card">
+    <h2>Side-by-side</h2>
+    <div class="hint">
+      The two most recently verified users, field by field. Rows that differ are
+      highlighted, so what actually separates two accounts is visible at a glance.
+    </div>
+    <div id="compare" class="compare"></div>
+    <div id="compareEmpty" class="empty" style="display:none;">Needs at least two verified users to compare.</div>
+  </div>
+
+  <div class="card">
+    <h2>Referral tree</h2>
+    <div class="hint">
+      Each verified user with the people they invited underneath. A dashed grey
+      box is a real, empty slot — the user is active and can invite, nobody has
+      taken it yet. Those fill in as invitees join and link their own X account.
+      Click a node with invitees to expand or collapse it.
+    </div>
+    <div id="tree" class="tree"></div>
+    <div id="treeEmpty" class="empty" style="display:none;">No verified users to chart yet.</div>
+  </div>
+</div>
+
+<script>
+  /** Empty slots drawn under a verified user who has not invited anyone yet. */
+  const PLACEHOLDER_SLOTS = 3;
+  let timeChart;
+  const collapsed = new Set();
+  let lastData = null;
+
+  const esc = (s) =>
+    String(s ?? '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const shortAddr = (a) => (a ? a.slice(0, 8) + '…' + a.slice(-4) : '—');
+  const day = (iso) => (iso ? String(iso).slice(0, 10) : '—');
+  const handle = (u) => (u ? '@' + u : null);
+
+  function statusPill(u) {
+    if (u.status === 'paid') return '<span class="pill ok">paid</span>';
+    if (u.error) return '<span class="pill bad">' + esc(u.error) + '</span>';
+    if (u.status) return '<span class="pill warn">' + esc(u.status) + '</span>';
+    return '<span class="pill">—</span>';
+  }
+
+  function renderTables(d) {
+    const vb = document.getElementById('verifiedRows');
+    vb.innerHTML = d.users.map((u) => `
+      <tr>
+        <td><strong>${esc(handle(u.x_username) || '—')}</strong></td>
+        <td class="mono addr" title="${esc(u.address)}">${esc(shortAddr(u.address))}</td>
+        <td>${esc(day(u.verified_at))}</td>
+        <td>${u.follower_count ?? '—'}</td>
+        <td>${u.qualified_posts_count}</td>
+        <td>${u.current_streak_days}</td>
+        <td class="mono">${u.referral_link
+          ? `<a href="${esc(u.referral_link)}" target="_blank" rel="noopener">${esc(u.referral_code)}</a>`
+          : '—'}</td>
+        <td>${u.invites_bound}/${u.invites_issued}</td>
+        <td>${statusPill(u)}</td>
+      </tr>`).join('');
+    document.getElementById('verifiedEmpty').style.display = d.users.length ? 'none' : 'block';
+
+    const pb = document.getElementById('pendingRows');
+    pb.innerHTML = d.pending.map((u) => `
+      <tr>
+        <td class="mono addr" title="${esc(u.address)}">${esc(shortAddr(u.address))}</td>
+        <td>${esc(handle(u.x_username) || '—')}</td>
+        <td>${esc(day(u.created_at))}</td>
+        <td>${esc(day(u.last_x_api_scan_at))}</td>
+        <td>${esc(u.status || '—')}</td>
+        <td>${u.error ? '<span class="pill bad">' + esc(u.error) + '</span>' : '—'}</td>
+      </tr>`).join('');
+    document.getElementById('pendingEmpty').style.display = d.pending.length ? 'none' : 'block';
+  }
+
+  function renderCompare(users) {
+    const box = document.getElementById('compare');
+    const empty = document.getElementById('compareEmpty');
+    if (users.length < 2) {
+      box.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    const [a, b] = users;
+    const fields = [
+      ['Wallet', (u) => u.address],
+      ['Verified', (u) => day(u.verified_at)],
+      ['Followers', (u) => (u.follower_count ?? '—')],
+      ['Follower tier', (u) => (u.follower_tier_index ?? '—')],
+      ['Qualifying posts', (u) => u.qualified_posts_count],
+      ['Current streak', (u) => u.current_streak_days],
+      ['Referral code', (u) => u.referral_code || '—'],
+      ['Invites issued', (u) => u.invites_issued],
+      ['Invites taken', (u) => u.invites_bound],
+      ['Last checked', (u) => day(u.last_x_api_scan_at)],
+      ['Status', (u) => u.status || '—'],
+      ['Error', (u) => u.error || '—'],
+    ];
+    const col = (u, other) => `
+      <div class="col">
+        <h3>${esc(handle(u.x_username) || shortAddr(u.address))}</h3>
+        <div class="addr mono">${esc(shortAddr(u.address))}</div>
+        <dl>
+          ${fields.map(([label, get]) => {
+            const mine = String(get(u));
+            const theirs = String(get(other));
+            return `<dt class="${mine !== theirs ? 'diff' : ''}">${esc(label)}</dt>
+                    <dd class="${mine !== theirs ? 'diff' : ''}">${esc(mine)}</dd>`;
+          }).join('')}
+        </dl>
+      </div>`;
+    box.innerHTML = col(a, b) + col(b, a);
+  }
+
+  function inviteeNode(inv) {
+    // A bound invitee is a real person; an unbound code is an empty slot the
+    // owner is still holding. Both are true states worth seeing.
+    if (!inv.address) {
+      return `<div class="node"><div class="box slot">
+        <div class="name">Open invite</div>
+        <div class="sub">code issued · not taken</div>
+      </div></div>`;
+    }
+    const verified = !!inv.verified_at;
+    return `<div class="node"><div class="box ${verified ? 'verified' : ''}">
+      <div class="name">${esc(handle(inv.x_username) || shortAddr(inv.address))}</div>
+      <div class="sub mono">${esc(shortAddr(inv.address))}</div>
+      <div class="sub">${verified ? 'X verified ' + esc(day(inv.verified_at)) : 'joined · no X yet'}</div>
+    </div></div>`;
+  }
+
+  function placeholderSlots(n) {
+    return Array.from({ length: n }, () => `
+      <div class="node"><div class="box slot">
+        <div class="name">Not invited yet</div>
+        <div class="sub">fills in when they invite someone</div>
+      </div></div>`).join('');
+  }
+
+  // Nodes are addressed by index, never by interpolating the address into an
+  // onclick string: an attribute is HTML-decoded before it is parsed as JS, so
+  // escaping alone would not make arbitrary stored text safe there.
+  function userNode(u, i) {
+    const isCollapsed = collapsed.has(u.address);
+    const hasInvitees = u.invitees.length > 0;
+    const children = isCollapsed
+      ? ''
+      : `<div class="children">
+           ${hasInvitees ? u.invitees.map(inviteeNode).join('') : placeholderSlots(PLACEHOLDER_SLOTS)}
+         </div>`;
+    return `<div class="node">
+      <div class="box verified ${hasInvitees ? 'clickable' : ''}"
+           ${hasInvitees ? `onclick="toggleNode(${i})"` : ''}>
+        <div class="name">${esc(handle(u.x_username) || shortAddr(u.address))}</div>
+        <div class="sub mono">${esc(shortAddr(u.address))}</div>
+        <div class="sub">${u.invites_bound}/${u.invites_issued} invites taken</div>
+      </div>
+      ${hasInvitees ? `<button class="toggle" onclick="toggleNode(${i})">${isCollapsed ? '▸ expand' : '▾ collapse'}</button>` : ''}
+      ${children}
+    </div>`;
+  }
+
+  function toggleNode(index) {
+    const user = lastData && lastData.users[index];
+    if (!user) return;
+    if (collapsed.has(user.address)) collapsed.delete(user.address);
+    else collapsed.add(user.address);
+    renderTree(lastData.users);
+  }
+
+  function renderTree(users) {
+    const el = document.getElementById('tree');
+    document.getElementById('treeEmpty').style.display = users.length ? 'none' : 'block';
+    el.innerHTML = users.map(userNode).join('');
+  }
+
+  function renderChart(series) {
+    const ctx = document.getElementById('timeChart');
+    if (timeChart) timeChart.destroy();
+    timeChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: series.map((p) => p.date),
+        datasets: [
+          {
+            label: 'Verified',
+            data: series.map((p) => p.verified),
+            borderColor: '#16a34a',
+            backgroundColor: 'rgba(22,163,74,0.1)',
+            tension: 0.25,
+          },
+          {
+            label: 'Referral links issued',
+            data: series.map((p) => p.referral_links),
+            borderColor: '#2563eb',
+            backgroundColor: 'rgba(37,99,235,0.1)',
+            tension: 0.25,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+      },
+    });
+  }
+
+  async function updateDashboard() {
+    const s = document.getElementById('startDate').value;
+    const e = document.getElementById('endDate').value;
+    const qs = new URLSearchParams();
+    if (s) qs.set('start_date', s);
+    if (e) qs.set('end_date', e);
+
+    const res = await fetch('/api/bcl-affiliation/analytics/x-explorer?' + qs.toString());
+    const d = await res.json();
+    if (!res.ok || !d || !d.summary) {
+      // Say so rather than rendering an empty page, which reads as "no users".
+      document.getElementById('queryMs').textContent =
+        'request failed: ' + esc((d && d.message) || res.status);
+      return;
+    }
+    lastData = d;
+
+    document.getElementById('queryMs').textContent = 'queryMs: ' + d.queryMs;
+    document.getElementById('sVerified').textContent = d.summary.verified_users;
+    document.getElementById('sPending').textContent = d.summary.pending_users;
+    document.getElementById('sIssued').textContent = d.summary.referral_links_issued;
+    document.getElementById('sBound').textContent = d.summary.referral_links_bound;
+
+    renderTables(d);
+    renderCompare(d.users);
+    renderTree(d.users);
+    renderChart(d.series);
+  }
+
+  (function init() {
+    const end = moment().add(1, 'day');
+    // Wide by default: this flow's activity is sparse, and a fortnight-long
+    // window made a working dashboard look broken.
+    const start = moment().subtract(6, 'months');
+    document.getElementById('startDate').value = start.format('YYYY-MM-DD');
+    document.getElementById('endDate').value = end.format('YYYY-MM-DD');
+    updateDashboard();
+  })();
+</script>
+{{/main-layout}}
