@@ -64,6 +64,17 @@ export class Tx {
   @Sortable()
   micro_index: string;
 
+  /**
+   * Despite the name, this is stored in MILLISECONDS (13 digits), not
+   * microseconds — it is written straight from the middleware's own
+   * `micro_time`, which is epoch millis.
+   *
+   * Treating it as microseconds is a silent, total failure rather than a loud
+   * one: a 16-digit microsecond bound compares false against every 13-digit
+   * row, so the query returns nothing and the caller renders a legitimate-
+   * looking zero. That is exactly how the X verification dashboard read 0 for
+   * every date range while the underlying data was fine.
+   */
   @Column({ type: 'bigint' })
   @Field()
   @ApiProperty()

@@ -70,24 +70,35 @@ describe('BclAffiliationAnalyticsService', () => {
     await dashboardPromise;
   });
 
-  it('counts each linked address once on their first verification day in range', async () => {
+  it('counts verifications from the rewards table, not from raw link arguments', async () => {
+    // The bug: this read `t.raw->'arguments'` and matched only
+    // `function = 'link'`. The pipeline records a verification four ways —
+    // `link` (addr at arg 0), `link_principal` (signer at arg 1, provider one
+    // index further along), and a contract-LOGS fallback with no `arguments`
+    // at all. So the dashboard reported 0 while the onboarding funnel, reading
+    // the table below, reported real linked accounts.
     const groupBy = jest.fn().mockReturnThis();
     const orderBy = jest.fn().mockReturnThis();
+    const where = jest.fn().mockReturnThis();
     const andWhere = jest.fn().mockReturnThis();
-    const addSelect = jest.fn().mockReturnThis();
-    const txRepo = {
+    const select = jest.fn().mockReturnThis();
+    const postingRewardRepo = {
       createQueryBuilder: jest.fn().mockReturnValue({
-        select: jest.fn().mockReturnThis(),
-        addSelect,
-        where: jest.fn().mockReturnThis(),
+        select,
+        addSelect: jest.fn().mockReturnThis(),
+        where,
         andWhere,
         groupBy,
         orderBy,
         getRawMany: jest.fn().mockResolvedValue([
-          { linked_address: 'ak_a', date: '2026-03-01' },
-          { linked_address: 'ak_b', date: '2026-03-01' },
-          { linked_address: 'ak_c', date: '2026-03-02' },
+          { date: '2026-03-01', count: 2 },
+          { date: '2026-03-02', count: 1 },
         ]),
+      }),
+    } as any;
+    const txRepo = {
+      createQueryBuilder: jest.fn(() => {
+        throw new Error('must not read raw link transactions');
       }),
     } as any;
 
@@ -95,7 +106,7 @@ describe('BclAffiliationAnalyticsService', () => {
       {} as any,
       txRepo,
       {} as any,
-      {} as any,
+      postingRewardRepo,
       {} as any,
       {} as any,
     );
@@ -105,54 +116,43 @@ describe('BclAffiliationAnalyticsService', () => {
       new Date('2026-03-04T00:00:00.000Z'),
     );
 
-    expect(addSelect).toHaveBeenCalledWith(
-      expect.stringContaining('MIN('),
-      'date',
-    );
-    expect(groupBy).toHaveBeenCalledWith("t.raw->'arguments'->0->>'value'");
-    expect(result).toEqual({
-      '2026-03-01': 2,
-      '2026-03-02': 1,
-    });
-
-    // Regression: the day bucket used to divide by 1e6, which buckets a
-    // millisecond timestamp into 1970 and matches no day in the series.
-    const bucketSelect = addSelect.mock.calls.find(([sql]) =>
-      String(sql).includes('date_trunc'),
-    );
-    expect(bucketSelect?.[0]).toContain('/ 1000.0');
-    expect(bucketSelect?.[0]).not.toContain('1000000');
+    expect(result).toEqual({ '2026-03-01': 2, '2026-03-02': 1 });
+    // Dated by the link event, and only rows that actually carry a handle.
+    expect(where).toHaveBeenCalledWith('r.verified_at IS NOT NULL');
+    expect(andWhere).toHaveBeenCalledWith('r.x_username IS NOT NULL');
+    // Never again derived from the transaction argument shape.
+    expect(txRepo.createQueryBuilder).not.toHaveBeenCalled();
+    const sql = JSON.stringify([...select.mock.calls, ...groupBy.mock.calls]);
+    expect(sql).not.toContain('arguments');
   });
 
-  it('brackets millisecond micro_time values', () => {
+  it('totals distinct verified addresses from the same source as the series', async () => {
+    // Summary and chart disagreed before, because only one of them could match
+    // a row. Both now read the same table, so they cannot drift apart.
+    const postingRewardRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ count: 3 }),
+      }),
+    } as any;
+
     const service = new BclAffiliationAnalyticsService(
       {} as any,
       {} as any,
       {} as any,
+      postingRewardRepo,
       {} as any,
       {} as any,
-      {} as any,
-    );
-    const startDate = new Date('2026-03-01T00:00:00.000Z');
-    const endDate = new Date('2026-03-04T00:00:00.000Z');
-
-    const { startMicro, endMicro } = (service as any).getMicroTimeRange(
-      startDate,
-      endDate,
     );
 
-    // `txs.micro_time` is written straight from the middleware, which returns
-    // 13-digit epoch MILLISECONDS despite the column name. Bounds scaled to
-    // microseconds are ~1000x too large, so the predicate never matched and
-    // both X verification queries returned zero for every range.
-    const storedMicroTime = BigInt(
-      new Date('2026-03-02T12:00:00.000Z').getTime(),
-    );
-    expect(storedMicroTime.toString()).toHaveLength(13);
-    expect(BigInt(startMicro)).toBe(BigInt(startDate.getTime()));
-    expect(BigInt(endMicro)).toBe(BigInt(endDate.getTime()));
-    expect(storedMicroTime >= BigInt(startMicro)).toBe(true);
-    expect(storedMicroTime < BigInt(endMicro)).toBe(true);
+    await expect(
+      (service as any).getTotalVerifiedUsers(
+        new Date('2026-03-01T00:00:00.000Z'),
+        new Date('2026-03-04T00:00:00.000Z'),
+      ),
+    ).resolves.toBe(3);
   });
 
   it('builds an onboarding funnel of strictly narrowing stages', async () => {
