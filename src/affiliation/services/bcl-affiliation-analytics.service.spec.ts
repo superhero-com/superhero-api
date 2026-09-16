@@ -458,6 +458,46 @@ describe('BclAffiliationAnalyticsService', () => {
       expect(result.summary.payouts_failed).toBe(1);
     });
 
+    it('does not call a retrying payout failed', async () => {
+      // Caught in review. claimOnboardingPayoutAttempt writes the in-progress
+      // sentinel into tx_hash and never touches `status`, so a row retrying
+      // after an earlier failure still reads 'failed'. Ranking status above
+      // tx_hash printed "failed" beside a send that is actively in flight.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: '__posting_reward_payout_in_progress__',
+          error: null,
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.detail).toMatch(/in progress/i);
+      expect(result.summary.payouts_failed).toBe(0);
+    });
+
+    it('does not print failed beside a real broadcast hash', async () => {
+      // Same root cause: the broadcast-but-unconfirmed path persists a real
+      // th_ hash without resetting `status`. A live explorer link next to the
+      // word "failed" tells an operator the opposite of what happened.
+      const result = await run({
+        reward: {
+          status: 'failed',
+          tx_hash: 'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+          error: 'payout_confirmation_pending',
+        },
+      });
+
+      const onboarding = result.users[0].payouts[0];
+      expect(onboarding.status).toBe('pending');
+      expect(onboarding.explorer_url).toContain(
+        'th_2aBcDeFgHiJkLmNoPqRsTuVwXyZ',
+      );
+      expect(onboarding.detail).toMatch(/awaiting confirmation/i);
+      expect(result.summary.payouts_failed).toBe(0);
+    });
+
     it('does not show a later scan error as the payout error', async () => {
       // Caught in review. `error` is shared between payout state and
       // eligibility codes. Showing `below_min_followers` under a settled

@@ -1517,12 +1517,23 @@ export class BclAffiliationAnalyticsService {
         r.status === 'paid' || r.status === 'failed' || !!r.tx_hash;
       if (!attempted) continue;
 
+      // Precedence matters, and it is not "status first". A retry does not
+      // reset the column: claimOnboardingPayoutAttempt writes the in-progress
+      // sentinel into tx_hash, and the broadcast-but-unconfirmed path writes a
+      // real hash, and NEITHER touches `status`. So a row retrying after an
+      // earlier failure still reads status 'failed' — and ranking status above
+      // tx_hash printed "failed" beside a live th_ explorer link, or beside
+      // "send in progress". tx_hash is written later in the lifecycle than the
+      // failed status, so it wins: only a failed row with no hash at all is
+      // genuinely a dead send.
       const status =
         r.status === 'paid'
           ? 'paid'
-          : r.status === 'failed'
-            ? 'failed'
-            : 'pending';
+          : r.tx_hash
+            ? 'pending'
+            : r.status === 'failed'
+              ? 'failed'
+              : 'pending';
 
       // Only a payout error belongs on a payout row. This column is shared
       // with the eligibility codes later scans write, and surfacing
@@ -1546,7 +1557,9 @@ export class BclAffiliationAnalyticsService {
         created_at: iso(r.verified_at) ?? iso(r.created_at),
         detail: inFlight
           ? 'send in progress; amount from current config'
-          : 'amount from current config, not recorded on the row',
+          : isRealTxHash(r.tx_hash) && r.status !== 'paid'
+            ? 'broadcast, awaiting confirmation; amount from current config'
+            : 'amount from current config, not recorded on the row',
         error: payoutError,
       });
     }
