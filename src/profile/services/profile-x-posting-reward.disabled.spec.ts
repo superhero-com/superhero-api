@@ -1,4 +1,5 @@
 jest.mock('../profile.constants', () => ({
+  PROFILE_REWARDS_DISABLED: true,
   PROFILE_X_POSTING_REWARD_AMOUNT_AE: '0.05',
   PROFILE_X_POSTING_REWARD_ENABLED: false,
   PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS: 5000,
@@ -41,6 +42,7 @@ describe('ProfileXPostingRewardService disabled', () => {
       ),
     ).rejects.toMatchObject({
       status: 503,
+      response: { error_code: 'rewards_disabled' },
     });
 
     await expect(
@@ -49,6 +51,8 @@ describe('ProfileXPostingRewardService disabled', () => {
       ),
     ).resolves.toMatchObject({
       status: 'not_started',
+      program_status: 'disabled',
+      error_code: 'rewards_disabled',
       error: 'Posting rewards are temporarily unavailable.',
     });
   });

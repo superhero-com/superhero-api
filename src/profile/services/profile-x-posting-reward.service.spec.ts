@@ -6,6 +6,7 @@ jest.mock('@/configs/social', () => ({
 }));
 
 jest.mock('../profile.constants', () => ({
+  PROFILE_REWARDS_DISABLED: false,
   PROFILE_X_POSTING_REWARD_ENABLED: true,
   PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH: true,
   PROFILE_X_POSTING_REWARD_FETCH_TIMEOUT_MS: 5000,
@@ -92,6 +93,9 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
   let userIdLookupOverride: Record<string, number>;
   // Ids whose profile should come back WITHOUT public_metrics (null followers).
   let noMetricsUserIds: Set<string>;
+  // When true, the X app-token endpoint fails, so getXAppAccessToken resolves to
+  // null and no metered user read is ever made (the zero-read path).
+  let tokenEndpointFails: boolean;
   let tweetsByUserId: Record<
     string,
     Array<{
@@ -109,6 +113,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     confirmedTxHashes = new Set<string>();
     userIdLookupOverride = {};
     noMetricsUserIds = new Set<string>();
+    tokenEndpointFails = false;
     global.fetch = jest.fn().mockImplementation(async (input: string) => {
       const url = new URL(input);
       const path = url.pathname;
@@ -125,6 +130,9 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
         return { ok: false, status: 404, text: async () => 'not found' } as any;
       }
       if (path === '/oauth2/token' || path === '/2/oauth2/token') {
+        if (tokenEndpointFails) {
+          return { ok: false, status: 503, json: async () => ({}) } as any;
+        }
         return {
           ok: true,
           status: 200,
@@ -1286,11 +1294,11 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
   /* Frugal user lookup: fall back only on a definitive not-found      */
   /* ---------------------------------------------------------------- */
 
-  it('does NOT spend a second username lookup when the cached id lookup fails transiently (5xx)', async () => {
+  it('marks x_unavailable with no strike (and no second lookup) when the cached id lookup fails transiently (5xx)', async () => {
     userIdLookupOverride['100'] = 503;
     const { service, rows } = makeService({
       account: { address: ADDRESS, links: { x: 'poster' } },
-      rows: [baseRow({ x_user_id: '100' })],
+      rows: [baseRow({ x_user_id: '100', x_lookup_failure_count: 0 })],
     });
 
     await service.requestManualRecheck(ADDRESS);
@@ -1304,7 +1312,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     );
     expect(idCalls).toHaveLength(1);
     expect(usernameCalls).toHaveLength(0);
-    expect(rows.get(ADDRESS)?.error).toBe('x_user_lookup_failed');
+    // X's fault, not the user's: distinct code, and the strike counter is
+    // untouched so an X outage cannot lock a new user out.
+    expect(rows.get(ADDRESS)?.error).toBe('x_unavailable');
+    expect(rows.get(ADDRESS)?.x_lookup_failure_count).toBe(0);
   });
 
   it('falls back to the username lookup when the cached id is definitively gone (404)', async () => {
@@ -2507,5 +2518,28 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(rows.get(ADDRESS)?.last_x_api_scan_at).toBeInstanceOf(Date);
     const reclaimed = await (service as any).claimDailyScanSlot(ADDRESS);
     expect(reclaimed).toBe(false);
+  });
+
+  it('marks x_unavailable, refunds the slot and takes no strike when the scan made ZERO metered reads', async () => {
+    // The X app-token fetch fails, so no user read is ever made. That costs the X
+    // budget nothing, so the daily slot must be refunded — and X's outage is not
+    // the user's strike.
+    tokenEndpointFails = true;
+    const { service, rows } = makeService({
+      account: { address: ADDRESS, links: { x: 'poster' } },
+      rows: [baseRow({ x_lookup_failure_count: 0 })],
+    });
+
+    const result = await service.requestManualRecheck(ADDRESS);
+
+    expect(result).toBeDefined();
+    expect(rows.get(ADDRESS)?.error).toBe('x_unavailable');
+    expect(rows.get(ADDRESS)?.x_lookup_failure_count).toBe(0);
+    // No metered user read was made.
+    expect(xReadCallCount()).toBe(0);
+    // Slot refunded (rolled back to null) → an immediate re-claim now succeeds.
+    expect(rows.get(ADDRESS)?.last_x_api_scan_at == null).toBe(true);
+    const reclaimed = await (service as any).claimDailyScanSlot(ADDRESS);
+    expect(reclaimed).toBe(true);
   });
 });

@@ -3,6 +3,19 @@ import { ProfileSpendQueueService } from './profile-spend-queue.service';
 
 const flushMicrotasks = () => new Promise((resolve) => setImmediate(resolve));
 
+// A DataSource whose QueryRunner is a no-op: these tests exercise the
+// PROCESS-LOCAL queue ordering, so the advisory lock's SET/pg_advisory_lock/
+// pg_advisory_unlock calls resolve immediately. The cross-process lock itself is
+// covered live against a throwaway Postgres in profile-spend-queue.lock.spec.ts.
+const stubDataSource = () =>
+  ({
+    createQueryRunner: () => ({
+      connect: async () => undefined,
+      query: async () => [{}],
+      release: async () => undefined,
+    }),
+  }) as any;
+
 describe('ProfileSpendQueueService', () => {
   // A 32-byte seed expressed two different ways: raw hex and the sk_-encoded
   // secret key. Both denote the SAME on-chain account and MUST share one queue.
@@ -13,7 +26,7 @@ describe('ProfileSpendQueueService', () => {
   );
 
   it('serializes spends for the same wallet across different key encodings', async () => {
-    const service = new ProfileSpendQueueService();
+    const service = new ProfileSpendQueueService(stubDataSource());
     const order: string[] = [];
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((r) => {
@@ -39,7 +52,7 @@ describe('ProfileSpendQueueService', () => {
   });
 
   it('runs spends for different wallets concurrently', async () => {
-    const service = new ProfileSpendQueueService();
+    const service = new ProfileSpendQueueService(stubDataSource());
     const otherSeedHex = 'cd'.repeat(32);
     const order: string[] = [];
     let releaseFirst!: () => void;
@@ -66,7 +79,7 @@ describe('ProfileSpendQueueService', () => {
   });
 
   it('keeps serializing the queue even when a spend rejects', async () => {
-    const service = new ProfileSpendQueueService();
+    const service = new ProfileSpendQueueService(stubDataSource());
     const order: string[] = [];
 
     const first = service

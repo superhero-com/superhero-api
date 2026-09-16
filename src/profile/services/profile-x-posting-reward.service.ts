@@ -25,6 +25,7 @@ import {
 import { buildTxHash } from '@aeternity/aepp-sdk';
 import { randomBytes } from 'crypto';
 import {
+  PROFILE_REWARDS_DISABLED,
   PROFILE_X_FOLLOWER_TIERS,
   PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
   PROFILE_X_ONBOARDING_REWARD_ENABLED,
@@ -57,6 +58,7 @@ import { ProfileXStreakBonusReward } from '../entities/profile-x-streak-bonus-re
 import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
+import { parseProfilePrivateKeyBytes } from './profile-private-key.util';
 import {
   extractReferralHost,
   getRewardAmountAettos,
@@ -90,8 +92,40 @@ interface XPostFetchResult {
 type PublicPostingRewardStatus = 'not_started' | 'pending' | 'paid' | 'failed';
 type PublicPaymentStatus = 'not_started' | 'pending' | 'paid' | 'failed';
 
+/** Program-level readiness surfaced to both client apps (see item 1 contract). */
+type ProgramStatus = 'active' | 'disabled' | 'unavailable';
+
+type ProgramReadiness = {
+  program_status: ProgramStatus;
+  error_code: string | null;
+};
+
+/**
+ * Result a scan reports back to the recheck caller. `releaseScanSlot` is true
+ * only when the scan made ZERO metered X reads (e.g. a runtime token-acquisition
+ * failure) — the daily slot must then be refunded, mirroring the thrown path. A
+ * scan that spent a read keeps the slot (fail-closed for the X API budget).
+ */
+type ScanOutcome = { releaseScanSlot: boolean };
+
+/**
+ * Discriminated outcome of an X user lookup. `not_found` (a definitive 404 or a
+ * 200 that resolved to no user) is the user's problem and counts a strike;
+ * `unavailable` (no token, token failure, 429, 5xx, timeout) is X's problem and
+ * never strikes. `spentRead` tracks whether any metered X read was actually made.
+ */
+type XUserLookupResult =
+  | { outcome: 'found'; profile: XUserProfile; spentRead: boolean }
+  | { outcome: 'not_found'; spentRead: boolean }
+  | { outcome: 'unavailable'; spentRead: boolean };
+
 type PublicPostingRewardStatusPayload = {
   status: PublicPostingRewardStatus;
+  program_status: ProgramStatus;
+  error_code: string | null;
+  onboarding_enabled: boolean;
+  onboarding_amount_ae: string | null;
+  onboarding_keywords: string[];
   x_username: string | null;
   x_user_id: string | null;
   referral_code: string | null;
@@ -134,6 +168,28 @@ export class ProfileXPostingRewardService {
    * forever). A successful lookup or a fresh on-chain re-link resets the count.
    */
   private static readonly MAX_CONSECUTIVE_LOOKUP_FAILURES = 5;
+  /**
+   * `error` codes allowed to surface publicly as `error_code`. Coarse by
+   * design: anything not on this list resolves to null so the public API never
+   * leaks an internal/misconfiguration code. `rewards_disabled` /
+   * `rewards_unavailable` are program-level and set by the readiness preflight.
+   */
+  private static readonly PUBLIC_ERROR_CODES: readonly string[] = [
+    'missing_x_username',
+    'x_user_lookup_failed',
+    'x_user_lookup_blocked',
+    'below_min_followers',
+    'follower_count_unavailable',
+    'x_posts_fetch_failed',
+    'x_posts_scan_truncated',
+    'x_identity_already_rewarded',
+    'x_unavailable',
+    'payout_send_failed',
+    'payout_confirmation_pending',
+  ];
+  private static readonly SCAN_KEEP_SLOT: ScanOutcome = {
+    releaseScanSlot: false,
+  };
   private static readonly ONBOARDING_PAYOUT_IN_PROGRESS_TX_HASH =
     '__posting_reward_payout_in_progress__';
   private static readonly PERPOST_PAYOUT_IN_PROGRESS_TX_HASH =
@@ -141,6 +197,10 @@ export class ProfileXPostingRewardService {
   private static readonly STREAK_PAYOUT_IN_PROGRESS_TX_HASH =
     '__streak_bonus_payout_in_progress__';
   private readonly processingByAddress = new Map<string, Promise<void>>();
+  // Addresses whose current scan made zero metered X reads and whose daily slot
+  // must therefore be refunded by the recheck caller. Single-flight per address
+  // (the DB slot claim + processingByAddress guard serialize a recheck).
+  private readonly scanSlotRefunds = new Set<string>();
   private readonly recentSourceTxHashes = new Set<string>();
   private readonly recentSourceTxHashQueue: string[] = [];
 
@@ -362,6 +422,62 @@ export class ProfileXPostingRewardService {
   /* Status read (side-effect free)                                      */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * The single source of truth for `program_status` / `error_code`. Never
+   * touches the DB, X, or the user's row, so both the read status and the
+   * recheck preflight can call it cheaply and get the same verdict.
+   *
+   * `disabled` = intentionally off (kill switch or a per-reward toggle).
+   * `unavailable` = armed but a dependency is missing (X app credentials, the
+   * onboarding payout key, or the amount). The specific missing dependency is
+   * logged by name (never a value) and NOT exposed publicly.
+   */
+  private resolveProgramReadiness(): ProgramReadiness {
+    if (
+      PROFILE_REWARDS_DISABLED ||
+      !PROFILE_X_POSTING_REWARD_ENABLED ||
+      !PROFILE_X_POSTING_REWARD_ENABLE_POST_FETCH ||
+      !PROFILE_X_ONBOARDING_REWARD_ENABLED
+    ) {
+      return { program_status: 'disabled', error_code: 'rewards_disabled' };
+    }
+    const missingDependency = this.firstMissingArmingDependency();
+    if (missingDependency) {
+      this.logger.warn(
+        `X onboarding reward is armed but unavailable: ${missingDependency} is missing or invalid`,
+      );
+      return {
+        program_status: 'unavailable',
+        error_code: 'rewards_unavailable',
+      };
+    }
+    return { program_status: 'active', error_code: null };
+  }
+
+  /**
+   * Name (never value) of the first arming dependency that is absent or does
+   * not parse, or null when all are present and valid.
+   */
+  private firstMissingArmingDependency(): string | null {
+    const appKey = X_API_KEY || X_CLIENT_ID;
+    const appSecret = X_API_KEY_SECRET || X_CLIENT_SECRET;
+    if (!appKey || !appSecret) {
+      return 'X_API_KEY/X_API_KEY_SECRET (or X_CLIENT_ID/X_CLIENT_SECRET)';
+    }
+    if (!PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY) {
+      return 'PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY';
+    }
+    try {
+      parseProfilePrivateKeyBytes(PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY);
+    } catch {
+      return 'PROFILE_X_ONBOARDING_REWARD_PRIVATE_KEY';
+    }
+    if (!isValidAeAmount(PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE)) {
+      return 'PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE';
+    }
+    return null;
+  }
+
   async getRewardStatus(
     address: string,
   ): Promise<PublicPostingRewardStatusPayload> {
@@ -448,6 +564,7 @@ export class ProfileXPostingRewardService {
       current_streak_days: 0,
       next_check_allowed_at: null,
       error: null,
+      error_code: null,
     };
   }
 
@@ -516,11 +633,17 @@ export class ProfileXPostingRewardService {
     address: string,
   ): Promise<PublicPostingRewardStatusPayload> {
     this.assertValidAddress(address);
-    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+    // Preflight BEFORE the candidate is prepared and BEFORE the daily scan slot
+    // is claimed: a disabled or unavailable program must cost the user no slot,
+    // no strike and no X call. `unavailable` is a dependency gap (see readiness),
+    // not the user's fault, so it returns 503 rather than looking like success.
+    const readiness = this.resolveProgramReadiness();
+    if (readiness.program_status !== 'active') {
       throw new HttpException(
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
           message: 'Posting rewards are temporarily unavailable.',
+          error_code: readiness.error_code,
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
@@ -583,8 +706,9 @@ export class ProfileXPostingRewardService {
     //    failure) is neither budget abuse nor the user's fault: roll the slot
     //    back so they are not locked out for the whole window, and surface the
     //    failure instead of returning a misleading success.
+    let scanOutcome: ScanOutcome = ProfileXPostingRewardService.SCAN_KEEP_SLOT;
     try {
-      await this.processAddressWithGuard(address);
+      scanOutcome = await this.processAddressWithGuard(address);
     } catch (error) {
       await this.releaseDailyScanSlot(address, priorScanAt);
       this.logger.error(
@@ -605,6 +729,14 @@ export class ProfileXPostingRewardService {
         },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
+    }
+
+    // A handled scan that made ZERO metered X reads (e.g. a runtime
+    // token-acquisition failure) cost the X budget nothing, so it must not burn
+    // the user's daily slot — refund it exactly as the thrown path does. A scan
+    // that spent a read keeps the slot (fail-closed for the X budget).
+    if (scanOutcome.releaseScanSlot) {
+      await this.releaseDailyScanSlot(address, priorScanAt);
     }
 
     // A HANDLED scan failure does not throw — it records a code on the row and
@@ -768,12 +900,15 @@ export class ProfileXPostingRewardService {
     return reward;
   }
 
-  private async processAddressWithGuard(address: string): Promise<void> {
+  private async processAddressWithGuard(address: string): Promise<ScanOutcome> {
     // The in-flight guard's helper swallows (logs) a thrown scan error so the
     // fire-and-forget guard never rejects. Capture it here so the caller
     // (requestManualRecheck) can react — release the daily scan slot and surface
     // the failure — instead of the error being hidden behind a success response.
     let workError: unknown = null;
+    // Cleared before the scan; the scan re-adds the address only when it made
+    // zero metered X reads and the slot should be refunded (read+cleared below).
+    this.scanSlotRefunds.delete(address);
     await processAddressWithGuard({
       address,
       processingByAddress: this.processingByAddress,
@@ -801,6 +936,8 @@ export class ProfileXPostingRewardService {
     if (workError) {
       throw workError;
     }
+    // `delete` returns true only if the scan flagged this address for a refund.
+    return { releaseScanSlot: this.scanSlotRefunds.delete(address) };
   }
 
   /* ------------------------------------------------------------------ */
@@ -860,17 +997,32 @@ export class ProfileXPostingRewardService {
       return;
     }
 
-    const xUserProfile = await this.resolveXUserProfile(
+    const lookup = await this.resolveXUserProfile(
       rewardEntry.x_user_id,
       normalizedXUsername,
     );
-    if (!xUserProfile) {
+    if (lookup.outcome === 'unavailable') {
+      // X's fault, not the user's: an outage, rate limit or missing token must
+      // NOT accrue a strike (five would lock the row until re-link). Surface it
+      // as a distinct, no-strike code. If no metered read was spent, flag the
+      // daily slot for a refund so the outage cannot burn the user's window.
+      rewardEntry.error = 'x_unavailable';
+      await this.postingRewardRepository.save(rewardEntry);
+      if (!lookup.spentRead) {
+        this.scanSlotRefunds.add(address);
+      }
+      return;
+    }
+    if (lookup.outcome === 'not_found') {
+      // Definitive not-found (404 / a 200 that resolved to no user) is the
+      // user's problem — the handle is wrong or gone — so it counts a strike.
       rewardEntry.x_lookup_failure_count =
         Number(rewardEntry.x_lookup_failure_count || 0) + 1;
       rewardEntry.error = 'x_user_lookup_failed';
       await this.postingRewardRepository.save(rewardEntry);
       return;
     }
+    const xUserProfile = lookup.profile;
     rewardEntry.x_lookup_failure_count = 0;
     rewardEntry.x_username = normalizeXUsername(xUserProfile.username);
     rewardEntry.x_user_id = xUserProfile.id;
@@ -1928,8 +2080,22 @@ export class ProfileXPostingRewardService {
     )
       ? PROFILE_X_REWARD_STREAK_LENGTH
       : 10;
+    const readiness = this.resolveProgramReadiness();
+    // Program-level fields are identical for every row; `error_code` narrows to
+    // the row's own blocker only when the program itself is `active`.
+    const programFields = {
+      program_status: readiness.program_status,
+      onboarding_enabled: PROFILE_X_ONBOARDING_REWARD_ENABLED,
+      onboarding_amount_ae:
+        readiness.program_status === 'active'
+          ? PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE
+          : null,
+      onboarding_keywords: PROFILE_X_POSTING_REWARD_KEYWORDS,
+    };
     if (!reward) {
       return {
+        ...programFields,
+        error_code: readiness.error_code,
         status: 'not_started',
         x_username: null,
         x_user_id: null,
@@ -1961,6 +2127,11 @@ export class ProfileXPostingRewardService {
       Number(reward.follower_count || 0),
     );
     return {
+      ...programFields,
+      error_code:
+        readiness.program_status === 'active'
+          ? this.toPublicErrorCode(reward)
+          : readiness.error_code,
       status: onboardingStatus === 'paid' ? 'paid' : this.toScanStatus(reward),
       x_username: reward.x_username,
       x_user_id: reward.x_user_id,
@@ -2034,6 +2205,27 @@ export class ProfileXPostingRewardService {
       return null;
     }
     return txHash;
+  }
+
+  /**
+   * Stable machine code for the row's current blocker, or null. Only codes on
+   * the public allowlist pass through (coarse by design); a payout mid-flight
+   * and a paid row are not errors.
+   */
+  private toPublicErrorCode(reward: ProfileXPostingReward): string | null {
+    if (reward.status === 'paid') {
+      return null;
+    }
+    if (
+      reward.tx_hash ===
+      ProfileXPostingRewardService.ONBOARDING_PAYOUT_IN_PROGRESS_TX_HASH
+    ) {
+      return null;
+    }
+    return reward.error &&
+      ProfileXPostingRewardService.PUBLIC_ERROR_CODES.includes(reward.error)
+      ? reward.error
+      : null;
   }
 
   private toPublicError(reward: ProfileXPostingReward): string | null {
@@ -2120,30 +2312,36 @@ export class ProfileXPostingRewardService {
   private async resolveXUserProfile(
     knownUserId: string | null,
     username: string,
-  ): Promise<XUserProfile | null> {
+  ): Promise<XUserLookupResult> {
+    let spentRead = false;
     if (knownUserId) {
       const byId = await this.fetchXUserById(knownUserId);
-      if (byId.profile) {
-        return byId.profile;
+      spentRead = spentRead || byId.spentRead;
+      if (byId.outcome === 'found') {
+        return { ...byId, spentRead };
       }
       // Only spend a SECOND (paid) lookup when the id is definitively gone
       // (404 / resolved-to-nothing) — e.g. the handle changed or the id rotated.
-      // On a transient failure (429 / 5xx / network / no token) abort having
-      // spent a single call; the next daily-capped scan retries, instead of
-      // burning two lookups per scan during an X outage.
-      if (!byId.notFound) {
-        return null;
+      // On an unavailable result (429 / 5xx / network / no token) abort now; the
+      // next daily-capped scan retries, instead of burning two lookups per scan
+      // during an X outage.
+      if (byId.outcome !== 'not_found') {
+        return { outcome: 'unavailable', spentRead };
       }
     }
-    return this.fetchXUserProfileByUsername(username);
+    const byName = await this.fetchXUserProfileByUsername(username);
+    // A read spent on the by-id attempt counts even when the username fallback
+    // itself makes none (e.g. it had no token) — so the caller's slot-refund
+    // decision reflects the whole scan, not just the last call.
+    return { ...byName, spentRead: spentRead || byName.spentRead };
   }
 
   private async fetchXUserProfileByUsername(
     username: string,
-  ): Promise<XUserProfile | null> {
+  ): Promise<XUserLookupResult> {
     const token = await this.getXAppAccessToken();
     if (!token) {
-      return null;
+      return { outcome: 'unavailable', spentRead: false };
     }
     try {
       const { response, body, baseUrl } = await this.fetchXReadWithAuthFallback(
@@ -2159,25 +2357,32 @@ export class ProfileXPostingRewardService {
           status: response.status,
           detail: (body as any)?.detail || (body as any)?.title,
         });
-        return null;
+        // A 404, or a 200 that resolved to no user, is a definitive not-found
+        // (the user's handle is wrong / gone) → strike. Any other non-OK status
+        // (429 / 5xx) is transient → unavailable, no strike.
+        return response.status === 404 || response.ok
+          ? { outcome: 'not_found', spentRead: true }
+          : { outcome: 'unavailable', spentRead: true };
       }
-      return this.toXUserProfile((body as any).data, username);
+      return {
+        outcome: 'found',
+        profile: this.toXUserProfile((body as any).data, username),
+        spentRead: true,
+      };
     } catch (error) {
       this.logger.warn(
         `Failed to fetch X user profile for @${username}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return null;
+      return { outcome: 'unavailable', spentRead: true };
     }
   }
 
-  private async fetchXUserById(
-    userId: string,
-  ): Promise<{ profile: XUserProfile | null; notFound: boolean }> {
+  private async fetchXUserById(userId: string): Promise<XUserLookupResult> {
     const token = await this.getXAppAccessToken();
     if (!token) {
-      return { profile: null, notFound: false };
+      return { outcome: 'unavailable', spentRead: false };
     }
     try {
       const { response, body, baseUrl } = await this.fetchXReadWithAuthFallback(
@@ -2188,8 +2393,9 @@ export class ProfileXPostingRewardService {
       );
       if (response.ok && (body as any)?.data?.id) {
         return {
+          outcome: 'found',
           profile: this.toXUserProfile((body as any).data, null),
-          notFound: false,
+          spentRead: true,
         };
       }
       this.logger.warn('X user id lookup failed for posting reward', {
@@ -2199,20 +2405,19 @@ export class ProfileXPostingRewardService {
         detail: (body as any)?.detail || (body as any)?.title,
       });
       // A 404, or a 200 whose payload resolved to no user, both mean the id is
-      // gone for good → worth a username fallback. Other non-OK statuses
-      // (429 / 5xx) are transient → signal "not notFound" so the caller does
+      // gone for good → worth a username fallback (`not_found`). Other non-OK
+      // statuses (429 / 5xx) are transient → `unavailable` so the caller does
       // NOT spend a second lookup.
-      return {
-        profile: null,
-        notFound: response.status === 404 || response.ok,
-      };
+      return response.status === 404 || response.ok
+        ? { outcome: 'not_found', spentRead: true }
+        : { outcome: 'unavailable', spentRead: true };
     } catch (error) {
       this.logger.warn(
         `Failed to fetch X user by id ${userId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return { profile: null, notFound: false };
+      return { outcome: 'unavailable', spentRead: true };
     }
   }
 

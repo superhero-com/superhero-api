@@ -1,8 +1,9 @@
 import { RateLimitGuard } from '@/api-core/guards/rate-limit.guard';
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CreateXPostingRecheckChallengeDto } from '../dto/create-x-posting-recheck-challenge.dto';
 import { SubmitXPostingRecheckDto } from '../dto/submit-x-posting-recheck.dto';
+import { XPostingRewardStatusDto } from '../dto/x-posting-reward-status.dto';
 import { ProfileXInviteService } from '../services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
 import { AeAccountAddressPipe } from '@/common/validation/request-validation';
@@ -21,6 +22,7 @@ export class ProfileRewardsController {
     operationId: 'getXPostingRewardStatus',
     summary: 'Get X posting reward status for an address',
   })
+  @ApiOkResponse({ type: XPostingRewardStatusDto })
   async getXPostingRewardStatus(
     @Param('address', AeAccountAddressPipe) address: string,
   ) {
@@ -48,6 +50,7 @@ export class ProfileRewardsController {
     summary:
       'Verify wallet ownership and run an on-demand X posting reward recheck',
   })
+  @ApiOkResponse({ type: XPostingRewardStatusDto })
   async recheckXPostingReward(
     @Param('address', AeAccountAddressPipe) address: string,
     @Body() body: SubmitXPostingRecheckDto,
