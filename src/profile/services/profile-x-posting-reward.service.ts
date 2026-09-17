@@ -635,6 +635,143 @@ export class ProfileXPostingRewardService {
   }
 
   /**
+   * Run a check in the background when one is due, triggered by somebody
+   * opening the rewards page rather than by pressing the button.
+   *
+   * Nothing evaluates these rewards on a schedule, so a user who linked X and
+   * posted was never looked at again unless they came back and explicitly
+   * rechecked — which is why wallets sat verified and unpaid for months. The
+   * page already reads the status on every load; this makes that read also
+   * start the work, so simply visiting is enough.
+   *
+   * It deliberately does NOT reuse `requestManualRecheck`:
+   *
+   * - That path requires a signed challenge, because it is a user action. This
+   *   one is not: the signature stays on the button, and this can only ever do
+   *   what the button would have done for the address's own owner.
+   * - That path records a `rate_limited` attempt when the slot is taken. Here
+   *   the user pressed nothing, so recording one on every page load would bury
+   *   the genuine failures that history exists to surface.
+   * - That path throws so the caller can report the failure. This one has no
+   *   caller to report to, so it swallows everything: a background refresh must
+   *   never be able to break the status read that triggered it.
+   *
+   * Cost is bounded by the same atomic daily cap as the button — at most one X
+   * API scan per address per window — so the worst case equals a daily cron
+   * over every linked address, and the normal case is far cheaper because only
+   * wallets whose owner actually visits cost anything.
+   */
+  async refreshInBackgroundIfDue(address: string): Promise<void> {
+    try {
+      if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+        return;
+      }
+      // The same check `assertValidAddress` makes, without throwing: there is
+      // no caller here to receive a 400.
+      if (!ProfileXPostingRewardService.ADDRESS_REGEX.test(address || '')) {
+        return;
+      }
+      // Only wallets already in the program. The claim below is what actually
+      // makes an unknown address a no-op — its UPDATE matches no row — so this
+      // is here to skip that write entirely for the many reads that are never
+      // going to scan, not as the safety check.
+      const reward = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      if (!reward || reward.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+
+      // The account's CURRENT link decides, not the handle cached on the reward
+      // row. `bootstrapCandidate` refuses an unlinked account for exactly this
+      // reason, and reading the stale row instead would keep scanning — and
+      // paying — an address whose owner has since disconnected X. Read-only
+      // here on purpose: `prepareCheckCandidate` does the same check but also
+      // clears `error`, and doing that on every page load would wipe the
+      // eligibility code the dashboards read.
+      const account = await this.accountRepository.findOne({
+        where: { address },
+      });
+      const linkedXUsername = normalizeXUsername(account?.links?.x || '');
+      if (!linkedXUsername) {
+        return;
+      }
+
+      // Reset the cached identity BEFORE settling anything. Moving the settle
+      // pass ahead of the cooldown (below) put it ahead of the reset too, and
+      // that is a payout bug: `resetStaleXIdentityState` zeroes
+      // `qualified_posts_count` precisely so earnings from a PREVIOUS handle
+      // are not paid out, so settling on the un-reset row would send an
+      // onboarding reward earned under an X account the user has since
+      // swapped away from. The signed path is safe because it resets first;
+      // this has to as well.
+      const identityChanged = this.resetStaleXIdentityState(
+        reward,
+        linkedXUsername,
+      );
+      reward.x_username = linkedXUsername;
+      if (identityChanged) {
+        // Only when something actually changed — a re-link is rare, and this
+        // is a read path that should not write on every request.
+        await this.postingRewardRepository.save(reward);
+      }
+
+      // Settle anything already earned but stuck, BEFORE the cooldown gate.
+      // This calls no X API, so the X budget cap has no business blocking it —
+      // the manual path settles first for the same reason. Gating it behind the
+      // cooldown (as the first version of this did) meant a failed payout
+      // waited out the whole window even though revisiting the page was
+      // supposed to be what completed it.
+      await this.runPayouts(address, reward, { logStuckPayouts: true });
+
+      // Cheap read-side check so the common case (a page load inside the
+      // cooldown) costs nothing but the row we already loaded, instead of an
+      // UPDATE on every request to a hot endpoint. The claim below is still the
+      // real gate — this only avoids the write when it would obviously fail.
+      const nextAllowedAt = this.computeNextCheckAllowedAt(
+        reward.last_x_api_scan_at ?? null,
+      );
+      if (nextAllowedAt && nextAllowedAt.getTime() > Date.now()) {
+        return;
+      }
+
+      // Only now, immediately before scanning: this resets the cached X
+      // identity when the linked handle has CHANGED, without which the scan
+      // would resolve, accrue and pay against the previous X account. It also
+      // clears `error`, which is why it belongs here rather than on every read.
+      const candidate = await this.prepareCheckCandidate(address);
+      if (candidate.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+
+      const priorScanAt = candidate.last_x_api_scan_at ?? null;
+      // Atomic: concurrent page loads race here and exactly one wins. The
+      // losers return silently — nobody asked them for anything.
+      const claimed = await this.claimDailyScanSlot(address);
+      if (!claimed) {
+        return;
+      }
+
+      try {
+        await this.processAddressWithGuard(address);
+      } catch (error) {
+        // Same rollback as the manual path: an unexpected failure is not the
+        // user's fault and must not cost them the window.
+        await this.releaseDailyScanSlot(address, priorScanAt);
+        this.logger.warn(
+          `Background X reward refresh failed for ${address}; scan slot released`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Background X reward refresh could not start for ${address}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
    * Atomically consume this address's daily X API scan slot. Returns true only
    * for the single caller that flips `last_x_api_scan_at`; concurrent callers
    * and replays within the window get false. Set-before-fetch (fail-closed): a

@@ -2508,4 +2508,249 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     const reclaimed = await (service as any).claimDailyScanSlot(ADDRESS);
     expect(reclaimed).toBe(false);
   });
+
+  /**
+   * Opening the rewards page starts a due check, because nothing runs on a
+   * schedule. This path spends X API budget and can send AE without anybody
+   * pressing anything, so every guard on it is pinned here.
+   */
+  describe('refreshInBackgroundIfDue', () => {
+    it('pays a qualifying wallet without anyone pressing the button', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2001',
+          text: 'gm from superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, rows, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(rows.get(ADDRESS)?.status).toBe('paid');
+      expect(spend).toHaveBeenCalledTimes(1);
+      expect(spend.mock.calls[0][0]).toBe(ONBOARDING_AETTOS);
+    });
+
+    it('does nothing for an address that never joined the program', async () => {
+      // This endpoint is unauthenticated, so a request can name any address at
+      // all. Two things stop that from spending anything: the early return,
+      // and — the one that really enforces it — the scan claim, whose UPDATE
+      // matches no row when the address has none. Asserted on the outcome
+      // rather than on either guard, so it holds if one is refactored away.
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(spend).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does nothing while the wallet is inside its cooldown', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2002',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: new Date() })],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      // A page refresh inside the window costs nothing. Two layers enforce
+      // that — the read-side check here and the atomic claim underneath — so
+      // this asserts the outcome rather than either one.
+      expect(spend).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lets only one of many simultaneous page loads scan', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2003',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+
+      await Promise.all([
+        service.refreshInBackgroundIfDue(ADDRESS),
+        service.refreshInBackgroundIfDue(ADDRESS),
+        service.refreshInBackgroundIfDue(ADDRESS),
+      ]);
+
+      // Three tabs open at once must not pay three times. In this harness the
+      // in-process guard is what collapses them; across server instances it is
+      // the atomic scan claim, which a fake repository cannot simulate. Both
+      // are real, so this pins the invariant and not the mechanism.
+      expect(spend).toHaveBeenCalledTimes(1);
+    });
+
+    it('never throws, whatever goes wrong underneath', async () => {
+      const { service, postingRewardRepository } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+      postingRewardRepository.findOne.mockRejectedValueOnce(
+        new Error('database is on fire'),
+      );
+
+      // The status read that triggered this must still succeed. A background
+      // refresh turning a page load into a 500 would be strictly worse than
+      // not refreshing at all.
+      await expect(
+        service.refreshInBackgroundIfDue(ADDRESS),
+      ).resolves.toBeUndefined();
+    });
+
+    it('ignores a malformed address instead of throwing', async () => {
+      const { service, spend } = makeService({ rows: [baseRow()] });
+
+      await expect(
+        service.refreshInBackgroundIfDue('not-an-address'),
+      ).resolves.toBeUndefined();
+      expect(spend).not.toHaveBeenCalled();
+    });
+
+    it('does not scan or pay an account that has unlinked X', async () => {
+      // Caught in review. The reward row keeps the handle it last saw, so
+      // reading it alone would keep scanning — and paying — an address whose
+      // owner has since disconnected X. The manual path refuses via
+      // bootstrapCandidate; this must refuse for the same reason.
+      tweetsByUserId['100'] = [
+        {
+          id: '2004',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: {} },
+        // Seeded with a settleable payout on purpose. prepareCheckCandidate
+        // would refuse an unlinked account too, but only AFTER the settle pass
+        // — so without the read-only link check above, this row's money would
+        // go out before anything noticed the account was unlinked. That is the
+        // hole this asserts, and it is invisible on a row with nothing owed.
+        rows: [
+          baseRow({
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(spend).not.toHaveBeenCalled();
+    });
+
+    it('does not pay against the previous handle after a re-link', async () => {
+      // prepareCheckCandidate resets the cached X identity when the linked
+      // handle changed. Skipping it meant the scan resolved, accrued and paid
+      // against the OLD X account — the hazard resetStaleXIdentityState exists
+      // to prevent.
+      userIdByUsername = { poster: '100', newhandle: '200' };
+      followersByUserId = { '100': 500, '200': 500 };
+      tweetsByUserId['100'] = [
+        {
+          id: '2005',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      tweetsByUserId['200'] = [];
+      const { service, rows, spend } = makeService({
+        // The account now links a DIFFERENT handle than the row cached.
+        account: { address: ADDRESS, links: { x: 'newhandle' } },
+        // Seeded with a settleable onboarding balance earned under the OLD
+        // handle. The first version of this test had nothing owed, so it
+        // passed whether or not the reset ran before the settle pass and
+        // proved nothing — the same blind spot as the unlink case. Caught in
+        // review, twice; the balance is what makes it a real test.
+        rows: [
+          baseRow({
+            x_user_id: '100',
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      // Nothing earned under the previous handle may be sent after the swap.
+      expect(spend).not.toHaveBeenCalledWith(
+        ONBOARDING_AETTOS,
+        expect.anything(),
+        expect.anything(),
+      );
+      // And the row must have moved to the newly linked identity, never having
+      // scored the old account's posts.
+      expect(rows.get(ADDRESS)?.x_username).toBe('newhandle');
+      expect(rows.get(ADDRESS)?.x_user_id).not.toBe('100');
+      expect(rows.get(ADDRESS)?.qualified_posts_count).toBe(0);
+    });
+
+    it('settles a stuck payout even inside the scan cooldown', async () => {
+      // Caught in review, and the first version got this backwards: runPayouts
+      // sat behind the cooldown, so a failed payout — which leaves a fresh
+      // last_x_api_scan_at — waited out the whole window. Settling calls no X
+      // API, so the X budget cap must not gate it.
+      const { service } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [
+          baseRow({
+            last_x_api_scan_at: new Date(),
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
+      });
+      const runPayouts = jest.spyOn(service as any, 'runPayouts');
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(runPayouts).toHaveBeenCalled();
+      // And it asks for stuck-payout logging, like the manual path, so a
+      // lingering in-progress sentinel is surfaced rather than sitting silent.
+      expect(runPayouts.mock.calls[0][2]).toEqual({ logStuckPayouts: true });
+    });
+
+    it('files no attempt row when it declines to run', async () => {
+      // requestManualRecheck records a `rate_limited` attempt when the slot is
+      // taken, because a person pressed a button and deserves the history.
+      // Here nobody did, and recording one per page load would bury the real
+      // failures that history exists to surface.
+      const attempts = { record: jest.fn().mockResolvedValue(undefined) };
+      const { service } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: new Date() })],
+      });
+      (service as any).verificationAttemptService = attempts;
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(attempts.record).not.toHaveBeenCalled();
+    });
+  });
 });

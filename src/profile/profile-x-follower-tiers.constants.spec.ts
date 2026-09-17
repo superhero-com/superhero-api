@@ -42,11 +42,26 @@ describe('PROFILE_X_FOLLOWER_TIERS parsing', () => {
     const tiers = loadTiers(undefined);
     expect(Array.isArray(tiers)).toBe(true);
     expect(tiers.length).toBeGreaterThan(0);
-    expect(tiers[0].minFollowers).toBe(0);
+    // The default table starts at the advertised 100-follower floor, not 0.
+    // profile.constants.spec.ts pins the exact amounts against the rewards
+    // page; this only checks the parse produced the configured default.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PROFILE_X_FOLLOWER_TIERS_DEFAULT } = require('./profile.constants');
+    expect(tiers[0].minFollowers).toBe(
+      Number(PROFILE_X_FOLLOWER_TIERS_DEFAULT.split(':')[0]),
+    );
   });
 
-  it('yields an empty list when every entry is invalid', () => {
+  it('falls back to the default table when every entry is invalid', () => {
+    // This used to assert `[]`, which encoded the silent failure as correct.
+    // An empty table makes resolveFollowerTier return null for every follower
+    // count, so a single typo in the env var stopped all per-post rewards with
+    // nothing logged and every endpoint looking healthy. Now it complains and
+    // uses the advertised table.
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const tiers = loadTiers('foo,bar:,:1,5');
-    expect(tiers).toEqual([]);
+    expect(tiers.length).toBeGreaterThan(0);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
