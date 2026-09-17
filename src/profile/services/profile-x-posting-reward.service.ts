@@ -681,6 +681,29 @@ export class ProfileXPostingRewardService {
       if (!reward || reward.status === 'blocked_x_identity_conflict') {
         return;
       }
+
+      // The account's CURRENT link decides, not the handle cached on the reward
+      // row. `bootstrapCandidate` refuses an unlinked account for exactly this
+      // reason, and reading the stale row instead would keep scanning — and
+      // paying — an address whose owner has since disconnected X. Read-only
+      // here on purpose: `prepareCheckCandidate` does the same check but also
+      // clears `error`, and doing that on every page load would wipe the
+      // eligibility code the dashboards read.
+      const account = await this.accountRepository.findOne({
+        where: { address },
+      });
+      if (!normalizeXUsername(account?.links?.x || '')) {
+        return;
+      }
+
+      // Settle anything already earned but stuck, BEFORE the cooldown gate.
+      // This calls no X API, so the X budget cap has no business blocking it —
+      // the manual path settles first for the same reason. Gating it behind the
+      // cooldown (as the first version of this did) meant a failed payout
+      // waited out the whole window even though revisiting the page was
+      // supposed to be what completed it.
+      await this.runPayouts(address, reward, { logStuckPayouts: true });
+
       // Cheap read-side check so the common case (a page load inside the
       // cooldown) costs nothing but the row we already loaded, instead of an
       // UPDATE on every request to a hot endpoint. The claim below is still the
@@ -692,7 +715,16 @@ export class ProfileXPostingRewardService {
         return;
       }
 
-      const priorScanAt = reward.last_x_api_scan_at ?? null;
+      // Only now, immediately before scanning: this resets the cached X
+      // identity when the linked handle has CHANGED, without which the scan
+      // would resolve, accrue and pay against the previous X account. It also
+      // clears `error`, which is why it belongs here rather than on every read.
+      const candidate = await this.prepareCheckCandidate(address);
+      if (candidate.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+
+      const priorScanAt = candidate.last_x_api_scan_at ?? null;
       // Atomic: concurrent page loads race here and exactly one wins. The
       // losers return silently — nobody asked them for anything.
       const claimed = await this.claimDailyScanSlot(address);
@@ -701,10 +733,6 @@ export class ProfileXPostingRewardService {
       }
 
       try {
-        // Settle anything already earned but stuck first. This calls no X API
-        // and costs no budget, and it is the reason a user with a failed payout
-        // sees it complete by revisiting the page.
-        await this.runPayouts(address, reward);
         await this.processAddressWithGuard(address);
       } catch (error) {
         // Same rollback as the manual path: an unexpected failure is not the

@@ -2626,6 +2626,96 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       expect(spend).not.toHaveBeenCalled();
     });
 
+    it('does not scan or pay an account that has unlinked X', async () => {
+      // Caught in review. The reward row keeps the handle it last saw, so
+      // reading it alone would keep scanning — and paying — an address whose
+      // owner has since disconnected X. The manual path refuses via
+      // bootstrapCandidate; this must refuse for the same reason.
+      tweetsByUserId['100'] = [
+        {
+          id: '2004',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: {} },
+        // Seeded with a settleable payout on purpose. prepareCheckCandidate
+        // would refuse an unlinked account too, but only AFTER the settle pass
+        // — so without the read-only link check above, this row's money would
+        // go out before anything noticed the account was unlinked. That is the
+        // hole this asserts, and it is invisible on a row with nothing owed.
+        rows: [
+          baseRow({
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(spend).not.toHaveBeenCalled();
+    });
+
+    it('does not pay against the previous handle after a re-link', async () => {
+      // prepareCheckCandidate resets the cached X identity when the linked
+      // handle changed. Skipping it meant the scan resolved, accrued and paid
+      // against the OLD X account — the hazard resetStaleXIdentityState exists
+      // to prevent.
+      userIdByUsername = { poster: '100', newhandle: '200' };
+      followersByUserId = { '100': 500, '200': 500 };
+      tweetsByUserId['100'] = [
+        {
+          id: '2005',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      tweetsByUserId['200'] = [];
+      const { service, rows } = makeService({
+        // The account now links a DIFFERENT handle than the row cached.
+        account: { address: ADDRESS, links: { x: 'newhandle' } },
+        rows: [baseRow({ x_user_id: '100' })],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      // The row must have moved to the newly linked identity, never scored the
+      // old account's posts.
+      expect(rows.get(ADDRESS)?.x_username).toBe('newhandle');
+      expect(rows.get(ADDRESS)?.x_user_id).not.toBe('100');
+    });
+
+    it('settles a stuck payout even inside the scan cooldown', async () => {
+      // Caught in review, and the first version got this backwards: runPayouts
+      // sat behind the cooldown, so a failed payout — which leaves a fresh
+      // last_x_api_scan_at — waited out the whole window. Settling calls no X
+      // API, so the X budget cap must not gate it.
+      const { service } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [
+          baseRow({
+            last_x_api_scan_at: new Date(),
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
+      });
+      const runPayouts = jest.spyOn(service as any, 'runPayouts');
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(runPayouts).toHaveBeenCalled();
+      // And it asks for stuck-payout logging, like the manual path, so a
+      // lingering in-progress sentinel is surfaced rather than sitting silent.
+      expect(runPayouts.mock.calls[0][2]).toEqual({ logStuckPayouts: true });
+    });
+
     it('files no attempt row when it declines to run', async () => {
       // requestManualRecheck records a `rate_limited` attempt when the slot is
       // taken, because a person pressed a button and deserves the history.
