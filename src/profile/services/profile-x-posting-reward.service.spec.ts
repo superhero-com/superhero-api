@@ -2675,18 +2675,38 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
         },
       ];
       tweetsByUserId['200'] = [];
-      const { service, rows } = makeService({
+      const { service, rows, spend } = makeService({
         // The account now links a DIFFERENT handle than the row cached.
         account: { address: ADDRESS, links: { x: 'newhandle' } },
-        rows: [baseRow({ x_user_id: '100' })],
+        // Seeded with a settleable onboarding balance earned under the OLD
+        // handle. The first version of this test had nothing owed, so it
+        // passed whether or not the reset ran before the settle pass and
+        // proved nothing — the same blind spot as the unlink case. Caught in
+        // review, twice; the balance is what makes it a real test.
+        rows: [
+          baseRow({
+            x_user_id: '100',
+            qualified_posts_count: 1,
+            status: 'failed',
+            error: 'payout_send_failed',
+            tx_hash: null,
+          }),
+        ],
       });
 
       await service.refreshInBackgroundIfDue(ADDRESS);
 
-      // The row must have moved to the newly linked identity, never scored the
-      // old account's posts.
+      // Nothing earned under the previous handle may be sent after the swap.
+      expect(spend).not.toHaveBeenCalledWith(
+        ONBOARDING_AETTOS,
+        expect.anything(),
+        expect.anything(),
+      );
+      // And the row must have moved to the newly linked identity, never having
+      // scored the old account's posts.
       expect(rows.get(ADDRESS)?.x_username).toBe('newhandle');
       expect(rows.get(ADDRESS)?.x_user_id).not.toBe('100');
+      expect(rows.get(ADDRESS)?.qualified_posts_count).toBe(0);
     });
 
     it('settles a stuck payout even inside the scan cooldown', async () => {

@@ -692,8 +692,28 @@ export class ProfileXPostingRewardService {
       const account = await this.accountRepository.findOne({
         where: { address },
       });
-      if (!normalizeXUsername(account?.links?.x || '')) {
+      const linkedXUsername = normalizeXUsername(account?.links?.x || '');
+      if (!linkedXUsername) {
         return;
+      }
+
+      // Reset the cached identity BEFORE settling anything. Moving the settle
+      // pass ahead of the cooldown (below) put it ahead of the reset too, and
+      // that is a payout bug: `resetStaleXIdentityState` zeroes
+      // `qualified_posts_count` precisely so earnings from a PREVIOUS handle
+      // are not paid out, so settling on the un-reset row would send an
+      // onboarding reward earned under an X account the user has since
+      // swapped away from. The signed path is safe because it resets first;
+      // this has to as well.
+      const identityChanged = this.resetStaleXIdentityState(
+        reward,
+        linkedXUsername,
+      );
+      reward.x_username = linkedXUsername;
+      if (identityChanged) {
+        // Only when something actually changed — a re-link is rare, and this
+        // is a read path that should not write on every request.
+        await this.postingRewardRepository.save(reward);
       }
 
       // Settle anything already earned but stuck, BEFORE the cooldown gate.
