@@ -13,6 +13,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   DataSource,
   In,
@@ -50,6 +51,7 @@ import {
 import { Account } from '@/account/entities/account.entity';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { fetchJson } from '@/utils/common';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
 import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
@@ -143,6 +145,12 @@ export class ProfileXPostingRewardService {
   private readonly processingByAddress = new Map<string, Promise<void>>();
   private readonly recentSourceTxHashes = new Set<string>();
   private readonly recentSourceTxHashQueue: string[] = [];
+  // Cap on how many rows one sweep run settles, so a large enrolled population
+  // cannot turn a single tick into an unbounded batch. Oldest-scanned first, so
+  // rows never looked at come up before ones already settled recently.
+  private static readonly SWEEP_BATCH_SIZE = 500;
+  private static readonly SWEEP_CONCURRENCY = 5;
+  private isSweepRunning = false;
 
   constructor(
     @InjectRepository(ProfileXPostingReward)
@@ -635,14 +643,70 @@ export class ProfileXPostingRewardService {
   }
 
   /**
-   * Run a check in the background when one is due, triggered by somebody
-   * opening the rewards page rather than by pressing the button.
+   * Settle every enrolled row whose scan window has elapsed, on a schedule, so a
+   * wallet that linked X and posted is paid without its owner ever coming back to
+   * the page. This replaces the old page-visit trigger: a visit-triggered refresh
+   * by construction never reaches the users who stopped visiting, who are exactly
+   * the "verified and unpaid for months" population this exists to rescue.
    *
-   * Nothing evaluates these rewards on a schedule, so a user who linked X and
-   * posted was never looked at again unless they came back and explicitly
-   * rechecked — which is why wallets sat verified and unpaid for months. The
-   * page already reads the status on every load; this makes that read also
-   * start the work, so simply visiting is enough.
+   * Rows are selected oldest-scanned first and bounded to SWEEP_BATCH_SIZE per
+   * run; each is settled through the same per-address unit and atomic daily cap
+   * as the signed recheck, so a row already scanned inside its window is a no-op.
+   * A run never overlaps its predecessor, and one row's failure never stops the
+   * rest — `refreshInBackgroundIfDue` swallows its own errors.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async sweepDuePostingRewards(): Promise<void> {
+    if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+      return;
+    }
+    if (this.isSweepRunning) {
+      return;
+    }
+    this.isSweepRunning = true;
+    try {
+      const capHours = isValidPositiveInteger(PROFILE_X_REWARD_DAILY_CAP_HOURS)
+        ? PROFILE_X_REWARD_DAILY_CAP_HOURS
+        : 24;
+      const cutoff = new Date(Date.now() - capHours * 3600 * 1000);
+      const dueRows = await this.postingRewardRepository.find({
+        where: [
+          {
+            status: Not('blocked_x_identity_conflict'),
+            last_x_api_scan_at: IsNull(),
+          },
+          {
+            status: Not('blocked_x_identity_conflict'),
+            last_x_api_scan_at: LessThanOrEqual(cutoff),
+          },
+        ],
+        order: { last_x_api_scan_at: 'ASC' },
+        take: ProfileXPostingRewardService.SWEEP_BATCH_SIZE,
+      });
+      await mapWithConcurrency(
+        dueRows,
+        ProfileXPostingRewardService.SWEEP_CONCURRENCY,
+        (row) => this.refreshInBackgroundIfDue(row.address),
+      );
+    } catch (error) {
+      this.logger.error(
+        'Posting reward sweep failed',
+        error instanceof Error ? error.stack : String(error),
+      );
+    } finally {
+      this.isSweepRunning = false;
+    }
+  }
+
+  /**
+   * Settle and, if due, re-scan a single enrolled address. This is the
+   * per-address unit the scheduled sweep (`sweepDuePostingRewards`) runs; it is
+   * never reachable from an unauthenticated request.
+   *
+   * Rewards used to be evaluated only when a user came back and pressed the
+   * button (or, briefly, on any page visit), so a wallet that linked X and
+   * posted but never returned sat verified and unpaid for months. The sweep
+   * settles those rows without anyone visiting.
    *
    * It deliberately does NOT reuse `requestManualRecheck`:
    *
@@ -653,13 +717,12 @@ export class ProfileXPostingRewardService {
    *   the user pressed nothing, so recording one on every page load would bury
    *   the genuine failures that history exists to surface.
    * - That path throws so the caller can report the failure. This one has no
-   *   caller to report to, so it swallows everything: a background refresh must
-   *   never be able to break the status read that triggered it.
+   *   caller to report to, so it swallows everything: one row's failure must
+   *   never be able to break the sweep run that is settling the rest.
    *
    * Cost is bounded by the same atomic daily cap as the button — at most one X
-   * API scan per address per window — so the worst case equals a daily cron
-   * over every linked address, and the normal case is far cheaper because only
-   * wallets whose owner actually visits cost anything.
+   * API scan per address per window — so the worst case is one scan per enrolled
+   * address per window, which is exactly what the sweep is sized around.
    */
   async refreshInBackgroundIfDue(address: string): Promise<void> {
     try {

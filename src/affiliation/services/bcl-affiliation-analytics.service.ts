@@ -914,7 +914,16 @@ export class BclAffiliationAnalyticsService {
     start_date?: string;
     end_date?: string;
     limit?: number;
+    /**
+     * Per-wallet rows are inviter identities, so they never go to an
+     * unauthenticated caller. Deny by default: omit this flag and the list is
+     * empty, whatever else is configured. Only an authenticated path may set it.
+     */
+    include_per_wallet?: boolean;
   }): Promise<{ items: BclAffiliationTopInviter[]; queryMs: number }> {
+    if (!params.include_per_wallet) {
+      return { items: [], queryMs: 0 };
+    }
     const { startDate, endDate } = this.parseDateRange(params);
     const limit = this.sanitizeLimit(params.limit, 10);
 
@@ -1389,6 +1398,14 @@ export class BclAffiliationAnalyticsService {
   async getXExplorerData(params: {
     start_date?: string;
     end_date?: string;
+    /**
+     * The `users`/`pending` rows carry per-wallet identity, invite subtrees and
+     * single-use invite codes, so they never go to an unauthenticated caller.
+     * Deny by default: omit this flag and both arrays are empty while the
+     * aggregate `summary` and `series` still return. Only an authenticated path
+     * may set it.
+     */
+    include_per_wallet?: boolean;
   }): Promise<{
     users: BclXExplorerUser[];
     pending: BclXExplorerUser[];
@@ -1691,8 +1708,11 @@ export class BclAffiliationAnalyticsService {
     const allPayouts = [...users, ...pending].flatMap((u) => u.payouts);
 
     return {
-      users,
-      pending,
+      // Deny by default: per-wallet detail is withheld unless the caller is
+      // explicitly authenticated. The aggregate summary below carries no
+      // per-wallet identity and always returns.
+      users: params.include_per_wallet ? users : [],
+      pending: params.include_per_wallet ? pending : [],
       series,
       summary: {
         verified_users: users.length,

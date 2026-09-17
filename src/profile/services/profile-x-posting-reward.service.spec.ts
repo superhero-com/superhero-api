@@ -265,6 +265,11 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
         }
         return null;
       }),
+      find: jest.fn(async ({ where }: any = {}) => {
+        const all = Array.from(rows.values());
+        if (!where) return all;
+        return all.filter((row) => matchesAnyWhere(row, where));
+      }),
       create: jest.fn((v: any) => ({
         retry_count: 0,
         qualified_posts_count: 0,
@@ -2514,6 +2519,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
    * schedule. This path spends X API budget and can send AE without anybody
    * pressing anything, so every guard on it is pinned here.
    */
+  // The per-address unit the scheduled sweep runs. It is no longer reachable
+  // from the unauthenticated status GET (that read is pure now); the sweep is
+  // what settles due rows. The cases below pin its per-address behaviour, and
+  // the `sweepDuePostingRewards` block proves the sweep drives it.
   describe('refreshInBackgroundIfDue', () => {
     it('pays a qualifying wallet without anyone pressing the button', async () => {
       tweetsByUserId['100'] = [
@@ -2710,10 +2719,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     });
 
     it('settles a stuck payout even inside the scan cooldown', async () => {
-      // Caught in review, and the first version got this backwards: runPayouts
-      // sat behind the cooldown, so a failed payout — which leaves a fresh
-      // last_x_api_scan_at — waited out the whole window. Settling calls no X
-      // API, so the X budget cap must not gate it.
+      // The sweep only ever reaches a row once its window has elapsed, but a row
+      // can carry a stuck payout with a fresh last_x_api_scan_at (a failed send
+      // stamps one). Settling calls no X API, so the daily cap must not gate it —
+      // the row is settled on the same pass rather than waiting out the window.
       const { service } = makeService({
         account: { address: ADDRESS, links: { x: 'poster' } },
         rows: [
@@ -2751,6 +2760,67 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       await service.refreshInBackgroundIfDue(ADDRESS);
 
       expect(attempts.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sweepDuePostingRewards', () => {
+    it('pays a due wallet on a schedule, with no page visit', async () => {
+      // The whole point of the sweep: a wallet that linked X and posted but never
+      // came back is settled anyway. Nobody reads the status here.
+      tweetsByUserId['100'] = [
+        {
+          id: '3001',
+          text: 'gm from superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, rows, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        // last_x_api_scan_at null → due, never scanned.
+        rows: [baseRow({ last_x_api_scan_at: null })],
+      });
+
+      await service.sweepDuePostingRewards();
+
+      expect(rows.get(ADDRESS)?.status).toBe('paid');
+      expect(spend).toHaveBeenCalledTimes(1);
+      expect(spend.mock.calls[0][0]).toBe(ONBOARDING_AETTOS);
+    });
+
+    it('skips a wallet still inside its scan window', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '3002',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend, postingRewardRepository } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: new Date() })],
+      });
+
+      await service.sweepDuePostingRewards();
+
+      // The recently scanned row is not even selected, so no X call, no spend.
+      expect(postingRewardRepository.find).toHaveBeenCalled();
+      expect(spend).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does not overlap a run that is already in flight', async () => {
+      const { service } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: null })],
+      });
+      const refresh = jest
+        .spyOn(service as any, 'refreshInBackgroundIfDue')
+        .mockResolvedValue(undefined);
+
+      (service as any).isSweepRunning = true;
+      await service.sweepDuePostingRewards();
+
+      expect(refresh).not.toHaveBeenCalled();
     });
   });
 });

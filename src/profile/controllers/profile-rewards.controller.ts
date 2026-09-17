@@ -24,22 +24,11 @@ export class ProfileRewardsController {
   async getXPostingRewardStatus(
     @Param('address', AeAccountAddressPipe) address: string,
   ) {
-    // Opening the rewards page starts a check when one is due. Nothing runs on
-    // a schedule, so without this a user who linked X and posted is never
-    // looked at again unless they come back and press the button — which is
-    // how wallets ended up verified and unpaid for months.
-    //
-    // Deliberately not awaited: the status returns immediately from what is
-    // already known, and the refreshed numbers appear on the next load. The
-    // call swallows its own failures, so this cannot turn a read into an error.
-    // Cost is bounded by the same one-scan-per-address-per-window cap as the
-    // button.
-    // The `.catch` is belt-and-braces: the service already swallows its own
-    // failures, but nothing here would survive that guarantee being removed
-    // later, and an unhandled rejection on a read path is not worth the risk.
-    void this.profileXPostingRewardService
-      .refreshInBackgroundIfDue(address)
-      ?.catch(() => undefined);
+    // Pure read. This endpoint is unauthenticated, so it must not move money,
+    // mutate state or spend an X API scan for an address the caller has not
+    // proven they own. Due rows are settled by the scheduled sweep in
+    // ProfileXPostingRewardService, not by a page visit; an on-demand refresh is
+    // still available on the signed recheck endpoint below.
     return this.profileXPostingRewardService.getRewardStatus(address);
   }
 

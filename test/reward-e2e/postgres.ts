@@ -147,9 +147,21 @@ export async function startPostgres(binDir: string): Promise<PostgresHandle> {
   try {
     // Trust auth: the server listens on loopback, on a random port, and is
     // destroyed with its data directory when the suite ends.
+    // `--locale=C` so initdb does not read LANG/LC_* from the environment: on a
+    // host where those are unset it otherwise exits with "invalid locale
+    // settings" and fails the whole harness instead of booting.
     execFileSync(
       path.join(binDir, 'initdb'),
-      ['-D', dataDir, '-U', 'postgres', '-A', 'trust', '--encoding=UTF8'],
+      [
+        '-D',
+        dataDir,
+        '-U',
+        'postgres',
+        '-A',
+        'trust',
+        '--encoding=UTF8',
+        '--locale=C',
+      ],
       { stdio: 'ignore', ...runAs },
     );
 

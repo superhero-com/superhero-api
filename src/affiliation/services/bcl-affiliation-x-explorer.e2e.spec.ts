@@ -162,14 +162,34 @@ describeWithDb('X explorer against real PostgreSQL', () => {
 
   it('runs every explorer query against the real engine', async () => {
     // The whole point: if any column, join or parameter expansion is wrong,
-    // this throws instead of quietly returning a shaped-but-empty object.
-    const result = await makeService(ds).getXExplorerData({});
+    // this throws instead of quietly returning a shaped-but-empty object. The
+    // per-wallet detail is behind the explicit opt-in; these cases exercise the
+    // authenticated path against the real engine.
+    const result = await makeService(ds).getXExplorerData({
+      include_per_wallet: true,
+    });
 
     expect(result.users.length + result.pending.length).toBe(2);
   });
 
-  it('reports a real paid wallet with every payout attributed and linked', async () => {
+  it('withholds every per-wallet row from an unauthenticated caller', async () => {
+    // No flag = the shape the public route serves. Aggregates still come back;
+    // not one wallet address, invitee or single-use invite code does.
     const result = await makeService(ds).getXExplorerData({});
+
+    expect(result.users).toEqual([]);
+    expect(result.pending).toEqual([]);
+    // The aggregate summary is computed and returned regardless.
+    expect(result.summary.verified_users + result.summary.pending_users).toBe(
+      2,
+    );
+    expect(JSON.stringify(result)).not.toContain(PAID_ADDRESS);
+  });
+
+  it('reports a real paid wallet with every payout attributed and linked', async () => {
+    const result = await makeService(ds).getXExplorerData({
+      include_per_wallet: true,
+    });
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     expect(paid).toBeDefined();
@@ -199,7 +219,9 @@ describeWithDb('X explorer against real PostgreSQL', () => {
   });
 
   it('separates a never-scanned wallet from an eligible one', async () => {
-    const result = await makeService(ds).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({
+      include_per_wallet: true,
+    });
 
     const stalled = [...result.users, ...result.pending].find(
       (u) => u.address === STALLED_ADDRESS,
@@ -212,7 +234,9 @@ describeWithDb('X explorer against real PostgreSQL', () => {
   });
 
   it('counts an unbound invite link without inventing an invitee', async () => {
-    const result = await makeService(ds).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({
+      include_per_wallet: true,
+    });
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     expect(paid?.invite_links_created).toBe(1);
@@ -223,7 +247,9 @@ describeWithDb('X explorer against real PostgreSQL', () => {
   });
 
   it('totals only settled AE, across all reward tables', async () => {
-    const result = await makeService(ds).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({
+      include_per_wallet: true,
+    });
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     // 50 (streak) + 10 (per-post) + the configured onboarding amount. Asserted

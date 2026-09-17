@@ -337,6 +337,9 @@ describe('BclAffiliationAnalyticsService', () => {
       ...over,
     });
 
+    // These cases pin the per-wallet detail the authenticated path returns, so
+    // they explicitly opt in. The default (no flag) is covered by the
+    // deny-by-default block below.
     const run = (over: { reward?: any; streak?: any[] } = {}) =>
       makeService({
         postingRewardRepo: qb([rewardRow(over.reward)]),
@@ -344,7 +347,7 @@ describe('BclAffiliationAnalyticsService', () => {
         postRewardLedgerRepo: qb([]),
         streakBonusRepo: qb(over.streak ?? []),
         inviteMilestoneRepo: qb([]),
-      }).getXExplorerData({});
+      }).getXExplorerData({ include_per_wallet: true });
 
     it('says why a wallet is not eligible, with the number it failed on', async () => {
       // "below_min_followers" alone sends the reader to the source to find out
@@ -607,6 +610,105 @@ describe('BclAffiliationAnalyticsService', () => {
       expect(result.users[0].total_ae_paid).toBe('50');
       expect(result.summary.total_ae_paid).toBe('50');
       expect(result.summary.payouts_paid).toBe(1);
+    });
+  });
+
+  describe('per-wallet data is denied by default', () => {
+    // The controller routes are unauthenticated and pass no flag, so these
+    // assert the shape an anonymous caller actually receives: aggregates only,
+    // never a wallet address, invite subtree or single-use invite code. The
+    // default is deny with nothing configured — the flag has to be set to opt in.
+    const qbMany = (rows: any[]) => {
+      const builder: any = new Proxy(
+        { getMany: async () => rows, getRawMany: async () => rows },
+        {
+          get: (target, prop) =>
+            prop in target ? (target as any)[prop] : () => builder,
+        },
+      );
+      return { createQueryBuilder: () => builder } as any;
+    };
+
+    it('getXExplorerData returns no per-wallet rows when the flag is absent', async () => {
+      const reward = {
+        address: 'ak_secret_wallet',
+        x_username: 'someone',
+        verified_at: new Date('2026-06-24T00:00:00.000Z'),
+        referral_code: 'abc123',
+        follower_count: 0,
+        follower_tier_index: 0,
+        qualified_posts_count: 0,
+        current_streak_days: 0,
+        status: 'pending',
+        error: null,
+        last_x_api_scan_at: null,
+        created_at: new Date('2026-06-24T00:00:00.000Z'),
+      };
+      const service = makeService({
+        postingRewardRepo: qbMany([reward]),
+        profileXInviteRepo: qbMany([]),
+        postRewardLedgerRepo: qbMany([]),
+        streakBonusRepo: qbMany([]),
+        inviteMilestoneRepo: qbMany([]),
+      });
+
+      const result = await service.getXExplorerData({});
+
+      expect(result.users).toEqual([]);
+      expect(result.pending).toEqual([]);
+      // The aggregate summary still comes through — it carries no identity.
+      expect(result.summary).toBeDefined();
+      expect(JSON.stringify(result)).not.toContain('ak_secret_wallet');
+    });
+
+    it('getTopInviters returns no inviter rows when the flag is absent', async () => {
+      const service = makeService({
+        invitationRepo: qbMany([
+          {
+            inviter: 'ak_secret_wallet',
+            registered_count: 5,
+            total_amount_ae: 1,
+          },
+        ]),
+      });
+
+      const result = await service.getTopInviters({});
+
+      expect(result.items).toEqual([]);
+      expect(JSON.stringify(result)).not.toContain('ak_secret_wallet');
+    });
+
+    it('opting in returns the per-wallet detail (authenticated path)', async () => {
+      const explorer = await makeService({
+        postingRewardRepo: qbMany([
+          {
+            address: 'ak_inviter',
+            x_username: 'someone',
+            verified_at: new Date('2026-06-24T00:00:00.000Z'),
+            referral_code: 'abc123',
+            follower_count: 0,
+            follower_tier_index: 0,
+            qualified_posts_count: 0,
+            current_streak_days: 0,
+            status: 'pending',
+            error: null,
+            last_x_api_scan_at: null,
+            created_at: new Date('2026-06-24T00:00:00.000Z'),
+          },
+        ]),
+        profileXInviteRepo: qbMany([]),
+        postRewardLedgerRepo: qbMany([]),
+        streakBonusRepo: qbMany([]),
+        inviteMilestoneRepo: qbMany([]),
+      }).getXExplorerData({ include_per_wallet: true });
+      expect(explorer.users.map((u) => u.address)).toContain('ak_inviter');
+
+      const inviters = await makeService({
+        invitationRepo: qbMany([
+          { inviter: 'ak_inviter', registered_count: 5, total_amount_ae: 1 },
+        ]),
+      }).getTopInviters({ include_per_wallet: true });
+      expect(inviters.items.map((i) => i.inviter)).toContain('ak_inviter');
     });
   });
 });
