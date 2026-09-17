@@ -6,6 +6,10 @@ import {
   type PopularRankingWeightScale,
 } from '@/configs/constants';
 import type { PopularWindow } from '../services/popular-ranking.service';
+import {
+  POST_LANGUAGE_FILTERS,
+  type PostLanguageFilter,
+} from '../utils/post-language.util';
 
 export class PopularPostsQueryDto {
   @ApiPropertyOptional({
@@ -124,4 +128,13 @@ export class PopularPostsQueryDto {
   @IsOptional()
   @IsIn(POPULAR_RANKING_WEIGHT_SCALES)
   interactionsPerHour?: PopularRankingWeightScale;
+
+  @ApiPropertyOptional({
+    enum: POST_LANGUAGE_FILTERS,
+    description:
+      'Return only posts detected as this script/language. Posts with no detected language are excluded.',
+  })
+  @IsOptional()
+  @IsIn(POST_LANGUAGE_FILTERS)
+  language?: PostLanguageFilter;
 }
