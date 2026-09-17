@@ -635,6 +635,95 @@ export class ProfileXPostingRewardService {
   }
 
   /**
+   * Run a check in the background when one is due, triggered by somebody
+   * opening the rewards page rather than by pressing the button.
+   *
+   * Nothing evaluates these rewards on a schedule, so a user who linked X and
+   * posted was never looked at again unless they came back and explicitly
+   * rechecked — which is why wallets sat verified and unpaid for months. The
+   * page already reads the status on every load; this makes that read also
+   * start the work, so simply visiting is enough.
+   *
+   * It deliberately does NOT reuse `requestManualRecheck`:
+   *
+   * - That path requires a signed challenge, because it is a user action. This
+   *   one is not: the signature stays on the button, and this can only ever do
+   *   what the button would have done for the address's own owner.
+   * - That path records a `rate_limited` attempt when the slot is taken. Here
+   *   the user pressed nothing, so recording one on every page load would bury
+   *   the genuine failures that history exists to surface.
+   * - That path throws so the caller can report the failure. This one has no
+   *   caller to report to, so it swallows everything: a background refresh must
+   *   never be able to break the status read that triggered it.
+   *
+   * Cost is bounded by the same atomic daily cap as the button — at most one X
+   * API scan per address per window — so the worst case equals a daily cron
+   * over every linked address, and the normal case is far cheaper because only
+   * wallets whose owner actually visits cost anything.
+   */
+  async refreshInBackgroundIfDue(address: string): Promise<void> {
+    try {
+      if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+        return;
+      }
+      // The same check `assertValidAddress` makes, without throwing: there is
+      // no caller here to receive a 400.
+      if (!ProfileXPostingRewardService.ADDRESS_REGEX.test(address || '')) {
+        return;
+      }
+      // Only wallets already in the program. The claim below is what actually
+      // makes an unknown address a no-op — its UPDATE matches no row — so this
+      // is here to skip that write entirely for the many reads that are never
+      // going to scan, not as the safety check.
+      const reward = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      if (!reward || reward.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+      // Cheap read-side check so the common case (a page load inside the
+      // cooldown) costs nothing but the row we already loaded, instead of an
+      // UPDATE on every request to a hot endpoint. The claim below is still the
+      // real gate — this only avoids the write when it would obviously fail.
+      const nextAllowedAt = this.computeNextCheckAllowedAt(
+        reward.last_x_api_scan_at ?? null,
+      );
+      if (nextAllowedAt && nextAllowedAt.getTime() > Date.now()) {
+        return;
+      }
+
+      const priorScanAt = reward.last_x_api_scan_at ?? null;
+      // Atomic: concurrent page loads race here and exactly one wins. The
+      // losers return silently — nobody asked them for anything.
+      const claimed = await this.claimDailyScanSlot(address);
+      if (!claimed) {
+        return;
+      }
+
+      try {
+        // Settle anything already earned but stuck first. This calls no X API
+        // and costs no budget, and it is the reason a user with a failed payout
+        // sees it complete by revisiting the page.
+        await this.runPayouts(address, reward);
+        await this.processAddressWithGuard(address);
+      } catch (error) {
+        // Same rollback as the manual path: an unexpected failure is not the
+        // user's fault and must not cost them the window.
+        await this.releaseDailyScanSlot(address, priorScanAt);
+        this.logger.warn(
+          `Background X reward refresh failed for ${address}; scan slot released`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Background X reward refresh could not start for ${address}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
    * Atomically consume this address's daily X API scan slot. Returns true only
    * for the single caller that flips `last_x_api_scan_at`; concurrent callers
    * and replays within the window get false. Set-before-fetch (fail-closed): a

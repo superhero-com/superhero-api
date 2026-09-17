@@ -2508,4 +2508,139 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     const reclaimed = await (service as any).claimDailyScanSlot(ADDRESS);
     expect(reclaimed).toBe(false);
   });
+
+  /**
+   * Opening the rewards page starts a due check, because nothing runs on a
+   * schedule. This path spends X API budget and can send AE without anybody
+   * pressing anything, so every guard on it is pinned here.
+   */
+  describe('refreshInBackgroundIfDue', () => {
+    it('pays a qualifying wallet without anyone pressing the button', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2001',
+          text: 'gm from superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, rows, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(rows.get(ADDRESS)?.status).toBe('paid');
+      expect(spend).toHaveBeenCalledTimes(1);
+      expect(spend.mock.calls[0][0]).toBe(ONBOARDING_AETTOS);
+    });
+
+    it('does nothing for an address that never joined the program', async () => {
+      // This endpoint is unauthenticated, so a request can name any address at
+      // all. Two things stop that from spending anything: the early return,
+      // and — the one that really enforces it — the scan claim, whose UPDATE
+      // matches no row when the address has none. Asserted on the outcome
+      // rather than on either guard, so it holds if one is refactored away.
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(spend).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('does nothing while the wallet is inside its cooldown', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2002',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: new Date() })],
+      });
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      // A page refresh inside the window costs nothing. Two layers enforce
+      // that — the read-side check here and the atomic claim underneath — so
+      // this asserts the outcome rather than either one.
+      expect(spend).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('lets only one of many simultaneous page loads scan', async () => {
+      tweetsByUserId['100'] = [
+        {
+          id: '2003',
+          text: 'superhero.com',
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      const { service, spend } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+
+      await Promise.all([
+        service.refreshInBackgroundIfDue(ADDRESS),
+        service.refreshInBackgroundIfDue(ADDRESS),
+        service.refreshInBackgroundIfDue(ADDRESS),
+      ]);
+
+      // Three tabs open at once must not pay three times. In this harness the
+      // in-process guard is what collapses them; across server instances it is
+      // the atomic scan claim, which a fake repository cannot simulate. Both
+      // are real, so this pins the invariant and not the mechanism.
+      expect(spend).toHaveBeenCalledTimes(1);
+    });
+
+    it('never throws, whatever goes wrong underneath', async () => {
+      const { service, postingRewardRepository } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow()],
+      });
+      postingRewardRepository.findOne.mockRejectedValueOnce(
+        new Error('database is on fire'),
+      );
+
+      // The status read that triggered this must still succeed. A background
+      // refresh turning a page load into a 500 would be strictly worse than
+      // not refreshing at all.
+      await expect(
+        service.refreshInBackgroundIfDue(ADDRESS),
+      ).resolves.toBeUndefined();
+    });
+
+    it('ignores a malformed address instead of throwing', async () => {
+      const { service, spend } = makeService({ rows: [baseRow()] });
+
+      await expect(
+        service.refreshInBackgroundIfDue('not-an-address'),
+      ).resolves.toBeUndefined();
+      expect(spend).not.toHaveBeenCalled();
+    });
+
+    it('files no attempt row when it declines to run', async () => {
+      // requestManualRecheck records a `rate_limited` attempt when the slot is
+      // taken, because a person pressed a button and deserves the history.
+      // Here nobody did, and recording one per page load would bury the real
+      // failures that history exists to surface.
+      const attempts = { record: jest.fn().mockResolvedValue(undefined) };
+      const { service } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [baseRow({ last_x_api_scan_at: new Date() })],
+      });
+      (service as any).verificationAttemptService = attempts;
+
+      await service.refreshInBackgroundIfDue(ADDRESS);
+
+      expect(attempts.record).not.toHaveBeenCalled();
+    });
+  });
 });
