@@ -18,7 +18,13 @@ export type PostgresHandle = {
   stop: () => void;
 };
 
-function findBinDir(): string | null {
+/**
+ * Synchronous so a suite can decide at module load between `describe` and
+ * `describe.skip`. That distinction matters: a suite that returns early from
+ * each test is recorded by Jest as PASSING, so a broken environment reports
+ * green while testing nothing — the exact failure these tests exist to catch.
+ */
+export function findPostgresBinDir(): string | null {
   const candidates = [
     ...(fs.existsSync('/usr/lib/postgresql')
       ? fs
@@ -97,14 +103,16 @@ async function waitForReady(
 }
 
 /**
- * Returns null when Postgres is not available here, so a suite can skip rather
- * than fail. A skipped suite is honest; a suite that silently tests nothing
- * because it swallowed the error is not.
+ * Start a server using a binary directory the caller has already found.
+ *
+ * THROWS on failure rather than returning null, and that split is deliberate:
+ * "PostgreSQL is not installed here" is an environment fact a suite may skip
+ * on, but "the binary is right there and would not start" is a real problem
+ * that must be loud. An earlier version swallowed the second case into the
+ * first and reported `no PostgreSQL binary available` while the binary sat on
+ * disk — the actual cause was `initdb` refusing to run as root.
  */
-export async function startPostgres(): Promise<PostgresHandle | null> {
-  const binDir = findBinDir();
-  if (!binDir) return null;
-
+export async function startPostgres(binDir: string): Promise<PostgresHandle> {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reward-e2e-pg-'));
   const port = await freePort();
   const asUser = postgresUser();
@@ -113,9 +121,11 @@ export async function startPostgres(): Promise<PostgresHandle | null> {
   if (asUser) {
     try {
       fs.chownSync(dataDir, asUser.uid, asUser.gid);
-    } catch {
+    } catch (error) {
       fs.rmSync(dataDir, { recursive: true, force: true });
-      return null;
+      throw new Error(
+        `Could not chown the data directory to the postgres account: ${String(error)}`,
+      );
     }
   }
   const runAs = asUser ? { uid: asUser.uid, gid: asUser.gid } : {};
@@ -152,15 +162,17 @@ export async function startPostgres(): Promise<PostgresHandle | null> {
 
     if (!(await waitForReady(binDir, port))) {
       cleanup();
-      return null;
+      throw new Error(
+        `PostgreSQL at ${binDir} did not become ready on port ${port} within the timeout`,
+      );
     }
 
     return {
       url: `postgres://postgres@127.0.0.1:${port}/postgres`,
       stop: cleanup,
     };
-  } catch {
+  } catch (error) {
     cleanup();
-    return null;
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }

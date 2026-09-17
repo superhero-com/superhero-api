@@ -13,8 +13,6 @@
  * written the way the pipeline writes it comes back out of the dashboard
  * correctly attributed, totalled and linked. Before arming real money, that is
  * the property worth having under test.
- *
- * Skips cleanly when no Postgres binary is present, so CI stays green.
  */
 import { DataSource, Repository } from 'typeorm';
 
@@ -23,7 +21,11 @@ import { ProfileXInviteMilestoneReward } from '@/profile/entities/profile-x-invi
 import { ProfileXPostingReward } from '@/profile/entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
-import { startPostgres, PostgresHandle } from '@/test/reward-e2e/postgres';
+import {
+  findPostgresBinDir,
+  startPostgres,
+  PostgresHandle,
+} from '@/test/reward-e2e/postgres';
 import { BclAffiliationAnalyticsService } from './bcl-affiliation-analytics.service';
 
 const PAID_ADDRESS = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
@@ -32,41 +34,18 @@ const ONBOARDING_TX = 'th_2onboardingHashAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const STREAK_TX = 'th_2streakHashBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 
 let pg: PostgresHandle | null = null;
-let ds: DataSource | null = null;
+let ds: DataSource;
 
-// Resolved in beforeAll; `describe` bodies run before it, so the guard has to
-// be inside each test rather than around the describe.
-const skipUnlessDb = () => {
-  if (!ds) {
-    console.warn('Skipping: no PostgreSQL binary available on this machine.');
-    return true;
-  }
-  return false;
-};
-
-beforeAll(async () => {
-  pg = await startPostgres();
-  if (!pg) return;
-  ds = new DataSource({
-    type: 'postgres',
-    url: pg.url,
-    entities: [
-      ProfileXPostingReward,
-      ProfileXPostRewardLedger,
-      ProfileXStreakBonusReward,
-      ProfileXInvite,
-      ProfileXInviteMilestoneReward,
-    ],
-    synchronize: true,
-    logging: false,
-  });
-  await ds.initialize();
-}, 120000);
-
-afterAll(async () => {
-  if (ds?.isInitialized) await ds.destroy();
-  pg?.stop();
-});
+/**
+ * Decided synchronously at module load so Jest can REPORT these as skipped.
+ *
+ * Returning early from inside each test instead would have Jest record them as
+ * PASSING, so a machine without a database reports five green tests that
+ * executed nothing. That is the precise failure mode this suite exists to
+ * catch, and an earlier version of this file shipped it — caught in review.
+ */
+const binDir = findPostgresBinDir();
+const describeWithDb = binDir ? describe : describe.skip;
 
 function makeService(dataSource: DataSource) {
   const repo = <T>(e: any): Repository<T> => dataSource.getRepository(e);
@@ -151,21 +130,46 @@ async function seed(dataSource: DataSource) {
   } as any);
 }
 
-describe('X explorer against real PostgreSQL', () => {
-  it('runs every explorer query against the real engine', async () => {
-    if (skipUnlessDb()) return;
-    await seed(ds as DataSource);
+describeWithDb('X explorer against real PostgreSQL', () => {
+  beforeAll(async () => {
+    // Throws if the binary is present but will not start. That is a real
+    // problem, not an absent environment, and must not be silently skipped.
+    pg = await startPostgres(binDir as string);
+    ds = new DataSource({
+      type: 'postgres',
+      url: pg.url,
+      entities: [
+        ProfileXPostingReward,
+        ProfileXPostRewardLedger,
+        ProfileXStreakBonusReward,
+        ProfileXInvite,
+        ProfileXInviteMilestoneReward,
+      ],
+      synchronize: true,
+      logging: false,
+    });
+    await ds.initialize();
+    // Seeded here, not inside the first test: a case that only passes because
+    // another happened to run before it is not a test, and `-t` on any single
+    // one below would have failed.
+    await seed(ds);
+  }, 120000);
 
+  afterAll(async () => {
+    if (ds?.isInitialized) await ds.destroy();
+    pg?.stop();
+  });
+
+  it('runs every explorer query against the real engine', async () => {
     // The whole point: if any column, join or parameter expansion is wrong,
     // this throws instead of quietly returning a shaped-but-empty object.
-    const result = await makeService(ds as DataSource).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({});
 
     expect(result.users.length + result.pending.length).toBe(2);
   });
 
   it('reports a real paid wallet with every payout attributed and linked', async () => {
-    if (skipUnlessDb()) return;
-    const result = await makeService(ds as DataSource).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({});
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     expect(paid).toBeDefined();
@@ -195,8 +199,7 @@ describe('X explorer against real PostgreSQL', () => {
   });
 
   it('separates a never-scanned wallet from an eligible one', async () => {
-    if (skipUnlessDb()) return;
-    const result = await makeService(ds as DataSource).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({});
 
     const stalled = [...result.users, ...result.pending].find(
       (u) => u.address === STALLED_ADDRESS,
@@ -209,8 +212,7 @@ describe('X explorer against real PostgreSQL', () => {
   });
 
   it('counts an unbound invite link without inventing an invitee', async () => {
-    if (skipUnlessDb()) return;
-    const result = await makeService(ds as DataSource).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({});
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     expect(paid?.invite_links_created).toBe(1);
@@ -221,8 +223,7 @@ describe('X explorer against real PostgreSQL', () => {
   });
 
   it('totals only settled AE, across all reward tables', async () => {
-    if (skipUnlessDb()) return;
-    const result = await makeService(ds as DataSource).getXExplorerData({});
+    const result = await makeService(ds).getXExplorerData({});
 
     const paid = result.users.find((u) => u.address === PAID_ADDRESS);
     // 50 (streak) + 10 (per-post) + the configured onboarding amount. Asserted
