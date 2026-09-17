@@ -168,7 +168,14 @@ export async function startPostgres(binDir: string): Promise<PostgresHandle> {
     child = spawn(
       path.join(binDir, 'postgres'),
       ['-D', dataDir, '-p', String(port), '-h', '127.0.0.1', '-k', dataDir],
-      { stdio: 'ignore', ...runAs },
+      // The postmaster inherits the parent environment; with LANG/LC_* unset on
+      // macOS/Homebrew PG it exits "postmaster became multithreaded during
+      // startup", which then surfaces as a spurious not-ready timeout below.
+      {
+        stdio: 'ignore',
+        ...runAs,
+        env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
+      },
     );
     child.unref();
 

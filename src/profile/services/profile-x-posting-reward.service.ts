@@ -680,7 +680,11 @@ export class ProfileXPostingRewardService {
             last_x_api_scan_at: LessThanOrEqual(cutoff),
           },
         ],
-        order: { last_x_api_scan_at: 'ASC' },
+        // Object form is required for the NULLS clause: a bare 'ASC' sorts
+        // NULLS LAST in Postgres, which would queue never-scanned rows — the
+        // "verified and unpaid" cohort this exists for — behind every settled
+        // one once the backlog exceeds one batch.
+        order: { last_x_api_scan_at: { direction: 'ASC', nulls: 'FIRST' } },
         take: ProfileXPostingRewardService.SWEEP_BATCH_SIZE,
       });
       await mapWithConcurrency(
