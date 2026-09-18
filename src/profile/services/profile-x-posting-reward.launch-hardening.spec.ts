@@ -37,6 +37,7 @@ type Harness = {
   row: any;
   xRead: jest.Mock;
   getToken: jest.Mock;
+  recordAttempt: jest.Mock;
 };
 
 /** Shape `fetchXReadWithAuthFallback` resolves to. */
@@ -63,7 +64,12 @@ const build = async (
 ): Promise<Harness> => {
   let harness!: Harness;
   await jest.isolateModulesAsync(async () => {
+    // Keep the module's real helpers and override only the config values.
+    // Replacing the whole module drops functions like `isInformationalXError`,
+    // and the caller here catches its own errors — so a missing helper shows up
+    // as a silently skipped write rather than a failure pointing at the mock.
     jest.doMock('../profile.constants', () => ({
+      ...jest.requireActual('../profile.constants'),
       ...BASE_CONSTANTS,
       ...(opts.constants || {}),
     }));
@@ -122,6 +128,7 @@ const build = async (
       opts.token === undefined ? 'token' : opts.token,
     );
     const xRead = opts.xRead || jest.fn(async () => xResponse(200, {}));
+    const recordAttempt = jest.fn().mockResolvedValue(undefined);
 
     const service = new ProfileXPostingRewardService(
       postingRewardRepository,
@@ -140,10 +147,10 @@ const build = async (
       } as any,
       ledgerRepo,
       streakRepo,
-      { record: jest.fn().mockResolvedValue(undefined) } as any,
+      { record: recordAttempt } as any,
     );
 
-    harness = { service, row, xRead, getToken };
+    harness = { service, row, xRead, getToken, recordAttempt };
   });
   return harness;
 };
@@ -290,6 +297,64 @@ describe('the unauthenticated refresh only settles wallets that are owed somethi
     await (h.service as any).refreshInBackgroundIfDue(ADDRESS);
 
     expect(runPayouts).toHaveBeenCalledTimes(1);
+  });
+
+  it('files the page-load scan in the attempt history, tagged to that source', async () => {
+    // This is now the main way checks happen, so a history that only records
+    // button presses cannot show a failure which only occurs on page load.
+    const h = await build({ status: 'paid', qualified_posts_count: 1 });
+    settleOnly(h.service);
+    // Everything between the gate and the scan is exercised elsewhere; what is
+    // under test here is that a completed scan gets filed.
+    jest
+      .spyOn(h.service as any, 'prepareCheckCandidate')
+      .mockResolvedValue({ status: 'paid', last_x_api_scan_at: null } as never);
+    jest
+      .spyOn(h.service as any, 'claimDailyScanSlot')
+      .mockResolvedValue(true as never);
+    jest
+      .spyOn(h.service as any, 'processAddressWithGuard')
+      .mockResolvedValue(undefined as never);
+
+    await (h.service as any).refreshInBackgroundIfDue(ADDRESS);
+
+    expect(h.recordAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ address: ADDRESS, source: 'page_refresh' }),
+    );
+  });
+
+  it('gives a thrown page-load scan an error CODE, not just free text', async () => {
+    // The dashboard groups and indexes on `error_code`. Filing null there would
+    // keep these failures off every "what is failing lately" view and leave the
+    // fault discoverable only by reading `detail` row by row.
+    const h = await build({ status: 'paid', qualified_posts_count: 1 });
+    settleOnly(h.service);
+    jest
+      .spyOn(h.service as any, 'prepareCheckCandidate')
+      .mockResolvedValue({ status: 'paid', last_x_api_scan_at: null } as never);
+    jest
+      .spyOn(h.service as any, 'claimDailyScanSlot')
+      .mockResolvedValue(true as never);
+    jest
+      .spyOn(h.service as any, 'processAddressWithGuard')
+      .mockRejectedValue(new Error('middleware exploded') as never);
+    jest
+      .spyOn(h.service as any, 'releaseDailyScanSlot')
+      .mockResolvedValue(undefined as never);
+
+    await (h.service as any).refreshInBackgroundIfDue(ADDRESS);
+
+    expect(h.recordAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: ADDRESS,
+        source: 'page_refresh',
+        outcome: 'failed',
+        // Same code the signed path uses for the same fault, so the two
+        // aggregate together instead of looking like different problems.
+        errorCode: 'recheck_failed',
+        detail: 'middleware exploded',
+      }),
+    );
   });
 
   it('does not settle while the failure backoff is still running', async () => {

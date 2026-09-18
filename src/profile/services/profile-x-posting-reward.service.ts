@@ -855,7 +855,13 @@ export class ProfileXPostingRewardService {
       await this.recordAttempt(
         address,
         failed ? 'failed' : 'succeeded',
-        thrownDetail ? null : informational ? null : settledError,
+        // An unexpected throw gets a CODE, not just free text. The dashboard
+        // groups and indexes on `error_code`, so filing null there would keep
+        // these off every "what is failing lately" view and leave the fault
+        // discoverable only by reading `detail` row by row. Same code the
+        // signed path uses for the same fault, so the two paths aggregate
+        // together rather than looking like different problems.
+        thrownDetail ? 'recheck_failed' : informational ? null : settledError,
         thrownDetail ?? (informational ? `notice: ${settledError}` : null),
         settled?.x_username ?? null,
         'page_refresh',
