@@ -110,6 +110,13 @@
     <span class="pill mono" id="queryMs">queryMs: -</span>
   </div>
 
+  <div
+    id="truncNotice"
+    style="display:none; margin-bottom:0.75rem; padding:0.6rem 0.75rem;
+           border-radius:0.5rem; background:#fef3c7; border:1px solid #fcd34d;
+           color:#78350f; font-size:0.82rem; line-height:1.45;"
+  ></div>
+
   <div class="date-range">
     <div>
       <label for="startDate">Start Date:</label>
@@ -550,6 +557,19 @@
     document.getElementById('sEligible').textContent = d.summary.eligible_users;
     document.getElementById('sNeverScanned').textContent = d.summary.never_scanned_users;
     document.getElementById('sPaidAe').textContent = d.summary.total_ae_paid + ' AE';
+    // Say so when the page is a sample. Every figure above is computed from the
+    // rows actually rendered, so a silent cap reads as a complete total.
+    var truncEl = document.getElementById('truncNotice');
+    if (d.summary.truncated) {
+      truncEl.textContent =
+        'Showing the ' + d.summary.row_cap + ' most recent of ' +
+        d.summary.matching_users + ' wallets in this range. Every figure on ' +
+        'this page covers only those rows — narrow the date range for totals ' +
+        'you can rely on.';
+      truncEl.style.display = 'block';
+    } else {
+      truncEl.style.display = 'none';
+    }
     document.getElementById('sPayoutCounts').textContent =
       d.summary.payouts_paid + ' settled · ' + d.summary.payouts_failed + ' failed';
     if (d.explorer_base_url) {

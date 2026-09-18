@@ -24,7 +24,11 @@ import {
 export type XVerificationAttemptOutcome = 'succeeded' | 'failed';
 
 /** Where the attempt came from. Manual is the user pressing "Check rewards". */
-export type XVerificationAttemptSource = 'manual_recheck' | 'link_intake';
+export type XVerificationAttemptSource =
+  | 'manual_recheck'
+  | 'link_intake'
+  /** The page-load refresh, which is now the main way checks happen. */
+  | 'page_refresh';
 
 @Entity({ name: 'profile_x_verification_attempts' })
 // Per-address history: "show me everything this wallet tried".
@@ -54,7 +58,9 @@ export class ProfileXVerificationAttempt {
   @Column({ enum: ['succeeded', 'failed'] })
   outcome: XVerificationAttemptOutcome;
 
-  @Column({ enum: ['manual_recheck', 'link_intake'] })
+  // Plain varchar in the database (see the migration), so the list here is
+  // documentation rather than a constraint and adding a value is additive.
+  @Column({ enum: ['manual_recheck', 'link_intake', 'page_refresh'] })
   source: XVerificationAttemptSource;
 
   /**

@@ -309,10 +309,22 @@ describe('BclAffiliationAnalyticsService', () => {
   });
 
   describe('getXExplorerData', () => {
-    /** Chainable query-builder stub: every method returns itself. */
+    /**
+     * Chainable query-builder stub: every method returns itself.
+     *
+     * Terminal methods have to be listed explicitly. The proxy answers every
+     * other property with a function returning the builder — including `then`,
+     * so `await`ing an unlisted terminal sees a thenable that never resolves
+     * and the test times out instead of failing. `getCount` learned that the
+     * hard way.
+     */
     const qb = (rows: any[]) => {
       const builder: any = new Proxy(
-        { getMany: async () => rows },
+        {
+          getMany: async () => rows,
+          getCount: async () => rows.length,
+          clone: () => builder,
+        },
         {
           get: (target, prop) =>
             prop in target ? (target as any)[prop] : () => builder,

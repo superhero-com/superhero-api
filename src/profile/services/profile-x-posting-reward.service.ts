@@ -52,6 +52,7 @@ import { ACTIVE_NETWORK } from '@/configs/network';
 import { fetchJson } from '@/utils/common';
 import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
+import type { XVerificationAttemptSource } from '../entities/profile-x-verification-attempt.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '../entities/profile-x-streak-bonus-reward.entity';
 import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
@@ -171,10 +172,11 @@ export class ProfileXPostingRewardService {
     errorCode: string | null,
     detail?: string | null,
     xUsername?: string | null,
+    source: XVerificationAttemptSource = 'manual_recheck',
   ): Promise<void> {
     await this.verificationAttemptService.record({
       address,
-      source: 'manual_recheck',
+      source,
       outcome,
       errorCode,
       detail,
@@ -763,6 +765,12 @@ export class ProfileXPostingRewardService {
 
       try {
         await this.processAddressWithGuard(address);
+        // File the attempt, exactly as the signed path does. This is now the
+        // main way checks happen, so leaving it out meant the history table
+        // saw only button presses: a failure that only ever occurs on page
+        // load — or twenty wallets starting to fail within an hour — was
+        // invisible to the dashboard that table exists to feed.
+        await this.recordBackgroundAttempt(address);
       } catch (error) {
         // Same rollback as the manual path: an unexpected failure is not the
         // user's fault and must not cost them the window.
@@ -771,11 +779,50 @@ export class ProfileXPostingRewardService {
           `Background X reward refresh failed for ${address}; scan slot released`,
           error instanceof Error ? error.stack : String(error),
         );
+        await this.recordBackgroundAttempt(
+          address,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     } catch (error) {
       this.logger.warn(
         `Background X reward refresh could not start for ${address}`,
         error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * File a history row for a background scan, mirroring the signed path's
+   * treatment of informational notices as successes rather than failures.
+   *
+   * Never allowed to disturb the scan it describes: the history exists to
+   * explain checks, so a write failure here must not become one.
+   */
+  private async recordBackgroundAttempt(
+    address: string,
+    thrownDetail?: string,
+  ): Promise<void> {
+    try {
+      const settled = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      const settledError = settled?.error ?? null;
+      const informational = isInformationalXError(settledError);
+      const failed = !!thrownDetail || (!!settledError && !informational);
+      await this.recordAttempt(
+        address,
+        failed ? 'failed' : 'succeeded',
+        thrownDetail ? null : informational ? null : settledError,
+        thrownDetail ?? (informational ? `notice: ${settledError}` : null),
+        settled?.x_username ?? null,
+        'page_refresh',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not record the background X reward attempt for ${address}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }
