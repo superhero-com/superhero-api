@@ -185,9 +185,9 @@ describe('PostLanguageBackfillService', () => {
 
     it('releases the lock even if the backfill throws', async () => {
       const { dataSource, lockRunner } = makeDataSource([]);
-      dataSource.query = jest.fn(async (_sql: string, _params: any[]) => {
-        throw new Error('db exploded');
-      });
+      (dataSource as any).query = jest
+        .fn()
+        .mockRejectedValue(new Error('db exploded'));
       const service = new PostLanguageBackfillService(dataSource as any);
 
       await expect(service.runBackfill()).resolves.toBeUndefined(); // swallowed
