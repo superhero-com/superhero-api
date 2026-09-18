@@ -333,6 +333,14 @@ function describeEligibility(
         detail: null,
         code,
       };
+    case 'x_lookup_unavailable':
+      return {
+        eligible: false,
+        label: 'Blocked — X could not be reached',
+        detail:
+          'Our side: no credentials or an X outage. Retried on the next check, and it does not count against the user',
+        code,
+      };
     case 'x_user_lookup_failed':
     case 'x_user_lookup_blocked':
       return {

@@ -32,8 +32,13 @@ export class ProfileRewardsController {
     // Deliberately not awaited: the status returns immediately from what is
     // already known, and the refreshed numbers appear on the next load. The
     // call swallows its own failures, so this cannot turn a read into an error.
-    // Cost is bounded by the same one-scan-per-address-per-window cap as the
-    // button.
+    //
+    // This route is unauthenticated, so be precise about what a stranger can
+    // set in motion by naming an address. The SCAN is capped at one per address
+    // per window. The SETTLE pass deliberately sits AHEAD of that cap (a failed
+    // payout must not wait out the window), so the cap does not bound it —
+    // `hasSettleableWork` does, by reducing every wallet that is not actually
+    // owed money to a single row read.
     // The `.catch` is belt-and-braces: the service already swallows its own
     // failures, but nothing here would survive that guarantee being removed
     // later, and an unhandled rejection on a read path is not worth the risk.

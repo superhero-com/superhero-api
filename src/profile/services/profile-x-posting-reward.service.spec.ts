@@ -1304,7 +1304,11 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     );
     expect(idCalls).toHaveLength(1);
     expect(usernameCalls).toHaveLength(0);
-    expect(rows.get(ADDRESS)?.error).toBe('x_user_lookup_failed');
+    // A 5xx is X being unavailable, not a verdict on the user's handle, so it
+    // records the transient code and — crucially — does not move the strike
+    // count that leads to `x_user_lookup_blocked`.
+    expect(rows.get(ADDRESS)?.error).toBe('x_lookup_unavailable');
+    expect(Number(rows.get(ADDRESS)?.x_lookup_failure_count || 0)).toBe(0);
   });
 
   it('falls back to the username lookup when the cached id is definitively gone (404)', async () => {
