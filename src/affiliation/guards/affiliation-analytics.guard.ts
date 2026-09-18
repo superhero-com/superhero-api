@@ -1,75 +1,49 @@
 import {
-  AFFILIATION_ANALYTICS_API_KEY,
-  AFFILIATION_ANALYTICS_MIN_KEY_LENGTH,
+  AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH,
+  AFFILIATION_ANALYTICS_PASSWORD,
+  AFFILIATION_ANALYTICS_USER,
 } from '@/configs/constants';
 import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { timingSafeEqual } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { Request, Response } from 'express';
 
-export const AFFILIATION_ANALYTICS_COOKIE = 'sh_affiliation_analytics';
-
-/** Long enough for a working session, short enough that a shared laptop
- *  does not stay authorised for a week. */
-const COOKIE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+export const AFFILIATION_ANALYTICS_REALM = 'Superhero affiliation dashboards';
 
 /**
- * Read one cookie without pulling in `cookie-parser`, which this app does not
- * register.
+ * Compare without leaking which characters — or how many — matched.
+ *
+ * Digesting first means both buffers are always 32 bytes, so `timingSafeEqual`
+ * never throws on a length mismatch and the comparison leaks nothing about the
+ * password's length either. (Comparing the raw strings would need an explicit
+ * length check first, and that check is itself an oracle.)
  */
-function readCookie(request: Request, name: string): string | undefined {
-  const header = request.headers.cookie;
-  if (!header) {
-    return undefined;
-  }
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) {
-      continue;
-    }
-    if (part.slice(0, eq).trim() !== name) {
-      continue;
-    }
-    try {
-      return decodeURIComponent(part.slice(eq + 1).trim());
-    } catch {
-      // A malformed cookie is simply not a valid key.
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-function constantTimeEquals(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on a length mismatch, so the length must be compared
-  // first. That leaks the key's length and nothing else.
-  return a.length === b.length && timingSafeEqual(a, b);
+function safeEquals(provided: string, expected: string): boolean {
+  return timingSafeEqual(
+    createHash('sha256').update(provided, 'utf8').digest(),
+    createHash('sha256').update(expected, 'utf8').digest(),
+  );
 }
 
 /**
- * Gate the internal affiliation dashboards behind an operator key.
+ * Gate the internal affiliation dashboards behind HTTP Basic auth.
  *
  * These endpoints publish wallet address ↔ X handle ↔ follower count ↔ payout
  * amount ↔ transaction hash. That is a deanonymising join — an on-chain address
  * is pseudonymous until something ties it to a name — so it cannot sit on an
  * open URL.
  *
- * The key is accepted three ways because a dashboard is opened in a browser,
- * which cannot attach a header to a navigation:
- *   1. `x-api-key` / `Authorization: Bearer` — scripts and curl.
- *   2. `?key=…` — the operator pastes the dashboard URL once.
- *   3. a cookie this guard sets after 1 or 2 succeeds, so the page's own XHR
- *      and any later refresh work without the key in the URL bar.
- *
- * A query-string key can land in access logs and in `Referer`, which is why it
- * is traded for a cookie immediately; treat the key as an operator secret to
- * rotate, not a password to hand out.
+ * Basic auth suits an operator dashboard opened in a browser: the browser shows
+ * its own credential prompt on the 401 challenge, caches the answer for the
+ * session, and then attaches it to every later request to this origin —
+ * including the page's own `fetch` calls for chart data, which is why the views
+ * need no changes. Scripts use `curl -u user:password`. Nothing travels in a
+ * URL, so nothing lands in access logs, `Referer`, bookmarks or history.
  */
 @Injectable()
 export class AffiliationAnalyticsGuard implements CanActivate {
@@ -78,67 +52,83 @@ export class AffiliationAnalyticsGuard implements CanActivate {
     const request = http.getRequest<Request>();
     const response = http.getResponse<Response>();
 
-    // Fail closed. A deployment that forgot the variable must show locked
-    // dashboards, never open ones — and must say which variable is missing,
-    // because a silently dark dashboard gets "fixed" by removing the guard.
+    // Fail closed when the deployment has no password. Deliberately NOT a 401
+    // challenge: a browser would prompt, reject whatever is typed, and prompt
+    // again forever, since no credential can satisfy an unset password. A 503
+    // naming the variable ends that loop and tells the operator what to fix.
     if (
-      !AFFILIATION_ANALYTICS_API_KEY ||
-      AFFILIATION_ANALYTICS_API_KEY.length <
-        AFFILIATION_ANALYTICS_MIN_KEY_LENGTH
+      !AFFILIATION_ANALYTICS_PASSWORD ||
+      AFFILIATION_ANALYTICS_PASSWORD.length <
+        AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH
     ) {
-      throw new UnauthorizedException(
+      throw new ServiceUnavailableException(
         'Affiliation dashboards are not configured: set' +
-          ` AFFILIATION_ANALYTICS_API_KEY (min ${AFFILIATION_ANALYTICS_MIN_KEY_LENGTH}` +
+          ` AFFILIATION_ANALYTICS_PASSWORD (min ${AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH}` +
           ' chars) on the server.',
       );
     }
 
-    const cookieKey = readCookie(request, AFFILIATION_ANALYTICS_COOKIE);
-    if (
-      cookieKey &&
-      constantTimeEquals(cookieKey, AFFILIATION_ANALYTICS_API_KEY)
-    ) {
-      return true;
+    const credentials = this.decodeBasic(request);
+    if (!credentials) {
+      this.challenge(response);
     }
 
-    const headerKey =
-      (request.headers['x-api-key'] as string | undefined) ||
-      (request.headers['authorization'] as string | undefined)?.replace(
-        /^Bearer /,
-        '',
-      );
-    const queryKey =
-      typeof request.query?.key === 'string' ? request.query.key : undefined;
-    const presented = headerKey || queryKey;
-
-    if (
-      !presented ||
-      !constantTimeEquals(presented, AFFILIATION_ANALYTICS_API_KEY)
-    ) {
-      throw new UnauthorizedException(
-        'A valid operator key is required for the affiliation dashboards.',
-      );
-    }
-
-    // Trade the key for a session cookie so it stops travelling in URLs.
-    if (queryKey && typeof response?.cookie === 'function') {
-      response.cookie(
-        AFFILIATION_ANALYTICS_COOKIE,
-        AFFILIATION_ANALYTICS_API_KEY,
-        {
-          httpOnly: true,
-          sameSite: 'lax',
-          // Only mark Secure when the request actually arrived over TLS. Setting
-          // it unconditionally would silently drop the cookie on a plain-HTTP
-          // deployment and make the dashboards look broken.
-          secure:
-            request.secure || request.headers['x-forwarded-proto'] === 'https',
-          maxAge: COOKIE_MAX_AGE_MS,
-          path: '/api',
-        },
-      );
+    // Both comparisons run before the `&&`, so a wrong username and a wrong
+    // password cost the same time. Short-circuiting here would let an attacker
+    // discover the username by measuring which rejection came back faster.
+    const userOk = safeEquals(credentials.user, AFFILIATION_ANALYTICS_USER);
+    const passwordOk = safeEquals(
+      credentials.password,
+      AFFILIATION_ANALYTICS_PASSWORD,
+    );
+    if (!userOk || !passwordOk) {
+      this.challenge(response);
     }
 
     return true;
+  }
+
+  private decodeBasic(
+    request: Request,
+  ): { user: string; password: string } | null {
+    const header = request.headers.authorization;
+    if (!header) {
+      return null;
+    }
+    const separator = header.indexOf(' ');
+    if (separator === -1) {
+      return null;
+    }
+    if (header.slice(0, separator).toLowerCase() !== 'basic') {
+      return null;
+    }
+    const decoded = Buffer.from(
+      header.slice(separator + 1).trim(),
+      'base64',
+    ).toString('utf8');
+    // Only the FIRST colon separates the two fields — a password may contain
+    // colons, a username may not.
+    const colon = decoded.indexOf(':');
+    if (colon === -1) {
+      return null;
+    }
+    return {
+      user: decoded.slice(0, colon),
+      password: decoded.slice(colon + 1),
+    };
+  }
+
+  /**
+   * Send the challenge that makes the browser show its credential prompt.
+   * Returns `never` so callers can treat it as a terminator.
+   */
+  private challenge(response: Response): never {
+    response.setHeader(
+      'WWW-Authenticate',
+      `Basic realm="${AFFILIATION_ANALYTICS_REALM}", charset="UTF-8"`,
+    );
+    throw new UnauthorizedException(
+      'Authentication required for the affiliation dashboards.',
+    );
   }
 }

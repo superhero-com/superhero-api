@@ -2,30 +2,35 @@
 /**
  * The affiliation dashboards join wallet address to X handle, follower count
  * and payout. The guard's job is to make that join unreachable without the
- * operator key — including when the key was never configured, which must lock
- * the dashboards rather than open them.
+ * operator credentials — including when they were never configured, which must
+ * lock the dashboards rather than open them.
  */
 import { ExecutionContext } from '@nestjs/common';
 
-const KEY = 'k'.repeat(32);
+const USER = 'admin';
+const PASSWORD = 'p'.repeat(32);
+
+const basic = (user: string, password: string) =>
+  `Basic ${Buffer.from(`${user}:${password}`, 'utf8').toString('base64')}`;
 
 const contextFor = (
-  request: Record<string, any>,
-  response: Record<string, any> = {},
+  headers: Record<string, string> = {},
+  response: Record<string, any> = { setHeader: jest.fn() },
 ): ExecutionContext =>
   ({
     switchToHttp: () => ({
-      getRequest: () => ({ headers: {}, query: {}, ...request }),
+      getRequest: () => ({ headers }),
       getResponse: () => response,
     }),
   }) as any;
 
-const guardWithKey = async (key: string) => {
+const guardWith = async (user: string, password: string) => {
   let Guard: any;
   await jest.isolateModulesAsync(async () => {
     jest.doMock('@/configs/constants', () => ({
-      AFFILIATION_ANALYTICS_API_KEY: key,
-      AFFILIATION_ANALYTICS_MIN_KEY_LENGTH: 16,
+      AFFILIATION_ANALYTICS_USER: user,
+      AFFILIATION_ANALYTICS_PASSWORD: password,
+      AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH: 16,
     }));
     ({
       AffiliationAnalyticsGuard: Guard,
@@ -35,122 +40,115 @@ const guardWithKey = async (key: string) => {
 };
 
 describe('AffiliationAnalyticsGuard', () => {
-  it('rejects a request carrying no key', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(() => guard.canActivate(contextFor({}))).toThrow(
-      /valid operator key is required/i,
-    );
+  describe('when configured', () => {
+    it('accepts the correct credentials', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      expect(
+        guard.canActivate(contextFor({ authorization: basic(USER, PASSWORD) })),
+      ).toBe(true);
+    });
+
+    it('rejects a request with no Authorization header', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      expect(() => guard.canActivate(contextFor({}))).toThrow(
+        /authentication required/i,
+      );
+    });
+
+    it('challenges so the browser shows its credential prompt', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      const setHeader = jest.fn();
+      expect(() => guard.canActivate(contextFor({}, { setHeader }))).toThrow();
+      expect(setHeader).toHaveBeenCalledWith(
+        'WWW-Authenticate',
+        expect.stringContaining('Basic realm='),
+      );
+    });
+
+    it('rejects a wrong password', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      expect(() =>
+        guard.canActivate(
+          contextFor({ authorization: basic(USER, 'x'.repeat(32)) }),
+        ),
+      ).toThrow(/authentication required/i);
+    });
+
+    it('rejects a wrong username even with the right password', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      expect(() =>
+        guard.canActivate(
+          contextFor({ authorization: basic('someone-else', PASSWORD) }),
+        ),
+      ).toThrow(/authentication required/i);
+    });
+
+    it('rejects a non-Basic scheme carrying the password', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      expect(() =>
+        guard.canActivate(contextFor({ authorization: `Bearer ${PASSWORD}` })),
+      ).toThrow(/authentication required/i);
+    });
+
+    it('rejects a malformed header with no colon in the payload', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      const encoded = Buffer.from('no-colon-here', 'utf8').toString('base64');
+      expect(() =>
+        guard.canActivate(contextFor({ authorization: `Basic ${encoded}` })),
+      ).toThrow(/authentication required/i);
+    });
+
+    it('accepts a scheme name in any case, as RFC 7617 requires', async () => {
+      const guard = await guardWith(USER, PASSWORD);
+      const encoded = Buffer.from(`${USER}:${PASSWORD}`, 'utf8').toString(
+        'base64',
+      );
+      expect(
+        guard.canActivate(contextFor({ authorization: `bAsIc ${encoded}` })),
+      ).toBe(true);
+    });
+
+    it('keeps a password that contains colons intact', async () => {
+      const colonPassword = 'a:b:c:'.repeat(6);
+      const guard = await guardWith(USER, colonPassword);
+      expect(
+        guard.canActivate(
+          contextFor({ authorization: basic(USER, colonPassword) }),
+        ),
+      ).toBe(true);
+    });
   });
 
-  it('rejects a wrong key of the same length', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(() =>
-      guard.canActivate(
-        contextFor({ headers: { 'x-api-key': 'x'.repeat(32) } }),
-      ),
-    ).toThrow(/valid operator key is required/i);
-  });
+  describe('when not configured', () => {
+    it('locks the dashboards when the password is unset', async () => {
+      const guard = await guardWith(USER, '');
+      expect(() =>
+        guard.canActivate(contextFor({ authorization: basic(USER, '') })),
+      ).toThrow(/not configured/i);
+    });
 
-  it('fails closed when the server key is unset', async () => {
-    const guard = await guardWithKey('');
-    // Even presenting the empty string must not get in.
-    expect(() =>
-      guard.canActivate(contextFor({ headers: { 'x-api-key': '' } })),
-    ).toThrow(/not configured/i);
-  });
+    it('locks the dashboards when the password is too short to be a secret', async () => {
+      const guard = await guardWith(USER, 'abc123');
+      expect(() =>
+        guard.canActivate(contextFor({ authorization: basic(USER, 'abc123') })),
+      ).toThrow(/not configured/i);
+    });
 
-  it('fails closed when the server key is too short to be a secret', async () => {
-    const short = 'abc123';
-    const guard = await guardWithKey(short);
-    expect(() =>
-      guard.canActivate(contextFor({ headers: { 'x-api-key': short } })),
-    ).toThrow(/not configured/i);
-  });
+    it('does NOT challenge when unconfigured, so the browser cannot loop', async () => {
+      // A 401 challenge here would make the browser prompt, reject whatever is
+      // typed, and prompt again forever — no credential can satisfy an unset
+      // password. The operator must see the misconfiguration instead.
+      const guard = await guardWith(USER, '');
+      const setHeader = jest.fn();
+      expect(() => guard.canActivate(contextFor({}, { setHeader }))).toThrow();
+      expect(setHeader).not.toHaveBeenCalled();
+    });
 
-  it('accepts the key in the x-api-key header', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(
-      guard.canActivate(contextFor({ headers: { 'x-api-key': KEY } })),
-    ).toBe(true);
-  });
-
-  it('accepts the key as a bearer token', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(
-      guard.canActivate(
-        contextFor({ headers: { authorization: `Bearer ${KEY}` } }),
-      ),
-    ).toBe(true);
-  });
-
-  it('accepts the key in the query string and trades it for a cookie', async () => {
-    const guard = await guardWithKey(KEY);
-    const cookie = jest.fn();
-    expect(
-      guard.canActivate(contextFor({ query: { key: KEY } }, { cookie })),
-    ).toBe(true);
-    expect(cookie).toHaveBeenCalledWith(
-      'sh_affiliation_analytics',
-      KEY,
-      expect.objectContaining({ httpOnly: true, sameSite: 'lax' }),
-    );
-  });
-
-  it('marks the cookie Secure only behind TLS', async () => {
-    const guard = await guardWithKey(KEY);
-
-    const plain = jest.fn();
-    guard.canActivate(contextFor({ query: { key: KEY } }, { cookie: plain }));
-    expect(plain).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ secure: false }),
-    );
-
-    const tls = jest.fn();
-    guard.canActivate(
-      contextFor(
-        { query: { key: KEY }, headers: { 'x-forwarded-proto': 'https' } },
-        { cookie: tls },
-      ),
-    );
-    expect(tls).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ secure: true }),
-    );
-  });
-
-  it('accepts the session cookie on a later request with no key in the URL', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(
-      guard.canActivate(
-        contextFor({
-          headers: { cookie: `other=1; sh_affiliation_analytics=${KEY}` },
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it('rejects a forged cookie', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(() =>
-      guard.canActivate(
-        contextFor({
-          headers: { cookie: `sh_affiliation_analytics=${'x'.repeat(32)}` },
-        }),
-      ),
-    ).toThrow(/valid operator key is required/i);
-  });
-
-  it('does not mistake a cookie whose name merely ends with the same suffix', async () => {
-    const guard = await guardWithKey(KEY);
-    expect(() =>
-      guard.canActivate(
-        contextFor({
-          headers: { cookie: `evil_sh_affiliation_analytics=${KEY}` },
-        }),
-      ),
-    ).toThrow(/valid operator key is required/i);
+    it('names the variable the operator has to set', async () => {
+      const guard = await guardWith(USER, '');
+      expect(() => guard.canActivate(contextFor({}))).toThrow(
+        /AFFILIATION_ANALYTICS_PASSWORD/,
+      );
+    });
   });
 });

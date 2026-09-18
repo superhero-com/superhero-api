@@ -8,7 +8,7 @@ import {
   Render,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBasicAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AffiliationAnalyticsGuard } from '../guards/affiliation-analytics.guard';
 import { BclAffiliationAnalyticsService } from '../services/bcl-affiliation-analytics.service';
 
@@ -19,7 +19,7 @@ import { BclAffiliationAnalyticsService } from '../services/bcl-affiliation-anal
 // arrive unguarded by omission).
 @Controller('bcl-affiliation/analytics')
 @ApiTags('BCL-Affiliation')
-@ApiSecurity('affiliation-analytics-key')
+@ApiBasicAuth('affiliation-analytics')
 @UseGuards(AffiliationAnalyticsGuard)
 export class BclAffiliationAnalyticsController {
   constructor(

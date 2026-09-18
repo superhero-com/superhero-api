@@ -96,18 +96,17 @@ async function bootstrap() {
       .setTitle('WORD CRAFT Scan')
       .setDescription('The WORD CRAFT Scan API')
       .setVersion('1.0')
-      .addApiKey(
+      .addBasicAuth(
         {
-          type: 'apiKey',
-          in: 'header',
-          name: 'x-api-key',
+          type: 'http',
+          scheme: 'basic',
           description:
-            'Operator key for the internal affiliation dashboards' +
-            ' (AFFILIATION_ANALYTICS_API_KEY). In a browser, open the' +
-            ' dashboard once as .../preview?key=<key> instead — the server' +
-            ' then sets a session cookie.',
+            'Operator credentials for the internal affiliation dashboards' +
+            ' (AFFILIATION_ANALYTICS_USER / AFFILIATION_ANALYTICS_PASSWORD).' +
+            ' A browser prompts for these on its own; scripts use' +
+            ' `curl -u user:password`.',
         },
-        'affiliation-analytics-key',
+        'affiliation-analytics',
       )
       .build();
 
