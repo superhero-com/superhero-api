@@ -45,14 +45,17 @@ import {
   PROFILE_X_REWARD_STREAK_BONUS_ENABLED,
   PROFILE_X_REWARD_STREAK_BONUS_PRIVATE_KEY,
   PROFILE_X_REWARD_STREAK_LENGTH,
+  isInformationalXError,
 } from '../profile.constants';
 import { Account } from '@/account/entities/account.entity';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { fetchJson } from '@/utils/common';
 import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
+import type { XVerificationAttemptSource } from '../entities/profile-x-verification-attempt.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '../entities/profile-x-streak-bonus-reward.entity';
+import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileSpendQueueService } from './profile-spend-queue.service';
 import {
@@ -100,6 +103,15 @@ type PublicPostingRewardStatusPayload = {
   remaining_to_goal: number;
   per_post_total_paid_count: number;
   per_post_total_paid_aettos: string;
+  /**
+   * What the three programs have actually paid this wallet. Without these the
+   * only way to show a total was to multiply the CURRENT tier by the number of
+   * rewarded posts and add a hardcoded onboarding figure — which misprices
+   * every post earned at a different follower tier, and silently lies the day
+   * an amount is reconfigured.
+   */
+  onboarding_amount_ae: string | null;
+  streak_bonus_total_paid_aettos: string;
   follower_count: number | null;
   min_followers_required: number;
   follower_tier_index: number | null;
@@ -155,7 +167,31 @@ export class ProfileXPostingRewardService {
     private readonly postRewardLedgerRepository: Repository<ProfileXPostRewardLedger>,
     @InjectRepository(ProfileXStreakBonusReward)
     private readonly streakBonusRewardRepository: Repository<ProfileXStreakBonusReward>,
+    private readonly verificationAttemptService: ProfileXVerificationAttemptService,
   ) {}
+
+  /**
+   * Files one attempt row. Never awaited for correctness and never allowed to
+   * throw — the history exists to explain verification failures, so it must not
+   * be able to cause one.
+   */
+  private async recordAttempt(
+    address: string,
+    outcome: 'succeeded' | 'failed',
+    errorCode: string | null,
+    detail?: string | null,
+    xUsername?: string | null,
+    source: XVerificationAttemptSource = 'manual_recheck',
+  ): Promise<void> {
+    await this.verificationAttemptService.record({
+      address,
+      source,
+      outcome,
+      errorCode,
+      detail,
+      xUsername,
+    });
+  }
 
   /* ------------------------------------------------------------------ */
   /* Candidate intake (from on-chain X link events)                      */
@@ -351,20 +387,25 @@ export class ProfileXPostingRewardService {
         return this.toPublicRewardStatus(
           reward,
           await this.getPerPostTotals(address),
+          await this.getStreakBonusTotals(address),
         );
       }
       return {
-        ...this.toPublicRewardStatus(null, null),
+        ...this.toPublicRewardStatus(null, null, null),
         error: 'Posting rewards are temporarily unavailable.',
       };
     }
     const ledgerTotals = reward ? await this.getPerPostTotals(address) : null;
+    const streakTotals = reward
+      ? await this.getStreakBonusTotals(address)
+      : null;
     const streakBonusStatus = reward
       ? await this.resolveStreakBonusStatus(reward)
       : undefined;
     const payload = this.toPublicRewardStatus(
       reward,
       ledgerTotals,
+      streakTotals,
       streakBonusStatus,
     );
     // The reward row keeps the X identity it was last verified with, but the
@@ -455,6 +496,34 @@ export class ProfileXPostingRewardService {
     return { status: 'pending', paidCount };
   }
 
+  /**
+   * Settled streak-bonus AE for a wallet. Same shape and same guards as
+   * `getPerPostTotals`: aggregate in SQL, and keep malformed amounts out of the
+   * NUMERIC cast so one bad row cannot fail the query.
+   */
+  private async getStreakBonusTotals(
+    address: string,
+  ): Promise<{ count: number; aettos: string }> {
+    const raw = await this.streakBonusRewardRepository
+      .createQueryBuilder('bonus')
+      .select('COUNT(*)', 'count')
+      .addSelect(
+        'COALESCE(SUM(CAST(bonus.amount_aettos AS NUMERIC)), 0)',
+        'aettos',
+      )
+      .where('bonus.address = :address', { address })
+      .andWhere('bonus.status = :status', { status: 'paid' })
+      .andWhere('bonus.amount_aettos ~ :numericPattern', {
+        numericPattern: '^[0-9]+$',
+      })
+      .getRawOne<{ count: string; aettos: string }>();
+    const aettosRaw = raw?.aettos != null ? String(raw.aettos) : '0';
+    return {
+      count: Number(raw?.count || 0),
+      aettos: aettosRaw.split('.')[0] || '0',
+    };
+  }
+
   private async getPerPostTotals(
     address: string,
   ): Promise<{ count: number; aettos: string }> {
@@ -503,6 +572,16 @@ export class ProfileXPostingRewardService {
 
     const reward = await this.prepareCheckCandidate(address);
     if (reward.status === 'blocked_x_identity_conflict') {
+      // Returns a normal status payload, so from the outside this looks like a
+      // successful check that simply never pays. Worth a row: it is one of the
+      // states people report as "verification is not working".
+      await this.recordAttempt(
+        address,
+        'failed',
+        'blocked_x_identity_conflict',
+        'This X account is already linked to a different address',
+        reward.x_username,
+      );
       return this.getRewardStatus(address);
     }
 
@@ -521,6 +600,15 @@ export class ProfileXPostingRewardService {
       const latest = await this.postingRewardRepository.findOne({
         where: { address },
       });
+      // The user pressed the button and got nothing. Not a pipeline fault, but
+      // it is indistinguishable from one to them, so it belongs in the history.
+      await this.recordAttempt(
+        address,
+        'failed',
+        'rate_limited',
+        'Daily X scan slot already used for this address',
+        latest?.x_username ?? reward.x_username,
+      );
       throw new HttpException(
         {
           status: HttpStatus.TOO_MANY_REQUESTS,
@@ -547,6 +635,13 @@ export class ProfileXPostingRewardService {
         `X reward recheck failed for ${address} after claiming the scan slot; slot released`,
         error instanceof Error ? error.stack : String(error),
       );
+      await this.recordAttempt(
+        address,
+        'failed',
+        'recheck_failed',
+        error instanceof Error ? error.message : String(error),
+        reward.x_username,
+      );
       throw new HttpException(
         {
           status: HttpStatus.SERVICE_UNAVAILABLE,
@@ -555,7 +650,305 @@ export class ProfileXPostingRewardService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
+
+    // A HANDLED scan failure does not throw — it records a code on the row and
+    // returns a normal status. Those are precisely the failures nobody sees:
+    // the request was a 200, the user was told nothing, and the only trace was
+    // a column about to be overwritten by the next run. Read the settled row
+    // and file what actually happened.
+    //
+    // Not every code is a failure, though. `x_posts_scan_truncated` is written
+    // alongside a scan that COMPLETED but hit the per-check post limit, so
+    // filing it as failed would spike this history on a notice and bury the
+    // real failures it exists to surface. Keep the notice as detail so it is
+    // not lost, and call the attempt what it was: a success.
+    const settled = await this.postingRewardRepository.findOne({
+      where: { address },
+    });
+    const settledError = settled?.error ?? null;
+    const informational = isInformationalXError(settledError);
+    await this.recordAttempt(
+      address,
+      settledError && !informational ? 'failed' : 'succeeded',
+      informational ? null : settledError,
+      informational ? `notice: ${settledError}` : null,
+      settled?.x_username ?? reward.x_username,
+    );
+
     return this.getRewardStatus(address);
+  }
+
+  /**
+   * Run a check in the background when one is due, triggered by somebody
+   * opening the rewards page rather than by pressing the button.
+   *
+   * Nothing evaluates these rewards on a schedule, so a user who linked X and
+   * posted was never looked at again unless they came back and explicitly
+   * rechecked — which is why wallets sat verified and unpaid for months. The
+   * page already reads the status on every load; this makes that read also
+   * start the work, so simply visiting is enough.
+   *
+   * It deliberately does NOT reuse `requestManualRecheck`:
+   *
+   * - That path requires a signed challenge, because it is a user action. This
+   *   one is not: the signature stays on the button, and this can only ever do
+   *   what the button would have done for the address's own owner.
+   * - That path records a `rate_limited` attempt when the slot is taken. Here
+   *   the user pressed nothing, so recording one on every page load would bury
+   *   the genuine failures that history exists to surface.
+   * - That path throws so the caller can report the failure. This one has no
+   *   caller to report to, so it swallows everything: a background refresh must
+   *   never be able to break the status read that triggered it.
+   *
+   * Cost is bounded by the same atomic daily cap as the button — at most one X
+   * API scan per address per window — so the worst case equals a daily cron
+   * over every linked address, and the normal case is far cheaper because only
+   * wallets whose owner actually visits cost anything.
+   */
+  async refreshInBackgroundIfDue(address: string): Promise<void> {
+    try {
+      if (!PROFILE_X_POSTING_REWARD_ENABLED) {
+        return;
+      }
+      // The same check `assertValidAddress` makes, without throwing: there is
+      // no caller here to receive a 400.
+      if (!ProfileXPostingRewardService.ADDRESS_REGEX.test(address || '')) {
+        return;
+      }
+      // Only wallets already in the program. The claim below is what actually
+      // makes an unknown address a no-op — its UPDATE matches no row — so this
+      // is here to skip that write entirely for the many reads that are never
+      // going to scan, not as the safety check.
+      const reward = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      if (!reward || reward.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+
+      // The account's CURRENT link decides, not the handle cached on the reward
+      // row. `bootstrapCandidate` refuses an unlinked account for exactly this
+      // reason, and reading the stale row instead would keep scanning — and
+      // paying — an address whose owner has since disconnected X. Read-only
+      // here on purpose: `prepareCheckCandidate` does the same check but also
+      // clears `error`, and doing that on every page load would wipe the
+      // eligibility code the dashboards read.
+      const account = await this.accountRepository.findOne({
+        where: { address },
+      });
+      const linkedXUsername = normalizeXUsername(account?.links?.x || '');
+      if (!linkedXUsername) {
+        return;
+      }
+
+      // Reset the cached identity BEFORE settling anything. Moving the settle
+      // pass ahead of the cooldown (below) put it ahead of the reset too, and
+      // that is a payout bug: `resetStaleXIdentityState` zeroes
+      // `qualified_posts_count` precisely so earnings from a PREVIOUS handle
+      // are not paid out, so settling on the un-reset row would send an
+      // onboarding reward earned under an X account the user has since
+      // swapped away from. The signed path is safe because it resets first;
+      // this has to as well.
+      const identityChanged = this.resetStaleXIdentityState(
+        reward,
+        linkedXUsername,
+      );
+      reward.x_username = linkedXUsername;
+      if (identityChanged) {
+        // Only when something actually changed — a re-link is rare, and this
+        // is a read path that should not write on every request.
+        await this.postingRewardRepository.save(reward);
+      }
+
+      // Settle anything already earned but stuck, BEFORE the cooldown gate.
+      // This calls no X API, so the X budget cap has no business blocking it —
+      // the manual path settles first for the same reason. Gating it behind the
+      // cooldown (as the first version of this did) meant a failed payout
+      // waited out the whole window even though revisiting the page was
+      // supposed to be what completed it.
+      //
+      // But this endpoint is unauthenticated and anyone may name any address,
+      // so the settle pass must be provably free for the overwhelming majority
+      // of calls: `hasSettleableWork` answers from the row already in hand plus
+      // at most two COUNTs, and only a wallet genuinely owed money reaches the
+      // spend queue. Sitting ahead of the cooldown, it is NOT bounded by the
+      // one-scan-per-day cap, which is exactly why it needs its own gate.
+      if (await this.hasSettleableWork(reward)) {
+        await this.runPayouts(address, reward, { logStuckPayouts: true });
+      }
+
+      // Cheap read-side check so the common case (a page load inside the
+      // cooldown) costs nothing but the row we already loaded, instead of an
+      // UPDATE on every request to a hot endpoint. The claim below is still the
+      // real gate — this only avoids the write when it would obviously fail.
+      const nextAllowedAt = this.computeNextCheckAllowedAt(
+        reward.last_x_api_scan_at ?? null,
+      );
+      if (nextAllowedAt && nextAllowedAt.getTime() > Date.now()) {
+        return;
+      }
+
+      // Only now, immediately before scanning: this resets the cached X
+      // identity when the linked handle has CHANGED, without which the scan
+      // would resolve, accrue and pay against the previous X account. It also
+      // clears `error`, which is why it belongs here rather than on every read.
+      const candidate = await this.prepareCheckCandidate(address);
+      if (candidate.status === 'blocked_x_identity_conflict') {
+        return;
+      }
+
+      const priorScanAt = candidate.last_x_api_scan_at ?? null;
+      // Atomic: concurrent page loads race here and exactly one wins. The
+      // losers return silently — nobody asked them for anything.
+      const claimed = await this.claimDailyScanSlot(address);
+      if (!claimed) {
+        return;
+      }
+
+      try {
+        await this.processAddressWithGuard(address);
+        // File the attempt, exactly as the signed path does. This is now the
+        // main way checks happen, so leaving it out meant the history table
+        // saw only button presses: a failure that only ever occurs on page
+        // load — or twenty wallets starting to fail within an hour — was
+        // invisible to the dashboard that table exists to feed.
+        await this.recordBackgroundAttempt(address);
+      } catch (error) {
+        // Same rollback as the manual path: an unexpected failure is not the
+        // user's fault and must not cost them the window.
+        await this.releaseDailyScanSlot(address, priorScanAt);
+        this.logger.warn(
+          `Background X reward refresh failed for ${address}; scan slot released`,
+          error instanceof Error ? error.stack : String(error),
+        );
+        await this.recordBackgroundAttempt(
+          address,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Background X reward refresh could not start for ${address}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * File a history row for a background scan, mirroring the signed path's
+   * treatment of informational notices as successes rather than failures.
+   *
+   * Never allowed to disturb the scan it describes: the history exists to
+   * explain checks, so a write failure here must not become one.
+   */
+  private async recordBackgroundAttempt(
+    address: string,
+    thrownDetail?: string,
+  ): Promise<void> {
+    try {
+      const settled = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      const settledError = settled?.error ?? null;
+      const informational = isInformationalXError(settledError);
+      const failed = !!thrownDetail || (!!settledError && !informational);
+      await this.recordAttempt(
+        address,
+        failed ? 'failed' : 'succeeded',
+        // An unexpected throw gets a CODE, not just free text. The dashboard
+        // groups and indexes on `error_code`, so filing null there would keep
+        // these off every "what is failing lately" view and leave the fault
+        // discoverable only by reading `detail` row by row. Same code the
+        // signed path uses for the same fault, so the two paths aggregate
+        // together rather than looking like different problems.
+        thrownDetail ? 'recheck_failed' : informational ? null : settledError,
+        thrownDetail ?? (informational ? `notice: ${settledError}` : null),
+        settled?.x_username ?? null,
+        'page_refresh',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not record the background X reward attempt for ${address}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Is there anything for `runPayouts` to actually do for this wallet?
+   *
+   * A cheap pre-check, not a second implementation of the payout rules: every
+   * condition below is a necessary condition of one of the three payout passes,
+   * so a false answer means all three would have returned without sending. The
+   * passes keep their own (authoritative, atomically-claimed) checks — this
+   * only decides whether it is worth calling them at all, so that an anonymous
+   * request naming an arbitrary address costs one row read instead of a walk
+   * through three payout paths and the spend queue.
+   */
+  private async hasSettleableWork(
+    reward: ProfileXPostingReward,
+  ): Promise<boolean> {
+    if (reward.status === 'blocked_x_identity_conflict') {
+      return false;
+    }
+    const now = new Date();
+
+    if (reward.status !== 'paid') {
+      // A payout that crashed mid-flight, or one that broadcast but failed its
+      // DB confirmation. Both need `runPayouts`' reconcile/log pass, and
+      // neither can send twice — the sentinel is unclaimable by design.
+      if (
+        reward.tx_hash ===
+          ProfileXPostingRewardService.ONBOARDING_PAYOUT_IN_PROGRESS_TX_HASH ||
+        (typeof reward.tx_hash === 'string' && reward.tx_hash.startsWith('th_'))
+      ) {
+        return true;
+      }
+      if (PROFILE_X_ONBOARDING_REWARD_ENABLED) {
+        const threshold = isValidPositiveInteger(PROFILE_X_ONBOARDING_THRESHOLD)
+          ? PROFILE_X_ONBOARDING_THRESHOLD
+          : 1;
+        const retryDue =
+          !reward.next_retry_at ||
+          new Date(reward.next_retry_at).getTime() <= now.getTime();
+        if (
+          retryDue &&
+          Number(reward.qualified_posts_count || 0) >= threshold
+        ) {
+          return true;
+        }
+      }
+    }
+
+    // Mirrors the due-row queries in `payPendingLedger` / `payStreakBonusesDue`:
+    // pending or failed, and either never retried or past its backoff.
+    const dueWhere = (address: string) => [
+      { address, status: In(['pending', 'failed']), next_retry_at: IsNull() },
+      {
+        address,
+        status: In(['pending', 'failed']),
+        next_retry_at: LessThanOrEqual(now),
+      },
+    ];
+
+    if (PROFILE_X_PERPOST_REWARD_ENABLED) {
+      const due = await this.postRewardLedgerRepository.count({
+        where: dueWhere(reward.address) as any,
+      });
+      if (due > 0) {
+        return true;
+      }
+    }
+    if (PROFILE_X_REWARD_STREAK_BONUS_ENABLED) {
+      const due = await this.streakBonusRewardRepository.count({
+        where: dueWhere(reward.address) as any,
+      });
+      if (due > 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -784,11 +1177,21 @@ export class ProfileXPostingRewardService {
       return;
     }
 
-    const xUserProfile = await this.resolveXUserProfile(
+    const lookup = await this.resolveXUserProfile(
       rewardEntry.x_user_id,
       normalizedXUsername,
     );
+    const xUserProfile = lookup.profile;
     if (!xUserProfile) {
+      if (!lookup.notFound) {
+        // We could not reach X (no credentials, rate limit, outage). Record it
+        // as transient and leave the strike count alone: counting our own
+        // outage against the user is what walks a perfectly good wallet into
+        // `x_user_lookup_blocked`, which only an on-chain re-link clears.
+        rewardEntry.error = 'x_lookup_unavailable';
+        await this.postingRewardRepository.save(rewardEntry);
+        return;
+      }
       rewardEntry.x_lookup_failure_count =
         Number(rewardEntry.x_lookup_failure_count || 0) + 1;
       rewardEntry.error = 'x_user_lookup_failed';
@@ -1840,6 +2243,7 @@ export class ProfileXPostingRewardService {
   private toPublicRewardStatus(
     reward: ProfileXPostingReward | null | undefined,
     ledgerTotals: { count: number; aettos: string } | null,
+    streakTotals: { count: number; aettos: string } | null,
     streakBonus?: { status: PublicPaymentStatus; paidCount: number },
   ): PublicPostingRewardStatusPayload {
     const onboardingThreshold = isValidPositiveInteger(
@@ -1865,6 +2269,8 @@ export class ProfileXPostingRewardService {
         remaining_to_goal: onboardingThreshold,
         per_post_total_paid_count: 0,
         per_post_total_paid_aettos: '0',
+        onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+        streak_bonus_total_paid_aettos: '0',
         follower_count: null,
         min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
         follower_tier_index: null,
@@ -1898,6 +2304,10 @@ export class ProfileXPostingRewardService {
       remaining_to_goal: Math.max(onboardingThreshold - qualifiedCount, 0),
       per_post_total_paid_count: ledgerTotals?.count || 0,
       per_post_total_paid_aettos: ledgerTotals?.aettos || '0',
+      // The configured amount, not a recorded one — the onboarding payout is
+      // the single reward whose row keeps no amount.
+      onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+      streak_bonus_total_paid_aettos: streakTotals?.aettos || '0',
       follower_count: reward.follower_count ?? null,
       min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
       follower_tier_index: reward.follower_tier_index ?? null,
@@ -1975,6 +2385,8 @@ export class ProfileXPostingRewardService {
         return 'Link your X account to use posting rewards.';
       case 'x_user_lookup_failed':
         return 'The linked X account could not be resolved. Reconnect it and try again.';
+      case 'x_lookup_unavailable':
+        return 'X could not be reached to check your account. Try again later.';
       case 'x_user_lookup_blocked':
         return 'The linked X account could not be resolved repeatedly. Re-link your X account to continue.';
       case 'below_min_followers':
@@ -2041,14 +2453,29 @@ export class ProfileXPostingRewardService {
   /* X API reads                                                         */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Resolve the linked X account.
+   *
+   * `notFound` distinguishes the two ways this returns no profile, and the
+   * distinction decides whether the wallet takes a strike:
+   *   - true  → X answered authoritatively that the handle/id is gone. That is
+   *             a fact about the user, and repeats of it should eventually stop
+   *             costing lookups.
+   *   - false → we could not ask (no credentials, 429, 5xx, network, timeout).
+   *             That is a fact about US, and must never be charged to the user.
+   * Conflating them meant an X credential outage walked every linked wallet to
+   * `x_user_lookup_blocked` in five page loads, recoverable only by re-linking
+   * on-chain — a self-inflicted lockout during precisely the incident where
+   * nobody could re-link either.
+   */
   private async resolveXUserProfile(
     knownUserId: string | null,
     username: string,
-  ): Promise<XUserProfile | null> {
+  ): Promise<{ profile: XUserProfile | null; notFound: boolean }> {
     if (knownUserId) {
       const byId = await this.fetchXUserById(knownUserId);
       if (byId.profile) {
-        return byId.profile;
+        return { profile: byId.profile, notFound: false };
       }
       // Only spend a SECOND (paid) lookup when the id is definitively gone
       // (404 / resolved-to-nothing) — e.g. the handle changed or the id rotated.
@@ -2056,7 +2483,7 @@ export class ProfileXPostingRewardService {
       // spent a single call; the next daily-capped scan retries, instead of
       // burning two lookups per scan during an X outage.
       if (!byId.notFound) {
-        return null;
+        return { profile: null, notFound: false };
       }
     }
     return this.fetchXUserProfileByUsername(username);
@@ -2064,10 +2491,15 @@ export class ProfileXPostingRewardService {
 
   private async fetchXUserProfileByUsername(
     username: string,
-  ): Promise<XUserProfile | null> {
+  ): Promise<{ profile: XUserProfile | null; notFound: boolean }> {
     const token = await this.getXAppAccessToken();
     if (!token) {
-      return null;
+      // No credentials / token endpoint down: we never asked X anything, so
+      // this says nothing about whether the handle exists.
+      this.logger.warn(
+        `Could not obtain an X app token; skipping username lookup for @${username}`,
+      );
+      return { profile: null, notFound: false };
     }
     try {
       const { response, body, baseUrl } = await this.fetchXReadWithAuthFallback(
@@ -2076,23 +2508,32 @@ export class ProfileXPostingRewardService {
         )}?user.fields=id,username,public_metrics`,
         token,
       );
-      if (!response.ok || !(body as any)?.data?.id) {
-        this.logger.warn('X username lookup failed for posting reward', {
-          username,
-          base_url: baseUrl,
-          status: response.status,
-          detail: (body as any)?.detail || (body as any)?.title,
-        });
-        return null;
+      if (response.ok && (body as any)?.data?.id) {
+        return {
+          profile: this.toXUserProfile((body as any).data, username),
+          notFound: false,
+        };
       }
-      return this.toXUserProfile((body as any).data, username);
+      this.logger.warn('X username lookup failed for posting reward', {
+        username,
+        base_url: baseUrl,
+        status: response.status,
+        detail: (body as any)?.detail || (body as any)?.title,
+      });
+      // Same rule as the by-id lookup: a 404, or a 200 that resolved to no
+      // user, is X telling us the handle is not there. Anything else
+      // (429 / 5xx) is X being unavailable.
+      return {
+        profile: null,
+        notFound: response.status === 404 || response.ok,
+      };
     } catch (error) {
       this.logger.warn(
         `Failed to fetch X user profile for @${username}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return null;
+      return { profile: null, notFound: false };
     }
   }
 

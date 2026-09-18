@@ -22,6 +22,7 @@ import { Repository } from 'typeorm';
 import { Post } from '../entities/post.entity';
 import { PopularRankingService } from '../services/popular-ranking.service';
 import { PopularPostsQueryDto, PostDto } from '../dto';
+import { POST_LANGUAGE_FILTERS } from '../utils/post-language.util';
 import type { Request } from 'express';
 import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
@@ -41,6 +42,7 @@ import {
 const ALLOWED_ORDER_BY = new Set(['created_at', 'total_comments']);
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
 const MAX_SEARCH_LENGTH = 100;
+const ALLOWED_LANGUAGE_FILTERS = new Set<string>(POST_LANGUAGE_FILTERS);
 
 @Controller('posts')
 @ApiTags('Posts')
@@ -221,6 +223,13 @@ export class PostsController {
     description:
       'Filter posts by topic names (comma-separated, partial matching)',
   })
+  @ApiQuery({
+    name: 'language',
+    enum: POST_LANGUAGE_FILTERS,
+    required: false,
+    description:
+      'Return only posts detected as this script/language. Posts with no detected language are excluded.',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -238,6 +247,7 @@ export class PostsController {
     @Query('account_address', OptionalAeAccountAddressPipe)
     account_address?: string,
     @Query('topics') topics?: string,
+    @Query('language') language?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -256,6 +266,11 @@ export class PostsController {
     if (search && search.length > MAX_SEARCH_LENGTH) {
       throw new BadRequestException(
         `search must be at most ${MAX_SEARCH_LENGTH} characters`,
+      );
+    }
+    if (language && !ALLOWED_LANGUAGE_FILTERS.has(language)) {
+      throw new BadRequestException(
+        `Invalid language value: ${language}. Allowed values: ${POST_LANGUAGE_FILTERS.join(', ')}`,
       );
     }
     // Build base query for filtering to get distinct post IDs
@@ -278,6 +293,10 @@ export class PostsController {
       baseQuery.andWhere('post.sender_address = :account_address', {
         account_address,
       });
+    }
+
+    if (language) {
+      baseQuery.andWhere('post.language = :language', { language });
     }
 
     // Add topic filtering
@@ -356,6 +375,10 @@ export class PostsController {
       });
     }
 
+    if (language) {
+      totalCountQuery.andWhere('post.language = :language', { language });
+    }
+
     if (topics) {
       const topicNames = topics
         .split(',')
@@ -430,6 +453,7 @@ export class PostsController {
       contentQuality,
       reads,
       interactionsPerHour,
+      language,
     } = query;
     const window = 'all' as const;
     const offset = (page - 1) * limit;
@@ -454,6 +478,7 @@ export class PostsController {
         offset,
         undefined,
         weightOverrides,
+        language,
       );
       const totalPages = Math.ceil(totalItems / limit);
 
@@ -510,6 +535,7 @@ export class PostsController {
           offset,
           weightOverrides,
           scoredItems,
+          language,
         );
       }
       return response;
@@ -518,6 +544,9 @@ export class PostsController {
         .createQueryBuilder('post')
         .where('post.is_hidden = false')
         .andWhere('post.post_id IS NULL');
+      if (language) {
+        fallbackQb.andWhere('post.language = :language', { language });
+      }
       const fallbackBasePosts = await fallbackQb
         .orderBy('post.created_at', 'DESC')
         .offset(offset)

@@ -7,6 +7,7 @@ import {
   SyncDirection,
 } from './plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { normalizeEventTopics } from '@/utils/common';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 
@@ -112,29 +113,9 @@ export abstract class BasePluginSyncService {
     );
   }
 
-  /**
-   * MDW serialises event `topics` as decimal strings, but aepp-sdk's
-   * `$decodeEvents` matches them against the BigInt event-name hash with strict
-   * equality — a string topic never matches, so with `omitUnknown: true` every
-   * event is silently dropped. Normalise each topic to BigInt before decoding.
-   * A single unconvertible topic (an unrelated log line in the same tx) is left
-   * untouched so it is dropped alone rather than aborting the whole log.
-   */
+  /** Thin instance accessor for the shared `normalizeEventTopics` util. */
   protected normalizeEventTopics(log: any[] | undefined | null): any[] {
-    const toBigIntTopic = (topic: any): any => {
-      if (typeof topic === 'bigint') return topic;
-      try {
-        return BigInt(topic);
-      } catch {
-        return topic;
-      }
-    };
-    return (log ?? []).map((entry: any) => ({
-      ...entry,
-      topics: Array.isArray(entry?.topics)
-        ? entry.topics.map(toBigIntTopic)
-        : entry?.topics,
-    }));
+    return normalizeEventTopics(log);
   }
 
   async getContract(

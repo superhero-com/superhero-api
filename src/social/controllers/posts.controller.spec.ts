@@ -160,6 +160,82 @@ describe('PostsController', () => {
       0,
       undefined,
       expect.any(Object),
+      undefined,
+    );
+  });
+
+  it('forwards the language filter to popular ranking', async () => {
+    const popularRankingService = {
+      getPopularPostsPage: jest.fn().mockResolvedValue({
+        items: [],
+        totalItems: 0,
+      }),
+    };
+    const hydratedPostQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    const popularController = new PostsController(
+      {
+        createQueryBuilder: jest.fn().mockReturnValue(hydratedPostQueryBuilder),
+      } as any,
+      {} as any,
+      popularRankingService as any,
+      {} as any,
+      { getProfilesByAddresses: jest.fn().mockResolvedValue([]) } as any,
+      {
+        getCurrentFactory: jest.fn().mockResolvedValue({ collections: {} }),
+        mapCollectionInfo: jest.fn().mockReturnValue(null),
+      } as any,
+    );
+
+    await popularController.popular({
+      page: 1,
+      limit: 20,
+      language: 'zh',
+    } as any);
+
+    expect(popularRankingService.getPopularPostsPage).toHaveBeenCalledWith(
+      'all',
+      20,
+      0,
+      undefined,
+      expect.any(Object),
+      'zh',
+    );
+  });
+
+  it('rejects a language outside the allowed set', async () => {
+    await expect(
+      controller.listAll(
+        1,
+        100,
+        'created_at',
+        'DESC',
+        undefined,
+        undefined,
+        undefined,
+        'jp',
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('applies the language filter to the posts list query', async () => {
+    await controller.listAll(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      undefined,
+      undefined,
+      undefined,
+      'ar',
+    );
+
+    expect(baseQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'post.language = :language',
+      { language: 'ar' },
     );
   });
 

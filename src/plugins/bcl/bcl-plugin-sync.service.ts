@@ -62,9 +62,12 @@ export class BclPluginSyncService extends BasePluginSyncService {
         BCL_CONTRACT.contractAddress,
         CommunityFactoryACI,
       );
-      const decodedLogs = contract.$decodeEvents(tx.raw.log, {
-        omitUnknown: true,
-      });
+      const decodedLogs = contract.$decodeEvents(
+        this.normalizeEventTopics(tx.raw.log),
+        {
+          omitUnknown: true,
+        },
+      );
 
       return serializeBigInts(decodedLogs);
     } catch (error: any) {

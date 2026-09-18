@@ -23,6 +23,7 @@ import {
   PopularRankingContentItem,
 } from '@/plugins/popular-ranking.interface';
 import { POPULAR_RANKING_CONTRIBUTOR } from '@/plugins/plugin.tokens';
+import type { PostLanguageFilter } from '../utils/post-language.util';
 
 export type PopularWindow = '24h' | '7d' | 'all';
 
@@ -256,6 +257,7 @@ export class PopularRankingService implements OnModuleDestroy {
   private async getVerifiedPopularIds(
     window: PopularWindow,
     maxCandidates?: number,
+    language?: PostLanguageFilter,
   ): Promise<string[]> {
     const key = this.getRedisKey(window);
 
@@ -329,19 +331,26 @@ export class PopularRankingService implements OnModuleDestroy {
           id: In(chunk),
           is_hidden: false,
           post_id: null,
+          // When a content-language filter is active, the ranked cache stays
+          // language-agnostic (one shared cache); membership is narrowed here.
+          ...(language ? { language } : {}),
         },
         select: { id: true },
       });
       existingPosts.forEach((p) => existingIdsSet.add(p.id));
     }
 
-    for (const id of pluginContentIds) {
-      const [type] = id.split(':');
-      const hasContributor = this.rankingContributors.some(
-        (c) => c.name === type,
-      );
-      if (hasContributor) {
-        existingIdsSet.add(id);
+    // Plugin items (polls, ...) carry no language, so an active filter drops
+    // them entirely.
+    if (!language) {
+      for (const id of pluginContentIds) {
+        const [type] = id.split(':');
+        const hasContributor = this.rankingContributors.some(
+          (c) => c.name === type,
+        );
+        if (hasContributor) {
+          existingIdsSet.add(id);
+        }
       }
     }
 
@@ -357,6 +366,7 @@ export class PopularRankingService implements OnModuleDestroy {
     window: PopularWindow,
     limit: number,
     offset: number,
+    language?: PostLanguageFilter,
   ): Promise<Post[]> {
     const qb = this.postRepository
       .createQueryBuilder('post')
@@ -369,6 +379,10 @@ export class PopularRankingService implements OnModuleDestroy {
       qb.andWhere('post.created_at >= :since', { since });
     }
 
+    if (language) {
+      qb.andWhere('post.language = :language', { language });
+    }
+
     return qb
       .orderBy('post.created_at', 'DESC')
       .offset(offset)
@@ -376,7 +390,10 @@ export class PopularRankingService implements OnModuleDestroy {
       .getMany();
   }
 
-  private async countRecentFallback(window: PopularWindow): Promise<number> {
+  private async countRecentFallback(
+    window: PopularWindow,
+    language?: PostLanguageFilter,
+  ): Promise<number> {
     const qb = this.postRepository
       .createQueryBuilder('post')
       .where('post.is_hidden = false')
@@ -386,6 +403,10 @@ export class PopularRankingService implements OnModuleDestroy {
       const hours = this.getWindowHours(window);
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
       qb.andWhere('post.created_at >= :since', { since });
+    }
+
+    if (language) {
+      qb.andWhere('post.language = :language', { language });
     }
 
     return qb.getCount();
@@ -555,6 +576,7 @@ export class PopularRankingService implements OnModuleDestroy {
     offset = 0,
     maxCandidates?: number,
     weightOverrides?: PopularRankingWeightOverrides,
+    language?: PostLanguageFilter,
   ): Promise<{
     items: (Post | PopularRankingContentItem)[];
     totalItems: number;
@@ -566,14 +588,15 @@ export class PopularRankingService implements OnModuleDestroy {
       const verifiedIds = await this.getVerifiedPopularIds(
         window,
         maxCandidates,
+        language,
       );
 
       if (verifiedIds.length === 0) {
         const [items, totalItems] = await Promise.all([
-          this.fetchRecentFallback(window, limit, offset),
+          this.fetchRecentFallback(window, limit, offset, language),
           // A failed count must not turn a servable page into a 500; the
           // pre-refactor count path swallowed its errors the same way.
-          this.countRecentFallback(window).catch((error) => {
+          this.countRecentFallback(window, language).catch((error) => {
             this.logger.error(
               `Error counting recent fallback for window ${window}:`,
               error,
@@ -600,6 +623,7 @@ export class PopularRankingService implements OnModuleDestroy {
       window,
       maxCandidates ?? this.getDefaultMaxCandidates(window),
       weightOverrides,
+      language,
     );
     const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
     const paginatedIds = scored
@@ -618,18 +642,23 @@ export class PopularRankingService implements OnModuleDestroy {
     window: PopularWindow,
     maxCandidates = 10000,
     weightOverrides?: PopularRankingWeightOverrides,
+    language?: PostLanguageFilter,
   ): Promise<PopularScoreItem[]> {
     const hours = this.getWindowHours(window);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    const candidateRows = await this.postRepository
+    const candidateQb = this.postRepository
       .createQueryBuilder('post')
       .select('post.id', 'id')
       .where('post.is_hidden = false')
       .andWhere('post.post_id IS NULL')
       .andWhere(window === 'all' ? '1=1' : 'post.created_at >= :since', {
         since,
-      })
+      });
+    if (language) {
+      candidateQb.andWhere('post.language = :language', { language });
+    }
+    const candidateRows = await candidateQb
       .orderBy('post.created_at', 'DESC')
       .limit(maxCandidates)
       .getRawMany<{ id: string }>();
@@ -662,22 +691,26 @@ export class PopularRankingService implements OnModuleDestroy {
     const pluginLimit = Math.floor(
       maxCandidates / Math.max(1, this.rankingContributors.length + 1),
     );
-    for (const contributor of this.rankingContributors) {
-      try {
-        const items = await contributor.getRankingCandidates(
-          window,
-          window === 'all' ? null : since,
-          pluginLimit,
-        );
-        pluginContentItems.push(...items);
-        this.logger.log(
-          `Plugin ${contributor.name} contributed ${items.length} items for window ${window}`,
-        );
-      } catch (error) {
-        this.logger.error(
-          `Failed to fetch content from plugin ${contributor.name}:`,
-          error,
-        );
+    // Plugin items carry no language, so an active content-language filter
+    // excludes them and their fetch is skipped entirely.
+    if (!language) {
+      for (const contributor of this.rankingContributors) {
+        try {
+          const items = await contributor.getRankingCandidates(
+            window,
+            window === 'all' ? null : since,
+            pluginLimit,
+          );
+          pluginContentItems.push(...items);
+          this.logger.log(
+            `Plugin ${contributor.name} contributed ${items.length} items for window ${window}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Failed to fetch content from plugin ${contributor.name}:`,
+            error,
+          );
+        }
       }
     }
     this.logger.log(
@@ -1207,6 +1240,7 @@ export class PopularRankingService implements OnModuleDestroy {
     offset = 0,
     weightOverrides?: PopularRankingWeightOverrides,
     precomputedScored?: PopularScoreItem[],
+    language?: PostLanguageFilter,
   ) {
     const personalized = this.hasWeightOverrides(weightOverrides);
     const appliedWeights = personalized
@@ -1222,6 +1256,7 @@ export class PopularRankingService implements OnModuleDestroy {
           window,
           this.getDefaultMaxCandidates(window),
           weightOverrides,
+          language,
         ));
       const candidateEnd = this.getDiversityCandidateEnd(offset, limit);
       const ids = scored.slice(0, candidateEnd).map((item) => item.postId);
@@ -1243,14 +1278,27 @@ export class PopularRankingService implements OnModuleDestroy {
           offset,
         );
       } else {
-        items = await this.postRepository
+        const fallbackQb = this.postRepository
           .createQueryBuilder('post')
           .where('post.is_hidden = false')
-          .andWhere('post.post_id IS NULL')
+          .andWhere('post.post_id IS NULL');
+        if (language) {
+          fallbackQb.andWhere('post.language = :language', { language });
+        }
+        items = await fallbackQb
           .orderBy('post.created_at', 'DESC')
           .limit(limit)
           .getMany();
       }
+    }
+
+    // The ranked-cache read above is language-agnostic; drop items that don't
+    // match the active filter (and plugin items, which have no language) so the
+    // debug view mirrors the served page.
+    if (language) {
+      items = items.filter(
+        (item) => 'language' in item && item.language === language,
+      );
     }
 
     return items.map((item) => ({

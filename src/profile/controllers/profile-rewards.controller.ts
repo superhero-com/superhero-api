@@ -24,6 +24,27 @@ export class ProfileRewardsController {
   async getXPostingRewardStatus(
     @Param('address', AeAccountAddressPipe) address: string,
   ) {
+    // Opening the rewards page starts a check when one is due. Nothing runs on
+    // a schedule, so without this a user who linked X and posted is never
+    // looked at again unless they come back and press the button — which is
+    // how wallets ended up verified and unpaid for months.
+    //
+    // Deliberately not awaited: the status returns immediately from what is
+    // already known, and the refreshed numbers appear on the next load. The
+    // call swallows its own failures, so this cannot turn a read into an error.
+    //
+    // This route is unauthenticated, so be precise about what a stranger can
+    // set in motion by naming an address. The SCAN is capped at one per address
+    // per window. The SETTLE pass deliberately sits AHEAD of that cap (a failed
+    // payout must not wait out the window), so the cap does not bound it —
+    // `hasSettleableWork` does, by reducing every wallet that is not actually
+    // owed money to a single row read.
+    // The `.catch` is belt-and-braces: the service already swallows its own
+    // failures, but nothing here would survive that guarantee being removed
+    // later, and an unhandled rejection on a read path is not worth the risk.
+    void this.profileXPostingRewardService
+      .refreshInBackgroundIfDue(address)
+      ?.catch(() => undefined);
     return this.profileXPostingRewardService.getRewardStatus(address);
   }
 

@@ -30,8 +30,35 @@ describe('ProfileXPostingRewardService disabled', () => {
         getRewardAccount: jest.fn(),
       } as any,
       new ProfileXApiClientService(),
-      { find: jest.fn(), update: jest.fn() } as any,
-      { find: jest.fn(), update: jest.fn() } as any,
+      {
+        find: jest.fn(),
+        update: jest.fn(),
+        createQueryBuilder: jest.fn(() => {
+          const qb: any = {
+            select: () => qb,
+            addSelect: () => qb,
+            where: () => qb,
+            andWhere: () => qb,
+            getRawOne: async () => ({ count: '0', aettos: '0' }),
+          };
+          return qb;
+        }),
+      } as any,
+      {
+        find: jest.fn(),
+        update: jest.fn(),
+        createQueryBuilder: jest.fn(() => {
+          const qb: any = {
+            select: () => qb,
+            addSelect: () => qb,
+            where: () => qb,
+            andWhere: () => qb,
+            getRawOne: async () => ({ count: '0', aettos: '0' }),
+          };
+          return qb;
+        }),
+      } as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     await expect(
@@ -88,7 +115,21 @@ describe('ProfileXPostingRewardService disabled', () => {
       { enqueueSpend: jest.fn(), getRewardAccount: jest.fn() } as any,
       new ProfileXApiClientService(),
       postRewardLedgerRepository,
-      { find: jest.fn(), update: jest.fn() } as any,
+      {
+        find: jest.fn(),
+        update: jest.fn(),
+        createQueryBuilder: jest.fn(() => {
+          const qb: any = {
+            select: () => qb,
+            addSelect: () => qb,
+            where: () => qb,
+            andWhere: () => qb,
+            getRawOne: async () => ({ count: '0', aettos: '0' }),
+          };
+          return qb;
+        }),
+      } as any,
+      { record: jest.fn().mockResolvedValue(undefined) } as any,
     );
 
     await expect(service.getRewardStatus(ADDRESS)).resolves.toMatchObject({

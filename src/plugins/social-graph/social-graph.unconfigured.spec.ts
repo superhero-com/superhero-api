@@ -113,6 +113,10 @@ describe('social-graph (unconfigured — SOCIAL_GRAPH_CONTRACT_ADDRESS unset)', 
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('./social-graph-contract.service')
               .SocialGraphContractService,
+          ProfileReadService:
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('@/profile/services/profile-read.service')
+              .ProfileReadService,
         };
       });
       request = mods.request;
@@ -128,11 +132,19 @@ describe('social-graph (unconfigured — SOCIAL_GRAPH_CONTRACT_ADDRESS unset)', 
           mods.SocialGraphConfiguredGuard,
           {
             provide: mods.SocialGraphService,
-            useValue: { getRelationship: mustNotRun, precheck: mustNotRun },
+            useValue: {
+              getRelationship: mustNotRun,
+              precheck: mustNotRun,
+              listConnections: mustNotRun,
+            },
           },
           {
             provide: mods.SocialGraphContractService,
             useValue: { getConfig: mustNotRun },
+          },
+          {
+            provide: mods.ProfileReadService,
+            useValue: { getProfilesByAddresses: mustNotRun },
           },
         ],
       }).compile();
@@ -152,6 +164,18 @@ describe('social-graph (unconfigured — SOCIAL_GRAPH_CONTRACT_ADDRESS unset)', 
 
     it('GET /social-graph/config → 503', () =>
       request(app.getHttpServer()).get('/social-graph/config').expect(503));
+
+    it('GET /social-graph/followers → 503', () =>
+      request(app.getHttpServer())
+        .get('/social-graph/followers')
+        .query({ address: 'ak_test' })
+        .expect(503));
+
+    it('GET /social-graph/following → 503', () =>
+      request(app.getHttpServer())
+        .get('/social-graph/following')
+        .query({ address: 'ak_test' })
+        .expect(503));
 
     // All four actions, including unfollow/unblock which the service would have
     // answered from the empty index — the guard now stops them before the service.

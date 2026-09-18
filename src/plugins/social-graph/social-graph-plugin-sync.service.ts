@@ -1,11 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { In, Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
-import { SyncDirection } from '../plugin.interface';
+import { SyncDirection, SyncDirectionEnum } from '../plugin.interface';
 import {
   SocialGraphEdge,
   SocialGraphEdgeKind,
@@ -16,6 +17,10 @@ import {
   SOCIAL_GRAPH_CONTRACT_ADDRESS,
   SOCIAL_GRAPH_PLUGIN_NAME,
 } from './social-graph.constants';
+import {
+  SOCIAL_GRAPH_FOLLOWED_EVENT,
+  SocialGraphFollowedEventPayload,
+} from './events';
 
 interface DecodedEvent {
   name: string;
@@ -45,6 +50,12 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     aeSdkService: AeSdkService,
     @InjectRepository(SocialGraphEdge)
     private readonly edgeRepo: Repository<SocialGraphEdge>,
+    // Optional so the existing unit DI (which builds the service by hand) still
+    // resolves; the global EventEmitterModule provides it in the real app. A new
+    // follow indexed on the live path emits SOCIAL_GRAPH_FOLLOWED_EVENT so the
+    // notifications module can tell the followed account.
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
   ) {
     super(aeSdkService);
   }
@@ -88,12 +99,11 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
 
   async processTransaction(
     tx: Tx,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _syncDirection: SyncDirection,
+    syncDirection: SyncDirection,
   ): Promise<void> {
     const events = await this.getDecodedEvents(tx);
     for (const event of events) {
-      await this.applyEvent(tx, event);
+      await this.applyEvent(tx, event, syncDirection);
     }
   }
 
@@ -106,18 +116,32 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     return Array.isArray(fresh) ? fresh : [];
   }
 
-  private async applyEvent(tx: Tx, event: DecodedEvent): Promise<void> {
+  private async applyEvent(
+    tx: Tx,
+    event: DecodedEvent,
+    syncDirection: SyncDirection,
+  ): Promise<void> {
     const [from, to] = event.args ?? [];
     if (!from || !to) {
       return;
     }
     switch (event.name) {
-      case 'Followed':
-        return this.insertEdge(from, to, 'follow', tx);
+      case 'Followed': {
+        const inserted = await this.insertEdge(from, to, 'follow', tx);
+        // Notify only on a genuinely new follow indexed live: an idempotent
+        // re-apply (`.orIgnore()` no-op) inserts nothing, and backfill/replay
+        // must not page the followed account. Unfollow/Blocked/Unblocked and a
+        // reverted follow (no Followed event) never reach this branch.
+        if (inserted && syncDirection === SyncDirectionEnum.Live) {
+          this.emitFollowed(from, to, tx.hash);
+        }
+        return;
+      }
       case 'Unfollowed':
         return this.deleteEdge(from, to, 'follow');
       case 'Blocked':
-        return this.insertEdge(from, to, 'block', tx);
+        await this.insertEdge(from, to, 'block', tx);
+        return;
       case 'Unblocked':
         return this.deleteEdge(from, to, 'block');
       default:
@@ -125,18 +149,35 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
     }
   }
 
+  private emitFollowed(from: string, to: string, txHash: string): void {
+    if (!this.eventEmitter) {
+      return;
+    }
+    const payload: SocialGraphFollowedEventPayload = {
+      followerAddress: from,
+      followedAddress: to,
+      txHash,
+    };
+    this.eventEmitter.emit(SOCIAL_GRAPH_FOLLOWED_EVENT, payload);
+  }
+
   // Each mutation and the recompute of its two affected addresses share one
   // transaction, so a crash between them can never leave a stale counter. The
   // counters are recomputed from the edge table, never incremented, so an
   // `.orIgnore()`d re-insert or an unconditional delete stays correct.
+  // Returns whether a new row was actually inserted. `ON CONFLICT DO NOTHING
+  // RETURNING id` yields the id only on a real insert and nothing on a conflict,
+  // so `raw.length` distinguishes a first follow from an idempotent re-apply —
+  // the signal the notification gate needs.
   private async insertEdge(
     from: string,
     to: string,
     kind: SocialGraphEdgeKind,
     tx: Tx,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let inserted = false;
     await this.edgeRepo.manager.transaction(async (manager) => {
-      await manager
+      const result = await manager
         .createQueryBuilder()
         .insert()
         .into(SocialGraphEdge)
@@ -148,11 +189,14 @@ export class SocialGraphPluginSyncService extends BasePluginSyncService {
           tx_hash: tx.hash,
         })
         .orIgnore() // ON CONFLICT (from,to,kind) DO NOTHING — safe to re-apply
+        .returning(['id'])
         .execute();
+      inserted = (result?.raw?.length ?? 0) > 0;
       await recomputeSocialGraphCounts(manager, from);
       await recomputeSocialGraphCounts(manager, to);
     });
     this.logger.log(`${kind}: ${from} -> ${to}`);
+    return inserted;
   }
 
   private async deleteEdge(
