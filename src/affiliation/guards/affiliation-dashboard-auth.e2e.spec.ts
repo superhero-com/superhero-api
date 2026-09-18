@@ -367,6 +367,58 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
       expect(response.text).toContain('Too many attempts');
     }, 90000);
 
+    it('tells the fifth wrong attempt it is locked, not merely wrong', async () => {
+      // Sequential on purpose: this is the one path that reads the UPDATE's
+      // RETURNING value. Asserting only on the database row (as the parallel
+      // test does) passes even when that value is misread and the branch never
+      // runs, so this checks what the operator is actually told.
+      let last: any;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        last = await request(server())
+          .post('/bcl-affiliation/auth/login')
+          .type('form')
+          .send({ username: USERNAME, password: `sequential-${attempt}` })
+          .expect(401);
+      }
+      expect(last.text).toContain('Too many attempts');
+      expect(last.text).not.toContain('Wrong username or password');
+    }, 90000);
+
+    it('stops reporting a lockout once it has lapsed', async () => {
+      // The non-locking arm keeps the old timestamp rather than clearing it, so
+      // the row still carries one long after the lockout ended. Reading that as
+      // "locked" would tell someone to wait fifteen minutes they do not owe.
+      await Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          request(server())
+            .post('/bcl-affiliation/auth/login')
+            .type('form')
+            .send({ username: USERNAME, password: `lapse-${i}` }),
+        ),
+      );
+      await ds
+        .getRepository(AffiliationDashboardAdmin)
+        .createQueryBuilder()
+        .update()
+        .set({ locked_until: new Date(Date.now() - 60_000) })
+        .execute();
+
+      const wrong = await request(server())
+        .post('/bcl-affiliation/auth/login')
+        .type('form')
+        .send({ username: USERNAME, password: 'still-wrong' })
+        .expect(401);
+      expect(wrong.text).toContain('Wrong username or password');
+      expect(wrong.text).not.toContain('Too many attempts');
+
+      // And the real password works again, because the lockout is over.
+      await request(server())
+        .post('/bcl-affiliation/auth/login')
+        .type('form')
+        .send({ username: USERNAME, password: PASSWORD })
+        .expect(302);
+    }, 90000);
+
     it('signing out invalidates the session everywhere', async () => {
       const login = await request(server())
         .post('/bcl-affiliation/auth/login')

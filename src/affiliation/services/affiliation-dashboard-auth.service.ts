@@ -50,6 +50,27 @@ export type SetupResult =
  */
 export const SETUP_ADVISORY_LOCK_KEY = 8_314_027;
 
+/**
+ * First row of a raw query result.
+ *
+ * TypeORM's `query()` does not return one shape. A SELECT yields the rows; an
+ * `UPDATE ... RETURNING` yields `[rows, rowCount]`. Indexing `[0]` blindly
+ * therefore reads a ROW for one and the whole ROWS ARRAY for the other, so
+ * every field comes back `undefined` — which silently turned the lockout
+ * branch below into dead code until a test looked at the response text rather
+ * than the database row.
+ */
+function firstRow(result: unknown): Record<string, any> | null {
+  if (!Array.isArray(result)) {
+    return null;
+  }
+  const head = result[0];
+  if (Array.isArray(head)) {
+    return (head[0] as Record<string, any>) ?? null;
+  }
+  return (head as Record<string, any>) ?? null;
+}
+
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
@@ -211,12 +232,21 @@ export class AffiliationDashboardAuthService {
           RETURNING "locked_until"`,
         [admin.id, MAX_FAILED_LOGINS, String(LOCKOUT_MS)],
       );
-      const locked = !!updated?.[0]?.locked_until;
-      if (locked) {
+
+      // A PRESENT `locked_until` is not a locked account — the non-locking arm
+      // deliberately leaves the previous, now-expired timestamp in place rather
+      // than clearing it, so testing only for presence would tell someone whose
+      // lockout lapsed an hour ago that they must wait another fifteen minutes.
+      // The same comparison the gate above uses decides it, and the wait comes
+      // from the row rather than from the constant, so it counts down.
+      const lockedUntilRaw = firstRow(updated)?.locked_until;
+      const lockedUntil = lockedUntilRaw ? new Date(lockedUntilRaw) : null;
+      const remainingMs = lockedUntil ? lockedUntil.getTime() - Date.now() : 0;
+      if (remainingMs > 0) {
         this.logger.warn(
           `Affiliation dashboard login locked for "${normalized}" after ${MAX_FAILED_LOGINS} failures`,
         );
-        return { status: 'locked', retryAfterMs: LOCKOUT_MS };
+        return { status: 'locked', retryAfterMs: remainingMs };
       }
       return { status: 'invalid' };
     }
