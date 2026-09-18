@@ -52,6 +52,7 @@ import { ACTIVE_NETWORK } from '@/configs/network';
 import { fetchJson } from '@/utils/common';
 import { microTimeToDate } from '@/mdw-sync/utils/common';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
+import type { XVerificationAttemptSource } from '../entities/profile-x-verification-attempt.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
 import { ProfileXStreakBonusReward } from '../entities/profile-x-streak-bonus-reward.entity';
 import { ProfileXVerificationAttemptService } from './profile-x-verification-attempt.service';
@@ -102,6 +103,15 @@ type PublicPostingRewardStatusPayload = {
   remaining_to_goal: number;
   per_post_total_paid_count: number;
   per_post_total_paid_aettos: string;
+  /**
+   * What the three programs have actually paid this wallet. Without these the
+   * only way to show a total was to multiply the CURRENT tier by the number of
+   * rewarded posts and add a hardcoded onboarding figure — which misprices
+   * every post earned at a different follower tier, and silently lies the day
+   * an amount is reconfigured.
+   */
+  onboarding_amount_ae: string | null;
+  streak_bonus_total_paid_aettos: string;
   follower_count: number | null;
   min_followers_required: number;
   follower_tier_index: number | null;
@@ -171,10 +181,11 @@ export class ProfileXPostingRewardService {
     errorCode: string | null,
     detail?: string | null,
     xUsername?: string | null,
+    source: XVerificationAttemptSource = 'manual_recheck',
   ): Promise<void> {
     await this.verificationAttemptService.record({
       address,
-      source: 'manual_recheck',
+      source,
       outcome,
       errorCode,
       detail,
@@ -376,20 +387,25 @@ export class ProfileXPostingRewardService {
         return this.toPublicRewardStatus(
           reward,
           await this.getPerPostTotals(address),
+          await this.getStreakBonusTotals(address),
         );
       }
       return {
-        ...this.toPublicRewardStatus(null, null),
+        ...this.toPublicRewardStatus(null, null, null),
         error: 'Posting rewards are temporarily unavailable.',
       };
     }
     const ledgerTotals = reward ? await this.getPerPostTotals(address) : null;
+    const streakTotals = reward
+      ? await this.getStreakBonusTotals(address)
+      : null;
     const streakBonusStatus = reward
       ? await this.resolveStreakBonusStatus(reward)
       : undefined;
     const payload = this.toPublicRewardStatus(
       reward,
       ledgerTotals,
+      streakTotals,
       streakBonusStatus,
     );
     // The reward row keeps the X identity it was last verified with, but the
@@ -478,6 +494,34 @@ export class ProfileXPostingRewardService {
       return { status: 'failed', paidCount };
     }
     return { status: 'pending', paidCount };
+  }
+
+  /**
+   * Settled streak-bonus AE for a wallet. Same shape and same guards as
+   * `getPerPostTotals`: aggregate in SQL, and keep malformed amounts out of the
+   * NUMERIC cast so one bad row cannot fail the query.
+   */
+  private async getStreakBonusTotals(
+    address: string,
+  ): Promise<{ count: number; aettos: string }> {
+    const raw = await this.streakBonusRewardRepository
+      .createQueryBuilder('bonus')
+      .select('COUNT(*)', 'count')
+      .addSelect(
+        'COALESCE(SUM(CAST(bonus.amount_aettos AS NUMERIC)), 0)',
+        'aettos',
+      )
+      .where('bonus.address = :address', { address })
+      .andWhere('bonus.status = :status', { status: 'paid' })
+      .andWhere('bonus.amount_aettos ~ :numericPattern', {
+        numericPattern: '^[0-9]+$',
+      })
+      .getRawOne<{ count: string; aettos: string }>();
+    const aettosRaw = raw?.aettos != null ? String(raw.aettos) : '0';
+    return {
+      count: Number(raw?.count || 0),
+      aettos: aettosRaw.split('.')[0] || '0',
+    };
   }
 
   private async getPerPostTotals(
@@ -763,6 +807,12 @@ export class ProfileXPostingRewardService {
 
       try {
         await this.processAddressWithGuard(address);
+        // File the attempt, exactly as the signed path does. This is now the
+        // main way checks happen, so leaving it out meant the history table
+        // saw only button presses: a failure that only ever occurs on page
+        // load — or twenty wallets starting to fail within an hour — was
+        // invisible to the dashboard that table exists to feed.
+        await this.recordBackgroundAttempt(address);
       } catch (error) {
         // Same rollback as the manual path: an unexpected failure is not the
         // user's fault and must not cost them the window.
@@ -771,11 +821,56 @@ export class ProfileXPostingRewardService {
           `Background X reward refresh failed for ${address}; scan slot released`,
           error instanceof Error ? error.stack : String(error),
         );
+        await this.recordBackgroundAttempt(
+          address,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     } catch (error) {
       this.logger.warn(
         `Background X reward refresh could not start for ${address}`,
         error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * File a history row for a background scan, mirroring the signed path's
+   * treatment of informational notices as successes rather than failures.
+   *
+   * Never allowed to disturb the scan it describes: the history exists to
+   * explain checks, so a write failure here must not become one.
+   */
+  private async recordBackgroundAttempt(
+    address: string,
+    thrownDetail?: string,
+  ): Promise<void> {
+    try {
+      const settled = await this.postingRewardRepository.findOne({
+        where: { address },
+      });
+      const settledError = settled?.error ?? null;
+      const informational = isInformationalXError(settledError);
+      const failed = !!thrownDetail || (!!settledError && !informational);
+      await this.recordAttempt(
+        address,
+        failed ? 'failed' : 'succeeded',
+        // An unexpected throw gets a CODE, not just free text. The dashboard
+        // groups and indexes on `error_code`, so filing null there would keep
+        // these off every "what is failing lately" view and leave the fault
+        // discoverable only by reading `detail` row by row. Same code the
+        // signed path uses for the same fault, so the two paths aggregate
+        // together rather than looking like different problems.
+        thrownDetail ? 'recheck_failed' : informational ? null : settledError,
+        thrownDetail ?? (informational ? `notice: ${settledError}` : null),
+        settled?.x_username ?? null,
+        'page_refresh',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not record the background X reward attempt for ${address}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }
@@ -2148,6 +2243,7 @@ export class ProfileXPostingRewardService {
   private toPublicRewardStatus(
     reward: ProfileXPostingReward | null | undefined,
     ledgerTotals: { count: number; aettos: string } | null,
+    streakTotals: { count: number; aettos: string } | null,
     streakBonus?: { status: PublicPaymentStatus; paidCount: number },
   ): PublicPostingRewardStatusPayload {
     const onboardingThreshold = isValidPositiveInteger(
@@ -2173,6 +2269,8 @@ export class ProfileXPostingRewardService {
         remaining_to_goal: onboardingThreshold,
         per_post_total_paid_count: 0,
         per_post_total_paid_aettos: '0',
+        onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+        streak_bonus_total_paid_aettos: '0',
         follower_count: null,
         min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
         follower_tier_index: null,
@@ -2206,6 +2304,10 @@ export class ProfileXPostingRewardService {
       remaining_to_goal: Math.max(onboardingThreshold - qualifiedCount, 0),
       per_post_total_paid_count: ledgerTotals?.count || 0,
       per_post_total_paid_aettos: ledgerTotals?.aettos || '0',
+      // The configured amount, not a recorded one — the onboarding payout is
+      // the single reward whose row keeps no amount.
+      onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+      streak_bonus_total_paid_aettos: streakTotals?.aettos || '0',
       follower_count: reward.follower_count ?? null,
       min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
       follower_tier_index: reward.follower_tier_index ?? null,

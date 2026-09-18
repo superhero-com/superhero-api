@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{title}}</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Inter", sans-serif; }
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 1rem;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #1e293b;
+        border-radius: 0.9rem;
+        padding: 1.75rem;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+      }
+      .brand { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+      .logo {
+        width: 34px; height: 34px; border-radius: 10px;
+        background: linear-gradient(135deg, rgba(16,185,129,0.9), rgba(59,130,246,0.9));
+      }
+      h1 { font-size: 1rem; font-weight: 600; color: #f1f5f9; }
+      .sub { font-size: 0.78rem; color: #94a3b8; margin-top: 2px; }
+      .callout {
+        margin-bottom: 0.4rem; padding: 0.65rem 0.7rem; border-radius: 0.5rem;
+        background: rgba(234, 179, 8, 0.1);
+        border: 1px solid rgba(234, 179, 8, 0.32);
+        color: #fde68a; font-size: 0.76rem; line-height: 1.45;
+      }
+      label {
+        display: block; font-size: 0.78rem; color: #cbd5e1;
+        margin: 0.85rem 0 0.3rem;
+      }
+      input {
+        width: 100%; padding: 0.6rem 0.7rem; border-radius: 0.5rem;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        background: #0f172a; color: #f1f5f9; font-size: 0.9rem;
+      }
+      input:focus { outline: 2px solid rgba(16, 185, 129, 0.55); outline-offset: 1px; }
+      button {
+        width: 100%; margin-top: 1.15rem; padding: 0.65rem;
+        border: 0; border-radius: 0.5rem; cursor: pointer;
+        background: #10b981; color: #052e21; font-size: 0.9rem; font-weight: 600;
+      }
+      button:hover { background: #059669; }
+      .error {
+        margin-top: 1rem; padding: 0.6rem 0.7rem; border-radius: 0.5rem;
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        color: #fecaca; font-size: 0.8rem;
+      }
+      .note { margin-top: 1.1rem; font-size: 0.72rem; color: #64748b; line-height: 1.45; }
+    </style>
+  </head>
+  <body>
+    <form class="card" method="post" action="/api/bcl-affiliation/auth/setup">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>Set up dashboard access</h1>
+          <div class="sub">First run — no operator exists yet</div>
+        </div>
+      </div>
+
+      <div class="callout">
+        Anyone who opens this page right now can claim the dashboards. Set the
+        password immediately after deploying, and this page closes for good.
+      </div>
+
+      {{#if error}}
+        <div class="error">{{error}}</div>
+      {{/if}}
+
+      <label for="username">Username</label>
+      <input
+        id="username"
+        name="username"
+        autocomplete="username"
+        autocapitalize="none"
+        autocorrect="off"
+        spellcheck="false"
+        value="{{username}}"
+        placeholder="admin"
+        required
+        autofocus
+      />
+
+      <label for="password">Password (min {{minPasswordLength}} characters)</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autocomplete="new-password"
+        minlength="{{minPasswordLength}}"
+        required
+      />
+
+      <button type="submit">Create operator</button>
+
+      <p class="note">
+        Stored as an Argon2id hash — it is never written to the repository or to
+        a config file, so a short password stays safe. Five wrong attempts lock
+        the account for 15 minutes.
+      </p>
+    </form>
+  </body>
+</html>

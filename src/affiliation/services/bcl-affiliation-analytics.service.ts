@@ -14,6 +14,7 @@ import { ProfileXPostRewardLedger } from '@/profile/entities/profile-x-post-rewa
 import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-bonus-reward.entity';
 import {
   PROFILE_X_INVITE_LINK_BASE_URL,
+  PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE,
   PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE,
   PROFILE_X_REFERRAL_LINK_BASE_URL,
   PROFILE_X_REWARD_MIN_FOLLOWERS,
@@ -198,6 +199,31 @@ export type BclXExplorerDailyPoint = {
  * sentinels the payout services write into `tx_hash` while a send is mid-flight.
  * Every genuine hash is `th_`-prefixed base58; no sentinel is.
  */
+/**
+ * What a payout row's status actually is.
+ *
+ * The `status` column alone is not it. A retry never resets it: claiming a
+ * payout writes an in-progress sentinel into `tx_hash`, and a broadcast whose
+ * DB confirmation failed writes a real hash, and neither touches `status`. So a
+ * row retrying after an earlier failure still reads 'failed', and ranking
+ * status first prints "failed" next to a live explorer link. `tx_hash` is
+ * written later in the lifecycle, so it wins — only a failed row carrying no
+ * hash at all is a genuinely dead send.
+ *
+ * This lived inline on the onboarding branch while per-post, streak and
+ * milestone copied `status` raw, so those three both mislabelled live sends and
+ * inflated `payouts_failed`. One implementation, applied to all four.
+ */
+function payoutStatus(row: {
+  status?: string | null;
+  tx_hash?: string | null;
+}): 'paid' | 'pending' | 'failed' {
+  if (row.status === 'paid') return 'paid';
+  if (row.tx_hash) return 'pending';
+  if (row.status === 'failed') return 'failed';
+  return 'pending';
+}
+
 function isRealTxHash(txHash: string | null | undefined): txHash is string {
   return !!txHash && /^th_[1-9A-HJ-NP-Za-km-z]+$/.test(txHash);
 }
@@ -439,6 +465,13 @@ export type BclXOnboardingSummary = {
 
 @Injectable()
 export class BclAffiliationAnalyticsService {
+  /**
+   * Upper bound on rows the explorer renders in one page. Bounded because the
+   * page draws every row and each wallet's invite subtree; disclosed alongside
+   * the match count so a truncated view is never mistaken for the whole.
+   */
+  static readonly X_EXPLORER_ROW_CAP = 1000;
+
   constructor(
     @InjectRepository(Invitation)
     private readonly invitationRepo: Repository<Invitation>,
@@ -1348,24 +1381,34 @@ export class BclAffiliationAnalyticsService {
     return out;
   }
 
+  /**
+   * Resolve the picker's dates to the half-open range the queries expect.
+   *
+   * Every query here compares `< :endDate`, so `endDate` is an EXCLUSIVE bound.
+   * The pickers send the last day the operator selected, which parses to that
+   * day's midnight — so passing it through unchanged excluded the whole of the
+   * selected day. Since the default end is today, that meant the first load of
+   * every dashboard silently omitted today: verifications, payouts and funnel
+   * stages that happened in the last few hours were simply missing, which is
+   * the worst possible day to lose while watching a launch.
+   *
+   * `end_date` is therefore inclusive of the day it names, and the exclusive
+   * bound is midnight the morning after.
+   */
   private parseDateRange(params: { start_date?: string; end_date?: string }) {
     const startDate = moment(
       params.start_date ?? moment().subtract(14, 'days').format('YYYY-MM-DD'),
       'YYYY-MM-DD',
       true,
     );
-    const endDate = moment(
-      params.end_date ?? moment().add(1, 'day').format('YYYY-MM-DD'),
-      'YYYY-MM-DD',
-      true,
-    );
+    const endDate = moment(params.end_date, 'YYYY-MM-DD', true);
 
     return {
       startDate: startDate.isValid()
         ? startDate.toDate()
         : moment().subtract(14, 'days').toDate(),
       endDate: endDate.isValid()
-        ? endDate.toDate()
+        ? endDate.add(1, 'day').toDate()
         : moment().add(1, 'day').toDate(),
     };
   }
@@ -1416,6 +1459,9 @@ export class BclAffiliationAnalyticsService {
       total_ae_paid: string;
       payouts_paid: number;
       payouts_failed: number;
+      matching_users: number;
+      row_cap: number;
+      truncated: boolean;
     };
     min_followers: number;
     explorer_base_url: string;
@@ -1424,11 +1470,34 @@ export class BclAffiliationAnalyticsService {
     const { startDate, endDate } = this.parseDateRange(params);
     const start = Date.now();
 
-    const rows = await this.postingRewardRepo
+    // The date picker used to be decorative here: the range was parsed, used
+    // for the chart axis, and never applied to the rows — so every figure on
+    // the page described "the latest 200 wallets" whatever range was chosen.
+    // COALESCE because a wallet that has not verified yet still belongs to the
+    // day it entered the program.
+    const rowScope = this.postingRewardRepo
       .createQueryBuilder('r')
+      .where('COALESCE(r.verified_at, r.created_at) < :endDate', { endDate });
+    // Lower bound only when the caller actually picked one. The shared default
+    // is fourteen days, which is right for a rate-of-change chart and wrong
+    // here: this page answers "who is in the program", and the wallets that
+    // matter most are the ones that verified months ago and were never paid.
+    // Defaulting to a fortnight would have hidden exactly those.
+    if (params.start_date) {
+      rowScope.andWhere('COALESCE(r.verified_at, r.created_at) >= :startDate', {
+        startDate,
+      });
+    }
+
+    // Counted before the cap, so the page can say how much it is not showing.
+    // A truncated total presented as a total is how an operator concludes the
+    // program paid less than it did.
+    const matchingUsers = await rowScope.clone().getCount();
+
+    const rows = await rowScope
       .orderBy('r.verified_at', 'DESC', 'NULLS LAST')
       .addOrderBy('r.created_at', 'DESC')
-      .limit(200)
+      .limit(BclAffiliationAnalyticsService.X_EXPLORER_ROW_CAP)
       .getMany();
 
     const addresses = rows.map((r) => r.address);
@@ -1525,23 +1594,7 @@ export class BclAffiliationAnalyticsService {
         r.status === 'paid' || r.status === 'failed' || !!r.tx_hash;
       if (!attempted) continue;
 
-      // Precedence matters, and it is not "status first". A retry does not
-      // reset the column: claimOnboardingPayoutAttempt writes the in-progress
-      // sentinel into tx_hash, and the broadcast-but-unconfirmed path writes a
-      // real hash, and NEITHER touches `status`. So a row retrying after an
-      // earlier failure still reads status 'failed' — and ranking status above
-      // tx_hash printed "failed" beside a live th_ explorer link, or beside
-      // "send in progress". tx_hash is written later in the lifecycle than the
-      // failed status, so it wins: only a failed row with no hash at all is
-      // genuinely a dead send.
-      const status =
-        r.status === 'paid'
-          ? 'paid'
-          : r.tx_hash
-            ? 'pending'
-            : r.status === 'failed'
-              ? 'failed'
-              : 'pending';
+      const status = payoutStatus(r);
 
       // Only a payout error belongs on a payout row. This column is shared
       // with the eligibility codes later scans write, and surfacing
@@ -1577,7 +1630,7 @@ export class BclAffiliationAnalyticsService {
         kind: 'per_post',
         label: 'Per-post reward',
         amount_ae: aettosToAe(l.amount_aettos),
-        status: l.status,
+        status: payoutStatus(l),
         tx_hash: isRealTxHash(l.tx_hash) ? l.tx_hash : null,
         explorer_url: explorerTxUrl(l.tx_hash),
         created_at: iso(l.created_at),
@@ -1590,7 +1643,7 @@ export class BclAffiliationAnalyticsService {
         kind: 'streak_bonus',
         label: 'Streak bonus',
         amount_ae: aettosToAe(s.amount_aettos),
-        status: s.status,
+        status: payoutStatus(s),
         tx_hash: isRealTxHash(s.tx_hash) ? s.tx_hash : null,
         explorer_url: explorerTxUrl(s.tx_hash),
         created_at: iso(s.created_at),
@@ -1602,13 +1655,18 @@ export class BclAffiliationAnalyticsService {
       addPayout(m.inviter_address, {
         kind: 'invite_milestone',
         label: 'Invite milestone',
-        // This table records no amount; the payout is a fixed configured value.
-        amount_ae: null,
-        status: m.status,
+        // This table records no amount, like the onboarding row. Reporting
+        // null dropped settled milestones out of `total_ae_paid` while still
+        // counting them in `payouts_paid`, so the "AE actually paid" figure
+        // understated what had left the wallet. The configured value is the
+        // best available answer, and `detail` says so rather than passing it
+        // off as a recorded fact.
+        amount_ae: PROFILE_X_INVITE_MILESTONE_REWARD_AMOUNT_AE || null,
+        status: payoutStatus(m),
         tx_hash: isRealTxHash(m.tx_hash) ? m.tx_hash : null,
         explorer_url: explorerTxUrl(m.tx_hash),
         created_at: iso(m.created_at),
-        detail: `${m.threshold} invites`,
+        detail: `${m.threshold} invites; amount from current config, not recorded on the row`,
         error: m.error ?? null,
       });
     }
@@ -1717,6 +1775,14 @@ export class BclAffiliationAnalyticsService {
           .toFixed(),
         payouts_paid: allPayouts.filter((p) => p.status === 'paid').length,
         payouts_failed: allPayouts.filter((p) => p.status === 'failed').length,
+        // Every figure above is computed from the rows on this page. When the
+        // range holds more wallets than the cap, they are a sample and the page
+        // has to say so — an operator reading a truncated `total_ae_paid` as
+        // the total concludes the program paid less than it did.
+        matching_users: matchingUsers,
+        row_cap: BclAffiliationAnalyticsService.X_EXPLORER_ROW_CAP,
+        truncated:
+          matchingUsers > BclAffiliationAnalyticsService.X_EXPLORER_ROW_CAP,
       },
       min_followers: PROFILE_X_REWARD_MIN_FOLLOWERS,
       explorer_base_url: (ACTIVE_NETWORK?.explorerUrl || '').replace(

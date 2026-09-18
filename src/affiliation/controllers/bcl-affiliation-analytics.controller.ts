@@ -8,18 +8,17 @@ import {
   Render,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AffiliationAnalyticsGuard } from '../guards/affiliation-analytics.guard';
 import { BclAffiliationAnalyticsService } from '../services/bcl-affiliation-analytics.service';
 
 // Internal operator dashboards. Every route here joins a wallet address to an
 // X handle, a follower count and a payout — deanonymising data that has no
-// business being served to the open internet, so the key is enforced for the
+// business being served to the open internet, so the login is enforced for the
 // whole controller rather than route by route (a new route must not be able to
 // arrive unguarded by omission).
 @Controller('bcl-affiliation/analytics')
 @ApiTags('BCL-Affiliation')
-@ApiSecurity('affiliation-analytics-key')
 @UseGuards(AffiliationAnalyticsGuard)
 export class BclAffiliationAnalyticsController {
   constructor(
