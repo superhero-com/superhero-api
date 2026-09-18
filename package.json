@@ -28,7 +28,6 @@
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
     "migration:generate": "npm run typeorm -- migration:generate -d src/data-source.ts",
     "migration:create": "npm run typeorm -- migration:create",
-    "backfill:post-language": "node dist/social/scripts/backfill-post-language.js",
     "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/bctsl-sdk/.build && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json"
   },
   "dependencies": {
