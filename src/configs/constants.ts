@@ -164,6 +164,28 @@ if (
   );
 }
 
+// Operator key for the internal affiliation dashboards. They join wallet
+// address to X handle, follower count, payout amount and transaction hash —
+// a per-person profile that must not be readable by anyone who guesses the
+// URL. No default, and fail-closed for the same reason as above: an unset key
+// must lock the dashboards, never open them.
+export const AFFILIATION_ANALYTICS_API_KEY: string =
+  process.env.AFFILIATION_ANALYTICS_API_KEY ?? '';
+
+export const AFFILIATION_ANALYTICS_MIN_KEY_LENGTH = 16;
+
+if (
+  process.env.NODE_ENV === 'production' &&
+  AFFILIATION_ANALYTICS_API_KEY.length < AFFILIATION_ANALYTICS_MIN_KEY_LENGTH
+) {
+  console.error(
+    '[security] AFFILIATION_ANALYTICS_API_KEY is missing or too short in' +
+      ` production (min ${AFFILIATION_ANALYTICS_MIN_KEY_LENGTH} chars` +
+      ' required). The /api/bcl-affiliation analytics and tree dashboards' +
+      ' will reject all requests until it is set.',
+  );
+}
+
 /**
  * Trending Score Configuration
  */

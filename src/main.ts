@@ -96,6 +96,19 @@ async function bootstrap() {
       .setTitle('WORD CRAFT Scan')
       .setDescription('The WORD CRAFT Scan API')
       .setVersion('1.0')
+      .addApiKey(
+        {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-key',
+          description:
+            'Operator key for the internal affiliation dashboards' +
+            ' (AFFILIATION_ANALYTICS_API_KEY). In a browser, open the' +
+            ' dashboard once as .../preview?key=<key> instead — the server' +
+            ' then sets a session cookie.',
+        },
+        'affiliation-analytics-key',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
