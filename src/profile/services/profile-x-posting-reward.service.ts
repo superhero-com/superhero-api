@@ -103,6 +103,15 @@ type PublicPostingRewardStatusPayload = {
   remaining_to_goal: number;
   per_post_total_paid_count: number;
   per_post_total_paid_aettos: string;
+  /**
+   * What the three programs have actually paid this wallet. Without these the
+   * only way to show a total was to multiply the CURRENT tier by the number of
+   * rewarded posts and add a hardcoded onboarding figure — which misprices
+   * every post earned at a different follower tier, and silently lies the day
+   * an amount is reconfigured.
+   */
+  onboarding_amount_ae: string | null;
+  streak_bonus_total_paid_aettos: string;
   follower_count: number | null;
   min_followers_required: number;
   follower_tier_index: number | null;
@@ -378,20 +387,25 @@ export class ProfileXPostingRewardService {
         return this.toPublicRewardStatus(
           reward,
           await this.getPerPostTotals(address),
+          await this.getStreakBonusTotals(address),
         );
       }
       return {
-        ...this.toPublicRewardStatus(null, null),
+        ...this.toPublicRewardStatus(null, null, null),
         error: 'Posting rewards are temporarily unavailable.',
       };
     }
     const ledgerTotals = reward ? await this.getPerPostTotals(address) : null;
+    const streakTotals = reward
+      ? await this.getStreakBonusTotals(address)
+      : null;
     const streakBonusStatus = reward
       ? await this.resolveStreakBonusStatus(reward)
       : undefined;
     const payload = this.toPublicRewardStatus(
       reward,
       ledgerTotals,
+      streakTotals,
       streakBonusStatus,
     );
     // The reward row keeps the X identity it was last verified with, but the
@@ -480,6 +494,34 @@ export class ProfileXPostingRewardService {
       return { status: 'failed', paidCount };
     }
     return { status: 'pending', paidCount };
+  }
+
+  /**
+   * Settled streak-bonus AE for a wallet. Same shape and same guards as
+   * `getPerPostTotals`: aggregate in SQL, and keep malformed amounts out of the
+   * NUMERIC cast so one bad row cannot fail the query.
+   */
+  private async getStreakBonusTotals(
+    address: string,
+  ): Promise<{ count: number; aettos: string }> {
+    const raw = await this.streakBonusRewardRepository
+      .createQueryBuilder('bonus')
+      .select('COUNT(*)', 'count')
+      .addSelect(
+        'COALESCE(SUM(CAST(bonus.amount_aettos AS NUMERIC)), 0)',
+        'aettos',
+      )
+      .where('bonus.address = :address', { address })
+      .andWhere('bonus.status = :status', { status: 'paid' })
+      .andWhere('bonus.amount_aettos ~ :numericPattern', {
+        numericPattern: '^[0-9]+$',
+      })
+      .getRawOne<{ count: string; aettos: string }>();
+    const aettosRaw = raw?.aettos != null ? String(raw.aettos) : '0';
+    return {
+      count: Number(raw?.count || 0),
+      aettos: aettosRaw.split('.')[0] || '0',
+    };
   }
 
   private async getPerPostTotals(
@@ -2195,6 +2237,7 @@ export class ProfileXPostingRewardService {
   private toPublicRewardStatus(
     reward: ProfileXPostingReward | null | undefined,
     ledgerTotals: { count: number; aettos: string } | null,
+    streakTotals: { count: number; aettos: string } | null,
     streakBonus?: { status: PublicPaymentStatus; paidCount: number },
   ): PublicPostingRewardStatusPayload {
     const onboardingThreshold = isValidPositiveInteger(
@@ -2220,6 +2263,8 @@ export class ProfileXPostingRewardService {
         remaining_to_goal: onboardingThreshold,
         per_post_total_paid_count: 0,
         per_post_total_paid_aettos: '0',
+        onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+        streak_bonus_total_paid_aettos: '0',
         follower_count: null,
         min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
         follower_tier_index: null,
@@ -2253,6 +2298,10 @@ export class ProfileXPostingRewardService {
       remaining_to_goal: Math.max(onboardingThreshold - qualifiedCount, 0),
       per_post_total_paid_count: ledgerTotals?.count || 0,
       per_post_total_paid_aettos: ledgerTotals?.aettos || '0',
+      // The configured amount, not a recorded one — the onboarding payout is
+      // the single reward whose row keeps no amount.
+      onboarding_amount_ae: PROFILE_X_ONBOARDING_REWARD_AMOUNT_AE || null,
+      streak_bonus_total_paid_aettos: streakTotals?.aettos || '0',
       follower_count: reward.follower_count ?? null,
       min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
       follower_tier_index: reward.follower_tier_index ?? null,

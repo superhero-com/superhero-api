@@ -106,6 +106,16 @@ const build = async (
       find: jest.fn(async () => []),
       update: jest.fn(),
       count: jest.fn(async () => opts.streakDue ?? 0),
+      createQueryBuilder: jest.fn(() => {
+        const qb: any = {
+          select: () => qb,
+          addSelect: () => qb,
+          where: () => qb,
+          andWhere: () => qb,
+          getRawOne: async () => ({ count: '0', aettos: '0' }),
+        };
+        return qb;
+      }),
     };
 
     const getToken = jest.fn(async () =>

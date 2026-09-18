@@ -419,6 +419,36 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     };
 
     const streakBonusRewardRepository: any = {
+      // Aggregate over the in-memory bonus rows, mirroring the ledger stub:
+      // `getStreakBonusTotals` sums settled streak AE the same way
+      // `getPerPostTotals` sums per-post AE.
+      createQueryBuilder: jest.fn(() => {
+        const state: any = { params: {} };
+        const qb: any = {
+          select: () => qb,
+          addSelect: () => qb,
+          where: (_s: string, p: any) => {
+            if (p) Object.assign(state.params, p);
+            return qb;
+          },
+          andWhere: (_s: string, p: any) => {
+            if (p) Object.assign(state.params, p);
+            return qb;
+          },
+          getRawOne: async () => {
+            const matched = bonusRows.filter(
+              (r: any) =>
+                r.address === state.params.address &&
+                r.status === 'paid' &&
+                /^[0-9]+$/.test(String(r.amount_aettos ?? '')),
+            );
+            let sum = BigInt(0);
+            for (const r of matched) sum += BigInt((r as any).amount_aettos);
+            return { count: String(matched.length), aettos: sum.toString() };
+          },
+        };
+        return qb;
+      }),
       find: jest.fn(async ({ where }: any) =>
         bonusRows.filter((row) => matchesAnyWhere(row, where)),
       ),
@@ -1156,6 +1186,42 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
 
     expect(result.streak_bonus_status).toBe('pending');
     expect(result.streak_bonus_paid_count).toBe(0);
+  });
+
+  it('reports what each program actually paid, not a figure the client must reconstruct', async () => {
+    // Without these the only way to show a total was to multiply the CURRENT
+    // tier by the rewarded-post count and add a hardcoded onboarding number —
+    // which misprices every post earned at a different tier and silently lies
+    // the day an amount is reconfigured.
+    const { service, bonusRows } = makeService({
+      rows: [{ address: ADDRESS, x_username: 'poster', status: 'paid' }],
+    });
+    bonusRows.push(
+      {
+        id: 1,
+        address: ADDRESS,
+        x_user_id: '100',
+        streak_completed_day: '2026-06-03',
+        amount_aettos: '50000000000000000000', // 50 AE
+        status: 'paid',
+        tx_hash: 'th_2streakPaidHash',
+      },
+      {
+        // Not settled, so it must not be counted as paid.
+        id: 2,
+        address: ADDRESS,
+        x_user_id: '100',
+        streak_completed_day: '2026-07-03',
+        amount_aettos: '50000000000000000000',
+        status: 'pending',
+        tx_hash: null,
+      },
+    );
+
+    const result = await service.getRewardStatus(ADDRESS);
+
+    expect(result.streak_bonus_total_paid_aettos).toBe('50000000000000000000');
+    expect(result.onboarding_amount_ae).toBeTruthy();
   });
 
   it('masks the X identity once the account has unlinked X but keeps paid history', async () => {
