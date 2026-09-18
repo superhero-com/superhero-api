@@ -339,11 +339,12 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
     }, 60000);
 
     it('locks the account even when the wrong guesses arrive in parallel', async () => {
-      // Read-modify-write on the counter loses increments under concurrency:
-      // every request reads the same value and writes back the same value, so
-      // the lockout never trips and a short password is guessable at speed.
+      // MORE than the threshold on purpose. Five would also pass against a
+      // version where a late attempt clears the lock a sibling just set: the
+      // stragglers are what expose that, since they run their UPDATE after the
+      // locking one has already reset the counter.
       await Promise.all(
-        Array.from({ length: 5 }, (_, i) =>
+        Array.from({ length: 8 }, (_, i) =>
           request(server())
             .post('/bcl-affiliation/auth/login')
             .type('form')
@@ -364,7 +365,7 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
         .send({ username: USERNAME, password: PASSWORD })
         .expect(401);
       expect(response.text).toContain('Too many attempts');
-    }, 60000);
+    }, 90000);
 
     it('signing out invalidates the session everywhere', async () => {
       const login = await request(server())

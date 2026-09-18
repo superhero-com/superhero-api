@@ -184,11 +184,19 @@ export class AffiliationDashboardAuthService {
 
     if (!verified) {
       // Incremented by the DATABASE, not read-modify-written here. Parallel
-      // guesses all read the same count, so the previous in-memory version had
-      // them overwrite each other and the fifth attempt could land with the
-      // counter still at 1 — the lockout would simply never trip, which is the
-      // only thing making a short password safe. The CASE arms both see the
-      // pre-update value, so `+ 1` is the attempt being processed right now.
+      // guesses all read the same count, so an in-memory version has them
+      // overwrite each other and the fifth attempt can land with the counter
+      // still at 1 — the lockout would never trip, which is the only thing
+      // making a short password safe. Both CASE arms see the pre-update value,
+      // so `+ 1` is the attempt being processed right now.
+      //
+      // The non-locking arm keeps `locked_until` rather than clearing it. An
+      // earlier version wrote NULL there and re-opened the account: requests
+      // that passed the lock check before a sibling locked it still ran this
+      // UPDATE afterwards, read the counter the lock had just reset to 0,
+      // decided they were not the locking attempt, and wiped the lock. Six
+      // overlapping guesses were enough. Nothing here may ever clear a lock —
+      // only a successful login does, and otherwise it simply expires.
       const updated = await this.adminRepository.query(
         `UPDATE "affiliation_dashboard_admins"
             SET "failed_login_count" =
@@ -197,7 +205,7 @@ export class AffiliationDashboardAuthService {
                 "locked_until" =
                   CASE WHEN "failed_login_count" + 1 >= $2
                        THEN now() + ($3 || ' milliseconds')::interval
-                       ELSE NULL END,
+                       ELSE "locked_until" END,
                 "updated_at" = now()
           WHERE "id" = $1
           RETURNING "locked_until"`,
