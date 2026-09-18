@@ -11,6 +11,7 @@ import { ReadsService } from './services/reads.service';
 import { PostService } from './services/post.service';
 import { PopularRankingService } from './services/popular-ranking.service';
 import { CacheDailyPostAnalyticsService } from './services/cache-daily-post-analytics.service';
+import { PostLanguageBackfillService } from './services/post-language-backfill.service';
 import { TransactionsModule } from '@/transactions/transactions.module';
 import { PostsController } from './controllers/posts.controller';
 import { TopicsController } from './controllers/topics.controller';
@@ -44,6 +45,7 @@ import { AeModule } from '@/ae/ae.module';
     PopularRankingService,
     ReadsService,
     CacheDailyPostAnalyticsService,
+    PostLanguageBackfillService,
     getPopularRankingContributorProvider(),
   ],
   exports: [PostService, PopularRankingService, ReadsService, TypeOrmModule],
