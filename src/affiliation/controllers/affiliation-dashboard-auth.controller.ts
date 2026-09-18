@@ -60,15 +60,22 @@ export class AffiliationDashboardAuthController {
       if (result.status === 'already_configured') {
         return response.redirect(302, '/api/bcl-affiliation/auth/login');
       }
-      return response.status(400).render('affiliation-dashboard-setup', {
-        title: 'Set up dashboard access',
-        minPasswordLength: AFFILIATION_DASHBOARD_LIMITS.MIN_PASSWORD_LENGTH,
-        error:
-          result.status === 'invalid_username'
-            ? 'Username must be 3–64 characters, lowercase letters, digits, dot, dash or underscore.'
-            : `Password must be at least ${AFFILIATION_DASHBOARD_LIMITS.MIN_PASSWORD_LENGTH} characters.`,
-        username: String(body?.username ?? ''),
-      });
+      const message = {
+        invalid_username:
+          'Username must be 3–64 characters, lowercase letters, digits, dot, dash or underscore.',
+        weak_password: `Password must be at least ${AFFILIATION_DASHBOARD_LIMITS.MIN_PASSWORD_LENGTH} characters.`,
+        // Distinct from the validation errors on purpose: nothing the operator
+        // typed is wrong, so telling them to fix their input would be a lie.
+        error: 'Could not create the operator. Check the server logs.',
+      }[result.status];
+      return response
+        .status(result.status === 'error' ? 500 : 400)
+        .render('affiliation-dashboard-setup', {
+          title: 'Set up dashboard access',
+          minPasswordLength: AFFILIATION_DASHBOARD_LIMITS.MIN_PASSWORD_LENGTH,
+          error: message,
+          username: String(body?.username ?? ''),
+        });
     }
     this.setSessionCookie(response, result.token, result.expiresAt);
     return response.redirect(302, DASHBOARD_HOME);

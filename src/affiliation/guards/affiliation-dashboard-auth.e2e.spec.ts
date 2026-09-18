@@ -26,7 +26,10 @@ import {
 import { AffiliationDashboardAuthController } from '../controllers/affiliation-dashboard-auth.controller';
 import { AffiliationDashboardAdmin } from '../entities/affiliation-dashboard-admin.entity';
 import { AffiliationDashboardSession } from '../entities/affiliation-dashboard-session.entity';
-import { AffiliationDashboardAuthService } from '../services/affiliation-dashboard-auth.service';
+import {
+  AffiliationDashboardAuthService,
+  SETUP_ADVISORY_LOCK_KEY,
+} from '../services/affiliation-dashboard-auth.service';
 import { AffiliationAnalyticsGuard } from './affiliation-analytics.guard';
 import { RateLimitGuard } from '@/api-core/guards/rate-limit.guard';
 
@@ -56,6 +59,7 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
   let pg: PostgresHandle | null = null;
   let ds: DataSource;
   let app: INestApplication;
+  let authService: AffiliationDashboardAuthService;
 
   beforeAll(async () => {
     pg = await startPostgres(binDir as string);
@@ -90,6 +94,7 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
       .useValue({ canActivate: () => true })
       .compile();
 
+    authService = moduleRef.get(AffiliationDashboardAuthService);
     app = moduleRef.createNestApplication<NestExpressApplication>();
     // Real templates, so a broken .hbs fails here rather than in front of an
     // operator.
@@ -184,6 +189,64 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
       expect(await ds.getRepository(AffiliationDashboardAdmin).count()).toBe(1);
     });
 
+    it('serialises setup on a lock, so a concurrent attempt cannot slip past the check', async () => {
+      // The unique index is on `username`, so two simultaneous setups using
+      // DIFFERENT usernames collide on nothing and both insert — only
+      // serialising the check-and-insert prevents a second operator.
+      //
+      // Firing concurrent requests does NOT demonstrate that: the transactions
+      // queue through the connection pool and finish faster than the window
+      // they would have to overlap in, so such a test passes with the lock
+      // removed and proves nothing. This holds the lock from another connection
+      // instead and asserts setup actually waits on it, which fails the moment
+      // the serialisation is gone.
+      const blocker = new DataSource({
+        type: 'postgres',
+        url: (pg as PostgresHandle).url,
+        entities: [AffiliationDashboardAdmin, AffiliationDashboardSession],
+      });
+      await blocker.initialize();
+      try {
+        await blocker.query('SELECT pg_advisory_lock($1)', [
+          SETUP_ADVISORY_LOCK_KEY,
+        ]);
+
+        let settled = false;
+        const pending = authService
+          .setup('firstoperator', PASSWORD)
+          .then((result) => {
+            settled = true;
+            return result;
+          });
+
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        expect(settled).toBe(false);
+
+        // While it waits its turn, somebody else claims the deployment.
+        await ds.getRepository(AffiliationDashboardAdmin).save(
+          ds.getRepository(AffiliationDashboardAdmin).create({
+            username: 'someoneelse',
+            password_hash: '$argon2id$placeholder',
+            failed_login_count: 0,
+            locked_until: null,
+            last_login_at: new Date(),
+          }),
+        );
+
+        await blocker.query('SELECT pg_advisory_unlock($1)', [
+          SETUP_ADVISORY_LOCK_KEY,
+        ]);
+
+        // It now re-reads the table rather than acting on its stale check.
+        expect((await pending).status).toBe('already_configured');
+        expect(await ds.getRepository(AffiliationDashboardAdmin).count()).toBe(
+          1,
+        );
+      } finally {
+        await blocker.destroy();
+      }
+    }, 60000);
+
     it('rejects a password below the minimum', async () => {
       await request(server())
         .post('/bcl-affiliation/auth/setup')
@@ -267,6 +330,34 @@ describeWithDb('affiliation dashboard login (real DB + HTTP)', () => {
 
       // Even the CORRECT password is refused while the lockout holds — that is
       // what makes a short password safe against online guessing.
+      const response = await request(server())
+        .post('/bcl-affiliation/auth/login')
+        .type('form')
+        .send({ username: USERNAME, password: PASSWORD })
+        .expect(401);
+      expect(response.text).toContain('Too many attempts');
+    }, 60000);
+
+    it('locks the account even when the wrong guesses arrive in parallel', async () => {
+      // Read-modify-write on the counter loses increments under concurrency:
+      // every request reads the same value and writes back the same value, so
+      // the lockout never trips and a short password is guessable at speed.
+      await Promise.all(
+        Array.from({ length: 5 }, (_, i) =>
+          request(server())
+            .post('/bcl-affiliation/auth/login')
+            .type('form')
+            .send({ username: USERNAME, password: `parallel-${i}` }),
+        ),
+      );
+
+      const admin = await ds
+        .getRepository(AffiliationDashboardAdmin)
+        .findOne({ where: { username: USERNAME } });
+      expect(admin?.locked_until).toBeTruthy();
+      expect(admin!.locked_until!.getTime()).toBeGreaterThan(Date.now());
+
+      // And the correct password is refused while it holds.
       const response = await request(server())
         .post('/bcl-affiliation/auth/login')
         .type('form')

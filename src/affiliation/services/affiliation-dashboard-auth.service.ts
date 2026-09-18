@@ -41,7 +41,14 @@ export type SetupResult =
   | IssuedSession
   | { status: 'already_configured' }
   | { status: 'invalid_username' }
-  | { status: 'weak_password' };
+  | { status: 'weak_password' }
+  | { status: 'error' };
+
+/**
+ * Arbitrary but fixed: every instance must pick the same key for the lock to
+ * serialise them against each other.
+ */
+export const SETUP_ADVISORY_LOCK_KEY = 8_314_027;
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -69,10 +76,16 @@ export class AffiliationDashboardAuthService {
   /**
    * Claim the deployment by creating its first operator.
    *
-   * Guarded by the row count rather than by a secret, so it is a land-grab:
-   * whoever reaches it first wins. That is acceptable only because the window
-   * is meant to be seconds — deploy, then set the password — and because the
-   * unique index below settles a race even if two requests arrive together.
+   * A land-grab by design: whoever reaches it first after a deploy wins, and
+   * the window is meant to be seconds.
+   *
+   * "First" has to mean it under concurrency, though, and the unique index on
+   * `username` does NOT deliver that — two simultaneous requests using
+   * DIFFERENT usernames both see an empty table and both insert cleanly, since
+   * they collide on nothing. An earlier version of this comment claimed the
+   * index settled the race; it does not. A transaction-scoped advisory lock
+   * does: every setup attempt across every instance serialises on it, so the
+   * count check below is evaluated by one request at a time.
    */
   async setup(username: string, password: string): Promise<SetupResult> {
     const normalized = (username || '').trim().toLowerCase();
@@ -86,36 +99,52 @@ export class AffiliationDashboardAuthService {
     ) {
       return { status: 'weak_password' };
     }
-    if (!(await this.needsSetup())) {
-      return { status: 'already_configured' };
-    }
 
-    let admin: AffiliationDashboardAdmin;
+    // Hash before taking the lock: Argon2id is deliberately slow, and holding a
+    // cluster-wide lock across it would serialise that cost too.
+    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+
+    let adminId: number;
     try {
-      admin = await this.adminRepository.save(
-        this.adminRepository.create({
-          username: normalized,
-          password_hash: await argon2.hash(password, { type: argon2.argon2id }),
-          failed_login_count: 0,
-          locked_until: null,
-          last_login_at: new Date(),
-        }),
+      const created = await this.adminRepository.manager.connection.transaction(
+        async (manager) => {
+          await manager.query('SELECT pg_advisory_xact_lock($1)', [
+            SETUP_ADVISORY_LOCK_KEY,
+          ]);
+          if ((await manager.count(AffiliationDashboardAdmin)) > 0) {
+            return null;
+          }
+          return manager.save(
+            manager.create(AffiliationDashboardAdmin, {
+              username: normalized,
+              password_hash: passwordHash,
+              failed_login_count: 0,
+              locked_until: null,
+              last_login_at: new Date(),
+            }),
+          );
+        },
       );
+      if (!created) {
+        return { status: 'already_configured' };
+      }
+      adminId = created.id;
     } catch (error) {
-      // The unique index is the real arbiter of the race above: the loser lands
-      // here and is told the deployment is already claimed.
-      this.logger.warn(
-        `Affiliation dashboard setup lost a race or failed: ${
+      // A failure here is a failure, not a claimed deployment. Reporting it as
+      // `already_configured` (as this once did) would send an operator to a
+      // login that cannot exist yet and hide the real fault.
+      this.logger.error(
+        `Affiliation dashboard setup failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return { status: 'already_configured' };
+      return { status: 'error' };
     }
 
     this.logger.log(
       `Affiliation dashboard operator "${normalized}" created; setup is now closed`,
     );
-    return this.issueSession(admin.id);
+    return this.issueSession(adminId);
   }
 
   async login(username: string, password: string): Promise<LoginResult> {
@@ -154,15 +183,27 @@ export class AffiliationDashboardAuthService {
     }
 
     if (!verified) {
-      const failures = Number(admin.failed_login_count || 0) + 1;
-      const locked = failures >= MAX_FAILED_LOGINS;
-      await this.adminRepository.update(
-        { id: admin.id },
-        {
-          failed_login_count: locked ? 0 : failures,
-          locked_until: locked ? new Date(now + LOCKOUT_MS) : null,
-        },
+      // Incremented by the DATABASE, not read-modify-written here. Parallel
+      // guesses all read the same count, so the previous in-memory version had
+      // them overwrite each other and the fifth attempt could land with the
+      // counter still at 1 — the lockout would simply never trip, which is the
+      // only thing making a short password safe. The CASE arms both see the
+      // pre-update value, so `+ 1` is the attempt being processed right now.
+      const updated = await this.adminRepository.query(
+        `UPDATE "affiliation_dashboard_admins"
+            SET "failed_login_count" =
+                  CASE WHEN "failed_login_count" + 1 >= $2 THEN 0
+                       ELSE "failed_login_count" + 1 END,
+                "locked_until" =
+                  CASE WHEN "failed_login_count" + 1 >= $2
+                       THEN now() + ($3 || ' milliseconds')::interval
+                       ELSE NULL END,
+                "updated_at" = now()
+          WHERE "id" = $1
+          RETURNING "locked_until"`,
+        [admin.id, MAX_FAILED_LOGINS, String(LOCKOUT_MS)],
       );
+      const locked = !!updated?.[0]?.locked_until;
       if (locked) {
         this.logger.warn(
           `Affiliation dashboard login locked for "${normalized}" after ${MAX_FAILED_LOGINS} failures`,
