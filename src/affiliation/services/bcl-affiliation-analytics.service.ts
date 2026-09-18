@@ -217,8 +217,13 @@ export type BclXExplorerDailyPoint = {
 function payoutStatus(row: {
   status?: string | null;
   tx_hash?: string | null;
-}): 'paid' | 'pending' | 'failed' {
+}): 'paid' | 'pending' | 'failed' | 'skipped' {
   if (row.status === 'paid') return 'paid';
+  // `skipped` (a malformed amount, say) is terminal and outranks `tx_hash`:
+  // nothing is retried from it — the payout passes only ever select `pending`
+  // and `failed` — so folding it into `pending` would show money as in flight
+  // that is never going to move. Only the onboarding row lacks this state.
+  if (row.status === 'skipped') return 'skipped';
   if (row.tx_hash) return 'pending';
   if (row.status === 'failed') return 'failed';
   return 'pending';

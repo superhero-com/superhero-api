@@ -320,6 +320,51 @@ describeWithDb('X explorer against real PostgreSQL', () => {
       .delete({ address: retrying } as any);
   });
 
+  it('keeps a skipped payout visible as skipped, not as money in flight', async () => {
+    // `skipped` (a malformed amount) is terminal — the payout passes only ever
+    // select `pending` and `failed`, so nothing retries it. Folding it into
+    // `pending` would show an operator money that is never going to move.
+    const skippedAddress =
+      'ak_2b2ZPHzHaU3zbqTzJCanLDvQiJU4EV6AqgFMbkTnkeTgGh2ELF';
+    await ds.getRepository(ProfileXPostingReward).save({
+      address: skippedAddress,
+      x_username: 'skipped_user',
+      x_user_id: '333',
+      verified_at: new Date('2026-06-26T00:00:00.000Z'),
+      qualified_posts_count: 1,
+      status: 'pending',
+      tx_hash: null,
+      error: null,
+    } as any);
+    await ds.getRepository(ProfileXStreakBonusReward).save({
+      address: skippedAddress,
+      x_user_id: '333',
+      streak_length: 10,
+      streak_completed_day: '2026-07-06',
+      amount_aettos: '0',
+      status: 'skipped',
+      tx_hash: null,
+      error: 'invalid_amount',
+    } as any);
+
+    const result = await makeService(ds).getXExplorerData({});
+    const user = [...result.users, ...result.pending].find(
+      (u) => u.address === skippedAddress,
+    );
+    const bonus = user?.payouts.find((p) => p.kind === 'streak_bonus');
+
+    expect(bonus?.status).toBe('skipped');
+    // And it is neither counted as settled nor as a failed send.
+    expect(result.summary.payouts_failed).toBe(0);
+
+    await ds
+      .getRepository(ProfileXStreakBonusReward)
+      .delete({ address: skippedAddress } as any);
+    await ds
+      .getRepository(ProfileXPostingReward)
+      .delete({ address: skippedAddress } as any);
+  });
+
   it('counts a settled invite milestone toward the AE paid', async () => {
     // The milestone table records no amount. Reporting null dropped settled
     // milestones out of total_ae_paid while still counting them as paid.
