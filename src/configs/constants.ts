@@ -164,37 +164,6 @@ if (
   );
 }
 
-// HTTP Basic credentials for the internal affiliation dashboards. They join
-// wallet address to X handle, follower count, payout amount and transaction
-// hash — a per-person profile that must not be readable by anyone who guesses
-// the URL.
-//
-// Basic rather than a key in the URL: the browser shows its own credential
-// prompt, caches the answer for the session, and attaches it to the page's own
-// data requests. Nothing ends up in a URL, a bookmark or browser history.
-export const AFFILIATION_ANALYTICS_USER: string =
-  process.env.AFFILIATION_ANALYTICS_USER || 'admin';
-
-// No default, and fail-closed for the same reason as above: an unset password
-// must lock the dashboards, never open them.
-export const AFFILIATION_ANALYTICS_PASSWORD: string =
-  process.env.AFFILIATION_ANALYTICS_PASSWORD ?? '';
-
-export const AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH = 16;
-
-if (
-  process.env.NODE_ENV === 'production' &&
-  AFFILIATION_ANALYTICS_PASSWORD.length <
-    AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH
-) {
-  console.error(
-    '[security] AFFILIATION_ANALYTICS_PASSWORD is missing or too short in' +
-      ` production (min ${AFFILIATION_ANALYTICS_MIN_PASSWORD_LENGTH} chars` +
-      ' required). The /api/bcl-affiliation analytics and tree dashboards' +
-      ' will reject all requests until it is set.',
-  );
-}
-
 /**
  * Trending Score Configuration
  */

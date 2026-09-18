@@ -52,8 +52,9 @@ async function bootstrap() {
   // `ALLOWED_ORIGINS` for private deployments. Credentials are only
   // enabled when an explicit allowlist is configured, because browsers
   // reject `Access-Control-Allow-Credentials: true` alongside a wildcard
-  // origin — and nothing in this codebase relies on cookies anyway
-  // (auth uses explicit `x-api-key` / `Authorization` headers).
+  // origin. The one cookie we set (the affiliation dashboard session) is only
+  // ever sent same-origin, which does not go through CORS at all, so this
+  // setting does not affect it.
   app.enableCors({
     origin: parseAllowedOrigins(),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -96,18 +97,6 @@ async function bootstrap() {
       .setTitle('WORD CRAFT Scan')
       .setDescription('The WORD CRAFT Scan API')
       .setVersion('1.0')
-      .addBasicAuth(
-        {
-          type: 'http',
-          scheme: 'basic',
-          description:
-            'Operator credentials for the internal affiliation dashboards' +
-            ' (AFFILIATION_ANALYTICS_USER / AFFILIATION_ANALYTICS_PASSWORD).' +
-            ' A browser prompts for these on its own; scripts use' +
-            ' `curl -u user:password`.',
-        },
-        'affiliation-analytics',
-      )
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
