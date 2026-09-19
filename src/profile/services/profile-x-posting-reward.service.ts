@@ -539,6 +539,9 @@ export class ProfileXPostingRewardService {
       )
       .where('ledger.address = :address', { address })
       .andWhere('ledger.status = :status', { status: 'paid' })
+      // Onboarding rows share this ledger; scope the total to per-post so it
+      // stays the per-post headline once onboarding rows are written.
+      .andWhere('ledger.reward_kind = :rewardKind', { rewardKind: 'per_post' })
       .andWhere('ledger.amount_aettos ~ :numericPattern', {
         numericPattern: '^[0-9]+$',
       })

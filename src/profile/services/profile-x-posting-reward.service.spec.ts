@@ -357,13 +357,19 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
             if (p) Object.assign(state.params, p);
             return qb;
           },
-          // getPerPostTotals aggregate over the in-memory ledger.
+          // getPerPostTotals aggregate over the in-memory ledger. Honors the
+          // reward_kind filter when the query scopes it, so a missing filter
+          // would let onboarding rows leak into the per-post total.
           getRawOne: async () => {
             const address = state.params.address;
+            const rewardKind = state.params.rewardKind;
             const matched = ledger.filter(
               (r) =>
                 r.address === address &&
                 r.status === 'paid' &&
+                // reward_kind column defaults to 'per_post' in the entity.
+                (rewardKind == null ||
+                  (r.reward_kind ?? 'per_post') === rewardKind) &&
                 /^[0-9]+$/.test(String(r.amount_aettos ?? '')),
             );
             let sum = BigInt(0);
@@ -951,6 +957,42 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(result.per_post_total_paid_count).toBe(2);
     // 2 * 0.1 AE in aettos
     expect(result.per_post_total_paid_aettos).toBe('200000000000000000');
+  });
+
+  it('excludes onboarding ledger rows from the per-post paid total', async () => {
+    const { service, ledger } = makeService({
+      rows: [{ address: ADDRESS, x_username: 'poster', status: 'paid' }],
+    });
+    // A settled per-post row and a settled onboarding row on the same ledger.
+    // Only the per-post row belongs in per_post_total_paid_*.
+    ledger.push(
+      {
+        id: '1',
+        address: ADDRESS,
+        x_user_id: '100',
+        tweet_id: '7001',
+        reward_kind: 'per_post',
+        amount_aettos: '100000000000000000', // 0.1 AE
+        status: 'paid',
+        tx_hash: 'th_perpost',
+      },
+      {
+        id: '2',
+        address: ADDRESS,
+        x_user_id: '100',
+        tweet_id: '7002',
+        reward_kind: 'onboarding',
+        amount_aettos: '5000000000000000000', // 5 AE
+        status: 'paid',
+        tx_hash: 'th_onboarding',
+      },
+    );
+
+    const result = await service.getRewardStatus(ADDRESS);
+
+    // Fails if the onboarding row leaks in (count 2, 5.1 AE).
+    expect(result.per_post_total_paid_count).toBe(1);
+    expect(result.per_post_total_paid_aettos).toBe('100000000000000000');
   });
 
   it('keeps a per-post payout unclaimable when broadcast succeeds but the DB write fails', async () => {
