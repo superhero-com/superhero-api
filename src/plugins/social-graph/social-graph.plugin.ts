@@ -12,6 +12,15 @@ import {
   SOCIAL_GRAPH_START_HEIGHT,
 } from './social-graph.constants';
 
+/**
+ * Deliberately does not override `getUpdateQueries`: the base auto-update sweep
+ * only re-decodes and re-stamps the tx jsonb, and this plugin's state lives in
+ * the `social_graph_edge` table, applied solely by `processBatch`. Wiring the
+ * sweep would clear the version-mismatch signal while leaving the edge table and
+ * counts stale. A version bump is recovered by `SocialGraphBackfillService`,
+ * which re-walks the history through `processBatch` (idempotent) when its stored
+ * recovery version no longer matches `version` below.
+ */
 @Injectable()
 export class SocialGraphPlugin extends BasePlugin {
   protected readonly logger = new Logger(SocialGraphPlugin.name);

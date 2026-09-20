@@ -29,6 +29,7 @@ import {
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
 import { parsePostContent } from '../utils/content-parser.util';
+import { detectPostLanguage } from '../utils/post-language.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { normalizeTopicName } from '../utils/topic-name.util';
 import { TokensService } from '@/tokens/tokens.service';
@@ -494,6 +495,7 @@ export class PostService {
         sender_address: transaction.tx.callerId,
         contract_address: transaction.tx.contractId,
         content: parsedContent.content,
+        language: detectPostLanguage(parsedContent.content),
         token_mentions: parsedContent.trendMentions,
         topics: topics,
         media: parsedContent.media,

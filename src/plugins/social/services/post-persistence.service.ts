@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Topic } from '@/social/entities/topic.entity';
+import { detectPostLanguage } from '@/social/utils/post-language.util';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import {
   IPostContract,
@@ -329,6 +330,7 @@ export class PostPersistenceService {
       sender_address: tx.caller_id || tx.raw?.callerId || '',
       contract_address: tx.contract_id || tx.raw?.contractId || '',
       content: parsedContent.content,
+      language: detectPostLanguage(parsedContent.content),
       token_mentions: parsedContent.trendMentions,
       topics: topics,
       media: parsedContent.media,

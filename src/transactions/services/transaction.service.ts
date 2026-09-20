@@ -4,6 +4,7 @@ import { BCL_FUNCTIONS } from '@/configs';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
+import { normalizeEventTopics } from '@/utils/common';
 import { Encoded, toAe } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -265,9 +266,12 @@ export class TransactionService {
       const factory = await this.communityFactoryService.loadFactory(
         token.factory_address as Encoded.ContractAddress,
       );
-      const decodedData = factory.contract.$decodeEvents(tx.raw.log, {
-        omitUnknown: true,
-      });
+      const decodedData = factory.contract.$decodeEvents(
+        normalizeEventTopics(tx.raw.log),
+        {
+          omitUnknown: true,
+        },
+      );
 
       return {
         ...tx,
@@ -303,7 +307,7 @@ export class TransactionService {
         token.factory_address as Encoded.ContractAddress,
       );
       const decodedData = factory.contract.$decodeEvents(
-        rawTransaction.tx.log,
+        normalizeEventTopics(rawTransaction.tx.log),
         {
           omitUnknown: true,
         },

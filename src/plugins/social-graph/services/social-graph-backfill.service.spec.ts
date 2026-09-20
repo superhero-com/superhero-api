@@ -89,6 +89,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -96,7 +97,7 @@ describe('SocialGraphBackfillService', () => {
     const service = new Service(configService, txRepo, stateRepo, plugin);
     const result = await service.backfill();
 
-    expect(result).toEqual({ saved: 1, reprocessed: 1 });
+    expect(result).toEqual({ saved: 1, reprocessed: 0 });
     const saved = txRepo.save.mock.calls[0][0];
     expect(saved[0]).toMatchObject({
       hash: MISSED_TX,
@@ -135,6 +136,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
     const Service = loadService();
@@ -147,7 +149,7 @@ describe('SocialGraphBackfillService', () => {
       stateRepo,
       plugin,
     ).backfill();
-    expect(boot1).toEqual({ saved: 3, reprocessed: 3 });
+    expect(boot1).toEqual({ saved: 3, reprocessed: 0 });
     expect(stateRepo._current().last_backfilled_height).toBe(1352517);
 
     // Second boot: same history from the middleware, but the watermark makes it
@@ -185,6 +187,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -198,6 +201,100 @@ describe('SocialGraphBackfillService', () => {
       [storedRow],
       SyncDirectionEnum.Backward,
     );
+  });
+
+  // A version bump means the decode logic changed, so the whole history must be
+  // reprocessed to rebuild the edge table — the watermark that normally stops the
+  // walk must be ignored for one boot. Starts from the exact stale state: a call
+  // already in the DB, decoded to zero events under the old version, sitting at or
+  // below a watermark that was set under that old version.
+  describe('version-bump recovery', () => {
+    function seededStaleState(recoveredVersion: number) {
+      const storedRow = {
+        hash: MISSED_TX,
+        block_height: 1352517,
+        raw: { log: [{ address: CONTRACT, topics: ['1', '2'] }] },
+        logs: { 'social-graph': { _version: recoveredVersion, data: [] } },
+      };
+      const stateRepo = makeStateRepo();
+      // Recovered up to the top under the given version.
+      stateRepo.save({
+        contract_address: CONTRACT,
+        last_backfilled_height: 1352517,
+        resume_from_height: null,
+        pending_high_height: null,
+        version: recoveredVersion,
+      });
+      stateRepo.save.mockClear();
+      return { storedRow, stateRepo };
+    }
+
+    it('ignores the watermark and reprocesses the stale history when the plugin version is bumped', async () => {
+      const { storedRow, stateRepo } = seededStaleState(1);
+      // The call sits at the watermark, so an unbumped boot would stop before it.
+      mockFetchJson.mockResolvedValueOnce({
+        data: [rawContractCallTx(MISSED_TX, 1352517)],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([storedRow]),
+        save: jest.fn(),
+      };
+      // Decode fix shipped as version 2.
+      const plugin = {
+        version: 2,
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      // The stale row was handed back to the plugin so the edge it never wrote is
+      // finally written — the watermark did not short-circuit the walk.
+      expect(result).toEqual({ saved: 0, reprocessed: 1 });
+      expect(plugin.processBatch).toHaveBeenCalledWith(
+        [storedRow],
+        SyncDirectionEnum.Backward,
+      );
+      // Watermark re-affirmed and re-stamped with the new version, so the next
+      // boot at that version stops early again.
+      const state = stateRepo._current();
+      expect(state.last_backfilled_height).toBe(1352517);
+      expect(state.version).toBe(2);
+    });
+
+    it('respects the watermark when the stored version already matches the plugin', async () => {
+      const { storedRow, stateRepo } = seededStaleState(2);
+      mockFetchJson.mockResolvedValueOnce({
+        data: [rawContractCallTx(MISSED_TX, 1352517)],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([storedRow]),
+        save: jest.fn(),
+      };
+      const plugin = {
+        version: 2,
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      // No version change: the walk stops at the watermark, nothing reprocessed.
+      expect(result).toEqual({ saved: 0, reprocessed: 0 });
+      expect(plugin.processBatch).not.toHaveBeenCalled();
+    });
   });
 
   it('refreshes raw from the payload when a stored row lost its log, then reprocesses', async () => {
@@ -214,6 +311,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -228,6 +326,94 @@ describe('SocialGraphBackfillService', () => {
       [storedRow],
       SyncDirectionEnum.Backward,
     );
+  });
+
+  it('holds the watermark one below a tx whose replay failed, never at or past it', async () => {
+    const page = {
+      // Newest-first; the middle call fails replay.
+      data: [
+        rawContractCallTx('th_c', 1352517),
+        rawContractCallTx('th_b', 1352514),
+        rawContractCallTx('th_a', 1352513),
+      ],
+      next: null,
+    };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    const plugin = {
+      version: 1,
+      processBatch: jest.fn(async (txs: any[]) => ({
+        failed: txs
+          .filter((tx) => tx.block_height === 1352514)
+          .map((tx) => ({ tx, error: new Error('replay failed') })),
+      })),
+    };
+
+    const Service = loadService();
+    mockFetchJson.mockResolvedValueOnce(page);
+    await new Service(configService, txRepo, stateRepo, plugin).backfill();
+
+    // Capped at failed_height - 1 (1352513), not the highest recovered (1352517).
+    expect(stateRepo._current().last_backfilled_height).toBe(1352513);
+  });
+
+  it('re-walks the failed height and above on the next boot, keeping the recovered call below the watermark untouched', async () => {
+    const page = {
+      data: [
+        rawContractCallTx('th_c', 1352517),
+        rawContractCallTx('th_b', 1352514),
+        rawContractCallTx('th_a', 1352513),
+      ],
+      next: null,
+    };
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    let failReplay = true;
+    const plugin = {
+      version: 1,
+      processBatch: jest.fn(async (txs: any[]) => ({
+        failed: failReplay
+          ? txs
+              .filter((tx) => tx.block_height === 1352514)
+              .map((tx) => ({ tx, error: new Error('replay failed') }))
+          : [],
+      })),
+    };
+    const Service = loadService();
+
+    // Boot 1: th_b fails, watermark held at 1352513.
+    mockFetchJson.mockResolvedValueOnce(page);
+    await new Service(configService, txRepo, stateRepo, plugin).backfill();
+    expect(stateRepo._current().last_backfilled_height).toBe(1352513);
+
+    // Boot 2: replay now succeeds. th_a (<= watermark) is not re-walked; th_b
+    // and th_c are, idempotently, and the watermark reaches the top.
+    failReplay = false;
+    plugin.processBatch.mockClear();
+    mockFetchJson.mockResolvedValueOnce(page);
+    const boot2 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+
+    const rewalked = plugin.processBatch.mock.calls[0][0].map(
+      (tx: any) => tx.hash,
+    );
+    expect(rewalked).toEqual(['th_c', 'th_b']);
+    expect(boot2).toEqual({ saved: 2, reprocessed: 0 });
+    expect(stateRepo._current().last_backfilled_height).toBe(1352517);
   });
 
   it('does not advance the watermark when the walk is truncated by the page cap', async () => {
@@ -245,6 +431,7 @@ describe('SocialGraphBackfillService', () => {
     };
     const stateRepo = makeStateRepo();
     const plugin = {
+      version: 1,
       processBatch: jest.fn().mockResolvedValue({ failed: [] }),
     };
 
@@ -252,14 +439,204 @@ describe('SocialGraphBackfillService', () => {
     const service = new Service(configService, txRepo, stateRepo, plugin);
     await service.backfill();
 
-    expect(stateRepo.save).not.toHaveBeenCalled();
+    // Watermark stays null (nothing marked done), but the resume state is
+    // recorded so the next boot continues instead of restarting from the top.
+    const state = stateRepo._current();
+    expect(state.last_backfilled_height ?? null).toBeNull();
+    expect(state.resume_from_height).toBe(1352517);
+    expect(state.pending_high_height).toBe(1352517);
+  });
+
+  it('resumes a null-watermark history larger than the page-safety window and completes on a later boot', async () => {
+    const TOP = 5100; // one call per page, > PAGE_SAFETY (50) pages of history
+    const BOTTOM = 5041; // 60 distinct heights: boot 1 truncates, boot 2 finishes
+    const heights = Array.from({ length: TOP - BOTTOM + 1 }, (_, i) => TOP - i);
+
+    const txRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      save: jest
+        .fn()
+        .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+    };
+    const stateRepo = makeStateRepo();
+    const plugin = {
+      version: 1,
+      processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+    };
+    const Service = loadService();
+
+    // Serve one contract call per page, newest-first, from the first height at
+    // or below the resume ceiling the boot asked for; `next` is null only on the
+    // last (oldest) page so an incomplete walk keeps a next link.
+    const serveFrom = (ceiling: number) => {
+      let idx = heights.findIndex((h) => h <= ceiling);
+      if (idx < 0) idx = heights.length;
+      mockFetchJson.mockImplementation(async () => {
+        if (idx >= heights.length) {
+          return { data: [], next: null };
+        }
+        const height = heights[idx];
+        idx += 1;
+        return {
+          data: [rawContractCallTx(`th_${height}`, height)],
+          next: idx < heights.length ? '/v3/transactions?cursor=more' : null,
+        };
+      });
+    };
+
+    // Boot 1: no watermark, walk from the newest page and truncate at the cap.
+    serveFrom(Number.POSITIVE_INFINITY);
+    const boot1 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot1.saved).toBe(50); // exactly PAGE_SAFETY pages walked (all new)
+    const afterBoot1 = stateRepo._current();
+    expect(afterBoot1.last_backfilled_height ?? null).toBeNull();
+    expect(afterBoot1.pending_high_height).toBe(TOP);
+    expect(afterBoot1.resume_from_height).toBe(TOP - 49); // lowest height reached
+
+    // Boot 2: resume below the truncation point, reach the oldest call, complete.
+    serveFrom(afterBoot1.resume_from_height);
+    const boot2 = await new Service(
+      configService,
+      txRepo,
+      stateRepo,
+      plugin,
+    ).backfill();
+    expect(boot2.saved).toBeGreaterThan(0);
+    const oldestWalked = plugin.processBatch.mock.calls
+      .flatMap((call: any[]) => call[0])
+      .some((tx: any) => tx.block_height === BOTTOM);
+    expect(oldestWalked).toBe(true);
+
+    const afterBoot2 = stateRepo._current();
+    // Walk complete: the carried top is promoted, resume state cleared.
+    expect(afterBoot2.last_backfilled_height).toBe(TOP);
+    expect(afterBoot2.resume_from_height).toBeNull();
+    expect(afterBoot2.pending_high_height).toBeNull();
+  });
+
+  // saved and reprocessed must be disjoint: a tx is either newly persisted
+  // (saved) or already stored and re-decoded (reprocessed), never both, so
+  // saved + reprocessed is the number handed to the plugin with no double-count.
+  describe('counter semantics (saved and reprocessed are disjoint)', () => {
+    it('counts only-missing transactions as saved, reprocessed 0', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_new1', 1352517),
+          rawContractCallTx('th_new2', 1352516),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([]),
+        save: jest
+          .fn()
+          .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 2, reprocessed: 0 });
+      expect(plugin.processBatch.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it('counts only-already-present transactions as reprocessed, saved 0', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_old1', 1352517),
+          rawContractCallTx('th_old2', 1352516),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([
+          { hash: 'th_old1', raw: { log: [{ topics: ['1', '2'] }] } },
+          { hash: 'th_old2', raw: { log: [{ topics: ['1', '2'] }] } },
+        ]),
+        save: jest.fn(),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 0, reprocessed: 2 });
+      expect(txRepo.save).not.toHaveBeenCalled();
+      expect(plugin.processBatch.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it('splits a mixed page: new to saved, stored to reprocessed, all handed to the plugin', async () => {
+      mockFetchJson.mockResolvedValueOnce({
+        data: [
+          rawContractCallTx('th_new1', 1352517),
+          rawContractCallTx('th_old1', 1352516),
+          rawContractCallTx('th_new2', 1352515),
+          rawContractCallTx('th_old2', 1352514),
+        ],
+        next: null,
+      });
+      const txRepo = {
+        find: jest.fn().mockResolvedValue([
+          { hash: 'th_old1', raw: { log: [{ topics: ['1', '2'] }] } },
+          { hash: 'th_old2', raw: { log: [{ topics: ['1', '2'] }] } },
+        ]),
+        save: jest
+          .fn()
+          .mockImplementation((rows: any[]) => Promise.resolve(rows)),
+      };
+      const stateRepo = makeStateRepo();
+      const plugin = {
+        processBatch: jest.fn().mockResolvedValue({ failed: [] }),
+      };
+
+      const Service = loadService();
+      const result = await new Service(
+        configService,
+        txRepo,
+        stateRepo,
+        plugin,
+      ).backfill();
+
+      expect(result).toEqual({ saved: 2, reprocessed: 2 });
+      // Disjoint and complete: every walked tx reached the plugin exactly once.
+      const handed = plugin.processBatch.mock.calls[0][0];
+      expect(handed).toHaveLength(result.saved + result.reprocessed);
+      expect(handed.map((tx: any) => tx.hash).sort()).toEqual([
+        'th_new1',
+        'th_new2',
+        'th_old1',
+        'th_old2',
+      ]);
+    });
   });
 
   it('does not touch the middleware when the contract is unconfigured', () => {
     delete process.env[KEY];
     const txRepo = { find: jest.fn(), save: jest.fn() };
     const stateRepo = makeStateRepo();
-    const plugin = { processBatch: jest.fn() };
+    const plugin = { version: 1, processBatch: jest.fn() };
 
     const Service = loadService();
     const service = new Service(configService, txRepo, stateRepo, plugin);

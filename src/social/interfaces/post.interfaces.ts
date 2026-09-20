@@ -31,6 +31,9 @@ export interface ICreatePostData {
   sender_address: string;
   contract_address: string;
   content: string;
+  // Detected script/language. Required so the TypeScript build fails if either
+  // insert builder forgets to set it.
+  language: string;
   token_mentions: string[];
   topics: Topic[];
   media: string[];

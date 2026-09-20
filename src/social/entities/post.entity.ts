@@ -19,6 +19,8 @@ import { Topic } from './topic.entity';
 // Serves comment lookups and each level of the popular-ranking thread CTE;
 // Postgres does not index FK columns automatically.
 @Index('IDX_POSTS_POST_ID', ['post_id'])
+// Serves the content-language filter on the posts and popular feeds.
+@Index('IDX_POSTS_LANGUAGE_CREATED_AT', ['language', 'created_at'])
 export class Post {
   @PrimaryColumn()
   id: string;
@@ -78,6 +80,11 @@ export class Post {
     },
   })
   topics: Topic[];
+
+  // Detected script/language. `null` means not yet processed; `und` means
+  // processed with no supported script found. Values match the web locale codes.
+  @Column({ type: 'varchar', length: 8, nullable: true })
+  language: string | null;
 
   @Column('json', { default: [] })
   media: string[];

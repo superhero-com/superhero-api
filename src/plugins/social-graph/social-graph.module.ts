@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AeModule } from '@/ae/ae.module';
+import { ProfileModule } from '@/profile/profile.module';
 import { SocialGraphEdge } from './entities/social-graph-edge.entity';
 import { SocialGraphCount } from './entities/social-graph-count.entity';
 import { SocialGraphController } from './social-graph.controller';
@@ -13,6 +14,7 @@ import { SocialGraphReconcileService } from './services/social-graph-reconcile.s
   imports: [
     TypeOrmModule.forFeature([SocialGraphEdge, SocialGraphCount]),
     AeModule,
+    ProfileModule,
   ],
   controllers: [SocialGraphController],
   providers: [

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { PostTrendMentionDto } from './post-trend-mention.dto';
 import { PostSenderDto } from './post-sender.dto';
+import { POST_LANGUAGES } from '../utils/post-language.util';
 
 export class PostDto {
   @ApiProperty({
@@ -66,6 +67,16 @@ export class PostDto {
     example: ['https://example.com/image.jpg', 'https://example.com/video.mp4'],
   })
   media: string[];
+
+  @ApiProperty({
+    description:
+      'Detected script/language of the content. `null` when not yet processed, `und` when no supported script was found.',
+    enum: POST_LANGUAGES,
+    nullable: true,
+    required: false,
+    example: 'en',
+  })
+  language: string | null;
 
   @ApiProperty({
     description: 'Total number of comments on this post',
