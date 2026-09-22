@@ -68,6 +68,7 @@ import {
   processAddressWithGuard,
   resolveFollowerTier,
 } from './profile-x-reward.util';
+import { withRewardMemo } from '../utils/reward-memo.util';
 
 interface XUserProfile {
   id: string;
@@ -1850,7 +1851,7 @@ export class ProfileXPostingRewardService {
           const spendResult = await this.aeSdkService.sdk.spend(
             amountAettos,
             reward.address as `ak_${string}`,
-            { onAccount: rewardAccount },
+            withRewardMemo({ onAccount: rewardAccount }, 'onboarding'),
           );
           broadcastHash = spendResult.hash || 'broadcasted';
           await this.postingRewardRepository.update(
@@ -2012,7 +2013,7 @@ export class ProfileXPostingRewardService {
           const spendResult = await this.aeSdkService.sdk.spend(
             amountAettos,
             row.address as `ak_${string}`,
-            { onAccount: rewardAccount },
+            withRewardMemo({ onAccount: rewardAccount }, 'per_post'),
           );
           broadcastHash = spendResult.hash || 'broadcasted';
           await this.postRewardLedgerRepository.update(
@@ -2150,7 +2151,9 @@ export class ProfileXPostingRewardService {
           const spendResult = await this.aeSdkService.sdk.spend(
             amountAettos,
             row.address as `ak_${string}`,
-            { onAccount: rewardAccount },
+            withRewardMemo({ onAccount: rewardAccount }, 'streak_bonus', {
+              streakDays: row.streak_length,
+            }),
           );
           broadcastHash = spendResult.hash || 'broadcasted';
           await this.streakBonusRewardRepository.update(

@@ -22,6 +22,7 @@ import {
   getRewardAmountAettos,
   isValidAeAmount,
 } from './profile-x-reward.util';
+import { withRewardMemo } from '../utils/reward-memo.util';
 
 type InviteProgress = {
   inviter_address: string;
@@ -413,7 +414,9 @@ export class ProfileXInviteService {
           const spendResult = await this.aeSdkService.sdk.spend(
             rewardAmountAettos,
             inviterAddress as `ak_${string}`,
-            { onAccount: rewardAccount },
+            withRewardMemo({ onAccount: rewardAccount }, 'invite_milestone', {
+              invites: rewardEntry.threshold,
+            }),
           );
           rewardEntry.tx_hash = spendResult.hash || null;
           rewardEntry.status = 'paid';
