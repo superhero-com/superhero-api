@@ -4,14 +4,18 @@ describe('ProfileRewardsController', () => {
   const getController = (overrides?: {
     profileXInviteService?: any;
     profileXPostingRewardService?: any;
+    profileXRewardHistoryService?: any;
   }) => {
     const profileXInviteService =
       overrides?.profileXInviteService || ({} as any);
     const profileXPostingRewardService =
       overrides?.profileXPostingRewardService || ({} as any);
+    const profileXRewardHistoryService =
+      overrides?.profileXRewardHistoryService || ({} as any);
     const controller = new ProfileRewardsController(
       profileXInviteService,
       profileXPostingRewardService,
+      profileXRewardHistoryService,
     );
     return { controller, profileXInviteService, profileXPostingRewardService };
   };
@@ -70,6 +74,33 @@ describe('ProfileRewardsController', () => {
     await expect(controller.getXPostingRewardStatus('ak_1')).resolves.toEqual({
       status: 'pending',
     });
+  });
+
+  it('reads reward history without starting a check', async () => {
+    // Listing what was paid must not set a scan or a payout in motion: that
+    // is the status route's job, and doing it twice per page load would double
+    // the traffic a stranger can cause by naming an address.
+    const history = { items: [], truncated: false };
+    const profileXRewardHistoryService = {
+      getHistory: jest.fn().mockResolvedValue(history),
+    } as any;
+    const profileXPostingRewardService = {
+      refreshInBackgroundIfDue: jest.fn(),
+    } as any;
+    const { controller } = getController({
+      profileXPostingRewardService,
+      profileXRewardHistoryService,
+    });
+
+    await expect(controller.getXPostingRewardHistory('ak_1')).resolves.toBe(
+      history,
+    );
+    expect(profileXRewardHistoryService.getHistory).toHaveBeenCalledWith(
+      'ak_1',
+    );
+    expect(
+      profileXPostingRewardService.refreshInBackgroundIfDue,
+    ).not.toHaveBeenCalled();
   });
 
   it('creates a posting reward recheck challenge', async () => {
