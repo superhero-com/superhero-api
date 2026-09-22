@@ -5,6 +5,7 @@ import { CreateXPostingRecheckChallengeDto } from '../dto/create-x-posting-reche
 import { SubmitXPostingRecheckDto } from '../dto/submit-x-posting-recheck.dto';
 import { ProfileXInviteService } from '../services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from '../services/profile-x-posting-reward.service';
+import { ProfileXRewardHistoryService } from '../services/profile-x-reward-history.service';
 import { AeAccountAddressPipe } from '@/common/validation/request-validation';
 
 @Controller('profile')
@@ -13,6 +14,7 @@ export class ProfileRewardsController {
   constructor(
     private readonly profileXInviteService: ProfileXInviteService,
     private readonly profileXPostingRewardService: ProfileXPostingRewardService,
+    private readonly profileXRewardHistoryService: ProfileXRewardHistoryService,
   ) {}
 
   @Get(':address/x-posting-reward')
@@ -46,6 +48,20 @@ export class ProfileRewardsController {
       .refreshInBackgroundIfDue(address)
       ?.catch(() => undefined);
     return this.profileXPostingRewardService.getRewardStatus(address);
+  }
+
+  @Get(':address/x-posting-reward/history')
+  @UseGuards(RateLimitGuard)
+  @ApiOperation({
+    operationId: 'getXPostingRewardHistory',
+    summary:
+      'List the X reward payouts sent to an address, with explorer links',
+  })
+  async getXPostingRewardHistory(
+    @Param('address', AeAccountAddressPipe) address: string,
+  ) {
+    // Read-only: unlike the status route above, this never starts a check.
+    return this.profileXRewardHistoryService.getHistory(address);
   }
 
   @Post('x-posting-reward/recheck-challenge')

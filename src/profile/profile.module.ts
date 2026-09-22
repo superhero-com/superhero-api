@@ -22,6 +22,7 @@ import { ProfileSpendQueueService } from './services/profile-spend-queue.service
 import { ProfileXApiClientService } from './services/profile-x-api-client.service';
 import { ProfileXInviteService } from './services/profile-x-invite.service';
 import { ProfileXPostingRewardService } from './services/profile-x-posting-reward.service';
+import { ProfileXRewardHistoryService } from './services/profile-x-reward-history.service';
 import { ProfileXVerificationAttemptService } from './services/profile-x-verification-attempt.service';
 import { ProfileChainNameChallenge } from './entities/profile-chain-name-challenge.entity';
 import { ProfileChainNameClaim } from './entities/profile-chain-name-claim.entity';
@@ -55,6 +56,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileXApiClientService,
     ProfileXInviteService,
     ProfileXPostingRewardService,
+    ProfileXRewardHistoryService,
     ProfileXVerificationAttemptService,
     ProfileChainNameService,
   ],
