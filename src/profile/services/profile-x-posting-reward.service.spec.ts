@@ -37,11 +37,14 @@ jest.mock('../profile.constants', () => ({
     code === 'x_posts_scan_truncated',
 }));
 
-import { buildTx, buildTxHash, Tag } from '@aeternity/aepp-sdk';
+import { buildTx, buildTxHash, decode, Tag } from '@aeternity/aepp-sdk';
 import { ProfileXPostingReward } from '../entities/profile-x-posting-reward.entity';
 import { ProfileXPostRewardLedger } from '../entities/profile-x-post-reward-ledger.entity';
 import { ProfileXApiClientService } from './profile-x-api-client.service';
 import { ProfileXPostingRewardService } from './profile-x-posting-reward.service';
+
+/** The on-chain memo a mocked `sdk.spend` call was given. */
+const memoOf = (call: any[]) => decode(call[2]?.payload).toString();
 
 type RewardRow = Partial<ProfileXPostingReward> & { address: string };
 
@@ -587,6 +590,9 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(rows.get(ADDRESS)?.status).toBe('paid');
     expect(spend).toHaveBeenCalledTimes(1);
     expect(spend.mock.calls[0][0]).toBe(ONBOARDING_AETTOS);
+    // The transaction says what it was for, on æScan and to anyone reading
+    // the chain without our API.
+    expect(memoOf(spend.mock.calls[0])).toBe('Superhero X reward: welcome');
   });
 
   it('does NOT count a post without any keyword or referral link', async () => {
@@ -639,6 +645,8 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       expect.arrayContaining([ONBOARDING_AETTOS, PER_POST_AETTOS]),
     );
     expect(spend).toHaveBeenCalledTimes(2);
+    const perPostCall = spend.mock.calls.find((c) => c[0] === PER_POST_AETTOS);
+    expect(memoOf(perPostCall!)).toBe('Superhero X reward: post');
 
     // Re-scan the same tweet (reset cursor + window) → no second payout.
     rows.set(ADDRESS, {
@@ -725,6 +733,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(result.streak_bonus_paid_count).toBe(1);
     const amounts = spend.mock.calls.map((c) => c[0]);
     expect(amounts.filter((a) => a === STREAK_BONUS_AETTOS)).toHaveLength(1);
+    const bonusCall = spend.mock.calls.find(
+      (c) => c[0] === STREAK_BONUS_AETTOS,
+    );
+    expect(memoOf(bonusCall!)).toBe('Superhero X reward: 3-day streak');
     // 3 per-post (one per day) + 1 onboarding + 1 streak bonus.
     expect(amounts.filter((a) => a === PER_POST_AETTOS)).toHaveLength(3);
     expect(amounts.filter((a) => a === ONBOARDING_AETTOS)).toHaveLength(1);
