@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import moment from 'moment';
 import BigNumber from 'bignumber.js';
-import { toAe } from '@aeternity/aepp-sdk';
 import { Invitation } from '../entities/invitation.entity';
 import { ACTIVE_NETWORK } from '@/configs/network';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
@@ -21,6 +20,12 @@ import {
   X_INFORMATIONAL_ERROR_CODES,
   isInformationalXError,
 } from '@/profile/profile.constants';
+import {
+  aettosToAe,
+  explorerTxUrl,
+  isRealTxHash,
+  payoutStatus,
+} from '@/profile/utils/reward-payout.util';
 
 export type BclAffiliationDailyPoint = {
   date: string; // YYYY-MM-DD
@@ -194,68 +199,9 @@ export type BclXExplorerDailyPoint = {
   invite_links: number;
 };
 
-/**
- * A real æternity transaction hash, as opposed to one of the in-progress
- * sentinels the payout services write into `tx_hash` while a send is mid-flight.
- * Every genuine hash is `th_`-prefixed base58; no sentinel is.
- */
-/**
- * What a payout row's status actually is.
- *
- * The `status` column alone is not it. A retry never resets it: claiming a
- * payout writes an in-progress sentinel into `tx_hash`, and a broadcast whose
- * DB confirmation failed writes a real hash, and neither touches `status`. So a
- * row retrying after an earlier failure still reads 'failed', and ranking
- * status first prints "failed" next to a live explorer link. `tx_hash` is
- * written later in the lifecycle, so it wins — only a failed row carrying no
- * hash at all is a genuinely dead send.
- *
- * This lived inline on the onboarding branch while per-post, streak and
- * milestone copied `status` raw, so those three both mislabelled live sends and
- * inflated `payouts_failed`. One implementation, applied to all four.
- */
-function payoutStatus(row: {
-  status?: string | null;
-  tx_hash?: string | null;
-}): 'paid' | 'pending' | 'failed' | 'skipped' {
-  if (row.status === 'paid') return 'paid';
-  // `skipped` (a malformed amount, say) is terminal and outranks `tx_hash`:
-  // nothing is retried from it — the payout passes only ever select `pending`
-  // and `failed` — so folding it into `pending` would show money as in flight
-  // that is never going to move. Only the onboarding row lacks this state.
-  if (row.status === 'skipped') return 'skipped';
-  if (row.tx_hash) return 'pending';
-  if (row.status === 'failed') return 'failed';
-  return 'pending';
-}
-
-function isRealTxHash(txHash: string | null | undefined): txHash is string {
-  return !!txHash && /^th_[1-9A-HJ-NP-Za-km-z]+$/.test(txHash);
-}
-
-function explorerTxUrl(txHash: string | null | undefined): string | null {
-  if (!isRealTxHash(txHash)) return null;
-  const base = (ACTIVE_NETWORK?.explorerUrl || '').replace(/\/+$/, '');
-  return base ? `${base}/transactions/${txHash}` : null;
-}
-
 function explorerAccountUrl(address: string): string {
   const base = (ACTIVE_NETWORK?.explorerUrl || '').replace(/\/+$/, '');
   return base ? `${base}/accounts/${address}` : '';
-}
-
-/**
- * Amounts are stored in aettos. Formatted here rather than in the browser
- * because 50 AE is 5e19 aettos — past Number.MAX_SAFE_INTEGER, so parsing it
- * as a JS number in the page would quietly round it.
- */
-function aettosToAe(amountAettos: string | null | undefined): string | null {
-  if (!amountAettos) return null;
-  try {
-    return new BigNumber(toAe(amountAettos)).toFixed();
-  } catch {
-    return null;
-  }
 }
 
 /**
