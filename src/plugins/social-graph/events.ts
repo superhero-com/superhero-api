@@ -9,6 +9,8 @@
 export const SOCIAL_GRAPH_FOLLOWED_EVENT = 'social-graph.followed';
 
 export interface SocialGraphFollowedEventPayload {
+  /** V2 namespace; absent for unchanged V1 events. */
+  graphScope?: { network: string; contract: string; eventIndex: number };
   /** Account that started following (notification subject). */
   followerAddress: string;
   /** Account that was followed (notification recipient). */

@@ -9,6 +9,7 @@ import {
 import { shortenAddress } from '../notifications.constants';
 
 export interface NewFollowParams {
+  graphScope?: { network: string; contract: string; eventIndex: number };
   /** Account that started following (notification subject). */
   follower: string;
   /** Account that was followed (notification recipient). */
@@ -42,7 +43,10 @@ export class NewFollowNotification implements AppNotification {
 
   dedupKey(notifiable: Notifiable): string {
     // One notification per (follow tx, followed account) — guards retries / reorg replays.
-    return `${this.params.txHash}:${notifiable.address}`;
+    const scope = this.params.graphScope;
+    return scope
+      ? `${scope.network}:${scope.contract}:${this.params.txHash}:${scope.eventIndex}:${notifiable.address}`
+      : `${this.params.txHash}:${notifiable.address}`;
   }
 
   toExpo(): ExpoMessageContent {
@@ -55,6 +59,9 @@ export class NewFollowNotification implements AppNotification {
         type: this.type,
         txHash: this.params.txHash,
         follower: this.params.follower,
+        ...(this.params.graphScope
+          ? { graphScope: this.params.graphScope }
+          : {}),
       },
     };
   }
