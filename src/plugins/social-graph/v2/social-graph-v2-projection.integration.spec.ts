@@ -262,6 +262,19 @@ const bin = findPostgresBinDir();
     expect(last.addresses).toEqual(['ak_a']);
     expect(last.next_cursor).toBeNull();
     expect((await queries.counts(ready, 'ak_b')).followers).toBe('2');
+    const tooLarge = JSON.parse(
+      Buffer.from(first.next_cursor!, 'base64url').toString(),
+    );
+    tooLarge.before = '9223372036854775808';
+    await expect(
+      queries.connections(
+        ready,
+        'ak_b',
+        'followers',
+        1,
+        Buffer.from(JSON.stringify(tooLarge)).toString('base64url'),
+      ),
+    ).rejects.toThrow('cursor');
     await expect(
       queries.connections(
         { ...ready, contract: 'ct_destination' },
@@ -474,6 +487,84 @@ const bin = findPostgresBinDir();
     ).toBe(0);
     expect(await service.pending(scope)).toHaveLength(2);
   });
+  it('defers reconciliation while a live transaction prefix is being applied', async () => {
+    await db.query(
+      "UPDATE social_graph_v2_scopes SET synced_height=100,synced_hash='kh_start',sync_end_height=101,sync_end_hash='kh_end'",
+    );
+    await service.applyEvent(scope, event('prefix-follow'), [edge]);
+    const reader: any = {
+      identity: scope,
+      assertCanonical: jest.fn(),
+      countsAt: jest.fn(),
+    };
+    const reconcile = new SocialGraphV2ReconcileService(db, service);
+    expect(await reconcile.step(scope, reader)).toBe(0);
+    expect(reader.countsAt).not.toHaveBeenCalled();
+    expect(await service.pending(scope)).toHaveLength(2);
+    expect(
+      (await new SocialGraphV2QueryService(db).counts(scope, 'ak_b')).followers,
+    ).toBe('1');
+  });
+  it('discards a connection after advisory unlock failure and permits subsequent worker passes', async () => {
+    const previous = process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED;
+    process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED = 'true';
+    const runner = db.createQueryRunner();
+    const query = runner.query.bind(runner);
+    const spy = jest
+      .spyOn(runner, 'query')
+      .mockImplementation(async (sql: string, ...args: any[]) => {
+        if (sql.includes('pg_advisory_unlock'))
+          throw new Error('simulated unlock failure');
+        return query(sql, ...args);
+      });
+    const factory = jest
+      .spyOn(db, 'createQueryRunner')
+      .mockReturnValueOnce(runner);
+    const reader = {
+      identity: scope,
+      verifyIdentity: jest.fn(),
+      assertCanonical: jest
+        .fn()
+        .mockRejectedValue(new Error('simulated RPC outage')),
+    };
+    const worker = new SocialGraphV2WorkerService(
+      db,
+      {} as any,
+      { getReader: () => reader } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      service,
+      {} as any,
+    );
+    try {
+      await worker.tick();
+      factory.mockRestore();
+      spy.mockRestore();
+      const probe = db.createQueryRunner();
+      try {
+        expect(
+          (
+            await probe.query(
+              'SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked',
+              [`social-graph-v2:${scope.network}:${scope.contract}`],
+            )
+          )[0].locked,
+        ).toBe(true);
+      } finally {
+        await probe.query('SELECT pg_advisory_unlock_all()');
+        await probe.release();
+      }
+      await worker.tick();
+      expect(reader.verifyIdentity).toHaveBeenCalledTimes(2);
+    } finally {
+      factory.mockRestore();
+      spy.mockRestore();
+      if (previous === undefined)
+        delete process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED;
+      else process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED = previous;
+    }
+  });
   it('runs a restartable worker from snapshot to live generation, then rebuilds after reorg', async () => {
     const previous = process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED;
     process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED = 'true';
@@ -655,6 +746,10 @@ const bin = findPostgresBinDir();
         .delivered,
     ).toBe(false);
     await outbox.dispatch(scope);
+    expect(emitter.emitAsync).toHaveBeenCalledTimes(1);
+    await db.query(
+      "UPDATE social_graph_v2_outbox SET next_attempt_at=now()-interval '1 second'",
+    );
     await outbox.dispatch(scope);
     expect(emitter.emitAsync).toHaveBeenCalledTimes(2);
     expect(emitter.emitAsync.mock.calls[1][1].graphScope).toEqual({
@@ -679,6 +774,94 @@ const bin = findPostgresBinDir();
       (await db.query('SELECT delivered FROM social_graph_v2_outbox'))[0]
         .delivered,
     ).toBe(false);
+  });
+
+  it('keeps live reads consistent while indexing complete transactions within a generation', async () => {
+    await db.query(
+      "UPDATE social_graph_v2_scopes SET synced_hash='kh_ready',synced_height=100,snapshot_height=90",
+    );
+    const sync = new SocialGraphV2CatchupService(db, service),
+      queries = new SocialGraphV2QueryService(db);
+    await sync.begin(scope, { hash: 'kh_end', height: '101' }, 'live1');
+    await sync.applyPage(scope, {
+      expectedCursor: 'live1',
+      nextCursor: 'live2',
+      transactions: [
+        {
+          hash: 'th_liveprefix',
+          height: '100',
+          position: '1',
+          events: [{ index: 0, changes: [edge] }],
+        },
+      ],
+    });
+    const ready = await queries.ready(scope.network, scope.contract);
+    expect(await queries.counts(ready, 'ak_b')).toMatchObject({
+      followers: '1',
+      completed_height: '100',
+      pending_height: '100',
+      catching_up: true,
+    });
+    expect(
+      (await queries.connections(ready, 'ak_b', 'followers', 20)).addresses,
+    ).toEqual(['ak_a']);
+    await sync.applyPage(scope, {
+      expectedCursor: 'live2',
+      nextCursor: null,
+      transactions: [],
+    });
+    expect(await queries.counts(ready, 'ak_b')).toMatchObject({
+      completed_height: '101',
+      pending_height: null,
+      catching_up: false,
+    });
+  });
+
+  it('persists verified migration boundaries and never guesses from the projection snapshot', async () => {
+    const target = { ...scope, generation: '2' },
+      importer = new SocialGraphV2SnapshotService(db, service);
+    const reader: any = {
+      identity: scope,
+      assertCanonical: async () => {},
+      policy: async () => ({
+        height: '120',
+        block_hash: 'kh_snap',
+        importing: false,
+        import_source: 'ct_previous',
+      }),
+      migrationEvidence: jest
+        .fn()
+        .mockRejectedValueOnce(new Error('activation missing')),
+    };
+    await expect(importer.begin(target, reader)).rejects.toThrow(
+      'activation missing',
+    );
+    expect(
+      await db.query('SELECT * FROM social_graph_v2_scopes WHERE generation=2'),
+    ).toHaveLength(0);
+    reader.migrationEvidence.mockResolvedValue({
+      sourceCutoff: '100',
+      activationHeight: '110',
+      proof: {
+        kind: 'frozen-source',
+        freeze_tx: 'th_freeze',
+        activation_tx: 'th_activate',
+      },
+    });
+    await importer.begin(target, reader);
+    expect(
+      await new SocialGraphV2QueryService(db).status(
+        scope.network,
+        scope.contract,
+      ),
+    ).toMatchObject({
+      generation: '2',
+      state: 'importing',
+      snapshot_height: '120',
+      source_cutoff: '100',
+      activation_height: '110',
+      migration_evidence: { kind: 'frozen-source' },
+    });
   });
   it('rolls back and reapplies its isolated schema migration cleanly', async () => {
     const runner = db.createQueryRunner();

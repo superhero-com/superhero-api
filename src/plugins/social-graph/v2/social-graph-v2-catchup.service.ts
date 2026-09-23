@@ -54,9 +54,10 @@ export class SocialGraphV2CatchupService {
       const start = s.synced_height ?? s.snapshot_height;
       if (start == null || BigInt(end.height) <= BigInt(start))
         throw new Error('Invalid sync window');
-      // Serving a partially applied window would expose inconsistent counters/edges.
+      // Initial catch-up is unavailable. Once bootstrapped, each page applies complete
+      // transactions atomically, so live readers can safely observe an ordered prefix.
       await m.query(
-        `UPDATE social_graph_v2_scopes SET state='catching-up',sync_end_hash=$4,sync_end_height=$5,
+        `UPDATE social_graph_v2_scopes SET state=CASE WHEN synced_height IS NULL THEN 'catching-up' ELSE 'ready' END,sync_end_hash=$4,sync_end_height=$5,
         sync_cursor=$6,sync_last_position=NULL,sync_last_height=NULL WHERE network=$1 AND contract=$2 AND generation=$3`,
         [...key, end.hash, end.height, firstCursor],
       );
@@ -83,7 +84,7 @@ export class SocialGraphV2CatchupService {
       )[0];
       if (
         !s ||
-        s.state !== 'catching-up' ||
+        !['ready', 'catching-up'].includes(s.state) ||
         s.sync_end_height == null ||
         s.sync_cursor !== page.expectedCursor
       )
