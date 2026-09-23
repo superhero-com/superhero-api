@@ -3,3 +3,6 @@
 **/dist
 .git
 .env
+.env.*
+**/.env
+**/.env.*

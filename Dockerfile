@@ -1,12 +1,19 @@
 FROM node:20-alpine
 RUN apk add --no-cache git
-# support for private repositories
-RUN --mount=type=secret,id=GITHUB_TOKEN \
-    git config --global url."https://x-access-token:$(cat /run/secrets/GITHUB_TOKEN)@github.com/".insteadOf "ssh://git@github.com"
-
 WORKDIR /src
 COPY . .
-RUN npm ci
+# Private repository authentication exists only in this RUN's process environment.
+# Never write the token into a Git URL/configuration file or an image ENV layer.
+RUN --mount=type=secret,id=GITHUB_TOKEN,required=true \
+    export GIT_CONFIG_COUNT=3 \
+      GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf \
+      GIT_CONFIG_VALUE_0=ssh://git@github.com/ \
+      GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf \
+      GIT_CONFIG_VALUE_1=git@github.com: \
+      GIT_CONFIG_KEY_2=http.https://github.com/.extraHeader \
+      GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$(cat /run/secrets/GITHUB_TOKEN)" | base64 | tr -d '\n')" \
+    && npm ci \
+    && npm cache clean --force
 RUN npm run build
 RUN npm prune --omit=dev
 
