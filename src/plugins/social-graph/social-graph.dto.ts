@@ -48,9 +48,11 @@ export class GraphProjectionDto extends GraphIdentityDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'Height of the last fully indexed key-block state.',
+    description:
+      'Height of the last fully indexed key-block or microblock state; subject to reorg.',
   })
   completed_height: string | null;
+  @ApiProperty({ type: String, nullable: true }) completed_hash: string | null;
   @ApiProperty({
     type: String,
     nullable: true,

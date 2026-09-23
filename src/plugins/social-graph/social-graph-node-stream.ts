@@ -9,7 +9,7 @@ interface Cursor {
 }
 export const FIRST_NODE_CURSOR = JSON.stringify({ micro: 0, transaction: 1 });
 
-/** Enumerates the whole closed generation through node transaction indexes.
+/** Enumerates a canonical generation or a pinned microblock prefix through node indexes.
  * Internal calls are included, without relying on a middleware destination filter. */
 export class SocialGraphNodeStream {
   constructor(private readonly node: Node) {}
@@ -27,8 +27,11 @@ export class SocialGraphNodeStream {
     end: { hash: string; height: string },
     token: string,
   ): Promise<CatchupPage> {
-    if (BigInt(end.height) !== BigInt(start.height) + 1n)
-      throw new Error('Node stream requires one closed generation');
+    const microEnd = end.hash.startsWith('mh_');
+    if (BigInt(end.height) !== BigInt(start.height) + (microEnd ? 0n : 1n))
+      throw new Error(
+        'Node stream requires one generation or microblock prefix',
+      );
     const cursor: Cursor = JSON.parse(token);
     if (
       !Number.isSafeInteger(cursor.micro) ||
@@ -40,20 +43,35 @@ export class SocialGraphNodeStream {
     const generation = await this.node.getGenerationByHeight(
       Number(start.height),
     );
-    const closing = await this.node.getKeyBlockByHeight(Number(end.height));
+    const keyHash = generation.keyBlock.hash;
+    const startMicro = start.hash.startsWith('mh_')
+      ? generation.microBlocks.indexOf(start.hash as any)
+      : -1;
     if (
-      generation.keyBlock.hash !== start.hash ||
-      closing.hash !== end.hash ||
-      closing.prevKeyHash !== start.hash
+      (start.hash.startsWith('mh_') && startMicro < 0) ||
+      (!start.hash.startsWith('mh_') && keyHash !== start.hash)
     )
       throw new GraphReorgError('Generation anchor changed');
-    const micros = generation.microBlocks;
-    if (micros.length > 10000 || cursor.micro > micros.length)
+    let micros = generation.microBlocks;
+    if (micros.length > 10000) throw new Error('Invalid generation bounds');
+    if (microEnd) {
+      const endMicro = micros.indexOf(end.hash as any);
+      if (endMicro <= startMicro)
+        throw new GraphReorgError('Microblock endpoint changed');
+      micros = micros.slice(0, endMicro + 1);
+    } else {
+      const closing = await this.node.getKeyBlockByHeight(Number(end.height));
+      if (closing.hash !== end.hash || closing.prevKeyHash !== keyHash)
+        throw new GraphReorgError('Generation anchor changed');
+      if (closing.prevHash !== (micros.at(-1) ?? keyHash))
+        throw new GraphReorgError(
+          'Generation is not closed at the expected block',
+        );
+    }
+    // A completed microblock watermark already includes every transaction in it.
+    if (token === FIRST_NODE_CURSOR) cursor.micro = startMicro + 1;
+    if (cursor.micro < startMicro + 1 || cursor.micro > micros.length)
       throw new Error('Invalid generation bounds');
-    if (closing.prevHash !== (micros.at(-1) ?? start.hash))
-      throw new GraphReorgError(
-        'Generation is not closed at the expected block',
-      );
     const transactions: CatchupPage['transactions'] = [];
     let budget = 100;
     while (cursor.micro < micros.length && budget > 0) {
@@ -63,9 +81,9 @@ export class SocialGraphNodeStream {
         this.node.getMicroBlockTransactionsCountByHash(hash),
       ]);
       if (
-        header.prevKeyHash !== start.hash ||
+        header.prevKeyHash !== keyHash ||
         header.prevHash !==
-          (cursor.micro === 0 ? start.hash : micros[cursor.micro - 1]) ||
+          (cursor.micro === 0 ? keyHash : micros[cursor.micro - 1]) ||
         decimal(header.height) !== start.height
       )
         throw new GraphReorgError('Invalid micro block ancestry');
@@ -113,11 +131,19 @@ export class SocialGraphNodeStream {
         cursor.transaction = 1;
       }
     }
-    if (
+    if (microEnd) {
+      const current = await this.node.getGenerationByHeight(Number(end.height));
+      if (
+        current.keyBlock.hash !== keyHash ||
+        current.microBlocks[micros.length - 1] !== end.hash
+      )
+        throw new GraphReorgError('Generation changed during read');
+    } else if (
       (await this.node.getKeyBlockByHeight(Number(end.height))).hash !==
       end.hash
-    )
+    ) {
       throw new GraphReorgError('Generation changed during read');
+    }
     return {
       expectedCursor: token,
       nextCursor:

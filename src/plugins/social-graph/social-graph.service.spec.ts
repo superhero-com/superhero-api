@@ -120,6 +120,8 @@ describe('Social graph selection', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
+      {} as any,
     );
     await worker.tick();
     expect(db.createQueryRunner).not.toHaveBeenCalled();

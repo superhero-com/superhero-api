@@ -266,7 +266,7 @@ export class SocialGraphController {
     summary: 'Fresh pinned policy, ownership and migration state',
   })
   policy() {
-    return this.graph.getReader().policy();
+    return this.graph.getReader().policy('top');
   }
 
   @Get('page')
