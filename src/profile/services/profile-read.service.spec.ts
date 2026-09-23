@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { Account } from '@/account/entities/account.entity';
 import { ProfileCache } from '../entities/profile-cache.entity';
 import { ProfileReadService } from './profile-read.service';
@@ -23,7 +24,8 @@ describe('ProfileReadService', () => {
       find: jest.fn().mockResolvedValue(accounts),
     } as any;
     const socialGraphCountRepository = {
-      findOne: jest.fn().mockResolvedValue(null),
+      isConfigured: () => false,
+      getFollowCounts: jest.fn(),
     } as any;
     return new ProfileReadService(
       profileCacheRepository,
@@ -41,79 +43,43 @@ describe('ProfileReadService', () => {
     expect(result.public_name).toBe(address);
   });
 
-  it('surfaces follower and following counts when the social graph is configured', async () => {
-    const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
-    const original = process.env[KEY];
-    process.env[KEY] = 'ct_configured';
-    try {
-      // Re-require so the module-level SOCIAL_GRAPH_ENABLED reads the set env.
-      let ConfiguredProfileReadService: any;
-      jest.isolateModules(() => {
-        ConfiguredProfileReadService =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('./profile-read.service').ProfileReadService;
-      });
-      const service = new ConfiguredProfileReadService(
-        { findOne: jest.fn().mockResolvedValue(null) },
-        { findOne: jest.fn().mockResolvedValue(null) },
-        {
-          findOne: jest.fn().mockResolvedValue({
-            address: 'ak_counts',
-            followers_count: 7,
-            following_count: 3,
-          }),
-        },
-      );
-
-      const result = await service.getProfile('ak_counts');
-
-      expect(result.profile).toEqual(
-        expect.objectContaining({
-          followers_count: 7,
-          following_count: 3,
-        }),
-      );
-    } finally {
-      if (original === undefined) {
-        delete process.env[KEY];
-      } else {
-        process.env[KEY] = original;
-      }
-    }
+  it('uses the selected contract projection for profile counts', async () => {
+    const graph = {
+      isConfigured: () => true,
+      getFollowCounts: jest
+        .fn()
+        .mockResolvedValue({ followers_count: 7, following_count: 3 }),
+    };
+    const service = new ProfileReadService(
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      graph as any,
+    );
+    expect((await service.getProfile('ak_account')).profile).toMatchObject({
+      followers_count: 7,
+      following_count: 3,
+    });
+    expect(graph.getFollowCounts).toHaveBeenCalledWith('ak_account');
   });
 
-  it('returns zero counts when the address has no counts row', async () => {
-    const KEY = 'SOCIAL_GRAPH_CONTRACT_ADDRESS';
-    const original = process.env[KEY];
-    process.env[KEY] = 'ct_configured';
-    try {
-      let ConfiguredProfileReadService: any;
-      jest.isolateModules(() => {
-        ConfiguredProfileReadService =
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          require('./profile-read.service').ProfileReadService;
-      });
-      const service = new ConfiguredProfileReadService(
-        { findOne: jest.fn().mockResolvedValue(null) },
-        { findOne: jest.fn().mockResolvedValue(null) },
-        { findOne: jest.fn().mockResolvedValue(null) },
-      );
-
-      const result = await service.getProfile('ak_nobody');
-
-      expect(result.profile).toEqual(
-        expect.objectContaining({
-          followers_count: 0,
-          following_count: 0,
-        }),
-      );
-    } finally {
-      if (original === undefined) {
-        delete process.env[KEY];
-      } else {
-        process.env[KEY] = original;
-      }
-    }
+  it('does not publish stale or zero counts while the selected graph is rebuilding', async () => {
+    const service = new ProfileReadService(
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      { findOne: jest.fn().mockResolvedValue(null) } as any,
+      {
+        isConfigured: () => true,
+        getFollowCounts: jest
+          .fn()
+          .mockRejectedValue(
+            new ServiceUnavailableException('Projection not ready'),
+          ),
+      } as any,
+    );
+    const result = await service.getProfile('ak_account');
+    expect(result.profile.social_graph_available).toBe(false);
+    expect(result.profile).not.toHaveProperty('followers_count');
+    expect(result.profile).not.toHaveProperty('following_count');
+    expect(result.address).toBe('ak_account');
   });
 
   it('prefers chain_name over other name sources', async () => {

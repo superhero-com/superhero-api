@@ -1,7 +1,7 @@
 import {
   FIRST_NODE_CURSOR,
-  SocialGraphV2NodeStream,
-} from './social-graph-v2-node-stream';
+  SocialGraphNodeStream,
+} from './social-graph-node-stream';
 
 function fixture(count = 1) {
   const node: any = {
@@ -52,10 +52,10 @@ function fixture(count = 1) {
   };
 }
 
-describe('V2 canonical node stream', () => {
+describe('Social graph canonical node stream', () => {
   it('includes indirect contract calls, uses one-based indexes, and resumes without splitting transactions', async () => {
     const f = fixture(105),
-      stream = new SocialGraphV2NodeStream(f.node);
+      stream = new SocialGraphNodeStream(f.node);
     const first = await stream.page(
       f.reader,
       f.start,
@@ -77,7 +77,7 @@ describe('V2 canonical node stream', () => {
   });
   it('rejects incomplete ancestry and a changed closing anchor', async () => {
     const f = fixture(),
-      stream = new SocialGraphV2NodeStream(f.node);
+      stream = new SocialGraphNodeStream(f.node);
     f.node.getMicroBlockHeaderByHash.mockResolvedValueOnce({
       prevHash: 'mh_missing',
       prevKeyHash: 'kh_start',
@@ -99,7 +99,7 @@ describe('V2 canonical node stream', () => {
   });
   it('suppresses reverted wrapper effects and decodes successful GA inner receipts', async () => {
     const f = fixture(),
-      stream = new SocialGraphV2NodeStream(f.node);
+      stream = new SocialGraphNodeStream(f.node);
     f.node.getTransactionInfoByHash.mockResolvedValueOnce({
       gaInfo: { returnType: 'error' },
     });
@@ -122,7 +122,7 @@ describe('V2 canonical node stream', () => {
   });
   it('skips sponsored spends but includes sponsored calls and GA attachment initialization', async () => {
     const f = fixture(),
-      stream = new SocialGraphV2NodeStream(f.node);
+      stream = new SocialGraphNodeStream(f.node);
     f.node.getMicroBlockTransactionByHashAndIndex.mockResolvedValueOnce({
       hash: 'th_spend',
       blockHash: 'mh_one',
@@ -152,7 +152,7 @@ describe('V2 canonical node stream', () => {
   });
   it('rejects incomplete GA contract receipts instead of losing their effects', async () => {
     const f = fixture(),
-      stream = new SocialGraphV2NodeStream(f.node);
+      stream = new SocialGraphNodeStream(f.node);
     f.node.getTransactionInfoByHash.mockResolvedValue({
       gaInfo: { returnType: 'ok', innerObject: { txInfo: 'contract_call_tx' } },
     });

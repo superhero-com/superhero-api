@@ -1,40 +1,44 @@
-import { SocialGraphV2OutboxService } from './social-graph-v2-outbox.service';
+import { SocialGraphOutboxService } from './social-graph-outbox.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
 import { AeSdkService } from '@/ae/ae-sdk.service';
-import { SocialGraphV2Service } from './social-graph-v2.service';
-import { SocialGraphV2SnapshotService } from './social-graph-v2-snapshot.service';
-import { SocialGraphV2CatchupService } from './social-graph-v2-catchup.service';
-import { SocialGraphV2ReconcileService } from './social-graph-v2-reconcile.service';
+import { SocialGraphService } from './social-graph.service';
+import { SocialGraphSnapshotService } from './social-graph-snapshot.service';
+import { SocialGraphCatchupService } from './social-graph-catchup.service';
+import { SocialGraphReconcileService } from './social-graph-reconcile.service';
 import {
-  SocialGraphV2ProjectionService,
+  SocialGraphProjectionService,
   ProjectionScope,
-} from './social-graph-v2-projection.service';
+} from './social-graph-projection.service';
 import {
   FIRST_NODE_CURSOR,
   GraphReorgError,
-  SocialGraphV2NodeStream,
-} from './social-graph-v2-node-stream';
+  SocialGraphNodeStream,
+} from './social-graph-node-stream';
 
 @Injectable()
-export class SocialGraphV2WorkerService {
-  private readonly logger = new Logger(SocialGraphV2WorkerService.name);
+export class SocialGraphWorkerService {
+  private readonly logger = new Logger(SocialGraphWorkerService.name);
   private running = false;
   constructor(
     private readonly db: DataSource,
     private readonly ae: AeSdkService,
-    private readonly graph: SocialGraphV2Service,
-    private readonly snapshots: SocialGraphV2SnapshotService,
-    private readonly catchup: SocialGraphV2CatchupService,
-    private readonly reconcile: SocialGraphV2ReconcileService,
-    private readonly projection: SocialGraphV2ProjectionService,
-    private readonly outbox: SocialGraphV2OutboxService,
+    private readonly graph: SocialGraphService,
+    private readonly snapshots: SocialGraphSnapshotService,
+    private readonly catchup: SocialGraphCatchupService,
+    private readonly reconcile: SocialGraphReconcileService,
+    private readonly projection: SocialGraphProjectionService,
+    private readonly outbox: SocialGraphOutboxService,
   ) {}
 
   @Interval(3000)
   async tick() {
-    if (process.env.SOCIAL_GRAPH_V2_WORKER_ENABLED !== 'true' || this.running)
+    if (
+      process.env.SOCIAL_GRAPH_WORKER_ENABLED === 'false' ||
+      !this.graph.isConfigured() ||
+      this.running
+    )
       return;
     this.running = true;
     let scope: ProjectionScope | undefined;
@@ -45,7 +49,7 @@ export class SocialGraphV2WorkerService {
     try {
       const reader = this.graph.getReader();
       await reader.verifyIdentity();
-      lockName = `social-graph-v2:${reader.identity.network}:${reader.identity.contract}`;
+      lockName = `social-graph:${reader.identity.network}:${reader.identity.contract}`;
       connection = await runner.connect();
       locked = (
         await runner.query(
@@ -56,7 +60,7 @@ export class SocialGraphV2WorkerService {
       if (!locked) return;
       const latest = (
         await runner.query(
-          'SELECT * FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 ORDER BY generation DESC LIMIT 1',
+          'SELECT * FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 ORDER BY generation DESC LIMIT 1',
           [reader.identity.network, reader.identity.contract],
         )
       )[0];
@@ -77,9 +81,7 @@ export class SocialGraphV2WorkerService {
         await this.snapshots.step(scope, reader);
         return;
       }
-      const stream = new SocialGraphV2NodeStream(
-        this.ae.sdk.getContext().onNode,
-      );
+      const stream = new SocialGraphNodeStream(this.ae.sdk.getContext().onNode);
       const start = {
         hash: latest.synced_hash ?? latest.snapshot_hash,
         height: latest.synced_height ?? latest.snapshot_height,
@@ -96,7 +98,7 @@ export class SocialGraphV2WorkerService {
           BigInt(start.height) >= BigInt(policy.height) - 1n
         ) {
           await runner.query(
-            `UPDATE social_graph_v2_scopes SET notify_from_height=$4
+            `UPDATE social_graph_projection_scopes SET notify_from_height=$4
             WHERE network=$1 AND contract=$2 AND generation=$3 AND notify_from_height IS NULL`,
             [scope.network, scope.contract, scope.generation, start.height],
           );
@@ -124,7 +126,7 @@ export class SocialGraphV2WorkerService {
       )
         await this.projection.invalidateAfterReorg(scope);
       this.logger.error(
-        `V2 graph worker stopped this pass: ${error instanceof Error ? error.message : String(error)}`,
+        `Social graph worker stopped this pass: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       try {
@@ -138,7 +140,7 @@ export class SocialGraphV2WorkerService {
         // Closing only our lock connection releases that lock on the server.
         await connection?.end();
         this.logger.error(
-          'V2 worker discarded its lock connection after unlock failure',
+          'Social graph worker discarded its lock connection after unlock failure',
         );
       } finally {
         try {

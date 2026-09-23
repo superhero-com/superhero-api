@@ -2,25 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import {
   ProjectionScope,
-  SocialGraphV2ProjectionService,
-} from './social-graph-v2-projection.service';
+  SocialGraphProjectionService,
+} from './social-graph-projection.service';
 import {
-  SocialGraphV2Reader,
+  SocialGraphReader,
   decimal,
   encodeGraphCursor,
   decodeGraphCursor,
-} from './social-graph-v2-reader';
+} from './social-graph-reader';
 
 type SnapshotReader = Pick<
-  SocialGraphV2Reader,
+  SocialGraphReader,
   'identity' | 'policy' | 'page' | 'assertCanonical' | 'migrationEvidence'
 >;
 
 @Injectable()
-export class SocialGraphV2SnapshotService {
+export class SocialGraphSnapshotService {
   constructor(
     private readonly db: DataSource,
-    private readonly projection: SocialGraphV2ProjectionService,
+    private readonly projection: SocialGraphProjectionService,
   ) {}
 
   private match(scope: ProjectionScope, reader: SnapshotReader) {
@@ -44,7 +44,7 @@ export class SocialGraphV2SnapshotService {
     // Never reset an existing checkpoint. A restart must continue it or choose
     // a new generation after invalidation, keeping the old projection isolated.
     await this.db.query(
-      `INSERT INTO social_graph_v2_scopes
+      `INSERT INTO social_graph_projection_scopes
       (network,contract,generation,state,snapshot_hash,snapshot_height,source_contract,source_cutoff,activation_height,migration_evidence)
       VALUES($1,$2,$3,'importing',$4,$5,$6,$7,$8,$9)`,
       [
@@ -65,7 +65,7 @@ export class SocialGraphV2SnapshotService {
     this.match(scope, reader);
     const key = [scope.network, scope.contract, scope.generation];
     const rows = await this.db.query(
-      'SELECT * FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3',
+      'SELECT * FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 AND generation=$3',
       key,
     );
     const state = rows[0];
@@ -105,7 +105,7 @@ export class SocialGraphV2SnapshotService {
     return this.db.transaction(async (m) => {
       const current = (
         await m.query(
-          'SELECT * FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
+          'SELECT * FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
           key,
         )
       )[0];
@@ -131,7 +131,7 @@ export class SocialGraphV2SnapshotService {
           throw new Error('Invalid snapshot account');
         if (kind === 'Rate') {
           await m.query(
-            `INSERT INTO social_graph_v2_rates(network,contract,generation,address,last_follow_height)
+            `INSERT INTO social_graph_projection_rates(network,contract,generation,address,last_follow_height)
             VALUES($1,$2,$3,$4,$5)`,
             [...key, pair[0], decimal(pair[1])],
           );
@@ -150,7 +150,7 @@ export class SocialGraphV2SnapshotService {
         }
       }
       await m.query(
-        `UPDATE social_graph_v2_scopes SET export_cursor=$4,state=$5
+        `UPDATE social_graph_projection_scopes SET export_cursor=$4,state=$5
         WHERE network=$1 AND contract=$2 AND generation=$3`,
         [...key, next, page.next_cursor ? 'importing' : 'catching-up'],
       );

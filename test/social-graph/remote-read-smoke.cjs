@@ -6,21 +6,27 @@ const { createHash } = require('node:crypto');
 const { writeFileSync } = require('node:fs');
 const { Node, Contract } = require('@aeternity/aepp-sdk');
 const {
-  SocialGraphV2Reader,
-} = require('../../src/plugins/social-graph/v2/social-graph-v2-reader');
+  SocialGraphReader,
+} = require('../../src/plugins/social-graph/social-graph-reader');
 const {
-  SocialGraphV2NodeStream,
+  SocialGraphNodeStream,
   FIRST_NODE_CURSOR,
-} = require('../../src/plugins/social-graph/v2/social-graph-v2-node-stream');
+} = require('../../src/plugins/social-graph/social-graph-node-stream');
 const {
-  SocialGraphV2Lifecycle,
-} = require('../../src/plugins/social-graph/v2/social-graph-v2-lifecycle');
-const aci = require('../../src/plugins/social-graph/aci/SocialContractV2.aci.json');
-const fixture = require('./fixtures/remote-rehearsal.json');
+  SocialGraphLifecycle,
+} = require('../../src/plugins/social-graph/social-graph-lifecycle');
+const aci = require('../../src/plugins/social-graph/aci/SocialContract.aci.json');
+const { evidencePath } = require('./evidence.cjs');
+const fixturePath = process.env.SOCIAL_GRAPH_REMOTE_FIXTURE;
+if (!fixturePath)
+  throw new Error(
+    'SOCIAL_GRAPH_REMOTE_FIXTURE must point to a private rehearsal fixture',
+  );
+const fixture = require(require('node:path').resolve(fixturePath));
 
 (async () => {
   assert.equal(
-    process.env.SOCIAL_GRAPH_V2_REMOTE_READ_TEST,
+    process.env.SOCIAL_GRAPH_REMOTE_READ_TEST,
     'true',
     'Explicit remote-read test opt-in required',
   );
@@ -28,7 +34,7 @@ const fixture = require('./fixtures/remote-rehearsal.json');
   const status = await node.getStatus();
   assert.equal(status.networkId, 'ae_uat');
   async function rehearsalReader(address) {
-    const reader = new SocialGraphV2Reader(node, {
+    const reader = new SocialGraphReader(node, {
       network: 'ae_uat',
       contract: address,
     });
@@ -49,7 +55,7 @@ const fixture = require('./fixtures/remote-rehearsal.json');
     return reader;
   }
   const reader = await rehearsalReader(fixture.source);
-  const stream = new SocialGraphV2NodeStream(node);
+  const stream = new SocialGraphNodeStream(node);
   const start = await stream.anchor(fixture.startHeight),
     end = await stream.anchor(fixture.endHeight);
   let cursor = FIRST_NODE_CURSOR,
@@ -82,7 +88,7 @@ const fixture = require('./fixtures/remote-rehearsal.json');
   const destinationPolicy = await (
     await rehearsalReader(fixture.destination)
   ).policy();
-  const migration = await new SocialGraphV2Lifecycle(node).verify(
+  const migration = await new SocialGraphLifecycle(node).verify(
     destinationPolicy,
     {
       freezeTx: fixture.freezeTx,
@@ -92,7 +98,7 @@ const fixture = require('./fixtures/remote-rehearsal.json');
   assert.equal(migration.proof.source, fixture.source);
   const checkedAt = new Date().toISOString();
   writeFileSync(
-    'docs/evidence/social-graph-v2-remote-delivery.json',
+    evidencePath('social-graph-remote-delivery.json'),
     JSON.stringify(
       {
         checkedAt,
@@ -151,7 +157,7 @@ const fixture = require('./fixtures/remote-rehearsal.json');
     });
   }
   writeFileSync(
-    'docs/evidence/social-graph-v2-wrapped-receipts.json',
+    evidencePath('social-graph-wrapped-receipts.json'),
     JSON.stringify(
       {
         network: 'ae_uat',

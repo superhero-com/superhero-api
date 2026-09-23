@@ -1,10 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
-import { SocialGraphCount } from '@/plugins/social-graph/entities/social-graph-count.entity';
-import { SOCIAL_GRAPH_ENABLED } from '@/plugins/social-graph/social-graph.constants';
+import { SocialGraphService } from '@/plugins/social-graph/social-graph.service';
 import { ProfileCache } from '../entities/profile-cache.entity';
+
+interface SocialGraphProfileCounts {
+  followers_count?: number;
+  following_count?: number;
+  social_graph_available?: boolean;
+}
 
 @Injectable()
 export class ProfileReadService {
@@ -13,17 +18,16 @@ export class ProfileReadService {
     private readonly profileCacheRepository: Repository<ProfileCache>,
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
-    @InjectRepository(SocialGraphCount)
-    private readonly socialGraphCountRepository: Repository<SocialGraphCount>,
+    private readonly socialGraph: SocialGraphService,
   ) {}
 
   async getProfile(address: string) {
     const [cache, account, counts] = await Promise.all([
       this.profileCacheRepository.findOne({ where: { address } }),
       this.accountRepository.findOne({ where: { address } }),
-      SOCIAL_GRAPH_ENABLED
+      this.socialGraph.isConfigured()
         ? this.getFollowCounts(address)
-        : Promise.resolve({}),
+        : Promise.resolve<SocialGraphProfileCounts>({}),
     ]);
 
     const profile = { ...this.mergeProfile(cache, account), ...counts };
@@ -36,22 +40,20 @@ export class ProfileReadService {
     };
   }
 
-  // Follower/following counts are chain-truth served from the maintained
-  // social_graph_counts table — one primary-key lookup, no COUNT(*) on the read
-  // path. Called only when the feature is enabled; a disabled deployment omits
-  // the keys rather than reading an empty table. A missing row is an address
-  // nobody follows and who follows nobody: zero, not absent. Only the
-  // single-profile read carries them — the profile page the counts are for.
   private async getFollowCounts(
     address: string,
-  ): Promise<{ followers_count: number; following_count: number }> {
-    const counts = await this.socialGraphCountRepository.findOne({
-      where: { address },
-    });
-    return {
-      followers_count: counts?.followers_count ?? 0,
-      following_count: counts?.following_count ?? 0,
-    };
+  ): Promise<SocialGraphProfileCounts> {
+    try {
+      return {
+        ...(await this.socialGraph.getFollowCounts(address)),
+        social_graph_available: true,
+      };
+    } catch (error) {
+      if (!(error instanceof ServiceUnavailableException)) throw error;
+      // A snapshot/reorg rebuild must not hide an otherwise available profile.
+      // Omitting counters avoids presenting unknown graph state as zero.
+      return { social_graph_available: false };
+    }
   }
 
   async getProfilesByAddresses(addresses: string[]) {

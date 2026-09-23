@@ -1,14 +1,14 @@
-import { SOCIAL_GRAPH_ABORT_STATUS } from '../social-graph.errors';
+import { SOCIAL_GRAPH_ABORT_STATUS } from './social-graph.errors';
 import { normalizeEventTopics } from '@/utils/common';
-import type { GraphMutation } from './social-graph-v2-projection.service';
+import type { GraphMutation } from './social-graph-projection.service';
 import {
   BadRequestException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Contract, Encoded, Node } from '@aeternity/aepp-sdk';
-import aci from '../aci/SocialContractV2.aci.json';
-import build from '../aci/SocialContractV2.build.json';
+import aci from './aci/SocialContract.aci.json';
+import build from './aci/SocialContract.build.json';
 
 export interface GraphIdentity {
   network: string;
@@ -69,8 +69,8 @@ export function decodeGraphCursor(
   return c;
 }
 
-/** Read-only V2 adapter. Every multi-call view uses one key-block state. */
-export class SocialGraphV2Reader {
+/** Read-only social graph adapter. Every multi-call view uses one key-block state. */
+export class SocialGraphReader {
   private contract?: Promise<any>;
   constructor(
     private readonly node: Node,
@@ -106,16 +106,14 @@ export class SocialGraphV2Reader {
   }
 
   async migrationEvidence(
-    policy: Awaited<ReturnType<SocialGraphV2Reader['policy']>>,
+    policy: Awaited<ReturnType<SocialGraphReader['policy']>>,
   ) {
-    const { SocialGraphV2Lifecycle } =
-      await import('./social-graph-v2-lifecycle');
-    return new SocialGraphV2Lifecycle(this.node).verify(policy, {
-      activationTx: process.env.SOCIAL_GRAPH_V2_ACTIVATION_TX,
-      freezeTx: process.env.SOCIAL_GRAPH_V2_SOURCE_FREEZE_TX,
-      legacySnapshotHash: process.env.SOCIAL_GRAPH_V2_LEGACY_SNAPSHOT_HASH,
-      legacyManifestHash:
-        process.env.SOCIAL_GRAPH_V2_LEGACY_MANIFEST_COMMITMENT,
+    const { SocialGraphLifecycle } = await import('./social-graph-lifecycle');
+    return new SocialGraphLifecycle(this.node).verify(policy, {
+      activationTx: process.env.SOCIAL_GRAPH_ACTIVATION_TX,
+      freezeTx: process.env.SOCIAL_GRAPH_SOURCE_FREEZE_TX,
+      legacySnapshotHash: process.env.SOCIAL_GRAPH_LEGACY_SNAPSHOT_HASH,
+      legacyManifestHash: process.env.SOCIAL_GRAPH_LEGACY_MANIFEST_COMMITMENT,
     });
   }
 

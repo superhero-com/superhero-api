@@ -2,7 +2,7 @@ import { AeModule } from '@/ae/ae.module';
 import { AffiliationModule } from '@/affiliation/affiliation.module';
 import { Account } from '@/account/entities/account.entity';
 import { Invitation } from '@/affiliation/entities/invitation.entity';
-import { SocialGraphCount } from '@/plugins/social-graph/entities/social-graph-count.entity';
+import { SocialGraphReadModule } from '@/plugins/social-graph/social-graph-read.module';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProfileCache } from './entities/profile-cache.entity';
@@ -30,6 +30,7 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
 
 @Module({
   imports: [
+    SocialGraphReadModule,
     AeModule,
     forwardRef(() => AffiliationModule),
     TypeOrmModule.forFeature([
@@ -46,7 +47,6 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
       ProfileChainNameClaim,
       Account,
       Invitation,
-      SocialGraphCount,
     ]),
   ],
   providers: [
