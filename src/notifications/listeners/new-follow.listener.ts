@@ -30,8 +30,14 @@ export class NewFollowListener {
     private readonly config: ConfigType<typeof notificationsConfig>,
   ) {}
 
-  @OnEvent(SOCIAL_GRAPH_FOLLOWED_EVENT, { async: true, promisify: true, suppressErrors: false })
-  async onFollowed(payload: SocialGraphFollowedEventPayload): Promise<boolean | void> {
+  @OnEvent(SOCIAL_GRAPH_FOLLOWED_EVENT, {
+    async: true,
+    promisify: true,
+    suppressErrors: false,
+  })
+  async onFollowed(
+    payload: SocialGraphFollowedEventPayload,
+  ): Promise<boolean | void> {
     try {
       if (!this.config.enabled) {
         return payload.graphScope ? false : undefined;
