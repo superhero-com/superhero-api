@@ -1,5 +1,5 @@
 import { Contract } from '@aeternity/aepp-sdk';
-import { SocialGraphV2Lifecycle } from './social-graph-v2-lifecycle';
+import { SocialGraphLifecycle } from './social-graph-lifecycle';
 const policy = {
   contract: 'ct_destination',
   height: '120',
@@ -25,14 +25,14 @@ describe('Migration evidence boundaries', () => {
   afterEach(() => jest.restoreAllMocks());
   it('does not invent lifecycle heights for a fresh deployment', async () => {
     expect(
-      await new SocialGraphV2Lifecycle({} as any).verify(
+      await new SocialGraphLifecycle({} as any).verify(
         { ...policy, import_source: null },
         {},
       ),
     ).toEqual({ sourceCutoff: null, activationHeight: null, proof: null });
   });
   it('requires matching source/destination receipt evidence before projection import', async () => {
-    const service = new SocialGraphV2Lifecycle({} as any);
+    const service = new SocialGraphLifecycle({} as any);
     await expect(service.verify(policy, {})).rejects.toThrow('ACTIVATION_TX');
     jest
       .spyOn(service, 'receipt')
@@ -56,7 +56,7 @@ describe('Migration evidence boundaries', () => {
     ).rejects.toThrow('source');
   });
   it('checks legacy commitment and canonical snapshot while preserving the owner trust boundary', async () => {
-    const service = new SocialGraphV2Lifecycle({
+    const service = new SocialGraphLifecycle({
       getKeyBlockByHash: async () => ({ hash: 'kh_legacy', height: 99 }),
       getKeyBlockByHeight: async () => ({ hash: 'kh_legacy' }),
     } as any);

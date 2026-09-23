@@ -20,7 +20,7 @@ export interface GraphEventIdentity {
 
 /** All mutations serialize within a projection generation; no degree-dependent recount. */
 @Injectable()
-export class SocialGraphV2ProjectionService {
+export class SocialGraphProjectionService {
   constructor(private readonly db: DataSource) {}
 
   async applyEvent(
@@ -32,7 +32,7 @@ export class SocialGraphV2ProjectionService {
     return this.db.transaction(async (m) => {
       const args = [scope.network, scope.contract, scope.generation];
       const rows = await m.query(
-        'SELECT state,snapshot_height FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
+        'SELECT state,snapshot_height FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
         args,
       );
       if (
@@ -46,7 +46,7 @@ export class SocialGraphV2ProjectionService {
       )
         return false;
       const inserted = await m.query(
-        `INSERT INTO social_graph_v2_events(network,contract,generation,tx_hash,event_index,height)
+        `INSERT INTO social_graph_projection_events(network,contract,generation,tx_hash,event_index,height)
         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING tx_hash`,
         [...args, event.transaction, event.index, event.height],
       );
@@ -73,12 +73,12 @@ export class SocialGraphV2ProjectionService {
     ];
     const rows = edge.present
       ? await m.query(
-          `INSERT INTO social_graph_v2_edges(network,contract,generation,from_address,to_address,kind)
+          `INSERT INTO social_graph_projection_edges(network,contract,generation,from_address,to_address,kind)
       VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING id`,
           args,
         )
       : await m.query(
-          `WITH removed AS (DELETE FROM social_graph_v2_edges WHERE network=$1 AND contract=$2 AND generation=$3
+          `WITH removed AS (DELETE FROM social_graph_projection_edges WHERE network=$1 AND contract=$2 AND generation=$3
         AND from_address=$4 AND to_address=$5 AND kind=$6 RETURNING id) SELECT id FROM removed`,
           args,
         );
@@ -88,12 +88,12 @@ export class SocialGraphV2ProjectionService {
     for (const address of [...new Set([edge.from, edge.to])].sort()) {
       const key = [scope.network, scope.contract, scope.generation, address];
       await m.query(
-        `INSERT INTO social_graph_v2_counts(network,contract,generation,address)
+        `INSERT INTO social_graph_projection_counts(network,contract,generation,address)
         VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
         key,
       );
       await m.query(
-        `UPDATE social_graph_v2_counts SET followers=followers+$5,following=following+$6,blocked=blocked+$7
+        `UPDATE social_graph_projection_counts SET followers=followers+$5,following=following+$6,blocked=blocked+$7
         WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4`,
         [
           ...key,
@@ -103,8 +103,8 @@ export class SocialGraphV2ProjectionService {
         ],
       );
       await m.query(
-        `INSERT INTO social_graph_v2_dirty(network,contract,generation,address) VALUES($1,$2,$3,$4)
-        ON CONFLICT(network,contract,generation,address) DO UPDATE SET revision=social_graph_v2_dirty.revision+1`,
+        `INSERT INTO social_graph_projection_dirty(network,contract,generation,address) VALUES($1,$2,$3,$4)
+        ON CONFLICT(network,contract,generation,address) DO UPDATE SET revision=social_graph_projection_dirty.revision+1`,
         key,
       );
     }
@@ -118,7 +118,7 @@ export class SocialGraphV2ProjectionService {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
       throw new Error('Invalid reconciliation limit');
     return this.db.query(
-      `SELECT address,revision::text FROM social_graph_v2_dirty
+      `SELECT address,revision::text FROM social_graph_projection_dirty
       WHERE network=$1 AND contract=$2 AND generation=$3 ORDER BY address LIMIT $4`,
       [scope.network, scope.contract, scope.generation, limit],
     );
@@ -131,7 +131,7 @@ export class SocialGraphV2ProjectionService {
   ): Promise<void> {
     // Never erase activity committed while the chain read was in flight.
     await this.db.query(
-      `DELETE FROM social_graph_v2_dirty WHERE network=$1 AND contract=$2 AND generation=$3
+      `DELETE FROM social_graph_projection_dirty WHERE network=$1 AND contract=$2 AND generation=$3
       AND address=$4 AND revision=$5`,
       [scope.network, scope.contract, scope.generation, address, revision],
     );
@@ -141,7 +141,7 @@ export class SocialGraphV2ProjectionService {
     // Deletions cannot be reversed from edge rows. Fail closed and rebuild a new
     // generation at a canonical snapshot, then replay; never resurrect legacy rows.
     await this.db.query(
-      `UPDATE social_graph_v2_scopes SET state='rebuilding'
+      `UPDATE social_graph_projection_scopes SET state='rebuilding'
       WHERE network=$1 AND contract=$2 AND generation=$3`,
       [scope.network, scope.contract, scope.generation],
     );

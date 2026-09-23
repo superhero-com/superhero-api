@@ -1,212 +1,236 @@
 import {
+  GraphCountsDto,
+  GraphStatusDto,
+  GraphConnectionsDto,
+  GraphRelationshipDto,
+  GraphPolicyDto,
+  GraphPageDto,
+} from './social-graph.dto';
+import {
+  SocialGraphPrecheckDto,
+  SocialGraphConfigDto,
+  SocialGraphConnectionsPageDto,
+} from './dto/social-graph.dto';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { ProfileReadService } from '@/profile/services/profile-read.service';
+import { SocialGraphQueryService } from './social-graph-query.service';
+import {
   BadRequestException,
   Body,
+  Post,
+  HttpCode,
+  HttpException,
   Controller,
   DefaultValuePipe,
   Get,
-  HttpCode,
-  HttpException,
   ParseIntPipe,
-  Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ProfileReadService } from '@/profile/services/profile-read.service';
-import { SocialGraphContractService } from './social-graph-contract.service';
-import { SocialGraphConfiguredGuard } from './social-graph-configured.guard';
 import { SocialGraphService } from './social-graph.service';
-import { SOCIAL_GRAPH_ABORT_STATUS } from './social-graph.errors';
-import {
-  AE_ADDRESS_REGEX,
-  SocialGraphConfigDto,
-  SocialGraphConnectionsPageDto,
-  SocialGraphPrecheckDto,
-  SocialGraphRelationshipDto,
-} from './dto/social-graph.dto';
-
-const MAX_LIST_LIMIT = 100;
-const MAX_LIST_SEARCH_LENGTH = 100;
+import { GraphDirection } from './social-graph-reader';
 
 @ApiTags('Social Graph')
 @Controller('social-graph')
-@UseGuards(SocialGraphConfiguredGuard)
 export class SocialGraphController {
   constructor(
-    private readonly socialGraphService: SocialGraphService,
-    private readonly contractService: SocialGraphContractService,
-    private readonly profileReadService: ProfileReadService,
+    private readonly graph: SocialGraphService,
+    private readonly queries: SocialGraphQueryService,
+    private readonly profiles: ProfileReadService,
   ) {}
 
   @Get('followers')
   @ApiOperation({
     operationId: 'listSocialGraphFollowers',
-    summary: "An account's followers, newest first, searchable and paged",
+    summary:
+      'Bounded follower page; continue with the cursor even when search returns no matches.',
   })
-  @ApiQuery({ name: 'address', required: true, example: 'ak_...' })
+  @ApiQuery({ name: 'address', required: true })
   @ApiQuery({
     name: 'search',
     required: false,
-    description: 'Filter by address, chain name or profile name.',
+    description:
+      'Filter the bounded page by address, chain name or profile name.',
   })
   @ApiQuery({
     name: 'cursor',
     required: false,
-    description: 'Opaque cursor from a previous page; omit for the first page.',
+    description:
+      'Opaque continuation; an empty page may still have a next cursor.',
   })
   @ApiQuery({
     name: 'limit',
     required: false,
-    description: `Page size, 1-${MAX_LIST_LIMIT} (default 20).`,
+    type: Number,
+    description: '1–100 slots, default 20.',
   })
   @ApiResponse({ status: 200, type: SocialGraphConnectionsPageDto })
-  @ApiResponse({ status: 400, description: 'Invalid address or query.' })
-  @ApiResponse({ status: 503, description: 'Contract not configured.' })
-  listFollowers(
+  async followers(
     @Query('address') address: string,
     @Query('search') search?: string,
     @Query('cursor') cursor?: string,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
-  ): Promise<SocialGraphConnectionsPageDto> {
-    return this.listConnections('followers', address, search, cursor, limit);
+  ) {
+    const page = await this.connections(
+      address,
+      'followers',
+      limit,
+      cursor,
+      search,
+    );
+    return { items: page.items, next_cursor: page.next_cursor };
   }
 
   @Get('following')
   @ApiOperation({
     operationId: 'listSocialGraphFollowing',
-    summary: 'Accounts an account follows, newest first, searchable and paged',
+    summary:
+      'Bounded following page; continue with the cursor even when search returns no matches.',
   })
-  @ApiQuery({ name: 'address', required: true, example: 'ak_...' })
+  @ApiQuery({ name: 'address', required: true })
   @ApiQuery({
     name: 'search',
     required: false,
-    description: 'Filter by address, chain name or profile name.',
+    description:
+      'Filter the bounded page by address, chain name or profile name.',
   })
   @ApiQuery({
     name: 'cursor',
     required: false,
-    description: 'Opaque cursor from a previous page; omit for the first page.',
+    description:
+      'Opaque continuation; an empty page may still have a next cursor.',
   })
   @ApiQuery({
     name: 'limit',
     required: false,
-    description: `Page size, 1-${MAX_LIST_LIMIT} (default 20).`,
+    type: Number,
+    description: '1–100 slots, default 20.',
   })
   @ApiResponse({ status: 200, type: SocialGraphConnectionsPageDto })
-  @ApiResponse({ status: 400, description: 'Invalid address or query.' })
-  @ApiResponse({ status: 503, description: 'Contract not configured.' })
-  listFollowing(
+  async following(
     @Query('address') address: string,
     @Query('search') search?: string,
     @Query('cursor') cursor?: string,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
-  ): Promise<SocialGraphConnectionsPageDto> {
-    return this.listConnections('following', address, search, cursor, limit);
-  }
-
-  private async listConnections(
-    direction: 'followers' | 'following',
-    address: string,
-    search: string | undefined,
-    cursor: string | undefined,
-    limit: number,
-  ): Promise<SocialGraphConnectionsPageDto> {
-    this.assertAddress(address, 'address');
-    if (limit < 1 || limit > MAX_LIST_LIMIT) {
-      throw new BadRequestException(
-        `limit must be between 1 and ${MAX_LIST_LIMIT}`,
-      );
-    }
-    if (search && search.length > MAX_LIST_SEARCH_LENGTH) {
-      throw new BadRequestException(
-        `search must be at most ${MAX_LIST_SEARCH_LENGTH} characters`,
-      );
-    }
-    const parsedCursor = this.parseCursor(cursor);
-
-    const { addresses, nextCursor } =
-      await this.socialGraphService.listConnections({
-        address,
-        direction,
-        search,
-        cursor: parsedCursor,
-        limit,
-      });
-
-    // One batched profile read for the whole page — the "no per-row lookup"
-    // the list rows need. Re-key by address to keep the edge (cursor) order.
-    const profiles =
-      await this.profileReadService.getProfilesByAddresses(addresses);
-    const byAddress = new Map(profiles.map((p) => [p.address, p]));
-    const items = addresses.map(
-      (addr) => byAddress.get(addr) ?? this.emptyRow(addr),
-    );
-
-    return {
-      items,
-      next_cursor: nextCursor === null ? null : String(nextCursor),
-    };
-  }
-
-  private parseCursor(cursor: string | undefined): number | undefined {
-    if (cursor === undefined || cursor === '') {
-      return undefined;
-    }
-    const parsed = Number(cursor);
-    if (!Number.isInteger(parsed) || parsed < 0) {
-      throw new BadRequestException('Invalid cursor');
-    }
-    return parsed;
-  }
-
-  private emptyRow(
-    address: string,
-  ): SocialGraphConnectionsPageDto['items'][number] {
-    return {
+  ) {
+    const page = await this.connections(
       address,
-      profile: {
-        fullname: '',
-        bio: '',
-        site: null,
-        avatarurl: '',
-        username: null,
-        prefered_aens_name: null,
-        x_username: null,
-        chain_name: null,
-        chain_expires_at: null,
-      },
-      public_name: address,
-    };
-  }
-
-  @Get('relationship')
-  @ApiOperation({
-    operationId: 'getSocialGraphRelationship',
-    summary: 'Pair-wise follow/block relationship between two addresses',
-  })
-  @ApiQuery({ name: 'from', required: true, example: 'ak_...' })
-  @ApiQuery({ name: 'to', required: true, example: 'ak_...' })
-  @ApiResponse({ status: 200, type: SocialGraphRelationshipDto })
-  @ApiResponse({ status: 400, description: 'Invalid address.' })
-  @ApiResponse({ status: 503, description: 'Contract not configured.' })
-  async getRelationship(
-    @Query('from') from: string,
-    @Query('to') to: string,
-  ): Promise<SocialGraphRelationshipDto> {
-    this.assertAddress(from, 'from');
-    this.assertAddress(to, 'to');
-    return this.socialGraphService.getRelationship(from, to);
+      'following',
+      limit,
+      cursor,
+      search,
+    );
+    return { items: page.items, next_cursor: page.next_cursor };
   }
 
   @Get('config')
   @ApiOperation({
     operationId: 'getSocialGraphConfig',
-    summary: 'Contract caps: max_following, max_blocked, follow_cooldown',
+    summary: 'Current contract caps and address.',
   })
   @ApiResponse({ status: 200, type: SocialGraphConfigDto })
-  @ApiResponse({ status: 503, description: 'Contract not configured.' })
-  getConfig(): SocialGraphConfigDto {
-    return this.contractService.getConfig();
+  config() {
+    return this.graph.getConfig();
+  }
+
+  @Get('status')
+  @ApiOperation({
+    operationId: 'getSocialGraphStatus',
+    summary: 'Projection progress and verified migration boundary evidence',
+  })
+  @ApiResponse({ status: 200, type: GraphStatusDto })
+  async status() {
+    const reader = this.graph.getReader();
+    await reader.verifyIdentity();
+    return this.queries.status(
+      reader.identity.network,
+      reader.identity.contract,
+    );
+  }
+
+  @Get('counts')
+  @ApiResponse({ status: 200, type: GraphCountsDto })
+  @ApiOperation({
+    operationId: 'getSocialGraphCounts',
+    summary: 'Scoped indexed counts as decimal strings',
+  })
+  @ApiQuery({ name: 'account', required: true })
+  async counts(@Query('account') account: string) {
+    const reader = this.graph.getReader();
+    await reader.verifyIdentity();
+    const { network, contract } = reader.identity;
+    return this.queries.counts(
+      await this.queries.ready(network, contract),
+      account,
+    );
+  }
+
+  @Get('connections')
+  @ApiResponse({ status: 200, type: GraphConnectionsDto })
+  @ApiOperation({
+    operationId: 'listSocialGraphConnections',
+    summary: 'Scoped keyset page with batched profiles',
+  })
+  @ApiQuery({ name: 'account', required: true })
+  @ApiQuery({ name: 'direction', enum: ['followers', 'following'] })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  async connections(
+    @Query('account') account: string,
+    @Query('direction') direction: 'followers' | 'following',
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit = 20,
+    @Query('cursor') cursor?: string,
+    @Query('search') search?: string,
+  ) {
+    const reader = this.graph.getReader();
+    await reader.verifyIdentity();
+    const { network, contract } = reader.identity;
+    const page = await this.queries.connections(
+      await this.queries.ready(network, contract),
+      account,
+      direction,
+      limit,
+      cursor,
+      search,
+    );
+    const profiles = await this.profiles.getProfilesByAddresses(page.addresses);
+    const byAddress = new Map(
+      profiles.map((profile) => [profile.address, profile]),
+    );
+    return {
+      ...page,
+      items: page.addresses.map(
+        (address) =>
+          byAddress.get(address) ?? {
+            address,
+            public_name: address,
+            profile: {
+              fullname: '',
+              bio: '',
+              site: null,
+              avatarurl: '',
+              username: null,
+              prefered_aens_name: null,
+              x_username: null,
+              chain_name: null,
+              chain_expires_at: null,
+            },
+          },
+      ),
+    };
+  }
+
+  @Get('relationship')
+  @ApiResponse({ status: 200, type: GraphRelationshipDto })
+  @ApiOperation({
+    operationId: 'getSocialGraphRelationship',
+    summary:
+      'Pinned relationship and lifecycle; advisory, never transaction authorization',
+  })
+  @ApiQuery({ name: 'from', required: true })
+  @ApiQuery({ name: 'to', required: true })
+  relationship(@Query('from') from: string, @Query('to') to: string) {
+    return this.graph.getReader().relationship(from, to);
   }
 
   @Post('precheck')
@@ -214,47 +238,59 @@ export class SocialGraphController {
   @ApiOperation({
     operationId: 'precheckSocialGraphAction',
     summary:
-      'Advisory precheck: would this follow/unfollow/block/unblock succeed on chain?',
+      'Read-only advisory simulation against real caller balance and current policy',
   })
-  @ApiResponse({ status: 204, description: 'Would succeed.' })
-  @ApiResponse({ status: 400, description: 'Invalid action or address.' })
+  @ApiResponse({ status: 204, description: 'Advisory simulation passed.' })
+  @ApiResponse({ status: 409, description: 'Contract rejected the action.' })
   @ApiResponse({
-    status: 403,
-    description: 'BLOCKED — the target has blocked the caller.',
+    status: 503,
+    description: 'Simulation unavailable; never treat this as approval.',
   })
-  @ApiResponse({
-    status: 409,
-    description:
-      'Stale-state or cap: ALREADY_FOLLOWING, NOT_FOLLOWING, ALREADY_BLOCKED, ' +
-      'NOT_BLOCKED, CANNOT_FOLLOW_SELF, CANNOT_BLOCK_SELF, BLOCKED_BY_SELF, ' +
-      'MAX_FOLLOWING_REACHED, MAX_BLOCKED_REACHED.',
-  })
-  @ApiResponse({
-    status: 429,
-    description: 'FOLLOW_COOLDOWN (unreachable while follow_cooldown = 0).',
-  })
-  @ApiResponse({ status: 503, description: 'Contract not configured.' })
   async precheck(@Body() body: SocialGraphPrecheckDto): Promise<void> {
-    const code = await this.socialGraphService.precheck(
-      body.action,
-      body.from,
-      body.to,
-    );
-    if (!code) {
-      return;
+    const result = await this.graph
+      .getReader()
+      .precheck(body.action, body.from, body.to);
+    if (result.reason) {
+      const status = result.suggested_http_status ?? 503;
+      throw new HttpException(
+        { statusCode: status, error: result.reason, message: result.reason },
+        status,
+      );
     }
-    const status = SOCIAL_GRAPH_ABORT_STATUS[code];
-    // The abort code reaches the client verbatim so it can render the mapped
-    // Bucket A/B behaviour; nothing raw from the chain is ever re-thrown.
-    throw new HttpException(
-      { statusCode: status, error: code, message: code },
-      status,
-    );
   }
 
-  private assertAddress(value: string, field: string): void {
-    if (!value || !AE_ADDRESS_REGEX.test(value)) {
-      throw new BadRequestException(`Invalid ${field} address`);
-    }
+  @Get('policy')
+  @ApiResponse({ status: 200, type: GraphPolicyDto })
+  @ApiOperation({
+    operationId: 'getSocialGraphPolicy',
+    summary: 'Fresh pinned policy, ownership and migration state',
+  })
+  policy() {
+    return this.graph.getReader().policy();
+  }
+
+  @Get('page')
+  @ApiResponse({ status: 200, type: GraphPageDto })
+  @ApiOperation({
+    operationId: 'getSocialGraphChainPage',
+    summary:
+      'Bounded snapshot-pinned contract slots; empty page can have continuation',
+  })
+  @ApiQuery({
+    name: 'direction',
+    enum: ['followers', 'following', 'blocked', 'export'],
+  })
+  @ApiQuery({ name: 'account', required: false })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  page(
+    @Query('direction') direction: GraphDirection,
+    @Query('account') account = '',
+    @Query('cursor') cursor?: string,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+  ) {
+    if (!['followers', 'following', 'blocked', 'export'].includes(direction))
+      throw new BadRequestException('Invalid direction');
+    return this.graph.getReader().page(direction, account, limit, cursor);
   }
 }

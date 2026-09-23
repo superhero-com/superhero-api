@@ -1,21 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { SocialGraphV2Reader } from './social-graph-v2-reader';
+import { SocialGraphReader } from './social-graph-reader';
 import {
   ProjectionScope,
-  SocialGraphV2ProjectionService,
-} from './social-graph-v2-projection.service';
+  SocialGraphProjectionService,
+} from './social-graph-projection.service';
 
 type Reader = Pick<
-  SocialGraphV2Reader,
+  SocialGraphReader,
   'identity' | 'countsAt' | 'assertCanonical'
 >;
 
 @Injectable()
-export class SocialGraphV2ReconcileService {
+export class SocialGraphReconcileService {
   constructor(
     private readonly db: DataSource,
-    private readonly projection: SocialGraphV2ProjectionService,
+    private readonly projection: SocialGraphProjectionService,
   ) {}
 
   async step(
@@ -31,7 +31,7 @@ export class SocialGraphV2ReconcileService {
     const key = [scope.network, scope.contract, scope.generation];
     const s = (
       await this.db.query(
-        'SELECT * FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3',
+        'SELECT * FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 AND generation=$3',
         key,
       )
     )[0];
@@ -53,7 +53,7 @@ export class SocialGraphV2ReconcileService {
       const result = await this.db.transaction(async (m) => {
         const current = (
           await m.query(
-            'SELECT state,synced_hash,sync_end_height FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
+            'SELECT state,synced_hash,sync_end_height FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
             key,
           )
         )[0];
@@ -66,14 +66,14 @@ export class SocialGraphV2ReconcileService {
           return 'changed';
         const revision = (
           await m.query(
-            'SELECT revision::text FROM social_graph_v2_dirty WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4',
+            'SELECT revision::text FROM social_graph_projection_dirty WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4',
             [...key, dirty.address],
           )
         )[0];
         if (!revision || revision.revision !== dirty.revision) return 'changed';
         const count = (
           await m.query(
-            'SELECT followers::text,following::text,blocked::text FROM social_graph_v2_counts WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4',
+            'SELECT followers::text,following::text,blocked::text FROM social_graph_projection_counts WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4',
             [...key, dirty.address],
           )
         )[0] ?? { followers: '0', following: '0', blocked: '0' };
@@ -83,13 +83,13 @@ export class SocialGraphV2ReconcileService {
           )
         ) {
           await m.query(
-            "UPDATE social_graph_v2_scopes SET state='rebuilding' WHERE network=$1 AND contract=$2 AND generation=$3",
+            "UPDATE social_graph_projection_scopes SET state='rebuilding' WHERE network=$1 AND contract=$2 AND generation=$3",
             key,
           );
           return 'drift';
         }
         await m.query(
-          'DELETE FROM social_graph_v2_dirty WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4 AND revision=$5',
+          'DELETE FROM social_graph_projection_dirty WHERE network=$1 AND contract=$2 AND generation=$3 AND address=$4 AND revision=$5',
           [...key, dirty.address, dirty.revision],
         );
         return 'checked';

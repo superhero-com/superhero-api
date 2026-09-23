@@ -1,189 +1,127 @@
-import { SocialGraphService } from './social-graph.service';
-import { SocialGraphContractService } from './social-graph-contract.service';
-import { SOCIAL_GRAPH_ABORT_STATUS } from './social-graph.errors';
+import { SocialGraphService, safeGraphNumber } from './social-graph.service';
+import { SocialGraphReader } from './social-graph-reader';
+import { SocialGraphWorkerService } from './social-graph-worker.service';
 
-const A = 'ak_alice';
-const B = 'ak_bob';
-const C = 'ak_carol';
-
-function edgeKey(from: string, to: string, kind: string): string {
-  return `${from}|${to}|${kind}`;
-}
-
-/**
- * A repository double whose `count` reads the `where` clause the service builds:
- * both from+to => existence; from only => following/blocked count; to only =>
- * followers count.
- */
-function makeEdgeRepo(edges: Set<string>) {
-  return {
-    count: jest.fn(async ({ where }: any) => {
-      const { from_address, to_address, kind } = where;
-      const all = [...edges].map((e) => e.split('|'));
-      if (from_address && to_address) {
-        return edges.has(edgeKey(from_address, to_address, kind)) ? 1 : 0;
-      }
-      if (from_address) {
-        return all.filter(([f, , k]) => f === from_address && k === kind)
-          .length;
-      }
-      if (to_address) {
-        return all.filter(([, t, k]) => t === to_address && k === kind).length;
-      }
-      return 0;
-    }),
+describe('Social graph selection', () => {
+  const saved = {
+    address: process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS,
+    network: process.env.SOCIAL_GRAPH_NETWORK_ID,
   };
-}
-
-function makeService(
-  edges: Set<string>,
-  config: Partial<{ max_following: number; max_blocked: number }> = {},
-) {
-  const edgeRepo = makeEdgeRepo(edges);
-  const contractService = {
-    getConfig: () => ({
-      max_following: config.max_following ?? 10000,
-      max_blocked: config.max_blocked ?? 10000,
+  afterEach(() => {
+    for (const [key, value] of [
+      ['SOCIAL_GRAPH_CONTRACT_ADDRESS', saved.address],
+      ['SOCIAL_GRAPH_NETWORK_ID', saved.network],
+    ]) {
+      if (value == null) delete process.env[key!];
+      else process.env[key!] = value;
+    }
+    jest.restoreAllMocks();
+  });
+  const create = () =>
+    new SocialGraphService(
+      { sdk: { getContext: () => ({ onNode: {} }) } } as any,
+      {} as any,
+    );
+  it('stays disabled without a contract and refuses incomplete network configuration', async () => {
+    delete process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS;
+    const graph = create();
+    expect(graph.isConfigured()).toBe(false);
+    await graph.onModuleInit();
+    expect(() => graph.getReader()).toThrow('not configured');
+    process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';
+    delete process.env.SOCIAL_GRAPH_NETWORK_ID;
+    await expect(graph.onModuleInit()).rejects.toThrow('not configured');
+  });
+  it('verifies identity on startup through the existing configuration names', async () => {
+    process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';
+    process.env.SOCIAL_GRAPH_NETWORK_ID = 'ae_dev';
+    const verify = jest
+      .spyOn(SocialGraphReader.prototype, 'verifyIdentity')
+      .mockResolvedValue();
+    const graph = create();
+    await graph.onModuleInit();
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(graph.getReader().identity).toEqual({
+      network: 'ae_dev',
+      contract: 'ct_abc',
+    });
+    verify.mockRejectedValue(new Error('Network mismatch'));
+    await expect(create().onModuleInit()).rejects.toThrow('Network mismatch');
+  });
+  it('reads changed policy each time without pinning mutable caps at startup', async () => {
+    const graph = create();
+    const policy = jest
+      .fn()
+      .mockResolvedValueOnce({
+        contract: 'ct_abc',
+        config: {
+          max_following: '100',
+          max_blocked: '50',
+          follow_cooldown: '0',
+        },
+      })
+      .mockResolvedValueOnce({
+        contract: 'ct_abc',
+        config: {
+          max_following: '200',
+          max_blocked: '75',
+          follow_cooldown: '10',
+        },
+      });
+    jest.spyOn(graph, 'getReader').mockReturnValue({ policy } as any);
+    expect(await graph.getConfig()).toEqual({
+      contract_address: 'ct_abc',
+      max_following: 100,
+      max_blocked: 50,
       follow_cooldown: 0,
-      contract_address: 'ct_test',
-    }),
-  } as unknown as SocialGraphContractService;
-  return new SocialGraphService(edgeRepo as any, contractService);
-}
-
-describe('SocialGraphService', () => {
-  describe('counts and relationship', () => {
-    it('counts followers, following and blocked from the index', async () => {
-      const edges = new Set<string>([
-        edgeKey(A, B, 'follow'), // A follows B
-        edgeKey(C, B, 'follow'), // C follows B
-        edgeKey(B, A, 'follow'), // B follows A
-        edgeKey(A, C, 'block'), // A blocks C
-      ]);
-      const service = makeService(edges);
-      expect(await service.getFollowersCount(B)).toBe(2);
-      expect(await service.getFollowingCount(A)).toBe(1);
-      expect(await service.getBlockedCount(A)).toBe(1);
     });
-
-    it('reports the pair-wise relationship in both directions', async () => {
-      const edges = new Set<string>([
-        edgeKey(A, B, 'follow'),
-        edgeKey(B, A, 'block'),
-      ]);
-      const service = makeService(edges);
-      expect(await service.getRelationship(A, B)).toEqual({
-        a_follows_b: true,
-        b_follows_a: false,
-        a_blocked_b: false,
-        b_blocked_a: true,
-      });
-    });
+    expect((await graph.getConfig()).max_following).toBe(200);
   });
-
-  describe('precheck follow', () => {
-    it('passes (null) for a clean follow', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('follow', A, B)).toBeNull();
-    });
-
-    it('CANNOT_FOLLOW_SELF', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('follow', A, A)).toBe('CANNOT_FOLLOW_SELF');
-    });
-
-    it('BLOCKED when the target has blocked the caller', async () => {
-      const service = makeService(new Set([edgeKey(B, A, 'block')]));
-      expect(await service.precheck('follow', A, B)).toBe('BLOCKED');
-    });
-
-    it('BLOCKED_BY_SELF when the caller has blocked the target', async () => {
-      const service = makeService(new Set([edgeKey(A, B, 'block')]));
-      expect(await service.precheck('follow', A, B)).toBe('BLOCKED_BY_SELF');
-    });
-
-    it('ALREADY_FOLLOWING', async () => {
-      const service = makeService(new Set([edgeKey(A, B, 'follow')]));
-      expect(await service.precheck('follow', A, B)).toBe('ALREADY_FOLLOWING');
-    });
-
-    it('MAX_FOLLOWING_REACHED at the cap', async () => {
-      const service = makeService(new Set([edgeKey(A, C, 'follow')]), {
-        max_following: 1,
-      });
-      expect(await service.precheck('follow', A, B)).toBe(
-        'MAX_FOLLOWING_REACHED',
-      );
-    });
+  it('never rounds the numeric values required by existing profile clients', () => {
+    expect(safeGraphNumber('1000000')).toBe(1000000);
+    expect(() => safeGraphNumber('9007199254740993')).toThrow('client range');
   });
-
-  describe('precheck unfollow', () => {
-    it('NOT_FOLLOWING when no edge exists', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('unfollow', A, B)).toBe('NOT_FOLLOWING');
+  it('serves profile counts only from the current ready namespace', async () => {
+    const queries = {
+      ready: jest.fn().mockResolvedValue({
+        network: 'ae_dev',
+        contract: 'ct_selected',
+        generation: '2',
+      }),
+      counts: jest
+        .fn()
+        .mockResolvedValue({ followers: '1000000', following: '4' }),
+    };
+    const graph = new SocialGraphService({} as any, queries as any);
+    jest.spyOn(graph, 'getReader').mockReturnValue({
+      identity: { network: 'ae_dev', contract: 'ct_selected' },
+      verifyIdentity: jest.fn(),
+    } as any);
+    expect(await graph.getFollowCounts('ak_abc')).toEqual({
+      followers_count: 1000000,
+      following_count: 4,
     });
-
-    it('passes (null) when following', async () => {
-      const service = makeService(new Set([edgeKey(A, B, 'follow')]));
-      expect(await service.precheck('unfollow', A, B)).toBeNull();
-    });
+    expect(queries.counts).toHaveBeenCalledWith(
+      { network: 'ae_dev', contract: 'ct_selected', generation: '2' },
+      'ak_abc',
+    );
+    queries.ready.mockRejectedValue(new Error('Graph not ready'));
+    await expect(graph.getFollowCounts('ak_abc')).rejects.toThrow('not ready');
   });
-
-  describe('precheck block', () => {
-    it('CANNOT_BLOCK_SELF', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('block', A, A)).toBe('CANNOT_BLOCK_SELF');
-    });
-
-    it('ALREADY_BLOCKED', async () => {
-      const service = makeService(new Set([edgeKey(A, B, 'block')]));
-      expect(await service.precheck('block', A, B)).toBe('ALREADY_BLOCKED');
-    });
-
-    it('MAX_BLOCKED_REACHED at the cap', async () => {
-      const service = makeService(new Set([edgeKey(A, C, 'block')]), {
-        max_blocked: 1,
-      });
-      expect(await service.precheck('block', A, B)).toBe('MAX_BLOCKED_REACHED');
-    });
-
-    it('passes (null) for a clean block', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('block', A, B)).toBeNull();
-    });
-  });
-
-  describe('precheck unblock', () => {
-    it('NOT_BLOCKED when no edge exists', async () => {
-      const service = makeService(new Set());
-      expect(await service.precheck('unblock', A, B)).toBe('NOT_BLOCKED');
-    });
-
-    it('passes (null) when blocked', async () => {
-      const service = makeService(new Set([edgeKey(A, B, 'block')]));
-      expect(await service.precheck('unblock', A, B)).toBeNull();
-    });
-  });
-
-  describe('abort → HTTP status map', () => {
-    it('maps every abort code the contract can produce, none invented', () => {
-      expect(SOCIAL_GRAPH_ABORT_STATUS).toEqual({
-        ALREADY_FOLLOWING: 409,
-        NOT_FOLLOWING: 409,
-        ALREADY_BLOCKED: 409,
-        NOT_BLOCKED: 409,
-        CANNOT_FOLLOW_SELF: 409,
-        CANNOT_BLOCK_SELF: 409,
-        BLOCKED: 403,
-        BLOCKED_BY_SELF: 409,
-        MAX_FOLLOWING_REACHED: 409,
-        MAX_BLOCKED_REACHED: 409,
-        FOLLOW_COOLDOWN: 429,
-      });
-    });
-
-    it('keeps FOLLOW_COOLDOWN mapped to 429 even though it is unreachable at cooldown=0', () => {
-      expect(SOCIAL_GRAPH_ABORT_STATUS.FOLLOW_COOLDOWN).toBe(429);
-    });
+  it('does not acquire a database connection for an unconfigured worker', async () => {
+    const db = { createQueryRunner: jest.fn() };
+    const graph = { isConfigured: () => false };
+    const worker = new SocialGraphWorkerService(
+      db as any,
+      {} as any,
+      graph as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    await worker.tick();
+    expect(db.createQueryRunner).not.toHaveBeenCalled();
   });
 });

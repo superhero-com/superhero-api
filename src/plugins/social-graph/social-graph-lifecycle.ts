@@ -1,7 +1,7 @@
 import { Contract, Node } from '@aeternity/aepp-sdk';
-import aci from '../aci/SocialContractV2.aci.json';
+import aci from './aci/SocialContract.aci.json';
 import { normalizeEventTopics } from '@/utils/common';
-import { decimal } from './social-graph-v2-reader';
+import { decimal } from './social-graph-reader';
 
 export function contractAddress(address: string): string {
   // Address and contract IDs encode the same 32-byte payload and checksum.
@@ -20,7 +20,7 @@ export interface MigrationEvidenceOptions {
 }
 
 /** Verifies configured receipts; it never infers a cutoff from the API snapshot. */
-export class SocialGraphV2Lifecycle {
+export class SocialGraphLifecycle {
   constructor(private readonly node: Node) {}
 
   async receipt(
@@ -86,7 +86,7 @@ export class SocialGraphV2Lifecycle {
       return { sourceCutoff: null, activationHeight: null, proof: null };
     if (!options.activationTx)
       throw new Error(
-        'Migrated V2 contract requires SOCIAL_GRAPH_V2_ACTIVATION_TX',
+        'Migrated Social contract requires SOCIAL_GRAPH_ACTIVATION_TX',
       );
     const activation = await this.receipt(
       options.activationTx,
@@ -106,7 +106,7 @@ export class SocialGraphV2Lifecycle {
     if (policy.import_source) {
       if (!options.freezeTx)
         throw new Error(
-          'Frozen-source migration requires SOCIAL_GRAPH_V2_SOURCE_FREEZE_TX',
+          'Frozen-source migration requires SOCIAL_GRAPH_SOURCE_FREEZE_TX',
         );
       const freeze = await this.receipt(
         options.freezeTx,

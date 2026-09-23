@@ -16,8 +16,6 @@ import { GovernancePopularRankingService } from './governance/services/governanc
 import { PopularRankingContributor } from './popular-ranking.interface';
 import { AddressLinksPlugin } from './address-links/address-links.plugin';
 import { AddressLinksPluginModule } from './address-links/address-links-plugin.module';
-import { SocialGraphPlugin } from './social-graph/social-graph.plugin';
-import { SocialGraphPluginModule } from './social-graph/social-graph-plugin.module';
 import { Aex9TransferPlugin } from '@/token-gated-rooms/plugins/aex9-transfer.plugin';
 import { Aex9TransferPluginModule } from '@/token-gated-rooms/plugins/aex9-transfer-plugin.module';
 import { CommunityRoomStatePlugin } from '@/token-gated-rooms/plugins/community-room-state.plugin';
@@ -35,7 +33,6 @@ export const PLUGIN_MODULES: Type[] = [
   BclAffiliationPluginModule,
   GovernancePluginModule,
   AddressLinksPluginModule,
-  SocialGraphPluginModule,
   Aex9TransferPluginModule,
   CommunityRoomStatePluginModule,
 ];
@@ -55,7 +52,6 @@ export const getPluginProvider = (): Provider => ({
     bclAffiliationPlugin: BclAffiliationPlugin,
     governancePlugin: GovernancePlugin,
     addressLinksPlugin: AddressLinksPlugin,
-    socialGraphPlugin: SocialGraphPlugin,
     aex9TransferPlugin: Aex9TransferPlugin,
     communityRoomStatePlugin: CommunityRoomStatePlugin,
   ) => {
@@ -67,7 +63,6 @@ export const getPluginProvider = (): Provider => ({
       bclAffiliationPlugin,
       governancePlugin,
       addressLinksPlugin,
-      socialGraphPlugin,
       aex9TransferPlugin,
       communityRoomStatePlugin,
     ];
@@ -80,7 +75,6 @@ export const getPluginProvider = (): Provider => ({
     BclAffiliationPlugin,
     GovernancePlugin,
     AddressLinksPlugin,
-    SocialGraphPlugin,
     Aex9TransferPlugin,
     CommunityRoomStatePlugin,
   ],

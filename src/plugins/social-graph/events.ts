@@ -1,6 +1,6 @@
 /**
  * Emitted after a genuinely new follow edge is inserted from a live Followed
- * event (see SocialGraphPluginSyncService). Cross-cutting consumers (the
+ * event by the graph outbox. Cross-cutting consumers (the
  * notifications module) subscribe so the followed account can be told.
  *
  * Owned by the social-graph plugin; consumers import the name/type. The plugin
@@ -9,7 +9,7 @@
 export const SOCIAL_GRAPH_FOLLOWED_EVENT = 'social-graph.followed';
 
 export interface SocialGraphFollowedEventPayload {
-  /** V2 namespace; absent for unchanged V1 events. */
+  /** Graph namespace; optional for historical notification compatibility. */
   graphScope?: { network: string; contract: string; eventIndex: number };
   /** Account that started following (notification subject). */
   followerAddress: string;
