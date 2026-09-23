@@ -35,7 +35,13 @@ export class SocialGraphV2ReconcileService {
         key,
       )
     )[0];
-    if (!s || s.state !== 'ready' || !s.synced_hash || s.synced_height == null)
+    if (
+      !s ||
+      s.state !== 'ready' ||
+      !s.synced_hash ||
+      s.synced_height == null ||
+      s.sync_end_height != null
+    )
       return 0;
     // Compare against the projection watermark, never the moving chain tip.
     await reader.assertCanonical(s.synced_hash, s.synced_height);
@@ -47,13 +53,14 @@ export class SocialGraphV2ReconcileService {
       const result = await this.db.transaction(async (m) => {
         const current = (
           await m.query(
-            'SELECT state,synced_hash FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
+            'SELECT state,synced_hash,sync_end_height FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 AND generation=$3 FOR UPDATE',
             key,
           )
         )[0];
         if (
           !current ||
           current.state !== 'ready' ||
+          current.sync_end_height != null ||
           current.synced_hash !== s.synced_hash
         )
           return 'changed';

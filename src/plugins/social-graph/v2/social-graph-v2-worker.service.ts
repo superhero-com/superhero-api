@@ -39,13 +39,14 @@ export class SocialGraphV2WorkerService {
     this.running = true;
     let scope: ProjectionScope | undefined;
     const runner = this.db.createQueryRunner();
+    let connection: { end(): Promise<void> } | undefined;
     let locked = false;
     let lockName: string | undefined;
     try {
       const reader = this.graph.getReader();
       await reader.verifyIdentity();
       lockName = `social-graph-v2:${reader.identity.network}:${reader.identity.contract}`;
-      await runner.connect();
+      connection = await runner.connect();
       locked = (
         await runner.query(
           'SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked',
@@ -132,9 +133,19 @@ export class SocialGraphV2WorkerService {
             'SELECT pg_advisory_unlock(hashtextextended($1,0))',
             [lockName],
           );
+      } catch (error) {
+        // Never return a session with an unreleased advisory lock to the pool.
+        // Closing only our lock connection releases that lock on the server.
+        await connection?.end();
+        this.logger.error(
+          'V2 worker discarded its lock connection after unlock failure',
+        );
       } finally {
-        await runner.release();
-        this.running = false;
+        try {
+          await runner.release();
+        } finally {
+          this.running = false;
+        }
       }
     }
   }

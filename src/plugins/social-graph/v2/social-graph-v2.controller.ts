@@ -1,8 +1,21 @@
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  GraphV2CountsDto,
+  GraphV2StatusDto,
+  GraphV2ConnectionsDto,
+  GraphV2RelationshipDto,
+  GraphV2PolicyDto,
+  GraphV2PageDto,
+  GraphV2PrecheckDto,
+} from './social-graph-v2.dto';
+import { SocialGraphPrecheckDto } from '../dto/social-graph.dto';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { SocialGraphV2QueryService } from './social-graph-v2-query.service';
 import {
   BadRequestException,
+  Body,
+  Post,
+  HttpCode,
   Controller,
   DefaultValuePipe,
   Get,
@@ -21,7 +34,23 @@ export class SocialGraphV2Controller {
     private readonly profiles: ProfileReadService,
   ) {}
 
+  @Get('status')
+  @ApiOperation({
+    operationId: 'getSocialGraphV2Status',
+    summary: 'Projection progress and verified migration boundary evidence',
+  })
+  @ApiResponse({ status: 200, type: GraphV2StatusDto })
+  async status() {
+    const reader = this.graph.getReader();
+    await reader.verifyIdentity();
+    return this.queries.status(
+      reader.identity.network,
+      reader.identity.contract,
+    );
+  }
+
   @Get('counts')
+  @ApiResponse({ status: 200, type: GraphV2CountsDto })
   @ApiOperation({
     operationId: 'getSocialGraphV2Counts',
     summary: 'Scoped indexed counts as decimal strings',
@@ -38,6 +67,7 @@ export class SocialGraphV2Controller {
   }
 
   @Get('connections')
+  @ApiResponse({ status: 200, type: GraphV2ConnectionsDto })
   @ApiOperation({
     operationId: 'listSocialGraphV2Connections',
     summary: 'Scoped keyset page with batched profiles',
@@ -69,12 +99,28 @@ export class SocialGraphV2Controller {
     return {
       ...page,
       items: page.addresses.map(
-        (address) => byAddress.get(address) ?? { address },
+        (address) =>
+          byAddress.get(address) ?? {
+            address,
+            public_name: address,
+            profile: {
+              fullname: '',
+              bio: '',
+              site: null,
+              avatarurl: '',
+              username: null,
+              prefered_aens_name: null,
+              x_username: null,
+              chain_name: null,
+              chain_expires_at: null,
+            },
+          },
       ),
     };
   }
 
   @Get('relationship')
+  @ApiResponse({ status: 200, type: GraphV2RelationshipDto })
   @ApiOperation({
     operationId: 'getSocialGraphV2Relationship',
     summary:
@@ -86,7 +132,24 @@ export class SocialGraphV2Controller {
     return this.graph.getReader().relationship(from, to);
   }
 
+  @Post('precheck')
+  @HttpCode(200)
+  @ApiOperation({
+    operationId: 'precheckSocialGraphV2Action',
+    summary:
+      'Read-only advisory simulation against real caller balance and current policy',
+  })
+  @ApiResponse({ status: 200, type: GraphV2PrecheckDto })
+  @ApiResponse({
+    status: 503,
+    description: 'Simulation unavailable; never treat this as approval.',
+  })
+  precheck(@Body() body: SocialGraphPrecheckDto) {
+    return this.graph.getReader().precheck(body.action, body.from, body.to);
+  }
+
   @Get('policy')
+  @ApiResponse({ status: 200, type: GraphV2PolicyDto })
   @ApiOperation({
     operationId: 'getSocialGraphV2Policy',
     summary: 'Fresh pinned policy, ownership and migration state',
@@ -96,6 +159,7 @@ export class SocialGraphV2Controller {
   }
 
   @Get('page')
+  @ApiResponse({ status: 200, type: GraphV2PageDto })
   @ApiOperation({
     operationId: 'getSocialGraphV2ChainPage',
     summary:

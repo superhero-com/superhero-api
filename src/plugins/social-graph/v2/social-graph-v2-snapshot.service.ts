@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { Encoded } from '@aeternity/aepp-sdk';
 import {
   ProjectionScope,
   SocialGraphV2ProjectionService,
@@ -14,7 +13,7 @@ import {
 
 type SnapshotReader = Pick<
   SocialGraphV2Reader,
-  'identity' | 'policy' | 'page' | 'assertCanonical'
+  'identity' | 'policy' | 'page' | 'assertCanonical' | 'migrationEvidence'
 >;
 
 @Injectable()
@@ -37,13 +36,17 @@ export class SocialGraphV2SnapshotService {
     this.match(scope, reader);
     const policy = await reader.policy();
     if (policy.importing) throw new Error('Destination import is not complete');
+    const evidence =
+      policy.import_source || policy.legacy_source
+        ? await reader.migrationEvidence(policy)
+        : { sourceCutoff: null, activationHeight: null, proof: null };
     await reader.assertCanonical(policy.block_hash, policy.height);
     // Never reset an existing checkpoint. A restart must continue it or choose
     // a new generation after invalidation, keeping the old projection isolated.
     await this.db.query(
       `INSERT INTO social_graph_v2_scopes
-      (network,contract,generation,state,snapshot_hash,snapshot_height,source_contract)
-      VALUES($1,$2,$3,'importing',$4,$5,$6)`,
+      (network,contract,generation,state,snapshot_hash,snapshot_height,source_contract,source_cutoff,activation_height,migration_evidence)
+      VALUES($1,$2,$3,'importing',$4,$5,$6,$7,$8,$9)`,
       [
         scope.network,
         scope.contract,
@@ -51,6 +54,9 @@ export class SocialGraphV2SnapshotService {
         policy.block_hash,
         policy.height,
         policy.import_source || policy.legacy_source || null,
+        evidence.sourceCutoff,
+        evidence.activationHeight,
+        evidence.proof,
       ],
     );
   }

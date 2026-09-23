@@ -54,7 +54,7 @@ function fixture(count = 1) {
 
 describe('V2 canonical node stream', () => {
   it('includes indirect contract calls, uses one-based indexes, and resumes without splitting transactions', async () => {
-    const f = fixture(25),
+    const f = fixture(105),
       stream = new SocialGraphV2NodeStream(f.node);
     const first = await stream.page(
       f.reader,
@@ -62,14 +62,14 @@ describe('V2 canonical node stream', () => {
       f.end,
       FIRST_NODE_CURSOR,
     );
-    expect(first.transactions).toHaveLength(19);
+    expect(first.transactions).toHaveLength(99);
     expect(
       f.node.getMicroBlockTransactionByHashAndIndex,
     ).toHaveBeenNthCalledWith(1, 'mh_one', 1);
     expect(first.transactions[0].events).toHaveLength(1);
     const last = await stream.page(f.reader, f.start, f.end, first.nextCursor!);
     expect(last.transactions).toHaveLength(6);
-    expect(last.transactions[0].hash).toBe('th_20');
+    expect(last.transactions[0].hash).toBe('th_100');
     expect(last.nextCursor).toBeNull();
     expect(BigInt(last.transactions[0].position)).toBeGreaterThan(
       BigInt(first.transactions.at(-1)!.position),
@@ -116,6 +116,46 @@ describe('V2 canonical node stream', () => {
     await stream.page(f.reader, f.start, f.end, FIRST_NODE_CURSOR);
     expect(f.reader.decodeLogs).toHaveBeenCalledTimes(1);
     f.node.getTransactionInfoByHash.mockResolvedValueOnce({});
+    await expect(
+      stream.page(f.reader, f.start, f.end, FIRST_NODE_CURSOR),
+    ).rejects.toThrow('Unsupported contract receipt');
+  });
+  it('skips sponsored spends but includes sponsored calls and GA attachment initialization', async () => {
+    const f = fixture(),
+      stream = new SocialGraphV2NodeStream(f.node);
+    f.node.getMicroBlockTransactionByHashAndIndex.mockResolvedValueOnce({
+      hash: 'th_spend',
+      blockHash: 'mh_one',
+      blockHeight: 100,
+      tx: { type: 'PayingForTx', tx: { tx: { type: 'SpendTx' } } },
+    });
+    expect(
+      (await stream.page(f.reader, f.start, f.end, FIRST_NODE_CURSOR))
+        .transactions[0].events,
+    ).toEqual([]);
+    expect(f.node.getTransactionInfoByHash).not.toHaveBeenCalled();
+    for (const tx of [
+      { type: 'PayingForTx', tx: { tx: { type: 'ContractCallTx' } } },
+      { type: 'GAAttachTx' },
+    ]) {
+      f.node.getMicroBlockTransactionByHashAndIndex.mockResolvedValueOnce({
+        hash: 'th_effect',
+        blockHash: 'mh_one',
+        blockHeight: 100,
+        tx,
+      });
+      expect(
+        (await stream.page(f.reader, f.start, f.end, FIRST_NODE_CURSOR))
+          .transactions[0].events,
+      ).toHaveLength(1);
+    }
+  });
+  it('rejects incomplete GA contract receipts instead of losing their effects', async () => {
+    const f = fixture(),
+      stream = new SocialGraphV2NodeStream(f.node);
+    f.node.getTransactionInfoByHash.mockResolvedValue({
+      gaInfo: { returnType: 'ok', innerObject: { txInfo: 'contract_call_tx' } },
+    });
     await expect(
       stream.page(f.reader, f.start, f.end, FIRST_NODE_CURSOR),
     ).rejects.toThrow('Unsupported contract receipt');

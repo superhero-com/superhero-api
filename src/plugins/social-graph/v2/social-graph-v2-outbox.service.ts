@@ -21,8 +21,8 @@ export class SocialGraphV2OutboxService {
       WHERE e.network=o.network AND e.contract=o.contract AND e.generation=o.generation
       AND e.from_address=o.follower AND e.to_address=o.followed AND e.kind='follow') AS still_following
       FROM social_graph_v2_outbox o JOIN social_graph_v2_scopes s USING(network,contract,generation)
-      WHERE o.network=$1 AND o.contract=$2 AND o.generation=$3 AND o.delivered=false AND s.state='ready'
-      ORDER BY o.height,o.tx_hash,o.event_index LIMIT 10`,
+      WHERE o.network=$1 AND o.contract=$2 AND o.generation=$3 AND o.delivered=false AND o.next_attempt_at<=now() AND s.state='ready' AND s.sync_end_height IS NULL
+      ORDER BY o.next_attempt_at,o.height,o.tx_hash,o.event_index LIMIT 10`,
       key,
     );
     for (const row of rows) {
@@ -43,7 +43,7 @@ export class SocialGraphV2OutboxService {
           );
           // No subscriber, disabled notifications or any non-acknowledgement is retryable.
           if (!results.length || !results.every((result) => result === true))
-            continue;
+            throw new Error('Notification delivery not acknowledged');
         }
         await this.db.query(
           `UPDATE social_graph_v2_outbox SET delivered=true
@@ -51,6 +51,12 @@ export class SocialGraphV2OutboxService {
           [...key, row.tx_hash, row.event_index],
         );
       } catch (error) {
+        await this.db.query(
+          `UPDATE social_graph_v2_outbox SET attempts=attempts+1,
+          next_attempt_at=now()+make_interval(secs=>LEAST(300,power(2,LEAST(attempts,8)))::double precision)
+          WHERE network=$1 AND contract=$2 AND generation=$3 AND tx_hash=$4 AND event_index=$5`,
+          [...key, row.tx_hash, row.event_index],
+        );
         this.logger.warn(
           `V2 follow notification remains pending: ${error instanceof Error ? error.message : String(error)}`,
         );
