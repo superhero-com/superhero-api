@@ -1,5 +1,10 @@
 import { SocialGraphOutboxService } from './social-graph-outbox.service';
 import { SocialGraphWorkerService } from './social-graph-worker.service';
+import { SocialGraphPlugin } from './social-graph.plugin';
+import { SocialGraphGateway } from './social-graph.gateway';
+import { SocialGraphTransactionProcessorService } from './services/transaction-processor.service';
+import { SyncDirectionEnum } from '@/plugins/plugin.interface';
+import { PluginBatchProcessorService } from '@/mdw-sync/services/plugin-batch-processor.service';
 import { SocialGraphReconcileService } from './social-graph-reconcile.service';
 import { SocialGraphCatchupService } from './social-graph-catchup.service';
 import { SocialGraphQueryService } from './social-graph-query.service';
@@ -88,6 +93,159 @@ const bin = findPostgresBinDir();
           )
         )[0].followers,
       ).toBe('0');
+    });
+    it('registers social transactions in the shared batch path and invalidates only the affected reorg namespace', async () => {
+      const graph: any = {
+        isConfigured: () => true,
+        getReader: () => ({ identity: scope }),
+      };
+      const worker: any = { requestSync: jest.fn() };
+      const gateway: any = { changed: jest.fn() };
+      const processor = new SocialGraphTransactionProcessorService(
+        {} as any,
+        worker,
+      );
+      const plugin = new SocialGraphPlugin(
+        {} as any,
+        {} as any,
+        processor,
+        graph,
+        worker,
+        db,
+        gateway,
+      );
+      const states: any = {
+        findOne: jest.fn().mockResolvedValue({ version: 1 }),
+        update: jest.fn(),
+      };
+      const failures: any = { recordFailure: jest.fn() };
+      const batches = new PluginBatchProcessorService(
+        { getPlugins: () => [plugin] } as any,
+        failures,
+        states,
+      );
+      const tx: any = {
+        hash: 'th_live',
+        contract_id: scope.contract,
+        block_height: 100,
+        block_hash: 'mh_one',
+      };
+      expect(batches.isRelevantTransaction(tx)).toBe(true);
+      expect(
+        batches.isRelevantTransaction({ ...tx, contract_id: 'ct_other' }),
+      ).toBe(false);
+      for (const direction of [
+        SyncDirectionEnum.Live,
+        SyncDirectionEnum.Backward,
+        SyncDirectionEnum.Reorg,
+      ])
+        await batches.processBatch([tx], direction);
+      expect(worker.requestSync).toHaveBeenCalledTimes(3);
+      expect(worker.requestSync).toHaveBeenCalledWith({
+        hash: 'mh_one',
+        height: 100,
+      });
+      expect(failures.recordFailure).not.toHaveBeenCalled();
+      await service.applyEvent(scope, event(tx.hash), [edge]);
+      const other = { ...scope, contract: 'ct_destination' };
+      await service.applyEvent(other, event(tx.hash), [edge]);
+      await batches.handleReorg([tx.hash]);
+      const queries = new SocialGraphQueryService(db);
+      await expect(
+        queries.ready(scope.network, scope.contract),
+      ).rejects.toThrow('not ready');
+      expect(await queries.ready(other.network, other.contract)).toEqual(other);
+      expect(gateway.changed).toHaveBeenCalledWith(scope);
+      expect(worker.requestSync).toHaveBeenCalledTimes(4);
+    });
+    it('commits same-height follow/unfollow microblocks and resumes a closed generation without replay', async () => {
+      await db.query(
+        "UPDATE social_graph_projection_scopes SET snapshot_hash='kh_start',snapshot_height=100,synced_hash='kh_start',synced_height=100 WHERE contract=$1",
+        [scope.contract],
+      );
+      const catchup = new SocialGraphCatchupService(db, service);
+      const queries = new SocialGraphQueryService(db);
+      for (const [hash, txHash, present, followers] of [
+        ['mh_one', 'th_follow', true, '1'],
+        ['mh_two', 'th_unfollow', false, '0'],
+      ] as const) {
+        await catchup.begin(scope, { hash, height: '100' }, 'first');
+        await catchup.applyPage(scope, {
+          expectedCursor: 'first',
+          nextCursor: null,
+          transactions: [
+            {
+              hash: txHash,
+              height: '100',
+              position: present ? '1' : '2',
+              events: [{ index: 0, changes: [{ ...edge, present }] }],
+            },
+          ],
+        });
+        expect(await queries.counts(scope, 'ak_b')).toMatchObject({
+          followers,
+          completed_height: '100',
+          completed_hash: hash,
+        });
+      }
+      await catchup.begin(scope, { hash: 'kh_end', height: '101' }, 'first');
+      await catchup.applyPage(scope, {
+        expectedCursor: 'first',
+        nextCursor: null,
+        transactions: [],
+      });
+      expect(await queries.counts(scope, 'ak_b')).toMatchObject({
+        followers: '0',
+        completed_hash: 'kh_end',
+      });
+      expect(
+        await db.query('SELECT * FROM social_graph_projection_events'),
+      ).toHaveLength(2);
+    });
+    it('broadcasts committed graph invalidations to every replica and releases LISTEN connections', async () => {
+      const graph: any = {
+        isConfigured: () => true,
+        getReader: () => ({
+          identity: { network: scope.network, contract: scope.contract },
+        }),
+      };
+      const first = new SocialGraphGateway(db, graph),
+        second = new SocialGraphGateway(db, graph);
+      const emitA = jest.fn(),
+        emitB = jest.fn();
+      first.server = { emit: emitA } as any;
+      second.server = { emit: emitB } as any;
+      try {
+        await first.onApplicationBootstrap();
+        await second.onApplicationBootstrap();
+        emitA.mockClear();
+        emitB.mockClear();
+        await first.changed(scope, ['ak_a', 'ak_b']);
+        for (
+          let attempt = 0;
+          attempt < 100 && !emitB.mock.calls.length;
+          attempt++
+        )
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        const payload = { ...scope, accounts: ['ak_a', 'ak_b'] };
+        expect(emitA).toHaveBeenCalledWith('social-graph-updated', payload);
+        expect(emitB).toHaveBeenCalledWith('social-graph-updated', payload);
+        emitA.mockClear();
+        emitB.mockClear();
+        await first.changed({ ...scope, contract: 'ct_other' });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(emitA).not.toHaveBeenCalled();
+        expect(emitB).not.toHaveBeenCalled();
+      } finally {
+        await first.onModuleDestroy();
+        await second.onModuleDestroy();
+      }
+      emitA.mockClear();
+      emitB.mockClear();
+      await first.changed(scope);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(emitA).not.toHaveBeenCalled();
+      expect(emitB).not.toHaveBeenCalled();
     });
     it('keeps source and destination independent and preserves deletion activity', async () => {
       await service.applyEvent(scope, event('th_one'), [edge]);
@@ -248,6 +406,51 @@ const bin = findPostgresBinDir();
       );
       await expect(importer.step(target, reader)).rejects.toThrow('canonical');
     });
+    it.each([
+      ['9', '10'],
+      ['99', '100'],
+      ['9007199254740992', '9007199254740993'],
+    ])(
+      'selects numeric generation %s -> %s for status, counts and lists',
+      async (older, newer) => {
+        const queries = new SocialGraphQueryService(db);
+        await db.query(
+          `INSERT INTO social_graph_projection_scopes(network,contract,generation,state)
+        VALUES($1,$2,$3,'rebuilding'),($1,$2,$4,'ready'),($1,'ct_other',9223372036854775807,'ready')`,
+          [scope.network, scope.contract, older, newer],
+        );
+        const current = { ...scope, generation: newer };
+        await service.applyEvent(current, event('th_current'), [edge]);
+        expect(await queries.ready(scope.network, scope.contract)).toEqual(
+          current,
+        );
+        expect(
+          await queries.status(scope.network, scope.contract),
+        ).toMatchObject({ generation: newer, state: 'ready' });
+        expect(await queries.counts(current, edge.to)).toMatchObject({
+          generation: newer,
+          followers: '1',
+        });
+        expect(
+          (await queries.connections(current, edge.to, 'followers', 10))
+            .addresses,
+        ).toEqual([edge.from]);
+        // The newest generation must still control availability when it is rebuilding.
+        await db.query(
+          `UPDATE social_graph_projection_scopes SET state=CASE WHEN generation=$3 THEN 'rebuilding' ELSE 'ready' END WHERE network=$1 AND contract=$2`,
+          [scope.network, scope.contract, newer],
+        );
+        expect(
+          await queries.status(scope.network, scope.contract),
+        ).toMatchObject({ generation: newer, state: 'rebuilding' });
+        await expect(
+          queries.ready(scope.network, scope.contract),
+        ).rejects.toThrow('not ready');
+        await expect(
+          queries.counts({ ...scope, generation: older }, edge.to),
+        ).rejects.toThrow('not ready');
+      },
+    );
     it('serves scoped keyset pages and fails closed after generation cutover', async () => {
       const queries = new SocialGraphQueryService(db);
       await service.applyEvent(scope, event('page-1'), [
@@ -546,6 +749,8 @@ const bin = findPostgresBinDir();
         {} as any,
         service,
         {} as any,
+        {} as any,
+        { changed: jest.fn() } as any,
       );
       try {
         await worker.tick();
@@ -575,7 +780,7 @@ const bin = findPostgresBinDir();
         else process.env.SOCIAL_GRAPH_WORKER_ENABLED = previous;
       }
     });
-    it('runs a restartable worker from snapshot to live generation, then rebuilds after reorg', async () => {
+    it('runs a restartable worker into the open generation without waiting for a key block, then rebuilds after reorg', async () => {
       const previous = process.env.SOCIAL_GRAPH_WORKER_ENABLED;
       process.env.SOCIAL_GRAPH_WORKER_ENABLED = 'true';
       try {
@@ -611,6 +816,9 @@ const bin = findPostgresBinDir();
           }),
         };
         const node: any = {
+          getTopHeader: jest
+            .fn()
+            .mockResolvedValue({ hash: 'mh_one', height: 100 }),
           getKeyBlockByHeight: jest.fn().mockResolvedValue({
             hash: 'kh_end',
             height: 101,
@@ -651,6 +859,8 @@ const bin = findPostgresBinDir();
             new SocialGraphOutboxService(db, {
               emitAsync: async () => [true],
             } as any),
+            {} as any,
+            { changed: jest.fn() } as any,
           );
         await make().tick(); // creates pinned snapshot
         await make().tick(); // completes one snapshot page
@@ -659,11 +869,17 @@ const bin = findPostgresBinDir();
           block_hash: 'kh_tip',
           importing: false,
         });
-        await make().tick(); // opens closed-generation window
+        await make().tick(); // opens this height's microblock window
         await make().tick(); // applies transaction and final checkpoint
         const queries = new SocialGraphQueryService(db);
         const ready = await queries.ready(scope.network, scope.contract);
-        expect((await queries.counts(ready, 'ak_b')).followers).toBe('0');
+        expect(await queries.counts(ready, 'ak_b')).toMatchObject({
+          followers: '0',
+          completed_height: '100',
+          completed_hash: 'mh_one',
+        });
+        // Reconnecting/restarting at the same tip does not replay the deletion.
+        await make().tick();
         expect(
           await db.query('SELECT * FROM social_graph_projection_events'),
         ).toHaveLength(1);

@@ -12,9 +12,10 @@ export class SocialGraphQueryService {
   constructor(private readonly db: DataSource) {}
   async ready(network: string, contract: string): Promise<ProjectionScope> {
     // The newest generation controls availability: never fall back to stale data.
+    // Qualify the bigint column: the selected generation::text alias sorts lexically.
     const rows = await this.db.query(
       `SELECT generation::text,state FROM social_graph_projection_scopes
-      WHERE network=$1 AND contract=$2 ORDER BY generation DESC LIMIT 1`,
+      WHERE network=$1 AND contract=$2 ORDER BY social_graph_projection_scopes.generation DESC LIMIT 1`,
       [network, contract],
     );
     if (rows[0]?.state !== 'ready')
@@ -25,10 +26,10 @@ export class SocialGraphQueryService {
   }
   async status(network: string, contract: string) {
     const rows = await this.db.query(
-      `SELECT generation::text,state,snapshot_height::text,synced_height::text AS completed_height,
+      `SELECT generation::text,state,snapshot_height::text,synced_height::text AS completed_height,synced_hash AS completed_hash,
       sync_last_height::text AS pending_height,sync_last_position::text AS pending_position,(sync_end_height IS NOT NULL) AS catching_up,
       source_contract,source_cutoff::text,activation_height::text,migration_evidence
-      FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 ORDER BY generation DESC LIMIT 1`,
+      FROM social_graph_projection_scopes WHERE network=$1 AND contract=$2 ORDER BY social_graph_projection_scopes.generation DESC LIMIT 1`,
       [network, contract],
     );
     return {
@@ -39,6 +40,7 @@ export class SocialGraphQueryService {
         state: 'uninitialized',
         snapshot_height: null,
         completed_height: null,
+        completed_hash: null,
         pending_height: null,
         pending_position: null,
         catching_up: false,
@@ -59,7 +61,7 @@ export class SocialGraphQueryService {
     const rows = await this.db.query(
       `SELECT COALESCE(c.followers,0)::text AS followers,
       COALESCE(c.following,0)::text AS following,COALESCE(c.blocked,0)::text AS blocked,
-      s.synced_height::text AS completed_height,s.sync_last_height::text AS pending_height,
+      s.synced_height::text AS completed_height,s.synced_hash AS completed_hash,s.sync_last_height::text AS pending_height,
       s.sync_last_position::text AS pending_position,(s.sync_end_height IS NOT NULL) AS catching_up
       FROM social_graph_projection_scopes s LEFT JOIN social_graph_projection_counts c
       ON c.network=s.network AND c.contract=s.contract AND c.generation=s.generation AND c.address=$4
@@ -113,7 +115,7 @@ export class SocialGraphQueryService {
     }
     return this.db.transaction('REPEATABLE READ', async (m) => {
       const state = await m.query(
-        'SELECT state,synced_height::text AS completed_height,sync_last_height::text AS pending_height,sync_last_position::text AS pending_position,(sync_end_height IS NOT NULL) AS catching_up FROM social_graph_projection_scopes s WHERE network=$1 AND contract=$2 AND generation=$3 AND NOT EXISTS(SELECT 1 FROM social_graph_projection_scopes newer WHERE newer.network=s.network AND newer.contract=s.contract AND newer.generation>s.generation)',
+        'SELECT state,synced_height::text AS completed_height,synced_hash AS completed_hash,sync_last_height::text AS pending_height,sync_last_position::text AS pending_position,(sync_end_height IS NOT NULL) AS catching_up FROM social_graph_projection_scopes s WHERE network=$1 AND contract=$2 AND generation=$3 AND NOT EXISTS(SELECT 1 FROM social_graph_projection_scopes newer WHERE newer.network=s.network AND newer.contract=s.contract AND newer.generation>s.generation)',
         [scope.network, scope.contract, scope.generation],
       );
       if (state[0]?.state !== 'ready')
@@ -156,6 +158,7 @@ export class SocialGraphQueryService {
         ...scope,
         account: address,
         completed_height: state[0].completed_height,
+        completed_hash: state[0].completed_hash,
         pending_height: state[0].pending_height,
         pending_position: state[0].pending_position,
         catching_up: state[0].catching_up,

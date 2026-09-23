@@ -69,7 +69,7 @@ export function decodeGraphCursor(
   return c;
 }
 
-/** Read-only social graph adapter. Every multi-call view uses one key-block state. */
+/** Read-only adapter. Multi-call views share one pinned state; snapshots use key blocks. */
 export class SocialGraphReader {
   private contract?: Promise<any>;
   constructor(
@@ -124,6 +124,12 @@ export class SocialGraphReader {
   async assertCanonical(hash: string, height: string): Promise<void> {
     const n = Number(decimal(height));
     if (!Number.isSafeInteger(n)) throw new Error('Unsupported block height');
+    if (hash.startsWith('mh_')) {
+      const generation = await this.node.getGenerationByHeight(n);
+      if (!generation.microBlocks.includes(hash as Encoded.MicroBlockHash))
+        throw new Error('Snapshot is no longer canonical');
+      return;
+    }
     const block = await this.node.getKeyBlockByHeight(n);
     if (block.hash !== hash) throw new Error('Snapshot is no longer canonical');
   }
@@ -179,7 +185,7 @@ export class SocialGraphReader {
     if ([from, to].some((a) => !/^ak_[1-9A-HJ-NP-Za-km-z]+$/.test(a)))
       throw new BadRequestException('Invalid graph account');
     const c = await this.instance();
-    const block = await this.node.getCurrentKeyBlock();
+    const block = await this.node.getTopHeader();
     const options = { top: block.hash, callStatic: true };
     const [relation, lifecycle] = await Promise.all([
       c.get_relationship(from, to, options),
@@ -216,7 +222,7 @@ export class SocialGraphReader {
 
   private async simulate(action: string, from: string, to: string) {
     const c = await this.instance();
-    const block = await this.node.getCurrentKeyBlock();
+    const block = await this.node.getTopHeader();
     const policy = await c.get_policy({ top: block.hash, callStatic: true });
     // Do not use SDK $call here: it funds the caller during dry-run. A call request
     // retains the real caller balance and has no signer or broadcast path.
@@ -280,7 +286,10 @@ export class SocialGraphReader {
     };
   }
 
-  async countsAt(account: string, top: Encoded.KeyBlockHash) {
+  async countsAt(
+    account: string,
+    top: Encoded.KeyBlockHash | Encoded.MicroBlockHash,
+  ) {
     if (!/^ak_[1-9A-HJ-NP-Za-km-z]+$/.test(account))
       throw new BadRequestException('Invalid graph account');
     const c = await this.instance();
@@ -297,9 +306,14 @@ export class SocialGraphReader {
     };
   }
 
-  async policy() {
+  async policy(state: 'key-block' | 'top' = 'key-block') {
     const c = await this.instance();
-    const block = await this.node.getCurrentKeyBlock();
+    // Interactive reads must include this generation's mined microblocks. Export
+    // and projection checkpoints retain their canonical key-block boundary.
+    const block =
+      state === 'top'
+        ? await this.node.getTopHeader()
+        : await this.node.getCurrentKeyBlock();
     const options = { top: block.hash, callStatic: true };
     const [policy, owner, lifecycle, source] = await Promise.all([
       c.get_policy(options),

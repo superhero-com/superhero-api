@@ -53,6 +53,108 @@ function fixture(count = 1) {
 }
 
 describe('Social graph canonical node stream', () => {
+  it('ingests an open microblock, resumes at the next microblock, and closes without replay', async () => {
+    const f = fixture(),
+      stream = new SocialGraphNodeStream(f.node);
+    const first = await stream.page(
+      f.reader,
+      f.start,
+      { hash: 'mh_one', height: '100' },
+      FIRST_NODE_CURSOR,
+    );
+    expect(first.transactions.map((tx) => tx.hash)).toEqual(['th_1']);
+    expect(first.nextCursor).toBeNull();
+    expect(f.node.getKeyBlockByHeight).not.toHaveBeenCalled();
+    f.node.getGenerationByHeight.mockResolvedValue({
+      keyBlock: { hash: 'kh_start' },
+      microBlocks: ['mh_one', 'mh_two'],
+    });
+    f.node.getMicroBlockHeaderByHash.mockResolvedValue({
+      height: 100,
+      prevHash: 'mh_one',
+      prevKeyHash: 'kh_start',
+    });
+    f.node.getMicroBlockTransactionByHashAndIndex.mockResolvedValue({
+      hash: 'th_unfollow',
+      blockHash: 'mh_two',
+      blockHeight: 100,
+      tx: { type: 'ContractCallTx' },
+    });
+    const second = await stream.page(
+      f.reader,
+      { hash: 'mh_one', height: '100' },
+      { hash: 'mh_two', height: '100' },
+      FIRST_NODE_CURSOR,
+    );
+    expect(second.transactions.map((tx) => tx.hash)).toEqual(['th_unfollow']);
+    expect(BigInt(second.transactions[0].position)).toBeGreaterThan(
+      BigInt(first.transactions[0].position),
+    );
+    f.node.getKeyBlockByHeight.mockResolvedValue({
+      hash: 'kh_end',
+      prevKeyHash: 'kh_start',
+      prevHash: 'mh_two',
+    });
+    const closed = await stream.page(
+      f.reader,
+      { hash: 'mh_two', height: '100' },
+      f.end,
+      FIRST_NODE_CURSOR,
+    );
+    expect(closed.transactions).toEqual([]);
+    expect(closed.nextCursor).toBeNull();
+  });
+  it('resumes a large open microblock within the bounded page budget', async () => {
+    const f = fixture(105),
+      stream = new SocialGraphNodeStream(f.node);
+    const end = { hash: 'mh_one', height: '100' };
+    const first = await stream.page(f.reader, f.start, end, FIRST_NODE_CURSOR);
+    const second = await stream.page(f.reader, f.start, end, first.nextCursor!);
+    expect(first.transactions).toHaveLength(99);
+    expect(second.transactions).toHaveLength(6);
+    expect(
+      new Set(
+        [...first.transactions, ...second.transactions].map((tx) => tx.hash),
+      ).size,
+    ).toBe(105);
+  });
+  it('rejects orphaned microblock watermarks and forks during an open-prefix read', async () => {
+    const f = fixture(),
+      stream = new SocialGraphNodeStream(f.node);
+    await expect(
+      stream.page(
+        f.reader,
+        { hash: 'mh_orphan', height: '100' },
+        f.end,
+        FIRST_NODE_CURSOR,
+      ),
+    ).rejects.toThrow('anchor changed');
+    await expect(
+      stream.page(
+        f.reader,
+        f.start,
+        { hash: 'mh_orphan', height: '100' },
+        FIRST_NODE_CURSOR,
+      ),
+    ).rejects.toThrow('endpoint changed');
+    f.node.getGenerationByHeight
+      .mockResolvedValueOnce({
+        keyBlock: { hash: 'kh_start' },
+        microBlocks: ['mh_one'],
+      })
+      .mockResolvedValueOnce({
+        keyBlock: { hash: 'kh_start' },
+        microBlocks: ['mh_fork'],
+      });
+    await expect(
+      stream.page(
+        f.reader,
+        f.start,
+        { hash: 'mh_one', height: '100' },
+        FIRST_NODE_CURSOR,
+      ),
+    ).rejects.toThrow('changed during');
+  });
   it('includes indirect contract calls, uses one-based indexes, and resumes without splitting transactions', async () => {
     const f = fixture(105),
       stream = new SocialGraphNodeStream(f.node);

@@ -65,10 +65,84 @@ describe('WebSocketService', () => {
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
+  it('notifies reconnect consumers once subscriptions are restored and supports teardown', async () => {
+    const callback = jest.fn();
+    const stop = service.subscribeForConnection(callback);
+    await service.handleWebsocketOpen();
+    await service.handleWebsocketOpen();
+    expect(callback).toHaveBeenCalledTimes(2);
+    stop();
+    await service.handleWebsocketOpen();
+    expect(callback).toHaveBeenCalledTimes(2);
+  });
 
   it('should initialize WebSocket connection on creation', () => {
     expect(WebSocket).toHaveBeenCalledWith(ACTIVE_NETWORK.websocketUrl);
     expect(mockWsClient.on).toHaveBeenCalledWith('open', expect.any(Function));
+  });
+  it('keeps node block notifications separate from middleware consumers before and after reconnect', async () => {
+    const node = jest.fn(),
+      mdw = jest.fn();
+    const stopNode = service.subscribeForMicroBlocksUpdates(node, 'node');
+    const stopMdw = service.subscribeForMicroBlocksUpdates(mdw);
+    await service.handleWebsocketOpen();
+    const nodeRequest = {
+      op: 'Subscribe',
+      payload: 'MicroBlocks',
+      source: 'node',
+    };
+    const mdwRequest = {
+      op: 'Subscribe',
+      payload: 'MicroBlocks',
+      source: 'mdw',
+    };
+    expect(mockWsClient.send).toHaveBeenCalledWith(JSON.stringify(nodeRequest));
+    expect(mockWsClient.send).toHaveBeenCalledWith(JSON.stringify(mdwRequest));
+    const dispatch = (source: string) =>
+      (service as any).handleWebsocketMessage(
+        JSON.stringify({
+          source,
+          subscription: 'MicroBlocks',
+          payload: { hash: 'mh_new', height: 100 },
+        }),
+      );
+    dispatch('node');
+    expect(node).toHaveBeenCalledTimes(1);
+    expect(mdw).not.toHaveBeenCalled();
+    dispatch('mdw');
+    expect(node).toHaveBeenCalledTimes(1);
+    expect(mdw).toHaveBeenCalledTimes(1);
+    mockWsClient.send.mockClear();
+    await service.handleWebsocketOpen();
+    expect(mockWsClient.send).toHaveBeenCalledWith(JSON.stringify(nodeRequest));
+    expect(mockWsClient.send).toHaveBeenCalledWith(JSON.stringify(mdwRequest));
+    stopNode();
+    expect(service.subscribersQueue).toEqual([mdwRequest]);
+    dispatch('node');
+    dispatch('mdw');
+    expect(node).toHaveBeenCalledTimes(1);
+    expect(mdw).toHaveBeenCalledTimes(2);
+    stopMdw();
+    expect(service.subscribersQueue).toEqual([]);
+  });
+  it('preserves explicit sources when subscribing on an already-open socket and deduplicates subscriptions', () => {
+    service.isWsConnected = true;
+    const first = service.subscribeForKeyBlocksUpdates(jest.fn(), 'node');
+    const second = service.subscribeForKeyBlocksUpdates(jest.fn(), 'node');
+    expect(mockWsClient.send).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mockWsClient.send.mock.calls[0][0])).toMatchObject({
+      source: 'node',
+      payload: 'KeyBlocks',
+    });
+    first();
+    expect(mockWsClient.send).toHaveBeenCalledTimes(1);
+    second();
+    expect(JSON.parse(mockWsClient.send.mock.calls[1][0])).toMatchObject({
+      source: 'node',
+      op: 'Unsubscribe',
+    });
+    second();
+    expect(mockWsClient.send).toHaveBeenCalledTimes(2);
   });
 
   it('should handle WebSocket open event and send queued subscriptions', async () => {

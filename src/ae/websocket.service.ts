@@ -16,6 +16,7 @@ import {
   ITopHeader,
   ITransaction,
   WebSocketChannelName,
+  WebSocketSourceName,
 } from '@/utils/types';
 import { Cron } from '@nestjs/schedule';
 import { CronExpression } from '@nestjs/schedule';
@@ -33,6 +34,11 @@ export class WebSocketService implements OnModuleDestroy {
   isWsConnected = false;
   reconnectInterval: NodeJS.Timeout;
   private openPollInterval?: NodeJS.Timeout;
+  private readonly subscriptionRequests = new Map<
+    string,
+    IMiddlewareWebSocketSubscriptionMessage
+  >();
+  private readonly connectionSubscribers = new Set<() => void>();
 
   private readonly boundOpen = this.handleWebsocketOpen.bind(this);
   private readonly boundClose = this.handleWebsocketClose.bind(this);
@@ -76,6 +82,7 @@ export class WebSocketService implements OnModuleDestroy {
       this.subscribersQueue.forEach((message) => {
         this.wsClient.send(JSON.stringify(message));
       });
+      this.connectionSubscribers.forEach((callback) => callback());
     } catch (error) {
       const timer = setTimeout(() => {
         this.handleWebsocketOpen();
@@ -91,6 +98,13 @@ export class WebSocketService implements OnModuleDestroy {
 
   isConnected(): boolean {
     return this.isWsConnected;
+  }
+
+  subscribeForConnection(callback: () => void): () => void {
+    this.connectionSubscribers.add(callback);
+    return () => {
+      this.connectionSubscribers.delete(callback);
+    };
   }
 
   private setupReconnectionCheck() {
@@ -161,41 +175,38 @@ export class WebSocketService implements OnModuleDestroy {
     message: IMiddlewareWebSocketSubscriptionMessage,
     callback: (payload: any) => void,
   ) {
-    if (this.isWsConnected) {
+    const request = {
+      ...message,
+      source: message.source ?? WEB_SOCKET_SOURCE.mdw,
+    };
+    const same = (other: IMiddlewareWebSocketSubscriptionMessage) =>
+      other.payload === request.payload &&
+      other.target === request.target &&
+      other.source === request.source;
+    const first = !this.subscribersQueue.some(same);
+    if (first) this.subscribersQueue.push(request);
+    const uuid = genUuid();
+    this.subscribers[request.payload][uuid] = callback;
+    this.subscriptionRequests.set(uuid, request);
+    if (first && this.isWsConnected) {
       try {
-        this.wsClient.send(
-          JSON.stringify({
-            ...message,
-            source: WEB_SOCKET_SOURCE.mdw,
-          }),
-        );
+        this.wsClient.send(JSON.stringify(request));
       } catch (error) {
         this.logger.error('subscribeForChannel->error::', error);
       }
     }
-
-    this.subscribersQueue.push(message);
-
-    const uuid = genUuid();
-    this.subscribers[message.payload][uuid] = callback;
     return () => {
-      delete this.subscribers[message.payload][uuid];
-      if (Object.keys(this.subscribers[message.payload]).length === 0) {
-        // should remove the message from the queue if there are no subscribers
+      if (!this.subscriptionRequests.delete(uuid)) return;
+      delete this.subscribers[request.payload][uuid];
+      if (![...this.subscriptionRequests.values()].some(same)) {
         this.subscribersQueue = this.subscribersQueue.filter(
-          (msg) => msg.payload !== message.payload,
+          (other) => !same(other),
         );
-
-        // should unsubscribe from the channel if there are no subscribers
-        Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
+        if (this.wsClient?.readyState === WebSocket.OPEN) {
           this.wsClient.send(
-            JSON.stringify({
-              ...message,
-              op: WEB_SOCKET_UNSUBSCRIBE,
-              source,
-            }),
+            JSON.stringify({ ...request, op: WEB_SOCKET_UNSUBSCRIBE }),
           );
-        });
+        }
       }
     };
   }
@@ -210,21 +221,29 @@ export class WebSocketService implements OnModuleDestroy {
     );
   }
 
-  subscribeForMicroBlocksUpdates(callback: (payload: ITopHeader) => void) {
+  subscribeForMicroBlocksUpdates(
+    callback: (payload: ITopHeader) => void,
+    source: WebSocketSourceName = WEB_SOCKET_SOURCE.mdw,
+  ) {
     return this.subscribeForChannel(
       {
         op: WEB_SOCKET_SUBSCRIBE,
         payload: WEB_SOCKET_CHANNELS.MicroBlocks,
+        source,
       },
       callback,
     );
   }
 
-  subscribeForKeyBlocksUpdates(callback: (payload: ITopHeader) => void) {
+  subscribeForKeyBlocksUpdates(
+    callback: (payload: ITopHeader) => void,
+    source: WebSocketSourceName = WEB_SOCKET_SOURCE.mdw,
+  ) {
     return this.subscribeForChannel(
       {
         op: WEB_SOCKET_SUBSCRIBE,
         payload: WEB_SOCKET_CHANNELS.KeyBlocks,
+        source,
       },
       callback,
     );
@@ -251,32 +270,33 @@ export class WebSocketService implements OnModuleDestroy {
         return;
       }
 
-      // Call all subscribers for the channel
-      Object.values(subscribers).forEach((subscriberCb) =>
-        subscriberCb(data.payload),
-      );
+      // Node hints arrive before middleware-enriched transactions. Keep each
+      // consumer on its selected source, including after reconnect.
+      Object.entries(subscribers).forEach(([uuid, callback]) => {
+        const request = this.subscriptionRequests.get(uuid);
+        if (request?.source === (data.source ?? WEB_SOCKET_SOURCE.mdw))
+          callback(data.payload);
+      });
     } catch (error) {
       this.logger.error('handleWebsocketMessage->error::', error);
     }
   }
 
   disconnect() {
+    this.isWsConnected = false;
     try {
-      this.subscribersQueue.forEach((message) => {
-        Object.keys(WEB_SOCKET_SOURCE).forEach((source) => {
+      if (this.wsClient?.readyState === WebSocket.OPEN) {
+        this.subscribersQueue.forEach((message) => {
           this.wsClient.send(
-            JSON.stringify({
-              ...message,
-              source,
-              op: WEB_SOCKET_UNSUBSCRIBE,
-            }),
+            JSON.stringify({ ...message, op: WEB_SOCKET_UNSUBSCRIBE }),
           );
         });
-      });
-      this.wsClient.removeAllListeners();
-      this.wsClient.close();
+      }
     } catch (error) {
       this.logger.debug('disconnect error (safe to ignore)', error);
+    } finally {
+      this.wsClient?.removeAllListeners();
+      this.wsClient?.close();
     }
   }
 
