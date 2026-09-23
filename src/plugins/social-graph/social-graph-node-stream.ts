@@ -1,6 +1,6 @@
 import { Node } from '@aeternity/aepp-sdk';
-import { SocialGraphV2Reader, decimal } from './social-graph-v2-reader';
-import { CatchupPage } from './social-graph-v2-catchup.service';
+import { SocialGraphReader, decimal } from './social-graph-reader';
+import { CatchupPage } from './social-graph-catchup.service';
 
 export class GraphReorgError extends Error {}
 interface Cursor {
@@ -11,7 +11,7 @@ export const FIRST_NODE_CURSOR = JSON.stringify({ micro: 0, transaction: 1 });
 
 /** Enumerates the whole closed generation through node transaction indexes.
  * Internal calls are included, without relying on a middleware destination filter. */
-export class SocialGraphV2NodeStream {
+export class SocialGraphNodeStream {
   constructor(private readonly node: Node) {}
 
   async anchor(height: string) {
@@ -22,7 +22,7 @@ export class SocialGraphV2NodeStream {
   }
 
   async page(
-    reader: SocialGraphV2Reader,
+    reader: SocialGraphReader,
     start: { hash: string; height: string },
     end: { hash: string; height: string },
     token: string,
@@ -126,7 +126,7 @@ export class SocialGraphV2NodeStream {
     };
   }
   private async transactionEvents(
-    reader: SocialGraphV2Reader,
+    reader: SocialGraphReader,
     signed: any,
   ): Promise<CatchupPage['transactions'][number]['events']> {
     let inner = signed.tx;

@@ -2,25 +2,25 @@ import { Test } from '@nestjs/testing';
 import { ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { SocialGraphV2Controller } from './social-graph-v2.controller';
-import { SocialGraphV2Service } from './social-graph-v2.service';
-import { SocialGraphV2QueryService } from './social-graph-v2-query.service';
+import { SocialGraphController } from './social-graph.controller';
+import { SocialGraphService } from './social-graph.service';
+import { SocialGraphQueryService } from './social-graph-query.service';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
-import { SocialGraphV2Reader } from './social-graph-v2-reader';
+import { SocialGraphReader } from './social-graph-reader';
 
-describe('V2 client API', () => {
+describe('Social graph API', () => {
   it('validates the real HTTP precheck route before touching the node', async () => {
     const simulate = jest
       .fn()
       .mockResolvedValue({ advisory: true, simulation: 'passed' });
     const module = await Test.createTestingModule({
-      controllers: [SocialGraphV2Controller],
+      controllers: [SocialGraphController],
       providers: [
         {
-          provide: SocialGraphV2Service,
+          provide: SocialGraphService,
           useValue: { getReader: () => ({ precheck: simulate }) },
         },
-        { provide: SocialGraphV2QueryService, useValue: {} },
+        { provide: SocialGraphQueryService, useValue: {} },
         { provide: ProfileReadService, useValue: {} },
       ],
     }).compile();
@@ -41,15 +41,35 @@ describe('V2 client API', () => {
         { action: 'follow', from: 'ak_a', to: 'ak_b', contract: 'ct_injected' },
       ])
         await request(app.getHttpServer())
-          .post('/api/social-graph/v2/precheck')
+          .post('/api/social-graph/precheck')
           .send(body)
           .expect(400);
       expect(simulate).not.toHaveBeenCalled();
       await request(app.getHttpServer())
+        .post('/api/social-graph/precheck')
+        .send({ action: 'follow', from: 'ak_a', to: 'ak_b' })
+        .expect(204);
+      expect(simulate).toHaveBeenCalledWith('follow', 'ak_a', 'ak_b');
+      for (const [reason, status] of [
+        ['FROZEN', 409],
+        ['LOW_BALANCE', 409],
+        ['BLOCKED', 403],
+        ['FOLLOW_COOLDOWN', 429],
+      ] as const) {
+        simulate.mockResolvedValue({ reason, suggested_http_status: status });
+        await request(app.getHttpServer())
+          .post('/api/social-graph/precheck')
+          .send({ action: 'follow', from: 'ak_a', to: 'ak_b' })
+          .expect(status, {
+            statusCode: status,
+            error: reason,
+            message: reason,
+          });
+      }
+      await request(app.getHttpServer())
         .post('/api/social-graph/v2/precheck')
         .send({ action: 'follow', from: 'ak_a', to: 'ak_b' })
-        .expect(200, { advisory: true, simulation: 'passed' });
-      expect(simulate).toHaveBeenCalledWith('follow', 'ak_a', 'ak_b');
+        .expect(404);
     } finally {
       await app.close();
     }
@@ -76,10 +96,10 @@ describe('V2 client API', () => {
       getReader: () => ({ identity: scope, verifyIdentity: async () => {} }),
     };
     const m = await Test.createTestingModule({
-      controllers: [SocialGraphV2Controller],
+      controllers: [SocialGraphController],
       providers: [
-        { provide: SocialGraphV2Service, useValue: graph },
-        { provide: SocialGraphV2QueryService, useValue: queries },
+        { provide: SocialGraphService, useValue: graph },
+        { provide: SocialGraphQueryService, useValue: queries },
         { provide: ProfileReadService, useValue: profiles },
       ],
     }).compile();
@@ -96,14 +116,27 @@ describe('V2 client API', () => {
         ['page', 'get'],
         ['policy', 'get'],
         ['relationship', 'get'],
-        ['precheck', 'post'],
       ])
         expect(
-          doc.paths[`/social-graph/v2/${path}`][method].responses['200']
-            .content['application/json'].schema.$ref,
-        ).toMatch(/GraphV2/);
+          doc.paths[`/social-graph/${path}`][method].responses['200'].content[
+            'application/json'
+          ].schema.$ref,
+        ).toMatch(/Graph/);
+      expect(
+        doc.paths['/social-graph/precheck'].post.responses['204'],
+      ).toBeDefined();
+      for (const route of ['followers', 'following']) {
+        const params = doc.paths[`/social-graph/${route}`].get
+          .parameters as any[];
+        expect(params.find((p) => p.name === 'address').required).toBe(true);
+        for (const name of ['search', 'cursor', 'limit'])
+          expect(params.find((p) => p.name === name).required).toBe(false);
+      }
+      expect(Object.keys(doc.paths).some((path) => path.includes('/v2'))).toBe(
+        false,
+      );
       const page = await m
-        .get(SocialGraphV2Controller)
+        .get(SocialGraphController)
         .connections('ak_c', 'followers', 20);
       expect(page.items.map((i) => i.address)).toEqual(['ak_a', 'ak_b']);
       expect(page.items[0]).toMatchObject({
@@ -111,6 +144,21 @@ describe('V2 client API', () => {
         profile: { site: null },
       });
       expect(profiles.getProfilesByAddresses).toHaveBeenCalledTimes(1);
+      await app.init();
+      const response = await request(app.getHttpServer())
+        .get('/social-graph/followers?address=ak_c&limit=20')
+        .expect(200);
+      expect(Object.keys(response.body).sort()).toEqual([
+        'items',
+        'next_cursor',
+      ]);
+      expect(response.body.items.map((i) => i.address)).toEqual([
+        'ak_a',
+        'ak_b',
+      ]);
+      await request(app.getHttpServer())
+        .get('/social-graph/following?address=ak_c&limit=20')
+        .expect(200);
     } finally {
       await app.close();
     }
@@ -135,7 +183,7 @@ describe('V2 client API', () => {
       getAccountByPubkeyAndHash: account,
       protectedDryRunTxs: dry,
     };
-    const reader = new SocialGraphV2Reader(node, {
+    const reader = new SocialGraphReader(node, {
       network: 'ae_dev',
       contract: 'ct_abc',
     });

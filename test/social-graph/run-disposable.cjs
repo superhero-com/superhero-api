@@ -1,8 +1,9 @@
-// Runs affected V1/V2 suites using a new loopback-only PostgreSQL cluster.
+// Runs affected social graph suites using a new loopback-only PostgreSQL cluster.
 // No application .env or existing database is read. The cluster is removed on exit.
 require('ts-node/register/transpile-only');
 require('tsconfig-paths/register');
 const { spawn } = require('node:child_process');
+const { evidencePath } = require('./evidence.cjs');
 const { statfsSync } = require('node:fs');
 const { findPostgresBinDir, startPostgres } = require('../reward-e2e/postgres');
 
@@ -27,8 +28,8 @@ const { findPostgresBinDir, startPostgres } = require('../reward-e2e/postgres');
     TG_TEST_DB_ADMIN_DATABASE: 'postgres',
     DB_SYNC: 'false',
     DB_LOGGING: 'false',
-    SOCIAL_GRAPH_V2_WORKER_ENABLED: 'false',
-    SOCIAL_GRAPH_V2_SCALE_TEST: 'true',
+    SOCIAL_GRAPH_WORKER_ENABLED: 'false',
+    SOCIAL_GRAPH_SCALE_TEST: 'true',
   };
   let child;
   const stop = () => {
@@ -45,10 +46,11 @@ const { findPostgresBinDir, startPostgres } = require('../reward-e2e/postgres');
         '--runInBand',
         'src/plugins/social-graph',
         'src/notifications',
+        'src/profile/services/profile-read.service.spec.ts',
         'src/utils',
         'src/ae/websocket.service.spec.ts',
         '--json',
-        '--outputFile=docs/evidence/social-graph-v2-jest-results.json',
+        `--outputFile=${evidencePath('social-graph-jest-results.json')}`,
       ],
       { env, stdio: 'inherit' },
     );

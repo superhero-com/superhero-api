@@ -1,10 +1,10 @@
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import {
-  SocialGraphV2Reader,
+  SocialGraphReader,
   decimal,
   decodeGraphCursor,
   encodeGraphCursor,
-} from './social-graph-v2-reader';
+} from './social-graph-reader';
 
 const identity = {
   network: 'ae_dev',
@@ -20,7 +20,7 @@ const cursor = {
   offset: '100',
 };
 
-describe('V2 graph read boundaries', () => {
+describe('Social graph read boundaries', () => {
   afterEach(() => jest.restoreAllMocks());
   it('refreshes adjustable policy while pinning every component to one block and keeping integers exact', async () => {
     const amount = 2n ** 100n;
@@ -46,7 +46,7 @@ describe('V2 graph read boundaries', () => {
     const source = jest
       .fn()
       .mockResolvedValue({ decodedResult: [null, 'ak_legacy'] });
-    const reader = new SocialGraphV2Reader(
+    const reader = new SocialGraphReader(
       { getCurrentKeyBlock: async () => ({ hash: top, height: 100 }) } as any,
       identity,
     );
@@ -102,7 +102,7 @@ describe('V2 graph read boundaries', () => {
       getContractCode: async () => ({ bytecode: 'unknown' }),
     };
     await expect(
-      new SocialGraphV2Reader(node as any, identity).policy(),
+      new SocialGraphReader(node as any, identity).policy(),
     ).rejects.toThrow('bytecode');
     expect(initialize).not.toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe('V2 graph read boundaries', () => {
     const page = jest.fn().mockResolvedValue({
       decodedResult: { items: [], next_cursor: 100n, end_cursor: 200n },
     });
-    const reader = new SocialGraphV2Reader(
+    const reader = new SocialGraphReader(
       { getCurrentKeyBlock: async () => ({ hash: top }) } as any,
       identity,
     );
@@ -136,7 +136,7 @@ describe('V2 graph read boundaries', () => {
     });
   });
   it('rejects stalled pages instead of creating an endless continuation', async () => {
-    const reader = new SocialGraphV2Reader(
+    const reader = new SocialGraphReader(
       { getCurrentKeyBlock: async () => ({ hash: top }) } as any,
       identity,
     );
@@ -149,9 +149,9 @@ describe('V2 graph read boundaries', () => {
   });
 });
 
-describe('V2 event namespace', () => {
+describe('Social graph event namespace', () => {
   it('filters foreign logs, preserves block cleanup order and does not turn imports into follows', async () => {
-    const reader = new SocialGraphV2Reader({} as any, identity);
+    const reader = new SocialGraphReader({} as any, identity);
     (reader as any).contract = Promise.resolve({
       $decodeEvents: ([log]) => [{ name: log.name, args: log.args }],
     });
@@ -188,7 +188,7 @@ describe('V2 event namespace', () => {
     ).toEqual(['ak_c']);
   });
   it('does not swallow decoder failures on the reviewed contract', async () => {
-    const reader = new SocialGraphV2Reader({} as any, identity);
+    const reader = new SocialGraphReader({} as any, identity);
     (reader as any).contract = Promise.resolve({
       $decodeEvents: () => {
         throw new Error('missing definition');
@@ -200,7 +200,7 @@ describe('V2 event namespace', () => {
   });
 });
 
-describe('V2 relationship snapshot', () => {
+describe('Social graph relationship snapshot', () => {
   it('pins relationship and lifecycle to the same key block and marks the view advisory', async () => {
     const relation = jest.fn().mockResolvedValue({
       decodedResult: {
@@ -213,7 +213,7 @@ describe('V2 relationship snapshot', () => {
     const lifecycle = jest
       .fn()
       .mockResolvedValue({ decodedResult: [null, 0n, false, true] });
-    const reader = new SocialGraphV2Reader(
+    const reader = new SocialGraphReader(
       { getCurrentKeyBlock: async () => ({ hash: top, height: 100 }) } as any,
       identity,
     );

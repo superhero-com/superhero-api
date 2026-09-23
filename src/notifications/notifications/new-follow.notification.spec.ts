@@ -51,7 +51,7 @@ describe('NewFollowNotification', () => {
     const n = new NewFollowNotification(base);
     expect(n.toExpo().body).toContain('ak_2foll...0000');
   });
-  it('separates V2 network, contract and log identities while preserving V1 keys', () => {
+  it('separates scoped network, contract and log identities while preserving historical keys', () => {
     const params = { follower: 'ak_a', followed: 'ak_b', txHash: 'th_same' };
     const a = new NewFollowNotification({
       ...params,

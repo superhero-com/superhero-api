@@ -6,3 +6,8 @@
 .env.*
 **/.env
 **/.env.*
+
+# Private local task artifacts
+/docs/evidence/
+/.internal/
+/test/social-graph/fixtures/remote-rehearsal.json

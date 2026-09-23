@@ -63,7 +63,7 @@ describe('NewFollowListener', () => {
     });
     await expect(listener.onFollowed(payload)).resolves.toBeUndefined();
   });
-  it('propagates V2 delivery failures so the durable outbox can retry', async () => {
+  it('propagates scoped delivery failures so the durable outbox can retry', async () => {
     notifications.send.mockResolvedValue({
       outcome: 'failed',
       error: 'temporary',
@@ -72,7 +72,7 @@ describe('NewFollowListener', () => {
     await expect(
       listener.onFollowed({
         ...payload,
-        graphScope: { network: 'ae_uat', contract: 'ct_v2', eventIndex: 2 },
+        graphScope: { network: 'ae_uat', contract: 'ct_graph', eventIndex: 2 },
       }),
     ).rejects.toThrow('temporary');
     await expect(listener.onFollowed(payload)).resolves.toBeUndefined();
