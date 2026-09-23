@@ -55,10 +55,13 @@ export class SocialGraphV2NodeStream {
         'Generation is not closed at the expected block',
       );
     const transactions: CatchupPage['transactions'] = [];
-    let budget = 20;
+    let budget = 100;
     while (cursor.micro < micros.length && budget > 0) {
       const hash = micros[cursor.micro];
-      const header = await this.node.getMicroBlockHeaderByHash(hash);
+      const [header, { count }] = await Promise.all([
+        this.node.getMicroBlockHeaderByHash(hash),
+        this.node.getMicroBlockTransactionsCountByHash(hash),
+      ]);
       if (
         header.prevKeyHash !== start.hash ||
         header.prevHash !==
@@ -66,8 +69,6 @@ export class SocialGraphV2NodeStream {
         decimal(header.height) !== start.height
       )
         throw new GraphReorgError('Invalid micro block ancestry');
-      const { count } =
-        await this.node.getMicroBlockTransactionsCountByHash(hash);
       if (
         !Number.isSafeInteger(count) ||
         count < 0 ||
@@ -75,53 +76,37 @@ export class SocialGraphV2NodeStream {
         cursor.transaction > count + 1
       )
         throw new Error('Invalid transaction count');
-      // Empty micro blocks also consume budget, bounding work even without events.
       budget--;
       while (cursor.transaction <= count && budget > 0) {
-        const tx = await this.node.getMicroBlockTransactionByHashAndIndex(
-          hash,
-          cursor.transaction,
+        const size = Math.min(8, budget, count - cursor.transaction + 1);
+        const batch = await Promise.all(
+          Array.from({ length: size }, async (_, offset) => {
+            const index = cursor.transaction + offset;
+            const tx = await this.node.getMicroBlockTransactionByHashAndIndex(
+              hash,
+              index,
+            );
+            if (
+              tx.blockHash !== hash ||
+              decimal(tx.blockHeight) !== start.height
+            )
+              throw new GraphReorgError('Transaction block changed');
+            const events = await this.transactionEvents(reader, tx);
+            return {
+              hash: tx.hash,
+              height: start.height,
+              position: (
+                (BigInt(start.height) << 64n) +
+                (BigInt(cursor.micro) << 32n) +
+                BigInt(index)
+              ).toString(),
+              events,
+            };
+          }),
         );
-        if (tx.blockHash !== hash || decimal(tx.blockHeight) !== start.height)
-          throw new GraphReorgError('Transaction block changed');
-        let events: CatchupPage['transactions'][number]['events'] = [];
-        if (
-          [
-            'ContractCallTx',
-            'ContractCreateTx',
-            'GAMetaTx',
-            'PayingForTx',
-          ].includes(tx.tx.type)
-        ) {
-          let info: any = await this.node.getTransactionInfoByHash(tx.hash);
-          let depth = 0;
-          while (info.gaInfo) {
-            if (++depth > 32) throw new Error('Unsupported nested receipt');
-            if (info.gaInfo.returnType !== 'ok') {
-              info = {};
-              break;
-            }
-            info = info.gaInfo.innerObject;
-            if (!info) throw new Error('Missing inner receipt');
-          }
-          if (info.callInfo?.returnType === 'ok')
-            events = await reader.decodeLogs(info.callInfo.log);
-          // A success wrapper with an unrecognised receipt must not hide graph writes.
-          if (!info.callInfo && !info.txInfo && depth === 0)
-            throw new Error('Unsupported contract receipt');
-        }
-        transactions.push({
-          hash: tx.hash,
-          height: start.height,
-          position: (
-            (BigInt(start.height) << 64n) +
-            (BigInt(cursor.micro) << 32n) +
-            BigInt(cursor.transaction)
-          ).toString(),
-          events,
-        });
-        cursor.transaction++;
-        budget--;
+        transactions.push(...batch);
+        cursor.transaction += size;
+        budget -= size;
       }
       if (cursor.transaction > count) {
         cursor.micro++;
@@ -139,5 +124,41 @@ export class SocialGraphV2NodeStream {
         cursor.micro === micros.length ? null : JSON.stringify(cursor),
       transactions,
     };
+  }
+  private async transactionEvents(
+    reader: SocialGraphV2Reader,
+    signed: any,
+  ): Promise<CatchupPage['transactions'][number]['events']> {
+    let inner = signed.tx;
+    let depth = 0;
+    // Sponsored spends have no contract receipt; asking for one returns 400.
+    while (inner?.type === 'PayingForTx') {
+      if (++depth > 32 || !inner.tx)
+        throw new Error('Unsupported sponsored wrapper');
+      inner = inner.tx.tx ?? inner.tx;
+    }
+    if (
+      ![
+        'ContractCallTx',
+        'ContractCreateTx',
+        'GAMetaTx',
+        'GAAttachTx',
+      ].includes(inner?.type)
+    )
+      return [];
+    let info: any = await this.node.getTransactionInfoByHash(signed.hash);
+    depth = 0;
+    while (info.gaInfo) {
+      if (++depth > 32) throw new Error('Unsupported nested receipt');
+      if (info.gaInfo.returnType !== 'ok') return [];
+      info = info.gaInfo.innerObject;
+      if (!info) throw new Error('Missing inner receipt');
+    }
+    if (info.callInfo?.returnType === 'ok')
+      return reader.decodeLogs(info.callInfo.log);
+    if (info.callInfo && ['error', 'revert'].includes(info.callInfo.returnType))
+      return [];
+    if (info.txInfo && !/contract|ga_attach/.test(info.txInfo)) return [];
+    throw new Error('Unsupported contract receipt');
   }
 }

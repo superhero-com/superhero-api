@@ -1,6 +1,10 @@
+import { SOCIAL_GRAPH_ABORT_STATUS } from '../social-graph.errors';
 import { normalizeEventTopics } from '@/utils/common';
 import type { GraphMutation } from './social-graph-v2-projection.service';
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createHash } from 'crypto';
 import { Contract, Encoded, Node } from '@aeternity/aepp-sdk';
 import aci from '../aci/SocialContractV2.aci.json';
@@ -101,6 +105,20 @@ export class SocialGraphV2Reader {
     return this.contract;
   }
 
+  async migrationEvidence(
+    policy: Awaited<ReturnType<SocialGraphV2Reader['policy']>>,
+  ) {
+    const { SocialGraphV2Lifecycle } =
+      await import('./social-graph-v2-lifecycle');
+    return new SocialGraphV2Lifecycle(this.node).verify(policy, {
+      activationTx: process.env.SOCIAL_GRAPH_V2_ACTIVATION_TX,
+      freezeTx: process.env.SOCIAL_GRAPH_V2_SOURCE_FREEZE_TX,
+      legacySnapshotHash: process.env.SOCIAL_GRAPH_V2_LEGACY_SNAPSHOT_HASH,
+      legacyManifestHash:
+        process.env.SOCIAL_GRAPH_V2_LEGACY_MANIFEST_COMMITMENT,
+    });
+  }
+
   async verifyIdentity(): Promise<void> {
     await this.instance();
   }
@@ -182,6 +200,88 @@ export class SocialGraphV2Reader {
     };
   }
 
+  async precheck(action: string, from: string, to: string) {
+    if (
+      !['follow', 'unfollow', 'block', 'unblock'].includes(action) ||
+      [from, to].some((a) => !/^ak_[1-9A-HJ-NP-Za-km-z]+$/.test(a))
+    )
+      throw new BadRequestException('Invalid graph precheck');
+    try {
+      return await this.simulate(action, from, to);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) throw error;
+      throw new ServiceUnavailableException(
+        'Graph simulation unavailable; retry with the wallet before signing',
+      );
+    }
+  }
+
+  private async simulate(action: string, from: string, to: string) {
+    const c = await this.instance();
+    const block = await this.node.getCurrentKeyBlock();
+    const policy = await c.get_policy({ top: block.hash, callStatic: true });
+    // Do not use SDK $call here: it funds the caller during dry-run. A call request
+    // retains the real caller balance and has no signer or broadcast path.
+    const account = await this.node.getAccountByPubkeyAndHash(from, block.hash);
+    if (account.kind === 'generalized')
+      throw new ServiceUnavailableException(
+        'Generalized-account precheck requires wallet authentication context',
+      );
+    const nonce = account.nonce + 1;
+    if (!Number.isSafeInteger(nonce))
+      throw new ServiceUnavailableException('Unsupported account nonce');
+    const result = await this.node.protectedDryRunTxs({
+      top: block.hash,
+      accounts: [],
+      txs: [
+        {
+          callReq: {
+            contract: this.identity.contract,
+            caller: from,
+            calldata: c._calldata.encode(c._name, action, [to]),
+            nonce,
+            gas: 1500000,
+            abiVersion: 3,
+            context: { stateful: false },
+          },
+        },
+      ],
+    });
+    const call =
+      result.results?.length === 1 && result.results[0].result === 'ok'
+        ? result.results[0].callObj
+        : undefined;
+    if (!call || !['ok', 'revert'].includes(call.returnType))
+      throw new ServiceUnavailableException(
+        'Graph simulation unavailable; retry with the wallet before signing',
+      );
+    const reason =
+      call.returnType === 'revert'
+        ? c._calldata.decodeFateString(call.returnValue)
+        : null;
+    const statuses = {
+      ...SOCIAL_GRAPH_ABORT_STATUS,
+      FROZEN: 409,
+      IMPORTING: 409,
+      LOW_BALANCE: 409,
+    };
+    if (reason && !Object.prototype.hasOwnProperty.call(statuses, reason))
+      throw new ServiceUnavailableException(
+        'Unrecognized graph simulation result',
+      );
+    return {
+      ...this.identity,
+      block_hash: block.hash,
+      height: decimal(block.height),
+      advisory: true,
+      simulation: reason ? 'rejected' : 'passed',
+      reason,
+      suggested_http_status: reason ? statuses[reason] : null,
+      config_version: decimal(policy.decodedResult[1]),
+      gas_used: decimal(call.gasUsed),
+    };
+  }
+
   async countsAt(account: string, top: Encoded.KeyBlockHash) {
     if (!/^ak_[1-9A-HJ-NP-Za-km-z]+$/.test(account))
       throw new BadRequestException('Invalid graph account');
@@ -223,15 +323,21 @@ export class SocialGraphV2Reader {
       height: decimal(block.height),
       config: serialize(policy.decodedResult[0]),
       config_version: decimal(policy.decodedResult[1]),
-      pending_config: serialize(policy.decodedResult[2]),
+      pending_config:
+        policy.decodedResult[2] == null
+          ? null
+          : {
+              config: serialize(policy.decodedResult[2][0]),
+              activation_height: decimal(policy.decodedResult[2][1]),
+            },
       owner: owner.decodedResult[0],
       pending_owner: owner.decodedResult[1] ?? null,
-      successor: lifecycle.decodedResult[0] ?? null,
+      successor: lifecycle.decodedResult[0]?.replace(/^ak_/, 'ct_') ?? null,
       freeze_height: decimal(lifecycle.decodedResult[1]),
       frozen: lifecycle.decodedResult[2],
       importing: lifecycle.decodedResult[3],
       import_source: source.decodedResult[0] ?? null,
-      legacy_source: source.decodedResult[1] ?? null,
+      legacy_source: source.decodedResult[1]?.replace(/^ak_/, 'ct_') ?? null,
       source_sha256: build.sourceSha256,
     };
   }

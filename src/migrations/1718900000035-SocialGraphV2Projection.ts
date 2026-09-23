@@ -6,7 +6,7 @@ export class SocialGraphV2Projection1718900000035 implements MigrationInterface 
       network text NOT NULL, contract text NOT NULL, generation bigint NOT NULL DEFAULT 1,
       state text NOT NULL DEFAULT 'importing' CHECK (state IN ('importing','catching-up','ready','rebuilding')),
       snapshot_hash text, snapshot_height bigint, export_cursor numeric(78,0) NOT NULL DEFAULT 0,
-      source_contract text, source_cutoff bigint, activation_height bigint,
+      source_contract text, source_cutoff bigint, activation_height bigint, migration_evidence jsonb,
       notify_from_height bigint, synced_hash text, synced_height bigint, sync_end_hash text, sync_end_height bigint,
       sync_cursor text, sync_last_position numeric(78,0), sync_last_height bigint,
       PRIMARY KEY(network,contract,generation))`);
@@ -35,9 +35,10 @@ export class SocialGraphV2Projection1718900000035 implements MigrationInterface 
       network text NOT NULL, contract text NOT NULL, generation bigint NOT NULL,
       tx_hash text NOT NULL, event_index integer NOT NULL, height bigint NOT NULL,
       follower text NOT NULL, followed text NOT NULL, delivered boolean NOT NULL DEFAULT false,
+      attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY(network,contract,tx_hash,event_index))`);
     await q.query(
-      `CREATE INDEX social_graph_v2_outbox_pending ON social_graph_v2_outbox(network,contract,generation,height,tx_hash,event_index) WHERE delivered=false`,
+      `CREATE INDEX social_graph_v2_outbox_pending ON social_graph_v2_outbox(network,contract,generation,next_attempt_at,height,tx_hash,event_index) WHERE delivered=false`,
     );
     await q.query(`CREATE TABLE social_graph_v2_rates (
       network text NOT NULL, contract text NOT NULL, generation bigint NOT NULL, address text NOT NULL,

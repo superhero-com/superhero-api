@@ -22,6 +22,60 @@ const cursor = {
 
 describe('V2 graph read boundaries', () => {
   afterEach(() => jest.restoreAllMocks());
+  it('refreshes adjustable policy while pinning every component to one block and keeping integers exact', async () => {
+    const amount = 2n ** 100n;
+    const config = {
+      max_following: 10000n,
+      max_blocked: 100n,
+      follow_cooldown: 2n,
+      minimum_balance: amount,
+      cleanup_grace: 5n,
+    };
+    const policy = jest
+      .fn()
+      .mockResolvedValueOnce({ decodedResult: [config, 1n, [config, 580n]] })
+      .mockResolvedValueOnce({
+        decodedResult: [{ ...config, minimum_balance: amount + 1n }, 2n, null],
+      });
+    const owner = jest
+      .fn()
+      .mockResolvedValue({ decodedResult: ['ak_owner', 'ak_next'] });
+    const lifecycle = jest
+      .fn()
+      .mockResolvedValue({ decodedResult: ['ak_next', 590n, false, false] });
+    const source = jest
+      .fn()
+      .mockResolvedValue({ decodedResult: [null, 'ak_legacy'] });
+    const reader = new SocialGraphV2Reader(
+      { getCurrentKeyBlock: async () => ({ hash: top, height: 100 }) } as any,
+      identity,
+    );
+    (reader as any).contract = Promise.resolve({
+      get_policy: policy,
+      get_owner: owner,
+      get_lifecycle: lifecycle,
+      get_import_source: source,
+    });
+    expect(await reader.policy()).toMatchObject({
+      config: { minimum_balance: amount.toString() },
+      config_version: '1',
+      pending_config: {
+        config: { minimum_balance: amount.toString() },
+        activation_height: '580',
+      },
+      successor: 'ct_next',
+      legacy_source: 'ct_legacy',
+    });
+    expect(await reader.policy()).toMatchObject({
+      config: { minimum_balance: (amount + 1n).toString() },
+      config_version: '2',
+      pending_config: null,
+    });
+    for (const read of [policy, owner, lifecycle, source]) {
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(read).toHaveBeenLastCalledWith({ top, callStatic: true });
+    }
+  });
   it('keeps large integers exact and rejects rounded numeric input', () => {
     expect(decimal(2n ** 100n)).toBe('1267650600228229401496703205376');
     expect(() => decimal(Number.MAX_SAFE_INTEGER + 1)).toThrow();
@@ -148,16 +202,14 @@ describe('V2 event namespace', () => {
 
 describe('V2 relationship snapshot', () => {
   it('pins relationship and lifecycle to the same key block and marks the view advisory', async () => {
-    const relation = jest
-      .fn()
-      .mockResolvedValue({
-        decodedResult: {
-          a_follows_b: true,
-          b_follows_a: false,
-          a_blocked_b: false,
-          b_blocked_a: false,
-        },
-      });
+    const relation = jest.fn().mockResolvedValue({
+      decodedResult: {
+        a_follows_b: true,
+        b_follows_a: false,
+        a_blocked_b: false,
+        b_blocked_a: false,
+      },
+    });
     const lifecycle = jest
       .fn()
       .mockResolvedValue({ decodedResult: [null, 0n, false, true] });

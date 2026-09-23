@@ -21,6 +21,33 @@ export class SocialGraphV2QueryService {
       throw new ServiceUnavailableException('V2 graph projection is not ready');
     return { network, contract, generation: rows[0].generation };
   }
+  async status(network: string, contract: string) {
+    const rows = await this.db.query(
+      `SELECT generation::text,state,snapshot_height::text,synced_height::text AS completed_height,
+      sync_last_height::text AS pending_height,sync_last_position::text AS pending_position,(sync_end_height IS NOT NULL) AS catching_up,
+      source_contract,source_cutoff::text,activation_height::text,migration_evidence
+      FROM social_graph_v2_scopes WHERE network=$1 AND contract=$2 ORDER BY generation DESC LIMIT 1`,
+      [network, contract],
+    );
+    return {
+      network,
+      contract,
+      ...(rows[0] ?? {
+        generation: null,
+        state: 'uninitialized',
+        snapshot_height: null,
+        completed_height: null,
+        pending_height: null,
+        pending_position: null,
+        catching_up: false,
+        source_contract: null,
+        source_cutoff: null,
+        activation_height: null,
+        migration_evidence: null,
+      }),
+    };
+  }
+
   private account(address: string) {
     if (!/^ak_[1-9A-HJ-NP-Za-km-z]+$/.test(address))
       throw new BadRequestException('Invalid account');
@@ -29,7 +56,9 @@ export class SocialGraphV2QueryService {
     this.account(address);
     const rows = await this.db.query(
       `SELECT COALESCE(c.followers,0)::text AS followers,
-      COALESCE(c.following,0)::text AS following,COALESCE(c.blocked,0)::text AS blocked
+      COALESCE(c.following,0)::text AS following,COALESCE(c.blocked,0)::text AS blocked,
+      s.synced_height::text AS completed_height,s.sync_last_height::text AS pending_height,
+      s.sync_last_position::text AS pending_position,(s.sync_end_height IS NOT NULL) AS catching_up
       FROM social_graph_v2_scopes s LEFT JOIN social_graph_v2_counts c
       ON c.network=s.network AND c.contract=s.contract AND c.generation=s.generation AND c.address=$4
       WHERE s.network=$1 AND s.contract=$2 AND s.generation=$3 AND s.state='ready' AND NOT EXISTS(SELECT 1 FROM social_graph_v2_scopes newer WHERE newer.network=s.network AND newer.contract=s.contract AND newer.generation>s.generation)`,
@@ -68,13 +97,14 @@ export class SocialGraphV2QueryService {
         )
           throw new Error();
         before = decimal(c.before);
+        if (BigInt(before) > 9223372036854775807n) throw new Error();
       } catch {
         throw new BadRequestException('Invalid projection cursor');
       }
     }
     return this.db.transaction('REPEATABLE READ', async (m) => {
       const state = await m.query(
-        'SELECT state FROM social_graph_v2_scopes s WHERE network=$1 AND contract=$2 AND generation=$3 AND NOT EXISTS(SELECT 1 FROM social_graph_v2_scopes newer WHERE newer.network=s.network AND newer.contract=s.contract AND newer.generation>s.generation)',
+        'SELECT state,synced_height::text AS completed_height,sync_last_height::text AS pending_height,sync_last_position::text AS pending_position,(sync_end_height IS NOT NULL) AS catching_up FROM social_graph_v2_scopes s WHERE network=$1 AND contract=$2 AND generation=$3 AND NOT EXISTS(SELECT 1 FROM social_graph_v2_scopes newer WHERE newer.network=s.network AND newer.contract=s.contract AND newer.generation>s.generation)',
         [scope.network, scope.contract, scope.generation],
       );
       if (state[0]?.state !== 'ready')
@@ -101,6 +131,10 @@ export class SocialGraphV2QueryService {
       return {
         ...scope,
         account: address,
+        completed_height: state[0].completed_height,
+        pending_height: state[0].pending_height,
+        pending_position: state[0].pending_position,
+        catching_up: state[0].catching_up,
         addresses: items.map((r) => r.address),
         next_cursor: more
           ? Buffer.from(
