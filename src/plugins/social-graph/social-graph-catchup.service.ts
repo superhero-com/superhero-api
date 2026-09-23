@@ -52,7 +52,13 @@ export class SocialGraphCatchupService {
       )
         throw new Error('No available catch-up checkpoint');
       const start = s.synced_height ?? s.snapshot_height;
-      if (start == null || BigInt(end.height) <= BigInt(start))
+      if (
+        start == null ||
+        BigInt(end.height) < BigInt(start) ||
+        (BigInt(end.height) === BigInt(start) &&
+          (!end.hash.startsWith('mh_') ||
+            end.hash === (s.synced_hash ?? s.snapshot_hash)))
+      )
         throw new Error('Invalid sync window');
       // Initial catch-up is unavailable. Once bootstrapped, each page applies complete
       // transactions atomically, so live readers can safely observe an ordered prefix.
@@ -101,7 +107,8 @@ export class SocialGraphCatchupService {
         if (
           (last !== null && position <= last) ||
           height < start ||
-          height >= end ||
+          height > end ||
+          (height === end && !s.sync_end_hash.startsWith('mh_')) ||
           (previousHeight !== null && height < previousHeight) ||
           tx.events.length > 10000 ||
           !tx.hash

@@ -81,6 +81,42 @@ describe('Social graph read boundaries', () => {
     expect(() => decimal(Number.MAX_SAFE_INTEGER + 1)).toThrow();
     expect(() => decimal('-1')).toThrow();
   });
+  it('reads current microblock policy for signing while keeping snapshot policy at the key block', async () => {
+    const micro = 'mh_abc';
+    const node = {
+      getCurrentKeyBlock: jest
+        .fn()
+        .mockResolvedValue({ hash: top, height: 100 }),
+      getTopHeader: jest.fn().mockResolvedValue({ hash: micro, height: 100 }),
+    };
+    const contract = {
+      get_policy: jest.fn(async ({ top: hash }) => ({
+        decodedResult: [{}, hash === micro ? 2n : 1n, null],
+      })),
+      get_owner: jest.fn(async () => ({ decodedResult: ['ak_owner', null] })),
+      get_lifecycle: jest.fn(async ({ top: hash }) => ({
+        decodedResult: [null, 0n, hash === micro, false],
+      })),
+      get_import_source: jest.fn(async () => ({ decodedResult: [null, null] })),
+    };
+    const reader = new SocialGraphReader(node as any, identity);
+    (reader as any).contract = Promise.resolve(contract);
+    expect(await reader.policy('top')).toMatchObject({
+      block_hash: micro,
+      config_version: '2',
+      frozen: true,
+    });
+    for (const read of Object.values(contract)) {
+      expect(read).toHaveBeenLastCalledWith({ top: micro, callStatic: true });
+    }
+    expect(node.getTopHeader).toHaveBeenCalledTimes(1);
+    expect(node.getCurrentKeyBlock).not.toHaveBeenCalled();
+    expect(await reader.policy()).toMatchObject({
+      block_hash: top,
+      config_version: '1',
+      frozen: false,
+    });
+  });
   it('binds cursor to network, contract, account, direction and snapshot', () => {
     const token = encodeGraphCursor(cursor);
     expect(decodeGraphCursor(token, cursor)).toEqual(cursor);
@@ -201,39 +237,59 @@ describe('Social graph event namespace', () => {
 });
 
 describe('Social graph relationship snapshot', () => {
-  it('pins relationship and lifecycle to the same key block and marks the view advisory', async () => {
-    const relation = jest.fn().mockResolvedValue({
-      decodedResult: {
-        a_follows_b: true,
-        b_follows_a: false,
-        a_blocked_b: false,
-        b_blocked_a: false,
-      },
-    });
-    const lifecycle = jest
+  it('validates a persisted microblock against its current canonical generation', async () => {
+    const generation = jest
       .fn()
-      .mockResolvedValue({ decodedResult: [null, 0n, false, true] });
+      .mockResolvedValue({ microBlocks: ['mh_one', 'mh_two'] });
     const reader = new SocialGraphReader(
-      { getCurrentKeyBlock: async () => ({ hash: top, height: 100 }) } as any,
+      { getGenerationByHeight: generation } as any,
       identity,
     );
-    (reader as any).contract = Promise.resolve({
-      get_relationship: relation,
-      get_lifecycle: lifecycle,
-    });
-    const result = await reader.relationship('ak_a', 'ak_b');
-    expect(result).toMatchObject({
-      block_hash: top,
-      height: '100',
-      importing: true,
-      advisory: true,
-      a_follows_b: true,
-    });
-    expect(relation).toHaveBeenCalledWith('ak_a', 'ak_b', {
-      top,
-      callStatic: true,
-    });
-    expect(lifecycle).toHaveBeenCalledWith({ top, callStatic: true });
-    await expect(reader.relationship('bad', 'ak_b')).rejects.toThrow('Invalid');
+    await reader.assertCanonical('mh_one', '100');
+    expect(generation).toHaveBeenCalledWith(100);
+    generation.mockResolvedValue({ microBlocks: ['mh_fork'] });
+    await expect(reader.assertCanonical('mh_one', '100')).rejects.toThrow(
+      'Snapshot is no longer canonical',
+    );
   });
+  it.each(['mh_abc', 'kh_abc'])(
+    'pins relationship and lifecycle to chain tip %s, including mined microblocks',
+    async (tip) => {
+      const relation = jest.fn().mockResolvedValue({
+        decodedResult: {
+          a_follows_b: true,
+          b_follows_a: false,
+          a_blocked_b: false,
+          b_blocked_a: false,
+        },
+      });
+      const lifecycle = jest
+        .fn()
+        .mockResolvedValue({ decodedResult: [null, 0n, false, true] });
+      const reader = new SocialGraphReader(
+        { getTopHeader: async () => ({ hash: tip, height: 100 }) } as any,
+        identity,
+      );
+      (reader as any).contract = Promise.resolve({
+        get_relationship: relation,
+        get_lifecycle: lifecycle,
+      });
+      const result = await reader.relationship('ak_a', 'ak_b');
+      expect(result).toMatchObject({
+        block_hash: tip,
+        height: '100',
+        importing: true,
+        advisory: true,
+        a_follows_b: true,
+      });
+      expect(relation).toHaveBeenCalledWith('ak_a', 'ak_b', {
+        top: tip,
+        callStatic: true,
+      });
+      expect(lifecycle).toHaveBeenCalledWith({ top: tip, callStatic: true });
+      await expect(reader.relationship('bad', 'ak_b')).rejects.toThrow(
+        'Invalid',
+      );
+    },
+  );
 });

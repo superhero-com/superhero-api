@@ -1,4 +1,6 @@
 import { Provider, Type } from '@nestjs/common';
+import { SocialGraphPluginModule } from './social-graph/social-graph-plugin.module';
+import { SocialGraphPlugin } from './social-graph/social-graph.plugin';
 import { MDW_PLUGIN, POPULAR_RANKING_CONTRIBUTOR } from './plugin.tokens';
 import { BclPlugin } from './bcl/bcl.plugin';
 import { BclPluginModule } from './bcl/bcl-plugin.module';
@@ -26,6 +28,7 @@ import { CommunityRoomStatePluginModule } from '@/token-gated-rooms/plugins/comm
  * Add new plugin modules here when registering a new plugin
  */
 export const PLUGIN_MODULES: Type[] = [
+  SocialGraphPluginModule,
   BclPluginModule,
   SocialPluginModule,
   DexPluginModule,
@@ -54,6 +57,7 @@ export const getPluginProvider = (): Provider => ({
     addressLinksPlugin: AddressLinksPlugin,
     aex9TransferPlugin: Aex9TransferPlugin,
     communityRoomStatePlugin: CommunityRoomStatePlugin,
+    socialGraphPlugin: SocialGraphPlugin,
   ) => {
     return [
       bclPlugin,
@@ -65,6 +69,7 @@ export const getPluginProvider = (): Provider => ({
       addressLinksPlugin,
       aex9TransferPlugin,
       communityRoomStatePlugin,
+      socialGraphPlugin,
     ];
   },
   inject: [
@@ -77,6 +82,7 @@ export const getPluginProvider = (): Provider => ({
     AddressLinksPlugin,
     Aex9TransferPlugin,
     CommunityRoomStatePlugin,
+    SocialGraphPlugin,
   ],
 });
 

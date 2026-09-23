@@ -10,6 +10,7 @@ import { SocialGraphReader } from './social-graph-reader';
 
 describe('Social graph API', () => {
   it('validates the real HTTP precheck route before touching the node', async () => {
+    const policy = jest.fn().mockResolvedValue({ block_hash: 'mh_abc' });
     const simulate = jest
       .fn()
       .mockResolvedValue({ advisory: true, simulation: 'passed' });
@@ -18,7 +19,7 @@ describe('Social graph API', () => {
       providers: [
         {
           provide: SocialGraphService,
-          useValue: { getReader: () => ({ precheck: simulate }) },
+          useValue: { getReader: () => ({ precheck: simulate, policy }) },
         },
         { provide: SocialGraphQueryService, useValue: {} },
         { provide: ProfileReadService, useValue: {} },
@@ -35,6 +36,10 @@ describe('Social graph API', () => {
     );
     await app.init();
     try {
+      await request(app.getHttpServer())
+        .get('/api/social-graph/policy')
+        .expect(200, { block_hash: 'mh_abc' });
+      expect(policy).toHaveBeenCalledWith('top');
       for (const body of [
         { action: 'freeze', from: 'ak_a', to: 'ak_b' },
         { action: 'follow', from: 'invalid', to: 'ak_b' },
@@ -85,6 +90,12 @@ describe('Social graph API', () => {
     const scope = { network: 'ae_dev', contract: 'ct_test', generation: '1' };
     const queries = {
       ready: async () => scope,
+      counts: jest.fn().mockResolvedValue({
+        ...scope,
+        address: 'ak_c',
+        followers: '1',
+        completed_height: '99',
+      }),
       connections: async () => ({
         ...scope,
         account: 'ak_c',
@@ -164,7 +175,7 @@ describe('Social graph API', () => {
     }
   });
   it('simulates without caller funding, pins nonce/policy/state and returns actionable aborts', async () => {
-    const top = 'kh_abc';
+    const top = 'mh_abc';
     const dry = jest.fn().mockResolvedValue({
       results: [
         {
@@ -179,7 +190,7 @@ describe('Social graph API', () => {
     });
     const account = jest.fn().mockResolvedValue({ kind: 'basic', nonce: 12 });
     const node: any = {
-      getCurrentKeyBlock: async () => ({ hash: top, height: 100 }),
+      getTopHeader: jest.fn().mockResolvedValue({ hash: top, height: 100 }),
       getAccountByPubkeyAndHash: account,
       protectedDryRunTxs: dry,
     };
@@ -187,13 +198,16 @@ describe('Social graph API', () => {
       network: 'ae_dev',
       contract: 'ct_abc',
     });
+    const policy = jest
+      .fn()
+      .mockResolvedValue({ decodedResult: [{}, 3n, null] });
     (reader as any).contract = Promise.resolve({
       _name: 'SocialContract',
       _calldata: {
         encode: () => 'cb_encoded',
         decodeFateString: () => 'LOW_BALANCE',
       },
-      get_policy: async () => ({ decodedResult: [{}, 3n, null] }),
+      get_policy: policy,
     });
     expect(await reader.precheck('follow', 'ak_a', 'ak_b')).toMatchObject({
       advisory: true,
@@ -220,6 +234,8 @@ describe('Social graph API', () => {
       ],
     });
     expect(account).toHaveBeenCalledWith('ak_a', top);
+    expect(policy).toHaveBeenCalledWith({ top, callStatic: true });
+    expect(node.getTopHeader).toHaveBeenCalledTimes(1);
     await expect(reader.precheck('freeze', 'ak_a', 'ak_b')).rejects.toThrow(
       'Invalid',
     );

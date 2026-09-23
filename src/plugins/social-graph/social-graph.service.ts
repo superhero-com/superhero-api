@@ -67,7 +67,7 @@ export class SocialGraphService implements OnModuleInit {
   }
 
   async getConfig() {
-    const policy = await this.getReader().policy();
+    const policy = await this.getReader().policy('top');
     return {
       max_following: safeGraphNumber(policy.config.max_following),
       max_blocked: safeGraphNumber(policy.config.max_blocked),
