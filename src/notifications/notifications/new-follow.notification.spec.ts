@@ -51,4 +51,21 @@ describe('NewFollowNotification', () => {
     const n = new NewFollowNotification(base);
     expect(n.toExpo().body).toContain('ak_2foll...0000');
   });
+  it('separates V2 network, contract and log identities while preserving V1 keys', () => {
+    const params = { follower: 'ak_a', followed: 'ak_b', txHash: 'th_same' };
+    const a = new NewFollowNotification({
+      ...params,
+      graphScope: { network: 'ae_uat', contract: 'ct_a', eventIndex: 0 },
+    });
+    const b = new NewFollowNotification({
+      ...params,
+      graphScope: { network: 'ae_uat', contract: 'ct_b', eventIndex: 0 },
+    });
+    expect(a.dedupKey({ address: 'ak_b' as any })).not.toBe(
+      b.dedupKey({ address: 'ak_b' as any }),
+    );
+    expect(a.dedupKey({ address: 'ak_b' as any })).toBe(
+      'ae_uat:ct_a:th_same:0:ak_b',
+    );
+  });
 });

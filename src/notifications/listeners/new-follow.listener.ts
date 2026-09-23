@@ -30,18 +30,18 @@ export class NewFollowListener {
     private readonly config: ConfigType<typeof notificationsConfig>,
   ) {}
 
-  @OnEvent(SOCIAL_GRAPH_FOLLOWED_EVENT, { async: true, promisify: true })
-  async onFollowed(payload: SocialGraphFollowedEventPayload): Promise<void> {
+  @OnEvent(SOCIAL_GRAPH_FOLLOWED_EVENT, { async: true, promisify: true, suppressErrors: false })
+  async onFollowed(payload: SocialGraphFollowedEventPayload): Promise<boolean | void> {
     try {
       if (!this.config.enabled) {
-        return;
+        return payload.graphScope ? false : undefined;
       }
       const { followerAddress, followedAddress, txHash } = payload;
       if (!followerAddress || !followedAddress || !txHash) {
-        return;
+        return payload.graphScope ? false : undefined;
       }
       if (followerAddress === followedAddress) {
-        return;
+        return payload.graphScope ? false : undefined;
       }
 
       const followerLabel = await this.accountLabel.labelFor(followerAddress);
@@ -52,15 +52,21 @@ export class NewFollowListener {
           followed: followedAddress,
           txHash,
           followerLabel,
+          graphScope: payload.graphScope,
         }),
       );
       if (outcome.outcome === 'failed') {
         this.logger.warn(
           `New-follow notification failed for ${followedAddress}: ${outcome.error}`,
         );
+        if (payload.graphScope) throw new Error(outcome.error);
+        return payload.graphScope ? false : undefined;
       }
+      return payload.graphScope ? true : undefined;
     } catch (error) {
       this.logger.error('Failed to process new-follow event', error as Error);
+      if (payload.graphScope) throw error;
+      return payload.graphScope ? false : undefined;
     }
   }
 }
