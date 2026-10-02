@@ -1,15 +1,10 @@
-import {
-  fetchJson,
-  resolveMiddlewareNextUrlSafely,
-  sanitizeJsonForPostgres,
-} from '@/utils/common';
+import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
 import {
   isDatabaseConnectionOrPoolError,
   logDatabaseIssue,
   runWithDatabaseIssueLogging,
 } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
-import { decode } from '@aeternity/aepp-sdk';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,6 +17,7 @@ import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
 import { isSelfTransferTx } from '../utils/common';
+import { toMdwTx } from '../utils/to-mdw-tx';
 
 @Injectable()
 export class BlockSyncService {
@@ -216,7 +212,7 @@ export class BlockSyncService {
         if (isSelfTransferTx(camelTx)) {
           continue;
         }
-        mdwTxs.push(this.convertToMdwTx(camelTx));
+        mdwTxs.push(toMdwTx(camelTx));
       }
 
       // Track every transaction MDW reports for this block (minus self-
@@ -420,40 +416,6 @@ export class BlockSyncService {
       nonce: block?.nonce?.toString() || '0',
       pow: Array.isArray(block?.pow) ? block.pow : [],
       created_at: new Date(block.time),
-    };
-  }
-
-  convertToMdwTx(tx: ITransaction): Partial<Tx> {
-    let payload = '';
-    if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
-      payload = decode(tx?.tx?.payload).toString();
-    }
-
-    // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
-    // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
-    const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
-    const sanitizedSignatures = tx.signatures
-      ? sanitizeJsonForPostgres(tx.signatures)
-      : [];
-
-    return {
-      hash: tx.hash,
-      block_height: tx.blockHeight,
-      block_hash: tx.blockHash?.toString() || '',
-      micro_index: tx.microIndex?.toString() || '0',
-      micro_time: tx.microTime?.toString() || '0',
-      signatures: sanitizedSignatures,
-      encoded_tx: tx.encodedTx || '',
-      type: tx.tx?.type || '',
-      contract_id: tx.tx?.contractId,
-      function: tx.tx?.function,
-      caller_id: tx.tx?.callerId,
-      sender_id: tx.tx?.senderId,
-      recipient_id: tx.tx?.recipientId,
-      payload: payload ? sanitizeJsonForPostgres(payload) : '',
-      raw: sanitizedRaw,
-      version: 1, // Explicitly set default value
-      created_at: new Date(tx.microTime), // Explicitly set timestamp
     };
   }
 }

@@ -18,12 +18,12 @@ import {
 } from '../events';
 import { SyncDirection } from '../../plugin.interface';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { POST_SYNC_VERSION } from '@/social/config/post-contracts.config';
 import moment from 'moment';
 
 @Injectable()
 export class PostPersistenceService {
   private readonly logger = new Logger(PostPersistenceService.name);
-  private readonly syncVersion = 6; // Match PostService syncVersion
 
   constructor(
     @InjectRepository(Post)
@@ -342,7 +342,7 @@ export class PostPersistenceService {
           ? postTypeInfo.parentPostId
           : null,
       is_hidden: postTypeInfo.isHidden,
-      version: this.syncVersion,
+      version: POST_SYNC_VERSION,
     };
   }
 
