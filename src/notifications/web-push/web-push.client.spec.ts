@@ -35,7 +35,7 @@ describe('WebPushClient', () => {
       expect(client.isConfigured()).toBe(true);
     });
 
-    it('stays disabled when the public key is not the private key\'s pair', () => {
+    it("stays disabled when the public key is not the private key's pair", () => {
       // Format-valid but mismatched: setVapidDetails accepts it, every send
       // would then 403 and be dropped as permanent. Must be refused at boot.
       const other = webpush.generateVAPIDKeys();

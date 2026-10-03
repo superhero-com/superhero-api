@@ -138,9 +138,7 @@ export function vapidKeysMatch(publicKey: string, privateKey: string): boolean {
   try {
     const ecdh = createECDH('prime256v1');
     ecdh.setPrivateKey(Buffer.from(privateKey, 'base64url'));
-    return ecdh
-      .getPublicKey()
-      .equals(Buffer.from(publicKey, 'base64url'));
+    return ecdh.getPublicKey().equals(Buffer.from(publicKey, 'base64url'));
   } catch {
     return false;
   }
