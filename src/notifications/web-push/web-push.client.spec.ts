@@ -1,5 +1,5 @@
 import webpush, { WebPushError } from 'web-push';
-import { WebPushClient } from './web-push.client';
+import { vapidKeysMatch, WebPushClient } from './web-push.client';
 
 describe('WebPushClient', () => {
   const baseConfig = {
@@ -31,6 +31,28 @@ describe('WebPushClient', () => {
         vapidPublicKey:
           'BH48--skSmKK5wcCFq33bvGVSBat96xZIOeP6XOMsYe83K1OVEzmNflW8NC55a1s15wpQFBULNxLuhCMv4sMLtI',
         vapidPrivateKey: 'QxpqtcLM6kZtan5RGBSPcneWpitBBPrisplNL2TAf_Y',
+      });
+      expect(client.isConfigured()).toBe(true);
+    });
+
+    it('stays disabled when the public key is not the private key\'s pair', () => {
+      // Format-valid but mismatched: setVapidDetails accepts it, every send
+      // would then 403 and be dropped as permanent. Must be refused at boot.
+      const other = webpush.generateVAPIDKeys();
+      const client = new WebPushClient({
+        ...baseConfig,
+        vapidPublicKey: other.publicKey,
+        vapidPrivateKey: configuredConfig.vapidPrivateKey,
+      });
+      expect(client.isConfigured()).toBe(false);
+    });
+
+    it('accepts a freshly generated keypair', () => {
+      const pair = webpush.generateVAPIDKeys();
+      const client = new WebPushClient({
+        ...baseConfig,
+        vapidPublicKey: pair.publicKey,
+        vapidPrivateKey: pair.privateKey,
       });
       expect(client.isConfigured()).toBe(true);
     });
@@ -110,5 +132,19 @@ describe('WebPushClient', () => {
       expect(WebPushClient.classify(err(403))).toBe('permanent');
       expect(WebPushClient.classify(err(413))).toBe('permanent');
     });
+  });
+});
+
+describe('vapidKeysMatch', () => {
+  it('matches a generated pair and rejects a crossed pair', () => {
+    const a = webpush.generateVAPIDKeys();
+    const b = webpush.generateVAPIDKeys();
+    expect(vapidKeysMatch(a.publicKey, a.privateKey)).toBe(true);
+    expect(vapidKeysMatch(b.publicKey, a.privateKey)).toBe(false);
+  });
+
+  it('is false (not throwing) on garbage input', () => {
+    expect(vapidKeysMatch('not-a-key', 'nope')).toBe(false);
+    expect(vapidKeysMatch('', '')).toBe(false);
   });
 });
