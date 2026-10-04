@@ -81,6 +81,12 @@ Leave `SHORTS_JEV_ENABLED=0` until configured. Enable only with a server-side `T
 
 Run `npm run test:shorts:unit` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The opt-in testnet suite additionally exercises resumable transfer, captions retrieval, analytics deletion and moderation/appeals alongside the wallet lifecycle.
 
+## Local Studio connection without an extra signature
+
+Set `SHORTS_DEMO_CONNECTED_WALLET=1` in the ignored local environment and restart the API to use the main app's connected address throughout Studio. The config endpoint reports `creatorAccess: "connected-wallet"`; the web client opens and renews its Studio session automatically through `POST /api/shorts/auth/connect`. Switching or disconnecting the main wallet clears the previous account's creator data. Hosting payments, paid Likes, claims and withdrawals still require wallet-signed contract calls.
+
+This is a local demo identity shortcut, not cryptographic proof of address ownership. A local caller can request a creator session for any valid address, including access to that address's drafts and analytics. It is disabled by default, requires local testnet mode and is unavailable in production. The normal API bootstrap does not expose the Shorts module. Connection-only sessions expire after 30 minutes, are stored separately, cannot access operator review routes and stop working when the flag is disabled. Outside this mode, private creator access still uses signed sessions.
+
 ## Temporary local demo approval
 
 Set `SHORTS_DEMO_AUTO_APPROVE=1` in the ignored `.env.shorts-testnet` and restart the local API to skip visual scans, scan retries and optional text classification. This opt-in mode requires `SHORTS_TESTNET_MVP=1` and is disabled in production. The config endpoint reports `moderationMode: "demo"` and `visualModeration: false`.

@@ -7,6 +7,7 @@ import { ShortsChainService, ae, aetto } from './shorts-chain.service';
 import { ShortsMediaService } from './shorts-media.service';
 import { DemoActor, FundingSource, ShortRecord } from './shorts.types';
 import { communityGuidelines, creatorContent } from './shorts-eligibility';
+import { ShortsAuthService } from './shorts-auth.service';
 
 export const TOPICS = ['All', ...SHORTS_TOPICS];
 @Injectable()
@@ -17,6 +18,7 @@ export class ShortsService {
     readonly analytics: ShortsAnalyticsService,
     readonly ledger: ShortsLedgerService,
     readonly labels: ShortsLabelsService,
+    readonly auth: ShortsAuthService,
   ) {}
   get demoAutoApprove() {
     return this.media.safety?.demoAutoApprove === true;
@@ -38,6 +40,9 @@ export class ShortsService {
       replicas: this.media.apis.length,
       visualModeration: await this.media.safety.health(),
       moderationMode: this.demoAutoApprove ? 'demo' : 'review',
+      creatorAccess: this.auth?.connectedWalletAccess
+        ? 'connected-wallet'
+        : 'signed-session',
       classification: this.demoAutoApprove
         ? 'Creator-selected topics; demo auto-approval'
         : 'Local frame inspection + human review',

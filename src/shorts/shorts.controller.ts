@@ -12,7 +12,6 @@ import {
   Req,
   Headers,
   BadRequestException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
@@ -39,6 +38,9 @@ export class ShortsController {
   }
   @Post('auth/verify') verify(@Body() body: { id: string; signature: string }) {
     return this.auth.verify(body.id, body.signature);
+  }
+  @Post('auth/connect') connect(@Body() body: { address: string }) {
+    return this.auth.connect(body.address);
   }
   @Get() list(@Query('address') address = '', @Query('topic') topic = 'All') {
     return this.shorts.list(address, topic);
@@ -95,11 +97,7 @@ export class ShortsController {
   ) {
     const address = this.auth.authenticate(authorization);
     const short = this.shorts.item(id);
-    if (
-      address !== short.creator &&
-      address !== this.shorts.chain.operator.address
-    )
-      throw new ForbiddenException('Creator or operator required');
+    if (address !== short.creator) this.auth.operator(authorization);
     const data = await this.shorts.media.preview(short);
     return res
       .set({
@@ -225,11 +223,8 @@ export class ShortsController {
     @Param('id') id: string,
   ) {
     const actor = this.auth.authenticate(authorization);
-    if (
-      actor !== this.shorts.item(id).creator &&
-      actor !== this.shorts.chain.operator.address
-    )
-      throw new ForbiddenException('Creator or operator required');
+    if (actor !== this.shorts.item(id).creator)
+      this.auth.operator(authorization);
     return this.shorts.chain.serial(async () => {
       const safety = await this.shorts.rescan(id);
       return actor === this.shorts.chain.operator.address &&

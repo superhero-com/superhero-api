@@ -6,6 +6,71 @@ const { ShortsLabelsService } = require('./shorts-labels.service');
 const { ShortsLedgerService } = require('./shorts-ledger.service');
 const { ShortsService } = require('./shorts.service');
 const { randomUUID } = require('node:crypto');
+const { ShortsAuthService } = require('./shorts-auth.service');
+
+function studioAuth(t, enabled = true) {
+  const saved = { ...process.env };
+  t.after(() => { process.env = saved; });
+  process.env.SHORTS_DEMO_CONNECTED_WALLET = enabled ? '1' : '0';
+  process.env.SHORTS_TESTNET_MVP = '1';
+  process.env.NODE_ENV = 'test';
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec(`CREATE TABLE challenges(id TEXT PRIMARY KEY, address TEXT, message TEXT, expires INTEGER);
+    CREATE TABLE sessions(hash TEXT PRIMARY KEY, address TEXT, expires INTEGER);
+    CREATE TABLE connected_wallet_sessions(hash TEXT PRIMARY KEY, address TEXT, expires INTEGER);`);
+  const chain = { state: { contract: 'ct_test' }, operator: { address: 'ak_operator' }, address: a => {
+    if (!a?.startsWith('ak_')) throw new Error('Invalid account');
+    return a;
+  } };
+  return { db, chain, auth: new ShortsAuthService({ db }, chain) };
+}
+
+test('connection-only Studio sessions require explicit non-production local mode', t => {
+  const { db, chain, auth } = studioAuth(t, false);
+  assert.throws(() => auth.connect('ak_creator'), /disabled/);
+  process.env.SHORTS_DEMO_CONNECTED_WALLET = '1';
+  process.env.SHORTS_TESTNET_MVP = '0';
+  assert.throws(() => new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
+  process.env.SHORTS_TESTNET_MVP = '1';
+  process.env.NODE_ENV = 'production';
+  assert.throws(() => new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
+  process.env.NODE_ENV = 'test';
+  assert.throws(() => new ShortsAuthService({ db }, chain).connect('invalid'), /Invalid account/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connected_wallet_sessions').get().n, 0);
+});
+
+test('connected Studio sessions stay account-scoped and never become operator or verified sessions', t => {
+  const { auth, db, chain } = studioAuth(t);
+  const creator = auth.connect('ak_creator'), other = auth.connect('ak_other');
+  assert.equal(creator.kind, 'connected-wallet');
+  assert.equal(auth.authenticate(`Bearer ${creator.token}`), 'ak_creator');
+  assert.equal(auth.authenticate(`Bearer ${other.token}`), 'ak_other');
+  assert.throws(() => auth.authenticate(), /Sign in/);
+  assert.throws(() => auth.authenticate(`Bearer ${'0'.repeat(64)}`), /Sign in/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
+  assert.equal(db.prepare('SELECT hash FROM connected_wallet_sessions WHERE address=?').get('ak_creator').hash.includes(creator.token), false);
+  const operator = auth.connect('ak_operator');
+  assert.throws(() => auth.operator(`Bearer ${operator.token}`), /Sign in/);
+  process.env.SHORTS_DEMO_CONNECTED_WALLET = '0';
+  const normal = new ShortsAuthService({ db }, chain);
+  assert.throws(() => normal.authenticate(`Bearer ${creator.token}`), /Sign in/);
+  db.prepare('UPDATE connected_wallet_sessions SET expires=?').run(Date.now() - 1);
+  assert.throws(() => auth.authenticate(`Bearer ${creator.token}`), /Sign in/);
+});
+
+test('signed operator access still verifies a real signature alongside connection-only Studio mode', async t => {
+  const { AccountMemory } = require('@aeternity/aepp-sdk');
+  const { auth, chain } = studioAuth(t);
+  const operator = AccountMemory.generate();
+  chain.operator.address = operator.address;
+  const challenge = auth.challenge(operator.address);
+  const signature = Buffer.from(await operator.signMessage(challenge.message)).toString('hex');
+  const session = auth.verify(challenge.id, signature);
+  assert.equal(session.kind, 'wallet-signature');
+  assert.equal(auth.operator(`Bearer ${session.token}`), operator.address);
+  assert.throws(() => auth.verify(challenge.id, signature), /Invalid or expired/);
+});
 
 function analytics(t) {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());

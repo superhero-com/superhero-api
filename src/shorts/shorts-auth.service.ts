@@ -10,10 +10,20 @@ import { verifyAeAddressSignature } from '../profile/services/profile-signature.
 
 @Injectable()
 export class ShortsAuthService {
+  readonly connectedWalletAccess =
+    process.env.SHORTS_DEMO_CONNECTED_WALLET === '1' &&
+    process.env.SHORTS_TESTNET_MVP === '1' &&
+    process.env.NODE_ENV !== 'production';
   constructor(
     private readonly store: ShortsStoreService,
     private readonly chain: ShortsChainService,
   ) {}
+  connect(address: string) {
+    if (!this.connectedWalletAccess)
+      throw new ForbiddenException('Connection-only Studio access is disabled');
+    this.chain.address(address);
+    return this.issue(address, true);
+  }
   challenge(address: string) {
     this.chain.address(address);
     this.store.db
@@ -53,28 +63,50 @@ export class ShortsAuthService {
       )
     )
       throw new UnauthorizedException('Invalid or expired signature');
+    return this.issue(String(row.address));
+  }
+  private issue(address: string, connectedWallet = false) {
+    // Demo sessions are kept separate: they never grant operator authority and
+    // cannot become verified sessions when the local shortcut is switched off.
+    const table = connectedWallet ? 'connected_wallet_sessions' : 'sessions';
     const token = randomBytes(32).toString('hex');
     const expires = Date.now() + 1800000;
     this.store.db
-      .prepare('DELETE FROM sessions WHERE expires<?')
+      .prepare(`DELETE FROM ${table} WHERE expires<?`)
       .run(Date.now());
+    const count = this.store.db
+      .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE address=?`)
+      .get(address);
+    if (Number(count.n) >= 30)
+      throw new ForbiddenException('Too many active Studio sessions');
     this.store.db
-      .prepare('INSERT INTO sessions VALUES(?,?,?)')
-      .run(this.hash(token), row.address, expires);
-    return { token, address: row.address, expiresAt: expires };
+      .prepare(`INSERT INTO ${table} VALUES(?,?,?)`)
+      .run(this.hash(token), address, expires);
+    return {
+      token,
+      address,
+      expiresAt: expires,
+      kind: connectedWallet ? 'connected-wallet' : 'wallet-signature',
+    };
   }
-  authenticate(authorization?: string) {
+  authenticate(authorization?: string, verifiedOnly = false) {
     const token = authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-    const row =
+    let row =
       token &&
       this.store.db
         .prepare('SELECT * FROM sessions WHERE hash=? AND expires>?')
+        .get(this.hash(token), Date.now());
+    if (!row && token && this.connectedWalletAccess && !verifiedOnly)
+      row = this.store.db
+        .prepare(
+          'SELECT * FROM connected_wallet_sessions WHERE hash=? AND expires>?',
+        )
         .get(this.hash(token), Date.now());
     if (!row) throw new UnauthorizedException('Sign in with your wallet');
     return String(row.address);
   }
   operator(authorization?: string) {
-    const address = this.authenticate(authorization);
+    const address = this.authenticate(authorization, true);
     if (address !== this.chain.operator.address)
       throw new ForbiddenException('Operator wallet required');
     return address;
