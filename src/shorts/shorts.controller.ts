@@ -250,13 +250,31 @@ export class ShortsController {
     const short = await this.shorts.ensurePlayable(id);
     return this.shorts.analytics.record(short, body);
   }
+  @Get(':id/hosting-prices') hostingPrices(
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+  ) {
+    return this.shorts.hostingPrices(this.auth.authenticate(authorization), id);
+  }
   @Post('quote') quote(
     @Headers('authorization') authorization: string,
-    @Body() body: { shortId: string; budget: string; source: FundingSource },
+    @Body()
+    body: {
+      shortId: string;
+      budget?: string;
+      days?: number;
+      source: FundingSource;
+    },
   ) {
     const address = this.auth.authenticate(authorization);
     return this.shorts.chain.serial(() =>
-      this.shorts.quote(address, body.shortId, body.budget, body.source),
+      this.shorts.quote(
+        address,
+        body.shortId,
+        body.budget,
+        body.source,
+        body.days,
+      ),
     );
   }
   @Post('activate') activate(

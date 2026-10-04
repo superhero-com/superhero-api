@@ -128,3 +128,38 @@ test('resumable uploads enforce ownership, exact parts, integrity and idempotent
   await u.part('creator', corrupt.id, 0, bytes.subarray(0,12));
   await assert.rejects(u.finish('creator', corrupt.id), /checksum/);
 });
+
+test('duration quotes preserve integer rounding and budget quotes remain compatible', async () => {
+  const writes = [];
+  const short = { id: 'duration', creator: 'creator', cid: 'cid', bytes: 100_000_001 };
+  const chain = {
+    state: { shorts: [short] }, address: value => value,
+    read: async method => {
+      if (method === 'get_config') return [0, 0, 0, 0, 10n ** 19n, 3_000_000_000n];
+      if (method === 'get_short') return null;
+      if (method === 'get_quote') {
+        const days = BigInt(writes.at(-1)[1][4]);
+        return { amount: (BigInt(short.bytes) * 10n ** 19n * days + 3_000_000_000n - 1n) / 3_000_000_000n, expected_until: 0, expires: Date.now() + 60000, rate_version: 1 };
+      }
+    },
+    write: async (...args) => { writes.push(args); return { decodedResult: '1' }; },
+  };
+  const service = new ShortsService(chain, {}, {}, {}, {});
+  assert.deepEqual(await service.hostingPrices('creator', 'duration'), {
+    shortId: 'duration', bytes: short.bytes, numerator: '10000000000000000000', denominator: '3000000000', maxDays: 3650,
+  });
+  await assert.rejects(service.hostingPrices('other', 'duration'), /Only the creator/);
+  const q = await service.quote('creator', 'duration', undefined, 'rewards', 30);
+  assert.equal(q.days, 30); assert.equal(q.charge, '10.0000001'); assert.equal(q.unused, '0');
+  assert.equal(writes[0][1][6], true);
+  const budget = await service.quote('creator', 'duration', '10', 'wallet');
+  assert.equal(budget.days, 29); assert.equal(budget.amountAettos, '9666666763333333334');
+  const count = writes.length;
+  for (const days of [0, -1, 1.5, 3651, '30', null]) {
+    await assert.rejects(service.quote('creator', 'duration', undefined, 'wallet', days), /whole days/);
+  }
+  await assert.rejects(service.quote('creator', 'duration', '10', 'wallet', 30), /duration or an AE budget/);
+  await assert.rejects(service.quote('creator', 'duration', undefined, 'wallet'), /duration or an AE budget/);
+  await assert.rejects(service.quote('other', 'duration', undefined, 'wallet', 30), /Only the creator/);
+  assert.equal(writes.length, count, 'invalid or unauthorized input never registers a quote');
+});

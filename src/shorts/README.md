@@ -30,6 +30,8 @@ npm run shorts:review -- restrict <short-id>
 
 After preparation, the creator chooses a hosting budget and wallet or reward source. The API registers an exact price/size/term/CID quote on chain. The creator's wallet signs funding; the API verifies the complete package on both configured IPFS nodes before activating coverage. Feed approval is not required to purchase hosting or share a paid active video by direct link. Studio displays the coverage end date, claimable rewards, earnings, views, paid Likes and transaction links. Creators can buy additional days using their available rewards or wallet balance.
 
+The upload stepper also supports a duration-first choice. Authenticated `GET /api/shorts/:id/hosting-prices` checks creator ownership and returns the prepared byte size and current tariff numerator/denominator without registering a quote. `POST /api/shorts/quote` accepts exactly one of `budget` (AE string) or `days` (integer, 1–3650), alongside `shortId` and `source`. The existing contract performs final rounded-up pricing when the quote is registered; the response remains the authoritative payment amount and expiry. No contract deployment change is required.
+
 Each Like requires a wallet-confirmed 0.1 test AE payment, split 80/20 between creator and deployer treasury. Gas is additional. Claims transfer accrued rewards to the signing wallet. A withdrawal requires explicit confirmation, stops official playback permanently and does not refund activated hosting.
 
 ## Trust and persistence

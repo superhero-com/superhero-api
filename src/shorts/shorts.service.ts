@@ -261,21 +261,47 @@ export class ShortsService {
     await this.chain.save();
     return short.safety;
   }
+  async hostingPrices(actor: DemoActor, id: string) {
+    const short = this.item(id);
+    if (short.creator !== this.chain.address(actor))
+      throw new Error('Only the creator can price this Short');
+    const cfg = await this.chain.read('get_config');
+    return {
+      shortId: id,
+      bytes: short.bytes,
+      numerator: String(cfg[4]),
+      denominator: String(cfg[5]),
+      maxDays: 3650,
+    };
+  }
   async quote(
     actor: DemoActor,
     id: string,
-    budget: string,
+    budget: string | undefined,
     source: FundingSource,
+    requestedDays?: number,
   ) {
     const s = this.item(id);
     if (s.creator !== this.chain.address(actor))
       throw new Error('Only the creator can fund this Short');
     if (!['wallet', 'rewards'].includes(source))
       throw new Error('Unknown funding source');
+    if ((budget !== undefined) === (requestedDays !== undefined))
+      throw new Error('Choose a hosting duration or an AE budget');
+    if (
+      requestedDays !== undefined &&
+      (!Number.isInteger(requestedDays) ||
+        requestedDays < 1 ||
+        requestedDays > 3650)
+    )
+      throw new Error('Choose between 1 and 3650 whole days');
     const cfg = await this.chain.read('get_config');
     const n = BigInt(cfg[4]),
       d = BigInt(cfg[5]);
-    const affordable = (aetto(budget) * d) / (BigInt(s.bytes) * n);
+    const affordable =
+      requestedDays !== undefined
+        ? BigInt(requestedDays)
+        : (aetto(budget!) * d) / (BigInt(s.bytes) * n);
     const days = affordable > 3650n ? 3650n : affordable;
     if (days < 1n) throw new Error('Budget must cover at least one day');
     const v = await this.chain.read('get_short', [id]);
@@ -299,7 +325,7 @@ export class ShortsService {
       days: Number(days),
       source,
       charge: ae(q.amount),
-      unused: ae(aetto(budget) - BigInt(q.amount)),
+      unused: budget === undefined ? '0' : ae(aetto(budget) - BigInt(q.amount)),
       amountAettos: String(q.amount),
       daily: ae((BigInt(s.bytes) * n + d - 1n) / d),
       previousUntil: Number(q.expected_until),
