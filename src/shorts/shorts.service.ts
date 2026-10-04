@@ -18,6 +18,9 @@ export class ShortsService {
     readonly ledger: ShortsLedgerService,
     readonly labels: ShortsLabelsService,
   ) {}
+  get demoAutoApprove() {
+    return this.media.safety?.demoAutoApprove === true;
+  }
   item(id: string) {
     const item = this.chain.state.shorts.find((s) => s.id === id);
     if (!item) throw new Error('Short not found');
@@ -34,7 +37,10 @@ export class ShortsService {
       ipfs: await this.media.health(),
       replicas: this.media.apis.length,
       visualModeration: await this.media.safety.health(),
-      classification: 'Local frame inspection + human review',
+      moderationMode: this.demoAutoApprove ? 'demo' : 'review',
+      classification: this.demoAutoApprove
+        ? 'Creator-selected topics; demo auto-approval'
+        : 'Local frame inspection + human review',
       analyticsSince: this.analytics.since,
       topics: TOPICS,
       operator: this.chain.operator.address,
@@ -51,7 +57,7 @@ export class ShortsService {
         : BigInt(v.until) <= BigInt(Date.now())
           ? 'expired'
           : 'active';
-    const guidelines = communityGuidelines(s);
+    const guidelines = communityGuidelines(s, this.demoAutoApprove);
     const status =
       hostingStatus === 'withdrawn'
         ? 'withdrawn'
@@ -63,7 +69,7 @@ export class ShortsService {
               ? 'ready'
               : hostingStatus;
     return {
-      ...creatorContent(s),
+      ...creatorContent(s, this.demoAutoApprove),
       appeal: studio ? s.appeal : undefined,
       captionsUrl: s.captions
         ? `/api/shorts/media/${s.id}/captions.vtt`
@@ -186,17 +192,19 @@ export class ShortsService {
       synthetic: details.synthetic === true,
       sponsored: details.sponsored === true,
       captions: !!details.captions,
-      classification: await this.labels.classify({
-        title: title.trim(),
-        topic,
-        description: details.description,
-        captions: details.captions,
-      }),
+      classification: this.demoAutoApprove
+        ? undefined
+        : await this.labels.classify({
+            title: title.trim(),
+            topic,
+            description: details.description,
+            captions: details.captions,
+          }),
       moderation:
-        prepared.safety.status === 'blocked'
+        prepared.safety?.status === 'blocked'
           ? ('rejected' as const)
           : ('pending' as const),
-      reviewReason: prepared.safety.reason,
+      reviewReason: prepared.safety?.reason,
       views: [],
       reports: 0,
     };
@@ -251,12 +259,14 @@ export class ShortsService {
   }
   async rescan(id: string) {
     const short = this.item(id);
+    // Keep prior evidence intact so disabling demo mode restores review state.
+    if (this.demoAutoApprove) return short.safety;
     short.safety = await this.media.rescan(short);
     short.visualReviewHash = undefined;
-    if (short.safety.status !== 'no_flags') {
+    if (short.safety?.status !== 'no_flags') {
       short.moderation =
-        short.safety.status === 'blocked' ? 'rejected' : 'pending';
-      short.reviewReason = short.safety.reason;
+        short.safety?.status === 'blocked' ? 'rejected' : 'pending';
+      short.reviewReason = short.safety?.reason;
     }
     await this.chain.save();
     return short.safety;

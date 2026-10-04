@@ -66,6 +66,7 @@ export class ShortsHostingService
         for (const [cid, short] of active)
           if (!this.media.hasAllPins(cid)) await this.media.pin(short);
       });
+      if (this.shorts.demoAutoApprove) return;
       // Feed inspection must not delay paid hosting or hold the transaction queue.
       for (const short of this.chain.state.shorts) {
         if (

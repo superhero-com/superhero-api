@@ -81,7 +81,15 @@ Leave `SHORTS_JEV_ENABLED=0` until configured. Enable only with a server-side `T
 
 Run `npm run test:shorts:unit` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The opt-in testnet suite additionally exercises resumable transfer, captions retrieval, analytics deletion and moderation/appeals alongside the wallet lifecycle.
 
-## Local visual inspection
+## Temporary local demo approval
+
+Set `SHORTS_DEMO_AUTO_APPROVE=1` in the ignored `.env.shorts-testnet` and restart the local API to skip visual scans, scan retries and optional text classification. This opt-in mode requires `SHORTS_TESTNET_MVP=1` and is disabled in production. The config endpoint reports `moderationMode: "demo"` and `visualModeration: false`.
+
+New uploads and existing pending videos become eligible for the feed immediately. Paid active hosting is still required for playback and feed inclusion; expired, withdrawn and unfunded videos remain unavailable. Previously blocked or explicitly rejected videos remain excluded. Wallet authorization, media validation, encryption, IPFS verification and payment checks are unchanged.
+
+Approval is an effective demo policy, not a stored review decision: creator responses report `moderation: "approved"` and `guidelines.approval: "demo"`, without manufacturing scan evidence or overwriting review history. The web UI omits the community-guidelines check panel for these responses. Set the flag back to `0` and restart to restore the original review state; uploads created during the demo then need inspection and approval. The worker resumes scanning missing or failed evidence automatically.
+
+## Local visual inspection (default mode)
 
 Every upload sends the actual original bytes to the local Docker visual service before review. It samples two frames per second, scene changes and a final frame; Falconsai NSFW screens sexual/nudity content and OpenAI CLIP suggests visual topics. JEV is not involved in this visual pipeline and may remain disabled. The receipt binds model/policy versions, timestamps, image scores and topic suggestions to the original SHA-256. The API rejects malformed evidence, incomplete temporal coverage and inconsistent decisions.
 

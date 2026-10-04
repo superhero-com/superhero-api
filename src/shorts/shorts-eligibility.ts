@@ -2,7 +2,10 @@ import type { ShortRecord } from './shorts.types';
 import { visualAllows } from './shorts-safety.service';
 
 // Feed distribution is a separate decision from purchased storage coverage.
-export function communityGuidelines(short: ShortRecord) {
+export function communityGuidelines(
+  short: ShortRecord,
+  demoAutoApprove = false,
+) {
   if (short.moderation === 'rejected' || short.safety?.status === 'blocked') {
     const decision = short.reviewHistory?.at(-1);
     return {
@@ -15,6 +18,8 @@ export function communityGuidelines(short: ShortRecord) {
           : undefined,
     };
   }
+  if (demoAutoApprove)
+    return { status: 'eligible' as const, approval: 'demo' as const };
   if (short.moderation === 'approved' && visualAllows(short))
     return { status: 'eligible' as const };
   if (!short.safety) return { status: 'analyzing' as const };
@@ -23,7 +28,8 @@ export function communityGuidelines(short: ShortRecord) {
   return { status: 'reviewing' as const };
 }
 
-export function creatorContent(short: ShortRecord) {
+export function creatorContent(short: ShortRecord, demoAutoApprove = false) {
+  const guidelines = communityGuidelines(short, demoAutoApprove);
   return {
     id: short.id,
     creator: short.creator,
@@ -37,7 +43,10 @@ export function creatorContent(short: ShortRecord) {
     language: short.language,
     synthetic: short.synthetic,
     sponsored: short.sponsored,
-    moderation: short.moderation,
-    guidelines: communityGuidelines(short),
+    moderation:
+      demoAutoApprove && guidelines.status === 'eligible'
+        ? 'approved'
+        : short.moderation,
+    guidelines,
   };
 }

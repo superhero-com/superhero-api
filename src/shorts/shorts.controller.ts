@@ -146,7 +146,10 @@ export class ShortsController {
   ) {
     const actor = this.auth.authenticate(authorization);
     return this.shorts.chain.serial(async () =>
-      creatorContent(await this.uploads.finish(actor, id)),
+      creatorContent(
+        await this.uploads.finish(actor, id),
+        this.shorts.demoAutoApprove,
+      ),
     );
   }
   @Post('upload')
@@ -189,6 +192,7 @@ export class ShortsController {
           sponsored: body.sponsored === 'true',
           captions: body.captions || '',
         }),
+        this.shorts.demoAutoApprove,
       ),
     );
   }
@@ -228,9 +232,13 @@ export class ShortsController {
       throw new ForbiddenException('Creator or operator required');
     return this.shorts.chain.serial(async () => {
       const safety = await this.shorts.rescan(id);
-      return actor === this.shorts.chain.operator.address
+      return actor === this.shorts.chain.operator.address &&
+        !this.shorts.demoAutoApprove
         ? safety
-        : communityGuidelines(this.shorts.item(id));
+        : communityGuidelines(
+            this.shorts.item(id),
+            this.shorts.demoAutoApprove,
+          );
     });
   }
   @Post(':id/appeal') appeal(

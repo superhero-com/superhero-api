@@ -204,3 +204,104 @@ test('creator upload and rescan responses omit operator-only inspection evidence
   assert.deepEqual((await controller.scan('auth', 'a')).frames, ['internal-frame']);
   assert.deepEqual(controller.review('auth')[0].safety.frames, ['internal-frame']);
 });
+
+test('demo inspection bypass requires explicit local testnet opt-in and makes no scanner calls', async t => {
+  const keys = ['SHORTS_DEMO_AUTO_APPROVE', 'SHORTS_TESTNET_MVP', 'NODE_ENV'];
+  const saved = keys.map(key => process.env[key]);
+  t.after(() => keys.forEach((key, i) => {
+    if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i];
+  }));
+  for (const [demo, local, environment, enabled] of [
+    [undefined, '1', 'development', false],
+    ['0', '1', 'development', false],
+    ['1', '0', 'development', false],
+    ['1', '1', 'production', false],
+    ['1', '1', 'development', true],
+  ]) {
+    if (demo === undefined) delete process.env.SHORTS_DEMO_AUTO_APPROVE;
+    else process.env.SHORTS_DEMO_AUTO_APPROVE = demo;
+    process.env.SHORTS_TESTNET_MVP = local;
+    process.env.NODE_ENV = environment;
+    assert.equal(new ShortsSafetyService().demoAutoApprove, enabled);
+  }
+  const fetch = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Scanner must not be called'); });
+  const safety = new ShortsSafetyService();
+  assert.equal(await safety.scan(Buffer.from('owned demo video')), undefined, 'no fabricated scan receipt');
+  assert.equal(await safety.health(), false, 'disabled scanning is not reported as healthy');
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('demo approval opens pending videos without changing evidence, payment gates or reversibility', async () => {
+  const base = { creator: 'creator', moderation: 'pending', views: [], safety: { status: 'error', checkedAt: 1 }, reviewHistory: [] };
+  const records = ['pending', 'missing', 'expired', 'withdrawn', 'unfunded', 'blocked', 'rejected'].map(id => ({
+    ...base, id, safety: id === 'missing' ? undefined : id === 'blocked' ? { status: 'blocked' } : base.safety,
+    moderation: id === 'rejected' ? 'rejected' : 'pending',
+  }));
+  const original = JSON.stringify(records);
+  const chain = { state: { shorts: records }, address: a => a, read: async (method, [id]) => {
+    if (method === 'has_liked') return false;
+    if (id === 'unfunded') return undefined;
+    return { until: Date.now() + (id === 'expired' ? -1000 : 100000), withdrawn: id === 'withdrawn', likes: 0 };
+  } };
+  const media = { safety: { demoAutoApprove: true }, rescan: async () => { throw new Error('Demo must not rescan'); } };
+  const service = new ShortsService(chain, media, {}, {}, {});
+  assert.deepEqual((await service.list()).map(s => s.id), ['pending', 'missing']);
+  for (const id of ['pending', 'missing']) {
+    const shared = await service.shared(id);
+    assert.equal(shared.status, 'active');
+    assert.equal(shared.moderation, 'approved');
+    assert.deepEqual(shared.guidelines, { status: 'eligible', approval: 'demo' });
+    assert.equal(shared.contentWarning, undefined);
+    await service.rescan(id);
+  }
+  for (const id of ['expired', 'withdrawn', 'unfunded']) await assert.rejects(service.shared(id), /not available/);
+  for (const id of ['blocked', 'rejected']) assert.equal((await service.shared(id)).contentWarning, 'feed-excluded');
+  assert.equal((await service.list('other', 'All', true)).length, 0, 'creator ownership still applies');
+  assert.equal(JSON.stringify(records), original, 'effective approval preserves the stored decisions and evidence');
+  media.safety.demoAutoApprove = false;
+  assert.equal((await service.list()).length, 0);
+  assert.equal((await service.shared('pending')).contentWarning, 'unreviewed');
+  assert.equal((await service.shared('missing')).guidelines.status, 'analyzing');
+});
+
+test('new demo uploads are immediately eligible in both upload responses, without stored approval or classification', async () => {
+  const { ShortsController } = require('./shorts.controller');
+  const chain = { state: { shorts: [] }, address: a => a, serial: fn => fn(), save: async () => {} };
+  let preparations = 0;
+  const service = new ShortsService(chain, {
+    safety: { demoAutoApprove: true },
+    prepare: async () => { preparations++; return { cid: 'bafy-demo', bytes: 1000, duration: 12, files: [], safety: undefined }; },
+  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } });
+  const controller = new ShortsController(service, { authenticate: () => 'creator' }, { finish: async () => chain.state.shorts[0] });
+  assert.throws(() => controller.upload('auth', { rights: 'false' }, { buffer: Buffer.from('video') }), /publishing rights/);
+  const result = await controller.upload('auth', { title: 'Demo', topic: 'Art', rights: 'true' }, { buffer: Buffer.from('video') });
+  assert.equal(preparations, 1, 'media preparation still runs');
+  assert.equal(result.moderation, 'approved');
+  assert.deepEqual(result.guidelines, { status: 'eligible', approval: 'demo' });
+  assert.deepEqual(await controller.finishUpload('auth', result.id), result);
+  const stored = chain.state.shorts[0];
+  assert.equal(stored.moderation, 'pending');
+  assert.equal(stored.safety, undefined);
+  assert.equal(stored.classification, undefined);
+  service.media.safety.demoAutoApprove = false;
+  assert.equal((await controller.finishUpload('auth', result.id)).guidelines.status, 'analyzing');
+});
+
+test('demo worker continues hosting recovery and replica repair while pausing scan retries', async () => {
+  const { ShortsHostingService } = require('./shorts-hosting.service');
+  const records = [{ id: 'missing', cid: 'bafy-missing', creator: 'creator' }, { id: 'error', cid: 'bafy-error', safety: { status: 'error', checkedAt: 1 } }];
+  let recovered = 0, repaired = 0, rescanned = 0;
+  const chain = { state: { shorts: records }, serial: fn => fn(), read: async (method, [id]) => {
+    if (method === 'get_pending') return id === 'missing' ? 'quote' : undefined;
+    if (method === 'get_quote') return { funded: true, complete: false, deadline: Date.now() + 100000 };
+    return { until: Date.now() + 100000 };
+  } };
+  const media = { pins: async () => new Set(), hasAllPins: () => false, pin: async () => { repaired++; } };
+  const shorts = { demoAutoApprove: true, fund: async () => { recovered++; }, rescan: async () => { rescanned++; } };
+  const worker = new ShortsHostingService(chain, media, shorts);
+  await worker.reconcile();
+  assert.equal(recovered, 1); assert.equal(repaired, 2); assert.equal(rescanned, 0);
+  shorts.demoAutoApprove = false;
+  await worker.reconcile();
+  assert.equal(rescanned, 2, 'inspection resumes when demo approval is disabled');
+});

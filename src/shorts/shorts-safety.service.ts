@@ -37,9 +37,14 @@ export function visualAllows(short: {
 
 @Injectable()
 export class ShortsSafetyService {
+  readonly demoAutoApprove =
+    process.env.SHORTS_DEMO_AUTO_APPROVE === '1' &&
+    process.env.SHORTS_TESTNET_MVP === '1' &&
+    process.env.NODE_ENV !== 'production';
   private readonly endpoint =
     process.env.SHORTS_MODERATION_URL || 'http://127.0.0.1:3340';
   async health() {
+    if (this.demoAutoApprove) return false;
     try {
       const response = await fetch(`${this.endpoint}/health`, {
         signal: AbortSignal.timeout(3000),
@@ -49,7 +54,9 @@ export class ShortsSafetyService {
       return false;
     }
   }
-  async scan(video: Buffer): Promise<VisualSafety> {
+  async scan(video: Buffer): Promise<VisualSafety | undefined> {
+    // Skipping inspection must not create a successful scan receipt.
+    if (this.demoAutoApprove) return undefined;
     const base = {
       sourceSha256: createHash('sha256').update(video).digest('hex'),
       checkedAt: Date.now(),
