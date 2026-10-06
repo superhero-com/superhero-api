@@ -288,9 +288,9 @@ export class TokensService {
       )
       SELECT
         ranked_tokens.rank,
-        row_to_json(token_performance_view.*) as performance
+        row_to_json(token_performance.*) as performance
       FROM ranked_tokens
-      LEFT JOIN token_performance_view ON ranked_tokens.sale_address = token_performance_view.sale_address
+      LEFT JOIN token_performance ON ranked_tokens.sale_address = token_performance.sale_address
       WHERE ranked_tokens.sale_address = $2
     `;
 
@@ -762,10 +762,10 @@ export class TokensService {
       paged_tokens AS (
         SELECT 
           all_ranked_tokens.*,
-          row_to_json(token_performance_view.*) as performance
+          row_to_json(token_performance.*) as performance
         FROM all_ranked_tokens
         INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
-        LEFT JOIN token_performance_view ON all_ranked_tokens.sale_address = token_performance_view.sale_address
+        LEFT JOIN token_performance ON all_ranked_tokens.sale_address = token_performance.sale_address
         ORDER BY ${pagedOrderClause}
         LIMIT ${limitPlaceholder}
         OFFSET ${offsetPlaceholder}
