@@ -29,7 +29,6 @@ describe('AccountTokensController', () => {
 
   beforeEach(async () => {
     tokensService = {
-      getTokenRanksByAex9Address: jest.fn().mockResolvedValue(new Map()),
       getTokensByAex9Address: jest.fn().mockResolvedValue([]),
     } as any;
 
@@ -111,11 +110,13 @@ describe('AccountTokensController', () => {
       jest
         .spyOn(tokenHolderRepository, 'createQueryBuilder')
         .mockReturnValue(tokenHolderQueryBuilder as any);
-      tokensService.getTokenRanksByAex9Address.mockResolvedValue(
-        new Map([['ct_token_1', 7]]),
-      );
       tokensService.getTokensByAex9Address.mockResolvedValue([
-        { address: 'ct_token_1', name: 'Token 1' } as any,
+        {
+          address: 'ct_token_1',
+          name: 'Token 1',
+          rank: 7,
+          unlisted: false,
+        } as any,
       ]);
 
       const result = await controller.listAccountTokens('test_address');
@@ -180,9 +181,9 @@ describe('AccountTokensController', () => {
       expect(spyGetFactory).toHaveBeenCalled();
     });
 
-    it('should merge ranks and holdings for creator_address/owner_address lookups', async () => {
+    it('should merge persisted ranks and holdings for creator_address/owner_address lookups', async () => {
       (paginate as jest.Mock).mockResolvedValue({
-        items: [{ address: 'ct_token_1' } as Token],
+        items: [{ address: 'ct_token_1', rank: 3, unlisted: false } as Token],
         meta: {
           totalItems: 1,
           itemCount: 1,
@@ -210,10 +211,6 @@ describe('AccountTokensController', () => {
       jest
         .spyOn(tokenHolderRepository, 'createQueryBuilder')
         .mockReturnValue(holderQueryBuilder as any);
-      tokensService.getTokenRanksByAex9Address.mockResolvedValue(
-        new Map([['ct_token_1', 3]]),
-      );
-
       const result = await controller.listAccountTokens(
         'test_address',
         undefined,
@@ -234,9 +231,6 @@ describe('AccountTokensController', () => {
         ],
         meta: expect.any(Object),
       });
-      expect(tokensService.getTokenRanksByAex9Address).toHaveBeenCalledWith([
-        'ct_token_1',
-      ]);
       expect(holderQueryBuilder.andWhere).toHaveBeenCalledWith(
         'token_holder.aex9_address IN (:...tokenAddresses)',
         { tokenAddresses: ['ct_token_1'] },

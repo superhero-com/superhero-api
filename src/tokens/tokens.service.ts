@@ -33,6 +33,7 @@ import { Transaction } from '@/transactions/entities/transaction.entity';
 import { Post } from '@/social/entities/post.entity';
 import { buildTokenMentionExistsSql } from '@/social/utils/token-mentions-sql.util';
 import { normalizeTokenSymbol } from './utils/token-symbol.util';
+import { visibleTokenRank } from './utils/token-rank.util';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -236,14 +237,7 @@ export class TokensService {
       .getOne();
   }
 
-  /**
-   * `withoutRank: true` returns the plain row. The default path additionally
-   * runs a RANK() over every token of the factory plus a performance-view join
-   * -- hundreds of ms against 64k tokens -- so pass `true` unless the caller
-   * actually reads `rank`/`performance`. Note the ranks differ: this one is
-   * per-factory and includes unlisted tokens, while the persisted `token.rank`
-   * column (RefreshTokenRanksService) spans factories over `unlisted = false`.
-   */
+  /** `withoutRank: true` returns the plain row, without `performance`. */
   async findByAddress(
     address: string,
     withoutRank = false,
@@ -273,35 +267,14 @@ export class TokensService {
       return token;
     }
 
-    const rankedQuery = `
-      WITH ranked_tokens AS (
-        SELECT 
-          sale_address,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN market_cap = 0 THEN 1 ELSE 0 END,
-              market_cap DESC,
-              created_at ASC
-          ) AS INTEGER) as rank
-        FROM token
-        WHERE factory_address = $1
-      )
-      SELECT
-        ranked_tokens.rank,
-        row_to_json(token_performance.*) as performance
-      FROM ranked_tokens
-      LEFT JOIN token_performance ON ranked_tokens.sale_address = token_performance.sale_address
-      WHERE ranked_tokens.sale_address = $2
-    `;
-
-    const [rankResult] = await this.tokensRepository.query(rankedQuery, [
-      token.factory_address,
-      token.sale_address,
-    ]);
+    const [row] = await this.tokensRepository.query(
+      'SELECT row_to_json(token_performance.*) AS performance FROM token_performance WHERE sale_address = $1',
+      [token.sale_address],
+    );
     return {
       ...token,
-      rank: rankResult?.rank,
-      performance: rankResult?.performance ?? null,
+      rank: visibleTokenRank(token),
+      performance: row?.performance ?? null,
     } as Token & { rank: number; performance: unknown };
   }
 
@@ -899,66 +872,6 @@ export class TokensService {
       },
       passes,
     };
-  }
-
-  async getTokenRanks(tokenIds: string[]): Promise<Map<string, number>> {
-    if (!tokenIds.length) {
-      return new Map();
-    }
-    const factory = await this.communityFactoryService.getCurrentFactory();
-    const rankedQuery = `
-      WITH ranked_tokens AS (
-        SELECT 
-          t.*,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
-              t.market_cap DESC,
-              t.created_at ASC
-          ) AS INTEGER) as rank
-        FROM token t
-        WHERE t.factory_address = $1
-        AND t.unlisted = false
-      )
-      SELECT * FROM ranked_tokens WHERE sale_address = ANY($2::text[])
-    `;
-
-    const result = await this.tokensRepository.query(rankedQuery, [
-      factory.address,
-      tokenIds,
-    ]);
-    return new Map(result.map((token) => [token.sale_address, token.rank]));
-  }
-
-  async getTokenRanksByAex9Address(
-    aex9Addresses: string[],
-  ): Promise<Map<string, number>> {
-    if (!aex9Addresses.length) {
-      return new Map();
-    }
-    const factory = await this.communityFactoryService.getCurrentFactory();
-    const rankedQuery = `
-      WITH ranked_tokens AS (
-        SELECT 
-          t.*,
-          CAST(RANK() OVER (
-            ORDER BY 
-              CASE WHEN t.market_cap = 0 THEN 1 ELSE 0 END,
-              t.market_cap DESC,
-              t.created_at ASC
-          ) AS INTEGER) as rank
-        FROM token t
-        WHERE t.factory_address = $1
-        AND t.unlisted = false
-      )
-      SELECT * FROM ranked_tokens WHERE address = ANY($2::text[])
-    `;
-
-    const result = await this.tokensRepository.query(rankedQuery, [
-      factory.address,
-      aex9Addresses,
-    ]);
-    return new Map(result.map((token) => [token.address, token.rank]));
   }
 
   async getTokensByAex9Address(aex9Addresses: string[]): Promise<Token[]> {
