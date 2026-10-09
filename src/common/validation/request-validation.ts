@@ -1,4 +1,4 @@
-import { Encoding, isEncoded } from '@aeternity/aepp-sdk';
+import { Encoding, isEncoded, isNameValid } from '@aeternity/aepp-sdk';
 import { BadRequestException, PipeTransform } from '@nestjs/common';
 import {
   registerDecorator,
@@ -6,7 +6,6 @@ import {
   ValidationOptions,
 } from 'class-validator';
 
-const CHAIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}\.chain$/i;
 const INVITE_CODE_PATTERN = /^[a-z0-9]{1,64}$/i;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/i;
 const POST_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._~:-]{0,127}$/u;
@@ -66,7 +65,7 @@ export function isAeTransactionHash(value: unknown): value is string {
 export function isAeAccountReference(value: unknown): value is string {
   return (
     isAeAccountAddress(value) ||
-    (typeof value === 'string' && CHAIN_NAME_PATTERN.test(value))
+    (typeof value === 'string' && isNameValid(value))
   );
 }
 
