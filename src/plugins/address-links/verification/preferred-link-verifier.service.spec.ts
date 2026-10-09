@@ -29,6 +29,50 @@ describe('PreferredLinkVerifierService', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('accepts unicode AENS names', async () => {
+    const claim = await verifier.verifyClaim({
+      address,
+      value: '中文.chain',
+    });
+
+    expect(claim.value).toBe('中文.chain');
+    await expect(
+      verifier.verifySubmit({
+        address,
+        value: '中文.chain',
+        nonce: 0,
+        signature: 'a'.repeat(128),
+        verification_token: claim.verificationToken!,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still accepts punycode names for unlinking', () => {
+    expect(
+      verifier.verifyUnlinkPrincipal({
+        address,
+        value: 'xn--fiq228c.chain',
+        nonce: 1,
+        signature: 'a'.repeat(128),
+      }),
+    ).toBe('xn--fiq228c.chain');
+  });
+
+  it('rejects unicode names that are not valid AENS names', async () => {
+    await expect(
+      verifier.verifyClaim({
+        address,
+        value: '中 文.chain',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      verifier.verifyClaim({
+        address,
+        value: '🦸.chain',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects names that are not .chain principals', async () => {
     await expect(
       verifier.verifyClaim({

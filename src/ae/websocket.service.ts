@@ -211,11 +211,15 @@ export class WebSocketService implements OnModuleDestroy {
     };
   }
 
-  subscribeForTransactionsUpdates(callback: (payload: ITransaction) => void) {
+  subscribeForTransactionsUpdates(
+    callback: (payload: ITransaction) => void,
+    source: WebSocketSourceName = WEB_SOCKET_SOURCE.mdw,
+  ) {
     return this.subscribeForChannel(
       {
         op: WEB_SOCKET_SUBSCRIBE,
         payload: WEB_SOCKET_CHANNELS.Transactions,
+        source,
       },
       callback,
     );

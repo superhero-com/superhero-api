@@ -469,10 +469,10 @@ export class TokensController {
       (
         SELECT
           token.*,
-          row_to_json(token_performance_view.*) as performance
+          row_to_json(token_performance.*) as performance
         FROM token
-        LEFT JOIN token_performance_view
-          ON token.sale_address = token_performance_view.sale_address
+        LEFT JOIN token_performance
+          ON token.sale_address = token_performance.sale_address
         WHERE token.factory_address = $1
           AND token.unlisted = false
           AND token.rank < $2
@@ -483,10 +483,10 @@ export class TokensController {
       (
         SELECT
           token.*,
-          row_to_json(token_performance_view.*) as performance
+          row_to_json(token_performance.*) as performance
         FROM token
-        LEFT JOIN token_performance_view
-          ON token.sale_address = token_performance_view.sale_address
+        LEFT JOIN token_performance
+          ON token.sale_address = token_performance.sale_address
         WHERE token.factory_address = $1
           AND token.unlisted = false
           AND token.rank >= $2

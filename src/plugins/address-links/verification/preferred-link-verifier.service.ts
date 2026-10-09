@@ -1,3 +1,4 @@
+import { isNameValid } from '@aeternity/aepp-sdk';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ClaimPreferredLinkDto } from '../dto/preferred/claim-preferred-link.dto';
 import { SubmitPreferredLinkDto } from '../dto/preferred/submit-preferred-link.dto';
@@ -17,7 +18,11 @@ interface PreferredTokenPayload extends VerificationTokenPayload {
   principal: string;
 }
 
-const CHAIN_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.chain$/;
+// isNameValid covers unicode names (e.g. 中文.chain) but rejects punycode
+// `xn--` labels, so the ASCII rule stays to keep names linked under it valid
+// for unlinking.
+const ASCII_CHAIN_NAME_PATTERN =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.chain$/;
 
 @Injectable()
 export class PreferredLinkVerifierService {
@@ -72,7 +77,10 @@ export class PreferredLinkVerifierService {
     if (normalized.includes(':')) {
       throw new BadRequestException('AENS name must not contain ":"');
     }
-    if (!CHAIN_NAME_PATTERN.test(normalized)) {
+    if (
+      !ASCII_CHAIN_NAME_PATTERN.test(normalized) &&
+      !isNameValid(normalized)
+    ) {
       throw new BadRequestException(
         'AENS name must be a valid .chain name (e.g. hero.chain)',
       );

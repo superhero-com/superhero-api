@@ -1,6 +1,5 @@
-import { fetchJson, sanitizeJsonForPostgres } from '@/utils/common';
+import { fetchJson } from '@/utils/common';
 import { ITransaction, ITopHeader } from '@/utils/types';
-import { decode } from '@aeternity/aepp-sdk';
 import {
   Injectable,
   Logger,
@@ -21,6 +20,7 @@ import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
 import { isSelfTransferTx } from '../utils/common';
+import { toMdwTx } from '../utils/to-mdw-tx';
 
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
@@ -84,7 +84,7 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
 
   async handleLiveTransaction(transaction: ITransaction) {
     try {
-      const mdwTx = this.convertToMdwTx(transaction);
+      const mdwTx = toMdwTx(transaction);
 
       // Surface every live tx to cross-cutting consumers (notifications, ...)
       // BEFORE the plugin relevance filter, because some consumers care about
@@ -180,40 +180,6 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
         error,
       );
     }
-  }
-
-  private convertToMdwTx(tx: ITransaction): Partial<Tx> {
-    let payload = '';
-    if (tx?.tx?.type === 'SpendTx' && tx?.tx?.payload) {
-      payload = decode(tx?.tx?.payload).toString();
-    }
-
-    // Sanitize JSONB fields to remove null bytes and invalid Unicode characters
-    // PostgreSQL cannot handle null bytes (\u0000) in JSONB columns
-    const sanitizedRaw = tx.tx ? sanitizeJsonForPostgres(tx.tx) : null;
-    const sanitizedSignatures = tx.signatures
-      ? sanitizeJsonForPostgres(tx.signatures)
-      : [];
-
-    return {
-      hash: tx.hash,
-      block_height: tx.blockHeight,
-      block_hash: tx.blockHash?.toString() || '',
-      micro_index: tx.microIndex?.toString() || '0',
-      micro_time: tx.microTime?.toString() || '0',
-      signatures: sanitizedSignatures,
-      encoded_tx: tx.encodedTx || '',
-      type: tx.tx?.type || '',
-      contract_id: tx.tx?.contractId,
-      function: tx.tx?.function,
-      caller_id: tx.tx?.callerId,
-      sender_id: tx.tx?.senderId,
-      recipient_id: tx.tx?.recipientId,
-      payload: payload ? sanitizeJsonForPostgres(payload) : '',
-      raw: sanitizedRaw,
-      version: 1,
-      created_at: new Date(tx.microTime),
-    };
   }
 
   /**
