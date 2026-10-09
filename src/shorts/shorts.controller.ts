@@ -9,15 +9,15 @@ import {
   UploadedFile,
   UseInterceptors,
   Res,
-  Req,
   Headers,
   BadRequestException,
+  Header,
+  GoneException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 import { ShortsService } from './shorts.service';
-import { FundingSource } from './shorts.types';
 import { ShortsAuthService } from './shorts-auth.service';
 import { PlaybackEvent } from './shorts-analytics.service';
 import { communityGuidelines, creatorContent } from './shorts-eligibility';
@@ -253,41 +253,12 @@ export class ShortsController {
     const short = await this.shorts.ensurePlayable(id);
     return this.shorts.analytics.record(short, body);
   }
-  @Get(':id/hosting-prices') hostingPrices(
+  @Post(':id/publish') publish(
     @Headers('authorization') authorization: string,
     @Param('id') id: string,
   ) {
-    return this.shorts.hostingPrices(this.auth.authenticate(authorization), id);
-  }
-  @Post('quote') quote(
-    @Headers('authorization') authorization: string,
-    @Body()
-    body: {
-      shortId: string;
-      budget?: string;
-      days?: number;
-      source: FundingSource;
-    },
-  ) {
-    const address = this.auth.authenticate(authorization);
-    return this.shorts.chain.serial(() =>
-      this.shorts.quote(
-        address,
-        body.shortId,
-        body.budget,
-        body.source,
-        body.days,
-      ),
-    );
-  }
-  @Post('activate') activate(
-    @Headers('authorization') authorization: string,
-    @Body() body: { quoteId: string },
-  ) {
-    const address = this.auth.authenticate(authorization);
-    return this.shorts.chain.serial(() =>
-      this.shorts.fund(address, body.quoteId),
-    );
+    const actor = this.auth.authenticate(authorization);
+    return this.shorts.chain.serial(() => this.shorts.publish(actor, id));
   }
   @Post('receipt') receipt(
     @Headers('authorization') authorization: string,
@@ -310,49 +281,14 @@ export class ShortsController {
   ) {
     return this.shorts.chain.serial(() => this.shorts.report(id, body));
   }
+  @Get('playback/:id')
+  @Header('Cache-Control', 'no-store')
+  playbackDescriptor(@Param('id') id: string) {
+    return this.shorts.playbackDescriptor(id);
+  }
   @Get('media/:id/:file')
-  async media(
-    @Param('id') id: string,
-    @Param('file') file: string,
-    @Req() req: Request,
-    @Res() res: Response,
-  ) {
-    const short = await this.shorts.ensurePlayable(id);
-    const data = await this.shorts.media.retrieve(short, file);
-    res.set({
-      'Content-Type': file.endsWith('.mp4')
-        ? 'video/mp4'
-        : file.endsWith('.jpg')
-          ? 'image/jpeg'
-          : file.endsWith('.vtt')
-            ? 'text/vtt; charset=utf-8'
-            : 'application/json',
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    if (req.headers.range) {
-      const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
-      if (!m)
-        return res
-          .status(416)
-          .set('Content-Range', `bytes */${data.length}`)
-          .end();
-      const start = Number(m[1]),
-        end = Math.min(m[2] ? Number(m[2]) : data.length - 1, data.length - 1);
-      if (start > end || start >= data.length)
-        return res
-          .status(416)
-          .set('Content-Range', `bytes */${data.length}`)
-          .end();
-      return res
-        .status(206)
-        .set({
-          'Content-Range': `bytes ${start}-${end}/${data.length}`,
-          'Content-Length': String(end - start + 1),
-        })
-        .send(data.subarray(start, end + 1));
-    }
-    return res.set('Content-Length', String(data.length)).send(data);
+  @Header('Cache-Control', 'no-store')
+  media() {
+    throw new GoneException('Use the video streaming service for playback');
   }
 }

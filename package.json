@@ -31,7 +31,7 @@
     "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/bctsl-sdk/.build && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json",
     "start:shorts:testnet": "node --env-file=.env.shorts-testnet -r ts-node/register -r tsconfig-paths/register src/shorts/local-main.ts",
     "shorts:review": "node --env-file=.env.shorts-testnet -r ts-node/register -r tsconfig-paths/register src/shorts/shorts-operator.client.ts",
-    "test:shorts:unit": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-studio.test.cjs src/shorts/shorts-safety.test.cjs",
+    "test:shorts:unit": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-feature.test.cjs src/shorts/shorts-studio.test.cjs src/shorts/shorts-safety.test.cjs src/shorts/shorts-ipfs.test.cjs src/shorts/shorts-playback.test.cjs src/shorts/shorts-streaming.test.cjs",
     "test:shorts:testnet": "node --test src/shorts/shorts.testnet.test.cjs"
   },
   "dependencies": {

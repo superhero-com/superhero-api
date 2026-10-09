@@ -41,19 +41,21 @@ export class ShortsHostingService
           (typeof this.chain.state.shorts)[number]
         >();
         for (const short of this.chain.state.shorts) {
-          const qid = await this.chain.read('get_pending', [short.id]);
-          if (qid !== undefined) {
-            const q = await this.chain.read('get_quote', [qid]);
-            if (q.funded && !q.complete && Number(q.deadline) >= Date.now()) {
-              await this.shorts.fund(short.creator, String(qid));
+          let video = await this.chain.read('get_short', [short.id]);
+          if (
+            short.publication === 'pending' ||
+            (!video && short.publication === 'published')
+          ) {
+            try {
+              await this.shorts.publish(short.creator, short.id);
+            } catch {
+              this.logger.warn(`Publication will retry: ${short.id}`);
             }
           }
-          const video = await this.chain.read('get_short', [short.id]);
-          if (
-            video &&
-            !video.withdrawn &&
-            BigInt(video.until) > BigInt(Date.now())
-          )
+          video = await this.chain.read('get_short', [short.id]);
+          if (video && !video.withdrawn) active.set(short.cid, short);
+          // Never remove storage for a submitted publication whose outcome is uncertain.
+          if (!video && ['pending', 'published'].includes(short.publication))
             active.set(short.cid, short);
         }
         // Preserve a CID if another active Short uses the same package.
@@ -64,10 +66,10 @@ export class ShortsHostingService
           }
         }
         for (const [cid, short] of active)
-          if (!this.media.hasAllPins(cid)) await this.media.pin(short);
+          if (!this.media.hasPin(cid)) await this.media.pin(short);
       });
       if (this.shorts.demoAutoApprove) return;
-      // Feed inspection must not delay paid hosting or hold the transaction queue.
+      // Feed inspection must not delay publication or hold the transaction queue.
       for (const short of this.chain.state.shorts) {
         if (
           !short.safety ||

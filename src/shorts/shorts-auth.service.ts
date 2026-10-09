@@ -43,7 +43,7 @@ export class ShortsAuthService {
       );
     const id = randomBytes(24).toString('hex');
     const expires = Date.now() + 300000;
-    const message = `Superhero Shorts sign-in\nOrigin: http://127.0.0.1:5180\nNetwork: ae_uat\nContract: ${this.chain.state.contract}\nAddress: ${address}\nNonce: ${id}\nExpires: ${new Date(expires).toISOString()}\nThis authenticates uploads and creator actions. It does not transfer tokens.`;
+    const message = `Superhero Shorts sign-in\nOrigin: ${process.env.SHORTS_WEB_ORIGIN || 'http://127.0.0.1:5180'}\nNetwork: ae_uat\nContract: ${this.chain.state.contract}\nAddress: ${address}\nNonce: ${id}\nExpires: ${new Date(expires).toISOString()}\nThis authenticates uploads and creator actions. It does not transfer tokens.`;
     this.store.db
       .prepare('INSERT INTO challenges VALUES(?,?,?,?)')
       .run(id, address, message, expires);

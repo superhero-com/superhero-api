@@ -8,7 +8,7 @@ import {
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { LOCAL_DIR } from './shorts-chain.service';
 import { ShortRecord } from './shorts.types';
 import { ShortsSafetyService } from './shorts-safety.service';
@@ -17,14 +17,16 @@ const run = promisify(execFile);
 @Injectable()
 export class ShortsMediaService implements OnModuleInit {
   private key: Buffer;
-  private nodePins: Set<string>[] = [];
-  readonly apis = (
-    process.env.SHORTS_IPFS_APIS || 'http://127.0.0.1:35002/api/v0'
+  private pinnedCids = new Set<string>();
+  readonly api = (
+    process.env.SHORTS_IPFS_API || 'http://127.0.0.1:35002/api/v0'
   )
-    .split(',')
-    .map((s) => s.trim());
+    .trim()
+    .replace(/\/$/, '');
   constructor(readonly safety: ShortsSafetyService) {}
   async onModuleInit() {
+    // Validate storage configuration before accepting uploads.
+    await this.ipfsHeaders();
     await mkdir(join(LOCAL_DIR, 'private'), { recursive: true, mode: 0o700 });
     try {
       this.key = await readFile(join(LOCAL_DIR, 'quarantine.key'));
@@ -36,6 +38,58 @@ export class ShortsMediaService implements OnModuleInit {
         flag: 'wx',
       });
     }
+  }
+  private async ipfsHeaders(): Promise<Headers> {
+    if (
+      process.env.SHORTS_IPFS_APIS !== undefined ||
+      process.env.SHORTS_IPFS_CREDENTIALS_FILE !== undefined
+    )
+      throw new Error(
+        'Replace SHORTS_IPFS_APIS and SHORTS_IPFS_CREDENTIALS_FILE with SHORTS_IPFS_API and SHORTS_IPFS_TOKEN_FILE',
+      );
+    const url = new URL(this.api);
+    const local = ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname);
+    if (
+      this.api.includes(',') ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/api/v0' ||
+      (url.protocol !== 'https:' &&
+        !(
+          url.protocol === 'http:' &&
+          local &&
+          process.env.NODE_ENV !== 'production'
+        ))
+    )
+      throw new Error(
+        'IPFS requires an explicit HTTPS RPC endpoint (HTTP is local development only)',
+      );
+    const tokenFile = process.env.SHORTS_IPFS_TOKEN_FILE;
+    const headers = new Headers();
+    if (!tokenFile) {
+      if (!local || process.env.NODE_ENV === 'production')
+        throw new Error('IPFS credentials are required for remote storage');
+      return headers;
+    }
+    if (!isAbsolute(tokenFile))
+      throw new Error('IPFS token file must use an absolute path');
+    // Read the server-only key per request so rotation needs no API restart.
+    const token = (await readFile(tokenFile, 'utf8')).trim();
+    if (!/^[0-9a-f]{64}$/.test(token))
+      throw new Error('Invalid IPFS service token');
+    headers.set('Authorization', `Bearer ${token}`);
+    return headers;
+  }
+  private async ipfsFetch(path: string, init: RequestInit) {
+    const headers = await this.ipfsHeaders();
+    return fetch(`${this.api}/${path}`, {
+      ...init,
+      headers,
+      // Never send a storage credential to a redirected destination.
+      redirect: 'error',
+    });
   }
   private async store(id: string, name: string, data: Buffer) {
     const iv = randomBytes(12);
@@ -80,13 +134,12 @@ export class ShortsMediaService implements OnModuleInit {
   private async add(
     files: { name: string; data: Buffer }[],
     onlyHash: boolean,
-    endpoint = this.apis[0],
   ) {
     const form = new FormData();
     for (const file of files)
       form.append('file', new Blob([new Uint8Array(file.data)]), file.name);
-    const response = await fetch(
-      `${endpoint}/add?wrap-with-directory=true&cid-version=1&pin=${!onlyHash}&only-hash=${onlyHash}`,
+    const response = await this.ipfsFetch(
+      `add?wrap-with-directory=true&cid-version=1&pin=${!onlyHash}&only-hash=${onlyHash}`,
       { method: 'POST', body: form, signal: AbortSignal.timeout(60000) },
     );
     if (!response.ok) throw new Error(`IPFS add failed (${response.status})`);
@@ -251,12 +304,10 @@ export class ShortsMediaService implements OnModuleInit {
         data: await this.load(short.id, f.name),
       })),
     );
-    for (const endpoint of this.apis) {
-      if ((await this.add(files, false, endpoint)) !== short.cid)
-        throw new Error('IPFS commitment mismatch');
-      for (const f of short.files)
-        await this.retrieveFrom(short, f.name, endpoint);
-    }
+    if ((await this.add(files, false)) !== short.cid)
+      throw new Error('IPFS commitment mismatch');
+    for (const f of short.files) await this.retrieve(short, f.name);
+    this.pinnedCids.add(short.cid);
   }
   async preview(short: ShortRecord) {
     return this.load(short.id, 'video.mp4');
@@ -265,24 +316,10 @@ export class ShortsMediaService implements OnModuleInit {
     return this.safety.scan(await this.load(short.id, 'original'));
   }
   async retrieve(short: ShortRecord, name: string) {
-    for (const endpoint of this.apis) {
-      try {
-        return await this.retrieveFrom(short, name, endpoint);
-      } catch {
-        /* Try the other verified replica. */
-      }
-    }
-    throw new Error('Verified IPFS media unavailable on all replicas');
-  }
-  private async retrieveFrom(
-    short: ShortRecord,
-    name: string,
-    endpoint: string,
-  ) {
     const entry = short.files.find((f) => f.name === name);
     if (!entry) throw new Error('Unknown media file');
-    const response = await fetch(
-      `${endpoint}/cat?arg=${encodeURIComponent(`${short.cid}/${name}`)}`,
+    const response = await this.ipfsFetch(
+      `cat?arg=${encodeURIComponent(`${short.cid}/${name}`)}`,
       { method: 'POST', signal: AbortSignal.timeout(5000) },
     );
     if (!response.ok) throw new Error('IPFS media unavailable');
@@ -296,49 +333,37 @@ export class ShortsMediaService implements OnModuleInit {
   }
   async health() {
     try {
-      const results = await Promise.all(
-        this.apis.map((endpoint) =>
-          fetch(`${endpoint}/version`, {
-            method: 'POST',
-            signal: AbortSignal.timeout(3000),
-          }),
-        ),
-      );
-      return results.every((r) => r.ok);
+      const response = await this.ipfsFetch('id', {
+        method: 'POST',
+        signal: AbortSignal.timeout(3000),
+      });
+      return response.ok;
     } catch {
       return false;
     }
   }
   async pins(): Promise<Set<string>> {
-    this.nodePins = await Promise.all(
-      this.apis.map(async (endpoint) => {
-        const response = await fetch(`${endpoint}/pin/ls?type=recursive`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!response.ok) throw new Error('Cannot inspect local IPFS pins');
-        return new Set(Object.keys((await response.json()).Keys ?? {}));
-      }),
-    );
-    return new Set(this.nodePins.flatMap((pins) => [...pins]));
+    const response = await this.ipfsFetch('pin/ls?type=recursive', {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error('Cannot inspect IPFS pins');
+    this.pinnedCids = new Set(Object.keys((await response.json()).Keys ?? {}));
+    return new Set(this.pinnedCids);
   }
-  hasAllPins(cid: string) {
-    return (
-      this.nodePins.length === this.apis.length &&
-      this.nodePins.every((pins) => pins.has(cid))
-    );
+  hasPin(cid: string) {
+    return this.pinnedCids.has(cid);
   }
   async unpin(cid: string) {
-    for (const [index, endpoint] of this.apis.entries()) {
-      if (!this.nodePins[index]?.has(cid)) continue;
-      const response = await fetch(
-        `${endpoint}/pin/rm?arg=${encodeURIComponent(cid)}`,
-        {
-          method: 'POST',
-          signal: AbortSignal.timeout(10000),
-        },
-      );
-      if (!response.ok) throw new Error('Cannot remove local IPFS pin');
-    }
+    if (!this.pinnedCids.has(cid)) return;
+    const response = await this.ipfsFetch(
+      `pin/rm?arg=${encodeURIComponent(cid)}`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    if (!response.ok) throw new Error('Cannot remove IPFS pin');
+    this.pinnedCids.delete(cid);
   }
 }

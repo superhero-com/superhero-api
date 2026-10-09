@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import type { Request, Response, NextFunction } from 'express';
-import { ShortsTestnetModule } from './shorts.module';
 
 @Catch()
 class LocalErrorFilter implements ExceptionFilter {
@@ -21,10 +20,12 @@ class LocalErrorFilter implements ExceptionFilter {
 }
 async function bootstrap() {
   if (
+    process.env.ENABLE_SHORTS !== 'true' ||
     process.env.SHORTS_TESTNET_MVP !== '1' ||
     process.env.NODE_ENV === 'production'
   )
     throw new Error('Local Shorts preview is disabled');
+  const { ShortsTestnetModule } = await import('./shorts.module');
   const app = await NestFactory.create(ShortsTestnetModule);
   const origins = ['http://localhost:5180', 'http://127.0.0.1:5180'];
   app.enableCors({
@@ -33,7 +34,16 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'OPTIONS'],
   });
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (!['localhost:3334', '127.0.0.1:3334'].includes(req.headers.host ?? ''))
+    // Docker Desktop reaches this loopback server via its host alias. Only the
+    // public playback descriptor is exposed under that Host, never Studio/auth.
+    const streamingLookup =
+      req.headers.host === 'host.docker.internal:3334' &&
+      req.method === 'GET' &&
+      /^\/api\/shorts\/playback\/[a-zA-Z0-9-]{1,80}$/.test(req.path);
+    if (
+      !['localhost:3334', '127.0.0.1:3334'].includes(req.headers.host ?? '') &&
+      !streamingLookup
+    )
       return res.status(403).end();
     if (req.headers.origin && !origins.includes(req.headers.origin))
       return res.status(403).end();

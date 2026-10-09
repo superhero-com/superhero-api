@@ -1,7 +1,7 @@
 import type { ShortRecord } from './shorts.types';
 import { visualAllows } from './shorts-safety.service';
 
-// Feed distribution is a separate decision from purchased storage coverage.
+// Feed distribution is a separate decision from publication.
 export function communityGuidelines(
   short: ShortRecord,
   demoAutoApprove = false,

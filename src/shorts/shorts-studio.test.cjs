@@ -160,7 +160,7 @@ test('ledger refresh is idempotent and discards orphaned history on a canonical 
     getTransactionByHash: async () => ({ tx: { callerId: 'viewer', contractId: 'ct_test' }, blockHash: 'mh_test', blockHeight: 5 }),
     getTransactionInfoByHash: async () => ({ callInfo: { returnType: 'ok', log: [] } }),
     getGenerationByHeight: async () => ({ microBlocks: ['mh_test'] }),
-  } }, contract: { $decodeEvents: () => [{ name: 'PaidLike', args: ['viewer', 80000000000000000n, 'a'] }] } };
+  } }, contract: { $options: { address: 'ct_test' }, $decodeEvents: () => [{ name: 'PaidLike', args: ['viewer', 80000000000000000n, 'a'] }] } };
   const l = new ShortsLedgerService(chain, { db });
   await l.sync(); await l.sync(); assert.equal(l.entries.length, 1); assert.equal(l.report('creator', 0, 200).earned, '0.08');
   canonical = false; await l.sync(); assert.equal(l.entries.length, 0);
@@ -194,37 +194,128 @@ test('resumable uploads enforce ownership, exact parts, integrity and idempotent
   await assert.rejects(u.finish('creator', corrupt.id), /checksum/);
 });
 
-test('duration quotes preserve integer rounding and budget quotes remain compatible', async () => {
-  const writes = [];
-  const short = { id: 'duration', creator: 'creator', cid: 'cid', bytes: 100_000_001 };
-  const chain = {
-    state: { shorts: [short] }, address: value => value,
-    read: async method => {
-      if (method === 'get_config') return [0, 0, 0, 0, 10n ** 19n, 3_000_000_000n];
-      if (method === 'get_short') return null;
-      if (method === 'get_quote') {
-        const days = BigInt(writes.at(-1)[1][4]);
-        return { amount: (BigInt(short.bytes) * 10n ** 19n * days + 3_000_000_000n - 1n) / 3_000_000_000n, expected_until: 0, expires: Date.now() + 60000, rate_version: 1 };
-      }
-    },
-    write: async (...args) => { writes.push(args); return { decodedResult: '1' }; },
+
+test('free publication verifies storage, persists intent and survives an ambiguous chain response', async () => {
+  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [], moderation: 'pending' };
+  let video, writes = 0, pins = 0;
+  const saved = [];
+  const chain = { state: { shorts: [short] }, address: a => a,
+    save: async () => saved.push(short.publication),
+    read: async method => method === 'has_liked' ? false : video,
+    write: async (method, args) => { assert.equal(method, 'publish'); assert.deepEqual(args, ['free', 'creator', 'cid', 1000]); writes++; video = { withdrawn: false, likes: 0 }; throw new Error('Node timeout after submission'); },
   };
-  const service = new ShortsService(chain, {}, {}, {}, {});
-  assert.deepEqual(await service.hostingPrices('creator', 'duration'), {
-    shortId: 'duration', bytes: short.bytes, numerator: '10000000000000000000', denominator: '3000000000', maxDays: 3650,
-  });
-  await assert.rejects(service.hostingPrices('other', 'duration'), /Only the creator/);
-  const q = await service.quote('creator', 'duration', undefined, 'rewards', 30);
-  assert.equal(q.days, 30); assert.equal(q.charge, '10.0000001'); assert.equal(q.unused, '0');
-  assert.equal(writes[0][1][6], true);
-  const budget = await service.quote('creator', 'duration', '10', 'wallet');
-  assert.equal(budget.days, 29); assert.equal(budget.amountAettos, '9666666763333333334');
-  const count = writes.length;
-  for (const days of [0, -1, 1.5, 3651, '30', null]) {
-    await assert.rejects(service.quote('creator', 'duration', undefined, 'wallet', days), /whole days/);
+  const service = new ShortsService(chain, { pin: async () => { pins++; } }, { counters: () => ({ views: 0, engagement: { score: 0.5 } }) }, {}, {});
+  await assert.rejects(service.publish('other', 'free'), /Only the creator/);
+  assert.equal(pins, 0); assert.equal(writes, 0);
+  await assert.rejects(service.publish('creator', 'free'), /Node timeout/);
+  assert.equal(short.publication, 'pending'); assert.deepEqual(saved, ['pending']);
+  const result = await service.publish('creator', 'free');
+  assert.equal(result.publicationStatus, 'published'); assert.equal(result.until, undefined);
+  assert.equal(writes, 1); assert.equal(pins, 1);
+  video.withdrawn = true;
+  await assert.rejects(service.publish('creator', 'free'), /Withdrawn/);
+});
+
+test('storage outage never registers publication or debits a creator', async () => {
+  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [] };
+  const chain = { state: { shorts: [short] }, address: a => a, save: async () => {}, read: async () => undefined,
+    write: async () => { throw new Error('Must not submit before storage verification'); } };
+  const service = new ShortsService(chain, { pin: async () => { throw new Error('IPFS offline'); } }, {}, {}, {});
+  await assert.rejects(service.publish('creator', 'free'), /IPFS offline/);
+  assert.equal(short.publication, 'pending');
+});
+
+test('view totals migrate once, survive expiry and cannot be inflated by replay or the legacy endpoint', async t => {
+  let now = Date.UTC(2026, 9, 5); t.mock.method(Date, 'now', () => now);
+  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
+  let a = new ShortsAnalyticsService({ db });
+  const short = { id: 'a', duration: 10, views: ['legacy'] };
+  const event = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'for-you' };
+  a.record(short, event); now += 2500;
+  assert.equal(a.record(short, { ...event, seconds: 2.5 }).views, 1);
+  a.record(short, { ...event, seconds: 2.5 });
+  a.record(short, { ...event, seconds: 0 });
+  assert.equal(a.counters('a').views, 1);
+  a = new ShortsAnalyticsService({ db });
+  assert.equal(a.counters('a').views, 1, 'restart must not backfill twice');
+  const service = new ShortsService({ state: { shorts: [short] }, read: async () => ({ withdrawn: false }) }, {}, a, {}, {}, {});
+  assert.equal((await service.view('a', randomUUID())).views, 1);
+  assert.deepEqual(short.views, ['legacy'], 'legacy endpoint is read only');
+  now += 91 * ANALYTICS_DAY;
+  assert.equal(a.counters('a').views, 1);
+  assert.equal(a.report(['a'], 90).summary.views, 0);
+  assert.equal(a.counters('a').engagement.score, 0.5);
+});
+
+test('deletion reverses retained counts and rejects in-flight requests, while a new browser session can measure', t => {
+  let now = Date.UTC(2026, 9, 5); t.mock.method(Date, 'now', () => now);
+  const a = analytics(t), short = { id: 'a', duration: 10 };
+  const event = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'for-you' };
+  a.record(short, event); now += 3000; a.record(short, { ...event, seconds: 3 });
+  a.forget(event.session);
+  assert.equal(a.counters('a').views, 0);
+  assert.equal(a.record(short, { ...event, seconds: 3 }).accepted, false);
+  assert.equal(a.record(short, { ...event, id: randomUUID() }).accepted, false);
+  assert.equal(a.report(['a'], 7).summary.views, 0);
+  assert.equal(a.record(short, { ...event, id: randomUUID(), session: randomUUID() }).accepted, true);
+});
+
+test('engagement uses recent browser-balanced watch quality, neutral cold starts and no payment data', t => {
+  let now = Date.UTC(2026, 9, 5); t.mock.method(Date, 'now', () => now);
+  const a = analytics(t);
+  const shorts = [{ id: 'complete', duration: 10 }, { id: 'skipped', duration: 10 }];
+  for (let n = 0; n < 5; n++) {
+    const session = randomUUID(), events = shorts.map(() => randomUUID());
+    shorts.forEach((short, i) => a.record(short, { id: events[i], session, seconds: 0, source: 'for-you' }));
+    now += 10000;
+    shorts.forEach((short, i) => a.record(short, { id: events[i], session, seconds: i ? 2 : 10, source: 'for-you' }));
+    if (n < 4) assert.equal(a.engagement('complete').score, 0.5);
   }
-  await assert.rejects(service.quote('creator', 'duration', '10', 'wallet', 30), /duration or an AE budget/);
-  await assert.rejects(service.quote('creator', 'duration', undefined, 'wallet'), /duration or an AE budget/);
-  await assert.rejects(service.quote('other', 'duration', undefined, 'wallet', 30), /Only the creator/);
-  assert.equal(writes.length, count, 'invalid or unauthorized input never registers a quote');
+  assert.ok(a.engagement('complete').score > 0.5);
+  assert.ok(a.engagement('skipped').score < 0.5);
+  assert.equal(a.counters('complete').views, 5);
+  now += 8 * ANALYTICS_DAY;
+  assert.equal(a.engagement('complete').score, 0.5);
+});
+
+test('UTC rollover closes old events and qualifies a new daily event once', t => {
+  let now = Date.UTC(2026, 9, 5, 23, 59, 55); t.mock.method(Date, 'now', () => now);
+  const a = analytics(t), short = { id: 'a', duration: 10 };
+  const event = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'recent' };
+  a.record(short, event); now += 3000; a.record(short, { ...event, seconds: 3 });
+  now += 3000;
+  assert.equal(a.record(short, { ...event, seconds: 6 }).accepted, false);
+  const next = { ...event, id: randomUUID() };
+  a.record(short, next); now += 3000;
+  assert.equal(a.record(short, { ...next, seconds: 3 }).views, 2);
+});
+
+test('watch hours preserve qualified seconds across daily, video and previous-period reports', t => {
+  let now = Date.UTC(2026, 9, 5, 12); t.mock.method(Date, 'now', () => now);
+  const a = analytics(t), sessions = [];
+  for (let i = 0; i < 60; i++) {
+    const short = { id: i % 2 ? 'a' : 'b', duration: 60 };
+    const event = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'for-you' };
+    sessions.push(event.session);
+    a.record(short, event); now += 60000;
+    a.record(short, { ...event, seconds: 60 });
+    a.record(short, { ...event, seconds: 60 });
+  }
+  const brief = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'recent' };
+  a.record({ id: 'a', duration: 60 }, brief); now += 1500;
+  a.record({ id: 'a', duration: 60 }, { ...brief, seconds: 1.5 });
+  const report = a.report(['a', 'b'], 7);
+  assert.equal(report.summary.views, 60, 'short playback and retries must not add views');
+  assert.equal(report.summary.watchSeconds, 3600);
+  assert.equal(report.summary.watchHours, 1);
+  assert.equal(report.summary.averageSeconds, 60);
+  assert.equal(report.series.reduce((sum, day) => sum + day.watchHours, 0), 1);
+  assert.equal(report.videos.a.watchHours, 0.5);
+  assert.equal(report.videos.b.watchHours, 0.5);
+  assert.equal(report.previous.watchHours, 0);
+  a.forget(sessions[0]);
+  assert.equal(a.report(['a', 'b'], 7).summary.watchHours, 3540 / 3600, 'fractional hours are not rounded in the API');
+  now += 7 * ANALYTICS_DAY;
+  assert.equal(a.report(['a', 'b'], 7).previous.watchHours, 3540 / 3600);
+  assert.equal(a.report(['a', 'b'], 7).summary.watchHours, 0);
 });

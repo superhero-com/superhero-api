@@ -17,7 +17,6 @@ export interface LedgerEntry {
   beneficiary: string;
   amount: string;
   shortId?: string;
-  quoteId?: string;
   source?: string;
 }
 @Injectable()
@@ -40,7 +39,11 @@ export class ShortsLedgerService
       .prepare('SELECT * FROM shorts_ledger WHERE id=1')
       .get();
     if (row) {
-      this.entries = JSON.parse(String(row.body));
+      this.entries = JSON.parse(String(row.body)).filter((entry: LedgerEntry) =>
+        ['PaidLike', 'Claimed', 'Published', 'Withdrawn'].includes(
+          entry.action,
+        ),
+      );
       this.syncedAt = Number(row.synced);
     }
   }
@@ -65,10 +68,12 @@ export class ShortsLedgerService
       });
     return this.pending;
   }
-  private async collect() {
+  private async collectContract(
+    contract: NonNullable<ShortsChainService['previous']>,
+  ) {
     const base = 'https://testnet.aeternity.io/mdw';
     let next: string | null =
-      `/v3/contracts/logs?contract_id=${this.chain.state.contract}&limit=100`;
+      `/v3/contracts/logs?contract_id=${contract.$options.address}&limit=100`;
     const logs: any[] = [];
     for (let page = 0; next && page < 20; page++) {
       if (!next.startsWith('/v3/contracts/logs?'))
@@ -100,7 +105,7 @@ export class ShortsLedgerService
             !result ||
             result.returnType !== 'ok' ||
             transaction.blockHeight < 0 ||
-            call.contractId !== this.chain.state.contract
+            call.contractId !== contract.$options.address
           )
             return;
           const log = logs.find((l) => l.call_tx_hash === tx);
@@ -115,7 +120,7 @@ export class ShortsLedgerService
             )
           )
             throw new Error('Noncanonical transaction');
-          const events = this.chain.contract.$decodeEvents(
+          const events = contract.$decodeEvents(
             result.log.map((e) => ({
               ...e,
               address: e.address as `ct_${string}`,
@@ -124,6 +129,12 @@ export class ShortsLedgerService
             { omitUnknown: true },
           );
           for (const [index, event] of events.entries()) {
+            if (
+              !['PaidLike', 'Claimed', 'Published', 'Withdrawn'].includes(
+                event.name,
+              )
+            )
+              continue;
             const args: any[] = event.args;
             const row: LedgerEntry = {
               id: `${tx}:${index}`,
@@ -142,29 +153,12 @@ export class ShortsLedgerService
               row.beneficiary =
                 this.chain.state.shorts.find((s) => s.id === row.shortId)
                   ?.creator || '';
-            } else if (
-              [
-                'HostingFunded',
-                'HostingRefunded',
-                'Activated',
-                'QuoteOpened',
-                'StorageSettled',
-              ].includes(event.name)
-            ) {
-              row.quoteId = String(args[0]);
-              const q = await this.chain.read('get_quote', [row.quoteId]);
-              row.shortId = q.video_id;
-              row.beneficiary = q.creator;
-              row.source = q.rewards ? 'rewards' : 'wallet';
-              row.amount = ['HostingFunded', 'HostingRefunded'].includes(
-                event.name,
-              )
-                ? String(q.amount)
-                : '0';
-              if (event.name === 'StorageSettled') row.amount = String(args[1]);
             } else if (event.name === 'Claimed') {
               row.beneficiary = String(args[0]);
               row.amount = String(args[1]);
+            } else if (event.name === 'Published') {
+              row.beneficiary = String(args[0]);
+              row.shortId = String(args[1]);
             } else if (event.name === 'Withdrawn')
               row.shortId = String(args[0]);
             entries.push(row);
@@ -172,6 +166,14 @@ export class ShortsLedgerService
         }),
       );
     }
+    return entries;
+  }
+  private async collect() {
+    const groups = await Promise.all([
+      this.collectContract(this.chain.contract),
+      this.chain.previous ? this.collectContract(this.chain.previous) : [],
+    ]);
+    const entries = groups.flat();
     entries.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
     this.entries = entries;
     this.syncedAt = Date.now();

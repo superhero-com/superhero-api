@@ -1,3 +1,4 @@
+import { assertShortsEnvironment } from './shorts-environment';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import {
   AeSdk,
@@ -21,29 +22,19 @@ export function ae(value: bigint | string) {
   const fraction = (n % AE).toString().padStart(18, '0').replace(/0+$/, '');
   return `${n / AE}${fraction ? `.${fraction}` : ''}`;
 }
-export function aetto(value: string) {
-  if (typeof value !== 'string' || !/^\d{1,6}(\.\d{1,18})?$/.test(value))
-    throw new Error('Enter a valid positive AE amount');
-  const [whole, fraction = ''] = value.split('.');
-  const amount = BigInt(whole) * AE + BigInt(fraction.padEnd(18, '0'));
-  if (amount <= 0n) throw new Error('Amount must be positive');
-  return amount;
-}
 @Injectable()
 export class ShortsChainService implements OnModuleInit {
   sdk: AeSdk;
   contract: Contract<any>;
   operator: AccountMemory;
   artifact: any;
+  previous?: Contract<any>;
+  previousArtifact?: any;
   state: LocalState = { shorts: [], receipts: [] };
   private tail: Promise<unknown> = Promise.resolve();
   constructor(private readonly store: ShortsStoreService) {}
   async onModuleInit() {
-    if (
-      process.env.SHORTS_TESTNET_MVP !== '1' ||
-      process.env.NODE_ENV === 'production'
-    )
-      throw new Error('Explicit local testnet mode required');
+    assertShortsEnvironment();
     const {
       SHORTS_OPERATOR_KEY_FILE,
       SHORTS_DEPLOYMENT_FILE,
@@ -88,9 +79,43 @@ export class ShortsChainService implements OnModuleInit {
       aci: this.artifact.aci,
       address: deployment.contract,
     });
+    const previousAddress = await this.read('get_previous');
+    if (previousAddress) {
+      const oldDeployment = JSON.parse(
+        await readFile(process.env.SHORTS_PREVIOUS_DEPLOYMENT_FILE!, 'utf8'),
+      );
+      this.previousArtifact = JSON.parse(
+        await readFile(process.env.SHORTS_PREVIOUS_CONTRACT_ARTIFACT!, 'utf8'),
+      );
+      const oldCode = await this.sdk.api.getContractCode(previousAddress);
+      if (
+        oldDeployment.contract !== previousAddress ||
+        oldDeployment.network !== 'ae_uat' ||
+        oldDeployment.bytecodeHash !== this.previousArtifact.bytecodeHash ||
+        createHash('sha256').update(oldCode.bytecode).digest('hex') !==
+          oldDeployment.bytecodeHash
+      )
+        throw new Error('Previous deployment identity mismatch');
+      this.previous = await Contract.initialize({
+        ...this.sdk.getContext(),
+        aci: this.previousArtifact.aci,
+        address: previousAddress,
+      });
+    }
     this.state = this.store.load() || this.state;
-    if (this.state.contract && this.state.contract !== deployment.contract)
-      throw new Error('State belongs to another deployment');
+    if (this.state.contract && this.state.contract !== deployment.contract) {
+      if (this.state.contract !== previousAddress)
+        throw new Error('State belongs to another deployment');
+      // Only previously published records migrate automatically. Private drafts stay private.
+      for (const short of this.state.shorts) {
+        const old = (
+          await this.previous!.$call('get_short', [short.id], {
+            callStatic: true,
+          })
+        ).decodedResult;
+        if (old) short.publication = old.withdrawn ? 'withdrawn' : 'pending';
+      }
+    }
     this.state.contract = deployment.contract;
     this.state.sourceHash = deployment.sourceHash;
     await this.save();
@@ -136,7 +161,7 @@ export class ShortsChainService implements OnModuleInit {
     method: string,
     args: unknown[],
   ): Promise<{ hash: string; decodedResult: any }> {
-    if (!['register_quote', 'activate'].includes(method))
+    if (method !== 'publish')
       throw new Error('User payments must be signed by their wallet');
     await this.assertTestnet();
     const result = await this.invoke(method, args);
@@ -145,10 +170,6 @@ export class ShortsChainService implements OnModuleInit {
       action: method,
       tx: result.hash,
       at: Date.now(),
-      quoteId:
-        method === 'register_quote'
-          ? String(result.decodedResult)
-          : String(args[0]),
     });
     await this.save();
     return { hash: result.hash, decodedResult: result.decodedResult };
@@ -165,7 +186,9 @@ export class ShortsChainService implements OnModuleInit {
     if (
       transaction.blockHeight < 0 ||
       call.callerId !== address ||
-      call.contractId !== this.state.contract ||
+      ![this.state.contract, this.previous?.$options.address].includes(
+        call.contractId,
+      ) ||
       result?.returnType !== 'ok'
     )
       throw new Error('Successful mined wallet call to Shorts required');
@@ -186,16 +209,22 @@ export class ShortsChainService implements OnModuleInit {
   async account(address: string) {
     this.address(address);
     const balance = await this.read('get_account', [address]);
+    const old = this.previous
+      ? (
+          await this.previous.$call('get_account', [address], {
+            callStatic: true,
+          })
+        ).decodedResult
+      : undefined;
     return {
       address,
       wallet: ae(
         await this.sdk.getBalance(address as `ak_${string}`).catch(() => '0'),
       ),
       available: ae(balance.available),
-      earned: ae(balance.earned),
-      claimed: ae(balance.claimed),
-      allocated: ae(balance.allocated),
-      restored: ae(balance.restored),
+      earned: ae(BigInt(balance.earned) + BigInt(old?.earned || 0)),
+      claimed: ae(BigInt(balance.claimed) + BigInt(old?.claimed || 0)),
+      previousAvailable: old ? ae(old.available) : '0',
     };
   }
 }

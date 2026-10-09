@@ -1,0 +1,35 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { mkdtemp, writeFile, rm } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+const { ShortsStreamingService } = require('./shorts-streaming.service');
+const { DatabaseSync } = require('node:sqlite');
+
+test('HLS outbox survives failed dispatch and service restart, deduplicates publication, and sends no video or wallet secret', async t => {
+  const env = { ...process.env }; const fetch = global.fetch;
+  const directory = await mkdtemp(join(tmpdir(), 'shorts-outbox-'));
+  const file = join(directory, 'key'); await writeFile(file, 'a'.repeat(64));
+  Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: file });
+  const db = new DatabaseSync(join(directory, 'outbox.sqlite'));
+  const store = { db, load: () => ({ shorts: [] }) };
+  const calls = []; let status = 503;
+  global.fetch = async (url, init) => { calls.push({ url, init }); return new Response(null, { status }); };
+  t.after(async () => { global.fetch = fetch; process.env = env; db.close(); await rm(directory, { recursive: true, force: true }); });
+  const first = new ShortsStreamingService(store);
+  first.enqueue('short-1'); first.enqueue('short-1');
+  await first.dispatch(); first.onModuleDestroy();
+  assert.equal(db.prepare('SELECT count(*) AS n FROM shorts_stream_outbox').get().n, 1);
+  assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 0);
+  const next = new ShortsStreamingService(store);
+  db.exec('UPDATE shorts_stream_outbox SET next_at=0'); status = 202; await next.dispatch();
+  assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 0);
+  db.exec('UPDATE shorts_stream_outbox SET next_at=0'); status = 200; await next.dispatch();
+  assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 1);
+  next.enqueue('short-1'); await next.dispatch(); next.onModuleDestroy();
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].url, 'http://127.0.0.1:3337/internal/videos/short-1/prepare');
+  assert.equal(calls[0].init.body, undefined);
+  assert.equal(calls[0].init.redirect, 'error');
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${'a'.repeat(64)}`);
+});

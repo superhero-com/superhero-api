@@ -1,3 +1,4 @@
+import { ShortsFeatureModule } from './shorts/shorts-feature.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullBoardModule } from './bull-board/bull-board.module';
 
@@ -47,6 +48,7 @@ import { FeedModule } from './feed/feed.module';
   imports: [
     ScheduleModule.forRoot(),
     ConfigModule.forRoot(),
+    ShortsFeatureModule.register(),
     CacheModule.registerAsync({
       isGlobal: true,
       useFactory: () => ({

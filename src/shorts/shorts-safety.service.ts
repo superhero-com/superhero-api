@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
 
 export interface VisualSafety {
   status: 'no_flags' | 'review' | 'blocked' | 'error';
@@ -43,11 +44,36 @@ export class ShortsSafetyService {
     process.env.NODE_ENV !== 'production';
   private readonly endpoint =
     process.env.SHORTS_MODERATION_URL || 'http://127.0.0.1:3340';
+  constructor() {
+    const url = new URL(this.endpoint);
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.protocol !== 'https:' &&
+        !(
+          url.protocol === 'http:' &&
+          local &&
+          process.env.NODE_ENV !== 'production'
+        ))
+    ) {
+      throw new Error('Moderation requires HTTPS outside local development');
+    }
+    if (
+      process.env.NODE_ENV === 'production' &&
+      !isAbsolute(process.env.SHORTS_MODERATION_TOKEN_FILE || '')
+    ) {
+      throw new Error('Mount the moderation service credential');
+    }
+  }
   async health() {
     if (this.demoAutoApprove) return false;
     try {
       const response = await fetch(`${this.endpoint}/health`, {
         signal: AbortSignal.timeout(3000),
+        redirect: 'error',
       });
       return response.ok && (await response.json()).ready === true;
     } catch {
@@ -69,6 +95,7 @@ export class ShortsSafetyService {
       if (token.length < 32) throw new Error('Missing service credential');
       const response = await fetch(`${this.endpoint}/inspect`, {
         method: 'POST',
+        redirect: 'error',
         body: new Uint8Array(video),
         signal: AbortSignal.timeout(150000),
         headers: {

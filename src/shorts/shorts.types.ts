@@ -1,6 +1,6 @@
 export type DemoActor = string;
-export type FundingSource = 'wallet' | 'rewards';
 export interface ShortRecord {
+  publication?: 'pending' | 'published' | 'withdrawn';
   safety?: import('./shorts-safety.service').VisualSafety;
   visualReviewHash?: string;
   description?: string;
@@ -42,6 +42,5 @@ export interface LocalState {
     action: string;
     tx: string;
     at: number;
-    quoteId?: string;
   }[];
 }

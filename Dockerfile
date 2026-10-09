@@ -1,5 +1,5 @@
-FROM node:20-alpine
-RUN apk add --no-cache git
+FROM node:22.22.3-alpine
+RUN apk add --no-cache git ffmpeg
 WORKDIR /src
 COPY . .
 # Private repository authentication exists only in this RUN's process environment.
