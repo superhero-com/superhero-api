@@ -8,6 +8,7 @@ import { Topic } from '../entities/topic.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Logger } from '@nestjs/common';
+import { POST_SYNC_VERSION } from '../config/post-contracts.config';
 
 // Mock the external dependencies
 jest.mock('@/utils/common');
@@ -481,6 +482,46 @@ describe('PostService', () => {
         'Some topics could not be created or found',
         expect.objectContaining({ requested: ['alpha', 'missing'] }),
       );
+    });
+  });
+
+  describe('sync version', () => {
+    it('stamps posts and topics with the shared POST_SYNC_VERSION', async () => {
+      mockTopicRepository.query.mockResolvedValue(undefined);
+      mockTopicRepository.find.mockResolvedValue([{ name: 'alpha' }]);
+
+      await (service as any).createOrGetTopics(['alpha']);
+
+      expect(service.syncVersion).toBe(POST_SYNC_VERSION);
+      expect(mockTopicRepository.query.mock.calls[0][1][2]).toBe(
+        POST_SYNC_VERSION,
+      );
+    });
+  });
+
+  describe('clearNonCompatibleData', () => {
+    it('relabels plugin-written version 6 rows before deleting other versions', async () => {
+      const manager = { query: jest.fn().mockResolvedValue(undefined) };
+      mockRepository.manager.transaction.mockImplementation(
+        async (handler: any) => handler(manager),
+      );
+
+      await (service as any).clearNonCompatibleData();
+
+      const statements = manager.query.mock.calls.map(([sql]) =>
+        sql.replace(/\s+/g, ' ').trim(),
+      );
+      expect(statements.slice(0, 2)).toEqual([
+        'UPDATE posts SET version = 8 WHERE version = 6',
+        'UPDATE topics SET version = 8 WHERE version = 6',
+      ]);
+      expect(statements.slice(2).every((sql) => sql.startsWith('DELETE'))).toBe(
+        true,
+      );
+      expect(statements).toHaveLength(6);
+      for (const [, params] of manager.query.mock.calls.slice(2)) {
+        expect(params).toEqual([POST_SYNC_VERSION]);
+      }
     });
   });
 

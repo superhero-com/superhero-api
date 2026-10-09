@@ -35,7 +35,7 @@
     "test:shorts:testnet": "node --test src/shorts/shorts.testnet.test.cjs"
   },
   "dependencies": {
-    "@aeternity/aepp-sdk": "^14.1.1",
+    "@aeternity/aepp-sdk": "^15.0.1",
     "@as-integrations/express5": "^1.1.2",
     "@bull-board/api": "^9.3.2",
     "@bull-board/express": "^9.3.2",

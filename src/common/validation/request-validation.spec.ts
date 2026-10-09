@@ -30,6 +30,9 @@ describe('request validation pipes', () => {
     expect(pipe.transform('alice.chain', { data: 'address' })).toBe(
       'alice.chain',
     );
+    expect(pipe.transform('中文.chain', { data: 'address' })).toBe(
+      '中文.chain',
+    );
   });
 
   it('keeps strict account, contract, and transaction hash params separate', () => {

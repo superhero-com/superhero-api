@@ -15,6 +15,7 @@ import { ITransaction } from '@/utils/types';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
 import {
   POST_CONTRACTS,
+  POST_SYNC_VERSION,
   getContractByAddress,
   isContractSupported,
 } from '../config/post-contracts.config';
@@ -43,7 +44,7 @@ const ORPHAN_CLEANUP_GRACE_PERIOD = '1 hour';
 
 @Injectable()
 export class PostService {
-  syncVersion = 8;
+  syncVersion = POST_SYNC_VERSION;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
 
@@ -1073,6 +1074,13 @@ export class PostService {
 
       // Use a transaction to ensure data consistency
       await this.postRepository.manager.transaction(async (manager) => {
+        // Until POST_SYNC_VERSION was shared, the social plugin stamped 6 on
+        // rows identical to version 8 ones, so every boot deleted the posts it
+        // had indexed. Relabel them as 8, not the current version, so a later
+        // bump still rebuilds them. Remove once no replica writes 6.
+        await manager.query('UPDATE posts SET version = 8 WHERE version = 6');
+        await manager.query('UPDATE topics SET version = 8 WHERE version = 6');
+
         // First, clear the junction table (post_topics) for posts with different syncVersion
         await manager.query(
           `
