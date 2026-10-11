@@ -16,7 +16,10 @@ and an absolute persistent `SHORTS_DATA_DIR`. Mount the contract artifact,
 deployment receipt, and a dedicated **testnet operator** key using the paths in
 `shorts.env.example`. Both local demo flags must be `0`; hosted startup rejects them.
 The current SQLite snapshot store must not be used by multiple API replicas.
-It is a bounded staging implementation, not the production Postgres/indexer rollout.
+On-chain history uses the shared MDW plugin pipeline and PostgreSQL. Uploads, sessions,
+metadata, media preparation and view analytics still use the single-instance store.
+Run the normal API migrations before enabling Shorts; the Shorts migration creates
+`shorts_chain_events` and `shorts_index_backfill`. Keep `DISABLE_MDW_SYNC=false`.
 
 Remote services use HTTPS and separate credentials mounted as files:
 
@@ -98,7 +101,7 @@ The operator in the supplied test accounts must match the configured contract. R
 
 ## MVP boundaries
 
-One IPFS node (storage outages interrupt uploads/playback; persistent-volume backups are required), single-process SQLite snapshot persistence, a 50-video limit, buffered upload media, no production indexing/backfill or provider SLA. Reconciliation trusts the operator's retrieval attestation; it is not a decentralized proof of storage.
+One IPFS node (storage outages interrupt uploads/playback; persistent-volume backups are required), single-process SQLite snapshot persistence, a 50-video limit, buffered upload media, no multi-instance upload/analytics store or provider SLA. Reconciliation trusts the operator's retrieval attestation; it is not a decentralized proof of storage.
 
 Topic suggestions can use the optional JEV adapter below. Operators review and correct the discovery topic separately from immutable package metadata; decisions and appeals remain in local review history. Sampled visual screening is implemented below; representative safety evaluation, audio checks, age/territory controls and fraud-resistant analytics remain release work. Playback metrics are client reports from browsers, not verified people. Official moderation cannot prevent direct contract transactions or erase public chain/IPFS records. Wallet/store policy approval, production security and contract audit remain separate release work.
 
@@ -111,7 +114,43 @@ Playback is counted automatically without an opt-in control, including for guest
 
 For You receives a bounded engagement score from the last seven days: 70% watched fraction and 30% completion, averaged per browser before aggregation. Scores stay neutral below five distinct browsers and use twenty neutral prior browsers to temper small samples. The web client combines this with interests, follows, freshness and creator diversity. Recent stays chronological. Paid Likes, rewards and wallet balances never influence engagement scoring.
 
-The bounded testnet ledger rebuilds up to 2,000 middleware logs, verifies successful calls and canonical microblocks against the node, then atomically replaces its SQLite snapshot. It requires three key-block confirmations, deduplicates by transaction/event index and exposes stale state if an upstream read fails. It refreshes each minute; a coherent rebuild removes orphaned entries. This is a local prototype indexer, not a production finality or reconciliation guarantee.
+Hosted on-chain history is indexed by `src/plugins/shorts`, registered alongside the
+existing plugins only when `ENABLE_SHORTS=true`. Shared MDW backfill/live/reconnect
+and reorg handling deliver transactions to its processor. Successful events are
+projected atomically into `shorts_chain_events`, keyed by contract/transaction/log
+index, with a foreign key to `txs`. Duplicate deliveries replace the same rows;
+canonical transaction deletion removes their accounting rows. Decode failures go
+through the shared failed-transaction mechanism. The plugin version sweep replays
+the projection, not just decoded JSON.
+
+A one-time contract-event backfill recovers calls skipped by the global relevance filter
+before Shorts was enabled. It walks bounded pages with a durable cursor, resumes
+after failure and marks completion only after all pages commit. It is not a second
+ongoing chain listener. Normal updates use the shared MDW stream. `txs.data.shorts`
+records the projection version without overwriting another plugin's namespace.
+Direct calls and events emitted through another contract use the same processor.
+
+Revenue aggregates run in PostgreSQL over the complete history, with three
+confirmations derived from the shared indexer's current tip. Reports expose stale
+state while backfilling, when plugin jobs fail, or when the indexer heartbeat is
+old. Activity responses contain at most 200 recent receipts; daily revenue series
+and totals are computed independently of that display limit. PostgreSQL
+LISTEN/NOTIFY broadcasts `shorts-updated` after commit through the API's Socket.IO
+gateway; reconnect and reorg also invalidate the web view. Balances and playback
+withdrawal checks remain direct contract reads.
+
+The standalone loopback demo keeps its bounded SQLite ledger in
+`local-ledger.service.ts`; it is not loaded by hosted APIs. Run the isolated
+PostgreSQL integration suite against a disposable local database:
+
+```sh
+SHORTS_TEST_PG_URL=postgres://postgres@127.0.0.1:55439/postgres npm run test:shorts:index
+```
+
+The suite creates and removes a unique schema. It covers duplicate delivery,
+rollback, previous-contract earnings, reorg deletion, version replay, interrupted
+backfill and aggregate totals beyond the old history limit.
+
 
 Anonymous reports use bounded reason/detail fields and idempotency IDs. Creator-only appeals and operator-only review decisions are stored locally. Broader abuse prevention, policy staffing and legally complete notice/appeal workflows need production design.
 
@@ -147,7 +186,7 @@ Sampled frames can miss brief content, and model scores have false positives/neg
 
 Back up the SQLite database, previous artifact and deployment receipt before switching. Deploy the contract with `SHORTS_PREVIOUS_CONTRACT` set to the previous address. Point `SHORTS_DEPLOYMENT_FILE` and `SHORTS_CONTRACT_ARTIFACT` to the new deployment/artifact, and supply `SHORTS_PREVIOUS_DEPLOYMENT_FILE` plus `SHORTS_PREVIOUS_CONTRACT_ARTIFACT` for the verified old deployment. These paths and private keys stay outside Git.
 
-Startup verifies both contracts, imports only records already registered on the old contract, and queues operator-funded publication. A stored registry for an unrelated contract is rejected. Prior Like counts and duplicate-Like protection carry forward. The bounded ledger reads verified Like/claim events from both contracts; Studio shows the earlier claimable balance separately. No hosting funds or rewards are moved by migration.
+Startup verifies both contracts, imports only records already registered on the old contract, and queues operator-funded publication. A stored registry for an unrelated contract is rejected. Prior Like counts and duplicate-Like protection carry forward. The event index reads verified Like/claim events from both contracts; Studio shows the earlier claimable balance separately. No hosting funds or rewards are moved by migration.
 
 ## Separate public playback
 

@@ -6,6 +6,7 @@ const { NestFactory } = require('@nestjs/core');
 
 test('disabled Shorts registers no routes, providers or background services', async () => {
   const before = process.env.ENABLE_SHORTS;
+  const previousNetwork = process.env.AE_NETWORK_ID;
   try {
     for (const value of [undefined, '', 'false', '1', 'TRUE']) {
       if (value === undefined) delete process.env.ENABLE_SHORTS;
@@ -20,11 +21,14 @@ test('disabled Shorts registers no routes, providers or background services', as
       } finally { await app.close(); }
     }
     assert.equal(Object.keys(require.cache).some(path => path.endsWith('/shorts-store.service.ts')), false);
+    process.env.AE_NETWORK_ID = 'ae_uat';
     process.env.ENABLE_SHORTS = 'true';
     const feature = ShortsFeatureModule.register();
     assert.equal(feature.imports.length, 1);
     assert.equal((await feature.imports[0]).module.name, 'ShortsTestnetModule');
   } finally {
+    if (previousNetwork === undefined) delete process.env.AE_NETWORK_ID;
+    else process.env.AE_NETWORK_ID = previousNetwork;
     if (before === undefined) delete process.env.ENABLE_SHORTS;
     else process.env.ENABLE_SHORTS = before;
   }

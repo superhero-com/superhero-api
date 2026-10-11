@@ -11,9 +11,9 @@ export class ShortsFeatureModule {
       imports:
         process.env.ENABLE_SHORTS === 'true'
           ? [
-              import('./shorts.module').then((m) => ({
-                module: m.ShortsTestnetModule,
-              })),
+              import('./shorts.module').then((m) =>
+                m.ShortsTestnetModule.register(true),
+              ),
             ]
           : [],
     };

@@ -121,6 +121,8 @@ export class ShortsChainService implements OnModuleInit {
     await this.save();
     const cfg = await this.read('get_config');
     if (cfg[0] !== this.operator.address) throw new Error('Operator mismatch');
+    if (BigInt(cfg[2]) !== AE / 10n || BigInt(cfg[3]) !== 2000n)
+      throw new Error('Unsupported Shorts Like fee or split');
   }
   address(value: string) {
     if (!isAddressValid(value, Encoding.AccountAddress))

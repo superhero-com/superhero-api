@@ -34,6 +34,7 @@ export class ShortsService {
     return {
       mode: 'testnet',
       hosting: 'platform-funded',
+      realtime: this.ledger?.realtime === true,
       previousContract: this.chain.previous?.$options.address,
       previousAci: this.chain.previousArtifact?.aci,
       network: 'ae_uat',
@@ -391,13 +392,13 @@ export class ShortsService {
       own.filter((s) => !shortId || s.id === shortId).map((s) => s.id),
       days,
     );
-    const finance = this.ledger.report(
+    const finance = await this.ledger.report(
       actor,
       analytics.start,
       analytics.end,
       shortId,
     );
-    const previousFinance = this.ledger.report(
+    const previousFinance = await this.ledger.report(
       actor,
       analytics.start - days * 86400000,
       analytics.start,

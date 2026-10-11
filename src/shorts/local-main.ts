@@ -26,7 +26,7 @@ async function bootstrap() {
   )
     throw new Error('Local Shorts preview is disabled');
   const { ShortsTestnetModule } = await import('./shorts.module');
-  const app = await NestFactory.create(ShortsTestnetModule);
+  const app = await NestFactory.create(await ShortsTestnetModule.register());
   const origins = ['http://localhost:5180', 'http://127.0.0.1:5180'];
   app.enableCors({
     origin: origins,
