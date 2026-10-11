@@ -18,8 +18,10 @@ deployment receipt, and a dedicated **testnet operator** key using the paths in
 The current SQLite snapshot store must not be used by multiple API replicas.
 On-chain history uses the shared MDW plugin pipeline and PostgreSQL. Uploads, sessions,
 metadata, media preparation and view analytics still use the single-instance store.
-Run the normal API migrations before enabling Shorts; the Shorts migration creates
-`shorts_chain_events` and `shorts_index_backfill`. Keep `DISABLE_MDW_SYNC=false`.
+Run the normal API migrations before enabling Shorts. The Shorts migrations create
+`shorts_chain_events` and `shorts_index_backfill`, then add durable block coverage.
+Existing installations replay their contract history once after the coverage migration;
+earnings reports stay marked as catching up until this completes. Keep `DISABLE_MDW_SYNC=false`.
 
 Remote services use HTTPS and separate credentials mounted as files:
 
@@ -62,6 +64,16 @@ Keep the original storage volume and verify its pin inventory before stopping an
 Watch without a wallet. Connect a wallet configured for æternity testnet and sign the one-time sign-in challenge to upload or open private creator information. Reporting needs no wallet. Use the official testnet faucet to fund your own test wallet. Signing in does not transfer tokens.
 
 Upload an owned MP4/MOV clip (2–60 seconds, 40 MiB input maximum), title, topic, language, optional description/WebVTT captions, disclosures and rights confirmation. The web client sends resumable 1 MiB parts with an authenticated, 24-hour upload session. Parts are encrypted with the quarantine key; the full SHA-256 is checked before preparation. Reselect the same file and details to resume. Completing a session is idempotent. Stale part cleanup runs at startup and when starting another upload. The API prepares a single 540×960 MP4, poster and manifest, and measures the exact package bytes. Drafts remain private until Publish. The configured content policy separately determines feed eligibility.
+
+Legacy uploads and resumable sessions share a persistent rolling-hour budget:
+10 attempts / 400 MiB per creator and 100 attempts / 4000 MiB across the instance.
+Session creation reserves the declared input bytes; its first preparation uses that
+reservation. Failed uploads still count, and preparation retries or sessions older than
+an hour use a new attempt. Limits are checked before writing originals or preparing
+videos and return HTTP 429 when exhausted. Failed preparation removes encrypted
+originals and partial packages; resumable parts remain available until their session
+expires. Startup removes orphan prepared files while preserving registered media and
+resumable parts. These instance limits supplement normal ingress rate limits.
 
 Operator review can use the web Moderation tab when signed in with the operator wallet. On the local machine, the operator-only console provides the same authenticated review actions:
 
@@ -123,17 +135,20 @@ canonical transaction deletion removes their accounting rows. Decode failures go
 through the shared failed-transaction mechanism. The plugin version sweep replays
 the projection, not just decoded JSON.
 
-A one-time contract-event backfill recovers calls skipped by the global relevance filter
-before Shorts was enabled. It walks bounded pages with a durable cursor, resumes
-after failure and marks completion only after all pages commit. It is not a second
-ongoing chain listener. Normal updates use the shared MDW stream. `txs.data.shorts`
+The shared MDW sync tick calls the plugin's optional `catchUpToHeight` hook to recover
+contract calls missed before enablement, during downtime or after websocket loss.
+Each contract stores a contiguous `covered_height` plus a fixed range and page cursor
+for unfinished work. A tick handles up to ten pages per contract; only a fully committed
+range advances coverage. The current generation stays open until the next block.
+Failures and restarts resume the saved range, even when global backward sync is already
+complete. Normal low-latency updates still use the shared MDW stream. `txs.data.shorts`
 records the projection version without overwriting another plugin's namespace.
 Direct calls and events emitted through another contract use the same processor.
 
 Revenue aggregates run in PostgreSQL over the complete history, with three
 confirmations derived from the shared indexer's current tip. Reports expose stale
-state while backfilling, when plugin jobs fail, or when the indexer heartbeat is
-old. Activity responses contain at most 200 recent receipts; daily revenue series
+state while any contract's coverage is behind the latest closed generation, when plugin
+jobs fail, or when the indexer heartbeat is old. Activity responses contain at most 200 recent receipts; daily revenue series
 and totals are computed independently of that display limit. PostgreSQL
 LISTEN/NOTIFY broadcasts `shorts-updated` after commit through the API's Socket.IO
 gateway; reconnect and reorg also invalidate the web view. Balances and playback

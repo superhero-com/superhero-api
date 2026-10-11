@@ -206,7 +206,7 @@ test('new demo uploads are immediately eligible in both upload responses, withou
   const service = new ShortsService(chain, {
     safety: { demoAutoApprove: true },
     prepare: async () => { preparations++; return { cid: 'bafy-demo', bytes: 1000, duration: 12, files: [], safety: undefined }; },
-  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } });
+  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } }, {}, {}, { reserve() {}, beginPreparation() {} });
   const controller = new ShortsController(service, { authenticate: () => 'creator' }, { finish: async () => chain.state.shorts[0] });
   assert.throws(() => controller.upload('auth', { rights: 'false' }, { buffer: Buffer.from('video') }), /publishing rights/);
   const result = await controller.upload('auth', { title: 'Demo', topic: 'Art', rights: 'true' }, { buffer: Buffer.from('video') });

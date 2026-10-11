@@ -54,11 +54,12 @@ export class ShortsIndexService extends ShortsLedgerService {
       const syncedAt = sync ? new Date(sync.updated_at).getTime() : 0;
       const [health] = await manager.query(
         `SELECT
-        (SELECT COUNT(*) FROM shorts_index_backfill WHERE contract=ANY($1::text[]) AND version=$2 AND complete) AS complete,
+        (SELECT COUNT(*) FROM shorts_index_backfill WHERE contract=ANY($1::text[]) AND version=$2 AND complete AND covered_height >= $3) AS complete,
         (EXISTS(SELECT 1 FROM plugin_failed_transaction WHERE plugin_name='shorts') OR EXISTS(SELECT 1 FROM txs WHERE (contract_id=ANY($1::text[]) OR data ? 'shorts') AND type='ContractCallTx' AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)) AS failed`,
-        [contracts, SHORTS_INDEX_VERSION],
+        [contracts, SHORTS_INDEX_VERSION, Math.max(0, height - 1)],
       );
       const stale =
+        height < 1 ||
         Number(health.complete) !== contracts.length ||
         health.failed ||
         Date.now() - syncedAt > 120000;

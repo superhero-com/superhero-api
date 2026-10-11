@@ -11,12 +11,14 @@ import { ShortsController } from './shorts.controller';
 import { ShortsService } from './shorts.service';
 import { ShortsHostingService } from './shorts-hosting.service';
 import { ShortsMediaService } from './shorts-media.service';
+import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 
 // Loaded by the opt-in feature module or the loopback-only development entrypoint.
 @Module({
   imports: [ShortsCoreModule],
   controllers: [ShortsController],
   providers: [
+    ShortsUploadLimitsService,
     ShortsStreamingService,
     ShortsSafetyService,
     ShortsUploadsService,

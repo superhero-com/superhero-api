@@ -26,6 +26,7 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
   private retry?: NodeJS.Timeout;
   private stopped = false;
   private updating?: Promise<void>;
+  private catchingUp?: Promise<void>;
 
   constructor(
     @InjectRepository(Tx) protected readonly txRepository: Repository<Tx>,
@@ -60,6 +61,17 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
   }
   protected getSyncService() {
     return this.processor;
+  }
+  catchUpToHeight(tipHeight: number): Promise<void> {
+    if (this.stopped || process.env.DISABLE_MDW_SYNC === 'true')
+      return Promise.resolve();
+    if (this.catchingUp) return this.catchingUp;
+    this.catchingUp = this.backfill
+      .run(tipHeight, () => this.stopped)
+      .finally(() => {
+        this.catchingUp = undefined;
+      });
+    return this.catchingUp;
   }
   async processBatch(txs: Tx[], direction: SyncDirection) {
     const result = await this.processor.processBatch(txs, direction);
@@ -130,7 +142,6 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
   }
   private async replay(batchSize: number) {
     if (process.env.DISABLE_MDW_SYNC === 'true') return;
-    await this.backfill.run(() => this.stopped);
     const query = this.getUpdateQueries(this.version)[0];
     while (!this.stopped) {
       const txs = await query(this.txRepository, batchSize);

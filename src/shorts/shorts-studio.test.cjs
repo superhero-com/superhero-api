@@ -176,13 +176,15 @@ test('resumable uploads enforce ownership, exact parts, integrity and idempotent
     loadUploadPart: async (id, index) => parts.get(`${id}:${index}`),
     removeUploadParts: async (id, count) => { for (let i = 0; i < count; i++) parts.delete(`${id}:${i}`); },
   }, upload: async (actor, title, topic, bytes, details, id) => { preparations++; const video = { id, actor, title, bytes:bytes.length }; videos.set(id, video); return video; }, item: id => videos.get(id) };
-  const u = new ShortsUploadsService({ db }, shorts), bytes = Buffer.alloc(1024 * 1024 + 12, 'x');
+  const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
+  const limits = new ShortsUploadLimitsService({ db });
+  const u = new ShortsUploadsService({ db }, shorts, limits), bytes = Buffer.alloc(1024 * 1024 + 12, 'x');
   const input = { title:'Example', topic:'Art', rights:true, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), details:{} };
   const session = await u.create('creator', input);
   assert.throws(() => u.get('other', session.id), /not found/);
   await assert.rejects(u.part('creator', session.id, 0, Buffer.from('bad')), /size or position/);
   await u.part('creator', session.id, 0, bytes.subarray(0, 1024 * 1024));
-  const resumed = new ShortsUploadsService({ db }, shorts);
+  const resumed = new ShortsUploadsService({ db }, shorts, limits);
   assert.deepEqual(resumed.get('creator', session.id).parts, [0]);
   await assert.rejects(resumed.finish('creator', session.id), /incomplete/);
   await resumed.part('creator', session.id, 1, bytes.subarray(1024 * 1024));

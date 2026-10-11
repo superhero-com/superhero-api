@@ -2,6 +2,7 @@ import { Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { ShortsStoreService } from './shorts-store.service';
 import { ShortsService, TOPICS } from './shorts.service';
+import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 
 const PART = 1024 * 1024;
 const TTL = 24 * 60 * 60 * 1000;
@@ -31,12 +32,16 @@ export class ShortsUploadsService implements OnApplicationBootstrap {
   constructor(
     private readonly store: ShortsStoreService,
     private readonly shorts: ShortsService,
+    private readonly limits: ShortsUploadLimitsService,
   ) {
     store.db.exec(
       'CREATE TABLE IF NOT EXISTS shorts_uploads (id TEXT PRIMARY KEY, actor TEXT NOT NULL, created INTEGER NOT NULL, body TEXT NOT NULL)',
     );
   }
   async onApplicationBootstrap() {
+    await this.shorts.media.removeOrphanedPrepared(
+      new Set(this.shorts.chain.state.shorts.map((short) => short.id)),
+    );
     await this.cleanup();
   }
   private async cleanup() {
@@ -109,13 +114,6 @@ export class ShortsUploadsService implements OnApplicationBootstrap {
       JSON.stringify(input.details).length > 12000
     )
       throw new Error('Invalid upload metadata');
-    const count = this.store.db
-      .prepare(
-        'SELECT COUNT(*) AS n FROM shorts_uploads WHERE actor=? AND created>?',
-      )
-      .get(actor, Date.now() - 3600000);
-    if (Number(count?.n) >= 10)
-      throw new Error('Limit of 10 upload sessions per hour reached');
     const global = this.store.db
       .prepare('SELECT COUNT(*) AS n FROM shorts_uploads')
       .get();
@@ -129,6 +127,7 @@ export class ShortsUploadsService implements OnApplicationBootstrap {
       parts: [],
       complete: false,
     };
+    this.limits.reserve(actor, upload.id, input.bytes);
     this.save(upload);
     return this.status(upload);
   }

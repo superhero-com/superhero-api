@@ -7,7 +7,14 @@ import {
 } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+} from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { LOCAL_DIR } from './shorts-chain.service';
 import { ShortRecord } from './shorts.types';
@@ -118,6 +125,31 @@ export class ShortsMediaService implements OnModuleInit {
   }
   async saveUploadPart(id: string, index: number, bytes: Buffer) {
     await this.store(id, `part-${index}`, bytes);
+  }
+  async removePrepared(id: string) {
+    await Promise.all(
+      [
+        'original',
+        'video.mp4',
+        'poster.jpg',
+        'manifest.json',
+        'captions.vtt',
+      ].map((name) =>
+        rm(join(LOCAL_DIR, 'private', `${id}-${name}.enc`), { force: true }),
+      ),
+    );
+  }
+  async removeOrphanedPrepared(registered: Set<string>) {
+    // Runs before HTTP starts, after the chain has loaded the registry. Parts
+    // belong to resumable sessions and are managed separately by their TTL.
+    for (const name of await readdir(join(LOCAL_DIR, 'private'))) {
+      const match =
+        /^([a-f0-9-]{36})-(original|video\.mp4|poster\.jpg|manifest\.json|captions\.vtt)\.enc$/.exec(
+          name,
+        );
+      if (match && !registered.has(match[1]))
+        await rm(join(LOCAL_DIR, 'private', name), { force: true });
+    }
   }
   async loadUploadPart(id: string, index: number) {
     return this.load(id, `part-${index}`);
@@ -293,6 +325,9 @@ export class ShortsMediaService implements OnModuleInit {
           sha256: createHash('sha256').update(f.data).digest('hex'),
         })),
       };
+    } catch (error) {
+      await this.removePrepared(id);
+      throw error;
     } finally {
       await rm(temp, { recursive: true, force: true });
     }

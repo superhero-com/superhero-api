@@ -16,8 +16,8 @@ import { ShortsGateway } from '@/shorts/shorts.gateway';
 import { ShortsPluginSyncService } from './shorts-plugin-sync.service';
 import { SyncDirectionEnum } from '../plugin.interface';
 
-// One-time recovery for transactions the global relevance filter skipped before
-// this feature was enabled. Live ingestion/reconnect/reorg belong to mdw-sync.
+// Durable contract coverage driven by the shared MDW sync loop. Websocket
+// delivery remains the low-latency path; this closes gaps after any interruption.
 @Injectable()
 export class ShortsBackfillService {
   constructor(
@@ -29,27 +29,47 @@ export class ShortsBackfillService {
     private readonly gateway: ShortsGateway,
   ) {}
 
-  async run(stopped: () => boolean) {
+  async run(tipHeight: number, stopped: () => boolean) {
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < 1)
+      throw new Error('Invalid middleware tip height');
+    // The current generation can still gain microblocks. Never checkpoint it.
+    const closedHeight = tipHeight - 1;
+    let changed = false;
     const base =
       this.config.get<string>('mdw.middlewareUrl') ||
       ACTIVE_NETWORK.middlewareUrl;
     const repository = this.db.getRepository(Tx);
     for (const instance of this.index.contracts()) {
       const contract = instance.$options.address;
-      const initial = `/v3/contracts/logs?contract_id=${contract}&direction=forward&limit=100`;
+      if (stopped()) return;
       await this.db.query(
-        `INSERT INTO shorts_index_backfill(contract,version,cursor) VALUES($1,$2,$3)
-        ON CONFLICT(contract) DO UPDATE SET version=$2,cursor=$3,complete=false,updated_at=now()
+        `INSERT INTO shorts_index_backfill(contract,version) VALUES($1,$2)
+        ON CONFLICT(contract) DO UPDATE SET version=$2,cursor=null,complete=false,
+        covered_height=-1,target_height=null,from_height=null,updated_at=now()
         WHERE shorts_index_backfill.version != $2`,
-        [contract, SHORTS_INDEX_VERSION, initial],
+        [contract, SHORTS_INDEX_VERSION],
       );
       const [state] = await this.db.query(
         'SELECT * FROM shorts_index_backfill WHERE contract=$1',
         [contract],
       );
-      if (state.complete) continue;
+      if (state.complete && state.covered_height >= closedHeight) continue;
+      // An unfinished range has a fixed end and durable page cursor. A newer tip
+      // cannot cause its remaining pages to be skipped after a retry/restart.
+      const from = state.from_height ?? state.covered_height + 1;
+      const target = state.target_height ?? closedHeight;
+      if (target > closedHeight)
+        throw new Error('Middleware tip moved behind pending coverage');
+      const scope = `gen:${from}-${target}`;
+      const initial = `/v3/contracts/logs?contract_id=${contract}&direction=forward&limit=100&scope=${scope}`;
       let cursor: string | null = state.cursor || initial;
-      while (cursor && !stopped()) {
+      await this.db.query(
+        'UPDATE shorts_index_backfill SET complete=false,from_height=$2,target_height=$3,cursor=$4 WHERE contract=$1',
+        [contract, from, target, cursor],
+      );
+      // Bound each shared tick; a busy contract resumes on the next one.
+      let pages = 0;
+      while (cursor && !stopped() && pages++ < 10) {
         const url = resolveMiddlewareNextUrl(cursor, base);
         if (
           !url ||
@@ -57,6 +77,14 @@ export class ShortsBackfillService {
             `${new URL(base).pathname.replace(/\/$/, '')}/v3/contracts/logs`
         )
           throw new Error('Invalid Shorts backfill cursor');
+        const params = new URL(url).searchParams;
+        if (
+          params.get('contract_id') !== contract ||
+          params.get('scope') !== scope ||
+          params.get('direction') !== 'forward' ||
+          params.get('limit') !== '100'
+        )
+          throw new Error('Shorts cursor changed its coverage range');
         const response = await fetch(url, {
           signal: AbortSignal.timeout(15000),
           redirect: 'error',
@@ -89,6 +117,8 @@ export class ShortsBackfillService {
           const tx = toMdwTx(camelcaseKeysDeep(raw) as ITransaction) as Tx;
           if (
             tx.hash !== hash ||
+            tx.block_height < from ||
+            tx.block_height > target ||
             tx.type !== 'ContractCallTx' ||
             !tx.raw?.log?.some((log) => log.address === contract)
           )
@@ -109,11 +139,15 @@ export class ShortsBackfillService {
         // Advance only after the entire page committed. Restart/retry may replay
         // a page; per-transaction replacement makes that harmless.
         await this.db.query(
-          'UPDATE shorts_index_backfill SET cursor=$2,complete=$3,updated_at=now() WHERE contract=$1',
-          [contract, cursor, cursor === null],
+          `UPDATE shorts_index_backfill SET cursor=$2,complete=$3,updated_at=now(),
+          covered_height=CASE WHEN $3 THEN $4 ELSE covered_height END,
+          from_height=CASE WHEN $3 THEN NULL ELSE from_height END,
+          target_height=CASE WHEN $3 THEN NULL ELSE target_height END WHERE contract=$1`,
+          [contract, cursor, cursor === null, target],
         );
+        changed = true;
       }
     }
-    if (!stopped()) await this.gateway.changed();
+    if (changed && !stopped()) await this.gateway.changed();
   }
 }

@@ -9,6 +9,7 @@ import { DemoActor, ShortRecord } from './shorts.types';
 import { communityGuidelines, creatorContent } from './shorts-eligibility';
 import { ShortsStreamingService } from './shorts-streaming.service';
 import { ShortsAuthService } from './shorts-auth.service';
+import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 
 export const TOPICS = ['All', ...SHORTS_TOPICS];
 @Injectable()
@@ -21,6 +22,7 @@ export class ShortsService {
     readonly labels: ShortsLabelsService,
     readonly auth: ShortsAuthService,
     readonly streaming: ShortsStreamingService,
+    readonly uploadLimits: ShortsUploadLimitsService,
   ) {}
   get demoAutoApprove() {
     return this.media.safety?.demoAutoApprove === true;
@@ -151,12 +153,6 @@ export class ShortsService {
     if (this.chain.state.shorts.length >= 50)
       throw new Error('Local preview is limited to 50 videos');
     if (
-      this.chain.state.shorts.filter(
-        (s) => s.creator === actor && s.createdAt > Date.now() - 3600000,
-      ).length >= 10
-    )
-      throw new Error('Limit of 10 uploads per hour reached');
-    if (
       (details.description?.length || 0) > 1000 ||
       (details.captions?.length || 0) > 10000 ||
       !['und', 'en', 'ar', 'fr', 'es', 'de', 'zh'].includes(
@@ -178,44 +174,58 @@ export class ShortsService {
       (s) => s.id === id && s.creator === actor,
     );
     if (existing) return existing;
-    const prepared = await this.media.prepare(
-      id,
-      data,
-      title.trim(),
-      topic,
-      details,
-    );
-    const short = {
-      id,
-      creator: this.chain.address(actor),
-      title: title.trim(),
-      topic,
-      ...prepared,
-      createdAt: Date.now(),
-      description: details.description || '',
-      language: details.language || 'und',
-      synthetic: details.synthetic === true,
-      sponsored: details.sponsored === true,
-      captions: !!details.captions,
-      classification: this.demoAutoApprove
-        ? undefined
-        : await this.labels.classify({
-            title: title.trim(),
-            topic,
-            description: details.description,
-            captions: details.captions,
-          }),
-      moderation:
-        prepared.safety?.status === 'blocked'
-          ? ('rejected' as const)
-          : ('pending' as const),
-      reviewReason: prepared.safety?.reason,
-      views: [],
-      reports: 0,
-    };
-    this.chain.state.shorts.unshift(short);
-    await this.chain.save();
-    return short;
+    this.chain.address(actor);
+    if (!Buffer.isBuffer(data)) throw new Error('Choose a video');
+    if (!uploadId) this.uploadLimits.reserve(actor, id, data.length);
+    this.uploadLimits.beginPreparation(actor, id, data.length);
+    try {
+      const prepared = await this.media.prepare(
+        id,
+        data,
+        title.trim(),
+        topic,
+        details,
+      );
+      const short: ShortRecord = {
+        id,
+        creator: this.chain.address(actor),
+        title: title.trim(),
+        topic,
+        ...prepared,
+        createdAt: Date.now(),
+        description: details.description || '',
+        language: details.language || 'und',
+        synthetic: details.synthetic === true,
+        sponsored: details.sponsored === true,
+        captions: !!details.captions,
+        classification: this.demoAutoApprove
+          ? undefined
+          : await this.labels.classify({
+              title: title.trim(),
+              topic,
+              description: details.description,
+              captions: details.captions,
+            }),
+        moderation:
+          prepared.safety?.status === 'blocked'
+            ? ('rejected' as const)
+            : ('pending' as const),
+        reviewReason: prepared.safety?.reason,
+        views: [],
+        reports: 0,
+      };
+      this.chain.state.shorts.unshift(short);
+      await this.chain.save();
+      return short;
+    } catch (error) {
+      // No publication occurs here. A registration failure must not leave an
+      // in-memory draft or encrypted originals/packages outside the registry.
+      this.chain.state.shorts = this.chain.state.shorts.filter(
+        (short) => short.id !== id,
+      );
+      await this.media.removePrepared(id);
+      throw error;
+    }
   }
   async moderate(
     id: string,
