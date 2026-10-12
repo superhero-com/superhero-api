@@ -2315,7 +2315,7 @@ export class ProfileXPostingRewardService {
       min_followers_required: PROFILE_X_REWARD_MIN_FOLLOWERS,
       follower_tier_index: reward.follower_tier_index ?? null,
       tier_amount_ae: tier ? tier.amountAe : null,
-      current_streak_days: Number(reward.current_streak_days || 0),
+      current_streak_days: this.toLiveStreakDays(reward),
       streak_required: streakRequired,
       streak_bonus_status: streakBonus?.status ?? 'not_started',
       streak_bonus_paid_count: streakBonus?.paidCount ?? 0,
@@ -2325,6 +2325,33 @@ export class ProfileXPostingRewardService {
       tx_hash: this.sanitizeTxHash(reward.tx_hash),
       error: this.toPublicError(reward),
     };
+  }
+
+  /**
+   * The streak as the last scan left it, including a day it found missed.
+   *
+   * `current_streak_days` is only recomputed when a scan processes a new
+   * referral post. After a missed UTC day the stored count therefore stays
+   * where it was, and the page went on showing "5/10" for a streak that was
+   * already over; the drop to 1 only appeared after the user had posted
+   * again, which reads as the streak breaking for no reason (#766).
+   *
+   * A scan that started after the day following the last qualifying day had
+   * ended read every post of that day and found none, so the next post can
+   * only restart the count: report 0. Comparing with today instead would
+   * also zero a streak whose latest posts simply have not been scanned yet.
+   * Read-only: the stored row is left as is and `updateStreak` still resets
+   * it on the next post.
+   */
+  private toLiveStreakDays(reward: ProfileXPostingReward): number {
+    const stored = Number(reward.current_streak_days || 0);
+    const lastDay = reward.last_qualifying_post_day;
+    const scannedDay = this.toUtcDay(reward.last_x_api_scan_at);
+    if (stored <= 0 || !lastDay || !scannedDay) {
+      return stored;
+    }
+    // A malformed day gives NaN, which keeps the stored value.
+    return this.utcDayDiff(lastDay, scannedDay) > 1 ? 0 : stored;
   }
 
   private toOnboardingStatus(
