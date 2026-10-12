@@ -893,7 +893,10 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     });
     afterEach(() => jest.useRealTimers());
 
-    const statusFor = async (lastQualifyingPostDay: string) => {
+    const statusFor = async (
+      lastQualifyingPostDay: string,
+      lastScanAt: string | null,
+    ) => {
       const { service, rows } = makeService({
         account: { address: ADDRESS, links: { x: 'poster' } },
         rows: [
@@ -901,6 +904,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
             x_user_id: '100',
             current_streak_days: 5,
             last_qualifying_post_day: lastQualifyingPostDay,
+            last_x_api_scan_at: lastScanAt ? new Date(lastScanAt) : null,
           }),
         ],
       });
@@ -908,9 +912,12 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       return { result, rows };
     };
 
-    it('reports 0 once a whole UTC day has passed without a referral post', async () => {
-      // The reporter's row today: 5 days ending 2026-10-06, nothing since.
-      const { result, rows } = await statusFor('2026-10-06');
+    it('reports 0 once a scan has found a whole UTC day without a referral post', async () => {
+      // The reporter's row: 5 days ending 2026-10-06, scanned since.
+      const { result, rows } = await statusFor(
+        '2026-10-06',
+        '2026-10-08T10:00:00Z',
+      );
 
       expect(result.current_streak_days).toBe(0);
       // Display only: the next scan's updateStreak still owns the reset.
@@ -918,19 +925,32 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       expect(rows.get(ADDRESS)?.last_qualifying_post_day).toBe('2026-10-06');
     });
 
-    it('drops the streak on the first UTC day after the missed one', async () => {
-      expect((await statusFor('2026-10-10')).result.current_streak_days).toBe(
-        0,
-      );
+    it('drops the streak as soon as a scan runs on the day after the missed one', async () => {
+      const { result } = await statusFor('2026-10-10', '2026-10-12T00:30:00Z');
+      expect(result.current_streak_days).toBe(0);
     });
 
-    it('keeps the streak while the user can still extend it today', async () => {
-      expect((await statusFor('2026-10-12')).result.current_streak_days).toBe(
-        5,
-      );
-      expect((await statusFor('2026-10-11')).result.current_streak_days).toBe(
-        5,
-      );
+    it('keeps the streak when the day after the last one has not been fully scanned', async () => {
+      // Scanned on the morning of 10-11, before that day's post: 10-11 may
+      // still hold one, so the streak is not known to be over.
+      const { result } = await statusFor('2026-10-10', '2026-10-11T08:00:00Z');
+      expect(result.current_streak_days).toBe(5);
+    });
+
+    it('keeps the streak while the user can still extend it', async () => {
+      expect(
+        (await statusFor('2026-10-11', '2026-10-12T00:30:00Z')).result
+          .current_streak_days,
+      ).toBe(5);
+      expect(
+        (await statusFor('2026-10-12', '2026-10-12T00:30:00Z')).result
+          .current_streak_days,
+      ).toBe(5);
+    });
+
+    it('keeps the stored streak when no scan time is recorded', async () => {
+      const { result } = await statusFor('2026-10-06', null);
+      expect(result.current_streak_days).toBe(5);
     });
   });
 
