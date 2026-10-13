@@ -904,13 +904,73 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
             x_user_id: '100',
             current_streak_days: 5,
             last_qualifying_post_day: lastQualifyingPostDay,
-            last_x_api_scan_at: lastScanAt ? new Date(lastScanAt) : null,
+            last_posts_scan_at: lastScanAt ? new Date(lastScanAt) : null,
           }),
         ],
       });
       const result = await service.getRewardStatus(ADDRESS);
       return { result, rows };
     };
+
+    const rowWithStreak = () =>
+      baseRow({
+        x_user_id: '100',
+        current_streak_days: 1,
+        last_qualifying_post_day: '2026-10-10',
+        last_posts_scan_at: new Date('2026-10-10T20:00:00Z'),
+      });
+
+    it('reports 0 after a scan that read every post of the missed day', async () => {
+      const { service, rows } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [rowWithStreak()],
+      });
+
+      await service.requestManualRecheck(ADDRESS);
+
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        0,
+      );
+      expect(rows.get(ADDRESS)?.current_streak_days).toBe(1);
+    });
+
+    it('keeps the streak through a scan that could not read posts', async () => {
+      // The 10-11 post is there, but X is down for the 10-12 scan. Showing 0
+      // would be contradicted by the next scan, which continues the streak.
+      tweetsByUserId['100'] = [
+        {
+          id: '4101',
+          text: 'd',
+          created_at: '2026-10-11T09:00:00Z',
+          entities: { urls: [refUrl()] },
+        },
+      ];
+      const { service, rows } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [rowWithStreak()],
+      });
+      const baseFetch = global.fetch as jest.Mock;
+      global.fetch = jest.fn(async (input: string, init?: any) =>
+        new URL(input).pathname.endsWith('/tweets')
+          ? ({ ok: false, status: 503, json: async () => ({}) } as any)
+          : baseFetch(input, init),
+      ) as any;
+
+      await service.requestManualRecheck(ADDRESS);
+
+      expect(rows.get(ADDRESS)?.error).toBe('x_posts_fetch_failed');
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        1,
+      );
+
+      global.fetch = baseFetch;
+      resetScanWindow(rows);
+      await service.requestManualRecheck(ADDRESS);
+
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        2,
+      );
+    });
 
     it('reports 0 once a scan has found a whole UTC day without a referral post', async () => {
       // The reporter's row: 5 days ending 2026-10-06, scanned since.

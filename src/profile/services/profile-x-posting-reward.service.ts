@@ -1265,6 +1265,7 @@ export class ProfileXPostingRewardService {
       return;
     }
 
+    const postsScanStartedAt = new Date();
     const postsResult = await this.fetchUserPostsSince(
       xUserProfile.id,
       rewardEntry.last_scanned_tweet_id,
@@ -1275,6 +1276,7 @@ export class ProfileXPostingRewardService {
       await this.postingRewardRepository.save(rewardEntry);
       return;
     }
+    rewardEntry.last_posts_scan_at = postsScanStartedAt;
 
     // The two paths run together: a post carrying the user's referral link is
     // a Path-2 (per-post + streak) post AND also finalizes Path 1 (onboarding),
@@ -2336,17 +2338,18 @@ export class ProfileXPostingRewardService {
    * already over; the drop to 1 only appeared after the user had posted
    * again, which reads as the streak breaking for no reason (#766).
    *
-   * A scan that started after the day following the last qualifying day had
-   * ended read every post of that day and found none, so the next post can
-   * only restart the count: report 0. Comparing with today instead would
-   * also zero a streak whose latest posts simply have not been scanned yet.
+   * A posts fetch that succeeded and started after the day following the last
+   * qualifying day had ended read every post of that day and found none, so
+   * the next post can only restart the count: report 0. Comparing with today
+   * instead would also zero a streak whose latest posts simply have not been
+   * scanned yet, and `last_x_api_scan_at` is set before a scan that may fail.
    * Read-only: the stored row is left as is and `updateStreak` still resets
    * it on the next post.
    */
   private toLiveStreakDays(reward: ProfileXPostingReward): number {
     const stored = Number(reward.current_streak_days || 0);
     const lastDay = reward.last_qualifying_post_day;
-    const scannedDay = this.toUtcDay(reward.last_x_api_scan_at);
+    const scannedDay = this.toUtcDay(reward.last_posts_scan_at);
     if (stored <= 0 || !lastDay || !scannedDay) {
       return stored;
     }
