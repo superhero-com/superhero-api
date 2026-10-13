@@ -17,6 +17,7 @@ import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { TokensService } from './tokens.service';
+import { visibleTokenRank } from './utils/token-rank.util';
 import {
   AeAccountAddressPipe,
   OptionalAeAccountAddressPipe,
@@ -108,26 +109,23 @@ export class AccountTokensController {
         .map((t) => t.address)
         .filter((addr): addr is string => addr !== undefined);
 
-      const [tokenRanks, holdings] = await Promise.all([
-        this.tokensService.getTokenRanksByAex9Address(tokenAddresses as any),
-        tokenAddresses.length
-          ? this.tokenHolderRepository
-              .createQueryBuilder('token_holder')
-              .where('token_holder.address = :address', {
-                address: owner_address || creator_address,
-              })
-              .andWhere('token_holder.aex9_address IN (:...tokenAddresses)', {
-                tokenAddresses,
-              })
-              .getMany()
-          : Promise.resolve([]),
-      ]);
+      const holdings = tokenAddresses.length
+        ? await this.tokenHolderRepository
+            .createQueryBuilder('token_holder')
+            .where('token_holder.address = :address', {
+              address: owner_address || creator_address,
+            })
+            .andWhere('token_holder.aex9_address IN (:...tokenAddresses)', {
+              tokenAddresses,
+            })
+            .getMany()
+        : [];
       return {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
           token: {
             ...token,
-            rank: tokenRanks.get(token.address as any),
+            rank: visibleTokenRank(token),
           },
           address: owner_address || creator_address,
           balance:
@@ -185,19 +183,16 @@ export class AccountTokensController {
       limit,
     });
 
-    // Get the token ranks for all tokens in the result
     const tokenIds = tokenHolders.items
       .map((holder) => holder.aex9_address)
       .filter(
         (aex9_address): aex9_address is string => aex9_address !== undefined,
       );
 
-    const [tokenRanks, tokens] = await Promise.all([
-      this.tokensService.getTokenRanksByAex9Address(tokenIds as any),
-      this.tokensService.getTokensByAex9Address(tokenIds as any),
-    ]);
+    const tokens = await this.tokensService.getTokensByAex9Address(
+      tokenIds as any,
+    );
 
-    // Merge the rank information into the token holders
     tokenHolders.items.forEach((holder) => {
       if (holder.aex9_address) {
         const token = tokens.find(
@@ -205,7 +200,7 @@ export class AccountTokensController {
         );
         (holder as any).token = {
           ...token,
-          rank: tokenRanks.get(holder.aex9_address as any),
+          rank: token ? visibleTokenRank(token) : undefined,
         };
       }
     });

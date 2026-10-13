@@ -7,6 +7,12 @@ import {
 import { IPostContract } from '../interfaces/post.interfaces';
 
 /**
+ * Stamped on every post and topic row. PostService's boot cleanup deletes and
+ * re-pulls rows with any other version, so all writers must share this value.
+ */
+export const POST_SYNC_VERSION = 8;
+
+/**
  * Configuration for supported post contracts per network.
  * Each contract represents a different version or type of social posting functionality.
  */

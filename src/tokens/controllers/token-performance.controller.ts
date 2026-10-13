@@ -11,15 +11,15 @@ import {
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TokenPerformanceView } from '../entities/tokens-performance.view';
+import { TokenPerformance } from '../entities/token-performance.entity';
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokenPerformanceController {
   constructor(
-    @InjectRepository(TokenPerformanceView)
-    private readonly tokenPerformanceViewRepository: Repository<TokenPerformanceView>,
+    @InjectRepository(TokenPerformance)
+    private readonly tokenPerformanceRepository: Repository<TokenPerformance>,
     private readonly tokensService: TokensService,
   ) {
     //
@@ -43,8 +43,7 @@ export class TokenPerformanceController {
       throw new NotFoundException('Token not found');
     }
 
-    // Query the view directly for this token
-    const performanceData = await this.tokenPerformanceViewRepository.findOne({
+    const performanceData = await this.tokenPerformanceRepository.findOne({
       where: { sale_address: token.sale_address },
     });
 

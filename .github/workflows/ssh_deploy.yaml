@@ -69,6 +69,24 @@ jobs:
             fi
           done < .env.example > ".env.api.$ENVIRONMENT"
 
+      - name: Check browser push (VAPID) secrets
+        env:
+          ENVIRONMENT: ${{ inputs.ENVIRONMENT }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          # Without both keys the API answers GET
+          # /api/notifications/web-push/vapid-public-key with null and the web
+          # app cannot turn browser push on. Not fatal (the rest of the API is
+          # fine), but it must be visible on every deploy. Values never printed.
+          missing=$(jq -rn --argjson s "$ALL_SECRETS" \
+            '[ "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY" ]
+             | map(select(($s[.] // "") == "")) | join(", ")')
+          if [ -n "$missing" ]; then
+            echo "::warning title=Browser push disabled on $ENVIRONMENT::Missing GitHub environment secret(s): $missing. Generate one pair with: npx web-push generate-vapid-keys"
+          else
+            echo "VAPID keypair present for $ENVIRONMENT"
+          fi
+
       - name: Copy .env.api.${{ inputs.ENVIRONMENT }} to server
         uses: appleboy/scp-action@v1.0.0
         with:

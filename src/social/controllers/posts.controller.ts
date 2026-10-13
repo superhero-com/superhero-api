@@ -27,7 +27,7 @@ import type { Request } from 'express';
 import { ReadsService } from '../services/reads.service';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Token } from '@/tokens/entities/token.entity';
-import { TokenPerformanceView } from '@/tokens/entities/tokens-performance.view';
+import { TokenPerformance } from '@/tokens/entities/token-performance.entity';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
@@ -93,9 +93,9 @@ export class PostsController {
       .createQueryBuilder('token')
       .leftJoinAndMapOne(
         'token.performance',
-        TokenPerformanceView,
-        'token_performance_view',
-        'token.sale_address = token_performance_view.sale_address',
+        TokenPerformance,
+        'token_performance',
+        'token.sale_address = token_performance.sale_address',
       )
       .where('token.unlisted = false')
       .andWhere('UPPER(token.symbol) IN (:...names)', {
@@ -106,7 +106,7 @@ export class PostsController {
 
     const tokensBySymbol = new Map<
       string,
-      Token & { performance?: TokenPerformanceView }
+      Token & { performance?: TokenPerformance }
     >();
     for (const token of tokens) {
       if (token?.symbol) {

@@ -10,6 +10,7 @@ import { Account } from '@/account/entities/account.entity';
 import socialConfig from './config/post-contracts.config';
 import { SocialPlugin } from './social.plugin';
 import { SocialPluginSyncService } from './social-plugin-sync.service';
+import { SocialEarlyIndexerService } from './social-early-indexer.service';
 import { PostTransactionValidationService } from './services/post-transaction-validation.service';
 import { PostTypeDetectionService } from './services/post-type-detection.service';
 import { TopicManagementService } from './services/topic-management.service';
@@ -31,6 +32,7 @@ import { TokensModule } from '@/tokens/tokens.module';
     PostPersistenceService,
     PostTransactionProcessorService,
     SocialPluginSyncService,
+    SocialEarlyIndexerService,
     SocialPlugin,
   ],
   exports: [SocialPlugin],

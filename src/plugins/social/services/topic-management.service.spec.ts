@@ -1,5 +1,6 @@
 import { TopicManagementService } from './topic-management.service';
 import { Topic } from '@/social/entities/topic.entity';
+import { POST_SYNC_VERSION } from '@/social/config/post-contracts.config';
 
 describe('TopicManagementService', () => {
   let service: TopicManagementService;
@@ -43,6 +44,13 @@ describe('TopicManagementService', () => {
         'beta',
       ]);
       expect(result.map((t) => t.name)).toEqual(['alpha', 'beta']);
+    });
+
+    it('stamps new topics with the shared POST_SYNC_VERSION', async () => {
+      topicRepository.find.mockResolvedValue([{ id: 't-1', name: 'alpha' }]);
+
+      await service.createOrGetTopics(['alpha']);
+      expect(topicRepository.query.mock.calls[0][1][2]).toBe(POST_SYNC_VERSION);
     });
 
     it('never overwrites an existing topic on conflict', async () => {

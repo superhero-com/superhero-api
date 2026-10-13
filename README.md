@@ -131,6 +131,12 @@ src/
    - Web in-app notification feed (live `notification` / `unread-count` on the
      `/notifications` namespace) + native browser push (Web Push / VAPID) for
      closed-tab delivery — see [docs/notifications-web-feed.md](docs/notifications-web-feed.md)
+     - **Enabling browser push:** run `npx web-push generate-vapid-keys` and add
+       the pair as `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` secrets on each
+       GitHub environment. Check with
+       `curl <api>/api/notifications/web-push/vapid-public-key`: a `publicKey`
+       string means push is on, `null` means it is off. Boot refuses a public
+       key that is not the private key's pair.
 
 4. 📚 **Collection Management**
    - Collection configuration

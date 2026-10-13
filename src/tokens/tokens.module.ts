@@ -25,9 +25,9 @@ import { UpdateTrendingTokensService } from './services/update-trending-tokens.s
 import { TokenPerformanceController } from './controllers/token-performance.controller';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
-import { TokenPerformanceView } from './entities/tokens-performance.view';
+import { TokenPerformance } from './entities/token-performance.entity';
 import { RefreshTokenEligibilityCountsService } from './services/refresh-token-eligibility-counts.service';
-import { RefreshPerformanceViewService } from './services/refresh-performance-view.service';
+import { RefreshTokenPerformanceService } from './services/refresh-token-performance.service';
 import { RefreshTokenRanksService } from './services/refresh-token-ranks.service';
 import { TokenHoldersLockService } from './services/token-holders-lock.service';
 import { Post } from '@/social/entities/post.entity';
@@ -39,7 +39,7 @@ import { Post } from '@/social/entities/post.entity';
       TokenHolder,
       TokenEligibilityCounts,
       TokenTradeEligibilityCounts,
-      TokenPerformanceView,
+      TokenPerformance,
       Transaction,
       Post,
     ]),
@@ -76,7 +76,7 @@ import { Post } from '@/social/entities/post.entity';
     TokenHoldersLockService,
     UpdateTrendingTokensService,
     RefreshTokenEligibilityCountsService,
-    RefreshPerformanceViewService,
+    RefreshTokenPerformanceService,
     RefreshTokenRanksService,
   ],
   exports: [TypeOrmModule, TokensService, TokenWebsocketGateway],

@@ -1,4 +1,5 @@
-import { Encoding, isEncoded } from '@aeternity/aepp-sdk';
+import { domainToASCII } from 'url';
+import { Encoding, isEncoded, isNameValid } from '@aeternity/aepp-sdk';
 import { BadRequestException, PipeTransform } from '@nestjs/common';
 import {
   registerDecorator,
@@ -6,7 +7,10 @@ import {
   ValidationOptions,
 } from 'class-validator';
 
+// The looser form account path params have always accepted (any case).
 const CHAIN_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}\.chain$/i;
+const ASCII_CHAIN_NAME_PATTERN =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.chain$/;
 const INVITE_CODE_PATTERN = /^[a-z0-9]{1,64}$/i;
 const PROVIDER_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/i;
 const POST_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._~:-]{0,127}$/u;
@@ -63,10 +67,25 @@ export function isAeTransactionHash(value: unknown): value is string {
   return isAeEncoded(value, Encoding.TxHash);
 }
 
+// Every spelling the middleware lists, punycode included (isNameValid rejects
+// `xn--`), but not what isNameValid only passes by parsing the name as a URL
+// host: an empty label, line breaks, `%xx`.
+export function isChainName(value: string): boolean {
+  if (ASCII_CHAIN_NAME_PATTERN.test(value)) {
+    return true;
+  }
+  return (
+    !/[\p{Cc}%]/u.test(value) &&
+    isNameValid(value) &&
+    ASCII_CHAIN_NAME_PATTERN.test(domainToASCII(value))
+  );
+}
+
 export function isAeAccountReference(value: unknown): value is string {
   return (
     isAeAccountAddress(value) ||
-    (typeof value === 'string' && CHAIN_NAME_PATTERN.test(value))
+    (typeof value === 'string' &&
+      (CHAIN_NAME_PATTERN.test(value) || isChainName(value)))
   );
 }
 

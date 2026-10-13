@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
+import { IPostContract } from '@/social/interfaces/post.interfaces';
 import { parsePostContent } from '@/social/utils/content-parser.util';
 import { SyncDirection } from '../../plugin.interface';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
@@ -23,6 +24,10 @@ export interface ProcessPostTransactionResult {
 @Injectable()
 export class PostTransactionProcessorService {
   private readonly logger = new Logger(PostTransactionProcessorService.name);
+  private readonly inFlight = new Map<
+    string,
+    Promise<ProcessPostTransactionResult | null>
+  >();
 
   constructor(
     @InjectRepository(Post)
@@ -46,6 +51,26 @@ export class PostTransactionProcessorService {
   async processTransaction(
     tx: Tx,
     syncDirection: SyncDirection = SyncDirectionEnum.Live,
+  ): Promise<ProcessPostTransactionResult | null> {
+    // The early indexer, the MDW push and the cron can deliver one hash at
+    // once. Queued, later runs find the post instead of a duplicate key.
+    const previous = this.inFlight.get(tx.hash);
+    const run = (previous ?? Promise.resolve(null))
+      .catch(() => null)
+      .then(() => this.processTransactionOnce(tx, syncDirection));
+    this.inFlight.set(tx.hash, run);
+    try {
+      return await run;
+    } finally {
+      if (this.inFlight.get(tx.hash) === run) {
+        this.inFlight.delete(tx.hash);
+      }
+    }
+  }
+
+  private async processTransactionOnce(
+    tx: Tx,
+    syncDirection: SyncDirection,
   ): Promise<ProcessPostTransactionResult | null> {
     const txHash = tx.hash;
 
@@ -79,6 +104,9 @@ export class PostTransactionProcessorService {
       // Check if post already exists
       const existingPost =
         await this.persistenceService.getExistingPost(txHash);
+      if (existingPost) {
+        this.logPostIdMismatch(existingPost, tx, contract);
+      }
 
       // Handle existing post that needs to be converted to comment
       if (existingPost && postTypeInfo.isComment && !existingPost.post_id) {
@@ -192,6 +220,20 @@ export class PostTransactionProcessorService {
       // Validate and clean post data
       postData = this.persistenceService.validatePostData(postData, txHash);
 
+      // A fork can hand this tx an id an early-indexed post already holds, and
+      // save() would then silently overwrite that post.
+      const holder = await this.postRepository.findOne({
+        where: { id: postData.id },
+        select: { id: true, tx_hash: true },
+      });
+      if (holder && holder.tx_hash !== txHash) {
+        this.logger.error('Post id already belongs to another transaction', {
+          txHash,
+          postId: postData.id,
+          overwrittenTxHash: holder.tx_hash,
+        });
+      }
+
       this.logger.debug('Creating new post', {
         txHash,
         postId: postData.id,
@@ -276,6 +318,26 @@ export class PostTransactionProcessorService {
         skipped: false,
         error: errorMessage,
       };
+    }
+  }
+
+  /**
+   * A post indexed from a block that later lost a micro-fork can carry a
+   * different return value, and so a different id, than the final chain.
+   * Detection only: rewriting the id would orphan replies and tips.
+   */
+  private logPostIdMismatch(
+    existingPost: Post,
+    tx: Tx,
+    contract: IPostContract,
+  ): void {
+    const computedId = this.persistenceService.generatePostId(tx, contract);
+    if (computedId !== existingPost.id) {
+      this.logger.error('Stored post id differs from the chain result', {
+        txHash: tx.hash,
+        storedId: existingPost.id,
+        computedId,
+      });
     }
   }
 }

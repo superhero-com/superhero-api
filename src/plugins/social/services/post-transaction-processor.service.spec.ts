@@ -44,6 +44,7 @@ describe('PostTransactionProcessorService', () => {
       updatePostCommentCount: jest.fn(),
       validateParentPost: jest.fn(),
       emitCommentCreatedEvent: jest.fn(),
+      generatePostId: jest.fn(),
     };
     tokensService = {
       queueTrendingScoresForSymbols: jest.fn(),
@@ -195,5 +196,147 @@ describe('PostTransactionProcessorService', () => {
     } as any);
 
     expect(persistenceService.emitCommentCreatedEvent).not.toHaveBeenCalled();
+  });
+
+  it('inserts once when runs for the same hash overlap', async () => {
+    const savedPost = { id: 'post-1', token_mentions: [] };
+    let stored: any = null;
+
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      contract: {},
+    });
+    typeDetectionService.detectPostType.mockReturnValue({
+      isComment: false,
+      isHidden: false,
+    });
+    persistenceService.getExistingPost.mockImplementation(async () => stored);
+    persistenceService.generatePostId.mockReturnValue('post-1');
+    persistenceService.validateContent.mockReturnValue('raw content');
+    topicManagementService.createOrGetTopics.mockResolvedValue([]);
+    persistenceService.createPostData.mockReturnValue({
+      id: 'post-1',
+      post_id: null,
+      topics: [],
+      media: [],
+    });
+    persistenceService.validatePostData.mockImplementation(
+      (postData: any) => postData,
+    );
+    persistenceService.savePost.mockImplementation(async () => {
+      stored = savedPost;
+      return savedPost;
+    });
+
+    const tx = {
+      hash: 'th_post',
+      raw: { arguments: [{ value: 'raw content' }, { value: [] }] },
+    } as any;
+    const results = await Promise.all([
+      service.processTransaction(tx),
+      service.processTransaction(tx),
+      service.processTransaction(tx),
+    ]);
+
+    expect(persistenceService.savePost).toHaveBeenCalledTimes(1);
+    expect(results.map((result) => result?.post)).toEqual([
+      savedPost,
+      savedPost,
+      savedPost,
+    ]);
+    expect(results.every((result) => result?.success)).toBe(true);
+  });
+
+  it('runs different hashes concurrently', async () => {
+    let releaseFirst: (value: unknown) => void;
+    validationService.validateTransaction
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ isValid: false });
+
+    const first = service.processTransaction({ hash: 'th_a' } as any);
+    const second = service.processTransaction({ hash: 'th_b' } as any);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(validationService.validateTransaction).toHaveBeenCalledTimes(2);
+    releaseFirst({ isValid: false });
+    await Promise.all([first, second]);
+  });
+
+  it('logs and still saves when a new post id belongs to another transaction', async () => {
+    const savedPost = { id: '8_v3', token_mentions: [] };
+    const logError = jest.spyOn((service as any).logger, 'error');
+
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      contract: {},
+    });
+    typeDetectionService.detectPostType.mockReturnValue({
+      isComment: false,
+      isHidden: false,
+    });
+    persistenceService.getExistingPost.mockResolvedValue(null);
+    persistenceService.validateContent.mockReturnValue('raw content');
+    topicManagementService.createOrGetTopics.mockResolvedValue([]);
+    persistenceService.createPostData.mockReturnValue({
+      id: '8_v3',
+      post_id: null,
+      topics: [],
+      media: [],
+    });
+    persistenceService.validatePostData.mockImplementation(
+      (postData: any) => postData,
+    );
+    persistenceService.savePost.mockResolvedValue(savedPost);
+    postRepository.findOne.mockResolvedValue({
+      id: '8_v3',
+      tx_hash: 'th_early',
+    });
+
+    const result = await service.processTransaction({
+      hash: 'th_chain',
+      raw: { arguments: [{ value: 'raw content' }, { value: [] }] },
+    } as any);
+
+    expect(result).toEqual({ post: savedPost, success: true, skipped: false });
+    expect(persistenceService.savePost).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith(
+      'Post id already belongs to another transaction',
+      { txHash: 'th_chain', postId: '8_v3', overwrittenTxHash: 'th_early' },
+    );
+  });
+
+  it('logs an error when an existing post id differs from the chain result', async () => {
+    const existingPost = { id: '7_v3', post_id: null };
+    const logError = jest.spyOn((service as any).logger, 'error');
+
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      contract: { version: 3 },
+    });
+    typeDetectionService.detectPostType.mockReturnValue({
+      isComment: false,
+      isHidden: false,
+    });
+    persistenceService.getExistingPost.mockResolvedValue(existingPost);
+    persistenceService.generatePostId.mockReturnValue('8_v3');
+
+    const result = await service.processTransaction({
+      hash: 'th_forked',
+      raw: { arguments: [{ value: 'text' }, { value: [] }] },
+    } as any);
+    expect(result).toEqual({
+      post: existingPost,
+      success: true,
+      skipped: false,
+    });
+    expect(logError).toHaveBeenCalledWith(
+      'Stored post id differs from the chain result',
+      { txHash: 'th_forked', storedId: '7_v3', computedId: '8_v3' },
+    );
   });
 });

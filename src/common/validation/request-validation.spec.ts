@@ -27,9 +27,36 @@ describe('request validation pipes', () => {
     expect(pipe.transform(accountAddress, { data: 'address' })).toBe(
       accountAddress,
     );
-    expect(pipe.transform('alice.chain', { data: 'address' })).toBe(
+    for (const name of [
       'alice.chain',
-    );
+      'Alice.CHAIN',
+      // The same name in unicode and punycode; the node resolves either.
+      '中文.chain',
+      'xn--fiq228c.chain',
+      // Active mainnet names, spelled as the middleware lists them.
+      'ﬂ.chain',
+      '\u200b铃兰.chain',
+    ]) {
+      expect(pipe.transform(name, { data: 'address' })).toBe(name);
+    }
+  });
+
+  it('rejects names that only validate because URL parsing rewrites them', () => {
+    const pipe = new AeAccountReferencePipe();
+
+    for (const name of [
+      '.chain',
+      'ali\nce.chain',
+      'ali\tce.chain',
+      '%41lice.chain',
+      '中 文.chain',
+      '🦸.chain',
+      'alice.test',
+    ]) {
+      expect(() => pipe.transform(name, { data: 'address' })).toThrow(
+        BadRequestException,
+      );
+    }
   });
 
   it('keeps strict account, contract, and transaction hash params separate', () => {

@@ -570,7 +570,7 @@ export class GovernancePluginSyncService extends BasePluginSyncService {
 
   /**
    * Convert a middleware contract_call tx to a `Partial<Tx>` row shaped
-   * exactly like `BlockSyncService.convertToMdwTx` would produce, so the
+   * exactly like `toMdwTx` (mdw-sync/utils/to-mdw-tx) would produce, so the
    * saved row is indistinguishable from one the main indexer would create.
    * Returns `null` if the payload is unusable (missing hash or wrong type).
    */

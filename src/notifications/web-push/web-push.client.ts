@@ -1,3 +1,4 @@
+import { createECDH } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import webpush, { PushSubscription, WebPushError } from 'web-push';
@@ -50,6 +51,15 @@ export class WebPushClient {
           config.vapidPublicKey,
           config.vapidPrivateKey,
         );
+        // setVapidDetails only checks each key's FORMAT. A public key that does
+        // not belong to the private key passes it, the frontend then subscribes
+        // browsers with that public key, and every send fails as a permanent
+        // 403 that the queue drops silently. Refuse the pair at boot instead.
+        if (!vapidKeysMatch(config.vapidPublicKey, config.vapidPrivateKey)) {
+          throw new Error(
+            'VAPID_PUBLIC_KEY does not belong to VAPID_PRIVATE_KEY (regenerate them as one pair)',
+          );
+        }
         this.configured = true;
       } catch (error) {
         // Malformed key/subject: disable the channel rather than crash boot. Ops
@@ -63,9 +73,16 @@ export class WebPushClient {
       }
     } else {
       this.configured = false;
-      this.logger.warn(
-        'VAPID keys not configured (VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY); web-push channel is disabled',
-      );
+      const message =
+        'VAPID keys not configured (VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY); web-push channel is disabled';
+      // In production a missing pair means browser push is silently off for
+      // every user (GET /notifications/web-push/vapid-public-key answers null),
+      // so say it at error level where it gets noticed.
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.error(message);
+      } else {
+        this.logger.warn(message);
+      }
     }
   }
 
@@ -110,5 +127,19 @@ export class WebPushClient {
       return 'retryable';
     }
     return 'permanent';
+  }
+}
+
+/**
+ * True when `publicKey` (base64url, uncompressed P-256 point) is the public half
+ * of `privateKey` (base64url, 32-byte scalar). Any decode error counts as false.
+ */
+export function vapidKeysMatch(publicKey: string, privateKey: string): boolean {
+  try {
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(privateKey, 'base64url'));
+    return ecdh.getPublicKey().equals(Buffer.from(publicKey, 'base64url'));
+  } catch {
+    return false;
   }
 }

@@ -5,11 +5,11 @@ import { randomUUID } from 'crypto';
 import { Topic } from '@/social/entities/topic.entity';
 import { Post } from '@/social/entities/post.entity';
 import { normalizeTopicName } from '@/social/utils/topic-name.util';
+import { POST_SYNC_VERSION } from '@/social/config/post-contracts.config';
 
 @Injectable()
 export class TopicManagementService {
   private readonly logger = new Logger(TopicManagementService.name);
-  private readonly syncVersion = 6; // Match PostService syncVersion
 
   constructor(
     @InjectRepository(Topic)
@@ -45,7 +45,7 @@ export class TopicManagementService {
       [
         normalizedNames.map(() => randomUUID()),
         normalizedNames,
-        this.syncVersion,
+        POST_SYNC_VERSION,
       ],
     );
 
