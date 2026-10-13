@@ -58,6 +58,11 @@ CREATE TABLE IF NOT EXISTS profile_x_posting_rewards (
 ALTER TABLE profile_x_posting_rewards
   ADD COLUMN IF NOT EXISTS rewarded_x_user_id character varying NULL;
 
+-- Start of the last successful posts fetch; the status endpoint uses it to show
+-- a lapsed streak. Also added by migration 1718900000037.
+ALTER TABLE profile_x_posting_rewards
+  ADD COLUMN IF NOT EXISTS last_posts_scan_at timestamp NULL;
+
 -- One reward row per X identity (anti-sybil) and per referral code. Partial so
 -- many rows may legitimately have NULL x_user_id / referral_code.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_profile_x_posting_rewards_x_user_id

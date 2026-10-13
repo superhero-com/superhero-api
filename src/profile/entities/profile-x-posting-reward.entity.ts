@@ -70,6 +70,13 @@ export class ProfileXPostingReward {
   })
   last_x_api_scan_at: Date | null;
 
+  /** Start of the last posts fetch that succeeded; failed scans leave it alone. */
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+  })
+  last_posts_scan_at: Date | null;
+
   @Column({
     type: 'int',
     nullable: true,
