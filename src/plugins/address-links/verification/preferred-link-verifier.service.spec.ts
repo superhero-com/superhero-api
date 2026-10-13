@@ -58,19 +58,27 @@ describe('PreferredLinkVerifierService', () => {
     ).toBe('xn--fiq228c.chain');
   });
 
+  it('keeps names exactly as the middleware lists them', async () => {
+    // The profile editor offers owned names from the middleware and compares
+    // the stored link against that list, so the value must not be rewritten.
+    for (const value of ['ﬂ.chain', '\u200b铃兰.chain']) {
+      const claim = await verifier.verifyClaim({ address, value });
+      expect(claim.value).toBe(value);
+    }
+  });
+
   it('rejects unicode names that are not valid AENS names', async () => {
-    await expect(
-      verifier.verifyClaim({
-        address,
-        value: '中 文.chain',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    await expect(
-      verifier.verifyClaim({
-        address,
-        value: '🦸.chain',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    for (const value of [
+      '中 文.chain',
+      '🦸.chain',
+      '.chain',
+      'ali\nce.chain',
+      '%41lice.chain',
+    ]) {
+      await expect(
+        verifier.verifyClaim({ address, value }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    }
   });
 
   it('rejects names that are not .chain principals', async () => {
