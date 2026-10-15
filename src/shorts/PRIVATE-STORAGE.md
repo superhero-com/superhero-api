@@ -53,8 +53,9 @@ it cannot create a falsely completed upload.
 The worker computes package CIDs locally with pinned UnixFS parameters, verified
 against Kubo, then writes encrypted outputs under its lease fence. Only the current
 claim may attach those outputs to a draft. Workers never approve content, pin it or
-sign a publication. The publishing worker verifies the accepted output references and CID again
-before publishing approved content to IPFS. Creator previews and rescans read the
+sign a publication. The API's durable lifecycle job verifies the accepted output
+references and CID again before pinning approved content to IPFS. The separate
+publisher signs the on-chain registration. Creator previews and rescans read the
 same private objects. Upload permissions expose only the selected part’s upload path
 and derived encryption key, never a bucket credential or the encryption key ring.
 

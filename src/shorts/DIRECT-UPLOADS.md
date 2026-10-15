@@ -102,9 +102,10 @@ sends missing chunks directly to storage.
   list or overwrite objects. Invalid/abandoned objects consume the reserved
   budget; expiry does not refund it. Inventory includes issued object references.
   Automatic deletion remains disabled.
-- This change removes the **upload** data path from the API. Existing private
-  preview and rescan paths are separate media operations; they are not a claim
-  that the entire API has no media reads. Public playback remains on streaming.
+- This change removes the **upload** data path from the API. Private previews,
+  rescans and the durable lifecycle job that pins prepared media still read video
+  in the API process. The separate publisher only handles on-chain registration.
+  Public playback remains on streaming.
 
 Run `npm run test:shorts:direct-uploads` for signing, envelope and completion
 checks, and `npm run test:shorts:uploads` with `SHORTS_TEST_PG_URL` pointing to an
