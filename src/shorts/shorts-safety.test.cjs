@@ -31,15 +31,15 @@ test('visual scan validates the actual source and fails closed on outage or inco
   assert.equal((await safety.scan(bytes)).status, 'error', 'an unsafe frame cannot claim a clear decision');
 });
 
-test('missing, failed and blocked scans cannot approve feed inclusion, but publication is separate', async () => {
+test('missing, failed and blocked scans deny both review approval and official playback', async () => {
   const short = { id: 'a', creator: 'creator', moderation: 'approved' };
-  const chain = { state: { shorts: [short] }, operator: { address: 'operator' }, address: a => a, save: async () => {}, read: async method => method === 'get_quote' ? { video_id: 'a', creator: 'creator' } : { until: Date.now() + 100000 } };
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] }, operator: { address: 'operator' }, address: a => a, save: async () => {}, read: async method => method === 'get_quote' ? { video_id: 'a', creator: 'creator' } : { until: Date.now() + 100000 } };
   const service = new ShortsService(chain, {}, { counters: () => ({ views: 0, engagement: { score: 0.5 } }) }, {}, {});
   for (const status of [undefined, 'error', 'blocked']) {
     short.safety = status ? { status } : undefined;
     assert.equal(visualAllows(short), false);
     await assert.rejects(service.moderate('a', true, 'Video reviewed'), /visual scan/);
-    assert.equal(await service.ensurePlayable('a'), short, 'published direct-link playback does not require feed approval');
+    await assert.rejects(service.ensurePlayable('a'), { status: 404 });
   }
   short.safety = { status: 'review', evidenceHash: 'receipt-a' };
   await assert.rejects(service.moderate('a', true, 'Full video reviewed'), /explicitly confirm/);
@@ -69,7 +69,7 @@ test('operator retries only stale-nonce dry runs, never ambiguous submissions or
 });
 
 test('feed lists only reviewed, published videos while Studio exposes drafts and safe review summaries', async () => {
-  const base = { creator: 'creator', moderation: 'approved', safety: { status: 'no_flags', frames: ['internal-frame'] }, views: [], reportDetails: ['private-report'], classification: { evidenceHash: 'internal-classification' }, reviewHistory: ['internal-review'], visualReviewHash: 'internal-hash', files: ['private-file'], reviewReason: 'internal scan diagnostics' };
+  const base = { creator: 'creator', cid: 'cid', bytes: 12, moderation: 'approved', safety: { status: 'no_flags', frames: ['internal-frame'] }, views: [], reportDetails: ['private-report'], classification: { evidenceHash: 'internal-classification' }, reviewHistory: ['internal-review'], visualReviewHash: 'internal-hash', files: ['private-file'], reviewReason: 'internal scan diagnostics' };
   const records = [
     { ...base, id: 'live' },
     { ...base, id: 'pending', moderation: 'pending' },
@@ -79,10 +79,10 @@ test('feed lists only reviewed, published videos while Studio exposes drafts and
     { ...base, id: 'stale', safety: { status: 'review', evidenceHash: 'new-evidence' } },
     { ...base, id: 'expired' }, { ...base, id: 'withdrawn' }, { ...base, id: 'unfunded' },
   ];
-  const chain = { state: { shorts: records }, address: a => a, read: async (method, [id]) => {
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: records }, address: a => a, read: async (method, [id]) => {
     if (method === 'has_liked') return false;
     if (id === 'unfunded') return undefined;
-    return { until: Date.now() + (id === 'expired' ? -1 : 100000), withdrawn: id === 'withdrawn', likes: 0 };
+    return { cid: 'cid', creator: 'creator', size: 12n, until: Date.now() + (id === 'expired' ? -1 : 100000), withdrawn: id === 'withdrawn', likes: 0 };
   } };
   const service = new ShortsService(chain, {}, { counters: () => ({ views: 0, engagement: { score: 0.5 } }) }, {}, {});
   assert.deepEqual((await service.list()).map(s => s.id), ['live', 'expired']);
@@ -95,20 +95,17 @@ test('feed lists only reviewed, published videos while Studio exposes drafts and
   assert.equal(studio.find(s => s.id === 'withdrawn').publicationStatus, 'withdrawn');
   assert.doesNotMatch(JSON.stringify(studio), /internal-|private-|scan diagnostics/);
   assert.equal((await service.list('other', 'All', true)).length, 0);
-  assert.equal((await service.shared('rejected')).contentWarning, 'feed-excluded');
-  assert.equal((await service.shared('pending')).contentWarning, 'unreviewed');
-  assert.equal((await service.shared('failed')).contentWarning, 'unreviewed');
   assert.equal((await service.shared('live')).contentWarning, undefined);
-  for (const id of ['withdrawn', 'unfunded']) {
+  for (const id of ['withdrawn', 'unfunded', 'rejected', 'pending', 'failed', 'missing', 'stale']) {
     await assert.rejects(service.shared(id), /not available/);
     await assert.rejects(service.ensurePlayable(id), /not available/);
   }
-  assert.doesNotMatch(JSON.stringify(await service.shared('rejected')), /internal-|private-|scan diagnostics/);
+  assert.doesNotMatch(JSON.stringify(await service.shared('live')), /internal-|private-|scan diagnostics/);
 });
 
 test('storage reconciliation repairs published videos and resumes publication without expiry', async () => {
   const { ShortsHostingService } = require('./shorts-hosting.service');
-  const shorts = ['pending', 'rejected', 'expired', 'withdrawn', 'unfunded', 'pin-missing'].map(id => ({ id, cid: id, creator: 'creator', moderation: id === 'rejected' ? 'rejected' : 'pending', safety: { status: 'blocked' }, publication: id === 'rejected' ? 'pending' : undefined }));
+  const shorts = ['pending', 'rejected', 'expired', 'withdrawn', 'unfunded', 'pin-missing'].map(id => ({ id, cid: id, creator: 'creator', moderation: id === 'rejected' ? 'rejected' : 'approved', safety: { status: id === 'rejected' ? 'blocked' : 'no_flags' }, publication: ['rejected', 'pending'].includes(id) ? 'pending' : undefined }));
   const unpinned = [], pinned = [], recovered = [];
   const chain = { state: { shorts }, serial: fn => fn(), read: async (method, [id]) => {
     if (method === 'get_pending') return id === 'rejected' ? 'quote' : undefined;
@@ -121,21 +118,30 @@ test('storage reconciliation repairs published videos and resumes publication wi
   await service.reconcile();
   assert.deepEqual(unpinned.sort(), ['unfunded', 'withdrawn']);
   assert.deepEqual(pinned, ['pin-missing']);
-  assert.deepEqual(recovered, [['creator', 'rejected']]);
+  assert.deepEqual(recovered, [['creator', 'pending']], 'blocked content is never republished');
 });
 
-test('creator upload and rescan responses omit operator-only inspection evidence', async () => {
+test('creator upload and rescan responses omit operator-only inspection evidence', async t => {
   const { ShortsController } = require('./shorts.controller');
   const short = { id: 'a', creator: 'creator', moderation: 'pending', safety: { status: 'review', frames: ['internal-frame'] }, classification: { evidenceHash: 'private-classification' } };
   let actor = 'creator';
-  const shorts = { chain: { serial: fn => fn(), operator: { address: 'operator' }, state: { shorts: [short] } }, item: () => short, rescan: async () => short.safety };
-  const controller = new ShortsController(shorts, { authenticate: () => actor, operator: () => { if (actor !== 'operator') throw new Error('Operator required'); } }, { finish: async () => short });
+  const chain = { serial: fn => fn(), address: value => value, operator: { address: 'operator' }, release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] } };
+  const shorts = new ShortsService(chain, {}, {}, {}, {}, {}, {}, {});
+  shorts.rescan = async () => short.safety;
+  const { DatabaseSync } = require('node:sqlite');
+  const { ShortsUploadsService } = require('./shorts-uploads.service');
+  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
+  const uploads = new ShortsUploadsService({ db }, shorts, {});
+  shorts.records = uploads.records;
+  const created = Date.now();
+  db.prepare('INSERT INTO shorts_uploads VALUES(?,?,?,?)').run('a', 'creator', created, JSON.stringify({ id: 'a', actor: 'creator', created, complete: true, parts: [0] }));
+  const controller = new ShortsController(shorts, { authenticate: () => actor, operator: () => { if (actor !== 'operator') throw new Error('Operator required'); return actor; } }, uploads);
   assert.doesNotMatch(JSON.stringify(await controller.finishUpload('auth', 'a')), /internal-frame|private-classification/);
   assert.deepEqual(await controller.scan('auth', 'a'), { status: 'reviewing' });
-  assert.throws(() => controller.review('auth'), /Operator required/);
+  await assert.rejects(controller.review('auth'), /Operator required/);
   actor = 'operator';
   assert.deepEqual((await controller.scan('auth', 'a')).frames, ['internal-frame']);
-  assert.deepEqual(controller.review('auth')[0].safety.frames, ['internal-frame']);
+  assert.deepEqual((await controller.review('auth')).items[0].safety.frames, ['internal-frame']);
 });
 
 test('demo inspection bypass requires explicit local testnet opt-in and makes no scanner calls', async t => {
@@ -167,16 +173,16 @@ test('demo inspection bypass requires explicit local testnet opt-in and makes no
 });
 
 test('demo approval opens pending videos without changing evidence, publication gates or reversibility', async () => {
-  const base = { creator: 'creator', moderation: 'pending', views: [], safety: { status: 'error', checkedAt: 1 }, reviewHistory: [] };
+  const base = { creator: 'creator', cid: 'cid', bytes: 12, moderation: 'pending', views: [], safety: { status: 'error', checkedAt: 1 }, reviewHistory: [] };
   const records = ['pending', 'missing', 'expired', 'withdrawn', 'unfunded', 'blocked', 'rejected'].map(id => ({
     ...base, id, safety: id === 'missing' ? undefined : id === 'blocked' ? { status: 'blocked' } : base.safety,
     moderation: id === 'rejected' ? 'rejected' : 'pending',
   }));
   const original = JSON.stringify(records);
-  const chain = { state: { shorts: records }, address: a => a, read: async (method, [id]) => {
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: records }, address: a => a, read: async (method, [id]) => {
     if (method === 'has_liked') return false;
     if (id === 'unfunded') return undefined;
-    return { until: Date.now() + (id === 'expired' ? -1000 : 100000), withdrawn: id === 'withdrawn', likes: 0 };
+    return { cid: 'cid', creator: 'creator', size: 12n, until: Date.now() + (id === 'expired' ? -1000 : 100000), withdrawn: id === 'withdrawn', likes: 0 };
   } };
   const media = { safety: { demoAutoApprove: true }, rescan: async () => { throw new Error('Demo must not rescan'); } };
   const service = new ShortsService(chain, media, { counters: () => ({ views: 0, engagement: { score: 0.5 } }) }, {}, {});
@@ -190,43 +196,53 @@ test('demo approval opens pending videos without changing evidence, publication 
     await service.rescan(id);
   }
   for (const id of ['withdrawn', 'unfunded']) await assert.rejects(service.shared(id), /not available/);
-  for (const id of ['blocked', 'rejected']) assert.equal((await service.shared(id)).contentWarning, 'feed-excluded');
+  for (const id of ['blocked', 'rejected']) await assert.rejects(service.shared(id), { status: 404 });
   assert.equal((await service.list('other', 'All', true)).length, 0, 'creator ownership still applies');
   assert.equal(JSON.stringify(records), original, 'effective approval preserves the stored decisions and evidence');
   media.safety.demoAutoApprove = false;
   assert.equal((await service.list()).length, 0);
-  assert.equal((await service.shared('pending')).contentWarning, 'unreviewed');
-  assert.equal((await service.shared('missing')).guidelines.status, 'analyzing');
+  for (const id of ['pending', 'missing']) await assert.rejects(service.shared(id), { status: 404 });
 });
 
-test('new demo uploads are immediately eligible in both upload responses, without stored approval or classification', async () => {
+test('demo approval applies to a prepared job, never to an unprocessed acknowledgement', async t => {
   const { ShortsController } = require('./shorts.controller');
-  const chain = { state: { shorts: [] }, address: a => a, serial: fn => fn(), save: async () => {} };
+  const { ShortsUploadsService } = require('./shorts-uploads.service');
+  const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
+  const parts = new Map();
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [] }, address: a => a, serial: fn => fn(), save: async () => {}, registerPrepared: short => { chain.state.shorts.unshift(short); return short; } };
   let preparations = 0;
   const service = new ShortsService(chain, {
     safety: { demoAutoApprove: true },
+    saveUploadPart: async (id, index, bytes) => parts.set(`${id}:${index}`, bytes),
+    loadUploadPart: async (id, index) => parts.get(`${id}:${index}`),
+    removeUploadParts: async () => parts.clear(),
     prepare: async () => { preparations++; return { cid: 'bafy-demo', bytes: 1000, duration: 12, files: [], safety: undefined }; },
-  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } }, {}, {}, { reserve() {}, beginPreparation() {} });
-  const controller = new ShortsController(service, { authenticate: () => 'creator' }, { finish: async () => chain.state.shorts[0] });
-  assert.throws(() => controller.upload('auth', { rights: 'false' }, { buffer: Buffer.from('video') }), /publishing rights/);
-  const result = await controller.upload('auth', { title: 'Demo', topic: 'Art', rights: 'true' }, { buffer: Buffer.from('video') });
-  assert.equal(preparations, 1, 'media preparation still runs');
-  assert.equal(result.moderation, 'approved');
-  assert.deepEqual(result.guidelines, { status: 'eligible', approval: 'demo' });
-  assert.deepEqual(await controller.finishUpload('auth', result.id), result);
+  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } }, {}, {}, new ShortsUploadLimitsService({ db }));
+  const uploads = new ShortsUploadsService({ db }, service, service.uploadLimits);
+  const controller = new ShortsController(service, { authenticate: () => 'creator' }, uploads);
+  await assert.rejects(controller.upload('auth', { rights: 'false' }, { buffer: Buffer.from('video') }), /publishing rights/);
+  const queued = await controller.upload('auth', { title: 'Demo', topic: 'Art', rights: 'true' }, { buffer: Buffer.from('video') });
+  assert.equal(queued.status, 'queued'); assert.equal(queued.video, undefined); assert.equal(preparations, 0);
+  await uploads.drain();
+  const result = await controller.finishUpload('auth', queued.id);
+  assert.equal(preparations, 1); assert.equal(result.status, 'ready');
+  assert.equal(result.video.moderation, 'approved');
+  assert.deepEqual(result.video.guidelines, { status: 'eligible', approval: 'demo' });
   const stored = chain.state.shorts[0];
   assert.equal(stored.moderation, 'pending');
   assert.equal(stored.safety, undefined);
   assert.equal(stored.classification, undefined);
   service.media.safety.demoAutoApprove = false;
-  assert.equal((await controller.finishUpload('auth', result.id)).guidelines.status, 'analyzing');
+  assert.equal((await controller.finishUpload('auth', queued.id)).video.guidelines.status, 'analyzing');
 });
 
 test('demo worker continues publication recovery and pin repair while pausing scan retries', async () => {
   const { ShortsHostingService } = require('./shorts-hosting.service');
   const records = [{ id: 'missing', cid: 'bafy-missing', creator: 'creator', publication: 'pending' }, { id: 'error', cid: 'bafy-error', safety: { status: 'error', checkedAt: 1 } }];
   let recovered = 0, repaired = 0, rescanned = 0;
-  const chain = { state: { shorts: records }, serial: fn => fn(), read: async (method, [id]) => {
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: records }, serial: fn => fn(), read: async (method, [id]) => {
     if (method === 'get_pending') return id === 'missing' ? 'quote' : undefined;
     if (method === 'get_quote') return { funded: true, complete: false, deadline: Date.now() + 100000 };
     return { until: Date.now() + 100000 };
@@ -252,4 +268,76 @@ test('missing chain publication is retried without unpinning or publishing priva
   await worker.reconcile();
   assert.deepEqual(recovered,[['creator','published']]);
   assert.deepEqual(removed,['draft-cid']);
+});
+
+test('scanner admission distinguishes busy from unhealthy and cancels with its caller', async t => {
+  const safety = new ShortsSafetyService();
+  t.after(() => safety.onModuleDestroy());
+  let receipt = { ready: true, accepting: false };
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(receipt)));
+  assert.equal(await safety.health(), true);
+  assert.equal(await safety.accepting(), false);
+  for (const [state, expected] of [[{ ready: true, accepting: true }, true], [{ ready: true }, true],
+    [{ ready: false, accepting: true }, false], [{ ready: true, accepting: 'true' }, false], [null, false]]) {
+    receipt = state; assert.equal(await safety.accepting(), expected);
+  }
+  const parent = new AbortController(); let observed;
+  fetch.mock.mockImplementation((_url, { signal }) => new Promise((_, reject) => {
+    observed = signal; signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const check = safety.accepting(parent.signal); parent.abort();
+  assert.equal(await check, false); assert.equal(observed.aborted, true);
+});
+
+test('queued scans retry only transport or temporary service failures; invalid evidence stays private', async t => {
+  const { ShortsModerationUnavailableError } = require('./shorts-safety.service');
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-retry-'));
+  const saved = process.env.SHORTS_MODERATION_TOKEN_FILE;
+  process.env.SHORTS_MODERATION_TOKEN_FILE = join(dir, 'token');
+  await writeFile(process.env.SHORTS_MODERATION_TOKEN_FILE, 'owned-local-token'.repeat(3), { mode: 0o600 });
+  const safety = new ShortsSafetyService();
+  t.after(async () => { safety.onModuleDestroy(); await rm(dir, { recursive: true });
+    if (saved === undefined) delete process.env.SHORTS_MODERATION_TOKEN_FILE; else process.env.SHORTS_MODERATION_TOKEN_FILE = saved; });
+  const bytes = Buffer.from('owned');
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 503 }));
+  for (const status of [408, 429, 500, 502, 503, 504]) {
+    fetch.mock.mockImplementation(async () => new Response('untrusted diagnostics', { status }));
+    await assert.rejects(safety.scan(bytes, undefined, true), ShortsModerationUnavailableError);
+    assert.equal((await safety.scan(bytes)).status, 'error', 'legacy callers still fail closed');
+  }
+  fetch.mock.mockImplementation(async () => { throw new TypeError('network unavailable'); });
+  await assert.rejects(safety.scan(bytes, undefined, true), ShortsModerationUnavailableError);
+  fetch.mock.mockImplementation(async () => new Response(new ReadableStream({ start(c) { c.error(new TypeError('socket closed')); } })));
+  await assert.rejects(safety.scan(bytes, undefined, true), ShortsModerationUnavailableError);
+  for (const status of [400, 401, 403, 413, 415, 422]) {
+    fetch.mock.mockImplementation(async () => new Response('invalid input or configuration', { status }));
+    assert.equal((await safety.scan(bytes, undefined, true)).status, 'error');
+  }
+  for (const body of ['invalid json', 'null', '{}', JSON.stringify({ status: 'no_flags', sourceSha256: 'wrong' }), 'a'.repeat(262145)]) {
+    fetch.mock.mockImplementation(async () => new Response(body));
+    const result = await safety.scan(bytes, undefined, true);
+    assert.equal(result.status, 'error'); assert.equal(visualAllows({ safety: result }), false);
+  }
+  const parent = new AbortController(); parent.abort();
+  assert.equal((await safety.scan(bytes, parent.signal, true)).status, 'error', 'cancelled lease is not refunded as capacity');
+  await rm(process.env.SHORTS_MODERATION_TOKEN_FILE);
+  assert.equal((await safety.scan(bytes, undefined, true)).status, 'error', 'missing credential requires operator repair');
+});
+
+test('inspection response deadline returns queued backpressure without approving incomplete bytes', async t => {
+  const { ShortsModerationUnavailableError } = require('./shorts-safety.service');
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-scan-deadline-'));
+  const saved = process.env.SHORTS_MODERATION_TOKEN_FILE;
+  process.env.SHORTS_MODERATION_TOKEN_FILE = join(dir, 'token');
+  await writeFile(process.env.SHORTS_MODERATION_TOKEN_FILE, 'owned-local-token'.repeat(3), { mode: 0o600 });
+  const safety = new ShortsSafetyService();
+  t.after(async () => { safety.onModuleDestroy(); await rm(dir, { recursive: true });
+    if (saved === undefined) delete process.env.SHORTS_MODERATION_TOKEN_FILE; else process.env.SHORTS_MODERATION_TOKEN_FILE = saved; });
+  const deadline = new AbortController(); let cancel = false;
+  t.mock.method(AbortSignal, 'timeout', ms => { assert.equal(ms, 150000); return deadline.signal; });
+  t.mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    start(c) { c.enqueue(Buffer.from('{')); setImmediate(() => deadline.abort()); }, cancel() { cancel = true; },
+  })));
+  await assert.rejects(safety.scan(Buffer.from('owned'), undefined, true), ShortsModerationUnavailableError);
+  assert.equal(cancel, true);
 });

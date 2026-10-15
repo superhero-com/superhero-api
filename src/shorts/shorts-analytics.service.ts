@@ -3,6 +3,22 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ShortsStoreService } from './shorts-store.service';
 
 export const ANALYTICS_DAY = 86400000;
+/** Only pass a timestamp authenticated by ShortsPlaybackEvidenceService. */
+export function playbackStart(now: number, verifiedStart?: number) {
+  if (verifiedStart === undefined) return now;
+  if (
+    !Number.isSafeInteger(verifiedStart) ||
+    verifiedStart < now - 125000 ||
+    verifiedStart > now + 2000
+  )
+    throw new Error('Invalid verified playback start');
+  // A receipt can span UTC midnight, but cannot claim yesterday's elapsed time
+  // toward a new daily view. Never move an existing play's clock on renewal.
+  return Math.max(
+    Math.floor(now / ANALYTICS_DAY) * ANALYTICS_DAY,
+    Math.min(now, verifiedStart),
+  );
+}
 export interface PlaybackEvent {
   id: string;
   session: string;
@@ -38,11 +54,51 @@ export function playbackSummary(plays: Play[]) {
     })),
   };
 }
+export type PlaybackSummary = ReturnType<typeof playbackSummary>;
+export interface AnalyticsCounters {
+  views: number;
+  engagement: { score: number };
+}
+export interface AnalyticsReport {
+  days: number;
+  start: number;
+  end: number;
+  timezone: string;
+  since: number;
+  retentionDays: number;
+  partial: boolean;
+  previousPartial: boolean;
+  summary: PlaybackSummary;
+  previous: PlaybackSummary;
+  series: ({ at: number } & PlaybackSummary)[];
+  videos: Record<string, PlaybackSummary>;
+  videoBreakdown?: { total: number; returned: number; complete: boolean };
+  sources: { source: string; views: number | null; suppressed: boolean }[];
+}
+type Result<T> = T | Promise<T>;
+export abstract class ShortsAnalyticsService {
+  abstract readonly since: number;
+  abstract counters(id: string): Result<AnalyticsCounters>;
+  abstract record(
+    short: { id: string; duration: number },
+    event: PlaybackEvent,
+    verifiedStart?: number,
+  ): Result<{ accepted: boolean } & AnalyticsCounters>;
+  abstract forget(session: string): Result<{ deleted: boolean }>;
+  abstract report(ids: string[], days: number): Result<AnalyticsReport>;
+  /** Hosted implementations aggregate the owner's library without loading its IDs. */
+  creatorReport?(
+    creator: string,
+    days: number,
+    shortId?: string,
+  ): Result<AnalyticsReport>;
+}
 @Injectable()
-export class ShortsAnalyticsService {
+export class LocalShortsAnalyticsService extends ShortsAnalyticsService {
   readonly since: number;
   private salt: string;
   constructor(private readonly store: ShortsStoreService) {
+    super();
     store.db
       .exec(`CREATE TABLE IF NOT EXISTS shorts_analytics_settings (id INTEGER PRIMARY KEY, salt TEXT NOT NULL, since INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS shorts_plays (id TEXT PRIMARY KEY, short_id TEXT NOT NULL, viewer TEXT NOT NULL, started INTEGER NOT NULL, seconds REAL NOT NULL, source TEXT NOT NULL, duration REAL NOT NULL);
@@ -109,7 +165,11 @@ export class ShortsAnalyticsService {
       engagement: this.engagement(shortId),
     };
   }
-  record(short: { id: string; duration: number }, event: PlaybackEvent) {
+  record(
+    short: { id: string; duration: number },
+    event: PlaybackEvent,
+    verifiedStart?: number,
+  ) {
     if (
       !event ||
       typeof event.id !== 'string' ||
@@ -124,6 +184,12 @@ export class ShortsAnalyticsService {
       throw new Error('Invalid playback event');
     const viewer = this.viewer(event.session),
       now = Date.now();
+    const initialStart = playbackStart(now, verifiedStart);
+    if (
+      verifiedStart !== undefined &&
+      Math.min(event.seconds, (now - initialStart) / 1000 + 0.5) < 2
+    )
+      return { accepted: true, ...this.counters(short.id) };
     this.prune(now);
     if (
       this.store.db
@@ -158,9 +224,17 @@ export class ShortsAnalyticsService {
       if (prior) return { accepted: false, ...this.counters(short.id) };
       this.store.db
         .prepare('INSERT INTO shorts_plays VALUES(?,?,?,?,?,?,?)')
-        .run(event.id, short.id, viewer, now, 0, event.source, short.duration);
+        .run(
+          event.id,
+          short.id,
+          viewer,
+          initialStart,
+          0,
+          event.source,
+          short.duration,
+        );
     }
-    const started = Number(existing?.started ?? now);
+    const started = Number(existing?.started ?? initialStart);
     const seconds = Math.min(
       short.duration,
       event.seconds,

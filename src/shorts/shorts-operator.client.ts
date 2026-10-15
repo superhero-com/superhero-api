@@ -60,15 +60,20 @@ class ShortsOperatorClient {
       })
     ).token;
     if (command === 'list') {
-      const rows = await request('/review');
+      // Read one page per command; never accumulate the entire review library.
+      const page = await request(
+        `/review${id ? `?cursor=${encodeURIComponent(id)}` : ''}`,
+      );
       console.table(
-        rows.map(({ id: shortId, title, moderation, reports }) => ({
+        page.items.map(({ id: shortId, title, moderation, reports }) => ({
           id: shortId,
           title,
           moderation,
           reports,
         })),
       );
+      if (page.next)
+        console.log(`Next page: npm run shorts:review -- list ${page.next}`);
     } else
       console.log(
         await request(`/review/${encodeURIComponent(id)}`, {

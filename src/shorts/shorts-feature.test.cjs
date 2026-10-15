@@ -18,6 +18,7 @@ test('disabled Shorts registers no routes, providers or background services', as
       await app.listen(0, '127.0.0.1');
       try {
         assert.equal((await fetch(`${await app.getUrl()}/shorts/config`)).status, 404);
+        assert.equal((await fetch(`${await app.getUrl()}/shorts/wallet-transactions/unknown`)).status, 404);
       } finally { await app.close(); }
     }
     assert.equal(Object.keys(require.cache).some(path => path.endsWith('/shorts-store.service.ts')), false);
@@ -42,10 +43,11 @@ test('hosted Shorts rejects mainnet, demo authentication and invalid deployment 
       AE_NETWORK_ID: 'ae_uat', SHORTS_WEB_ORIGIN: 'https://staging.example.com',
       SHORTS_DATA_DIR: '/var/lib/shorts', SHORTS_DEMO_AUTO_APPROVE: '0', SHORTS_DEMO_CONNECTED_WALLET: '0',
     });
+    delete process.env.SHORTS_DATA_DIR;
     assert.doesNotThrow(assertShortsEnvironment);
     for (const [key, value] of Object.entries({
       AE_NETWORK_ID: 'ae_mainnet', SHORTS_DEMO_CONNECTED_WALLET: '1',
-      SHORTS_DEMO_AUTO_APPROVE: '1', SHORTS_WEB_ORIGIN: 'http://staging.example.com', SHORTS_DATA_DIR: 'relative',
+      SHORTS_DEMO_AUTO_APPROVE: '1', SHORTS_WEB_ORIGIN: 'http://staging.example.com',
     })) {
       const before = process.env[key]; process.env[key] = value;
       assert.throws(assertShortsEnvironment);

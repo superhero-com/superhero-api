@@ -24,7 +24,5 @@ export function assertShortsEnvironment() {
         'SHORTS_WEB_ORIGIN must be the exact HTTPS website origin',
       );
     }
-    if (!process.env.SHORTS_DATA_DIR?.startsWith('/'))
-      throw new Error('Mount an absolute SHORTS_DATA_DIR');
   }
 }

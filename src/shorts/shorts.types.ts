@@ -1,8 +1,19 @@
 export type DemoActor = string;
 export interface ShortRecord {
+  /** Internal only. Kept immutable with the accepted prepared package. */
+  privateMedia?: {
+    version: 1;
+    fence: string;
+    source: import('./shorts-metadata.service').IngestionInput;
+    files: Record<
+      string,
+      import('./shorts-private-objects.service').PrivateObjectRef
+    >;
+  };
   publication?: 'pending' | 'published' | 'withdrawn';
   safety?: import('./shorts-safety.service').VisualSafety;
   visualReviewHash?: string;
+  scanGeneration?: string;
   description?: string;
   language?: string;
   synthetic?: boolean;
@@ -33,14 +44,15 @@ export interface ShortRecord {
   views: string[];
   reports: number;
 }
+export interface LocalReceipt {
+  actor: string;
+  action: string;
+  tx: string;
+  at: number;
+}
 export interface LocalState {
   contract?: string;
   sourceHash?: string;
   shorts: ShortRecord[];
-  receipts: {
-    actor: string;
-    action: string;
-    tx: string;
-    at: number;
-  }[];
+  receipts: LocalReceipt[];
 }

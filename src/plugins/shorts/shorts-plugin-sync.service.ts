@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { ShortsPluginNetworkService } from './shorts-plugin-network.service';
 import { BasePluginSyncService } from '../base-plugin-sync.service';
 import { SyncDirection, Tx } from '../plugin.interface';
 import {
@@ -17,12 +18,15 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
     ae: AeSdkService,
     private readonly db: DataSource,
     private readonly index: ShortsIndexService,
+    private readonly network: ShortsPluginNetworkService,
   ) {
     super(ae);
   }
 
   async processTransaction(tx: Tx, direction: SyncDirection): Promise<void> {
     void direction;
+    await this.network.verify();
+    await this.index.assertNetwork();
     const contracts = this.index.contracts();
     const addresses = contracts.map((item) => item.$options.address);
     if (
@@ -126,6 +130,7 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
     // Decode, projection, version marker and notification commit together. No
     // swallowed decode failures: BasePluginSyncService parks them for shared retry.
     await this.db.transaction(async (manager) => {
+      this.network.bindings();
       const [canonical] = await manager.query(
         'SELECT block_hash, block_height FROM txs WHERE hash=$1 FOR UPDATE',
         [tx.hash],

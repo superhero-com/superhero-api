@@ -45,12 +45,18 @@ test('Free publication, IPFS playback, paid Likes and reward claims on ae_uat', 
     const before = await sdk.getBalance(actors.creator.address);
     const bytes = readFileSync(process.env.SHORTS_TEST_VIDEO);
     const session = await req('/uploads', {title: `Platform-funded test · ${randomUUID().slice(0,8)}`, topic:'Art', rights:true, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), details:{language:'und', synthetic:true}}, 'creator');
-    await req(`/uploads/${session.id}`, undefined, 'viewer', 400);
+    await req(`/uploads/${session.id}`, undefined, 'viewer', 404);
     for(let i=0; i<Math.ceil(bytes.length/session.partSize); i++) {
       const part = new FormData(); part.set('file',new Blob([bytes.subarray(i*session.partSize,(i+1)*session.partSize)]),'part');
       await req(`/uploads/${session.id}/parts/${i}`,part,'creator');
     }
-    video=await req(`/uploads/${session.id}/finish`,{},'creator');
+    let prepared=await req(`/uploads/${session.id}/finish`,{},'creator',202);
+    for(let attempt=0;prepared.status!=='ready'&&attempt<180;attempt++) {
+      assert.notEqual(prepared.status,'failed',prepared.error);
+      await new Promise(resolve=>setTimeout(resolve,2000));
+      prepared=await req(`/uploads/${session.id}`,undefined,'creator');
+    }
+    assert.equal(prepared.status,'ready'); video=prepared.video;
     await req(`/playback/${video.id}`, undefined, undefined, 404);
     await req(`/${video.id}/hosting-prices`, undefined, 'creator', 404);
     await req(`/${video.id}/publish`, {}, 'viewer', 400);

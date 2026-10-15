@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
+import { discardShortsResponse, readShortsJson } from './shorts-upstream';
 
 export interface VisualSafety {
   status: 'no_flags' | 'review' | 'blocked' | 'error';
@@ -36,8 +37,17 @@ export function visualAllows(short: {
   );
 }
 
+/** Infrastructure backpressure, never a safety verdict about the video. */
+export class ShortsModerationUnavailableError extends Error {
+  constructor() {
+    super('Visual inspection is temporarily unavailable');
+    this.name = 'ShortsModerationUnavailableError';
+  }
+}
+
 @Injectable()
-export class ShortsSafetyService {
+export class ShortsSafetyService implements OnModuleDestroy {
+  private readonly shutdown = new AbortController();
   readonly demoAutoApprove =
     process.env.SHORTS_DEMO_AUTO_APPROVE === '1' &&
     process.env.SHORTS_TESTNET_MVP === '1' &&
@@ -68,19 +78,45 @@ export class ShortsSafetyService {
       throw new Error('Mount the moderation service credential');
     }
   }
-  async health() {
-    if (this.demoAutoApprove) return false;
+  private async readiness(parent?: AbortSignal) {
+    if (this.demoAutoApprove) return undefined;
     try {
+      const signal = AbortSignal.any([
+        this.shutdown.signal,
+        AbortSignal.timeout(3000),
+        ...(parent ? [parent] : []),
+      ]);
+      signal.throwIfAborted();
       const response = await fetch(`${this.endpoint}/health`, {
-        signal: AbortSignal.timeout(3000),
+        signal,
         redirect: 'error',
       });
-      return response.ok && (await response.json()).ready === true;
+      if (!response.ok) {
+        discardShortsResponse(response);
+        return undefined;
+      }
+      return await readShortsJson(response, 16384, signal);
     } catch {
-      return false;
+      return undefined;
     }
   }
-  async scan(video: Buffer): Promise<VisualSafety | undefined> {
+  async health() {
+    return (await this.readiness())?.ready === true;
+  }
+  async accepting(signal?: AbortSignal) {
+    const state = await this.readiness(signal);
+    // Older scanner instances omit admission state. A health check is only a
+    // hint; inspection still handles 429/503 races through fenced deferral.
+    return (
+      state?.ready === true &&
+      (state.accepting === undefined || state.accepting === true)
+    );
+  }
+  async scan(
+    video: Buffer,
+    signal?: AbortSignal,
+    retryUnavailable = false,
+  ): Promise<VisualSafety | undefined> {
     // Skipping inspection must not create a successful scan receipt.
     if (this.demoAutoApprove) return undefined;
     const base = {
@@ -93,18 +129,41 @@ export class ShortsSafetyService {
         await readFile(process.env.SHORTS_MODERATION_TOKEN_FILE || '', 'utf8')
       ).trim();
       if (token.length < 32) throw new Error('Missing service credential');
+      const deadline = AbortSignal.any([
+        this.shutdown.signal,
+        AbortSignal.timeout(150000),
+        ...(signal ? [signal] : []),
+      ]);
+      deadline.throwIfAborted();
       const response = await fetch(`${this.endpoint}/inspect`, {
         method: 'POST',
         redirect: 'error',
         body: new Uint8Array(video),
-        signal: AbortSignal.timeout(150000),
+        signal: deadline,
         headers: {
           'Content-Type': 'application/octet-stream',
           Authorization: `Bearer ${token}`,
         },
+      }).catch(() => {
+        throw new ShortsModerationUnavailableError();
       });
-      if (!response.ok) throw new Error('Visual service unavailable');
-      const result = await response.json();
+      if (!response.ok) {
+        discardShortsResponse(response);
+        if (
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500
+        )
+          throw new ShortsModerationUnavailableError();
+        throw new Error('Visual service unavailable');
+      }
+      const result = await readShortsJson(response, 262144, deadline).catch(
+        (error) => {
+          if (deadline.aborted || error instanceof TypeError)
+            throw new ShortsModerationUnavailableError();
+          throw error;
+        },
+      );
       const validScore = (n: unknown) =>
         typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
       const topics = new Set([
@@ -176,7 +235,14 @@ export class ShortsSafetyService {
       if (result.status !== expected || result.maxNsfwScore !== peak)
         throw new Error('Invalid safety decision');
       return { ...result, ...base };
-    } catch {
+    } catch (error) {
+      if (
+        retryUnavailable &&
+        error instanceof ShortsModerationUnavailableError &&
+        !this.shutdown.signal.aborted &&
+        !signal?.aborted
+      )
+        throw error;
       return {
         ...base,
         status: 'error',
@@ -184,5 +250,8 @@ export class ShortsSafetyService {
           'Visual inspection is unavailable or incomplete. Keep this video private and retry the scan.',
       };
     }
+  }
+  onModuleDestroy() {
+    this.shutdown.abort();
   }
 }

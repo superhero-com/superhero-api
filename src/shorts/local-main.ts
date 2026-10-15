@@ -39,7 +39,9 @@ async function bootstrap() {
     const streamingLookup =
       req.headers.host === 'host.docker.internal:3334' &&
       req.method === 'GET' &&
-      /^\/api\/shorts\/playback\/[a-zA-Z0-9-]{1,80}$/.test(req.path);
+      /^\/api\/shorts\/(playback\/[a-zA-Z0-9-]{1,80}|health\/playback)$/.test(
+        req.path,
+      );
     if (
       !['localhost:3334', '127.0.0.1:3334'].includes(req.headers.host ?? '') &&
       !streamingLookup

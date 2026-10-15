@@ -5,6 +5,9 @@ const { mkdtemp, writeFile, rm } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { ShortsMediaService } = require('./shorts-media.service');
+const { ShortsMediaUnavailableError } = require('./shorts-media-admission.service');
+const { createServer } = require('node:http');
+const { once } = require('node:events');
 
 function environment(t, values = {}) {
   const keys = ['SHORTS_IPFS_API', 'SHORTS_IPFS_TOKEN_FILE', 'SHORTS_IPFS_APIS', 'SHORTS_IPFS_CREDENTIALS_FILE', 'NODE_ENV'];
@@ -83,6 +86,45 @@ test('corrupt or unavailable media fails without fallback, and failed publicatio
   request.mock.mockImplementation(async url => new Response(url.includes('/add?') ? JSON.stringify({ Hash: short.cid }) : 'corrupt'));
   await assert.rejects(media.pin(short), /integrity/);
   assert.equal(media.hasPin(short.cid), false);
+});
+
+test('HTTP storage write admission waits safely and resumes the same package after capacity recovers', async t => {
+  const bytes = Buffer.from('owned capacity recovery fixture');
+  const short = manifest(bytes, 'bafycapacityfixture');
+  let admission = 503, adds = 0, reads = 0;
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      if (req.url.startsWith('/api/v0/pin/ls?')) {
+        res.writeHead(500); res.end(JSON.stringify({ Code: 0, Message: `path '${short.cid}' is not pinned` }));
+      } else if (req.url.startsWith('/api/v0/add?')) {
+        adds++;
+        res.writeHead(admission);
+        res.end(admission === 200 ? JSON.stringify({ Hash: short.cid }) : 'storage unavailable');
+      } else if (req.url.startsWith('/api/v0/cat?')) {
+        reads++; res.end(bytes);
+      } else { res.writeHead(404); res.end(); }
+    });
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  environment(t, { SHORTS_IPFS_API: `http://127.0.0.1:${server.address().port}/api/v0` });
+  const media = new ShortsMediaService({});
+  t.after(() => media.onModuleDestroy());
+  t.mock.method(media, 'load', async () => bytes);
+  for (admission of [503, 429]) {
+    await assert.rejects(media.ensurePinned(short), error => error instanceof ShortsMediaUnavailableError);
+    assert.equal(media.hasPin(short.cid), false);
+    assert.equal(reads, 0, 'denied writes cannot become verified/public media');
+  }
+  admission = 403;
+  await assert.rejects(media.ensurePinned(short), error => !(error instanceof ShortsMediaUnavailableError) && /403/.test(error.message));
+  assert.equal(adds, 3, 'each claimed attempt makes only one write request');
+  admission = 200;
+  await media.ensurePinned(short);
+  assert.equal(adds, 4);
+  assert.equal(reads, 1);
+  assert.equal(media.hasPin(short.cid), true);
 });
 
 test('missing pins and failed unpins do not erase the cached inventory', async t => {

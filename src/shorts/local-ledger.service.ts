@@ -15,6 +15,7 @@ export class LocalShortsLedgerService
 {
   private timer: ReturnType<typeof setInterval>;
   private pending: Promise<void> | undefined;
+  private stopped = false;
   entries: LedgerEntry[] = [];
   syncedAt = 0;
   error = '';
@@ -44,10 +45,13 @@ export class LocalShortsLedgerService
     }, 60000);
     this.timer.unref();
   }
-  onModuleDestroy() {
+  async onModuleDestroy() {
+    this.stopped = true;
     clearInterval(this.timer);
+    await this.pending;
   }
   sync() {
+    if (this.stopped) return Promise.resolve();
     if (this.pending) return this.pending;
     this.pending = this.collect()
       .catch(() => {
@@ -66,6 +70,7 @@ export class LocalShortsLedgerService
       `/v3/contracts/logs?contract_id=${contract.$options.address}&limit=100`;
     const logs: any[] = [];
     for (let page = 0; next && page < 20; page++) {
+      if (this.stopped) return [];
       if (!next.startsWith('/v3/contracts/logs?'))
         throw new Error('Invalid history cursor');
       const response = await fetch(base + next, {
@@ -83,6 +88,7 @@ export class LocalShortsLedgerService
     // Rebuild this bounded testnet history from node-verified canonical transactions.
     // A reorg removes orphaned entries on the next successful refresh.
     for (let i = 0; i < hashes.length; i += 6) {
+      if (this.stopped) return [];
       await Promise.all(
         hashes.slice(i, i + 6).map(async (tx) => {
           const [transaction, info] = await Promise.all([
@@ -163,6 +169,7 @@ export class LocalShortsLedgerService
       this.collectContract(this.chain.contract),
       this.chain.previous ? this.collectContract(this.chain.previous) : [],
     ]);
+    if (this.stopped) return;
     const entries = groups.flat();
     entries.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
     this.entries = entries;

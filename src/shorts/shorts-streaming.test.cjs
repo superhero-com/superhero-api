@@ -12,7 +12,8 @@ test('HLS outbox survives failed dispatch and service restart, deduplicates publ
   const file = join(directory, 'key'); await writeFile(file, 'a'.repeat(64));
   Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: file });
   const db = new DatabaseSync(join(directory, 'outbox.sqlite'));
-  const store = { db, load: () => ({ shorts: [] }) };
+  const short = { id: 'short-1', publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
+  const store = { db, load: () => ({ shorts: [short] }) };
   const calls = []; let status = 503;
   global.fetch = async (url, init) => { calls.push({ url, init }); return new Response(null, { status }); };
   t.after(async () => { global.fetch = fetch; process.env = env; db.close(); await rm(directory, { recursive: true, force: true }); });
@@ -32,4 +33,10 @@ test('HLS outbox survives failed dispatch and service restart, deduplicates publ
   assert.equal(calls[0].init.body, undefined);
   assert.equal(calls[0].init.redirect, 'error');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${'a'.repeat(64)}`);
+  const denied = new ShortsStreamingService(store);
+  db.exec('UPDATE shorts_stream_outbox SET ready=0, next_at=0');
+  short.moderation = 'rejected';
+  await denied.dispatch(); denied.onModuleDestroy();
+  assert.equal(calls.length, 3, 'revoked jobs never reach the streaming service after restart');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM shorts_stream_outbox').get().n, 0);
 });

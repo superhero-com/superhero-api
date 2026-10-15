@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { ShortsDatabaseService } from './shorts-database.service';
+import { Inject, Injectable } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
 import { ShortsChainService, ae } from './shorts-chain.service';
 import { LedgerReport, ShortsLedgerService } from './shorts-ledger.service';
+import { ShortsIndexNetworkService } from './shorts-index-network.service';
+import { shortsRuntimeScope } from './shorts-runtime-scope';
 
 export const SHORTS_INDEX_VERSION = 1;
 export const SHORTS_UPDATES_CHANNEL = 'shorts_updated';
@@ -11,8 +14,9 @@ export const SHORTS_PLUGIN = 'SHORTS_MDW_PLUGIN';
 export class ShortsIndexService extends ShortsLedgerService {
   readonly realtime = true;
   constructor(
-    private readonly db: DataSource,
+    @Inject(ShortsDatabaseService) private readonly db: DataSource,
     private readonly chain: ShortsChainService,
+    private readonly network: ShortsIndexNetworkService,
   ) {
     super();
   }
@@ -21,7 +25,12 @@ export class ShortsIndexService extends ShortsLedgerService {
     return [this.chain.contract, this.chain.previous].filter(Boolean);
   }
 
+  assertNetwork() {
+    return this.network.ensure();
+  }
+
   async removed(hashes: string[]) {
+    await this.assertNetwork();
     await this.db.query(
       "DELETE FROM plugin_failed_transaction f WHERE plugin_name='shorts' AND tx_hash=ANY($1::text[]) AND NOT EXISTS(SELECT 1 FROM txs WHERE hash=f.tx_hash)",
       [hashes],
@@ -29,10 +38,31 @@ export class ShortsIndexService extends ShortsLedgerService {
   }
 
   identity() {
-    return {
-      network: 'ae_uat',
-      contract: this.chain.contract.$options.address,
-    };
+    return shortsRuntimeScope(this.chain);
+  }
+
+  async health(manager: EntityManager | DataSource = this.db) {
+    await this.assertNetwork();
+    const contracts = this.contracts().map(
+      (contract) => contract.$options.address,
+    );
+    const [sync] = await manager.query(
+      "SELECT tip_height, updated_at FROM sync_state WHERE id='global'",
+    );
+    const height = Number(sync?.tip_height ?? -1);
+    const syncedAt = sync ? new Date(sync.updated_at).getTime() : 0;
+    const [health] = await manager.query(
+      `SELECT
+        (SELECT COUNT(*) FROM shorts_index_backfill WHERE contract=ANY($1::text[]) AND version=$2 AND complete AND covered_height >= $3) AS complete,
+        (EXISTS(SELECT 1 FROM plugin_failed_transaction WHERE plugin_name='shorts') OR EXISTS(SELECT 1 FROM txs WHERE (contract_id=ANY($1::text[]) OR data ? 'shorts') AND type='ContractCallTx' AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)) AS failed`,
+      [contracts, SHORTS_INDEX_VERSION, Math.max(0, height - 1)],
+    );
+    const stale =
+      height < 1 ||
+      Number(health.complete) !== contracts.length ||
+      health.failed ||
+      Date.now() - syncedAt > 120000;
+    return { height, syncedAt, stale, confirmationsRequired: 3 };
   }
 
   async report(
@@ -41,28 +71,14 @@ export class ShortsIndexService extends ShortsLedgerService {
     end: number,
     shortId?: string,
   ): Promise<LedgerReport> {
+    await this.assertNetwork();
     const contracts = this.contracts().map(
       (contract) => contract.$options.address,
     );
     // Repeatable-read keeps counts and rows on the same canonical snapshot if a
     // reorg deletes txs while this report is being assembled. The FK cascades.
     return this.db.transaction('REPEATABLE READ', async (manager) => {
-      const [sync] = await manager.query(
-        "SELECT tip_height, updated_at FROM sync_state WHERE id='global'",
-      );
-      const height = Number(sync?.tip_height ?? -1);
-      const syncedAt = sync ? new Date(sync.updated_at).getTime() : 0;
-      const [health] = await manager.query(
-        `SELECT
-        (SELECT COUNT(*) FROM shorts_index_backfill WHERE contract=ANY($1::text[]) AND version=$2 AND complete AND covered_height >= $3) AS complete,
-        (EXISTS(SELECT 1 FROM plugin_failed_transaction WHERE plugin_name='shorts') OR EXISTS(SELECT 1 FROM txs WHERE (contract_id=ANY($1::text[]) OR data ? 'shorts') AND type='ContractCallTx' AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)) AS failed`,
-        [contracts, SHORTS_INDEX_VERSION, Math.max(0, height - 1)],
-      );
-      const stale =
-        height < 1 ||
-        Number(health.complete) !== contracts.length ||
-        health.failed ||
-        Date.now() - syncedAt > 120000;
+      const { height, syncedAt, stale } = await this.health(manager);
       const where =
         'beneficiary=$1 AND contract=ANY($2::text[]) AND ($3::text IS NULL OR short_id=$3)';
       const params = [actor, contracts, shortId ?? null];

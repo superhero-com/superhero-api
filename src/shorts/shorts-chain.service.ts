@@ -1,9 +1,15 @@
+import { shortsRuntimeScope } from './shorts-runtime-scope';
 import { assertShortsEnvironment } from './shorts-environment';
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnApplicationBootstrap,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import {
   AeSdk,
   AccountMemory,
-  Node,
   Contract,
   isAddressValid,
   Encoding,
@@ -11,9 +17,23 @@ import {
 } from '@aeternity/aepp-sdk';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { LocalState } from './shorts.types';
+import { LocalState, ShortRecord } from './shorts.types';
 import { ShortsStoreService, SHORTS_DATA_DIR } from './shorts-store.service';
+import { ShortsWorkQueueService } from './shorts-work-queue.service';
+import {
+  ShortsReceiptsService,
+  ReceiptObservation,
+  receiptHash,
+} from './shorts-receipts.service';
+import { ShortsScope } from './shorts-metadata.service';
+import { ShortsNodeAccessService } from './shorts-node-access.service';
+import {
+  ShortsRelease,
+  shortsConfigJson,
+  loadShortsRelease,
+  shortsArtifact,
+  assertShortsReleaseConfig,
+} from './shorts-release';
 
 export const LOCAL_DIR = SHORTS_DATA_DIR;
 export const AE = 10n ** 18n;
@@ -23,16 +43,79 @@ export function ae(value: bigint | string) {
   return `${n / AE}${fraction ? `.${fraction}` : ''}`;
 }
 @Injectable()
-export class ShortsChainService implements OnModuleInit {
+export class ShortsChainService
+  implements OnModuleInit, OnApplicationBootstrap
+{
   sdk: AeSdk;
   contract: Contract<any>;
-  operator: AccountMemory;
+  operator: Pick<AccountMemory, 'address'>;
   artifact: any;
+  release: ShortsRelease;
   previous?: Contract<any>;
   previousArtifact?: any;
   state: LocalState = { shorts: [], receipts: [] };
-  private tail: Promise<unknown> = Promise.resolve();
-  constructor(private readonly store: ShortsStoreService) {}
+  private receiptScope?: ShortsScope;
+  constructor(
+    private readonly store: ShortsStoreService,
+    private readonly work: ShortsWorkQueueService,
+    @Optional() private readonly receipts?: ShortsReceiptsService,
+    @Optional()
+    private readonly nodeAccess: ShortsNodeAccessService = new ShortsNodeAccessService(),
+  ) {}
+  get sharedReceipts() {
+    return this.receipts?.shared === true;
+  }
+  async onApplicationBootstrap() {
+    if (!this.sharedReceipts) {
+      if (process.env.NODE_ENV === 'production')
+        throw new Error('Hosted Shorts require shared transaction history');
+      return;
+    }
+    if (!this.state.contract)
+      throw new ServiceUnavailableException(
+        'Shorts deployment is not initialized',
+      );
+    const scope = shortsRuntimeScope(this);
+    await this.receipts!.initialize(
+      scope,
+      this.state.sourceHash!,
+      this.previous?.$options.address,
+      this.state.receipts,
+      process.env.SHORTS_IMPORT_LEGACY_RECEIPTS === '1',
+    );
+    this.receiptScope = scope;
+  }
+  private readyReceiptScope() {
+    if (!this.receiptScope)
+      throw new ServiceUnavailableException(
+        'Transaction history is not initialized',
+      );
+    shortsRuntimeScope(this);
+    return this.receiptScope;
+  }
+  private async saveReceipt(observation: ReceiptObservation) {
+    if (this.sharedReceipts)
+      return this.receipts!.record(this.readyReceiptScope(), observation);
+    if (this.state.receipts.some((r) => r.tx === observation.tx)) return;
+    const receipt = {
+      actor: observation.actor,
+      action: observation.action,
+      tx: observation.tx,
+      at: Date.now(),
+    };
+    this.state.receipts.unshift(receipt);
+    try {
+      this.store.save(this.state);
+    } catch (error) {
+      this.state.receipts = this.state.receipts.filter((r) => r !== receipt);
+      throw error;
+    }
+  }
+  async receiptHistory(actor: string) {
+    if (this.sharedReceipts)
+      return (await this.receipts!.list(this.readyReceiptScope(), actor)).items;
+    return this.state.receipts.filter((r) => r.actor === actor).slice(0, 15);
+  }
   async onModuleInit() {
     assertShortsEnvironment();
     const {
@@ -40,30 +123,41 @@ export class ShortsChainService implements OnModuleInit {
       SHORTS_DEPLOYMENT_FILE,
       SHORTS_CONTRACT_ARTIFACT,
     } = process.env;
+    if (this.sharedReceipts && SHORTS_OPERATOR_KEY_FILE)
+      throw new Error('Mount the operator key only in the isolated publisher');
+    if (process.env.NODE_ENV === 'production' && !this.sharedReceipts)
+      throw new Error('Hosted Shorts require shared publishing');
     if (
-      !SHORTS_OPERATOR_KEY_FILE ||
+      (!this.sharedReceipts && !SHORTS_OPERATOR_KEY_FILE) ||
       !SHORTS_DEPLOYMENT_FILE ||
       !SHORTS_CONTRACT_ARTIFACT
     )
       throw new Error('Missing testnet contract configuration');
-    const key = JSON.parse(await readFile(SHORTS_OPERATOR_KEY_FILE, 'utf8'));
-    this.operator = new AccountMemory(key.secretKey);
-    const deployment = JSON.parse(
-      await readFile(SHORTS_DEPLOYMENT_FILE, 'utf8'),
+    const deployment = await loadShortsRelease();
+    this.artifact = shortsArtifact(
+      await shortsConfigJson(SHORTS_CONTRACT_ARTIFACT),
+      deployment,
     );
-    this.artifact = JSON.parse(
-      await readFile(resolve(SHORTS_CONTRACT_ARTIFACT), 'utf8'),
-    );
-    if (
-      deployment.network !== 'ae_uat' ||
-      deployment.operator !== this.operator.address ||
-      deployment.bytecodeHash !== this.artifact.bytecodeHash
-    )
+    this.release = deployment;
+    const localAccount = this.sharedReceipts
+      ? undefined
+      : new AccountMemory(
+          JSON.parse(await readFile(SHORTS_OPERATOR_KEY_FILE, 'utf8'))
+            .secretKey,
+        );
+    this.operator = localAccount || { address: deployment.operator };
+    if (deployment.operator !== this.operator.address)
       throw new Error('Deployment identity mismatch');
     this.sdk = new AeSdk({
-      accounts: [this.operator],
+      accounts: localAccount ? [localAccount] : [],
       nodes: [
-        { name: 'testnet', instance: new Node('https://testnet.aeternity.io') },
+        {
+          name: deployment.network,
+          instance: this.nodeAccess.createNode(
+            deployment.node,
+            !this.sharedReceipts,
+          ),
+        },
       ],
       interval: 1500,
     });
@@ -80,17 +174,23 @@ export class ShortsChainService implements OnModuleInit {
       address: deployment.contract,
     });
     const previousAddress = await this.read('get_previous');
+    if ((previousAddress || null) !== deployment.previousContract)
+      throw new Error('Previous contract does not match the release manifest');
+    assertShortsReleaseConfig(deployment, await this.read('get_config'));
     if (previousAddress) {
-      const oldDeployment = JSON.parse(
-        await readFile(process.env.SHORTS_PREVIOUS_DEPLOYMENT_FILE!, 'utf8'),
+      const oldDeployment = await shortsConfigJson(
+        process.env.SHORTS_PREVIOUS_DEPLOYMENT_FILE!,
       );
-      this.previousArtifact = JSON.parse(
-        await readFile(process.env.SHORTS_PREVIOUS_CONTRACT_ARTIFACT!, 'utf8'),
+      this.previousArtifact = shortsArtifact(
+        await shortsConfigJson(process.env.SHORTS_PREVIOUS_CONTRACT_ARTIFACT!),
+        deployment.previousArtifact!,
       );
       const oldCode = await this.sdk.api.getContractCode(previousAddress);
       if (
         oldDeployment.contract !== previousAddress ||
-        oldDeployment.network !== 'ae_uat' ||
+        oldDeployment.network !== deployment.network ||
+        oldDeployment.compiler !== this.previousArtifact.compiler ||
+        oldDeployment.sourceHash !== this.previousArtifact.sourceHash ||
         oldDeployment.bytecodeHash !== this.previousArtifact.bytecodeHash ||
         createHash('sha256').update(oldCode.bytecode).digest('hex') !==
           oldDeployment.bytecodeHash
@@ -102,27 +202,25 @@ export class ShortsChainService implements OnModuleInit {
         address: previousAddress,
       });
     }
-    this.state = this.store.load() || this.state;
+    if (!this.sharedReceipts) this.state = this.store.load() || this.state;
     if (this.state.contract && this.state.contract !== deployment.contract) {
       if (this.state.contract !== previousAddress)
         throw new Error('State belongs to another deployment');
       // Only previously published records migrate automatically. Private drafts stay private.
       for (const short of this.state.shorts) {
         const old = (
-          await this.previous!.$call('get_short', [short.id], {
-            callStatic: true,
-          })
+          await this.readNode(() =>
+            this.previous!.$call('get_short', [short.id], {
+              callStatic: true,
+            }),
+          )
         ).decodedResult;
         if (old) short.publication = old.withdrawn ? 'withdrawn' : 'pending';
       }
     }
     this.state.contract = deployment.contract;
     this.state.sourceHash = deployment.sourceHash;
-    await this.save();
-    const cfg = await this.read('get_config');
-    if (cfg[0] !== this.operator.address) throw new Error('Operator mismatch');
-    if (BigInt(cfg[2]) !== AE / 10n || BigInt(cfg[3]) !== 2000n)
-      throw new Error('Unsupported Shorts Like fee or split');
+    if (!this.sharedReceipts) await this.save();
   }
   address(value: string) {
     if (!isAddressValid(value, Encoding.AccountAddress))
@@ -130,16 +228,50 @@ export class ShortsChainService implements OnModuleInit {
     return value;
   }
   async assertTestnet() {
-    if ((await this.sdk.getNodeInfo()).nodeNetworkId !== 'ae_uat')
+    if (
+      (await this.readNode(() => this.sdk.api.getStatus())).networkId !==
+      this.release.network
+    )
       throw new Error('Refusing non-testnet transaction');
   }
-  serial<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.tail.then(fn);
-    this.tail = next.catch(() => undefined);
-    return next;
+  serial<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.work.run(fn, signal);
   }
-  async read(method: string, args: unknown[] = []): Promise<any> {
-    return (await this.invoke(method, args, true)).decodedResult;
+  /** Commit a prepared draft without waiting behind a slow network operation. */
+  registerPrepared(short: ShortRecord) {
+    if (this.sharedReceipts)
+      throw new Error('Hosted drafts require shared metadata');
+    const existing = this.state.shorts.find((s) => s.id === short.id);
+    if (existing) {
+      if (existing.creator !== short.creator)
+        throw new Error('Upload identity mismatch');
+      return existing;
+    }
+    if (this.state.shorts.length >= 50)
+      throw new Error('Local preview is limited to 50 videos');
+    // This critical section contains no await. The exclusive SQLite owner
+    // persists the current shared snapshot before another callback can run.
+    this.state.shorts.unshift(short);
+    try {
+      this.store.save(this.state);
+      return short;
+    } catch (error) {
+      this.state.shorts = this.state.shorts.filter((s) => s !== short);
+      throw error;
+    }
+  }
+  readNode<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.nodeAccess.read(operation, signal);
+  }
+  async read(
+    method: string,
+    args: unknown[] = [],
+    signal?: AbortSignal,
+  ): Promise<any> {
+    return this.readNode(
+      async () => (await this.invoke(method, args, true)).decodedResult,
+      signal,
+    );
   }
   private async invoke(method: string, args: unknown[], callStatic = false) {
     for (let attempt = 0; ; attempt++) {
@@ -163,22 +295,25 @@ export class ShortsChainService implements OnModuleInit {
     method: string,
     args: unknown[],
   ): Promise<{ hash: string; decodedResult: any }> {
+    if (this.sharedReceipts)
+      throw new Error('Hosted API cannot sign publication transactions');
     if (method !== 'publish')
       throw new Error('User payments must be signed by their wallet');
     await this.assertTestnet();
     const result = await this.invoke(method, args);
-    this.state.receipts.unshift({
+    await this.saveReceipt({
       actor: this.operator.address,
       action: method,
       tx: result.hash,
-      at: Date.now(),
+      calledContract: this.state.contract!,
+      verification: 'submitted',
     });
-    await this.save();
     return { hash: result.hash, decodedResult: result.decodedResult };
   }
   async recordTransaction(address: string, tx: string) {
-    if (!/^th_[1-9A-HJ-NP-Za-km-z]+$/.test(tx))
-      throw new Error('Invalid transaction');
+    receiptHash(tx);
+    this.address(address);
+    await this.assertTestnet();
     const [transaction, info] = await Promise.all([
       this.sdk.api.getTransactionByHash(tx),
       this.sdk.api.getTransactionInfoByHash(tx),
@@ -186,47 +321,65 @@ export class ShortsChainService implements OnModuleInit {
     const call = transaction.tx as any;
     const result = (info as any).callInfo;
     if (
+      transaction.hash !== tx ||
+      !Number.isSafeInteger(transaction.blockHeight) ||
       transaction.blockHeight < 0 ||
+      call.type !== 'ContractCallTx' ||
       call.callerId !== address ||
       ![this.state.contract, this.previous?.$options.address].includes(
         call.contractId,
       ) ||
-      result?.returnType !== 'ok'
+      result?.returnType !== 'ok' ||
+      result.callerId !== address ||
+      result.contractId !== call.contractId ||
+      result.height !== transaction.blockHeight
     )
       throw new Error('Successful mined wallet call to Shorts required');
-    if (!this.state.receipts.some((r) => r.tx === tx)) {
-      this.state.receipts.unshift({
-        actor: address,
-        action: 'wallet_transaction',
-        tx,
-        at: Date.now(),
-      });
-      await this.save();
-    }
+    receiptHash(transaction.blockHash, 'mh_');
+    const generation = await this.sdk.api.getGenerationByHeight(
+      transaction.blockHeight,
+    );
+    if (!generation.microBlocks.includes(transaction.blockHash))
+      throw new Error('Transaction is no longer in the node generation');
+    await this.saveReceipt({
+      actor: address,
+      action: 'wallet_transaction',
+      tx,
+      calledContract: call.contractId,
+      verification: 'node_observed',
+      blockHash: transaction.blockHash,
+      blockHeight: transaction.blockHeight,
+    });
     return { tx };
   }
   async save() {
+    if (this.sharedReceipts)
+      throw new Error(
+        'Hosted state must be persisted by its shared repository',
+      );
     this.store.save(this.state);
   }
   async account(address: string) {
     this.address(address);
-    const balance = await this.read('get_account', [address]);
-    const old = this.previous
-      ? (
-          await this.previous.$call('get_account', [address], {
-            callStatic: true,
-          })
-        ).decodedResult
-      : undefined;
-    return {
-      address,
-      wallet: ae(
-        await this.sdk.getBalance(address as `ak_${string}`).catch(() => '0'),
-      ),
-      available: ae(balance.available),
-      earned: ae(BigInt(balance.earned) + BigInt(old?.earned || 0)),
-      claimed: ae(BigInt(balance.claimed) + BigInt(old?.claimed || 0)),
-      previousAvailable: old ? ae(old.available) : '0',
-    };
+    return this.readNode(async () => {
+      const balance = await this.read('get_account', [address]);
+      const old = this.previous
+        ? (
+            await this.previous.$call('get_account', [address], {
+              callStatic: true,
+            })
+          ).decodedResult
+        : undefined;
+      return {
+        address,
+        wallet: ae(
+          await this.sdk.getBalance(address as `ak_${string}`).catch(() => '0'),
+        ),
+        available: ae(balance.available),
+        earned: ae(BigInt(balance.earned) + BigInt(old?.earned || 0)),
+        claimed: ae(BigInt(balance.claimed) + BigInt(old?.claimed || 0)),
+        previousAvailable: old ? ae(old.available) : '0',
+      };
+    });
   }
 }

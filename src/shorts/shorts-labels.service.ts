@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { discardShortsResponse, readShortsJson } from './shorts-upstream';
 
 export const SHORTS_TOPICS = [
   'Art',
@@ -19,7 +20,8 @@ export interface Classification {
   reason: string;
 }
 @Injectable()
-export class ShortsLabelsService {
+export class ShortsLabelsService implements OnModuleDestroy {
+  private readonly shutdown = new AbortController();
   get enabled() {
     return (
       process.env.SHORTS_JEV_ENABLED === '1' &&
@@ -27,12 +29,15 @@ export class ShortsLabelsService {
       /^jev-\d+\.\d+\.\d+$/.test(process.env.SHORTS_JEV_MODEL || '')
     );
   }
-  async classify(evidence: {
-    title: string;
-    topic: string;
-    description?: string;
-    captions?: string;
-  }): Promise<Classification> {
+  async classify(
+    evidence: {
+      title: string;
+      topic: string;
+      description?: string;
+      captions?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<Classification> {
     const base = {
       topic: evidence.topic,
       model: null,
@@ -50,9 +55,16 @@ export class ShortsLabelsService {
           'JEV is disabled. Creator-declared topic; human review required.',
       };
     try {
+      const deadline = AbortSignal.any([
+        this.shutdown.signal,
+        AbortSignal.timeout(8000),
+        ...(signal ? [signal] : []),
+      ]);
+      deadline.throwIfAborted();
       const response = await fetch('https://api.typesafe.ai/v1/systemone', {
         method: 'POST',
-        signal: AbortSignal.timeout(8000),
+        signal: deadline,
+        redirect: 'error',
         headers: {
           Authorization: `Bearer ${process.env.TYPESAFE_API_KEY}`,
           'Content-Type': 'application/json',
@@ -77,8 +89,11 @@ export class ShortsLabelsService {
           },
         }),
       });
-      if (!response.ok) throw new Error('Provider unavailable');
-      const body = await response.json(),
+      if (!response.ok) {
+        discardShortsResponse(response);
+        throw new Error('Provider unavailable');
+      }
+      const body = await readShortsJson(response, 16384, deadline),
         answer = body.answers?.topic;
       if (
         body.model !== process.env.SHORTS_JEV_MODEL ||
@@ -106,5 +121,8 @@ export class ShortsLabelsService {
           'Classification unavailable or uncertain. Manual review required.',
       };
     }
+  }
+  onModuleDestroy() {
+    this.shutdown.abort();
   }
 }

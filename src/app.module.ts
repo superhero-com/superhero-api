@@ -90,7 +90,11 @@ import { FeedModule } from './feed/feed.module';
     TypeOrmModule.forFeature([SyncState]),
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // Production containers can use a read-only application filesystem.
+      autoSchemaFile:
+        process.env.NODE_ENV === 'production'
+          ? true
+          : join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: false,
       // Keep introspection + GraphiQL off in production so the full schema

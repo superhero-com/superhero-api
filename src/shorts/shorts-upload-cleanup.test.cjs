@@ -20,12 +20,16 @@ const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
 
 test('failed upload cleanup and shared persistent attempt budgets', async t => {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const media = new ShortsMediaService({ demoAutoApprove: true, scan: async () => undefined });
+  const { ShortsScratchService, ShortsScratchProbeService } = require('./shorts-scratch.service');
+  const { ShortsEncodingService } = require('./shorts-encoding.service');
+  const scratch = new ShortsScratchService({ directory: join(root, 'scratch'), minFreeBytes: 1048576, minFreeInodes: 128, maxUsedPercent: 99 }, new ShortsScratchProbeService());
+  await scratch.onModuleInit(); t.after(() => scratch.onModuleDestroy());
+  const media = new ShortsMediaService({ demoAutoApprove: true, scan: async () => undefined }, undefined, undefined, new ShortsEncodingService(scratch));
   await media.onModuleInit();
   const setup = () => {
     const db = new DatabaseSync(':memory:');
     const limits = new ShortsUploadLimitsService({ db });
-    const chain = { state: { shorts: [] }, address: value => value, save: async () => {} };
+    const chain = { registerPrepared: short => { chain.state.shorts.unshift(short); return short; }, state: { shorts: [] }, address: value => value, serial: fn => fn(), save: async () => {} };
     const shorts = new ShortsService(chain, media, {}, {}, { classify: async () => ({}) }, {}, {}, limits);
     const sessions = new ShortsUploadsService({ db }, shorts, limits);
     return { db, limits, chain, shorts, sessions };
@@ -60,8 +64,13 @@ test('failed upload cleanup and shared persistent attempt budgets', async t => {
     try {
       const session = await sessions.create('creator', input);
       await sessions.part('creator', session.id, 0, invalid);
-      for (let i = 0; i < 10; i++) await assert.rejects(sessions.finish('creator', session.id), /ffprobe/);
-      await assert.rejects(sessions.finish('creator', session.id), /10 upload attempts/);
+      for (let i = 0; i < 3; i++) {
+        assert.equal((await sessions.finish('creator', session.id)).status, 'queued');
+        await sessions.drain();
+        assert.equal((await sessions.get('creator', session.id)).status, 'failed');
+      }
+      await assert.rejects(sessions.finish('creator', session.id), /three attempts/);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM shorts_upload_attempts').get().n, 3);
       assert.deepEqual(await files(), [`${session.id}-part-0.enc`]);
       await media.removeUploadParts(session.id, 1);
     } finally { db.close(); }
@@ -96,7 +105,7 @@ test('failed upload cleanup and shared persistent attempt budgets', async t => {
   await t.test('registration failure removes prepared packages and rolls back the in-memory draft', async () => {
     const { db, chain, shorts } = setup(); const add = media.add;
     try {
-      media.add = async () => 'bafy-test'; chain.save = async () => { throw new Error('registry write failed'); };
+      media.add = async () => 'bafy-test'; chain.registerPrepared = () => { throw new Error('registry write failed'); };
       await assert.rejects(shorts.upload('creator', 'Clip', 'Art', video), /registry write failed/);
       assert.equal(chain.state.shorts.length, 0); assert.deepEqual(await files(), []);
     } finally { db.close(); media.add = add; }

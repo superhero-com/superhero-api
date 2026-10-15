@@ -8,6 +8,9 @@ import {
   TokensService,
 } from './tokens.service';
 import { fetchJson } from '@/utils/common';
+import { Token } from './entities/token.entity';
+import { IsNull } from 'typeorm';
+import { TOKEN_MAINTENANCE_LOCK_KEY } from './utils/token-maintenance-lock.util';
 
 jest.mock('@/utils/common', () => {
   const actual = jest.requireActual('@/utils/common');
@@ -75,6 +78,54 @@ describe('TokensService', () => {
       pullTokenInfoQueue as any,
       updateTrendingScoresQueue as any,
     );
+  });
+
+  describe('incomplete-token cleanup', () => {
+    it('locks before deleting only incomplete tokens in the same transaction', async () => {
+      const query = jest.fn().mockResolvedValue([{ locked: true }]);
+      const remove = jest.fn();
+      tokensRepository.manager = {
+        transaction: async (work) => work({ query, delete: remove }),
+      };
+      await service.deleteTokensWhereDaoAddressIsNull();
+      expect(query).toHaveBeenCalledWith(
+        'SELECT pg_try_advisory_xact_lock($1) AS locked',
+        [TOKEN_MAINTENANCE_LOCK_KEY],
+      );
+      expect(remove).toHaveBeenCalledWith(Token, { dao_address: IsNull() });
+      expect(query.mock.invocationCallOrder[0]).toBeLessThan(
+        remove.mock.invocationCallOrder[0],
+      );
+      expect(tokensRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('skips when rank refresh owns the maintenance lock', async () => {
+      const remove = jest.fn();
+      tokensRepository.manager = {
+        transaction: async (work) =>
+          work({ query: async () => [{ locked: false }], delete: remove }),
+      };
+      await service.deleteTokensWhereDaoAddressIsNull();
+      expect(remove).not.toHaveBeenCalled();
+    });
+
+    it('propagates lock failures without deleting outside the transaction', async () => {
+      const remove = jest.fn();
+      tokensRepository.manager = {
+        transaction: async (work) =>
+          work({
+            query: async () => {
+              throw new Error('database failure');
+            },
+            delete: remove,
+          }),
+      };
+      await expect(service.deleteTokensWhereDaoAddressIsNull()).rejects.toThrow(
+        'database failure',
+      );
+      expect(remove).not.toHaveBeenCalled();
+      expect(tokensRepository.delete).not.toHaveBeenCalled();
+    });
   });
 
   it('calculates zero score cleanly when all signals are zero', async () => {

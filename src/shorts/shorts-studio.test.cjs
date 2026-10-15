@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
-const { ShortsAnalyticsService, ANALYTICS_DAY } = require('./shorts-analytics.service');
+const { LocalShortsAnalyticsService: ShortsAnalyticsService, ANALYTICS_DAY } = require('./shorts-analytics.service');
 const { ShortsLabelsService } = require('./shorts-labels.service');
 const { LocalShortsLedgerService: ShortsLedgerService } = require('./local-ledger.service');
 const { ShortsService } = require('./shorts.service');
@@ -19,44 +19,44 @@ function studioAuth(t, enabled = true) {
   db.exec(`CREATE TABLE challenges(id TEXT PRIMARY KEY, address TEXT, message TEXT, expires INTEGER);
     CREATE TABLE sessions(hash TEXT PRIMARY KEY, address TEXT, expires INTEGER);
     CREATE TABLE connected_wallet_sessions(hash TEXT PRIMARY KEY, address TEXT, expires INTEGER);`);
-  const chain = { state: { contract: 'ct_test' }, operator: { address: 'ak_operator' }, address: a => {
+  const chain = { release: { network: 'ae_uat', contract: 'ct_test'  }, state: { contract: 'ct_test' }, operator: { address: 'ak_operator' }, address: a => {
     if (!a?.startsWith('ak_')) throw new Error('Invalid account');
     return a;
   } };
   return { db, chain, auth: new ShortsAuthService({ db }, chain) };
 }
 
-test('connection-only Studio sessions require explicit non-production local mode', t => {
+test('connection-only Studio sessions require explicit non-production local mode', async t => {
   const { db, chain, auth } = studioAuth(t, false);
-  assert.throws(() => auth.connect('ak_creator'), /disabled/);
+  await assert.rejects(auth.connect('ak_creator'), /disabled/);
   process.env.SHORTS_DEMO_CONNECTED_WALLET = '1';
   process.env.SHORTS_TESTNET_MVP = '0';
-  assert.throws(() => new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
+  await assert.rejects(new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
   process.env.SHORTS_TESTNET_MVP = '1';
   process.env.NODE_ENV = 'production';
-  assert.throws(() => new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
+  await assert.rejects(new ShortsAuthService({ db }, chain).connect('ak_creator'), /disabled/);
   process.env.NODE_ENV = 'test';
-  assert.throws(() => new ShortsAuthService({ db }, chain).connect('invalid'), /Invalid account/);
+  await assert.rejects(new ShortsAuthService({ db }, chain).connect('invalid'), /Invalid AE address/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM connected_wallet_sessions').get().n, 0);
 });
 
-test('connected Studio sessions stay account-scoped and never become operator or verified sessions', t => {
+test('connected Studio sessions stay account-scoped and never become operator or verified sessions', async t => {
   const { auth, db, chain } = studioAuth(t);
-  const creator = auth.connect('ak_creator'), other = auth.connect('ak_other');
+  const creator = await auth.connect('ak_creator'), other = await auth.connect('ak_other');
   assert.equal(creator.kind, 'connected-wallet');
-  assert.equal(auth.authenticate(`Bearer ${creator.token}`), 'ak_creator');
-  assert.equal(auth.authenticate(`Bearer ${other.token}`), 'ak_other');
-  assert.throws(() => auth.authenticate(), /Sign in/);
-  assert.throws(() => auth.authenticate(`Bearer ${'0'.repeat(64)}`), /Sign in/);
+  assert.equal(await auth.authenticate(`Bearer ${creator.token}`), 'ak_creator');
+  assert.equal(await auth.authenticate(`Bearer ${other.token}`), 'ak_other');
+  await assert.rejects(auth.authenticate(), /Sign in/);
+  await assert.rejects(auth.authenticate(`Bearer ${'0'.repeat(64)}`), /Sign in/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
   assert.equal(db.prepare('SELECT hash FROM connected_wallet_sessions WHERE address=?').get('ak_creator').hash.includes(creator.token), false);
-  const operator = auth.connect('ak_operator');
-  assert.throws(() => auth.operator(`Bearer ${operator.token}`), /Sign in/);
+  const operator = await auth.connect('ak_operator');
+  await assert.rejects(auth.operator(`Bearer ${operator.token}`), /Sign in/);
   process.env.SHORTS_DEMO_CONNECTED_WALLET = '0';
   const normal = new ShortsAuthService({ db }, chain);
-  assert.throws(() => normal.authenticate(`Bearer ${creator.token}`), /Sign in/);
+  await assert.rejects(normal.authenticate(`Bearer ${creator.token}`), /Sign in/);
   db.prepare('UPDATE connected_wallet_sessions SET expires=?').run(Date.now() - 1);
-  assert.throws(() => auth.authenticate(`Bearer ${creator.token}`), /Sign in/);
+  await assert.rejects(auth.authenticate(`Bearer ${creator.token}`), /Sign in/);
 });
 
 test('signed operator access still verifies a real signature alongside connection-only Studio mode', async t => {
@@ -64,12 +64,47 @@ test('signed operator access still verifies a real signature alongside connectio
   const { auth, chain } = studioAuth(t);
   const operator = AccountMemory.generate();
   chain.operator.address = operator.address;
-  const challenge = auth.challenge(operator.address);
+  const challenge = await auth.challenge(operator.address);
   const signature = Buffer.from(await operator.signMessage(challenge.message)).toString('hex');
-  const session = auth.verify(challenge.id, signature);
+  const session = await auth.verify(challenge.id, signature);
   assert.equal(session.kind, 'wallet-signature');
-  assert.equal(auth.operator(`Bearer ${session.token}`), operator.address);
-  assert.throws(() => auth.verify(challenge.id, signature), /Invalid or expired/);
+  assert.equal(await auth.operator(`Bearer ${session.token}`), operator.address);
+  await assert.rejects(auth.verify(challenge.id, signature), /Invalid or expired/);
+});
+
+test('local demo tokens and signed challenges cannot cross contract or origin scopes', async t => {
+  const { AccountMemory } = require('@aeternity/aepp-sdk');
+  const { db, chain, auth } = studioAuth(t), wallet = AccountMemory.generate();
+  const token = await auth.connect(wallet.address), challenge = await auth.challenge(wallet.address);
+  const signature = Buffer.from(await wallet.signMessage(challenge.message)).toString('hex');
+  const other = new ShortsAuthService({ db }, { ...chain, release: { network: 'ae_uat', contract: 'ct_other' }, state: { contract: 'ct_other' } });
+  await assert.rejects(other.authenticate(`Bearer ${token.token}`), { status: 401 });
+  await assert.rejects(other.verify(challenge.id, signature), { status: 401 });
+  const signed = await auth.verify(challenge.id, signature);
+  assert.equal(await auth.authenticate(`Bearer ${signed.token}`), wallet.address);
+  assert.equal(await auth.authenticate(`Bearer ${token.token}`), wallet.address);
+  const fresh = await auth.challenge(wallet.address);
+  process.env.SHORTS_WEB_ORIGIN = 'https://another.example.com';
+  await assert.rejects(auth.authenticate(`Bearer ${token.token}`), { status: 401 });
+  await assert.rejects(auth.verify(fresh.id, Buffer.from(await wallet.signMessage(fresh.message)).toString('hex')), { status: 401 });
+});
+
+test('local logout revokes tokens and a connection-only session cannot revoke signed authority', async t => {
+  const { AccountMemory } = require('@aeternity/aepp-sdk');
+  const { auth } = studioAuth(t), wallet = AccountMemory.generate();
+  const challenge = await auth.challenge(wallet.address);
+  const signature = Buffer.from(await wallet.signMessage(challenge.message)).toString('hex');
+  const signed = await auth.verify(challenge.id, signature), connected = await auth.connect(wallet.address);
+  await assert.rejects(auth.logoutAll(`Bearer ${connected.token}`), { status: 401 });
+  assert.equal(await auth.authenticate(`Bearer ${signed.token}`), wallet.address);
+  const pending = await auth.challenge(wallet.address);
+  await auth.logoutAll(`Bearer ${signed.token}`);
+  await assert.rejects(auth.authenticate(`Bearer ${signed.token}`), { status: 401 });
+  await assert.rejects(auth.authenticate(`Bearer ${connected.token}`), { status: 401 });
+  await assert.rejects(auth.verify(pending.id, Buffer.from(await wallet.signMessage(pending.message)).toString('hex')), { status: 401 });
+  const last = await auth.connect(wallet.address);
+  await auth.logout(`Bearer ${last.token}`); await auth.logout(`Bearer ${last.token}`);
+  await assert.rejects(auth.authenticate(`Bearer ${last.token}`), { status: 401 });
 });
 
 function analytics(t) {
@@ -128,7 +163,7 @@ test('classification stays offline until enabled and never interprets a suggesti
 });
 test('creator access, report idempotency, appeal ownership and moderation gates', async () => {
   const short = { id: 'a', creator: 'creator', moderation: 'rejected', reports: 0, safety: { status: 'no_flags', evidenceHash: 'reviewed-content' } };
-  const service = new ShortsService({ state: { shorts: [short] }, operator: { address:'operator' }, save: async () => {} }, {}, {}, {}, {});
+  const service = new ShortsService({ address: a => a, state: { shorts: [short] }, operator: { address:'operator' }, save: async () => {} }, {}, {}, {}, {});
   await assert.rejects(service.appeal('other', 'a', 'Please review again'), /Only the creator/);
   await service.appeal('creator', 'a', 'Please review again');
   await assert.rejects(service.appeal('creator', 'a', 'Please review again'), /already/);
@@ -136,7 +171,7 @@ test('creator access, report idempotency, appeal ownership and moderation gates'
   const report = { id: randomUUID(), reason: 'Spam', detail: 'Local test report' };
   await service.report('a', report); await service.report('a', report); assert.equal(short.reports, 1);
   await assert.rejects(service.report('a', { ...report, reason: 'invalid' }), /Choose a reason/);
-  await assert.rejects(service.performance('other', 7, 'a'), /Creator access/);
+  await assert.rejects(service.performance('other', 7, 'a'), { status: 404 });
   await assert.rejects(service.performance('creator', 8), /Choose/);
 });
 test('ledger only counts confirmed creator earnings within the requested period', t => {
@@ -156,7 +191,7 @@ test('ledger refresh is idempotent and discards orphaned history on a canonical 
   let canonical = true;
   const log = { call_tx_hash: 'th_test', block_hash: 'mh_test', block_time: 100 };
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ data: canonical ? [log] : [], next: null })));
-  const chain = { state: { contract: 'ct_test', shorts: [{ id: 'a', creator: 'creator' }] }, sdk: { getHeight: async () => 10, api: {
+  const chain = { release: { network: 'ae_uat', contract: 'ct_test' }, state: { contract: 'ct_test', shorts: [{ id: 'a', creator: 'creator' }] }, sdk: { getHeight: async () => 10, api: {
     getTransactionByHash: async () => ({ tx: { callerId: 'viewer', contractId: 'ct_test' }, blockHash: 'mh_test', blockHeight: 5 }),
     getTransactionInfoByHash: async () => ({ callInfo: { returnType: 'ok', log: [] } }),
     getGenerationByHeight: async () => ({ microBlocks: ['mh_test'] }),
@@ -171,40 +206,45 @@ test('resumable uploads enforce ownership, exact parts, integrity and idempotent
   const { createHash } = require('node:crypto');
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const parts = new Map(), videos = new Map(); let preparations = 0;
-  const shorts = { media: {
+  const shorts = { chain: { state: { shorts: [] } }, media: {
     saveUploadPart: async (id, index, bytes) => parts.set(`${id}:${index}`, bytes),
     loadUploadPart: async (id, index) => parts.get(`${id}:${index}`),
     removeUploadParts: async (id, count) => { for (let i = 0; i < count; i++) parts.delete(`${id}:${i}`); },
-  }, upload: async (actor, title, topic, bytes, details, id) => { preparations++; const video = { id, actor, title, bytes:bytes.length }; videos.set(id, video); return video; }, item: id => videos.get(id) };
+  }, upload: async (actor, title, topic, bytes, details, id) => { preparations++; const video = { id, creator: actor, title, bytes:bytes.length }; videos.set(id, video); shorts.chain.state.shorts.push(video); return video; }, item: id => videos.get(id) };
   const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
   const limits = new ShortsUploadLimitsService({ db });
   const u = new ShortsUploadsService({ db }, shorts, limits), bytes = Buffer.alloc(1024 * 1024 + 12, 'x');
   const input = { title:'Example', topic:'Art', rights:true, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), details:{} };
   const session = await u.create('creator', input);
-  assert.throws(() => u.get('other', session.id), /not found/);
+  await assert.rejects(u.get('other', session.id), /not found/);
   await assert.rejects(u.part('creator', session.id, 0, Buffer.from('bad')), /size or position/);
   await u.part('creator', session.id, 0, bytes.subarray(0, 1024 * 1024));
   const resumed = new ShortsUploadsService({ db }, shorts, limits);
-  assert.deepEqual(resumed.get('creator', session.id).parts, [0]);
+  assert.deepEqual((await resumed.get('creator', session.id)).parts, [0]);
   await assert.rejects(resumed.finish('creator', session.id), /incomplete/);
   await resumed.part('creator', session.id, 1, bytes.subarray(1024 * 1024));
-  const video = await resumed.finish('creator', session.id);
-  assert.equal(video.bytes, bytes.length); assert.equal(parts.size, 0);
-  assert.deepEqual(await resumed.finish('creator', session.id), video); assert.equal(preparations, 1);
+  const queued = await resumed.finish('creator', session.id);
+  assert.equal(queued.status, 'queued');
+  assert.equal(preparations, 0);
+  await resumed.drain();
+  const ready = await resumed.get('creator', session.id);
+  assert.equal(ready.status, 'ready'); assert.equal(ready.video.bytes, bytes.length); assert.equal(parts.size, 0);
+  assert.deepEqual(await resumed.finish('creator', session.id), ready); assert.equal(preparations, 1);
   const corrupt = await u.create('creator', { ...input, bytes:12 });
   await u.part('creator', corrupt.id, 0, bytes.subarray(0,12));
-  await assert.rejects(u.finish('creator', corrupt.id), /checksum/);
+  await u.finish('creator', corrupt.id); await u.drain();
+  assert.equal((await u.get('creator', corrupt.id)).status, 'failed'); assert.equal(preparations, 1);
 });
 
 
 test('free publication verifies storage, persists intent and survives an ambiguous chain response', async () => {
-  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [], moderation: 'pending' };
+  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [], moderation: 'approved', safety: { status: 'no_flags' } };
   let video, writes = 0, pins = 0;
   const saved = [];
   const chain = { state: { shorts: [short] }, address: a => a,
     save: async () => saved.push(short.publication),
     read: async method => method === 'has_liked' ? false : video,
-    write: async (method, args) => { assert.equal(method, 'publish'); assert.deepEqual(args, ['free', 'creator', 'cid', 1000]); writes++; video = { withdrawn: false, likes: 0 }; throw new Error('Node timeout after submission'); },
+    write: async (method, args) => { assert.equal(method, 'publish'); assert.deepEqual(args, ['free', 'creator', 'cid', 1000]); writes++; video = { withdrawn: false, likes: 0, creator: 'creator', cid: 'cid', size: 1000n }; throw new Error('Node timeout after submission'); },
   };
   const service = new ShortsService(chain, { pin: async () => { pins++; } }, { counters: () => ({ views: 0, engagement: { score: 0.5 } }) }, {}, {});
   await assert.rejects(service.publish('other', 'free'), /Only the creator/);
@@ -219,7 +259,7 @@ test('free publication verifies storage, persists intent and survives an ambiguo
 });
 
 test('storage outage never registers publication or debits a creator', async () => {
-  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [] };
+  const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [], moderation: 'approved', safety: { status: 'no_flags' } };
   const chain = { state: { shorts: [short] }, address: a => a, save: async () => {}, read: async () => undefined,
     write: async () => { throw new Error('Must not submit before storage verification'); } };
   const service = new ShortsService(chain, { pin: async () => { throw new Error('IPFS offline'); } }, {}, {}, {});
@@ -231,7 +271,7 @@ test('view totals migrate once, survive expiry and cannot be inflated by replay 
   let now = Date.UTC(2026, 9, 5); t.mock.method(Date, 'now', () => now);
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   let a = new ShortsAnalyticsService({ db });
-  const short = { id: 'a', duration: 10, views: ['legacy'] };
+  const short = { id: 'a', creator: 'creator', cid: 'cid', bytes: 12, duration: 10, views: ['legacy'], moderation: 'approved', safety: { status: 'no_flags' } };
   const event = { id: randomUUID(), session: randomUUID(), seconds: 0, source: 'for-you' };
   a.record(short, event); now += 2500;
   assert.equal(a.record(short, { ...event, seconds: 2.5 }).views, 1);
@@ -240,7 +280,7 @@ test('view totals migrate once, survive expiry and cannot be inflated by replay 
   assert.equal(a.counters('a').views, 1);
   a = new ShortsAnalyticsService({ db });
   assert.equal(a.counters('a').views, 1, 'restart must not backfill twice');
-  const service = new ShortsService({ state: { shorts: [short] }, read: async () => ({ withdrawn: false }) }, {}, a, {}, {}, {});
+  const service = new ShortsService({ state: { shorts: [short] }, read: async () => ({ withdrawn: false, creator: 'creator', cid: 'cid', size: 12n }) }, {}, a, {}, {}, {});
   assert.equal((await service.view('a', randomUUID())).views, 1);
   assert.deepEqual(short.views, ['legacy'], 'legacy endpoint is read only');
   now += 91 * ANALYTICS_DAY;
@@ -320,4 +360,27 @@ test('watch hours preserve qualified seconds across daily, video and previous-pe
   now += 7 * ANALYTICS_DAY;
   assert.equal(a.report(['a', 'b'], 7).previous.watchHours, 3540 / 3600);
   assert.equal(a.report(['a', 'b'], 7).summary.watchHours, 0);
+});
+
+
+test('hosted creator analytics never enumerates the library and drains admission after errors', async () => {
+  let resolve, fail = false;
+  const calls = [], gate = new Promise(r => { resolve = r; });
+  const chain = { address: value => value }, records = { shared: true, all: () => { throw new Error('Full library read'); } };
+  const analytics = { creatorReport: async (...args) => {
+    calls.push(args); await gate; if (fail) throw new Error('Measurements unavailable');
+    return { start: 1000, end: 2000, summary: { views: 121 }, videoBreakdown: { total: 121, returned: 100, complete: false } };
+  } };
+  const financial = [], ledger = { report: async (...args) => { financial.push(args); return { earned: '1', paidLikes: 10 }; } };
+  const service = new ShortsService(chain, {}, analytics, ledger, {}, {}, {}, {}, records);
+  const pending = Array.from({ length: 4 }, () => service.performance('ak_creator', 7));
+  await assert.rejects(service.performance('ak_creator', 7), { status: 503 });
+  assert.equal(calls.length, 4); resolve();
+  for (const result of await Promise.all(pending)) assert.equal(result.summary.views, 121);
+  await service.performance('ak_creator', 28, 'chosen'); assert.deepEqual(calls.at(-1), ['ak_creator', 28, 'chosen']);
+  assert.ok(financial.every(args => args[0] === 'ak_creator'));
+  fail = true; await assert.rejects(service.performance('ak_creator', 7), /Measurements unavailable/);
+  fail = false; await service.performance('ak_creator', 7);
+  const missing = new ShortsService(chain, {}, {}, ledger, {}, {}, {}, {}, records);
+  await assert.rejects(missing.performance('ak_creator', 7), { status: 503 });
 });

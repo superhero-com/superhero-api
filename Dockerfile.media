@@ -1,0 +1,25 @@
+# Release layer for Shorts-enabled API, publisher and media-worker images.
+# Supply immutable application and shared-media image references at build time.
+# Omitted inputs remain non-runnable instead of selecting an implicit image.
+ARG APPLICATION_IMAGE=scratch
+ARG MEDIA_RUNTIME_IMAGE=scratch
+FROM ${MEDIA_RUNTIME_IMAGE} AS media
+FROM ${APPLICATION_IMAGE} AS runtime
+USER root
+# The shared artifact replaces this exact distribution ABI. Other versions need
+# a newly qualified media artifact rather than an unchecked library transplant.
+RUN for package in ffmpeg ffmpeg-libavcodec ffmpeg-libavdevice ffmpeg-libavfilter ffmpeg-libavformat ffmpeg-libavutil ffmpeg-libswresample ffmpeg-libswscale; do \
+      apk info -e "$package=8.1.2-r0" || exit 1; \
+    done
+COPY --from=media /usr/bin/ffmpeg /usr/bin/ffprobe /usr/bin/
+COPY --from=media /usr/lib/libavcodec.so.* /usr/lib/libavdevice.so.* /usr/lib/libavfilter.so.* /usr/lib/libavformat.so.* /usr/lib/libavutil.so.* /usr/lib/libswresample.so.* /usr/lib/libswscale.so.* /usr/lib/
+COPY --from=media /usr/share/ffmpeg/ /usr/share/ffmpeg/
+RUN sha256sum -c /usr/share/ffmpeg/build/binaries.sha256 \
+    && ffmpeg -hide_banner -version && ffprobe -hide_banner -version \
+    && for capability in decoders encoders demuxers muxers filters protocols bsfs hwaccels; do \
+         ffmpeg -hide_banner -v error "-$capability" > /tmp/media-capability \
+         && cmp "/usr/share/ffmpeg/distribution-features/$capability" /tmp/media-capability || exit 1; \
+       done \
+    && rm /tmp/media-capability
+USER node
+# CMD, ENTRYPOINT, environment and application files are inherited unchanged.

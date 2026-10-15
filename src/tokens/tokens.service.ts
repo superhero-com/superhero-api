@@ -34,6 +34,7 @@ import { Post } from '@/social/entities/post.entity';
 import { buildTokenMentionExistsSql } from '@/social/utils/token-mentions-sql.util';
 import { normalizeTokenSymbol } from './utils/token-symbol.util';
 import { visibleTokenRank } from './utils/token-rank.util';
+import { tryLockTokenMaintenance } from './utils/token-maintenance-lock.util';
 
 type TokenContracts = {
   instance?: TokenSale;
@@ -1781,8 +1782,9 @@ export class TokensService {
   }
 
   async deleteTokensWhereDaoAddressIsNull(): Promise<void> {
-    await this.tokensRepository.delete({
-      dao_address: IsNull(),
+    await this.tokensRepository.manager.transaction(async (manager) => {
+      if (!(await tryLockTokenMaintenance(manager))) return;
+      await manager.delete(Token, { dao_address: IsNull() });
     });
   }
 }

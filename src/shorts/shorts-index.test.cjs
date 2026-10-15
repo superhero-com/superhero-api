@@ -38,8 +38,15 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     $call: async () => ({ decodedResult: { creator: 'ak_creator' } }),
   };
   const previous = { ...contract, $options: { address: 'ct_previous' } };
-  const index = new ShortsIndexService(db, { contract, previous });
-  const processor = new ShortsPluginSyncService({}, db, index);
+  const chain = { contract, previous, state: { contract: 'ct_current' }, release: { network: 'ae_uat', contract: 'ct_current' } };
+  const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain));
+  // Ledger/projection fixtures isolate external identity checks, covered by the
+  // real HTTP/SDK tests in shorts-plugin-network.test.cjs.
+  const network = { verify: async () => {}, bindings: () => ({ middleware: 'https://testnet.aeternity.io/mdw' }),
+    json: async url => require('./shorts-upstream').readShortsJson(await fetch(url), 1048576),
+    generation: async () => ({ microBlocks: ['mh_canonical'] }),
+  };
+  const processor = new ShortsPluginSyncService({}, db, index, network);
   const repo = db.getRepository(Tx);
   const tx = (hash, events, height = 5, contractId = 'ct_current') => ({
     hash, block_hash: 'mh_canonical', block_height: height, micro_index: '0', micro_time: '86400100',
@@ -63,6 +70,19 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     assert.equal((await repo.findOneBy({ hash: first.hash })).data.another_plugin.keep, true);
     assert.equal((await index.report('ak_someone_else', 0, 172800000)).earned, '0');
     assert.equal((await index.report('ak_creator', 0, 172800000, 'other-video')).earned, '0');
+  });
+  await t.test('network verification failure leaves a real projection uncommitted and retryable', async () => {
+    const row = tx('th_network', [like]); await repo.save(row);
+    const verify = network.verify; network.verify = async () => { throw new Error('Network mismatch'); };
+    try {
+      const result = await processor.processBatch([row], 'live');
+      assert.equal(result.failed.length, 1);
+      assert.equal((await repo.findOneBy({ hash: row.hash })).data, null);
+      assert.equal((await db.query("SELECT COUNT(*)::int AS n FROM shorts_chain_events WHERE tx_hash=$1", [row.hash]))[0].n, 0);
+    } finally { network.verify = verify; }
+    await processor.processTransaction(row, 'live');
+    assert.equal((await repo.findOneBy({ hash: row.hash })).data.shorts._version, 1);
+    await repo.delete({ hash: row.hash });
   });
   await t.test('decode/storage failure is retryable and cannot stamp a successful version', async () => {
     const row = tx('th_bad', [like]); await repo.save(row); badDecode = true;
@@ -116,7 +136,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     let requests = 0, fail = true;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async url => { requests++; if (fail) throw new Error('offline'); return new Response(JSON.stringify(url.includes('/contracts/logs') ? { data: [{ call_tx_hash: raw.hash }], next: null } : raw)); };
-    const backfill = new ShortsBackfillService(db, { get: () => 'https://testnet.aeternity.io/mdw' }, { sdk: { api: { getGenerationByHeight: async () => ({ microBlocks: ['mh_canonical'] }) } } }, index, processor, { changed: async () => {} });
+    const backfill = new ShortsBackfillService(db, network, index, processor, { changed: async () => {} });
     try {
       await assert.rejects(backfill.run(12, () => false), /offline/);
       assert.equal((await db.query("SELECT complete FROM shorts_index_backfill WHERE contract='ct_current'"))[0].complete, false);
@@ -135,10 +155,9 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     const calls = []; let fail = true, tip = 1300;
     const config = { get: (key, fallback) => key === 'mdw.middlewareUrl' ? 'https://testnet.aeternity.io/mdw' : fallback };
     const gateway = { changed: async () => {} };
-    const ae = { sdk: { api: { getGenerationByHeight: async () => ({ microBlocks: ['mh_canonical'] }) } } };
     const plugins = [];
     function indexer() {
-      const backfill = new ShortsBackfillService(db, config, ae, index, processor, gateway);
+      const backfill = new ShortsBackfillService(db, network, index, processor, gateway);
       const plugin = new ShortsPlugin(repo, {}, processor, index, gateway, backfill); plugins.push(plugin);
       const registry = new PluginRegistryService([plugin], {});
       const state = { findOne: async () => ({ ...(await db.query("SELECT * FROM sync_state WHERE id='global'"))[0], backward_synced_height: 0 }),
@@ -184,8 +203,11 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     } finally { globalThis.fetch = originalFetch; plugins.forEach(plugin => plugin.onModuleDestroy()); }
   });
   await t.test('indirect contract calls are indexed and committed updates reach the gateway', async () => {
-    const gateway = new ShortsGateway(db, index);
-    const emitted = []; gateway.server = { emit: (...args) => emitted.push(args) };
+    const gateway = new ShortsGateway(db, index, { healthy: () => true, release: async () => {} });
+    const emitted = []; const connection = { close: () => {} };
+    gateway.server = { sockets: new Map([['fixture', { conn: connection, volatile: { emit: (...args) => emitted.push(args) } }]]) };
+    gateway.engines.set(connection, 'fixture');
+    gateway.connections.set('fixture', { lease: { id: 'fixture', deadline: Infinity }, close: () => {} });
     await gateway.onApplicationBootstrap();
     try {
       emitted.length = 0;
@@ -229,11 +251,23 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     try {
       module = await Test.createTestingModule({ imports: [TestDatabaseModule, await ShortsTestnetModule.register(true), ShortsPluginModule] })
         .overrideModule(AeModule).useModule(TestAeModule)
-        .overrideProvider(ShortsChainService).useValue({ contract, previous })
+        .overrideProvider(require('./shorts-private-objects.service').SHORTS_PRIVATE_OBJECT_CONFIG).useValue({ endpoint: 'http://127.0.0.1:1', region: 'us-east-1', bucket: 'test-only', prefix: 'test', forcePathStyle: true, credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, activeKeyId: 'test', keys: { test: Buffer.alloc(32) } })
+        .overrideProvider(require('./shorts-rate.config').SHORTS_RATE_CONFIG).useValue({ key: Buffer.alloc(32), client: () => 'test', redis: {host:'127.0.0.1',port:1} })
+        .overrideProvider(ShortsChainService).useValue({ contract, previous, release: { network: 'ae_uat' } })
         .overrideProvider(ShortsStoreService).useValue({ db: sqlite }).compile();
       assert.equal(module.get(ShortsService).ledger, module.get(ShortsIndexService));
       assert.equal(module.get(ShortsLedgerService), module.get(ShortsIndexService));
       assert.equal(module.get(ShortsService).chain, module.get(ShortsChainService));
+      assert.equal(module.get(ShortsService).records.shared, true, 'hosted content uses PostgreSQL, not the local snapshot');
+      const { ShortsAuthService } = require('./shorts-auth.service');
+      assert.equal(module.get(ShortsAuthService).shared, true, 'hosted authentication uses shared sessions');
+      assert.equal(module.get(require('./shorts-upload.interceptor').ShortsUploadInterceptor).admission,
+        module.get(require('./shorts-upload-admission.service').ShortsUploadAdmissionService),
+        'hosted upload interception resolves the shared admission provider');
+      assert.equal(module.get(require('./shorts-uploads.service').ShortsUploadsService).constructor.name, 'ShortsHostedUploadsService', 'hosted HTTP never starts the local decoder queue');
+      assert.equal(module.get(require('./shorts-streaming.service').ShortsStreamingService).jobs, module.get(require('./shorts-stream-jobs.service').ShortsStreamJobsService), 'hosted playback dispatch uses shared PostgreSQL jobs');
+      assert.equal(module.get(require('./shorts-analytics.service').ShortsAnalyticsService).constructor.name, 'ShortsHostedAnalyticsService', 'hosted measurement uses shared storage');
+      assert.equal(module.get(require('./shorts-receipts.service').ShortsReceiptsService).shared, true, 'hosted transaction references use shared storage');
       assert.equal(module.get('SHORTS_MDW_PLUGIN'), module.get(ShortsPlugin));
     } finally {
       if (module) await module.close();

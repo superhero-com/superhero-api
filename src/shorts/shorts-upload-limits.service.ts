@@ -8,6 +8,7 @@ const MAX_BYTES = 40 * 1024 * 1024;
 @Injectable()
 export class ShortsUploadLimitsService {
   constructor(private readonly store: ShortsStoreService) {
+    if (store.shared) return;
     store.db.exec(`CREATE TABLE IF NOT EXISTS shorts_upload_attempts (
       id TEXT PRIMARY KEY, actor TEXT NOT NULL, created INTEGER NOT NULL,
       bytes INTEGER NOT NULL, prepared INTEGER NOT NULL DEFAULT 0);
@@ -17,10 +18,14 @@ export class ShortsUploadLimitsService {
   // Reserve before any session parts or legacy originals are written. Failed
   // attempts remain charged; the shared budget survives process restarts.
   reserve(actor: string, id: string, bytes: number) {
+    if (this.store.shared)
+      throw new Error('Hosted uploads require shared admission');
     this.transaction(() => this.charge(actor, id, bytes, false));
   }
 
   beginPreparation(actor: string, id: string, bytes: number) {
+    if (this.store.shared)
+      throw new Error('Hosted uploads require shared admission');
     this.transaction(() => {
       const row = this.store.db
         .prepare('SELECT * FROM shorts_upload_attempts WHERE id=?')

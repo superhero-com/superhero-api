@@ -1,7 +1,7 @@
 import type { ShortRecord } from './shorts.types';
 import { visualAllows } from './shorts-safety.service';
 
-// Feed distribution is a separate decision from publication.
+// Review status is shared by publication, discovery and official delivery.
 export function communityGuidelines(
   short: ShortRecord,
   demoAutoApprove = false,
@@ -26,6 +26,18 @@ export function communityGuidelines(
   if (short.safety.status === 'error')
     return { status: 'unavailable' as const };
   return { status: 'reviewing' as const };
+}
+
+export function officialContentPolicy(
+  short: ShortRecord,
+  demoAutoApprove = false,
+) {
+  const allowed =
+    short.publication !== 'withdrawn' &&
+    communityGuidelines(short, demoAutoApprove).status === 'eligible';
+  // Discovery may later be narrower than serving. Neither may bypass safety.
+  // Callers must also verify the canonical on-chain publication for delivery.
+  return { publish: allowed, serve: allowed, discover: allowed };
 }
 
 export function creatorContent(short: ShortRecord, demoAutoApprove = false) {
