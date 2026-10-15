@@ -86,7 +86,7 @@ test('every private controller action waits for asynchronous creator or operator
   const base = await app.getUrl();
   for (const [method, paths] of [
     ['GET', ['/dashboard', '/performance', '/review', '/review-media/id', '/uploads/id', '/operator/ingestion']],
-    ['POST', ['/uploads', '/uploads/id/parts/0', '/uploads/id/finish', '/upload', '/review/id', '/id/scan', '/id/appeal', '/id/publish', '/receipt']],
+    ['POST', ['/uploads', '/uploads/id/parts/0', '/uploads/id/parts/0/prepare', '/uploads/id/parts/0/authorize', '/uploads/id/parts/0/complete', '/uploads/id/finish', '/upload', '/review/id', '/id/scan', '/id/appeal', '/id/publish', '/receipt']],
   ]) for (const path of paths) {
     const response = await fetch(`${base}/shorts${path}`, { method,
       headers: { Authorization: 'Bearer invalid', 'Content-Type': 'application/json' },

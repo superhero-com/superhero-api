@@ -7,13 +7,16 @@ import {
 } from '@nestjs/common';
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  hkdfSync,
   randomBytes,
 } from 'node:crypto';
 import { open } from 'node:fs/promises';
@@ -26,11 +29,12 @@ export const SHORTS_PRIVATE_OBJECT_CONFIG = Symbol(
 );
 const MAX_BYTES = 64 * 1024 * 1024;
 const MAGIC = Buffer.from('SHPRIV01');
+const DIRECT_MAGIC = Buffer.from('SHPRIV02');
 const OVERHEAD = MAGIC.length + 12 + 16;
 const hash = (data: Buffer | string) =>
   createHash('sha256').update(data).digest('hex');
 
-/** Internal database reference. Never return this or an S3 URL to the browser. */
+/** Internal database reference. Only scoped direct-upload permissions may expose its key. */
 export interface PrivateObjectRef {
   key: string;
   keyId: string;
@@ -52,6 +56,7 @@ export interface PrivateBucketConfig {
 export interface PrivateObjectConfig extends PrivateBucketConfig {
   activeKeyId: string;
   keys: Record<string, Buffer>;
+  uploadEndpoint?: string;
 }
 
 async function secretJson(path: string) {
@@ -149,6 +154,26 @@ export async function privateObjectConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PrivateObjectConfig> {
   const bucket = await privateBucketConfig(env);
+  let uploadEndpoint: string | undefined;
+  if (env.SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT) {
+    const url = new URL(env.SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT);
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/' ||
+      (url.protocol !== 'https:' &&
+        !(
+          url.protocol === 'http:' &&
+          ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
+          env.NODE_ENV !== 'production' &&
+          env.SHORTS_PRIVATE_S3_ALLOW_LOOPBACK === '1'
+        ))
+    )
+      throw new Error('Direct uploads require a public HTTPS storage origin');
+    uploadEndpoint = url.origin;
+  }
   const ring = await secretJson(env.SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE);
   if (
     !ring ||
@@ -175,6 +200,7 @@ export async function privateObjectConfig(
     ...bucket,
     activeKeyId: ring.activeKeyId,
     keys,
+    uploadEndpoint,
   };
 }
 
@@ -182,6 +208,7 @@ export async function privateObjectConfig(
 @Injectable()
 export class ShortsPrivateObjectsService implements OnModuleDestroy {
   private readonly client: S3Client;
+  private readonly uploadClient?: S3Client;
   constructor(
     @Inject(SHORTS_PRIVATE_OBJECT_CONFIG)
     private readonly config: PrivateObjectConfig,
@@ -201,9 +228,24 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
         throwOnRequestTimeout: true,
       },
     });
+    if (config.uploadEndpoint)
+      this.uploadClient = new S3Client({
+        endpoint: config.uploadEndpoint,
+        region: config.region,
+        credentials: config.credentials,
+        forcePathStyle: config.forcePathStyle,
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+      });
   }
   onModuleDestroy() {
     this.client.destroy();
+    this.uploadClient?.destroy();
+  }
+  assertDirectUploadsConfigured() {
+    if (!this.uploadClient)
+      throw new ServiceUnavailableException(
+        'Direct upload storage is not configured',
+      );
   }
 
   private prefix(scope: ShortsScope) {
@@ -237,8 +279,164 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
   }
   private aad(ref: PrivateObjectRef) {
     return Buffer.from(
-      JSON.stringify([1, ref.key, ref.keyId, ref.sha256, ref.bytes]),
+      JSON.stringify([
+        this.direct(ref) ? 2 : 1,
+        ref.key,
+        ref.keyId,
+        ref.sha256,
+        ref.bytes,
+      ]),
     );
+  }
+  private direct(ref: PrivateObjectRef) {
+    return /\/direct-part\/\d+\//.test(ref.key);
+  }
+  private encryptionKey(ref: PrivateObjectRef) {
+    return this.direct(ref)
+      ? Buffer.from(
+          hkdfSync(
+            'sha256',
+            this.config.keys[ref.keyId],
+            Buffer.alloc(0),
+            Buffer.from(`superhero-direct-upload-v1:${ref.key}`),
+            32,
+          ),
+        )
+      : this.config.keys[ref.keyId];
+  }
+  directReference(
+    scope: ShortsScope,
+    id: string,
+    index: number,
+    bytes: number,
+    sha256: string,
+  ): PrivateObjectRef {
+    if (!this.uploadClient)
+      throw new ServiceUnavailableException(
+        'Direct upload storage is not configured',
+      );
+    if (
+      !/^[a-zA-Z0-9_-]{1,80}$/.test(id) ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index > 39 ||
+      !Number.isSafeInteger(bytes) ||
+      bytes < 1 ||
+      bytes > 1024 * 1024
+    )
+      throw new BadRequestException('Invalid direct upload part');
+    const keyId = this.config.activeKeyId;
+    const ref = {
+      key: `${this.prefix(scope)}${id}/direct-part/${index}/${keyId}/${sha256}`,
+      keyId,
+      bytes,
+      sha256,
+    };
+    this.validateReference(scope, ref);
+    return ref;
+  }
+  directEncryption(scope: ShortsScope, ref: PrivateObjectRef, iv: string) {
+    this.validateReference(scope, ref);
+    if (!this.direct(ref) || !/^[a-f0-9]{24}$/.test(iv))
+      throw new BadRequestException('Invalid direct upload encryption');
+    // Only this object's derived key leaves the server; never the private key ring.
+    return {
+      key: this.encryptionKey(ref).toString('hex'),
+      iv,
+      aad: this.aad(ref).toString('base64'),
+      sha256: ref.sha256,
+      bytes: ref.bytes,
+    };
+  }
+  async directUrl(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    checksum: string,
+    expiresAt: number,
+  ) {
+    this.validateReference(scope, ref);
+    if (!this.uploadClient)
+      throw new ServiceUnavailableException(
+        'Direct upload storage is not configured',
+      );
+    if (!this.direct(ref) || !/^[a-f0-9]{64}$/.test(checksum))
+      throw new BadRequestException('Invalid upload checksum');
+    const expiresIn = Math.min(
+      300,
+      Math.floor((expiresAt - Date.now()) / 1000),
+    );
+    if (expiresIn < 1)
+      throw new BadRequestException('Upload permission expired');
+    const headers = {
+      'content-type': 'application/octet-stream',
+      'cache-control': 'no-store',
+      'if-none-match': '*',
+      'x-amz-checksum-sha256': Buffer.from(checksum, 'hex').toString('base64'),
+    };
+    const url = await getSignedUrl(
+      this.uploadClient,
+      new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: ref.key,
+        ContentLength: ref.bytes + OVERHEAD,
+        ContentType: headers['content-type'],
+        CacheControl: headers['cache-control'],
+        IfNoneMatch: '*',
+        ChecksumSHA256: headers['x-amz-checksum-sha256'],
+      }),
+      {
+        expiresIn,
+        unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+        signableHeaders: new Set([
+          'content-length',
+          'content-type',
+          'cache-control',
+          'if-none-match',
+          'x-amz-checksum-sha256',
+        ]),
+      },
+    );
+    return {
+      url,
+      method: 'PUT' as const,
+      headers,
+      expiresAt: Date.now() + expiresIn * 1000,
+    };
+  }
+  async verifyDirect(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    checksum: string,
+    signal?: AbortSignal,
+  ) {
+    this.validateReference(scope, ref);
+    if (!this.direct(ref) || !/^[a-f0-9]{64}$/.test(checksum))
+      throw new BadRequestException('Invalid upload checksum');
+    try {
+      // Metadata only. The media worker checks GCM authentication and the plaintext hash.
+      const head = await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.config.bucket,
+          Key: ref.key,
+          ChecksumMode: 'ENABLED',
+        }),
+        {
+          abortSignal: AbortSignal.any([
+            AbortSignal.timeout(10000),
+            ...(signal ? [signal] : []),
+          ]),
+        },
+      );
+      if (
+        head.ContentLength !== ref.bytes + OVERHEAD ||
+        head.ChecksumSHA256 !== Buffer.from(checksum, 'hex').toString('base64')
+      )
+        throw new Error('Upload metadata mismatch');
+    } catch {
+      throw new BadRequestException(
+        'Upload not received or could not be verified. Please retry.',
+      );
+    }
   }
   async put(
     scope: ShortsScope,
@@ -338,11 +536,14 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
         chunks.push(data);
       }
       const body = Buffer.concat(chunks);
-      if (length !== ref.bytes + OVERHEAD || !body.subarray(0, 8).equals(MAGIC))
+      if (
+        length !== ref.bytes + OVERHEAD ||
+        !body.subarray(0, 8).equals(this.direct(ref) ? DIRECT_MAGIC : MAGIC)
+      )
         throw new Error('Invalid private media envelope');
       const decipher = createDecipheriv(
         'aes-256-gcm',
-        this.config.keys[ref.keyId],
+        this.encryptionKey(ref),
         body.subarray(8, 20),
       );
       decipher.setAuthTag(body.subarray(20, 36));

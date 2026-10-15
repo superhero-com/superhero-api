@@ -212,7 +212,7 @@ export class ShortsRetentionService {
         keys,
       );
       const uploads = await db.query(
-        'SELECT id,state,expires_at>current_timestamp AS active FROM shorts_upload_sessions WHERE network=$1 AND contract=$2 AND id=ANY($3)',
+        "SELECT id,state,to_jsonb(shorts_upload_sessions)->'direct_parts' AS direct_parts,expires_at>current_timestamp AS active FROM shorts_upload_sessions WHERE network=$1 AND contract=$2 AND id=ANY($3)",
         keys,
       );
       const parts = await db.query(
@@ -236,6 +236,10 @@ export class ShortsRetentionService {
         parts
           .filter((row) => row.upload_id === resourceId)
           .forEach((row) => add(row.object_ref));
+        for (const part of Object.values(upload?.direct_parts || {}) as {
+          object: PrivateObjectRef;
+        }[])
+          add(part.object);
         add(job?.input?.manifest);
         add(record?.privateMedia?.source?.manifest);
         for (const ref of Object.values(record?.privateMedia?.files || {}))

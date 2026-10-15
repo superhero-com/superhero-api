@@ -320,6 +320,49 @@ export class ShortsController {
           ),
         );
   }
+  @Post('uploads/:id/parts/:index/prepare')
+  @Header('Cache-Control', 'no-store')
+  async prepareDirectPart(
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Param('index') index: string,
+    @Body() body: { sha256: string },
+  ) {
+    return this.uploads.prepareDirect(
+      await this.auth.authenticate(authorization),
+      id,
+      Number(index),
+      body?.sha256,
+    );
+  }
+  @Post('uploads/:id/parts/:index/authorize')
+  @Header('Cache-Control', 'no-store')
+  async authorizeDirectPart(
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Param('index') index: string,
+    @Body() body: { checksum: string },
+  ) {
+    return this.uploads.authorizeDirect(
+      await this.auth.authenticate(authorization),
+      id,
+      Number(index),
+      body?.checksum,
+    );
+  }
+  @Post('uploads/:id/parts/:index/complete')
+  @Header('Cache-Control', 'no-store')
+  async completeDirectPart(
+    @Headers('authorization') authorization: string,
+    @Param('id') id: string,
+    @Param('index') index: string,
+  ) {
+    return this.uploads.completeDirect(
+      await this.auth.authenticate(authorization),
+      id,
+      Number(index),
+    );
+  }
   @Post('uploads/:id/finish')
   @HttpCode(202)
   @UseGuards(ShortsAuthGuard)

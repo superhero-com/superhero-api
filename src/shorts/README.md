@@ -1,5 +1,8 @@
 # Shorts testnet MVP
 
+[Direct uploads](DIRECT-UPLOADS.md) send encrypted video chunks from the browser to MinIO,
+with the API handling permissions and completion metadata only.
+
 Private shared upload storage is documented in [PRIVATE-STORAGE.md](PRIVATE-STORAGE.md),
 including module boundaries, S3 configuration, secret files and provider requirements.
 [Database workload limits](DATABASE.md) describe the separate Shorts pool, deadlines and recovery semantics.

@@ -53,8 +53,9 @@ rollout. They are not knobs for disabling abuse protection.
 | Playback measurements and legacy view reads | 180 | — | 3,000 | 1 minute |
 | Forget analytics | 6 | — | 120 | 1 minute |
 | Reports | 6 | — | 120 | 1 minute |
-| Start upload / full-file upload | 12 | 6 | 60 | 1 minute |
-| Upload parts | 120 | 100 | 600 | 1 minute |
+| Start upload | 12 | 6 | 60 | 1 minute |
+| Legacy upload parts | 120 | 100 | 600 | 1 minute |
+| Direct upload prepare / authorize / complete | 360 | 300 | 1,800 | 1 minute |
 | Finish upload / publish (separate buckets) | 12 | 6 | 30 | 1 minute |
 | Transaction acknowledgement | 30 | 20 | 120 | 1 minute |
 | Rescan / appeal (separate buckets) | 6 | 3 | 60 | 1 hour |
@@ -70,7 +71,14 @@ Unauthenticated attempts cannot consume the authenticated operation allowance.
 An exhausted pre-authentication budget still limits all private admission; ingress
 DDoS controls and a restricted operator network remain necessary.
 
-All multipart upload routes additionally share byte reservations: **128 MiB per
+Hosted binary upload routes reject before multipart parsing; their parser budgets
+remain for legacy adapters. Direct uploads reserve the declared whole-file bytes in
+PostgreSQL before any permission is issued, and freeze a single object/checksum per
+part. Storage independently enforces each signed length and checksum. Rate-limit
+the public storage ingress too: repeated or concurrent signed PUT requests consume
+storage bandwidth even when conditional writes prevent duplicate objects.
+
+Legacy multipart routes additionally share byte reservations: **128 MiB per
 client IP, 80 MiB per wallet and 512 MiB deployment-wide**, replenished over ten
 minutes. Each part reserves the parser maximum of 1 MiB + 1 byte; the compatibility
 full-file route reserves 40 MiB. Reservations happen after authentication and before

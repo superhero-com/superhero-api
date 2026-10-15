@@ -10,7 +10,7 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
     const url = new URL(request.url());
     if (url.origin !== origin || request.method() !== 'POST') return;
     if (url.pathname === '/api/shorts/uploads') creates.push(url.pathname);
-    if (/\/uploads\/[^/]+\/parts\//.test(url.pathname)) parts.push(url.pathname);
+    if (/\/uploads\/[^/]+\/parts\/[^/]+\/complete$/.test(url.pathname)) parts.push(url.pathname);
     if (/\/uploads\/[^/]+\/finish$/.test(url.pathname)) finishes.push(url.pathname);
     if (/^\/api\/shorts\/[^/]+\/publish$/.test(url.pathname)) publications.push(url.pathname);
   };
@@ -34,15 +34,15 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
   try {
     await page.locator('.ss-sidebar').getByRole('link', { name: 'Create Short', exact: true }).click();
     await fill();
-    // The server accepts the part, then the browser loses only its response.
-    await page.route('**/api/shorts/uploads/*/parts/0', async route => {
+    // The server accepts the part; all three bounded completion retries lose their response.
+    await page.route('**/api/shorts/uploads/*/parts/0/complete', async route => {
       const response = await route.fetch(); assert.equal(response.status(), 201);
       id = new URL(route.request().url()).pathname.split('/')[4];
       await route.abort();
-    }, { times: 1 });
+    }, { times: 3 });
     await page.getByRole('button', { name: 'Publish', exact: true }).click();
     await expect(overlay.getByRole('heading', { name: 'Let’s try that again' })).toBeVisible();
-    assert.ok(id); assert.equal(creates.length, 1); assert.equal(parts.length, 1); assert.equal(finishes.length, 0);
+    assert.ok(id); assert.equal(creates.length, 1); assert.equal(parts.length, 3); assert.equal(finishes.length, 0);
 
     // Reselecting identical content after reload resumes the saved part, and a
     // lost finish acknowledgement reads the accepted job instead of enqueueing again.
@@ -56,10 +56,11 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
     await expect.poll(() => finishAccepted).toBe(true);
     await expect(overlay.getByRole('heading', { name: 'Preparing your Short', exact: true })).toBeVisible();
     stopWorker = await startWorker();
-    await expect(overlay.getByRole('heading', { name: 'Let’s try that again' })).toBeVisible({ timeout: 45000 });
-    await expect(overlay.getByRole('alert')).toHaveText('This Short is not approved for publication');
-    assert.equal(creates.length, 1); assert.equal(parts.length, 1); assert.equal(finishes.length, 1);
-    assert.equal(publications.length, 1, 'one denied explicit publication attempt');
+    await expect(overlay.getByRole('heading', { name: 'Your Short is awaiting review', exact: true })).toBeVisible({ timeout: 45000 });
+    await expect(overlay).toContainText('Your upload is saved. It will stay private until approved.');
+    await expect(overlay.getByRole('alert')).toHaveCount(0);
+    assert.equal(creates.length, 1); assert.equal(parts.length, 3); assert.equal(finishes.length, 1);
+    assert.equal(publications.length, 0, 'pending review does not submit a publication');
     assert.equal(await page.evaluate(async id => (await fetch('/api/shorts/playback/' + id)).status, id), 404);
     await stopWorker(); stopWorker = undefined;
 
@@ -68,7 +69,7 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
     await page.getByRole('button', { name: 'Publish', exact: true }).click();
     await expect(overlay.getByRole('heading', { name: 'Publishing your Short', exact: true })).toBeVisible();
     await queued(id);
-    assert.equal(publications.length, 2, 'one approved publication intent');
+    assert.equal(publications.length, 1, 'one approved publication intent');
     await expect(overlay.getByRole('link', { name: 'Watch & share', exact: true })).toHaveCount(0);
 
     // Reload while the signer observation is still pending. The same video and
@@ -80,7 +81,7 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
     await confirm(id);
     await expect(overlay.getByRole('heading', { name: 'Your Short is published.', exact: true })).toBeVisible({ timeout: 15000 });
     await expect(overlay).toContainText('Your link is ready to share. Playback may still be preparing.');
-    assert.equal(creates.length, 1); assert.equal(parts.length, 1); assert.equal(finishes.length, 1); assert.equal(publications.length, 2);
+    assert.equal(creates.length, 1); assert.equal(parts.length, 3); assert.equal(finishes.length, 1); assert.equal(publications.length, 1);
     assert.equal(await page.evaluate(() => window.__ownedWalletState.transactions), 0);
     if (process.env.SHORTS_TEST_BROWSER_OUTPUT) await page.screenshot({ path: join(process.env.SHORTS_TEST_BROWSER_OUTPUT, 'shorts-upload-published.png') });
     await startPlayback();

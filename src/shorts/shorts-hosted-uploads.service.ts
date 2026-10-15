@@ -50,6 +50,7 @@ export class ShortsHostedUploadsService {
       id: upload.id,
       parts: upload.parts.map((part) => part.index),
       partSize: SHORTS_PART_BYTES,
+      transport: 'direct-s3-v1',
       expires: upload.expiresAt,
       complete: status === 'ready',
       status,
@@ -63,12 +64,29 @@ export class ShortsHostedUploadsService {
   }
   async create(actor: string, input: UploadInput) {
     this.records.chain.address(actor);
+    this.source.assertDirectUploadsConfigured();
     return this.status(
       await this.uploads.create(this.scope(), randomUUID(), actor, input),
     );
   }
   async get(actor: string, id: string) {
     return this.status(await this.uploads.get(this.scope(), id, actor));
+  }
+  prepareDirect(actor: string, id: string, index: number, sha256: string) {
+    return this.source.prepareDirect(this.scope(), id, actor, index, sha256);
+  }
+  authorizeDirect(actor: string, id: string, index: number, checksum: string) {
+    return this.source.authorizeDirect(
+      this.scope(),
+      id,
+      actor,
+      index,
+      checksum,
+    );
+  }
+  async completeDirect(actor: string, id: string, index: number) {
+    await this.source.completeDirect(this.scope(), id, actor, index);
+    return this.get(actor, id);
   }
   async part(
     actor: string,

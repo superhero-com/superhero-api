@@ -1,3 +1,4 @@
+const { directUploadPart } = require('./direct-upload.cjs');
 // Actual model service is provided separately, dedicated to these generated clips.
 const assert = require('node:assert/strict');
 const http = require('node:http');
@@ -63,8 +64,7 @@ exports.assembledRealModeration = async (t, f) => {
       assert.equal(session.status, 201); const token = session.body.token;
       const created = await request(b, '/uploads', { title: `Real scan ${seconds}`, topic: 'Art', rights: true, bytes: bytes.length, sha256: hash(bytes), details: {} }, token);
       assert.equal(created.status, 201); const id = created.body.id;
-      const form = new FormData(); form.append('file', new Blob([bytes]), 'part');
-      assert.equal((await request(c, `/uploads/${id}/parts/0`, form, token)).status, 201);
+      assert.equal((await directUploadPart(request, c, id, 0, bytes, token)).status, 201);
       assert.equal((await request(b, `/uploads/${id}/finish`, {}, token)).status, 202);
       jobs.push({ id, creator: wallet.address, token, sourceHash: hash(bytes), seconds });
     }

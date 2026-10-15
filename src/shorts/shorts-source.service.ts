@@ -22,6 +22,65 @@ export class ShortsSourceService extends ShortsSourceReaderService {
   ) {
     super(objects);
   }
+  assertDirectUploadsConfigured() {
+    this.objects.assertDirectUploadsConfigured();
+  }
+
+  async prepareDirect(
+    scope: ShortsScope,
+    id: string,
+    creator: string,
+    index: number,
+    sha256: string,
+  ) {
+    const upload = await this.uploads.get(scope, id, creator);
+    const bytes = Math.min(
+      SHORTS_PART_BYTES,
+      upload.input.bytes - index * SHORTS_PART_BYTES,
+    );
+    const ref = this.objects.directReference(scope, id, index, bytes, sha256);
+    const part = await this.uploads.reserveDirect(
+      scope,
+      id,
+      creator,
+      index,
+      ref,
+    );
+    return this.objects.directEncryption(scope, part.object, part.iv);
+  }
+  async authorizeDirect(
+    scope: ShortsScope,
+    id: string,
+    creator: string,
+    index: number,
+    checksum: string,
+  ) {
+    const { part, expiresAt } = await this.uploads.bindDirectChecksum(
+      scope,
+      id,
+      creator,
+      index,
+      checksum,
+    );
+    return this.objects.directUrl(scope, part.object, checksum, expiresAt);
+  }
+  async completeDirect(
+    scope: ShortsScope,
+    id: string,
+    creator: string,
+    index: number,
+    signal?: AbortSignal,
+  ) {
+    const upload = await this.uploads.get(scope, id, creator);
+    if (!Number.isInteger(index) || index < 0 || index > 39)
+      throw new BadRequestException('Invalid upload part');
+    if (upload.parts.some((part) => part.index === index)) return;
+    const part = upload.directParts[index];
+    if (!part?.checksum)
+      throw new ConflictException('Upload this video part first');
+    await this.objects.verifyDirect(scope, part.object, part.checksum, signal);
+    await this.uploads.part(scope, id, creator, index, part.object);
+  }
 
   async part(
     scope: ShortsScope,

@@ -14,8 +14,14 @@ import { ShortsMetadataService, ShortsScope } from './shorts-metadata.service';
 import type { PrivateObjectRef } from './shorts-private-objects.service';
 import type { UploadInput } from './shorts-uploads.service';
 import { SHORTS_TOPICS } from './shorts-labels.service';
+import { randomBytes } from 'node:crypto';
 
 export const SHORTS_PART_BYTES = 1024 * 1024;
+export interface DirectUploadPart {
+  object: PrivateObjectRef;
+  iv: string;
+  checksum?: string;
+}
 export interface SharedUpload {
   id: string;
   creator: string;
@@ -23,6 +29,7 @@ export interface SharedUpload {
   state: 'uploading' | 'sealed' | 'enqueued';
   expiresAt: number;
   parts: { index: number; object: PrivateObjectRef }[];
+  directParts: Record<string, DirectUploadPart>;
 }
 
 /** Upload metadata and admission share PostgreSQL; byte IO stays outside transactions. */
@@ -151,6 +158,7 @@ export class ShortsUploadRecordsService {
       input: row.input,
       state: row.state,
       expiresAt: new Date(row.expires_at).getTime(),
+      directParts: row.direct_parts || {},
       parts: parts.map((part) => ({
         index: part.part,
         object: part.object_ref,
@@ -264,6 +272,99 @@ export class ShortsUploadRecordsService {
         [...params.slice(0, 3), index, JSON.stringify(object)],
       );
       return object;
+    });
+  }
+  async reserveDirect(
+    scope: ShortsScope,
+    id: string,
+    creator: string,
+    index: number,
+    object: PrivateObjectRef,
+  ) {
+    const params = this.params(scope, id, creator);
+    this.object(object);
+    if (!Number.isInteger(index) || index < 0 || index > 39)
+      throw new BadRequestException('Invalid upload part');
+    return this.db.transaction(async (manager) => {
+      await this.lock(manager, params);
+      const row = await this.own(manager, params, true);
+      if (row.state !== 'uploading')
+        throw new ConflictException('Upload is already being prepared');
+      const expected = Math.min(
+        SHORTS_PART_BYTES,
+        row.input.bytes - index * SHORTS_PART_BYTES,
+      );
+      if (expected < 1 || expected !== object.bytes)
+        throw new BadRequestException('Incorrect upload part size');
+      const [received] = await manager.query(
+        'SELECT object_ref FROM shorts_upload_parts WHERE network=$1 AND contract=$2 AND upload_id=$3 AND part=$4',
+        [...params.slice(0, 3), index],
+      );
+      if (received && received.object_ref.sha256 !== object.sha256)
+        throw new ConflictException(
+          'This part already contains different bytes',
+        );
+      const parts: Record<string, DirectUploadPart> = row.direct_parts || {};
+      const existing = parts[index];
+      if (existing) {
+        if (
+          existing.object.sha256 !== object.sha256 ||
+          existing.object.bytes !== object.bytes
+        )
+          throw new ConflictException(
+            'This part already contains different bytes',
+          );
+        return existing;
+      }
+      if (received)
+        throw new ConflictException(
+          'This upload part has already been received',
+        );
+      const part: DirectUploadPart = {
+        object,
+        iv: randomBytes(12).toString('hex'),
+      };
+      parts[index] = part;
+      await manager.query(
+        'UPDATE shorts_upload_sessions SET direct_parts=$4::jsonb WHERE network=$1 AND contract=$2 AND id=$3',
+        [...params.slice(0, 3), JSON.stringify(parts)],
+      );
+      return part;
+    });
+  }
+  async bindDirectChecksum(
+    scope: ShortsScope,
+    id: string,
+    creator: string,
+    index: number,
+    checksum: string,
+  ) {
+    const params = this.params(scope, id, creator);
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index > 39 ||
+      !/^[a-f0-9]{64}$/.test(checksum)
+    )
+      throw new BadRequestException('Invalid direct upload checksum');
+    return this.db.transaction(async (manager) => {
+      await this.lock(manager, params);
+      const row = await this.own(manager, params, true);
+      if (row.state !== 'uploading')
+        throw new ConflictException('Upload is already being prepared');
+      const parts: Record<string, DirectUploadPart> = row.direct_parts || {};
+      const part = parts[index];
+      if (!part) throw new ConflictException('Prepare the upload part first');
+      if (part.checksum && part.checksum !== checksum)
+        throw new ConflictException(
+          'This upload permission already covers different bytes',
+        );
+      part.checksum = checksum;
+      await manager.query(
+        'UPDATE shorts_upload_sessions SET direct_parts=$4::jsonb WHERE network=$1 AND contract=$2 AND id=$3',
+        [...params.slice(0, 3), JSON.stringify(parts)],
+      );
+      return { part, expiresAt: new Date(row.expires_at).getTime() };
     });
   }
   async seal(scope: ShortsScope, id: string, creator: string) {

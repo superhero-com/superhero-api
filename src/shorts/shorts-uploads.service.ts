@@ -219,6 +219,35 @@ export class ShortsUploadsService
   async get(actor: string, id: string) {
     return this.status(this.own(actor, id));
   }
+  prepareDirect: (
+    actor: string,
+    id: string,
+    index: number,
+    sha256: string,
+  ) => Promise<unknown> = async () => {
+    throw new ServiceUnavailableException(
+      'Direct uploads require hosted storage',
+    );
+  };
+  authorizeDirect: (
+    actor: string,
+    id: string,
+    index: number,
+    checksum: string,
+  ) => Promise<unknown> = async () => {
+    throw new ServiceUnavailableException(
+      'Direct uploads require hosted storage',
+    );
+  };
+  completeDirect: (
+    actor: string,
+    id: string,
+    index: number,
+  ) => Promise<unknown> = async () => {
+    throw new ServiceUnavailableException(
+      'Direct uploads require hosted storage',
+    );
+  };
   async part(
     actor: string,
     id: string,

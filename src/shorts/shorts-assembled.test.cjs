@@ -1,3 +1,4 @@
+const { directUploadPart } = require('./testing/direct-upload.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -127,7 +128,7 @@ test('complete hosted module shares upload, media and publication controls acros
   Object.assign(env, { ...(social?.env || {}), NODE_ENV: 'test', ENABLE_SHORTS: 'true', AE_NETWORK_ID: 'ae_uat', SHORTS_TESTNET_MVP: '1',
     SHORTS_TEST_COMPILED: compiled ? '1' : '0',
     SHORTS_DEMO_AUTO_APPROVE: '0', SHORTS_DEMO_CONNECTED_WALLET: '0', SHORTS_WEB_ORIGIN: `http://127.0.0.1:${webPort || 5180}`,
-    SHORTS_PRIVATE_S3_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
+    SHORTS_PRIVATE_S3_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
     SHORTS_PRIVATE_S3_CREDENTIALS_FILE: join(dir, 's3.json'), SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json'),
     SHORTS_DEPLOYMENT_FILE: join(dir, 'deployment.json'), SHORTS_PUBLISHING_POLICY_FILE: join(dir, 'policy.json'),
     SHORTS_RATE_KEY_FILE: join(dir, 'rate.key'), SHORTS_SHARED_CONCURRENT_MEDIA: '1', SHORTS_TEST_SCHEMA: schema,
@@ -196,8 +197,7 @@ test('complete hosted module shares upload, media and publication controls acros
   const video = await readFile(input);
   const created = await request(a, '/uploads', { title: 'Owned fixture', topic: 'Art', rights: true, bytes: video.length, sha256: hash(video), details: { language: 'und' } }, creatorToken);
   assert.equal(created.status, 201, JSON.stringify(created)); const id = created.body.id;
-  const form = new FormData(); form.append('file', new Blob([video]), 'part');
-  assert.equal((await request(b, `/uploads/${id}/parts/0`, form, creatorToken)).status, 201);
+  assert.equal((await directUploadPart(request, b, id, 0, video, creatorToken)).status, 201);
   assert.equal((await request(a, `/uploads/${id}/finish`, {}, creatorToken)).status, 202);
   const workerEnv = { ...env, SHORTS_TEST_PG_URL: worker.url, SHORTS_TEST_UPLOAD_ID: id, SHORTS_WORKER_TMP_DIR: dir, SHORTS_WORKER_MAX_USED_PERCENT: '99' };
   delete workerEnv.SHORTS_IPFS_API; delete workerEnv.SHORTS_PUBLISHING_POLICY_FILE;

@@ -1,8 +1,10 @@
 # Private upload storage
 
 Unreviewed video parts and source manifests belong in a **private S3-compatible
-bucket**. Approved playback still uses IPFS. S3 credentials, encryption keys and
-object references stay on the server; there are no public or presigned upload URLs.
+bucket**. Approved playback still uses IPFS. S3 credentials and
+master encryption keys stay on the server. Browser uploads use short-lived, write-only
+permissions and object-scoped encryption keys; the bucket remains private. See
+[direct upload setup](DIRECT-UPLOADS.md) for the HTTPS endpoint, CORS and rollout steps.
 
 ## Module and runtime
 
@@ -29,7 +31,9 @@ The shared module's flow is:
 ```mermaid
 flowchart LR
   API[Authenticated upload handler] --> Records[PostgreSQL upload records]
-  API --> Objects[Encrypted private S3 objects]
+  API -->|Short-lived permission| Browser[Creator browser]
+  Browser -->|Encrypted video chunks| Objects[Private MinIO / S3]
+  API -->|HEAD verification + small manifest| Objects
   Records --> Queue[PostgreSQL preparation jobs]
   Queue --> Worker[Media worker]
   Objects --> Worker
@@ -49,9 +53,10 @@ it cannot create a falsely completed upload.
 The worker computes package CIDs locally with pinned UnixFS parameters, verified
 against Kubo, then writes encrypted outputs under its lease fence. Only the current
 claim may attach those outputs to a draft. Workers never approve content, pin it or
-sign a publication. The API verifies the accepted output references and CID again
+sign a publication. The publishing worker verifies the accepted output references and CID again
 before publishing approved content to IPFS. Creator previews and rescans read the
-same private objects. Object references are omitted from HTTP response DTOs.
+same private objects. Upload permissions expose only the selected part’s upload path
+and derived encryption key, never a bucket credential or the encryption key ring.
 
 ## Running the worker
 

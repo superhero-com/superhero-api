@@ -11,6 +11,7 @@ const { promisify } = require('node:util');
 const { DataSource } = require('typeorm');
 const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
 const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
+const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
 const { ShortsRetentionHolds1791763216000 } = require('../migrations/1791763216000-ShortsRetentionHolds');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { retentionConfig } = require('./shorts-retention.config');
@@ -216,8 +217,13 @@ test('restricted retention inventory and hold history survive concurrent operati
   });
 
   await t.test('unsealed uploads, expired roots and hold-only roots stay visible with bounded cursor pages', async () => {
+    // Keep the earlier assertions exercising pre-migration inventory compatibility.
+    await new ShortsDirectUploads1792022400000().up(owner);
     await upload('active-upload','sealed',new Date(Date.now()+60000));
     await upload('expired-upload','uploading',new Date(0));
+    const intended = ref('expired-upload','direct-part/0');
+    await owner.query('UPDATE shorts_upload_sessions SET direct_parts=$4::jsonb WHERE network=$1 AND contract=$2 AND id=$3',
+      [...sqlScope,'expired-upload',JSON.stringify({0:{object:intended,iv:'a'.repeat(24)}})]);
     await service.hold({ id:randomUUID(),resourceId:'unknown-root',reason:'legal',reference:'case-303' });
     const ids = []; let cursor;
     do {
@@ -226,7 +232,11 @@ test('restricted retention inventory and hold history survive concurrent operati
       for (const row of page.items) {
         assert.equal(row.eligibleForDeletion,false);
         if (row.id==='active-upload') assert.ok(row.retainReasons.includes('active-upload'));
-        if (row.id==='expired-upload') assert.deepEqual(row.retainReasons,[]);
+        if (row.id==='expired-upload') {
+          assert.deepEqual(row.retainReasons,[]);
+          assert.equal(row.objects.length,1,'unacknowledged direct uploads remain inventoried');
+          assert.equal(row.knownPlaintextBytes,intended.bytes);
+        }
       }
     } while (cursor);
     assert.deepEqual(ids,['active-upload','clip','expired-upload','unknown-root']);

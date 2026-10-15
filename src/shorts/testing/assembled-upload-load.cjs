@@ -1,3 +1,4 @@
+const { directUploadPart } = require('./direct-upload.cjs');
 // Owned-fixture upload/worker workload. Actual HTTP/auth/SQL/S3/FFmpeg;
 // classification remains controlled, and no signer or public publication runs.
 const assert = require('node:assert/strict');
@@ -69,11 +70,11 @@ exports.assembledUploadLoad = async (t, f) => {
       assert.equal(created.status, 201, JSON.stringify(created.body)); job.id = created.body.id;
       const partSize = created.body.partSize; assert.equal(partSize, 1048576);
       for (let offset = 0, part = 0; offset < job.bytes.length; offset += partSize, part++) {
-        const body = new FormData(); body.append('file', new Blob([job.bytes.subarray(offset, offset + partSize)]), 'part');
-        const saved = await resumable('part', () => request(other, `/uploads/${job.id}/parts/${part}`, body, job.token));
+        const body = job.bytes.subarray(offset, offset + partSize);
+        const saved = await resumable('part', () => directUploadPart(request, other, job.id, part, body, job.token));
         assert.equal(saved.status, 201, JSON.stringify(saved.body));
         // Repeat the first accepted part, as after a lost acknowledgement.
-        if (part === 0) assert.equal((await resumable('part', () => request(api, `/uploads/${job.id}/parts/0`, body, job.token))).status, 201);
+        if (part === 0) assert.equal((await resumable('part', () => directUploadPart(request, api, job.id, 0, body, job.token))).status, 201);
       }
       const finish = await resumable('finish', () => request(api, `/uploads/${job.id}/finish`, {}, job.token)); assert.equal(finish.status, 202, JSON.stringify(finish.body));
       assert.equal((await resumable('finish', () => request(other, `/uploads/${job.id}/finish`, {}, job.token))).status, 202);

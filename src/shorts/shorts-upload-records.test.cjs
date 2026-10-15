@@ -1,4 +1,5 @@
 const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
+const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,7 +21,7 @@ test('shared uploads: atomic admission, immutable parts, frozen input and job ac
   const schema = `shorts_uploads_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsUploadBudget1791763224000] };
+    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsUploadBudget1791763224000, ShortsDirectUploads1792022400000] };
   const first = new DataSource(options), second = new DataSource(options);
   t.after(async () => { if (first.isInitialized) await first.destroy(); if (second.isInitialized) await second.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
   await first.initialize(); await second.initialize(); await first.runMigrations({ transaction: 'all' });
@@ -33,6 +34,28 @@ test('shared uploads: atomic admission, immutable parts, frozen input and job ac
     await metadataA.configureUploadBudget(scope, { uploads: 500, sourceBytes: 20971520000 }); return scope;
   }
   const accepted = results => results.filter(row => row.status === 'fulfilled');
+
+  await t.test('direct permissions freeze one object and ciphertext per slot across replicas and key rotation', async () => {
+    const s = await scope(); await a.create(s, 'direct', actor, input());
+    const object = ref(), rotated = { ...object, keyId: 'key2', key: object.key.replace('/key1/', '/key2/') };
+    const intents = await Promise.all([a.reserveDirect(s, 'direct', actor, 0, object), b.reserveDirect(s, 'direct', actor, 0, rotated)]);
+    assert.deepEqual(intents[0], intents[1]); assert.match(intents[0].iv, /^[a-f0-9]{24}$/);
+    assert.equal((await a.get(s, 'direct', actor)).parts.length, 0, 'a permission is not a received part');
+    await assert.rejects(b.reserveDirect(s, 'direct', actor, 0, ref(10, hash('different'))), { status: 409 });
+    await assert.rejects(b.reserveDirect(s, 'direct', 'ak_other', 0, ref()), { status: 404 });
+    await assert.rejects(a.reserveDirect(s, 'direct', actor, 1, ref()), { status: 400 });
+    await assert.rejects(a.seal(s, 'direct', actor), { status: 409 });
+    const checksums = await Promise.allSettled([a.bindDirectChecksum(s, 'direct', actor, 0, hash('one')), b.bindDirectChecksum(s, 'direct', actor, 0, hash('two'))]);
+    assert.equal(accepted(checksums).length, 1);
+    assert.equal(checksums.find(row => row.status === 'rejected').reason.status, 409);
+    const checksum = accepted(checksums)[0].value.part.checksum;
+    assert.equal((await b.bindDirectChecksum(s, 'direct', actor, 0, checksum)).part.checksum, checksum);
+    await a.part(s, 'direct', actor, 0, intents[0].object);
+    await a.seal(s, 'direct', actor);
+    await assert.rejects(b.bindDirectChecksum(s, 'direct', actor, 0, checksum), { status: 409 });
+    const [budget] = await first.query('SELECT used_uploads,used_source_bytes FROM shorts_upload_budgets WHERE contract=$1', [s.contract]);
+    assert.equal(Number(budget.used_uploads), 1); assert.equal(Number(budget.used_source_bytes), 10);
+  });
 
   await t.test('concurrent creation charges a retry only once and preserves ownership and namespace', async () => {
     const s = await scope();

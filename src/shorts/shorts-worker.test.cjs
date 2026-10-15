@@ -1,3 +1,5 @@
+const { directUploadPart } = require('./testing/direct-upload.cjs');
+const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
@@ -94,7 +96,7 @@ test('hosted HTTP uploads survive a killed media worker and publish only through
   const schema = `shorts_worker_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata1791763200000, ShortsLifecycle1791763213000, ShortsUploads1791763202000, ShortsWorkers1791763203000, ShortsWorkerAuthority1791763204000, ShortsStreamingOutbox1791763206000, ShortsSharedCutover1791763214000, ShortsProcessingCapacity1791763215000, ShortsWorkerBackpressure1791763222000, ShortsUploadBudget1791763224000, ShortsMediaAdmission1791763225000] };
+    migrations: [ShortsMetadata1791763200000, ShortsLifecycle1791763213000, ShortsUploads1791763202000, ShortsWorkers1791763203000, ShortsWorkerAuthority1791763204000, ShortsStreamingOutbox1791763206000, ShortsSharedCutover1791763214000, ShortsProcessingCapacity1791763215000, ShortsWorkerBackpressure1791763222000, ShortsUploadBudget1791763224000, ShortsMediaAdmission1791763225000, ShortsDirectUploads1792022400000] };
   const a = new DataSource(options), b = new DataSource(options); await a.initialize(); await b.initialize(); await a.runMigrations({ transaction: 'all' });
   const scope = { network: 'ae_uat', contract: releaseFixture().release.contract }, sourceHash = hash('test-contract');
   const metadata = new ShortsMetadataService(a); await metadata.initialize(scope, sourceHash);
@@ -106,7 +108,7 @@ test('hosted HTTP uploads survive a killed media worker and publish only through
   await writeFile(join(dir, 'keys.json'), JSON.stringify({ activeKeyId: 'key1', keys: { key1: randomBytes(32).toString('hex') } }), { mode: 0o600 });
   await writeFile(join(dir, 'deployment.json'), JSON.stringify(releaseFixture({ ...scope, sourceHash }).release));
   Object.assign(process.env, { NODE_ENV: 'test', ENABLE_SHORTS: 'true', AE_NETWORK_ID: 'ae_uat', SHORTS_TESTNET_MVP: '1', SHORTS_DEMO_AUTO_APPROVE: '0', SHORTS_DEMO_CONNECTED_WALLET: '0',
-    SHORTS_PRIVATE_S3_ENDPOINT: endpoint.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
+    SHORTS_PRIVATE_S3_ENDPOINT: endpoint.origin, SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT: endpoint.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
     SHORTS_PRIVATE_S3_CREDENTIALS_FILE: join(dir, 's3.json'), SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json'),
     SHORTS_DEPLOYMENT_FILE: join(dir, 'deployment.json'), SHORTS_WORKER_LEASE_MS: '1200', SHORTS_TEST_SCHEMA: schema, SHORTS_WORKER_TMP_DIR: dir, SHORTS_WORKER_MAX_USED_PERCENT: '99' });
   for (const key of ['SHORTS_OPERATOR_KEY_FILE', 'SHORTS_IPFS_TOKEN_FILE', 'SHORTS_STREAM_KEY_FILE', 'SHORTS_DATA_DIR', 'SHORTS_IMPORT_LEGACY_CONTENT', 'SHORTS_IMPORT_LEGACY_ANALYTICS', 'SHORTS_IMPORT_LEGACY_RECEIPTS']) delete process.env[key];
@@ -138,8 +140,12 @@ test('hosted HTTP uploads survive a killed media worker and publish only through
   const request = { title: 'Owned synthetic short', topic: 'Art', rights: true, bytes: video.length, sha256: hash(video), details: { language: 'und' } };
   const response = await fetch(apiA.base + '/shorts/uploads', { method: 'POST', headers: { Authorization: 'Bearer creator', 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
   assert.equal(response.status, 201); const upload = await response.json();
-  const part = new FormData(); part.append('file', new Blob([video]), 'part');
-  assert.equal((await fetch(apiB.base + `/shorts/uploads/${upload.id}/parts/0`, { method: 'POST', headers: { Authorization: 'Bearer creator' }, body: part })).status, 201);
+  const json = async (api, path, body, token) => {
+    const response = await fetch(api.base + '/shorts' + path, { method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  assert.equal((await directUploadPart(json, apiB, upload.id, 0, video, 'creator')).status, 201);
   const finish = await fetch(apiA.base + `/shorts/uploads/${upload.id}/finish`, { method: 'POST', headers: { Authorization: 'Bearer creator' } }); assert.equal(finish.status, 202);
   assert.equal((await finish.json()).status, 'queued');
   assert.equal((await fetch(apiB.base + `/shorts/uploads/${upload.id}`, { headers: { Authorization: 'Bearer another' } })).status, 404);
