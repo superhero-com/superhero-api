@@ -1,5 +1,10 @@
 import { InjectQueue } from '@nestjs/bull';
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bull';
 import moment, { Moment } from 'moment';
@@ -9,7 +14,10 @@ import { CommunityFactoryService } from './ae/community-factory.service';
 import { DELETE_OLD_TOKENS_QUEUE } from './tokens/queues/constants';
 
 @Injectable()
-export class AppService {
+export class AppService implements OnApplicationBootstrap, OnModuleDestroy {
+  private readonly logger = new Logger(AppService.name);
+  private startupTimer?: NodeJS.Timeout;
+  private stopped = false;
   startedAt: Moment;
   constructor(
     private communityFactoryService: CommunityFactoryService,
@@ -20,26 +28,46 @@ export class AppService {
     private readonly deleteOldTokensQueue: Queue,
   ) {
     this.startedAt = moment();
-    setTimeout(() => this.init(), 5_000);
+  }
+
+  onApplicationBootstrap() {
+    this.startupTimer = setTimeout(() => {
+      void this.init().catch((error: unknown) => {
+        if (!this.stopped)
+          this.logger.warn(
+            'Startup warm-up did not complete',
+            error instanceof Error ? error.message : String(error),
+          );
+      });
+    }, 5_000);
+    this.startupTimer.unref();
+  }
+
+  onModuleDestroy() {
+    this.stopped = true;
+    clearTimeout(this.startupTimer);
   }
 
   async init() {
+    if (this.stopped) return;
     const factory = await this.communityFactoryService.getCurrentFactory();
+    if (this.stopped) return;
     await this.deleteOldTokensQueue.empty();
-    void this.deleteOldTokensQueue.add({
+    if (this.stopped) return;
+    await this.deleteOldTokensQueue.add({
       factories: [factory.address],
     });
 
     // Warm all CoinGecko caches (rates, market data, historical) on startup
-    await this.coinGeckoService.syncAllFromApi();
-    // Persist latest rates to the coin_prices DB table
-    await this.aePricingService.pullAndSaveCoinCurrencyRates();
+    await this.syncAeCoinPricing();
   }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async syncAeCoinPricing() {
+    if (this.stopped) return;
     // Fetch fresh data from CoinGecko and populate memory / Redis / DB caches
     await this.coinGeckoService.syncAllFromApi();
+    if (this.stopped) return;
     // Persist latest rates snapshot to the coin_prices DB table
     await this.aePricingService.pullAndSaveCoinCurrencyRates();
   }

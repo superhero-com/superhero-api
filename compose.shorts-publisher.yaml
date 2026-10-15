@@ -1,0 +1,37 @@
+services:
+  shorts-publisher:
+    image: ${SHORTS_PUBLISHER_IMAGE:?Set the API image digest for the publisher}
+    command: ["node", "dist/shorts/publisher-main"]
+    user: "1000:1000"
+    read_only: true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    cpus: 1
+    mem_limit: 512m
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file: ${SHORTS_PUBLISHER_ENV_FILE:?Set a dedicated publisher env file}
+    environment:
+      NODE_ENV: production
+      DOTENV_CONFIG_PATH: /dev/null
+      ENABLE_SHORTS: "true"
+      SHORTS_TESTNET_MVP: "1"
+      AE_NETWORK_ID: ae_uat
+      SHORTS_DEMO_AUTO_APPROVE: "0"
+      SHORTS_DEMO_CONNECTED_WALLET: "0"
+      SHORTS_DEPLOYMENT_FILE: /run/secrets/deployment.json
+      SHORTS_CONTRACT_ARTIFACT: /run/secrets/Shorts.json
+      SHORTS_PUBLISHING_POLICY_FILE: /run/secrets/publishing-policy.json
+      SHORTS_OPERATOR_KEY_FILE: /run/secrets/operator.json
+    volumes:
+      - ${SHORTS_PUBLISHER_DEPLOYMENT_FILE:?Mount the public manifest}:/run/secrets/deployment.json:ro
+      - ${SHORTS_PUBLISHER_ARTIFACT_FILE:?Mount the verified artifact}:/run/secrets/Shorts.json:ro
+      - ${SHORTS_PUBLISHER_POLICY_FILE:?Mount the approved spending limits}:/run/secrets/publishing-policy.json:ro
+      - ${SHORTS_PUBLISHER_KEY_FILE:?Mount the dedicated operator key, owned by UID 1000, mode 0600}:/run/secrets/operator.json:ro
+    # No HTTP listener, public ports, media volume, S3 credential or pinning key.
+    # Restrict outbound access to PostgreSQL and the configured node in host/network policy.
