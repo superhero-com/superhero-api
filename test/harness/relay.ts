@@ -26,6 +26,21 @@ export const RELAY_ADMIN_NSEC =
   process.env.TG_BOT_NSEC ||
   'nsec1dwg3l5mumawgr4xq4kc6klagytkj2w4s4kd2rrthy47g3v5mwx8qwrh7sx';
 
+/** Relay-signed addressable state is batched after management ACKs. */
+export async function waitForRelayState<T>(
+  read: () => Promise<T>,
+  matches: (value: T) => boolean,
+  timeoutMs = 5000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (matches(value)) return value;
+    if (Date.now() >= deadline) throw new Error('Relay state did not converge');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 /**
  * Probe whether a relay is reachable at `url`. Connects, immediately closes, and
  * never throws — returns `false` on any failure so specs can `describe.skip`.

@@ -18,6 +18,7 @@ import WebSocket from 'ws';
 import tgrConfig, { isRelayConfigured } from '../config/tgr.config';
 import type { Nip29Template } from './nip29';
 import type { PublishResult, RelayWriter } from './relay-writer.contract';
+import { authenticateRelay } from './relay-auth';
 import {
   incrementPublishFailed,
   incrementPublishOk,
@@ -258,9 +259,9 @@ export class RelayWriterService
     const relay = await this.ensureConnected();
     const members = new Set<string>();
 
-    return await new Promise<Set<string>>((resolve) => {
+    return await new Promise<Set<string>>((resolve, reject) => {
       let settled = false;
-      const finish = (): void => {
+      const finish = (error?: Error): void => {
         if (settled) {
           return;
         }
@@ -271,15 +272,21 @@ export class RelayWriterService
         } catch {
           // already closed
         }
-        resolve(members);
+        if (error) reject(error);
+        else resolve(members);
       };
 
-      const timer = setTimeout(finish, this.config.publishAckTimeoutMs);
+      const timer = setTimeout(
+        () => finish(new Error('Relay membership read timed out')),
+        this.config.publishAckTimeoutMs,
+      );
       timer.unref?.();
 
       const sub = relay.subscribe(
         [{ kinds: [KIND_GROUP_MEMBERS], '#d': [groupId] }],
         {
+          // Our deadline must reject before nostr-tools synthesizes EOSE.
+          eoseTimeout: this.config.publishAckTimeoutMs + 1000,
           onevent: (event: NostrEvent) => {
             // 39002 carries one `p` tag per member; collect them all.
             for (const tag of event.tags) {
@@ -288,8 +295,9 @@ export class RelayWriterService
               }
             }
           },
-          oneose: finish,
-          onclose: finish,
+          oneose: () => finish(),
+          onclose: (reason) =>
+            finish(new Error(`Relay membership read failed: ${reason}`)),
         },
       );
     });
@@ -353,8 +361,14 @@ export class RelayWriterService
 
     this.relay = relay;
 
-    // NIP-42 AUTH as relay admin so the bot can READ private-group state.
-    await this.authenticate(relay);
+    // The challenge arrives after the websocket handshake. Do not mark a
+    // connection healthy until authentication is acknowledged.
+    try {
+      await this.authenticate(relay);
+    } catch (error) {
+      relay.close();
+      throw error;
+    }
 
     this.healthy = true;
     this.reconnectAttempts = 0;
@@ -363,27 +377,15 @@ export class RelayWriterService
 
   /**
    * Respond to the relay's NIP-42 AUTH challenge with a signed kind-22242. The
-   * bot must be the relay admin (D7). No-op if the relay never challenges.
+   * bot must be the relay admin (D7). Missing or rejected AUTH fails closed.
    */
   private async authenticate(relay: Relay): Promise<void> {
-    try {
-      // Bound the AUTH: `relay.auth()` blocks until the relay sends a NIP-42
-      // challenge, but groups_relay only challenges on a protected REQ — so without
-      // a timeout this awaits forever and hangs the connect. A timeout is benign:
-      // the relay re-challenges on the next protected read.
-      await this.withTimeout(
-        relay.auth(async (evt: EventTemplate) => finalizeEvent(evt, this.sk)),
-        this.config.publishAckTimeoutMs,
-      );
-      this.logger.debug('NIP-42 authenticated as relay admin');
-    } catch (e) {
-      // Some relays only challenge on the first protected read; a benign "no
-      // challenge" must not flip the connection unhealthy. Real auth failures
-      // surface on the next protected REQ.
-      this.logger.debug(
-        `NIP-42 auth skipped/failed: ${(e as Error)?.message ?? e}`,
-      );
-    }
+    await authenticateRelay(
+      relay,
+      async (evt: EventTemplate) => finalizeEvent(evt, this.sk),
+      this.config.publishAckTimeoutMs,
+    );
+    this.logger.debug('NIP-42 authenticated as relay admin');
   }
 
   private markUnhealthy(reason: string): void {
