@@ -416,6 +416,49 @@ describe('TokensController', () => {
     expect(result).toEqual({ items: [], meta: {} });
   });
 
+  describe('holders refresh', () => {
+    let holdersQueue: { add: jest.Mock };
+
+    beforeEach(() => {
+      holdersQueue = (controller as any).syncTokenHoldersQueue;
+      tokensService.findByAddress = jest.fn().mockResolvedValue({
+        address: 'ct_aex9',
+        sale_address: 'ct_sale',
+      });
+      tokenHolderQueryBuilder.getCount.mockResolvedValue(3);
+    });
+
+    it('re-syncs a multi-holder list once per interval so stale lists repair', async () => {
+      cacheManager.get.mockResolvedValueOnce(undefined);
+      await controller.listTokenHolders('ct_aex9');
+
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        'token-holders-refresh:ct_sale',
+        1,
+        expect.any(Number),
+      );
+      expect(holdersQueue.add).toHaveBeenCalledWith(
+        { saleAddress: 'ct_sale' },
+        expect.objectContaining({ jobId: 'syncTokenHolders-ct_sale' }),
+      );
+    });
+
+    it('does not re-sync again inside the interval', async () => {
+      cacheManager.get.mockResolvedValueOnce(1);
+      await controller.listTokenHolders('ct_aex9');
+
+      expect(holdersQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('still serves the list when the throttle cache fails', async () => {
+      cacheManager.get.mockRejectedValueOnce(new Error('cache down'));
+      const result = await controller.listTokenHolders('ct_aex9');
+
+      expect(holdersQueue.add).not.toHaveBeenCalled();
+      expect(result).toEqual({ items: [], meta: {} });
+    });
+  });
+
   it('should throw when listing holders for an unknown token', async () => {
     const createQueryBuilderSpy = jest.spyOn(
       tokenHolderRepository,
