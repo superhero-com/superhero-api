@@ -4,6 +4,7 @@ import {
   DefaultValuePipe,
   Get,
   Inject,
+  Logger,
   NotFoundException,
   Param,
   ParseIntPipe,
@@ -45,11 +46,19 @@ const TOKENS_LIST_CACHE_TTL_MS = 60 * 1000;
 const TRENDING_TOKENS_LIST_CACHE_TTL_MS = 15 * 60 * 1000;
 const MAX_TOKEN_SEARCH_LENGTH = 100;
 const MAX_PAGE_LIMIT = 100;
+// Holder rows are a projection that can miss transfers (e.g. tokens outside the
+// live AEX9 indexer). A viewed list is re-pulled from the middleware at most
+// once per interval, which also repairs lists that are already stale.
+const HOLDERS_REFRESH_INTERVAL_MS = Number(
+  process.env.TOKEN_HOLDERS_REFRESH_INTERVAL_MS || 10 * 60 * 1000,
+);
 
 @Controller('tokens')
 @UseInterceptors(CacheInterceptor)
 @ApiTags('Tokens')
 export class TokensController {
+  private readonly logger = new Logger(TokensController.name);
+
   constructor(
     @InjectRepository(Token)
     private readonly tokensRepository: Repository<Token>,
@@ -344,6 +353,31 @@ export class TokensController {
     return token;
   }
 
+  /**
+   * Returns true at most once per HOLDERS_REFRESH_INTERVAL_MS per token, so a
+   * popular holders list triggers one middleware re-pull per interval. On a
+   * cache error it returns false and the list is served as before.
+   */
+  private async claimHoldersRefresh(saleAddress: string): Promise<boolean> {
+    if (!saleAddress || HOLDERS_REFRESH_INTERVAL_MS <= 0) {
+      return false;
+    }
+    const key = `token-holders-refresh:${saleAddress}`;
+    try {
+      if (await this.cacheManager.get(key)) {
+        return false;
+      }
+      await this.cacheManager.set(key, 1, HOLDERS_REFRESH_INTERVAL_MS);
+      return true;
+    } catch (error: any) {
+      this.logger.warn(
+        `Holders refresh throttle unavailable for ${saleAddress}`,
+        error,
+      );
+      return false;
+    }
+  }
+
   @ApiParam({
     name: 'address',
     type: 'string',
@@ -377,7 +411,7 @@ export class TokensController {
 
     // check if count is 0
     const count = await queryBuilder.getCount();
-    if (count <= 1) {
+    if (count <= 1 || (await this.claimHoldersRefresh(token.sale_address))) {
       void this.syncTokenHoldersQueue.add(
         {
           saleAddress: token.sale_address,
