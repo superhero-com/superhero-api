@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { Account } from '@/account/entities/account.entity';
 import { SocialGraphService } from '@/plugins/social-graph/social-graph.service';
 import { ProfileCache } from '../entities/profile-cache.entity';
+import { avatarLinkToUrl } from '@/plugins/address-links/verification/avatar-link-verifier.service';
 
 interface SocialGraphProfileCounts {
   followers_count?: number;
@@ -166,7 +167,7 @@ export class ProfileReadService {
       fullname: cache?.fullname ?? '',
       bio: this.getLinkedBio(account) ?? cache?.bio ?? '',
       site: this.getLinkedSite(account),
-      avatarurl: cache?.avatarurl ?? '',
+      avatarurl: this.getLinkedAvatarUrl(account) ?? cache?.avatarurl ?? '',
       username: cache?.username ?? null,
       prefered_aens_name: this.getLinkedPreferedAensName(account),
       x_username: this.getLinkedXUsername(account),
@@ -206,6 +207,10 @@ export class ProfileReadService {
   private getLinkedBio(account: Account | null): string | null {
     const linked = account?.links?.bio;
     return linked ? linked.trim() : null;
+  }
+
+  private getLinkedAvatarUrl(account: Account | null): string | null {
+    return avatarLinkToUrl(account?.links?.avatar);
   }
 
   private getLinkedSite(account: Account | null): string | null {
