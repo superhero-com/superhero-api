@@ -23,4 +23,66 @@ describe('PostPersistenceService', () => {
     expect(postData.version).toBe(POST_SYNC_VERSION);
     expect(postData.id).toBe('42_v3');
   });
+
+  describe('emitMentionEvent', () => {
+    const A = 'ak_2a1j2Mk9YSmC1gioUq4PWRm3bsv887MbuRVwyv4KaUGoR1eiKi';
+    const B = 'ak_28e8EYJ4wcni2KiSqhogHM7G11deM2mLPBcq1iKgVKRmSuAJgJ';
+    const PARENT = 'ak_2Nn5Rr2fScJbMj3ZVtV1dkgF7Yc9QDYMATqFL8dAyNzTHGDKWd';
+    let emitter: { emit: jest.Mock };
+    let svc: PostPersistenceService;
+
+    beforeEach(() => {
+      emitter = { emit: jest.fn() };
+      svc = new PostPersistenceService({} as any, {} as any, emitter as any);
+    });
+
+    it('emits tagged accounts, author and parent author excluded, for a live post', () => {
+      svc.emitMentionEvent(
+        {
+          id: '5_v3',
+          sender_address: A,
+          content: `gm [account:${B}] [account:${A}] [account:${PARENT}]`,
+        } as any,
+        'th_post',
+        'live' as any,
+        PARENT,
+      );
+      expect(emitter.emit).toHaveBeenCalledWith('social.post.mentioned', {
+        authorAddress: A,
+        mentionedAddresses: [B],
+        postId: '5_v3',
+        txHash: 'th_post',
+      });
+    });
+
+    it('stays quiet when the only mention is the parent author', () => {
+      svc.emitMentionEvent(
+        {
+          id: '5_v3',
+          sender_address: A,
+          content: `reply [account:${PARENT}]`,
+        } as any,
+        'th_post',
+        'live' as any,
+        PARENT,
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('stays quiet for backfill, replays and posts without mentions', () => {
+      const post = {
+        id: '5_v3',
+        sender_address: A,
+        content: `gm [account:${B}]`,
+      } as any;
+      svc.emitMentionEvent(post, 'th_post', 'backward' as any);
+      svc.emitMentionEvent(post, 'th_post', 'reorg' as any);
+      svc.emitMentionEvent(
+        { ...post, content: `self [account:${A}] and ${B}` },
+        'th_post',
+        'live' as any,
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
 });
