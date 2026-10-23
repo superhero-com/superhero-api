@@ -9,6 +9,28 @@
  */
 export const POST_COMMENT_CREATED_EVENT = 'social.post.commented';
 
+/**
+ * Emitted after a new post (or comment) indexed live tags accounts with the
+ * `[account:ak_…]` mention macro. One event per post; the listener fans out.
+ */
+export const POST_MENTION_EVENT = 'social.post.mentioned';
+
+export interface PostMentionEventPayload {
+  /** Account that wrote the post (notification subject). */
+  authorAddress: string;
+  /** Unique tagged accounts, author excluded, capped. */
+  mentionedAddresses: string[];
+  /** The mentioning post's id. */
+  postId: string;
+  /** Post tx hash, used as the dedup key. */
+  txHash: string;
+  /**
+   * Parent post author when the post is a comment. That account is already
+   * told through post-comment, so the listener skips it.
+   */
+  parentAuthorAddress?: string;
+}
+
 export interface PostCommentCreatedEventPayload {
   /** Account that wrote the comment (notification subject). */
   commenterAddress: string;

@@ -283,6 +283,16 @@ export class PostTransactionProcessorService {
         );
       }
 
+      // Tell tagged accounts. Same post-commit, Live-only gating as above.
+      this.persistenceService.emitMentionEvent(
+        post,
+        txHash,
+        syncDirection,
+        postTypeInfo.isComment && parentPost
+          ? parentPost.sender_address
+          : undefined,
+      );
+
       await refreshTrendingScoresForPostSafely({
         post,
         loadParentPost: (postId) =>

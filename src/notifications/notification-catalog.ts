@@ -4,6 +4,8 @@ import { AnnouncementNotification } from './notifications/announcement.notificat
 import { InvitationClaimedNotification } from './notifications/invitation-claimed.notification';
 import { PostCommentNotification } from './notifications/post-comment.notification';
 import { NewFollowNotification } from './notifications/new-follow.notification';
+import { TipReceivedNotification } from './notifications/tip-received.notification';
+import { PostMentionNotification } from './notifications/post-mention.notification';
 import { RoomMembershipNotification } from '@/token-gated-rooms/notifications/room-membership.notification';
 import { RoomMessageNotification } from '@/token-gated-rooms/notifications/room-message.notification';
 
@@ -24,6 +26,8 @@ export const NOTIFICATION_CATALOG: ReadonlyArray<NotificationMeta> = [
   InvitationClaimedNotification.META,
   PostCommentNotification.META,
   NewFollowNotification.META,
+  TipReceivedNotification.META,
+  PostMentionNotification.META,
   RoomMembershipNotification.META,
   RoomMessageNotification.META,
 ];

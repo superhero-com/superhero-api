@@ -10,6 +10,9 @@ import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 import { isSelfTip } from '@/tipping/utils/is-self-tip.util';
+import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { TIP_RECEIVED_EVENT, TipReceivedEventPayload } from '../events';
 
 @Injectable()
 export class SocialTippingTransactionProcessorService {
@@ -24,6 +27,7 @@ export class SocialTippingTransactionProcessorService {
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
     private readonly tokensService: TokensService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -36,7 +40,6 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Tip | null> {
-    void syncDirection;
     try {
       // Validate transaction
       const tipType = this.validateTransaction(tx);
@@ -54,6 +57,9 @@ export class SocialTippingTransactionProcessorService {
       if (!savedTipResult) {
         return null;
       }
+
+      // After commit, so a rollback can't leak a phantom push.
+      this.emitTipReceivedEvent(tx, savedTipResult, syncDirection);
 
       await refreshTrendingScoresForPostSafely({
         post: savedTipResult.post,
@@ -75,6 +81,39 @@ export class SocialTippingTransactionProcessorService {
         error.stack,
       );
       return null;
+    }
+  }
+
+  /**
+   * Emits TIP_RECEIVED_EVENT for the notifications module. Live only, so a
+   * backfill or reorg replay never pages anyone. Never throws into indexing.
+   */
+  private emitTipReceivedEvent(
+    tx: Tx,
+    saved: { tip: Tip; post: Post | null },
+    syncDirection: SyncDirection,
+  ): void {
+    if (syncDirection !== SyncDirectionEnum.Live) {
+      return;
+    }
+    if (!tx.sender_id || !tx.recipient_id || !tx.hash) {
+      return;
+    }
+    try {
+      const payload: TipReceivedEventPayload = {
+        senderAddress: tx.sender_id,
+        receiverAddress: tx.recipient_id,
+        amountAe: saved.tip?.amount ?? '0',
+        txHash: tx.hash,
+        ...(saved.post?.id ? { postId: saved.post.id } : {}),
+      };
+      this.eventEmitter.emit(TIP_RECEIVED_EVENT, payload);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to emit tip-received event for ${tx.hash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
