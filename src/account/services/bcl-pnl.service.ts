@@ -68,30 +68,52 @@ export class BclPnlService {
   }
 
   /**
-   * Calculate PNL for each token across multiple block heights in a single SQL query.
-   * Deduplicates heights before querying to avoid redundant work.
+   * Cumulative PnL for one account at many block heights, each matching
+   * calculateTokenPnls at that height.
    *
    * @param address - Account address
-   * @param blockHeights - Array of block heights to calculate PNL at
-   * @param fromBlockHeight - Optional: If provided, restrict cost-basis aggregates to this range
+   * @param blockHeights - Block heights to calculate PNL at
+   * @param includeTokenPnls - false leaves `pnls` empty and computes just
+   * the totals
    * @returns Map from block height to its TokenPnlResult
    */
   async calculateTokenPnlsBatch(
     address: string,
     blockHeights: number[],
-    fromBlockHeight?: number,
+    includeTokenPnls = true,
   ): Promise<Map<number, TokenPnlResult>> {
     const uniqueHeights = [...new Set(blockHeights)];
     if (uniqueHeights.length === 0) {
       return new Map();
     }
 
-    const rows = await this.transactionRepository.query(
-      this.buildBatchTokenPnlsQuery(fromBlockHeight),
-      this.buildBatchQueryParameters(address, uniqueHeights, fromBlockHeight),
-    );
+    // Joining every height to every account trade is ~3M rows for a 90-day
+    // chart of a 33k-token account, so the database returns running totals
+    // and prices only where they change, and the heights are walked here.
+    const sortedHeights = [...uniqueHeights].sort((a, b) => a - b);
+    const minHeight = sortedHeights[0];
+    const maxHeight = sortedHeights[sortedHeights.length - 1];
+    const [tradeRows, priceRows] = await Promise.all([
+      this.transactionRepository.query(this.buildCumulativeTradeTotalsQuery(), [
+        address,
+        maxHeight,
+        minHeight,
+      ]),
+      this.transactionRepository.query(this.buildPricePointsQuery(), [
+        address,
+        maxHeight,
+        minHeight,
+        sortedHeights,
+      ]),
+    ]);
 
-    return this.mapTokenPnlsBatch(rows, uniqueHeights, fromBlockHeight);
+    return this.mapCumulativeTokenPnlsBatch(
+      tradeRows,
+      priceRows,
+      uniqueHeights,
+      sortedHeights,
+      includeTokenPnls,
+    );
   }
 
   /**
@@ -359,210 +381,236 @@ export class BclPnlService {
     };
   }
 
-  private buildBatchTokenPnlsQuery(fromBlockHeight?: number): string {
-    const hasRange = fromBlockHeight !== undefined && fromBlockHeight !== null;
-    const rangeCondition = hasRange ? ' AND tx.block_height >= $3' : '';
-
-    // When a range is active, also gather cumulative (all-time) buy totals so we
-    // can compute the average cost per token across the full history. This is
-    // needed to price the cost basis of tokens that were sold during the range
-    // but were originally purchased before it started.
-    const cumulativeColumns = hasRange
-      ? `,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')
-                  THEN CAST(tx.volume AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS cumulative_volume_bought,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS cumulative_amount_spent_ae,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS cumulative_amount_spent_usd`
-      : '';
-
-    const cumulativeSelectColumns = hasRange
-      ? `
-        agg.cumulative_volume_bought,
-        agg.cumulative_amount_spent_ae,
-        agg.cumulative_amount_spent_usd,`
-      : '';
-
+  private buildCumulativeTradeTotalsQuery(): string {
+    // $1 address, $2 highest snapshot height, $3 lowest snapshot height.
     return `
-      WITH heights AS (
-        SELECT unnest($2::int[]) AS snapshot_height
-      ),
-      -- Scan the address's transactions exactly once and materialise the result.
-      -- Without MATERIALIZED PostgreSQL 12+ may inline this CTE, re-executing
-      -- the index scan for every row in heights (N × index-scan instead of 1).
-      -- With MATERIALIZED the planner builds a hash table once in work_mem and
-      -- probes it for each snapshot height, avoiding repeated I/O.
-      address_txs AS MATERIALIZED (
-        SELECT sale_address, block_height, tx_type, volume, amount
-        FROM transactions
-        WHERE address = $1
-      ),
-      aggregated_holdings AS (
+      WITH per_block AS (
         SELECT
-          h.snapshot_height,
-          tx.sale_address AS sale_address,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')
-                  THEN CAST(tx.volume AS DECIMAL)
-                ELSE 0
-              END
-            ) -
-            COALESCE(
-              SUM(
-                CASE
-                  WHEN tx.tx_type = 'sell'
-                    THEN CAST(tx.volume AS DECIMAL)
-                  ELSE 0
-                END
-              ),
-              0
-            ),
-            0
-          ) AS current_holdings,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
-                  THEN CAST(tx.volume AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_volume_bought,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_amount_spent_ae,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type IN ('buy', 'create_community')${rangeCondition}
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_amount_spent_usd,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type = 'sell'${rangeCondition}
-                  THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_amount_received_ae,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type = 'sell'${rangeCondition}
-                  THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_amount_received_usd,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN tx.tx_type = 'sell'${rangeCondition}
-                  THEN CAST(tx.volume AS DECIMAL)
-                ELSE 0
-              END
-            ),
-            0
-          ) AS total_volume_sold${cumulativeColumns}
-        FROM heights h
-        JOIN address_txs tx ON tx.block_height < h.snapshot_height
-        GROUP BY h.snapshot_height, tx.sale_address
+          tx.sale_address,
+          tx.block_height,
+          COALESCE(SUM(CASE WHEN tx.tx_type IN ('buy', 'create_community')
+            THEN CAST(tx.volume AS DECIMAL) ELSE 0 END), 0) AS bought,
+          COALESCE(SUM(CASE WHEN tx.tx_type = 'sell'
+            THEN CAST(tx.volume AS DECIMAL) ELSE 0 END), 0) AS sold,
+          COALESCE(SUM(CASE WHEN tx.tx_type IN ('buy', 'create_community')
+            THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL) ELSE 0 END), 0) AS spent_ae,
+          COALESCE(SUM(CASE WHEN tx.tx_type IN ('buy', 'create_community')
+            THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL) ELSE 0 END), 0) AS spent_usd,
+          COALESCE(SUM(CASE WHEN tx.tx_type = 'sell'
+            THEN CAST(NULLIF(tx.amount->>'ae', 'NaN') AS DECIMAL) ELSE 0 END), 0) AS received_ae,
+          COALESCE(SUM(CASE WHEN tx.tx_type = 'sell'
+            THEN CAST(NULLIF(tx.amount->>'usd', 'NaN') AS DECIMAL) ELSE 0 END), 0) AS received_usd
+        FROM transactions tx
+        WHERE tx.address = $1
+          AND tx.block_height < $2
+        GROUP BY tx.sale_address, tx.block_height
+      ),
+      running AS (
+        SELECT
+          sale_address,
+          block_height,
+          SUM(bought) OVER w - SUM(sold) OVER w AS current_holdings,
+          SUM(bought) OVER w AS total_volume_bought,
+          SUM(sold) OVER w AS total_volume_sold,
+          SUM(spent_ae) OVER w AS total_amount_spent_ae,
+          SUM(spent_usd) OVER w AS total_amount_spent_usd,
+          SUM(received_ae) OVER w AS total_amount_received_ae,
+          SUM(received_usd) OVER w AS total_amount_received_usd,
+          LEAD(block_height) OVER w AS next_block_height
+        FROM per_block
+        WINDOW w AS (PARTITION BY sale_address ORDER BY block_height)
       )
       SELECT
-        agg.snapshot_height,
-        agg.sale_address,
-        agg.current_holdings,
-        agg.total_volume_bought,
-        agg.total_amount_spent_ae,
-        agg.total_amount_spent_usd,
-        agg.total_amount_received_ae,
-        agg.total_amount_received_usd,
-        agg.total_volume_sold,${cumulativeSelectColumns}
-        ae_price.current_unit_price_ae,
-        usd_price.current_unit_price_usd
-      FROM aggregated_holdings agg
+        sale_address,
+        block_height,
+        current_holdings,
+        total_volume_bought,
+        total_volume_sold,
+        total_amount_spent_ae,
+        total_amount_spent_usd,
+        total_amount_received_ae,
+        total_amount_received_usd
+      FROM running
+      -- Below the lowest height only each token's last row is needed.
+      WHERE next_block_height IS NULL OR next_block_height >= $3
+      ORDER BY sale_address, block_height
+    `;
+  }
+
+  private buildPricePointsQuery(): string {
+    // $1 address, $2/$3 highest/lowest snapshot height, $4 heights ascending.
+    // Prices are looked up only where a trade may have moved them; the walk
+    // carries them forward in between.
+    return `
+      WITH held_tokens AS (
+        SELECT sale_address, MIN(block_height) AS first_block
+        FROM transactions
+        WHERE address = $1 AND block_height < $2
+        GROUP BY sale_address
+      ),
+      probes AS (
+        -- A token first traded above the lowest height gets its first
+        -- lookup from that trade's probe below.
+        SELECT sale_address, $3::int AS snapshot_height
+        FROM held_tokens
+        WHERE first_block <= $3
+        UNION
+        SELECT
+          p.sale_address,
+          -- The first snapshot height >= the trade's block.
+          ($4::int[])[width_bucket(p.block_height - 1, $4::int[]) + 1]
+        FROM held_tokens h
+        JOIN transactions p ON p.sale_address = h.sale_address
+        WHERE p.block_height > $3
+          AND p.block_height >= h.first_block
+          AND p.block_height <= $2
+      )
+      SELECT
+        pr.sale_address,
+        pr.snapshot_height AS block_height,
+        ae_price.price_ae,
+        usd_price.price_usd
+      FROM probes pr
+      -- The lookups calculateTokenPnls runs: tied micro-block trades come
+      -- back in index order, which no sort can reproduce.
       LEFT JOIN LATERAL (
-        SELECT CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS current_unit_price_ae
+        SELECT CAST(NULLIF(p.buy_price->>'ae', 'NaN') AS DECIMAL) AS price_ae
         FROM transactions p
-        WHERE p.sale_address = agg.sale_address
-          AND p.block_height <= agg.snapshot_height
+        WHERE p.sale_address = pr.sale_address
+          AND p.block_height <= pr.snapshot_height
           AND p.buy_price->>'ae' IS NOT NULL
           AND p.buy_price->>'ae' NOT IN ('NaN', 'null', '')
         ORDER BY p.block_height DESC, p.created_at DESC
         LIMIT 1
       ) ae_price ON true
       LEFT JOIN LATERAL (
-        SELECT CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS current_unit_price_usd
+        SELECT CAST(NULLIF(p.buy_price->>'usd', 'NaN') AS DECIMAL) AS price_usd
         FROM transactions p
-        WHERE p.sale_address = agg.sale_address
-          AND p.block_height <= agg.snapshot_height
+        WHERE p.sale_address = pr.sale_address
+          AND p.block_height <= pr.snapshot_height
           AND p.buy_price->>'usd' IS NOT NULL
           AND p.buy_price->>'usd' NOT IN ('NaN', 'null', '')
         ORDER BY p.block_height DESC, p.created_at DESC
         LIMIT 1
       ) usd_price ON true
-      WHERE agg.current_holdings > 0
-         OR agg.total_volume_bought > 0
-         OR agg.total_volume_sold > 0
+      ORDER BY pr.sale_address, pr.snapshot_height
     `;
   }
 
-  private buildBatchQueryParameters(
-    address: string,
-    blockHeights: number[],
-    fromBlockHeight?: number,
-  ): Array<string | number | number[]> {
-    return fromBlockHeight !== undefined && fromBlockHeight !== null
-      ? [address, blockHeights, fromBlockHeight]
-      : [address, blockHeights];
+  private mapCumulativeTokenPnlsBatch(
+    tradeRows: Array<Record<string, any>>,
+    priceRows: Array<Record<string, any>>,
+    uniqueHeights: number[],
+    sortedHeights: number[],
+    includeTokenPnls: boolean,
+  ): Map<number, TokenPnlResult> {
+    // Both queries return rows ordered by sale_address, then height.
+    const groupBySale = (rows: Array<Record<string, any>>) => {
+      const groups = new Map<string, Array<Record<string, any>>>();
+      for (const row of rows) {
+        const list = groups.get(row.sale_address);
+        if (list) {
+          list.push(row);
+        } else {
+          groups.set(row.sale_address, [row]);
+        }
+      }
+      return groups;
+    };
+    const tradesBySale = groupBySale(tradeRows);
+    const pricesBySale = groupBySale(priceRows);
+
+    const results = new Map<number, TokenPnlResult>();
+    for (const height of sortedHeights) {
+      results.set(height, {
+        pnls: {},
+        totalCostBasisAe: 0,
+        totalCostBasisUsd: 0,
+        totalCurrentValueAe: 0,
+        totalCurrentValueUsd: 0,
+        totalGainAe: 0,
+        totalGainUsd: 0,
+      });
+    }
+
+    for (const [saleAddress, trades] of tradesBySale.entries()) {
+      const prices = pricesBySale.get(saleAddress) ?? [];
+      let tradeIndex = -1;
+      let priceIndex = 0;
+      let priceAe: string | null = null;
+      let priceUsd: string | null = null;
+      // Only changes when a trade or price row is passed, so it is computed
+      // then and reused for the heights in between.
+      let tokenPnl: TokenPnlResult | undefined;
+
+      for (const height of sortedHeights) {
+        let changed = false;
+        // Trades count when block_height < height.
+        while (
+          tradeIndex + 1 < trades.length &&
+          Number(trades[tradeIndex + 1].block_height) < height
+        ) {
+          tradeIndex++;
+          changed = true;
+        }
+        // A price row is the lookup at its snapshot height.
+        while (
+          priceIndex < prices.length &&
+          Number(prices[priceIndex].block_height) <= height
+        ) {
+          priceAe = prices[priceIndex].price_ae;
+          priceUsd = prices[priceIndex].price_usd;
+          priceIndex++;
+          changed = true;
+        }
+        if (tradeIndex < 0) {
+          continue;
+        }
+
+        if (changed) {
+          const totals = trades[tradeIndex];
+          tokenPnl =
+            Number(totals.current_holdings) > 0 ||
+            Number(totals.total_volume_bought) > 0 ||
+            Number(totals.total_volume_sold) > 0
+              ? this.mapTokenPnls(
+                  [
+                    {
+                      ...totals,
+                      current_unit_price_ae: priceAe,
+                      current_unit_price_usd: priceUsd,
+                    },
+                  ],
+                  false,
+                )
+              : undefined;
+        }
+        if (!tokenPnl) {
+          continue;
+        }
+
+        const result = results.get(height)!;
+        result.totalCostBasisAe += tokenPnl.totalCostBasisAe;
+        result.totalCostBasisUsd += tokenPnl.totalCostBasisUsd;
+        result.totalCurrentValueAe += tokenPnl.totalCurrentValueAe;
+        result.totalCurrentValueUsd += tokenPnl.totalCurrentValueUsd;
+        result.totalGainAe += tokenPnl.totalGainAe;
+        result.totalGainUsd += tokenPnl.totalGainUsd;
+        if (includeTokenPnls) {
+          // Shared by every height until the token changes; not to be mutated.
+          result.pnls[saleAddress] = tokenPnl.pnls[saleAddress];
+        }
+      }
+    }
+
+    return new Map(
+      uniqueHeights.map((height) => [height, results.get(height)!]),
+    );
   }
 
-  // Mirrors buildBatchTokenPnlsQuery, adding `address` as an extra grouping
-  // dimension so many candidates resolve in one query instead of one per
-  // address. Keep the aggregation CASE expressions identical to the
-  // single-address version above.
+  // buildTokenPnlsQuery's aggregation, also grouped by snapshot height and
+  // address so all candidates resolve in one query. Keep the aggregation
+  // CASE expressions identical to it.
   private buildBatchTokenPnlsQueryForAddresses(
     fromBlockHeight?: number,
   ): string {
@@ -614,8 +662,8 @@ export class BclPnlService {
       WITH heights AS (
         SELECT unnest($2::int[]) AS snapshot_height
       ),
-      -- Scan every candidate's transactions exactly once and materialise the
-      -- result, same rationale as address_txs in buildBatchTokenPnlsQuery.
+      -- Scan every candidate's transactions once. MATERIALIZED keeps
+      -- PostgreSQL 12+ from inlining this and rescanning it per height.
       addr_txs AS MATERIALIZED (
         SELECT address, sale_address, block_height, tx_type, volume, amount
         FROM transactions
@@ -977,35 +1025,6 @@ export class BclPnlService {
     const result = new Map<number, TokenPnlResult>();
     for (const [ts, tsRows] of rowsByTs.entries()) {
       result.set(ts, this.mapTokenPnls(tsRows, true));
-    }
-    return result;
-  }
-
-  private mapTokenPnlsBatch(
-    rows: Array<Record<string, any>>,
-    uniqueHeights: number[],
-    fromBlockHeight?: number,
-  ): Map<number, TokenPnlResult> {
-    const isRangeBased =
-      fromBlockHeight !== undefined && fromBlockHeight !== null;
-
-    // Group rows by snapshot_height
-    const rowsByHeight = new Map<number, Array<Record<string, any>>>();
-    for (const height of uniqueHeights) {
-      rowsByHeight.set(height, []);
-    }
-    for (const row of rows) {
-      const height = Number(row.snapshot_height);
-      const group = rowsByHeight.get(height);
-      if (group) {
-        group.push(row);
-      }
-    }
-
-    // Map each height's rows using the existing single-height mapper
-    const result = new Map<number, TokenPnlResult>();
-    for (const [height, heightRows] of rowsByHeight.entries()) {
-      result.set(height, this.mapTokenPnls(heightRows, isRangeBased));
     }
     return result;
   }
