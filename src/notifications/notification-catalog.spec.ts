@@ -15,6 +15,10 @@ describe('NOTIFICATION_CATALOG — room types (Task 12)', () => {
     expect(NOTIFICATION_CATALOG_BY_TYPE.has('room-messages')).toBe(true);
   });
 
+  it('whitelists token-price-alert so a price-alert opt-out is accepted', () => {
+    expect(NOTIFICATION_CATALOG_BY_TYPE.has('token-price-alert')).toBe(true);
+  });
+
   it('has unique type ids', () => {
     const types = NOTIFICATION_CATALOG.map((m) => m.type);
     expect(new Set(types).size).toBe(types.length);
