@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ export function safeGraphNumber(value: unknown): number {
 
 @Injectable()
 export class SocialGraphService implements OnModuleInit {
+  private readonly logger = new Logger(SocialGraphService.name);
   private reader?: SocialGraphReader;
   constructor(
     private readonly ae: AeSdkService,
@@ -26,11 +28,21 @@ export class SocialGraphService implements OnModuleInit {
   ) {}
 
   isConfigured(): boolean {
-    return Boolean(process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS);
+    return Boolean(
+      process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS &&
+      process.env.SOCIAL_GRAPH_NETWORK_ID,
+    );
   }
 
   async onModuleInit(): Promise<void> {
-    if (this.isConfigured()) await this.getReader().verifyIdentity();
+    if (this.isConfigured()) return this.getReader().verifyIdentity();
+    if (
+      process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS ||
+      process.env.SOCIAL_GRAPH_NETWORK_ID
+    )
+      this.logger.warn(
+        'Social graph is disabled: SOCIAL_GRAPH_CONTRACT_ADDRESS and SOCIAL_GRAPH_NETWORK_ID must both be set',
+      );
   }
 
   getReader(): SocialGraphReader {

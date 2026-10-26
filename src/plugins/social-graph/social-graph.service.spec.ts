@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { SocialGraphService, safeGraphNumber } from './social-graph.service';
 import { SocialGraphReader } from './social-graph-reader';
 import { SocialGraphWorkerService } from './social-graph-worker.service';
@@ -22,15 +23,27 @@ describe('Social graph selection', () => {
       { sdk: { getContext: () => ({ onNode: {} }) } } as any,
       {} as any,
     );
-  it('stays disabled without a contract and refuses incomplete network configuration', async () => {
+  it('stays disabled without a contract or network instead of failing boot', async () => {
     delete process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS;
+    delete process.env.SOCIAL_GRAPH_NETWORK_ID;
     const graph = create();
     expect(graph.isConfigured()).toBe(false);
     await graph.onModuleInit();
     expect(() => graph.getReader()).toThrow('not configured');
-    process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';
-    delete process.env.SOCIAL_GRAPH_NETWORK_ID;
-    await expect(graph.onModuleInit()).rejects.toThrow('not configured');
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    for (const [key, value] of [
+      ['SOCIAL_GRAPH_CONTRACT_ADDRESS', 'ct_abc'],
+      ['SOCIAL_GRAPH_NETWORK_ID', 'ae_dev'],
+    ]) {
+      delete process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS;
+      delete process.env.SOCIAL_GRAPH_NETWORK_ID;
+      process.env[key] = value;
+      expect(graph.isConfigured()).toBe(false);
+      await expect(graph.onModuleInit()).resolves.toBeUndefined();
+    }
+    expect(warn).toHaveBeenCalledTimes(2);
   });
   it('verifies identity on startup through the existing configuration names', async () => {
     process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';
