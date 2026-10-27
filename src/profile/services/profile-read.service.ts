@@ -1,3 +1,4 @@
+import { ProfileMediaService } from '../../profile-media/profile-media.service';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -19,6 +20,7 @@ export class ProfileReadService {
     @InjectRepository(Account)
     private readonly accountRepository: Repository<Account>,
     private readonly socialGraph: SocialGraphService,
+    private readonly media: ProfileMediaService,
   ) {}
 
   async getProfile(address: string) {
@@ -30,7 +32,11 @@ export class ProfileReadService {
         : Promise.resolve<SocialGraphProfileCounts>({}),
     ]);
 
-    const profile = { ...this.mergeProfile(cache, account), ...counts };
+    const profile = {
+      ...this.mergeProfile(cache, account),
+      ...counts,
+      ...(await this.imageFields(address)),
+    };
 
     const publicName = this.resolvePublicName(profile, address);
     return {
@@ -152,13 +158,38 @@ export class ProfileReadService {
     cache: ProfileCache | null,
     account: Account | null,
   ) {
-    const profile = this.mergeProfile(cache, account);
+    const profile = {
+      ...this.mergeProfile(cache, account),
+      ...(await this.imageFields(address)),
+    };
 
     return {
       address,
       profile,
       public_name: this.resolvePublicName(profile, address),
     };
+  }
+
+  private async imageFields(address: string) {
+    if (!this.media.config.enabled) return {};
+    try {
+      const images = await this.media.images(address);
+      return { ...images, images_available: true };
+    } catch {
+      return {
+        avatarurl: '',
+        avatar_thumbnail_url: '',
+        coverurl: '',
+        cover_thumbnail_url: '',
+        avatar_ref: '',
+        avatar_preview_ref: '',
+        cover_ref: '',
+        cover_preview_ref: '',
+        avatar_cid: null,
+        cover_cid: null,
+        images_available: false,
+      };
+    }
   }
 
   private mergeProfile(cache: ProfileCache | null, account: Account | null) {

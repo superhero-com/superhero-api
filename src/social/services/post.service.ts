@@ -34,7 +34,10 @@ import {
   ICommentProcessingResult,
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
-import { parsePostContent } from '../utils/content-parser.util';
+import {
+  parsePostContent,
+  validatePostContent,
+} from '../utils/content-parser.util';
 import { detectPostLanguage } from '../utils/post-language.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { normalizeTopicName } from '../utils/topic-name.util';
@@ -464,15 +467,12 @@ export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
         return existingPost;
       }
 
-      // Validate required transaction data
-      if (!transaction.tx?.arguments?.[0]?.value) {
-        this.logger.warn('Transaction missing content argument', { txHash });
-        return null;
-      }
-
-      const content = transaction.tx.arguments[0].value;
-      if (typeof content !== 'string' || content.trim().length === 0) {
-        this.logger.warn('Invalid or empty content', { txHash });
+      const content = validatePostContent(
+        transaction.tx?.arguments?.[0]?.value,
+        transaction.tx?.arguments?.[1]?.value,
+      );
+      if (content === null) {
+        this.logger.warn('Transaction missing content and media', { txHash });
         return null;
       }
 

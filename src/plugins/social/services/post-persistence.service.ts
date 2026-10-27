@@ -1,3 +1,4 @@
+import { validatePostContent } from '@/social/utils/content-parser.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -365,15 +366,9 @@ export class PostPersistenceService {
    * Validates transaction content
    */
   validateContent(tx: Tx): string | null {
-    if (!tx.raw?.arguments?.[0]?.value) {
-      return null;
-    }
-
-    const content = tx.raw.arguments[0].value;
-    if (typeof content !== 'string' || content.trim().length === 0) {
-      return null;
-    }
-
-    return content;
+    return validatePostContent(
+      tx.raw?.arguments?.[0]?.value,
+      tx.raw?.arguments?.[1]?.value,
+    );
   }
 }

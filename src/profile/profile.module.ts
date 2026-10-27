@@ -27,9 +27,12 @@ import { ProfileXVerificationAttemptService } from './services/profile-x-verific
 import { ProfileChainNameChallenge } from './entities/profile-chain-name-challenge.entity';
 import { ProfileChainNameClaim } from './entities/profile-chain-name-claim.entity';
 import { ProfileChainNameService } from './services/profile-chain-name.service';
+import { ProfilePublicController } from './controllers/profile-public.controller';
+import { ProfileMediaModule } from '../profile-media/profile-media.module';
 
 @Module({
   imports: [
+    ProfileMediaModule,
     SocialGraphReadModule,
     AeModule,
     forwardRef(() => AffiliationModule),
@@ -60,7 +63,11 @@ import { ProfileChainNameService } from './services/profile-chain-name.service';
     ProfileXVerificationAttemptService,
     ProfileChainNameService,
   ],
-  controllers: [ProfileChainNameController, ProfileRewardsController],
+  controllers: [
+    ProfileChainNameController,
+    ProfileRewardsController,
+    ProfilePublicController,
+  ],
   exports: [
     TypeOrmModule,
     ProfileReadService,

@@ -1,3 +1,4 @@
+import { parseImageReference } from '../../profile-media/image-reference';
 import {
   IParsedPostContent,
   IContentParsingOptions,
@@ -201,6 +202,8 @@ export function isValidMediaUrl(url: string): boolean {
     return false;
   }
 
+  if (parseImageReference(url)) return true;
+
   try {
     const parsedUrl = new URL(url);
     const validProtocols = ['http:', 'https:'];
@@ -236,4 +239,14 @@ export function isValidMediaUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Empty captions are valid only when the transaction includes renderable media. */
+export function validatePostContent(
+  content: unknown,
+  mediaArguments: any[] = [],
+): string | null {
+  if (typeof content !== 'string') return null;
+  if (!content.trim() && extractMedia(mediaArguments).length === 0) return null;
+  return content;
 }
