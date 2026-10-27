@@ -846,6 +846,174 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
     expect(bonusRows).toHaveLength(0);
   });
 
+  it('counts streak days in UTC: posts at 23:45 and at 00:00 the day after next leave a whole day empty (#766)', async () => {
+    // The reporter's own timestamps. Every local morning in UTC+7/+8, but the
+    // first lands just before UTC midnight and the second just after the
+    // following one, so 2026-10-01 (UTC) has no referral post at all.
+    tweetsByUserId['100'] = [
+      {
+        id: '3201',
+        text: 'd1',
+        created_at: '2026-09-30T03:41:58Z',
+        entities: { urls: [refUrl()] },
+      },
+      {
+        id: '3202',
+        text: 'd1-late',
+        created_at: '2026-09-30T23:45:41Z',
+        entities: { urls: [refUrl()] },
+      },
+      {
+        id: '3203',
+        text: 'd3',
+        created_at: '2026-10-02T00:00:42Z',
+        entities: { urls: [refUrl()] },
+      },
+    ];
+    const { service, rows, ledger } = makeService({
+      account: { address: ADDRESS, links: { x: 'poster' } },
+      rows: [baseRow()],
+    });
+
+    await service.requestManualRecheck(ADDRESS);
+
+    expect(ledger.map((r) => r.tweet_utc_day).sort()).toEqual([
+      '2026-09-30',
+      '2026-10-02',
+    ]);
+    expect(rows.get(ADDRESS)?.current_streak_days).toBe(1);
+    expect(rows.get(ADDRESS)?.last_qualifying_post_day).toBe('2026-10-02');
+  });
+
+  describe('current streak in the status payload (#766)', () => {
+    beforeEach(() => {
+      // Pinned so "today" cannot move between building the row and reading it.
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date('2026-10-12T00:45:00Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    const statusFor = async (
+      lastQualifyingPostDay: string,
+      lastScanAt: string | null,
+    ) => {
+      const { service, rows } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [
+          baseRow({
+            x_user_id: '100',
+            current_streak_days: 5,
+            last_qualifying_post_day: lastQualifyingPostDay,
+            last_posts_scan_at: lastScanAt ? new Date(lastScanAt) : null,
+          }),
+        ],
+      });
+      const result = await service.getRewardStatus(ADDRESS);
+      return { result, rows };
+    };
+
+    const rowWithStreak = () =>
+      baseRow({
+        x_user_id: '100',
+        current_streak_days: 1,
+        last_qualifying_post_day: '2026-10-10',
+        last_posts_scan_at: new Date('2026-10-10T20:00:00Z'),
+      });
+
+    it('reports 0 after a scan that read every post of the missed day', async () => {
+      const { service, rows } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [rowWithStreak()],
+      });
+
+      await service.requestManualRecheck(ADDRESS);
+
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        0,
+      );
+      expect(rows.get(ADDRESS)?.current_streak_days).toBe(1);
+    });
+
+    it('keeps the streak through a scan that could not read posts', async () => {
+      // The 10-11 post is there, but X is down for the 10-12 scan. Showing 0
+      // would be contradicted by the next scan, which continues the streak.
+      tweetsByUserId['100'] = [
+        {
+          id: '4101',
+          text: 'd',
+          created_at: '2026-10-11T09:00:00Z',
+          entities: { urls: [refUrl()] },
+        },
+      ];
+      const { service, rows } = makeService({
+        account: { address: ADDRESS, links: { x: 'poster' } },
+        rows: [rowWithStreak()],
+      });
+      const baseFetch = global.fetch as jest.Mock;
+      global.fetch = jest.fn(async (input: string, init?: any) =>
+        new URL(input).pathname.endsWith('/tweets')
+          ? ({ ok: false, status: 503, json: async () => ({}) } as any)
+          : baseFetch(input, init),
+      ) as any;
+
+      await service.requestManualRecheck(ADDRESS);
+
+      expect(rows.get(ADDRESS)?.error).toBe('x_posts_fetch_failed');
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        1,
+      );
+
+      global.fetch = baseFetch;
+      resetScanWindow(rows);
+      await service.requestManualRecheck(ADDRESS);
+
+      expect((await service.getRewardStatus(ADDRESS)).current_streak_days).toBe(
+        2,
+      );
+    });
+
+    it('reports 0 once a scan has found a whole UTC day without a referral post', async () => {
+      // The reporter's row: 5 days ending 2026-10-06, scanned since.
+      const { result, rows } = await statusFor(
+        '2026-10-06',
+        '2026-10-08T10:00:00Z',
+      );
+
+      expect(result.current_streak_days).toBe(0);
+      // Display only: the next scan's updateStreak still owns the reset.
+      expect(rows.get(ADDRESS)?.current_streak_days).toBe(5);
+      expect(rows.get(ADDRESS)?.last_qualifying_post_day).toBe('2026-10-06');
+    });
+
+    it('drops the streak as soon as a scan runs on the day after the missed one', async () => {
+      const { result } = await statusFor('2026-10-10', '2026-10-12T00:30:00Z');
+      expect(result.current_streak_days).toBe(0);
+    });
+
+    it('keeps the streak when the day after the last one has not been fully scanned', async () => {
+      // Scanned on the morning of 10-11, before that day's post: 10-11 may
+      // still hold one, so the streak is not known to be over.
+      const { result } = await statusFor('2026-10-10', '2026-10-11T08:00:00Z');
+      expect(result.current_streak_days).toBe(5);
+    });
+
+    it('keeps the streak while the user can still extend it', async () => {
+      expect(
+        (await statusFor('2026-10-11', '2026-10-12T00:30:00Z')).result
+          .current_streak_days,
+      ).toBe(5);
+      expect(
+        (await statusFor('2026-10-12', '2026-10-12T00:30:00Z')).result
+          .current_streak_days,
+      ).toBe(5);
+    });
+
+    it('keeps the stored streak when no scan time is recorded', async () => {
+      const { result } = await statusFor('2026-10-06', null);
+      expect(result.current_streak_days).toBe(5);
+    });
+  });
+
   it('blocks accounts below the minimum follower count without fetching posts', async () => {
     followersByUserId['100'] = 30;
     tweetsByUserId['100'] = [

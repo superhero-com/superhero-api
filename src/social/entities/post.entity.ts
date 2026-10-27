@@ -21,6 +21,8 @@ import { Topic } from './topic.entity';
 @Index('IDX_POSTS_POST_ID', ['post_id'])
 // Serves the content-language filter on the posts and popular feeds.
 @Index('IDX_POSTS_LANGUAGE_CREATED_AT', ['language', 'created_at'])
+// Lets `GET /api/posts/:id` (`id = :id OR slug = :id`) avoid a full scan.
+@Index('IDX_POSTS_SLUG', ['slug'])
 export class Post {
   @PrimaryColumn()
   id: string;

@@ -15,6 +15,7 @@ import { TokenBalance } from '@/token-gated-rooms/entities/token-balance.entity'
 import { RoomBackfillState } from '@/token-gated-rooms/entities/room-backfill-state.entity';
 import { IdentityService } from '@/token-gated-rooms/services/identity.service';
 import { EligibilityService } from '@/token-gated-rooms/services/eligibility.service';
+import { RoomsQueryService } from './rooms-query.service';
 import {
   TGR_BALANCE_CHANGED,
   TGR_COMMUNITY_UPSERTED,
@@ -261,6 +262,60 @@ d('EligibilityService (integration)', () => {
     expect(seen).toEqual([
       { saleAddress: SALE, memberAddress: member, eligible: false },
     ]);
+  });
+
+  it('zero-threshold access follows ownership through buy, last-token sale and reacquisition', async () => {
+    const member = 'ak_int_elig_member';
+    await seedRoom({ min_token_threshold: new BigNumber(0) });
+    await accountRepo.insert({ address: member, links: { [PROVIDER]: HEX } });
+    const query = new RoomsQueryService(roomRepo, membershipRepo, {} as any);
+    const change = () =>
+      eventEmitter.emitAsync(TGR_BALANCE_CHANGED, {
+        tokenAddress: TOKEN,
+        holderAddress: member,
+      });
+    const membership = { sale_address: SALE, member_address: member };
+    const holding = { token_address: TOKEN, holder_address: member };
+
+    // A linked account without tokens must not enter the eligible-rooms API.
+    await change();
+    expect(await membershipRepo.findOneBy(membership)).toBeNull();
+    expect((await query.listEligibleRooms(member, 1, 10)).items).toEqual([]);
+
+    // One raw unit qualifies, but posting waits for membership acknowledgement.
+    await balanceRepo.insert({ ...holding, balance: new BigNumber(1) });
+    await change();
+    expect(
+      (await query.listEligibleRooms(member, 1, 10)).items[0],
+    ).toMatchObject({
+      relay_state: 'pending_add',
+      readable: false,
+    });
+    // Represents the existing relay-ACK boundary; this spec does not run a relay.
+    await membershipRepo.update(membership, { relay_state: 'added' });
+    expect(
+      (await query.listEligibleRooms(member, 1, 10)).items[0].readable,
+    ).toBe(true);
+
+    // Selling the last unit removes API eligibility and requests relay eviction.
+    await balanceRepo.update(holding, { balance: new BigNumber(0) });
+    await change();
+    expect((await query.listEligibleRooms(member, 1, 10)).items).toEqual([]);
+    expect(await membershipRepo.findOneByOrFail(membership)).toMatchObject({
+      eligible: false,
+      relay_state: 'pending_remove',
+    });
+
+    // Reacquiring a token must provision access again, not reuse stale approval.
+    await membershipRepo.update(membership, { relay_state: 'removed' });
+    await balanceRepo.update(holding, { balance: new BigNumber(1) });
+    await change();
+    expect(
+      (await query.listEligibleRooms(member, 1, 10)).items[0],
+    ).toMatchObject({
+      relay_state: 'pending_add',
+      readable: false,
+    });
   });
 
   it('cursor-batched recompute: every member of a room with > N members is recomputed', async () => {

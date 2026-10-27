@@ -705,7 +705,7 @@ export class TokensService {
 
     const offset = (page - 1) * limit;
     const pagedOrderClause = this.buildTokensOrderClause(
-      'all_ranked_tokens',
+      'filtered_tokens',
       orderBy,
       orderDirection,
     );
@@ -714,35 +714,44 @@ export class TokensService {
       orderBy,
       orderDirection,
     );
+    const sortColumns = this.tokensOrderColumns(orderBy)
+      .map((column) => `filtered.${column}`)
+      .join(', ');
     const limitPlaceholder = `$${parameters.length + 1}`;
     const offsetPlaceholder = `$${parameters.length + 2}`;
 
+    // The caller's query must select token.* (the sort keys come from it) and
+    // filter `unlisted = false`; the page join re-checks the latter so a
+    // caller that forgets it still can't list unlisted tokens. Only the sort
+    // keys are materialized: the filter runs once for both the count and the
+    // page (inlining it scans twice for filters like search), and full rows
+    // are read for the page alone.
     const rankedQuery = `
-      WITH all_ranked_tokens AS (
-        -- token.rank is persisted (RefreshTokenRanksService) instead of
-        -- computed here via RANK() OVER (...); that used to re-sort the
-        -- whole table on every list request regardless of orderBy.
-        SELECT token.*
-        FROM token
-        WHERE token.unlisted = false
-      ),
-      filtered_tokens AS (
-        ${filteredTokensQuery}
+      WITH filtered_tokens AS MATERIALIZED (
+        SELECT filtered.sale_address, ${sortColumns}
+        FROM (
+          ${filteredTokensQuery}
+        ) filtered
       ),
       filtered_count AS (
         SELECT COUNT(*)::int AS total_items
         FROM filtered_tokens
       ),
       paged_tokens AS (
-        SELECT 
-          all_ranked_tokens.*,
+        SELECT
+          token.*,
           row_to_json(token_performance.*) as performance
-        FROM all_ranked_tokens
-        INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
-        LEFT JOIN token_performance ON all_ranked_tokens.sale_address = token_performance.sale_address
-        ORDER BY ${pagedOrderClause}
-        LIMIT ${limitPlaceholder}
-        OFFSET ${offsetPlaceholder}
+        FROM (
+          SELECT filtered_tokens.sale_address
+          FROM filtered_tokens
+          ORDER BY ${pagedOrderClause}
+          LIMIT ${limitPlaceholder}
+          OFFSET ${offsetPlaceholder}
+        ) page
+        INNER JOIN token
+          ON token.sale_address = page.sale_address
+          AND token.unlisted = false
+        LEFT JOIN token_performance ON token.sale_address = token_performance.sale_address
       )
       SELECT 
         paged_tokens.*,
@@ -781,6 +790,8 @@ export class TokensService {
     orderBy: string,
     orderDirection: 'ASC' | 'DESC',
   ): string {
+    // sale_address breaks ties, so paging through equal values (holders,
+    // price, the unranked block) never repeats or skips a token.
     if (orderBy === 'trending_score') {
       return `${alias}.trending_score ${orderDirection},
          CASE
@@ -788,12 +799,21 @@ export class TokensService {
              THEN ${alias}.created_at
            ELSE NULL
          END DESC,
-         ${alias}.created_at DESC`;
+         ${alias}.created_at DESC,
+         ${alias}.sale_address ASC`;
     }
 
-    const orderColumn = orderBy === 'treasury' ? 'dao_balance' : orderBy;
+    const [orderColumn] = this.tokensOrderColumns(orderBy);
 
-    return `${alias}.${orderColumn} ${orderDirection}`;
+    return `${alias}.${orderColumn} ${orderDirection}, ${alias}.sale_address ASC`;
+  }
+
+  // The columns buildTokensOrderClause reads besides sale_address.
+  private tokensOrderColumns(orderBy: string): string[] {
+    if (orderBy === 'trending_score') {
+      return ['trending_score', 'created_at'];
+    }
+    return [orderBy === 'treasury' ? 'dao_balance' : orderBy];
   }
 
   applyListEligibilityFilters(

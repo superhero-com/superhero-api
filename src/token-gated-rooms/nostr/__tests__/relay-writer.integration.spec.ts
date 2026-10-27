@@ -1,7 +1,9 @@
 import 'dotenv/config';
-import { Relay } from 'nostr-tools';
+import { Relay, finalizeEvent, nip19 } from 'nostr-tools';
 import WebSocket from 'ws';
+import { waitForRelayState } from '@/test/harness/relay';
 import { RelayWriterService } from '../relay-writer.service';
+import { authenticateRelay } from '../relay-auth';
 import { createGroup, editMetadata, putUser, removeUser } from '../nip29';
 
 if (typeof (globalThis as { WebSocket?: unknown }).WebSocket === 'undefined') {
@@ -51,6 +53,13 @@ async function relayReachable(url: string): Promise<boolean> {
 /** Read the relay-served `39000` group state (its `d` tag is the group id). */
 async function read39000(url: string, groupId: string): Promise<boolean> {
   const relay = await Relay.connect(url);
+  const decoded = nip19.decode(RELAY_ADMIN_NSEC);
+  if (decoded.type !== 'nsec') throw new Error('Invalid test admin key');
+  await authenticateRelay(
+    relay,
+    async (event) => finalizeEvent(event, decoded.data),
+    5000,
+  );
   return await new Promise<boolean>((resolve) => {
     let found = false;
     const sub = relay.subscribe([{ kinds: [39000], '#d': [groupId] }], {
@@ -58,12 +67,13 @@ async function read39000(url: string, groupId: string): Promise<boolean> {
         found = true;
       },
       oneose: () => {
+        clearTimeout(timer);
         sub.close();
         relay.close();
         resolve(found);
       },
     });
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       try {
         sub.close();
         relay.close();
@@ -82,6 +92,15 @@ const memberPk = (n = 0): string =>
 
 describe('RelayWriterService (integration)', () => {
   let available = false;
+  const writers: RelayWriterService[] = [];
+  afterEach(() =>
+    writers.splice(0).forEach((writer) => writer.onApplicationShutdown()),
+  );
+  const makeWriter = (url = RELAY_URL) => {
+    const writer = new RelayWriterService(makeConfig(url));
+    writers.push(writer);
+    return writer;
+  };
 
   beforeAll(async () => {
     available = !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
@@ -107,7 +126,7 @@ describe('RelayWriterService (integration)', () => {
   itRelay(
     'publishes 9007 + 9002 (closed) and the relay serves a 39000',
     async () => {
-      const writer = new RelayWriterService(makeConfig(RELAY_URL));
+      const writer = makeWriter();
       await writer.onModuleInit();
       const gid = uniqueGid();
 
@@ -124,8 +143,9 @@ describe('RelayWriterService (integration)', () => {
       expect(meta.ok).toBe(true);
 
       // Relay generates the addressable 39000 state for the group.
-      await new Promise((r) => setTimeout(r, 500));
-      expect(await read39000(RELAY_URL, gid)).toBe(true);
+      expect(
+        await waitForRelayState(() => read39000(RELAY_URL, gid), Boolean),
+      ).toBe(true);
 
       writer.onApplicationShutdown();
     },
@@ -134,7 +154,7 @@ describe('RelayWriterService (integration)', () => {
   itRelay(
     '9000 put-user adds to 39002, 9001 removes; fetchGroupMembers reflects both',
     async () => {
-      const writer = new RelayWriterService(makeConfig(RELAY_URL));
+      const writer = makeWriter();
       await writer.onModuleInit();
       const gid = uniqueGid();
       const pk = memberPk(1);
@@ -146,16 +166,18 @@ describe('RelayWriterService (integration)', () => {
 
       const add = await writer.publish(putUser(gid, pk));
       expect(add.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
-
-      const afterAdd = await writer.fetchGroupMembers(gid);
+      const afterAdd = await waitForRelayState(
+        () => writer.fetchGroupMembers(gid),
+        (members) => members.has(pk),
+      );
       expect(afterAdd.has(pk)).toBe(true);
 
       const remove = await writer.publish(removeUser(gid, pk));
       expect(remove.ok).toBe(true);
-      await new Promise((r) => setTimeout(r, 500));
-
-      const afterRemove = await writer.fetchGroupMembers(gid);
+      const afterRemove = await waitForRelayState(
+        () => writer.fetchGroupMembers(gid),
+        (members) => !members.has(pk),
+      );
       expect(afterRemove.has(pk)).toBe(false);
 
       writer.onApplicationShutdown();
@@ -165,7 +187,7 @@ describe('RelayWriterService (integration)', () => {
   itRelay(
     'duplicate 9007 for an existing group resolves (already-exists no-op)',
     async () => {
-      const writer = new RelayWriterService(makeConfig(RELAY_URL));
+      const writer = makeWriter();
       await writer.onModuleInit();
       const gid = uniqueGid();
 
@@ -180,7 +202,9 @@ describe('RelayWriterService (integration)', () => {
       }
 
       // 39000 still served (group unchanged).
-      expect(await read39000(RELAY_URL, gid)).toBe(true);
+      expect(
+        await waitForRelayState(() => read39000(RELAY_URL, gid), Boolean),
+      ).toBe(true);
 
       writer.onApplicationShutdown();
     },
@@ -190,7 +214,7 @@ describe('RelayWriterService (integration)', () => {
     'unreachable relay: publish reports failure and the writer is unhealthy (queue would pause)',
     async () => {
       // Point at a closed port — connect fails, publish must not hang forever.
-      const writer = new RelayWriterService(makeConfig('ws://127.0.0.1:1'));
+      const writer = makeWriter('ws://127.0.0.1:1');
       // onModuleInit schedules a reconnect on failure instead of throwing.
       await writer.onModuleInit();
       expect(writer.isHealthy()).toBe(false);
