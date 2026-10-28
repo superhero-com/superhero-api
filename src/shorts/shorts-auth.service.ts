@@ -198,7 +198,12 @@ export class ShortsAuthService {
   }
   async operator(authorization?: string) {
     const address = await this.authenticate(authorization, true);
-    if (address !== this.chain.operator.address)
+    if (
+      address !==
+      (this.chain.release.schemaVersion === 2
+        ? (await this.chain.policy()).operator
+        : this.chain.operator.address)
+    )
       throw new ForbiddenException('Operator wallet required');
     return address;
   }

@@ -158,7 +158,7 @@ literal case-insensitive substring of title/topic, at most 100 characters.
 
 The read service queries existing `shorts_chain_events` written by the Shorts
 indexing plugin. It does not add a chain listener or fetch every video's state
-from the node. Publication, withdrawal and paid Likes require three confirmations;
+from the node. Publication, withdrawal and Likes require three confirmations;
 canonical transaction deletion removes their projection on rollback. Withdrawn
 metadata remains withdrawn. A metadata publication without a confirmed Published
 event remains a draft/pending publication in this read model. An incomplete,

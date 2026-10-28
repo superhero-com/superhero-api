@@ -18,12 +18,14 @@ const aci = [{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], 
   { name: 'claim', arguments: [], returns: {tuple:[]}, payable: false, stateful: true },
 ] } }];
 const coder = new AciContractCallEncoder(aci);
+const v2Coder = new AciContractCallEncoder([{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions:
+  Object.entries({ paid_like: ['string','int'], claim: [], withdraw: ['string'], add_comment: ['string','string','int','int'], delete_comment: ['string','int'] }).map(([name, types]) => ({ name, arguments: types.map((type, i) => ({ name: `a${i}`, type })), returns: { tuple: [] }, payable: name === 'paid_like', stateful: true })) } }]);
 async function fixture(method = 'paid_like', options = {}) {
   const account = AccountMemory.generate(), current = encoded(Encoding.ContractAddress), previous = encoded(Encoding.ContractAddress);
   const contract = options.previous ? previous : current;
   const unsigned = buildTx({ tag: Tag.ContractCallTx, callerId: account.address, contractId: contract,
     abiVersion: 3, amount: method === 'paid_like' ? '100000000000000000' : 0,
-    callData: coder.encodeCall('Shorts', method, method === 'claim' ? [] : ['video-id']),
+    callData: (options.v2 && !options.previous ? v2Coder : coder).encodeCall('Shorts', method, options.args ?? (method === 'claim' ? [] : ['video-id'])),
     nonce: 7, ttl: options.ttl ?? 200, gasLimit: 100000, gasPrice: 1000000000, fee: '1000000000000000' });
   const network = options.network ?? 'ae_uat';
   const networkId = options.signatureNetwork ?? network;
@@ -44,7 +46,7 @@ async function fixture(method = 'paid_like', options = {}) {
     getCurrentKeyBlock: async () => tip, getGenerationByHeight: async () => generation, getTransactionInfoByHash: async () => info,
     postTransaction: () => assert.fail('Observation must never broadcast') };
   const access = new ShortsNodeAccessService();
-  const chain = { release: { network, contract: current, previousContract: previous }, sdk: { api }, state: { contract: current }, previous: { $options: { address: previous } },
+  const chain = { release: { schemaVersion: options.v2 ? 2 : 1, network, contract: current, previousContract: previous }, sdk: { api }, state: { contract: current }, previous: { $options: { address: previous } },
     readNode: async op => { reads++; return access.read(op); }, save: () => assert.fail('Observation must not alter state'),
     recordTransaction: () => assert.fail('Observation must not record receipts') };
   const service = new ShortsWalletTransactionsService(chain);
@@ -214,7 +216,7 @@ test('caller, contract, payload, signature and network are cryptographically bou
 test('only configured contracts and supported wallet methods can be inspected', async () => {
   for (const method of ['claim','withdraw']) assert.equal((await (await fixture(method)).observe()).method, method);
   assert.equal((await (await fixture('claim', { previous: true })).observe()).status, 'confirmed');
-  await assert.rejects((await fixture('paid_like', { previous: true })).observe(), { status: 400 });
+  assert.equal((await (await fixture('paid_like', { previous: true })).observe()).status, 'confirmed');
   await assert.rejects((await fixture('other')).observe(), { status: 400 });
   const f = await fixture();
   for (const args of [['bad', f.account.address, f.contract], [f.tx, 'bad', f.contract], [f.tx, f.account.address, encoded(Encoding.ContractAddress)]]) {
@@ -290,4 +292,13 @@ test('Nest resolves the read-only observer and exposes a no-store public endpoin
     assert.equal(SHORTS_RATE_GROUPS.transactionStatus[2], 120);
     await assert.rejects(async () => new ShortsController({}, {}, {}).walletTransaction(f.tx, f.account.address, f.contract), { status: 503 });
   } finally { await module.close(); }
+});
+
+test('V2 observation binds exact configuration versions and comment text/sequence without using current configuration', async () => {
+  for (const [method, args] of [['paid_like', ['video-id', '7']], ['add_comment', ['video-id', 'Hello 🌍', '7', '3']], ['delete_comment', ['video-id', '4']], ['claim', []]]) {
+    const f = await fixture(method, { v2: true, args });
+    const result = await f.observe(); assert.equal(result.status, 'confirmed'); assert.deepEqual(result.args, args);
+  }
+  const old = await fixture('paid_like', { v2: true, previous: true });
+  assert.equal((await old.observe()).status, 'confirmed'); assert.equal((await old.observe()).args, undefined);
 });

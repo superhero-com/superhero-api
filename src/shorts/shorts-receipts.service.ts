@@ -98,8 +98,19 @@ export class ShortsReceiptsService {
     previous: string | undefined,
     legacy: LocalReceipt[],
     allowImport = false,
+    rewards: string[] = [],
   ) {
     const params = this.scope(scope);
+    if (
+      rewards.length > 16 ||
+      new Set(rewards).size !== rewards.length ||
+      rewards.some(
+        (c) =>
+          !isAddressValid(c, Encoding.ContractAddress) ||
+          [scope.contract, previous].includes(c),
+      )
+    )
+      throw new BadRequestException('Invalid reward receipt targets');
     if (
       !/^[a-f0-9]{64}$/.test(sourceHash) ||
       !Array.isArray(legacy) ||
@@ -131,6 +142,17 @@ export class ShortsReceiptsService {
         'SELECT previous_contract,legacy_hash FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2 FOR UPDATE',
         params,
       );
+      if (rewards.length) {
+        const [targets] = await db.query(
+          'SELECT reward_contracts FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2',
+          params,
+        );
+        if (
+          targets &&
+          JSON.stringify(targets.reward_contracts) !== JSON.stringify(rewards)
+        )
+          throw new ConflictException('Reward receipt targets changed');
+      }
       if (existing) {
         if (
           existing.previous_contract !== (previous ?? null) ||
@@ -149,6 +171,11 @@ export class ShortsReceiptsService {
         'INSERT INTO shorts_receipt_scopes(network,contract,previous_contract,legacy_hash) VALUES($1,$2,$3,$4)',
         [...params, previous ?? null, legacy.length ? fingerprint : null],
       );
+      if (rewards.length)
+        await db.query(
+          'UPDATE shorts_receipt_scopes SET reward_contracts=$3::text[] WHERE network=$1 AND contract=$2',
+          [...params, rewards],
+        );
       for (const r of legacy) {
         const [duplicate] = await db.query(
           'SELECT actor,action FROM shorts_transaction_receipts WHERE network=$1 AND contract=$2 AND tx=$3',
@@ -191,7 +218,7 @@ export class ShortsReceiptsService {
       throw new BadRequestException('Unverified block evidence');
     return this.transaction(async (db) => {
       const [binding] = await db.query(
-        'SELECT previous_contract FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2',
+        "SELECT previous_contract,to_jsonb(s)->'reward_contracts' AS reward_contracts FROM shorts_receipt_scopes s WHERE network=$1 AND contract=$2",
         params,
       );
       if (!binding)
@@ -199,9 +226,11 @@ export class ShortsReceiptsService {
           'Transaction history is not initialized',
         );
       if (
-        ![scope.contract, binding.previous_contract].includes(
-          observation.calledContract,
-        )
+        ![
+          scope.contract,
+          binding.previous_contract,
+          ...(binding.reward_contracts ?? []),
+        ].includes(observation.calledContract)
       )
         throw new BadRequestException('Unrecognized Shorts contract');
       const args = [

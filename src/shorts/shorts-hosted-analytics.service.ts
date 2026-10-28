@@ -1,4 +1,7 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import {
   Injectable,
   Logger,
@@ -34,10 +37,10 @@ export class ShortsHostedAnalyticsService
       throw new ServiceUnavailableException(
         'Hosted analytics require shared content',
       );
-    const scope = shortsRuntimeScope(this.records.chain);
+    const scope = shortsStorageScope(this.records.chain);
     this.since = await this.measurements.initialize(
       scope,
-      this.records.chain.state.sourceHash!,
+      shortsStorageSourceHash(this.records.chain),
     );
     this.scope = scope;
   }
@@ -51,7 +54,7 @@ export class ShortsHostedAnalyticsService
   private ready() {
     if (!this.scope)
       throw new ServiceUnavailableException('Analytics are not initialized');
-    shortsRuntimeScope(this.records.chain);
+    shortsStorageScope(this.records.chain);
     return this.scope;
   }
   counters(id: string) {

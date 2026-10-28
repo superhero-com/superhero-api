@@ -10,7 +10,7 @@ const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-Sho
 const { ShortsStudio1791763212000 } = require('../migrations/1791763212000-ShortsStudio');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMeasurementsService } = require('./shorts-measurements.service');
-const { ShortsIndexService } = require('./shorts-index.service');
+const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('./shorts-index.service');
 const { ShortsStudioReadService } = require('./shorts-studio-read.service');
 const { ShortsService } = require('./shorts.service');
 const { studioQuery, studioCursor } = require('./shorts-studio-query');
@@ -33,20 +33,20 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
   const db = new DataSource(options), second = new DataSource(options);
   await db.initialize(); await second.initialize();
   t.after(async () => { await second.destroy(); await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
-  await db.query(`CREATE TABLE txs(hash varchar PRIMARY KEY,type text,contract_id text,data jsonb);
+  await db.query(`CREATE TABLE txs(hash varchar PRIMARY KEY,type text,contract_id text,data jsonb,raw jsonb);
     CREATE TABLE sync_state(id text PRIMARY KEY,tip_height int,updated_at timestamptz);
     CREATE TABLE plugin_failed_transaction(plugin_name text,tx_hash varchar);
     INSERT INTO sync_state VALUES('global',20,now());`);
   for (const Migration of [ShortsChainIndex1791676800000, ShortsCoverage1791734400000, ShortsMetadata1791763200000, ShortsAnalytics1791763207000, ShortsStudio1791763212000]) await new Migration().up({ query: (sql, args) => db.query(sql, args) });
   const scope = { network: 'ae_uat', contract: 'ct_current' }, hash = 'a'.repeat(64);
-  const chain = { release: { network: 'ae_uat', contract: scope.contract }, state: { contract: scope.contract, sourceHash: hash }, contract: { $options: { address: scope.contract } },
+  const chain = { release: { schemaVersion: 1, network: 'ae_uat', contract: scope.contract }, rewardContracts: () => [], state: { contract: scope.contract, sourceHash: hash }, contract: { $options: { address: scope.contract } },
     address: value => value, account: async address => ({ address, available: '1', earned: '2', claimed: '1' }),
     read: () => { throw new Error('Per-video chain RPC is forbidden in Studio queries'); } };
   const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain)), reader = new ShortsStudioReadService(db, chain, index);
   const meta = new ShortsMetadataService(db), measurements = new ShortsMeasurementsService(db);
   await meta.initialize(scope, hash); await measurements.initialize(scope, hash);
-  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',1,true,1000)");
-  await db.query("INSERT INTO txs VALUES('th_all','ContractCallTx','ct_current','{\"shorts\":{\"_version\":1}}'),('th_pending','ContractCallTx','ct_current','{\"shorts\":{\"_version\":1}}')");
+  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',$1,true,1000)", [SHORTS_INDEX_VERSION]);
+  await db.query("INSERT INTO txs(hash,type,contract_id,data) VALUES('th_all','ContractCallTx','ct_current',$1),('th_pending','ContractCallTx','ct_current',$1)", [JSON.stringify({ shorts: { _version: SHORTS_INDEX_VERSION } })]);
   const rows = Array.from({ length: 126 }, (_, i) => ({ i, id: `clip-${String(i).padStart(6, '0')}`, creator: i < 121 ? 'ak_creator' : 'ak_other',
     at: 1700000000000 + Math.floor(i / 3), likes: i % 7, periodViews: i % 5,
     status: ['published', 'draft', 'withdrawn'][i % 3], restricted: i % 11 === 0 && i % 3 !== 2 }));
@@ -136,6 +136,26 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     const performance = await (await get('/performance?days=28')).json(); assert.equal(performance.topShorts.length, 5);
     assert.equal(performance.summary.views, owned.reduce((n, r) => n + r.periodViews, 0));
     assert.ok(performance.topShorts.every(r => r.creator === 'ak_creator' && performance.videos[r.id].views === 4));
+  });
+  await t.test('V2 retains media analytics and combines imported memberships once with only new V2 events', async () => {
+    const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
+    const { ShortsImportSnapshot1792368001000 } = require('../migrations/1792368001000-ShortsImportSnapshot');
+    const runner = { query: (sql, args) => db.query(sql, args) };
+    await new ShortsReceipts1791763208000().up(runner); await new ShortsImportSnapshot1792368001000().up(runner);
+    await meta.initialize({ network: 'ae_uat', contract: 'ct_vtwo' }, 'b'.repeat(64));
+    await db.query("INSERT INTO shorts_import_snapshots(network,contract,source,cutoff_hash,cutoff_height,digest,videos,likes) VALUES('ae_uat','ct_vtwo','ct_current','kh_cutoff',5,$1,3,7)", ['c'.repeat(64)]);
+    await db.query("INSERT INTO shorts_import_videos(network,contract,id,likes,withdrawn) VALUES('ae_uat','ct_vtwo',$1,7,false),('ae_uat','ct_vtwo',$2,0,true),('ae_uat','ct_vtwo',$3,0,false)", [rows[3].id, rows[6].id, rows[0].id]);
+    await db.query("INSERT INTO txs(hash,type,contract_id,data) VALUES('th_vtwo','ContractCallTx','ct_vtwo',$1)", [JSON.stringify({ shorts: { _version: SHORTS_INDEX_VERSION } })]);
+    for (let n = 0; n < 2; n++) await db.query("INSERT INTO shorts_chain_events VALUES('ct_vtwo','th_vtwo',$1,10,1700000000000,'PaidLike','ak_viewer','ak_creator',17,$2)", [n, rows[3].id]);
+    const chain2 = { ...chain, release: { schemaVersion: 2, network: 'ae_uat', contract: 'ct_vtwo', sourceHash: 'b'.repeat(64), storage: { contract: scope.contract, sourceHash: hash } }, state: { contract: 'ct_vtwo', sourceHash: 'b'.repeat(64) } };
+    const v2 = new ShortsStudioReadService(db, chain2, { assertNetwork: async () => {}, health: async () => ({ height: 21, stale: false }) });
+    const page = await v2.page('ak_creator', { sort: 'likes' }, { ids: [rows[3].id, rows[6].id, rows[0].id] });
+    assert.equal(page.items[0].record.id, rows[3].id); assert.equal(page.items[0].likes, 9); assert.equal(page.items[0].periodViews, 3); assert.equal(page.items[0].publication, 'published');
+    assert.equal(page.items.find(r => r.record.id === rows[6].id).publication, 'withdrawn');
+    await db.query("INSERT INTO shorts_chain_events VALUES('ct_vtwo','th_vtwo',2,10,1700000000000,'Withdrawn','ak_creator','ak_creator',0,$1)", [rows[0].id]);
+    assert.equal((await v2.page('ak_creator', {}, { ids: [rows[0].id] })).items[0].publication, 'withdrawn');
+    // Historical rewards still retain every original payment, independent of membership deduplication.
+    assert.equal(Number((await db.query("SELECT count(*) FROM shorts_chain_events WHERE contract='ct_current' AND action='PaidLike' AND short_id=$1", [rows[3].id]))[0].count), 3);
   });
   const migration = new ShortsStudio1791763212000(); await migration.down({ query: (sql, args) => db.query(sql, args) });
   assert.equal((await db.query("SELECT to_regclass('shorts_chain_events_video') AS name"))[0].name, null);

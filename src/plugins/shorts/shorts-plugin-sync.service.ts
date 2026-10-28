@@ -9,6 +9,7 @@ import {
   SHORTS_INDEX_VERSION,
   SHORTS_UPDATES_CHANNEL,
 } from '@/shorts/shorts-index.service';
+import { shortsIndexedContractCall } from '@/shorts/shorts-contract-call';
 
 @Injectable()
 export class ShortsPluginSyncService extends BasePluginSyncService {
@@ -29,10 +30,11 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
     await this.index.assertNetwork();
     const contracts = this.index.contracts();
     const addresses = contracts.map((item) => item.$options.address);
+    const call = shortsIndexedContractCall(tx);
     if (
-      tx.type !== 'ContractCallTx' ||
-      (!addresses.includes(tx.contract_id as `ct_${string}`) &&
-        !tx.raw?.log?.some((log) => addresses.includes(log.address)))
+      !call ||
+      (!addresses.includes(call.contractId) &&
+        !call.log?.some((log) => addresses.includes(log.address)))
     )
       throw new Error('Unrecognized Shorts contract call');
     if (
@@ -43,7 +45,7 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
       throw new Error('Unmined Shorts transaction');
     // Only successful calls have accounting effects. Missing execution evidence
     // is retryable, not a success with zero events.
-    if (!['ok', 'error', 'revert'].includes(tx.raw?.returnType))
+    if (!['ok', 'error', 'revert'].includes(call.returnType))
       throw new Error('Missing Shorts execution result');
     const events: {
       contract: string;
@@ -54,10 +56,10 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
       amount: string;
       shortId?: string;
     }[] = [];
-    if (tx.raw.returnType === 'ok') {
-      if (!Array.isArray(tx.raw.log))
+    if (call.returnType === 'ok') {
+      if (!Array.isArray(call.log))
         throw new Error('Missing Shorts event logs');
-      const logs = this.normalizeEventTopics(tx.raw.log);
+      const logs = this.normalizeEventTopics(call.log);
       for (const [logIndex, log] of logs.entries()) {
         const contract = contracts.find(
           (item) => item.$options.address === log.address,
@@ -66,32 +68,47 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
         const decoded = contract.$decodeEvents([log], { omitUnknown: true });
         for (const event of decoded) {
           if (
-            !['Published', 'PaidLike', 'Claimed', 'Withdrawn'].includes(
-              event.name,
-            )
+            ![
+              'Published',
+              'Liked',
+              'PaidLike',
+              'Claimed',
+              'Withdrawn',
+            ].includes(event.name)
           )
             continue;
           const args = event.args;
-          const actor =
-            event.name === 'PaidLike' || event.name === 'Claimed'
-              ? String(args[0])
-              : tx.caller_id;
+          const v2 = this.index.schema(contract.$options.address) === 2;
+          if (
+            event.name === 'Liked' &&
+            (!v2 ||
+              args.length !== 3 ||
+              !/^(0|[1-9]\d{0,77})$/.test(String(args[1])) ||
+              (call.contractId === contract.$options.address &&
+                String(args[0]) !== call.callerId))
+          )
+            throw new Error('Invalid Shorts Like event');
+          const actor = ['Liked', 'PaidLike', 'Claimed'].includes(event.name)
+            ? String(args[0])
+            : call.callerId;
           let beneficiary = actor;
           const shortId =
-            event.name === 'PaidLike'
+            event.name === 'Liked'
               ? String(args[2])
-              : event.name === 'Published'
-                ? String(args[1])
-                : event.name === 'Withdrawn'
-                  ? String(args[0])
-                  : undefined;
+              : event.name === 'PaidLike'
+                ? String(args[v2 ? 3 : 2])
+                : event.name === 'Published'
+                  ? String(args[v2 ? 2 : 1])
+                  : event.name === 'Withdrawn'
+                    ? String(args[0])
+                    : undefined;
           if (event.name === 'Published') beneficiary = String(args[0]);
-          if (event.name === 'PaidLike' || event.name === 'Withdrawn') {
+          if (['Liked', 'PaidLike', 'Withdrawn'].includes(event.name)) {
             // Read from the event's own contract, including a previous deployment.
             // It works during reverse/backfill order and for creators absent from
             // this API's local metadata. A missing creator must never lose earnings.
             const { decodedResult: short } = await contract.$call(
-              'get_short',
+              v2 ? 'get_video' : 'get_short',
               [shortId],
               { callStatic: true },
             );
@@ -116,13 +133,14 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
       }
     }
     const expected = {
+      like: 'Liked',
       paid_like: 'PaidLike',
       claim: 'Claimed',
       withdraw: 'Withdrawn',
-    }[tx.function];
+    }[call.function];
     if (
-      tx.raw.returnType === 'ok' &&
-      addresses.includes(tx.contract_id as `ct_${string}`) &&
+      call.returnType === 'ok' &&
+      addresses.includes(call.contractId) &&
       expected &&
       !events.some((event) => event.action === expected)
     )

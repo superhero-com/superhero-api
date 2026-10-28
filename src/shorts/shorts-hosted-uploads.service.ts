@@ -1,4 +1,7 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { ShortsRecordsService } from './shorts-records.service';
@@ -27,12 +30,12 @@ export class ShortsHostedUploadsService {
       throw new ServiceUnavailableException(
         'Shared upload deployment is not initialized',
       );
-    return shortsRuntimeScope(this.records.chain);
+    return shortsStorageScope(this.records.chain);
   }
   async initialize() {
     await this.metadata.verifyRuntime(
       this.scope(),
-      this.records.chain.state.sourceHash,
+      shortsStorageSourceHash(this.records.chain),
     );
     await this.metadata.verifyHostedStorage(this.scope());
   }

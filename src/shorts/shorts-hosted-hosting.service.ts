@@ -1,4 +1,7 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import {
   Injectable,
   Inject,
@@ -56,7 +59,7 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
       throw new Error('Invalid lifecycle deadlines');
   }
   private scope() {
-    return shortsRuntimeScope(this.chain);
+    return shortsStorageScope(this.chain);
   }
   async initialize() {
     if (
@@ -65,7 +68,7 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
       !this.shorts.publisher
     )
       throw new Error('Hosted lifecycle requires shared verified publication');
-    await this.jobs.verify(this.scope(), this.chain.state.sourceHash!);
+    await this.jobs.verify(this.scope(), shortsStorageSourceHash(this.chain));
   }
   start() {
     if (this.timer || this.stopped) return;

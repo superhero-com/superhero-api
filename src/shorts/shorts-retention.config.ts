@@ -32,8 +32,11 @@ export async function retentionConfig(
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(prefix))
     throw new Error('Invalid retention deployment or private object prefix');
   return {
-    scope: { network: manifest.network, contract: manifest.contract },
-    sourceHash: manifest.sourceHash,
+    scope: {
+      network: manifest.network,
+      contract: manifest.storage?.contract ?? manifest.contract,
+    },
+    sourceHash: manifest.storage?.sourceHash ?? manifest.sourceHash,
     prefix,
   };
 }

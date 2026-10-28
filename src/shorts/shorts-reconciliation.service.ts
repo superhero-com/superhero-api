@@ -50,6 +50,10 @@ export class ShortsReconciliationService {
   }) {
     const scope = shortsRuntimeScope(this.chain);
     const contractId = input.contract ?? scope.contract;
+    if (this.chain.release.schemaVersion === 2)
+      throw new ServiceUnavailableException(
+        'Historical reconciliation for mutable configuration and prepaid predecessors is unavailable. Live contract balances remain available.',
+      );
     const instance = this.index
       .contracts()
       .find((item) => item.$options.address === contractId);

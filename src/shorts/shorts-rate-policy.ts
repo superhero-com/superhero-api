@@ -18,6 +18,7 @@ export const SHORTS_RATE_GROUPS = {
   publish: [12, minute, 30, 6],
   receipt: [30, minute, 120, 20],
   transactionStatus: [30, minute, 120, 0],
+  sponsorLike: [12, minute, 60, 6],
   scan: [6, 3600000, 60, 3],
   appeal: [6, 3600000, 60, 3],
   operator: [60, minute, 120, 60],
@@ -36,6 +37,9 @@ export interface ShortsHttpPolicy {
 // Every Shorts HTTP handler must have an explicit policy.
 export const SHORTS_HTTP_POLICY: Record<string, ShortsHttpPolicy> = {
   config: { group: 'read' },
+  commentAuthor: { group: 'read' },
+  commentPage: { group: 'read' },
+  videoStats: { group: 'read' },
   playbackHealth: { group: 'health' },
   challenge: { group: 'auth' },
   verify: { group: 'auth' },
@@ -78,6 +82,8 @@ export const SHORTS_HTTP_POLICY: Record<string, ShortsHttpPolicy> = {
   publish: { group: 'publish', private: true },
   receipt: { group: 'receipt', private: true },
   walletTransaction: { group: 'transactionStatus' },
+  sponsorLike: { group: 'sponsorLike', private: true },
+  sponsoredLikeStatus: { group: 'transactionStatus' },
   view: { group: 'measurement' },
   report: { group: 'report' },
   playbackDescriptor: { group: 'playback' },

@@ -21,12 +21,26 @@ import { ShortsRecordsService } from './shorts-records.service';
 import { ShortsWalletTransactionsService } from './shorts-wallet-transactions.service';
 import { ShortsPlaybackEvidenceService } from './shorts-playback-evidence.service';
 import { ShortsMeasurementMonitorService } from './shorts-measurement-monitor.service';
+import { ShortsCommentsService } from './shorts-comments.service';
+import {
+  SHORTS_LIKE_SPONSOR_CONFIG,
+  likeSponsorConfig,
+} from './shorts-like-sponsorship.config';
+import { ShortsLikeSponsorshipRepository } from './shorts-like-sponsorship-repository.service';
+import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
 
 // Loaded by the opt-in feature module or the loopback-only development entrypoint.
 @Module({
   imports: [ShortsCoreModule],
   controllers: [ShortsController],
   providers: [
+    {
+      provide: SHORTS_LIKE_SPONSOR_CONFIG,
+      useFactory: () => likeSponsorConfig(),
+    },
+    ShortsLikeSponsorshipRepository,
+    ShortsLikeSponsorshipService,
+    ShortsCommentsService,
     ShortsRecordsService,
     ShortsWalletTransactionsService,
     ShortsPlaybackEvidenceService,

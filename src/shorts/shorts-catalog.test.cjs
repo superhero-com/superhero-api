@@ -128,6 +128,59 @@ test('catalog rejects excess requests, shares admission with legacy reads and re
   await f.api.catalog(); assert.equal(reads, 5);
 });
 
+test('concurrent catalog pages share one item-read limit and preserve every page', async () => {
+  const f = service(Array.from({ length: 20 }, (_, i) => clip(i)));
+  const gate = deferred(), read = f.chain.read;
+  let active = 0, peak = 0;
+  f.chain.read = async (...args) => {
+    active++; peak = Math.max(peak, active);
+    try { await gate.promise; await turn(); return await read(...args); }
+    finally { active--; }
+  };
+  const pages = Array.from({ length: 4 }, () => f.api.catalog());
+  await turn();
+  const initialPeak = peak;
+  await assert.rejects(f.api.catalog(), { status: 503 });
+  gate.resolve();
+  const results = await Promise.all(pages);
+  assert.equal(initialPeak, 4);
+  assert.equal(peak, 4);
+  assert.equal(active, 0);
+  for (const page of results) {
+    assert.equal(page.items.length, 20);
+    assert.equal(new Set(page.items.map(s => s.id)).size, 20);
+    assert.deepEqual(page, results[0]);
+  }
+  assert.equal((await f.api.catalog()).items.length, 20);
+});
+
+test('a failed catalog page drains its readers and returns shared permits to waiting pages', async () => {
+  const f = service(Array.from({ length: 20 }, (_, i) => clip(i)));
+  const gate = deferred(), read = f.chain.read;
+  let calls = 0, active = 0, peak = 0, failedPageEnded = false;
+  f.chain.read = async (...args) => {
+    const first = ++calls === 1;
+    active++; peak = Math.max(peak, active);
+    try {
+      await turn();
+      if (first) throw new Error('read unavailable');
+      await gate.promise;
+      return await read(...args);
+    } finally { active--; }
+  };
+  const failed = f.api.catalog().catch(error => { failedPageEnded = true; return error; });
+  const waiting = Array.from({ length: 3 }, () => f.api.catalog());
+  await turn(); await turn();
+  assert.equal(failedPageEnded, false);
+  assert.equal(peak, 4);
+  gate.resolve();
+  assert.equal((await failed).message, 'read unavailable');
+  for (const page of await Promise.all(waiting)) assert.equal(page.items.length, 20);
+  assert.equal(active, 0);
+  assert.equal(peak, 4);
+  assert.equal((await f.api.catalog()).items.length, 20);
+});
+
 test('catalog HTTP endpoints authenticate Studio, isolate account cursors and prevent shared caching', async t => {
   const f = service(Array.from({ length: 25 }, (_, i) => ({ ...clip(i), moderation: 'pending' })));
   f.chain.state.shorts.push({ ...clip(90, 'ak_other'), moderation: 'pending' });

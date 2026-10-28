@@ -1,4 +1,4 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import { shortsStorageScope } from './shorts-runtime-scope';
 import { ShortsUploadsService, UploadInput } from './shorts-uploads.service';
 import {
   Body,
@@ -40,6 +40,8 @@ import { ShortsWalletTransactionsService } from './shorts-wallet-transactions.se
 import { ShortsPlaybackEvidenceService } from './shorts-playback-evidence.service';
 import { ShortsMeasurementMonitorService } from './shorts-measurement-monitor.service';
 import { ShortsReconciliationService } from './shorts-reconciliation.service';
+import { ShortsCommentsService } from './shorts-comments.service';
+import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
 
 @ApiTags('shorts')
 @Controller('shorts')
@@ -58,9 +60,57 @@ export class ShortsController {
     private readonly measurements?: ShortsMeasurementMonitorService,
     @Optional()
     private readonly reconciliation?: ShortsReconciliationService,
+    @Optional() private readonly comments?: ShortsCommentsService,
+    @Optional()
+    private readonly likeSponsorships?: ShortsLikeSponsorshipService,
   ) {}
-  @Get('config') config() {
+  @Post('like-sponsorships')
+  @Header('Cache-Control', 'no-store')
+  @HttpCode(202)
+  async sponsorLike(
+    @Headers('authorization') authorization: string,
+    @Body() body: { id: string; videoId: string; signedInnerTx: string },
+  ) {
+    if (!this.likeSponsorships)
+      throw new ServiceUnavailableException('Like sponsorship is unavailable');
+    return this.likeSponsorships.enqueue(
+      await this.auth.authenticate(authorization),
+      body,
+    );
+  }
+  @Get('like-sponsorships/:innerHash')
+  @Header('Cache-Control', 'no-store')
+  sponsoredLikeStatus(
+    @Param('innerHash') innerHash: string,
+    @Query('address') address: string,
+    @Query('contract') contract: string,
+  ) {
+    if (!this.likeSponsorships)
+      throw new ServiceUnavailableException('Like sponsorship is unavailable');
+    return this.likeSponsorships.observe(innerHash, address, contract);
+  }
+  @Get('config')
+  @Header('Cache-Control', 'no-store')
+  config() {
     return this.shorts.config();
+  }
+  @Get('comments/authors/:address')
+  @Header('Cache-Control', 'no-store')
+  commentAuthor(@Param('address') address: string) {
+    return this.comments.author(address);
+  }
+  @Get(':id/comments')
+  @Header('Cache-Control', 'no-store')
+  commentPage(
+    @Param('id') id: string,
+    @Query() query: { cursor?: string; version?: string; limit?: string },
+  ) {
+    return this.comments.page(id, query);
+  }
+  @Get(':id/stats')
+  @Header('Cache-Control', 'no-store')
+  videoStats(@Param('id') id: string) {
+    return this.comments.stats(id);
   }
   @Get('health/playback')
   @Header('Cache-Control', 'no-store')
@@ -258,7 +308,7 @@ export class ShortsController {
       throw new ServiceUnavailableException(
         'Lifecycle status requires the hosted API',
       );
-    return this.lifecycle.health(shortsRuntimeScope(this.shorts.chain));
+    return this.lifecycle.health(shortsStorageScope(this.shorts.chain));
   }
   @Get('operator/measurements')
   @Header('Cache-Control', 'no-store')
@@ -439,7 +489,7 @@ export class ShortsController {
       visualConfirmed?: boolean;
     },
   ) {
-    await this.auth.operator(authorization);
+    const operator = await this.auth.operator(authorization);
     if (typeof body.approved !== 'boolean')
       throw new BadRequestException('Explicit review decision required');
     const decide = () =>
@@ -449,6 +499,7 @@ export class ShortsController {
         body.reason || '',
         body.topic,
         body.visualConfirmed === true,
+        operator,
       );
     return this.shorts.records.shared
       ? decide()

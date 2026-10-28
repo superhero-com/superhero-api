@@ -126,7 +126,7 @@ export class ShortsPluginNetworkService
     signal.throwIfAborted();
   }
 
-  async json(value: string, parent?: AbortSignal) {
+  async json(value: string, parent?: AbortSignal, timeoutMs = 10000) {
     const release = this.bindings();
     const base = new URL(release.middleware);
     if (typeof value !== 'string' || value.length > 8192)
@@ -145,11 +145,13 @@ export class ShortsPluginNetworkService
       )
     )
       throw new Error('Shorts middleware request outside its authority');
+    if (![10000, 60000].includes(timeoutMs))
+      throw new Error('Invalid middleware read deadline');
     if (this.active >= 8)
       throw new Error('Shorts middleware requests are busy');
     const signal = AbortSignal.any([
       this.shutdown.signal,
-      AbortSignal.timeout(10000),
+      AbortSignal.timeout(timeoutMs),
       ...(parent ? [parent] : []),
     ]);
     this.active++;

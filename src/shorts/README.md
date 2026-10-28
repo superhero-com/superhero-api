@@ -73,7 +73,7 @@ not symlinks, and no larger than 1 MiB.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "network": "ae_uat",
   "node": "https://testnet.aeternity.io",
   "middleware": "https://testnet.aeternity.io/mdw",
@@ -85,7 +85,7 @@ not symlinks, and no larger than 1 MiB.
   "sourceHash": "<64 lowercase hex characters>",
   "bytecodeHash": "<64 lowercase hex characters>",
   "aciHash": "<64 lowercase hex characters>",
-  "likeFeeAetto": "100000000000000000",
+  "likeFeeAetto": "0",
   "treasuryBps": 2000
 }
 ```
@@ -127,25 +127,25 @@ The API exposes the same normalized identity in `/api/shorts/config` for compari
 the browser never accepts an API-supplied hash as its trust source. Public browsing
 can continue without a web pin, but wallet actions fail closed.
 
-Older deployment receipts are not accepted automatically. Preserve their
-transaction/height metadata, add these fields, and verify them against the
-reviewed artifact and on-chain state before restarting. This is a configuration
-upgrade; it does not redeploy a contract. The compiler/source declarations, actual
-artifact bytecode and ACI hashes must agree with the manifest before node access.
+The free-Like release requires a deployment of the new contract and its matching
+manifest. Editing an old paid-contract receipt cannot remove its charge.
+The compiler/source declarations, actual artifact bytecode and ACI hashes must
+agree with the manifest before node access.
 Startup then checks the node network, deployed bytecode, operator, treasury,
 fee/split and predecessor. The publisher repeats those chain checks before
 preparing a signature. A mismatch fails closed.
 
 The manifest is trusted deployment configuration, not a digital signature or
 proof that an ABI was compiled from its declared source. Protect it through the
-release process and read-only mounts. The current runtime still rejects mainnet,
-non-default middleware and economics other than the supported 0.1 AE / 20%
-treasury split. Changing a manifest alone cannot enable those configurations.
+release process and read-only mounts. The current runtime still rejects mainnet
+and non-default middleware. Sponsorship requires the verified nonpayable Like
+entrypoint and a live zero Like fee. Changing a manifest alone cannot change
+the deployed contract's behavior.
 
-The public Shorts configuration derives its network, Like fee and reward
-percentages from that validated manifest; there are no separate display-price
-defaults. Configuration requests reject a release change during readiness checks.
-Clients must independently verify the manifest before using it for payments.
+The public Shorts configuration derives its network and contract policy from
+that validated manifest; there are no separate display-price defaults.
+Free Likes create no rewards. Configuration requests reject a release change
+during readiness checks. Clients independently verify the manifest before signing.
 
 Mount this same complete versioned manifest for the media worker and operations
 tools (reference, S3, HLS and IPFS inventories and storage reconciliation). They
@@ -749,7 +749,7 @@ The upload flow is Video → Details → Review → Publish. `POST /api/shorts/:
 
 IPFS write refusals with HTTP 429 or 503 leave lifecycle work in `capacity_wait`. The saved publication intent is retried after capacity becomes available without consuming failure attempts or marking the package pinned. Credential failures and integrity mismatches remain failures. Check storage admission separately from liveness: an IPFS node can serve existing videos while refusing new writes.
 
-Each Like requires a wallet-confirmed 0.1 test AE payment, split 80/20 between creator and deployer treasury. Gas is additional. Claims transfer accrued rewards to the signing wallet. A withdrawal requires explicit confirmation, stops official playback permanently and cannot erase third-party copies.
+Each Like is a wallet-signed, nonpayable `like(id, expected_config_version)` call with zero amount. Superhero initially sponsors its network fee through a dedicated fee-payer process. Sponsored Likes require an authenticated API session and a wallet supporting inner-transaction signing; unavailable sponsorship does not silently charge the viewer. Likes create no creator or treasury reward. Claims only transfer previously accrued rewards. A withdrawal requires explicit confirmation, stops official playback permanently and cannot erase third-party copies. See [Like sponsorship](LIKE-SPONSORSHIP.md) for setup and recovery.
 
 The read-only [wallet transaction endpoint](WALLET-TRANSACTIONS.md) distinguishes
 mempool, mined, confirmed, failed, unknown and reorged observations for a saved
@@ -900,13 +900,13 @@ matching API, streaming service and player together; synchronize clocks and
 restart both services together when rotating the shared internal key. This
 correlates metrics with authorized segment requests, not completed delivery or
 proof of a person watching. Browser reach remains an estimate; bot/Sybil defenses
-are still required, and these metrics never determine paid Like rewards.
+are still required, and these metrics never determine rewards.
 
 Creator routes live under `/shorts/studio` with content, analytics, revenue, upload and per-video pages. `/performance?days=7|28|90&short=<optional-id>` requires a creator session and checks video ownership. Live reward balances are always separate from the selected reporting window. Every playback summary (current, previous, daily and per-video) exposes `views`, `watchSeconds`, `watchHours`, `averageSeconds` and `completion`. `watchHours = watchSeconds / 3600` is returned without presentation rounding. Only qualified views contribute watch time; repeated segments are excluded, capped at one clip duration per browser/Short/UTC day. These are reporting-window totals, with up to 90 days of retained measurements.
 
 Playback is counted automatically without an opt-in control, including for guests. Playback sends cumulative unique playback time after at least two seconds. Authenticated observations below that threshold do not allocate persistent viewer or playback records. The signed streaming-session timestamp anchors the first qualifying update, clipped to the current UTC day. The browser merges watched intervals and excludes repeated segments, seeks, paused, buffered and background playback; the server bounds reports by clip duration, authorized segment delivery and elapsed server time. The hosted API stores a salted browser identifier in PostgreSQL, never a wallet address, for up to 90 days. The loopback demo uses SQLite. A view requires two seconds; repeated loops are capped at clip duration and deduplicated per browser/Short/UTC day. Reach is distinct browsers within the requested creator scope. Source breakdowns need five browsers. Reports mark partial collection windows, including prior periods beyond retention, and never invent historical watch time. `/analytics/forget` removes the current browser's retained measurements and subtracts their qualified views. A salted revocation digest expires after 24 hours to reject late requests from that deleted session. Public `views` and Studio reports use the same qualified events. Anonymous lifetime view totals survive the 90-day expiry of browser records; only retained records can be removed by browser deletion. Existing qualified analytics rows migrate once, while legacy unmeasured preview views are excluded. The legacy `/:id/view` endpoint now only reads counters. These controls do not provide Sybil resistance.
 
-For You receives a bounded engagement score from the last seven days: 70% watched fraction and 30% completion, averaged per browser before aggregation. Scores stay neutral below five distinct browsers and use twenty neutral prior browsers to temper small samples. The web client combines this with interests, follows, freshness and creator diversity. Recent stays chronological. Paid Likes, rewards and wallet balances never influence engagement scoring.
+For You receives a bounded engagement score from the last seven days: 70% watched fraction and 30% completion, averaged per browser before aggregation. Scores stay neutral below five distinct browsers and use twenty neutral prior browsers to temper small samples. The web client combines this with interests, follows, freshness and creator diversity. Recent stays chronological. Likes, rewards and wallet balances never influence engagement scoring.
 
 Hosted on-chain history is indexed by `src/plugins/shorts`, registered alongside the
 existing plugins only when `ENABLE_SHORTS=true`. Shared MDW backfill/live/reconnect
@@ -966,11 +966,11 @@ Anonymous reports use bounded reason/detail fields and idempotency IDs. Creator-
 
 Leave `SHORTS_JEV_ENABLED=0` until configured. Enable only with a server-side `TYPESAFE_API_KEY` and a pinned `SHORTS_JEV_MODEL=jev-x.y.z`. The adapter sends title, declared topic, description and optional creator captions to `https://api.typesafe.ai/v1/systemone`. It checks the returned version, taxonomy, confidence and output shape; uncertain or failed results fall back to manual review. Evidence hashes, taxonomy and rubric versions are retained. No viewing history or wallet data is sent. There is no raw video/audio analysis, ASR/OCR pipeline or automatic safety approval. Operators choose the final discovery topic; client matching uses that topic and local preferences.
 
-Run `npm run test:shorts:unit` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The opt-in testnet suite exercises resumable transfer, private drafts, operator-funded publication, verified playback, exact Like splitting, claims and withdrawal. It verifies that publishing leaves the creator balance unchanged.
+Run `npm run test:shorts:unit` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The historical paid-Like testnet suite does not qualify the zero-payment contract. The offline sponsorship checks validate signed envelopes, fee caps, canonical observation and recovery without sending transactions. Live integration of the new contract and fee-payer process is a separate release check.
 
 ## Local Studio connection without an extra signature
 
-Set `SHORTS_DEMO_CONNECTED_WALLET=1` in the ignored local environment and restart the API to use the main app's connected address throughout Studio. The config endpoint reports `creatorAccess: "connected-wallet"`; the web client opens and renews its Studio session automatically through `POST /api/shorts/auth/connect`. Switching or disconnecting the main wallet clears the previous account's creator data. Paid Likes, claims and withdrawals still require wallet-signed contract calls.
+Set `SHORTS_DEMO_CONNECTED_WALLET=1` in the ignored local environment and restart the API to use the main app's connected address throughout Studio. The config endpoint reports `creatorAccess: "connected-wallet"`; the web client opens and renews its Studio session automatically through `POST /api/shorts/auth/connect`. Switching or disconnecting the main wallet clears the previous account's creator data. Claims and withdrawals still require wallet-signed contract calls. Sponsored Likes require cryptographic authentication and are unavailable with this connection-only demo shortcut.
 
 This is a local demo identity shortcut, not cryptographic proof of address ownership. A local caller can request a creator session for any valid address, including access to that address's drafts and analytics. It is disabled by default, requires local testnet mode and is unavailable in production. Hosted startup rejects this shortcut. Connection-only sessions expire after 30 minutes, are stored separately, cannot access operator review routes and stop working when the flag is disabled. Outside this mode, private creator access still uses signed sessions.
 
@@ -1042,3 +1042,5 @@ rollout/rollback and the separate infrastructure and HTTP-ingress limits.
 
 [IPFS pin and capacity inventory](PIN-INVENTORY.md) records physical pin observations
 and compares them with original/HLS references using a separate read-only storage key.
+
+Current free-contract account responses use zero current rewards without calling removed accounting getters. Verified earlier reward contracts remain separate and keep their existing claim paths. Historical withdrawal markers continue to govern playback and migration; the current contract does not expose withdrawal.

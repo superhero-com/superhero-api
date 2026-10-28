@@ -1,5 +1,14 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
-import { AccountMemory, AeSdk, Contract, Node } from '@aeternity/aepp-sdk';
+import {
+  AccountMemory,
+  AeSdk,
+  Contract,
+  Node,
+  decode,
+  encode,
+  Encoding,
+} from '@aeternity/aepp-sdk';
+import { shortsContractPolicy, shortsVideo } from './shorts-contract-policy';
 import { createHttpHeaders, HttpClient } from '@azure/core-rest-pipeline';
 import { createHash } from 'node:crypto';
 import {
@@ -133,11 +142,37 @@ export class ShortsPublisherNodeService implements OnModuleInit {
       callStatic: true,
     });
     assertShortsReleaseConfig(this.config.release, cfg);
-    const { decodedResult: previous } = await this.contract.$call(
-      'get_previous',
-      [],
-      { callStatic: true },
-    );
+    const policy = shortsContractPolicy(cfg, this.config.release.schemaVersion);
+    if (policy.operator !== this.config.operator || !policy.publishingEnabled)
+      throw new Error('Publisher is no longer authorized by the contract');
+    let previous;
+    if (this.config.release.schemaVersion === 2) {
+      const {
+        decodedResult: [native, legacy],
+      } = await this.contract.$call('get_import_source', [], {
+        callStatic: true,
+      });
+      const source = native || legacy?.source;
+      previous = source
+        ? encode(decode(source), Encoding.ContractAddress)
+        : null;
+      const { decodedResult: status } = await this.contract.$call(
+        'migration_status',
+        [],
+        { callStatic: true },
+      );
+      if (
+        status.schema !== 2n ||
+        status.importing ||
+        status.abandoned ||
+        status.frozen
+      )
+        throw new Error('Publisher contract is not active');
+    } else {
+      previous = (
+        await this.contract.$call('get_previous', [], { callStatic: true })
+      ).decodedResult;
+    }
     if ((previous || null) !== this.config.release.previousContract)
       throw new Error('Publisher previous contract changed');
   }
@@ -175,21 +210,23 @@ export class ShortsPublisherNodeService implements OnModuleInit {
       height = tip.height - this.config.policy.confirmations;
     if (height < 0) throw new Error('Chain has insufficient confirmations');
     const generation = await this.generation(height);
-    const { decodedResult: value } = await this.contract.$call(
-      'get_short',
-      [intent.id],
-      { callStatic: true, top: generation.keyBlock.hash as `kh_${string}` },
+    const value = await shortsVideo(
+      this.contract,
+      intent.id,
+      this.config.release.schemaVersion,
+      { top: generation.keyBlock.hash as `kh_${string}` },
     );
     if (
       (await this.generation(height)).keyBlock.hash !== generation.keyBlock.hash
     )
       throw new Error('Publication observation changed during recovery');
     if (!value) {
-      const latest = await this.contract.$call('get_short', [intent.id], {
-        callStatic: true,
-      });
-      if (latest.decodedResult)
-        throw new Error('Existing publication awaits confirmation');
+      const latest = await shortsVideo(
+        this.contract,
+        intent.id,
+        this.config.release.schemaVersion,
+      );
+      if (latest) throw new Error('Existing publication awaits confirmation');
       return undefined;
     }
     if (!this.matches(intent, value))

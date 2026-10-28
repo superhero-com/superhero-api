@@ -1,4 +1,4 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import { shortsRuntimeScope, shortsStorageScope } from './shorts-runtime-scope';
 import { ShortsDatabaseService } from './shorts-database.service';
 import {
   Inject,
@@ -64,6 +64,8 @@ export class ShortsStudioReadService {
     const limit = selection?.limit ?? STUDIO_PAGE_SIZE;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > STUDIO_PAGE_SIZE)
       throw new BadRequestException('Invalid Studio page size');
+    const v2 = this.chain.release.schemaVersion === 2;
+    const media = shortsStorageScope(this.chain);
     const scope = [
       shortsRuntimeScope(this.chain).network,
       this.chain.state.contract,
@@ -97,19 +99,20 @@ export class ShortsStudioReadService {
             body->>'publication' AS publication,body->>'moderation'='rejected' OR body->'safety'->>'status'='blocked' AS restricted
           FROM shorts_content WHERE network=$1 AND contract=$2 AND creator=$3 AND ($13::text[] IS NULL OR id=ANY($13))
         ), events AS (
-          SELECT short_id,count(*) FILTER(WHERE action='PaidLike') AS likes,
+          SELECT short_id,count(*) FILTER(WHERE action IN ('Liked','PaidLike')) AS likes,
             bool_or(action='Published') AS published,bool_or(action='Withdrawn') AS withdrawn
-          FROM shorts_chain_events WHERE contract=$2 AND beneficiary=$3 AND block_height<=$4
+          FROM shorts_chain_events WHERE contract=$14 AND beneficiary=$3 AND block_height<=$4
             AND short_id IN (SELECT id FROM owned) GROUP BY short_id
         ), plays AS (
           SELECT short_id,count(*) AS views FROM shorts_measurement_plays
           WHERE network=$1 AND contract=$2 AND started>=$5 AND started<$6 AND seconds>=2
             AND short_id IN (SELECT id FROM owned) GROUP BY short_id
         ), library AS MATERIALIZED (
-          SELECT o.*,CASE WHEN o.publication='withdrawn' OR e.withdrawn THEN 'withdrawn'
-            WHEN o.publication='published' AND e.published THEN 'published' ELSE 'draft' END AS status,
-            coalesce(e.likes,0) AS likes,coalesce(p.views,0) AS period_views
+          SELECT o.*,CASE WHEN o.publication='withdrawn' OR e.withdrawn OR b.withdrawn THEN 'withdrawn'
+            WHEN o.publication='published' AND (e.published OR b.id IS NOT NULL) THEN 'published' ELSE 'draft' END AS status,
+            coalesce(e.likes,0)+coalesce(b.likes,0) AS likes,coalesce(p.views,0) AS period_views
           FROM owned o LEFT JOIN events e ON e.short_id=o.id LEFT JOIN plays p ON p.short_id=o.id
+          ${v2 ? 'LEFT JOIN shorts_import_videos b ON b.network=$1 AND b.contract=$14 AND b.id=o.id' : 'LEFT JOIN (SELECT NULL::varchar AS id,0::bigint AS likes,false AS withdrawn) b ON false'}
         ), filtered AS MATERIALIZED (
           SELECT *,${rank} AS rank FROM library WHERE ($7='all' OR status=$7)
             AND ($8='' OR position(lower($8) in lower(coalesce(title,'')||' '||coalesce(topic,'')))>0)
@@ -128,8 +131,8 @@ export class ShortsStudioReadService {
             FROM page p JOIN shorts_content c ON c.network=$1 AND c.contract=$2 AND c.id=p.id
             LEFT JOIN shorts_measurement_totals t ON t.network=$1 AND t.contract=$2 AND t.short_id=p.id),'[]'::jsonb) AS items`,
         [
-          shortsRuntimeScope(this.chain).network,
-          this.chain.state.contract,
+          media.network,
+          media.contract,
           creator,
           health.height - 2,
           start,
@@ -141,6 +144,7 @@ export class ShortsStudioReadService {
           cursor.position?.id ?? null,
           limit + 1,
           selection?.ids ?? null,
+          this.chain.state.contract,
         ],
       );
       const rows: (StudioRow & { rank: number; at: number; id: string })[] =

@@ -44,8 +44,11 @@ export async function shortsWorkerConfig(
     throw new Error('Invalid media worker deployment or lease');
   return {
     release: deployment,
-    scope: { network: deployment.network, contract: deployment.contract },
-    sourceHash: deployment.sourceHash,
+    scope: {
+      network: deployment.network,
+      contract: deployment.storage?.contract ?? deployment.contract,
+    },
+    sourceHash: deployment.storage?.sourceHash ?? deployment.sourceHash,
     leaseMs,
     scratch,
   };

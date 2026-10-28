@@ -1,4 +1,7 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import {
   Injectable,
   Inject,
@@ -83,7 +86,7 @@ export class ShortsStreamingService
   private scope(): ShortsScope {
     const contract = this.records?.chain.state.contract;
     if (!contract) throw new Error('Playback deployment is not initialized');
-    return shortsRuntimeScope(this.records!.chain);
+    return shortsStorageScope(this.records!.chain);
   }
   async enqueue(id: string) {
     if (!/^[a-zA-Z0-9_-]{1,80}$/.test(id)) throw new Error('Invalid Short ID');
@@ -102,7 +105,7 @@ export class ShortsStreamingService
     if (this.jobs) {
       await this.jobs.verify(
         this.scope(),
-        this.records!.chain.state.sourceHash!,
+        shortsStorageSourceHash(this.records!.chain),
       );
     } else {
       const records = this.records

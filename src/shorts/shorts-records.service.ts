@@ -1,4 +1,8 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+  shortsRuntimeScope,
+} from './shorts-runtime-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -33,7 +37,7 @@ export class ShortsRecordsService implements OnModuleInit {
       throw new ServiceUnavailableException(
         'Shorts deployment is not initialized',
       );
-    return shortsRuntimeScope(this.chain);
+    return shortsStorageScope(this.chain);
   }
   private fingerprint(value: unknown) {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -44,7 +48,15 @@ export class ShortsRecordsService implements OnModuleInit {
       throw new ConflictException(
         'Move the local snapshot through the offline legacy migration',
       );
-    await this.metadata.initialize(this.scope(), this.chain.state.sourceHash);
+    await this.metadata.initialize(
+      this.scope(),
+      shortsStorageSourceHash(this.chain),
+    );
+    if (this.scope().contract !== this.chain.state.contract)
+      await this.metadata.initialize(
+        shortsRuntimeScope(this.chain),
+        this.chain.state.sourceHash,
+      );
     await this.metadata.verifyHostedStorage(this.scope());
   }
   async read(id: string): Promise<StoredShort> {

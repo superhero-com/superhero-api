@@ -1,12 +1,15 @@
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { shortsContractPolicy } = require('./shorts-contract-policy');
 const { ShortsService } = require('./shorts.service');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 
 function fixture(patch = {}) {
   const { release, artifact } = releaseFixture(patch);
   const chain = { release, artifact, operator: { address: release.operator }, state: { contract: release.contract } };
+  chain.policy = async () => shortsContractPolicy([release.operator, release.treasury, release.likeFeeAetto, release.treasuryBps], 1);
+  chain.rewardContracts = () => [];
   const media = { health: async () => true, safety: { health: async () => false } };
   return { chain, media, service: new ShortsService(chain, media, { since: 1234 }, { realtime: true }) };
 }
@@ -48,4 +51,37 @@ test('a release change while readiness loads cannot return a mixed configuration
     };
     await assert.rejects(f.service.config(), { status: 503 });
   }
+});
+
+test('free Like configuration advertises sponsorship only for the bound zero-payment ABI', async () => {
+  const like = { name: 'like', arguments: [{ name: 'id', type: 'string' }, { name: 'expected_config_version', type: 'int' }],
+    returns: { tuple: [] }, payable: false, stateful: true };
+  const aci = [{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions: [like] } }];
+  const { release, artifact } = releaseFixture({ schemaVersion: 2, likeFeeAetto: '0' }, { aci });
+  const chain = { release, artifact, state: { contract: release.contract }, rewardContracts: () => [],
+    policy: async () => ({ version: '0', operator: release.operator, treasury: release.treasury,
+      likeFeeAetto: '0', treasuryBps: 2000, publishingEnabled: true, likesEnabled: true, commentsEnabled: true }) };
+  const media = { health: async () => true, safety: { health: async () => true } };
+  const service = new ShortsService(chain, media, { since: 1234 }, {});
+  const withoutSponsor = await service.config();
+  assert.equal(withoutSponsor.likeMode, 'free'); assert.equal(withoutSponsor.likeFee, '0');
+  assert.equal(withoutSponsor.creatorShare, 0); assert.equal(withoutSponsor.treasuryShare, 0);
+  assert.deepEqual(withoutSponsor.likeSponsorship, { enabled: false });
+  const sponsorship = { enabled: true, gasLimit: 100000, gasPrice: '1000000000', maxFee: '100000000000000', ttlBlocks: 10 };
+  service.likeSponsor = { publicConfig: async () => sponsorship };
+  assert.deepEqual((await service.config()).likeSponsorship, sponsorship);
+  service.likeSponsor = { publicConfig: async () => {
+    chain.state.contract = 'ct_changed_during_sponsorship_check';
+    return sponsorship;
+  } };
+  await assert.rejects(service.config(), { status: 503 });
+  chain.state.contract = release.contract;
+  service.likeSponsor = { publicConfig: async () => {
+    chain.release = { ...release, sourceHash: 'f'.repeat(64) };
+    return sponsorship;
+  } };
+  await assert.rejects(service.config(), { status: 503 });
+  chain.release = release;
+  chain.policy = async () => ({ likeFeeAetto: '1' });
+  await assert.rejects(service.config(), /capability/);
 });

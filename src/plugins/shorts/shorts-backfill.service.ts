@@ -13,6 +13,7 @@ import { ShortsGateway } from '@/shorts/shorts.gateway';
 import { ShortsPluginSyncService } from './shorts-plugin-sync.service';
 import { ShortsPluginNetworkService } from './shorts-plugin-network.service';
 import { SyncDirectionEnum } from '../plugin.interface';
+import { shortsIndexedContractCall } from '@/shorts/shorts-contract-call';
 
 // Durable contract coverage driven by the shared MDW sync loop. Websocket
 // delivery remains the low-latency path; this closes gaps after any interruption.
@@ -86,7 +87,7 @@ export class ShortsBackfillService {
           params.get('limit') !== '100'
         )
           throw new Error('Shorts cursor changed its coverage range');
-        const page = await this.network.json(url);
+        const page = await this.network.json(url, undefined, 60000);
         if (
           !Array.isArray(page.data) ||
           page.data.length > 100 ||
@@ -106,12 +107,13 @@ export class ShortsBackfillService {
             `${base.replace(/\/$/, '')}/v3/transactions/${hash}`,
           );
           const tx = toMdwTx(camelcaseKeysDeep(raw) as ITransaction) as Tx;
+          const call = shortsIndexedContractCall(tx);
           if (
             tx.hash !== hash ||
             tx.block_height < from ||
             tx.block_height > target ||
-            tx.type !== 'ContractCallTx' ||
-            !tx.raw?.log?.some((log) => log.address === contract)
+            !call ||
+            !call.log?.some((log) => log.address === contract)
           )
             throw new Error('Unexpected Shorts backfill contract');
           // Do not restore an orphan from a lagging middleware during startup.

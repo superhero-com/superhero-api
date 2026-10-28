@@ -1,4 +1,8 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import {
+  shortsRuntimeScope,
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import { ShortsAnalyticsService } from './shorts-analytics.service';
 import { ShortsLedgerService } from './shorts-ledger.service';
 import { ShortsLabelsService, SHORTS_TOPICS } from './shorts-labels.service';
@@ -14,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ShortsChainService, ae } from './shorts-chain.service';
-import { shortsRelease } from './shorts-release';
+import { shortsLikeMode, shortsRelease } from './shorts-release';
 import { ShortsMediaService } from './shorts-media.service';
 import { DemoActor, ShortRecord } from './shorts.types';
 import {
@@ -34,11 +38,14 @@ import {
   ShortsStudioReadService,
   StudioRow,
 } from './shorts-studio-read.service';
+import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
 
 export const TOPICS = ['All', ...SHORTS_TOPICS];
 @Injectable()
 export class ShortsService {
   private catalogRequests = 0;
+  private catalogItems = 0;
+  private readonly catalogWaiters: Array<() => void> = [];
   constructor(
     readonly chain: ShortsChainService,
     readonly media: ShortsMediaService,
@@ -52,6 +59,7 @@ export class ShortsService {
     @Optional() readonly publisher?: ShortsApiPublicationService,
     @Optional() readonly studioRead?: ShortsStudioReadService,
     @Optional() readonly following?: ShortsFollowingService,
+    @Optional() readonly likeSponsor?: ShortsLikeSponsorshipService,
   ) {}
   get demoAutoApprove() {
     return this.media?.safety?.demoAutoApprove === true;
@@ -76,10 +84,16 @@ export class ShortsService {
   async config() {
     const scope = shortsRuntimeScope(this.chain);
     const release = shortsRelease(this.chain.release, true);
-    const [ipfs, visualModeration] = await Promise.all([
+    const [ipfs, visualModeration, policy] = await Promise.all([
       this.media.health(),
       this.media.safety.health(),
+      this.chain.policy(),
     ]);
+    const likeMode = shortsLikeMode(release, this.chain.artifact, policy);
+    const likeSponsorship =
+      likeMode === 'free'
+        ? ((await this.likeSponsor?.publicConfig()) ?? { enabled: false })
+        : { enabled: false };
     shortsRuntimeScope(this.chain);
     if (
       JSON.stringify(shortsRelease(this.chain.release, true)) !==
@@ -98,10 +112,18 @@ export class ShortsService {
       realtime: this.ledger?.realtime === true,
       previousContract: this.chain.previous?.$options.address,
       previousAci: this.chain.previousArtifact?.aci,
+      rewardContracts: this.chain.rewardContracts().map((item) => ({
+        contract: item.contract.$options.address,
+        aci: item.artifact.aci,
+      })),
       ...scope,
-      likeFee: ae(release.likeFeeAetto),
-      creatorShare: (10000 - release.treasuryBps) / 100,
-      treasuryShare: release.treasuryBps / 100,
+      policy,
+      likeMode,
+      likeSponsorship,
+      likeFee: ae(policy.likeFeeAetto),
+      creatorShare:
+        likeMode === 'free' ? 0 : (10000 - policy.treasuryBps) / 100,
+      treasuryShare: likeMode === 'free' ? 0 : policy.treasuryBps / 100,
       ipfs,
       visualModeration,
       moderationMode: this.demoAutoApprove ? 'demo' : 'review',
@@ -113,7 +135,7 @@ export class ShortsService {
         : 'Local frame inspection + human review',
       analyticsSince: this.analytics.since,
       topics: TOPICS,
-      operator: this.chain.operator.address,
+      operator: policy.operator,
       aci: this.chain.artifact.aci,
       bytecodeHash: this.chain.artifact.bytecodeHash,
     };
@@ -223,6 +245,28 @@ export class ShortsService {
       this.catalogRequests -= 1;
     }
   }
+  private catalogMap<T, R>(items: T[], work: (item: T) => Promise<R>) {
+    return catalogMap(items, async (item) => {
+      // Four admitted pages have at most four map workers each. Share four
+      // active item reads across pages instead of multiplying their SQL fanout.
+      if (this.catalogItems >= 4) {
+        if (this.catalogWaiters.length >= 12)
+          throw new ServiceUnavailableException('Shorts catalog is busy');
+        await new Promise<void>((resolve) => this.catalogWaiters.push(resolve));
+      } else {
+        this.catalogItems += 1;
+      }
+      try {
+        return await work(item);
+      } finally {
+        // Transfer the permit directly to the oldest waiter before admitting
+        // another item; failed pages still drain through catalogMap.
+        const next = this.catalogWaiters.shift();
+        if (next) next();
+        else this.catalogItems -= 1;
+      }
+    });
+  }
   private async catalogItem(s: ShortRecord, address: string, studio: boolean) {
     if (
       !studio &&
@@ -264,7 +308,7 @@ export class ShortsService {
         studio ? address : undefined,
         paging.after,
       );
-      const rows = await catalogMap(page.items, (s) =>
+      const rows = await this.catalogMap(page.items, (s) =>
         this.catalogItem(s, address, studio),
       );
       return {
@@ -282,12 +326,12 @@ export class ShortsService {
       throw new ServiceUnavailableException('Following is unavailable');
     return this.catalogRead(async () => {
       const page = await this.following!.page(
-        shortsRuntimeScope(this.chain),
-        this.chain.state.sourceHash,
+        shortsStorageScope(this.chain),
+        shortsStorageSourceHash(this.chain),
         address,
         cursor,
       );
-      const results = await catalogMap(page.ids, async (id) => {
+      const results = await this.catalogMap(page.ids, async (id) => {
         const record = await this.records.find(id);
         return record ? this.catalogItem(record, address, false) : undefined;
       });
@@ -366,7 +410,7 @@ export class ShortsService {
       const graph = following
         ? await this.following!.current(shortsRuntimeScope(this.chain).network)
         : undefined;
-      const rows = await catalogMap(ids as string[], async (id) => {
+      const rows = await this.catalogMap(ids as string[], async (id) => {
         const record = await this.records.find(id);
         return record?.publication === 'published'
           ? this.catalogItem(record, address, false)
@@ -392,8 +436,9 @@ export class ShortsService {
       );
     const address = actor ? this.chain.address(actor) : '';
     const rows = await this.catalogRead(async () =>
-      catalogMap(await this.records.all(studio ? address : undefined), (s) =>
-        this.catalogItem(s, address, studio),
+      this.catalogMap(
+        await this.records.all(studio ? address : undefined),
+        (s) => this.catalogItem(s, address, studio),
       ),
     );
     return rows.filter(Boolean).sort((a, b) => {
@@ -507,6 +552,7 @@ export class ShortsService {
     reason = '',
     topic?: string,
     visualConfirmed = false,
+    reviewer?: string,
   ) {
     const short = await this.records.change(id, (short) => {
       if (topic && !TOPICS.slice(1).includes(topic))
@@ -537,7 +583,7 @@ export class ShortsService {
       short.reviewHistory ||= [];
       short.reviewHistory.push({
         at: Date.now(),
-        operator: this.chain.operator.address,
+        operator: reviewer ?? this.chain.operator.address,
         reason: short.reviewReason,
         approved: approve,
         topic: short.reviewedTopic,
@@ -746,7 +792,7 @@ export class ShortsService {
     return {
       id: short.id,
       cid: short.cid,
-      ...shortsRuntimeScope(this.chain),
+      ...shortsStorageScope(this.chain),
       files: short.files.filter((file) =>
         ['video.mp4', 'poster.jpg', 'captions.vtt'].includes(file.name),
       ),

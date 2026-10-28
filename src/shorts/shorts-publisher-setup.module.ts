@@ -1,3 +1,5 @@
+import { ShortsNativeImportModule } from './shorts-native-import.module';
+import { ShortsLegacyImportModule } from './shorts-legacy-import.module';
 import { ShortsDatabaseModule } from './shorts-database.module';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -9,6 +11,8 @@ import { ShortsPublisherSetupService } from './shorts-publisher-setup.service';
 @Module({
   imports: [
     ShortsDatabaseModule,
+    ShortsLegacyImportModule,
+    ShortsNativeImportModule,
     TypeOrmModule.forRoot({
       ...DATABASE_CONFIG,
       synchronize: false,

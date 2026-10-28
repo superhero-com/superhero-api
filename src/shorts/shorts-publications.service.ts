@@ -58,6 +58,7 @@ export class ShortsPublicationsService {
     sourceHash: string,
     operator: string,
     limits: PublishingPolicy,
+    content?: { contract: string; sourceHash: string },
   ) {
     const params = this.scope(scope),
       policy = publishingPolicy(limits);
@@ -99,6 +100,40 @@ export class ShortsPublicationsService {
       );
       if (binding.operator !== operator || binding.source_hash !== sourceHash)
         throw new ConflictException('Publisher deployment identity changed');
+      if (content) {
+        const [storage] = await db.query(
+          'SELECT source_hash FROM shorts_runtime WHERE network=$1 AND contract=$2',
+          [scope.network, content.contract],
+        );
+        if (storage?.source_hash !== content.sourceHash)
+          throw new ConflictException('Publication content source mismatch');
+        const [existing] = await db.query(
+          'SELECT content_contract FROM shorts_publishing_contracts WHERE network=$1 AND contract=$2 FOR UPDATE',
+          params,
+        );
+        if (
+          existing.content_contract !== null &&
+          existing.content_contract !== content.contract
+        )
+          throw new ConflictException('Publication content identity changed');
+        if (
+          existing.content_contract === null &&
+          content.contract !== scope.contract
+        ) {
+          const [{ count }] = await db.query(
+            'SELECT count(*) FROM shorts_publication_jobs WHERE network=$1 AND contract=$2',
+            params,
+          );
+          if (Number(count))
+            throw new ConflictException(
+              'Existing journal content cannot be rebound',
+            );
+        }
+        await db.query(
+          'UPDATE shorts_publishing_contracts SET content_contract=$3 WHERE network=$1 AND contract=$2',
+          [...params, content.contract],
+        );
+      }
     });
   }
   private async account(db: EntityManager, scope: ShortsScope) {

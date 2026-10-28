@@ -13,14 +13,40 @@ import {
   isAddressValid,
   Tag,
   verifySignature,
+  unpackTx,
+  rebuildUnpackedTx,
 } from '@aeternity/aepp-sdk';
+import { signedWalletTransactionFromNode } from './shorts-sponsored-observation';
 import { ShortsChainService } from './shorts-chain.service';
 import { receiptHash } from './shorts-receipts.service';
 import type { ShortsRelease } from './shorts-release';
 
 const confirmationsRequired = 3; // Same convention as the Shorts accounting index.
-const methods = ['paid_like', 'claim', 'withdraw'] as const;
+const methods = [
+  'paid_like',
+  'claim',
+  'withdraw',
+  'add_comment',
+  'delete_comment',
+  'like',
+] as const;
 const encoder = new AciContractCallEncoder([
+  {
+    contract: {
+      name: 'Shorts',
+      kind: 'contract_main',
+      typedefs: [],
+      functions: methods.slice(0, 3).map((name) => ({
+        name,
+        arguments: name === 'claim' ? [] : [{ name: 'id', type: 'string' }],
+        returns: { tuple: [] },
+        payable: name === 'paid_like',
+        stateful: true,
+      })),
+    },
+  },
+]);
+const v2Encoder = new AciContractCallEncoder([
   {
     contract: {
       name: 'Shorts',
@@ -28,10 +54,19 @@ const encoder = new AciContractCallEncoder([
       typedefs: [],
       functions: methods.map((name) => ({
         name,
-        arguments: name === 'claim' ? [] : [{ name: 'id', type: 'string' }],
         returns: { tuple: [] },
         payable: name === 'paid_like',
         stateful: true,
+        arguments: (name === 'claim'
+          ? []
+          : name === 'paid_like' || name === 'like'
+            ? ['string', 'int']
+            : name === 'add_comment'
+              ? ['string', 'string', 'int', 'int']
+              : name === 'delete_comment'
+                ? ['string', 'int']
+                : ['string']
+        ).map((type, i) => ({ name: `arg${i}`, type })),
       })),
     },
   },
@@ -50,7 +85,9 @@ export class ShortsWalletTransactionsService {
     network: ShortsRelease['network'],
   ) {
     try {
-      const call = transaction.tx;
+      const sponsored = transaction.tx?.type === 'PayingForTx';
+      const innerTransaction = sponsored ? transaction.tx.tx : transaction;
+      const call = innerTransaction?.tx;
       // The node omits TTL when its encoded value is zero (no expiry).
       // Rebuilding the signed hash below still binds this default to the tx.
       const ttl = call.ttl === undefined ? 0 : call.ttl;
@@ -65,8 +102,8 @@ export class ShortsWalletTransactionsService {
         call.nonce <= 0 ||
         !Number.isSafeInteger(ttl) ||
         ttl < 0 ||
-        !Array.isArray(transaction.signatures) ||
-        transaction.signatures.length !== 1 ||
+        !Array.isArray(innerTransaction.signatures) ||
+        innerTransaction.signatures.length !== 1 ||
         typeof call.callData !== 'string' ||
         call.callData.length > 4096
       )
@@ -85,19 +122,44 @@ export class ShortsWalletTransactionsService {
         gasPrice: call.gasPrice,
         callData: call.callData,
       });
-      const signature = decode(transaction.signatures[0]);
+      const signature = decode(innerTransaction.signatures[0]);
       const signed = buildTx({
         tag: Tag.SignedTx,
         encodedTx: unsigned,
         signatures: [signature],
       });
       const binary = decode(unsigned);
+      let innerHash: string | undefined;
+      if (sponsored) {
+        const outerRaw = signedWalletTransactionFromNode(transaction);
+        const outerSigned = unpackTx(outerRaw, Tag.SignedTx) as any;
+        const outer = outerSigned.encodedTx;
+        const outerBinary = decode(rebuildUnpackedTx(outer));
+        if (
+          buildTxHash(outerRaw) !== tx ||
+          !isAddressValid(outer.payerId, Encoding.AccountAddress) ||
+          !Number.isSafeInteger(outer.nonce) ||
+          outer.nonce <= 0 ||
+          ![hash(outerBinary), outerBinary].some((payload) =>
+            verifySignature(
+              Buffer.concat([Buffer.from(network), payload]),
+              outerSigned.signatures[0],
+              outer.payerId,
+            ),
+          )
+        )
+          throw new Error();
+        innerHash = buildTxHash(signed);
+      }
       if (
-        buildTxHash(signed) !== tx ||
+        (!sponsored && buildTxHash(signed) !== tx) ||
         // Match the SDK's modern hash and legacy raw-byte signing formats.
         ![hash(binary), binary].some((payload) =>
           verifySignature(
-            Buffer.concat([Buffer.from(network), payload]),
+            Buffer.concat([
+              Buffer.from(sponsored ? `${network}-inner_tx` : network),
+              payload,
+            ]),
             signature,
             actor as `ak_${string}`,
           ),
@@ -106,11 +168,18 @@ export class ShortsWalletTransactionsService {
         throw new Error();
       for (const method of methods) {
         try {
-          const { args } = encoder.decodeCall('Shorts', method, call.callData);
-          if (encoder.encodeCall('Shorts', method, args) !== call.callData)
+          const abi =
+            contract === this.chain.state.contract &&
+            this.chain.release.schemaVersion === 2
+              ? v2Encoder
+              : encoder;
+          const { args } = abi.decodeCall('Shorts', method, call.callData);
+          if (abi.encodeCall('Shorts', method, args) !== call.callData)
             continue;
-          if (contract !== this.chain.state.contract && method !== 'claim')
+          if (sponsored && (method !== 'like' || BigInt(call.amount) !== 0n))
             continue;
+          // Observe historical signed actions on their own ABI after cutover.
+          // This read-only route never authorizes a new legacy transaction.
           if (
             method !== 'claim' &&
             (typeof args[0] !== 'string' || args[0].length > 128)
@@ -121,6 +190,10 @@ export class ShortsWalletTransactionsService {
             videoId: method === 'claim' ? undefined : (args[0] as string),
             amount: BigInt(call.amount).toString(),
             nonce: call.nonce,
+            ...(sponsored
+              ? { innerHash, sponsored: true, sponsoredTx: tx }
+              : {}),
+            ...(abi === v2Encoder ? { args: args.map(String) } : {}),
           };
         } catch {
           /* Try only the other explicitly supported wallet actions. */
@@ -149,6 +222,9 @@ export class ShortsWalletTransactionsService {
       ![
         this.chain.state.contract,
         this.chain.previous?.$options.address,
+        ...(this.chain.rewardContracts?.() || []).map(
+          (item) => item.contract.$options.address,
+        ),
       ].includes(contract)
     )
       throw new BadRequestException('Unrecognized Shorts contract');
@@ -156,6 +232,10 @@ export class ShortsWalletTransactionsService {
     const network = release?.network;
     const currentContract = release?.contract;
     const previousContract = release?.previousContract;
+    const rewardBinding = JSON.stringify(release?.rewardContracts ?? []);
+    const rewardInstances = (this.chain.rewardContracts?.() || [])
+      .map((item) => item.contract.$options.address)
+      .join(',');
     const node = this.chain.sdk.api;
     const assertBinding = () => {
       if (
@@ -168,6 +248,10 @@ export class ShortsWalletTransactionsService {
         currentContract !== this.chain.state.contract ||
         (previousContract || undefined) !==
           this.chain.previous?.$options.address ||
+        JSON.stringify(release.rewardContracts ?? []) !== rewardBinding ||
+        (this.chain.rewardContracts?.() || [])
+          .map((item) => item.contract.$options.address)
+          .join(',') !== rewardInstances ||
         this.chain.sdk.api !== node
       )
         throw new ServiceUnavailableException(

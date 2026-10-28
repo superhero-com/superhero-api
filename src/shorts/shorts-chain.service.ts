@@ -14,7 +14,11 @@ import {
   isAddressValid,
   Encoding,
   DryRunError,
+  decode,
+  encode,
 } from '@aeternity/aepp-sdk';
+import { shortsContractPolicy, shortsVideo } from './shorts-contract-policy';
+import { shortsInnerContractCall } from './shorts-contract-call';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { LocalState, ShortRecord } from './shorts.types';
@@ -32,6 +36,7 @@ import {
   shortsConfigJson,
   loadShortsRelease,
   shortsArtifact,
+  shortsLikeMode,
   assertShortsReleaseConfig,
 } from './shorts-release';
 
@@ -53,6 +58,7 @@ export class ShortsChainService
   release: ShortsRelease;
   previous?: Contract<any>;
   previousArtifact?: any;
+  rewards: { contract: Contract<any>; artifact: any }[] = [];
   state: LocalState = { shorts: [], receipts: [] };
   private receiptScope?: ShortsScope;
   constructor(
@@ -82,6 +88,7 @@ export class ShortsChainService
       this.previous?.$options.address,
       this.state.receipts,
       process.env.SHORTS_IMPORT_LEGACY_RECEIPTS === '1',
+      this.release.rewardContracts?.map((item) => item.contract) ?? [],
     );
     this.receiptScope = scope;
   }
@@ -173,7 +180,10 @@ export class ShortsChainService
       aci: this.artifact.aci,
       address: deployment.contract,
     });
-    const previousAddress = await this.read('get_previous');
+    const previousAddress =
+      deployment.schemaVersion === 2
+        ? await this.importSource()
+        : await this.read('get_previous');
     if ((previousAddress || null) !== deployment.previousContract)
       throw new Error('Previous contract does not match the release manifest');
     assertShortsReleaseConfig(deployment, await this.read('get_config'));
@@ -201,6 +211,32 @@ export class ShortsChainService
         aci: this.previousArtifact.aci,
         address: previousAddress,
       });
+      this.rewards.push({
+        contract: this.previous,
+        artifact: this.previousArtifact,
+      });
+    }
+    if (deployment.rewardContracts?.length) {
+      const artifacts = await shortsConfigJson(
+        process.env.SHORTS_REWARD_ARTIFACTS_FILE,
+      );
+      for (const identity of deployment.rewardContracts) {
+        const artifact = shortsArtifact(artifacts[identity.contract], identity);
+        const code = await this.sdk.api.getContractCode(identity.contract);
+        if (
+          createHash('sha256').update(code.bytecode).digest('hex') !==
+          identity.bytecodeHash
+        )
+          throw new Error('Reward contract bytecode mismatch');
+        this.rewards.push({
+          artifact,
+          contract: await Contract.initialize({
+            ...this.sdk.getContext(),
+            aci: artifact.aci,
+            address: identity.contract,
+          }),
+        });
+      }
     }
     if (!this.sharedReceipts) this.state = this.store.load() || this.state;
     if (this.state.contract && this.state.contract !== deployment.contract) {
@@ -268,10 +304,45 @@ export class ShortsChainService
     args: unknown[] = [],
     signal?: AbortSignal,
   ): Promise<any> {
+    if (method === 'get_short' && this.release.schemaVersion === 2) {
+      return this.readNode(async () => {
+        const video = await shortsVideo(this.contract, String(args[0]), 2);
+        if (!video) return undefined;
+        const stats = (
+          await this.contract.$call('get_video_stats', args, {
+            callStatic: true,
+          })
+        ).decodedResult;
+        return { ...video, likes: stats.likes, comments: stats.comments };
+      }, signal);
+    }
     return this.readNode(
       async () => (await this.invoke(method, args, true)).decodedResult,
       signal,
     );
+  }
+  async policy(signal?: AbortSignal) {
+    return shortsContractPolicy(
+      await this.read('get_config', [], signal),
+      this.release.schemaVersion,
+    );
+  }
+  private async importSource() {
+    if (BigInt(await this.read('schema_version')) !== 2n)
+      throw new Error('Unsupported Shorts schema');
+    const [native, legacy] = await this.read('get_import_source');
+    const address = native || legacy?.source;
+    return address
+      ? encode(decode(address), Encoding.ContractAddress)
+      : undefined;
+  }
+  rewardContracts() {
+    // Compatibility for unit fixtures and legacy single-predecessor releases.
+    return this.rewards.length
+      ? this.rewards
+      : this.previous
+        ? [{ contract: this.previous, artifact: this.previousArtifact }]
+        : [];
   }
   private async invoke(method: string, args: unknown[], callStatic = false) {
     for (let attempt = 0; ; attempt++) {
@@ -318,17 +389,18 @@ export class ShortsChainService
       this.sdk.api.getTransactionByHash(tx),
       this.sdk.api.getTransactionInfoByHash(tx),
     ]);
-    const call = transaction.tx as any;
+    const call = shortsInnerContractCall(transaction.tx);
     const result = (info as any).callInfo;
     if (
       transaction.hash !== tx ||
       !Number.isSafeInteger(transaction.blockHeight) ||
       transaction.blockHeight < 0 ||
-      call.type !== 'ContractCallTx' ||
+      !call ||
       call.callerId !== address ||
-      ![this.state.contract, this.previous?.$options.address].includes(
-        call.contractId,
-      ) ||
+      ![
+        this.state.contract,
+        ...this.rewardContracts().map((item) => item.contract.$options.address),
+      ].includes(call.contractId) ||
       result?.returnType !== 'ok' ||
       result.callerId !== address ||
       result.contractId !== call.contractId ||
@@ -362,23 +434,57 @@ export class ShortsChainService
   async account(address: string) {
     this.address(address);
     return this.readNode(async () => {
-      const balance = await this.read('get_account', [address]);
-      const old = this.previous
-        ? (
-            await this.previous.$call('get_account', [address], {
-              callStatic: true,
-            })
-          ).decodedResult
-        : undefined;
+      const freeLikes =
+        this.release.schemaVersion === 2 &&
+        shortsLikeMode(this.release, this.artifact, await this.policy()) ===
+          'free';
+      const balance = freeLikes
+        ? { available: 0n, earned: 0n, claimed: 0n }
+        : await this.read('get_account', [address]);
+      const rewards = [];
+      for (const item of this.rewardContracts()) {
+        // A content predecessor may itself be a free contract with no rewards API.
+        // Keep it in the event index, but do not invent a call to a removed getter.
+        const functions = item.artifact?.aci?.flatMap(
+          (entry: any) => entry.contract?.functions || [],
+        );
+        if (
+          functions &&
+          !functions.some((fn: any) =>
+            ['get_account', 'claim'].includes(fn.name),
+          )
+        )
+          continue;
+        const old = (
+          await item.contract.$call('get_account', [address], {
+            callStatic: true,
+          })
+        ).decodedResult;
+        rewards.push({ contract: item.contract.$options.address, ...old });
+      }
       return {
         address,
         wallet: ae(
           await this.sdk.getBalance(address as `ak_${string}`).catch(() => '0'),
         ),
         available: ae(balance.available),
-        earned: ae(BigInt(balance.earned) + BigInt(old?.earned || 0)),
-        claimed: ae(BigInt(balance.claimed) + BigInt(old?.claimed || 0)),
-        previousAvailable: old ? ae(old.available) : '0',
+        earned: ae(
+          rewards.reduce(
+            (sum, old) => sum + BigInt(old.earned || 0),
+            BigInt(balance.earned),
+          ),
+        ),
+        claimed: ae(
+          rewards.reduce(
+            (sum, old) => sum + BigInt(old.claimed || 0),
+            BigInt(balance.claimed),
+          ),
+        ),
+        previousAvailable: rewards[0] ? ae(rewards[0].available) : '0',
+        rewardAccounts: rewards.map((old) => ({
+          contract: old.contract,
+          available: ae(old.available),
+        })),
       };
     });
   }

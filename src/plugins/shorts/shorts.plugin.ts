@@ -17,6 +17,7 @@ import {
 import { ShortsGateway } from '@/shorts/shorts.gateway';
 import { ShortsPluginSyncService } from './shorts-plugin-sync.service';
 import { ShortsBackfillService } from './shorts-backfill.service';
+import { shortsIndexedContractCall } from '@/shorts/shorts-contract-call';
 
 @Injectable()
 export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
@@ -51,11 +52,15 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
       {
         type: 'contract_call',
         contractIds,
-        predicate: (tx) =>
-          tx.type === 'ContractCallTx' &&
-          (contractIds.includes(tx.contract_id as `ct_${string}`) ||
-            (Array.isArray(tx.raw?.log) &&
-              tx.raw.log.some((log) => contractIds.includes(log.address)))),
+        predicate: (tx) => {
+          const call = shortsIndexedContractCall(tx);
+          return (
+            !!call &&
+            (contractIds.includes(call.contractId) ||
+              (Array.isArray(call.log) &&
+                call.log.some((log) => contractIds.includes(log.address))))
+          );
+        },
       },
     ];
   }
@@ -96,9 +101,11 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
       (repo: Repository<Tx>, limit: number, cursor?: TxPageCursor) => {
         const query = repo
           .createQueryBuilder('tx')
-          .where('tx.type=:type', { type: 'ContractCallTx' })
+          .where('tx.type IN (:...types)', {
+            types: ['ContractCallTx', 'PayingForTx'],
+          })
           .andWhere(
-            "(tx.contract_id IN (:...contracts) OR tx.data ? 'shorts' OR EXISTS(SELECT 1 FROM plugin_failed_transaction f WHERE f.plugin_name='shorts' AND f.tx_hash=tx.hash))",
+            "(tx.contract_id IN (:...contracts) OR COALESCE(tx.raw #>> '{tx,tx,contractId}',tx.raw #>> '{tx,contractId}') IN (:...contracts) OR tx.data ? 'shorts' OR EXISTS(SELECT 1 FROM plugin_failed_transaction f WHERE f.plugin_name='shorts' AND f.tx_hash=tx.hash))",
             { contracts },
           )
           .andWhere(

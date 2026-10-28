@@ -31,8 +31,8 @@
     "postinstall": "node ./scripts/update-package-type.js && rm -rf ./node_modules/bctsl-sdk/.build && tsc -b ./node_modules/bctsl-sdk/tsconfig.cjs.json ./node_modules/bctsl-sdk/tsconfig.esm.json ./node_modules/bctsl-sdk/tsconfig.types.json",
     "start:shorts:testnet": "node --env-file=.env.shorts-testnet -r ts-node/register -r tsconfig-paths/register src/shorts/local-main.ts",
     "shorts:review": "node --env-file=.env.shorts-testnet -r ts-node/register -r tsconfig-paths/register src/shorts/shorts-operator.client.ts",
-    "test:shorts:unit": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-feature.test.cjs src/shorts/shorts-studio.test.cjs src/shorts/shorts-safety.test.cjs src/shorts/shorts-ipfs.test.cjs src/shorts/shorts-playback.test.cjs src/shorts/shorts-playback-evidence.test.cjs src/shorts/shorts-streaming.test.cjs src/shorts/shorts-upload-cleanup.test.cjs src/shorts/shorts-upload-auth.test.cjs src/shorts/shorts-store.test.cjs src/shorts/shorts-work-queue.test.cjs src/shorts/shorts-ingestion.test.cjs src/shorts/shorts-upstream.test.cjs src/shorts/shorts-node-access.test.cjs src/shorts/shorts-measurement-monitor.test.cjs src/shorts/shorts-reconciliation.test.cjs src/shorts/shorts-release.test.cjs src/shorts/shorts-plugin-network.test.cjs src/shorts/shorts-runtime-scope.test.cjs src/shorts/shorts-index-network.test.cjs src/shorts/shorts-public-config.test.cjs src/shorts/shorts-service-release.test.cjs src/shorts/shorts-direct-uploads.test.cjs",
-    "test:shorts:index": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-index.test.cjs",
+    "test:shorts:unit": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-feature.test.cjs src/shorts/shorts-studio.test.cjs src/shorts/shorts-safety.test.cjs src/shorts/shorts-ipfs.test.cjs src/shorts/shorts-playback.test.cjs src/shorts/shorts-playback-evidence.test.cjs src/shorts/shorts-streaming.test.cjs src/shorts/shorts-upload-cleanup.test.cjs src/shorts/shorts-upload-auth.test.cjs src/shorts/shorts-store.test.cjs src/shorts/shorts-work-queue.test.cjs src/shorts/shorts-ingestion.test.cjs src/shorts/shorts-upstream.test.cjs src/shorts/shorts-node-access.test.cjs src/shorts/shorts-measurement-monitor.test.cjs src/shorts/shorts-reconciliation.test.cjs src/shorts/shorts-release.test.cjs src/shorts/shorts-plugin-network.test.cjs src/shorts/shorts-runtime-scope.test.cjs src/shorts/shorts-index-network.test.cjs src/shorts/shorts-public-config.test.cjs src/shorts/shorts-service-release.test.cjs src/shorts/shorts-direct-uploads.test.cjs src/shorts/shorts-v2.test.cjs src/shorts/shorts-like-sponsorship.test.cjs src/shorts/shorts-free-like-index.test.cjs src/shorts/shorts-native-import.test.cjs src/shorts/shorts-index-schema.test.cjs",
+    "test:shorts:index": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-index.test.cjs src/shorts/shorts-free-like-index-database.test.cjs src/shorts/shorts-index-schema.test.cjs",
     "test:shorts:testnet": "node --test src/shorts/shorts.testnet.test.cjs",
     "test:shorts:metadata": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-metadata.test.cjs",
     "test:shorts:sessions": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-sessions.test.cjs",
@@ -84,7 +84,16 @@
     "test:shorts:assembled": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-assembled.test.cjs",
     "test:shorts:reconciliation": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-reconciliation.test.cjs",
     "test:shorts:reconciliation:devnet": "node --test src/shorts/shorts-reconciliation-devnet.test.cjs",
-    "test:shorts:direct-uploads": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-direct-uploads.test.cjs"
+    "test:shorts:direct-uploads": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-direct-uploads.test.cjs",
+    "test:shorts:free-like-index-database": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-free-like-index-database.test.cjs",
+    "test:shorts:v2": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-v2.test.cjs src/shorts/shorts-v2-storage.test.cjs",
+    "shorts:migrate:contract": "node dist/shorts/legacy-import-main",
+    "start:shorts:like-sponsor": "node dist/shorts/like-sponsor-main",
+    "test:shorts:like-sponsorship": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-like-sponsorship.test.cjs",
+    "test:shorts:like-sponsorship-database": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-like-sponsorship-database.test.cjs",
+    "shorts:migrate:native": "node dist/shorts/native-import-main",
+    "test:shorts:native-import": "node -r ts-node/register -r tsconfig-paths/register --test src/shorts/shorts-native-import.test.cjs",
+    "shorts:like-sponsor:setup": "node dist/shorts/like-sponsor-setup-main"
   },
   "dependencies": {
     "@aeternity/aepp-calldata": "1.9.1",

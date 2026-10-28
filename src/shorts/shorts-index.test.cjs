@@ -4,7 +4,7 @@ const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-ShortsCoverage');
 const { ShortsChainIndex1791676800000 } = require('../migrations/1791676800000-ShortsChainIndex');
-const { ShortsIndexService } = require('./shorts-index.service');
+const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('./shorts-index.service');
 const { ShortsGateway } = require('./shorts.gateway');
 const { ShortsPluginSyncService } = require('../plugins/shorts/shorts-plugin-sync.service');
 const { ShortsPlugin } = require('../plugins/shorts/shorts.plugin');
@@ -38,7 +38,13 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     $call: async () => ({ decodedResult: { creator: 'ak_creator' } }),
   };
   const previous = { ...contract, $options: { address: 'ct_previous' } };
-  const chain = { contract, previous, state: { contract: 'ct_current' }, release: { network: 'ae_uat', contract: 'ct_current' } };
+  const previousArtifact = { aci: [{ contract: {
+    kind: 'contract_main',
+    functions: [{ name: 'get_short', arguments: [{ type: 'string' }], payable: false, stateful: false }],
+    event: { variant: [{ PaidLike: ['address', 'int', 'string'] }, { Published: ['address', 'string'] }] },
+  } }] };
+  const chain = { contract, previous, state: { contract: 'ct_current' }, release: { schemaVersion: 1, network: 'ae_uat', contract: 'ct_current' },
+    rewardContracts: () => [{ contract: previous, artifact: previousArtifact }] };
   const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain));
   // Ledger/projection fixtures isolate external identity checks, covered by the
   // real HTTP/SDK tests in shorts-plugin-network.test.cjs.
@@ -59,8 +65,20 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
   const first = tx('th_first', [like]);
   first.data = { another_plugin: { keep: true } };
   await repo.save(first);
-  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',1,true,11),('ct_previous',1,true,11)");
+  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',$1,true,11),('ct_previous',$1,true,11)", [SHORTS_INDEX_VERSION]);
 
+  await t.test('V2 shifted publication/like event indices retain exact rewards and use native video reads', async () => {
+    chain.release.schemaVersion = 2; const original = contract.$call, calls = [];
+    contract.$call = async (method, args) => { calls.push([method, args]); return original(); };
+    try {
+      const pub = tx('th_v2publish', [{ name: 'Published', args: ['ak_creator', '800', 'v2video', 'bafyfixture'] }]); pub.function = 'publish';
+      const paid = tx('th_v2like', [{ name: 'PaidLike', args: ['ak_viewer', '17', '9', 'v2video'] }]);
+      await repo.save(pub); await repo.save(paid); await processor.processTransaction(pub, 'live'); await processor.processTransaction(paid, 'live');
+      const events = await db.query("SELECT action,short_id,beneficiary,amount::text FROM shorts_chain_events WHERE tx_hash IN ('th_v2publish','th_v2like') ORDER BY action");
+      assert.deepEqual(events, [{ action: 'PaidLike', short_id: 'v2video', beneficiary: 'ak_creator', amount: '17' }, { action: 'Published', short_id: 'v2video', beneficiary: 'ak_creator', amount: '0' }]);
+      assert.deepEqual(calls, [['get_video', ['v2video']]]);
+    } finally { chain.release.schemaVersion = 1; contract.$call = original; await repo.delete(['th_v2publish', 'th_v2like']); }
+  });
   await t.test('duplicate delivery, previous deployment, and failed calls', async () => {
     await processor.processTransaction(first, 'live'); await processor.processTransaction(first, 'backward');
     const old = tx('th_previous', [like], 5, 'ct_previous'); await repo.save(old); await processor.processTransaction(old, 'live');
@@ -81,7 +99,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
       assert.equal((await db.query("SELECT COUNT(*)::int AS n FROM shorts_chain_events WHERE tx_hash=$1", [row.hash]))[0].n, 0);
     } finally { network.verify = verify; }
     await processor.processTransaction(row, 'live');
-    assert.equal((await repo.findOneBy({ hash: row.hash })).data.shorts._version, 1);
+    assert.equal((await repo.findOneBy({ hash: row.hash })).data.shorts._version, SHORTS_INDEX_VERSION);
     await repo.delete({ hash: row.hash });
   });
   await t.test('decode/storage failure is retryable and cannot stamp a successful version', async () => {
@@ -123,10 +141,10 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     assert.equal(plugin.filters()[0].predicate({ ...first, type: 'SpendTx' }), false);
     const row = tx('th_version', [like]); row.data = { shorts: { _version: 0 } }; await repo.save(row);
     const foreign = tx('th_foreign', [like], 5, 'ct_other'); await repo.save(foreign);
-    const pending = await plugin.getUpdateQueries(1)[0](repo, 100);
+    const pending = await plugin.getUpdateQueries(SHORTS_INDEX_VERSION)[0](repo, 100);
     assert.deepEqual(pending.map(item => item.hash), ['th_version']);
     await plugin.updateTransactions();
-    assert.equal((await repo.findOneBy({ hash: row.hash })).data.shorts._version, 1);
+    assert.equal((await repo.findOneBy({ hash: row.hash })).data.shorts._version, SHORTS_INDEX_VERSION);
     assert.equal((await db.query("SELECT COUNT(*)::int AS n FROM shorts_chain_events WHERE tx_hash='th_version'"))[0].n, 1);
     plugin.onModuleDestroy();
   });
@@ -142,7 +160,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
       assert.equal((await db.query("SELECT complete FROM shorts_index_backfill WHERE contract='ct_current'"))[0].complete, false);
       fail = false; await backfill.run(12, () => false); await backfill.run(12, () => false);
       assert.equal(requests, 3);
-      assert.equal((await repo.findOneBy({ hash: raw.hash })).data.shorts._version, 1);
+      assert.equal((await repo.findOneBy({ hash: raw.hash })).data.shorts._version, SHORTS_INDEX_VERSION);
     } finally { globalThis.fetch = originalFetch; }
   });
   await t.test('shared sync recovers a long outage and resumes the exact failed page after restart', async () => {

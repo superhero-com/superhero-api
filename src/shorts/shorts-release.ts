@@ -3,6 +3,10 @@ import { open } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Encoding, isAddressValid } from '@aeternity/aepp-sdk';
+import {
+  ShortsContractPolicy,
+  shortsContractPolicy,
+} from './shorts-contract-policy';
 
 /** Public release identity, mounted independently of the compiled artifact. */
 export interface ShortsArtifactIdentity {
@@ -12,7 +16,7 @@ export interface ShortsArtifactIdentity {
   aciHash: string;
 }
 export interface ShortsRelease {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   network: 'ae_uat' | 'ae_mainnet';
   node: string;
   middleware: string;
@@ -27,6 +31,9 @@ export interface ShortsRelease {
   likeFeeAetto: string;
   treasuryBps: number;
   previousArtifact?: ShortsArtifactIdentity;
+  /** Stable media namespace; chain transactions always target contract above. */
+  storage?: { contract: `ct_${string}`; sourceHash: string };
+  rewardContracts?: (ShortsArtifactIdentity & { contract: `ct_${string}` })[];
 }
 
 export interface ShortsArtifact {
@@ -106,7 +113,7 @@ export function shortsRelease(
     throw new Error('Invalid Shorts release manifest');
   const v = value as Record<string, any>;
   if (
-    v.schemaVersion !== 1 ||
+    ![1, 2].includes(v.schemaVersion) ||
     !['ae_uat', 'ae_mainnet'].includes(v.network) ||
     !isAddressValid(v.contract, Encoding.ContractAddress) ||
     !isAddressValid(v.operator, Encoding.AccountAddress) ||
@@ -122,7 +129,8 @@ export function shortsRelease(
       (key) => typeof v[key] === 'string' && /^[a-f0-9]{64}$/.test(v[key]),
     ) ||
     typeof v.likeFeeAetto !== 'string' ||
-    !/^[1-9]\d{0,77}$/.test(v.likeFeeAetto) ||
+    !/^(0|[1-9]\d{0,77})$/.test(v.likeFeeAetto) ||
+    (v.schemaVersion === 1 && v.likeFeeAetto === '0') ||
     BigInt(v.likeFeeAetto) >= 2n ** 256n ||
     !Number.isInteger(v.treasuryBps) ||
     v.treasuryBps < 0 ||
@@ -135,9 +143,47 @@ export function shortsRelease(
       : artifactIdentity(v.previousArtifact);
   if (v.previousContract === null && v.previousArtifact !== undefined)
     throw new Error('Unexpected previous artifact in the release manifest');
+  if (
+    v.schemaVersion === 1 &&
+    (v.storage !== undefined || v.rewardContracts !== undefined)
+  )
+    throw new Error(
+      'Legacy releases cannot override their storage or reward identities',
+    );
+  const storage =
+    v.storage === undefined
+      ? undefined
+      : {
+          contract: v.storage?.contract,
+          sourceHash: v.storage?.sourceHash,
+        };
+  if (
+    storage &&
+    (!isAddressValid(storage.contract, Encoding.ContractAddress) ||
+      !/^[a-f0-9]{64}$/.test(storage.sourceHash))
+  )
+    throw new Error('Invalid Shorts storage identity');
+  if (
+    v.rewardContracts !== undefined &&
+    (!Array.isArray(v.rewardContracts) || v.rewardContracts.length > 16)
+  )
+    throw new Error('Invalid reward contracts');
+  const seen = new Set([v.contract, v.previousContract]);
+  const rewardContracts = v.rewardContracts?.map((item: any) => {
+    if (
+      !isAddressValid(item?.contract, Encoding.ContractAddress) ||
+      seen.has(item.contract)
+    )
+      throw new Error('Invalid or duplicate reward contract');
+    seen.add(item.contract);
+    return Object.freeze({
+      contract: item.contract,
+      ...artifactIdentity(item),
+    });
+  });
   // Copy only reviewed identity fields; deployment receipts may have extra metadata.
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: v.schemaVersion,
     network: v.network,
     node: endpoint(v.node, true, allowLoopback),
     middleware: endpoint(v.middleware, false, allowLoopback),
@@ -152,6 +198,10 @@ export function shortsRelease(
     likeFeeAetto: v.likeFeeAetto,
     treasuryBps: v.treasuryBps,
     ...(previousArtifact ? { previousArtifact } : {}),
+    ...(storage ? { storage: Object.freeze(storage) } : {}),
+    ...(rewardContracts
+      ? { rewardContracts: Object.freeze(rewardContracts) as any }
+      : {}),
   });
 }
 
@@ -189,8 +239,9 @@ export function assertSupportedShortsRelease(
   if (release.middleware !== 'https://testnet.aeternity.io/mdw')
     throw new Error('Shorts release middleware does not match the indexer');
   if (
-    release.likeFeeAetto !== '100000000000000000' ||
-    release.treasuryBps !== 2000
+    release.schemaVersion === 1 &&
+    (release.likeFeeAetto !== '100000000000000000' ||
+      release.treasuryBps !== 2000)
   )
     throw new Error('Unsupported Shorts Like fee or split');
 }
@@ -228,10 +279,46 @@ export function shortsArtifact(
   return a;
 }
 
+/** A zero price alone cannot advertise the new nonpayable Like entrypoint. */
+export function shortsLikeMode(
+  release: ShortsRelease,
+  artifact: ShortsArtifact,
+  policy: ShortsContractPolicy,
+): 'free' | 'paid' {
+  const bound = shortsArtifact(artifact, release);
+  const contracts = bound.aci
+    .map((item) => item.contract)
+    .filter((item) => item?.kind === 'contract_main');
+  const functions =
+    contracts.length === 1 && Array.isArray(contracts[0].functions)
+      ? contracts[0].functions
+      : [];
+  const likes = functions.filter((fn: any) => fn.name === 'like');
+  if (!likes.length && policy.likeFeeAetto !== '0') return 'paid';
+  const like = likes[0];
+  if (
+    release.schemaVersion !== 2 ||
+    release.likeFeeAetto !== '0' ||
+    policy.likeFeeAetto !== '0' ||
+    likes.length !== 1 ||
+    like.payable !== false ||
+    like.stateful !== true ||
+    JSON.stringify(like.arguments?.map((arg: any) => arg.type)) !==
+      JSON.stringify(['string', 'int']) ||
+    functions.some((fn: any) => fn.name === 'paid_like')
+  )
+    throw new Error('Shorts Like capability does not match its release');
+  return 'free';
+}
+
 export function assertShortsReleaseConfig(
   release: ShortsRelease,
   cfg: unknown,
 ) {
+  if (release.schemaVersion === 2) {
+    shortsContractPolicy(cfg, 2);
+    return;
+  }
   if (
     !Array.isArray(cfg) ||
     cfg.length !== 4 ||

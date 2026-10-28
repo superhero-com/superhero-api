@@ -1,4 +1,4 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import { shortsStorageScope } from './shorts-runtime-scope';
 import {
   BadRequestException,
   Injectable,
@@ -67,7 +67,7 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
       throw invalid();
     }
     const now = Date.now();
-    const scope = shortsRuntimeScope(this.chain);
+    const scope = shortsStorageScope(this.chain);
     if (
       !value ||
       Array.isArray(value) ||

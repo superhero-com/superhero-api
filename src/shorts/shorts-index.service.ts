@@ -5,8 +5,9 @@ import { ShortsChainService, ae } from './shorts-chain.service';
 import { LedgerReport, ShortsLedgerService } from './shorts-ledger.service';
 import { ShortsIndexNetworkService } from './shorts-index-network.service';
 import { shortsRuntimeScope } from './shorts-runtime-scope';
+import { shortsIndexSchema } from './shorts-index-schema';
 
-export const SHORTS_INDEX_VERSION = 1;
+export const SHORTS_INDEX_VERSION = 4;
 export const SHORTS_UPDATES_CHANNEL = 'shorts_updated';
 export const SHORTS_PLUGIN = 'SHORTS_MDW_PLUGIN';
 
@@ -22,7 +23,20 @@ export class ShortsIndexService extends ShortsLedgerService {
   }
 
   contracts() {
-    return [this.chain.contract, this.chain.previous].filter(Boolean);
+    return [
+      this.chain.contract,
+      ...this.chain.rewardContracts().map((item) => item.contract),
+    ].filter(Boolean);
+  }
+
+  schema(contract: string): 1 | 2 {
+    if (contract === this.chain.release.contract)
+      return this.chain.release.schemaVersion;
+    const reward = this.chain
+      .rewardContracts()
+      .find((item) => item.contract.$options.address === contract);
+    if (!reward) throw new Error('Unbound Shorts accounting contract');
+    return shortsIndexSchema(reward.artifact);
   }
 
   assertNetwork() {
@@ -51,10 +65,16 @@ export class ShortsIndexService extends ShortsLedgerService {
     );
     const height = Number(sync?.tip_height ?? -1);
     const syncedAt = sync ? new Date(sync.updated_at).getTime() : 0;
+    // Separate the candidate families so PostgreSQL can use the contract, type
+    // and Shorts-namespace indexes. Nested calls exist only inside PayingForTx;
+    // checking that JSON path across ordinary calls forces a full history scan.
     const [health] = await manager.query(
       `SELECT
         (SELECT COUNT(*) FROM shorts_index_backfill WHERE contract=ANY($1::text[]) AND version=$2 AND complete AND covered_height >= $3) AS complete,
-        (EXISTS(SELECT 1 FROM plugin_failed_transaction WHERE plugin_name='shorts') OR EXISTS(SELECT 1 FROM txs WHERE (contract_id=ANY($1::text[]) OR data ? 'shorts') AND type='ContractCallTx' AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)) AS failed`,
+        (EXISTS(SELECT 1 FROM plugin_failed_transaction WHERE plugin_name='shorts')
+          OR EXISTS(SELECT 1 FROM txs WHERE contract_id=ANY($1::text[]) AND type IN ('ContractCallTx','PayingForTx') AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)
+          OR EXISTS(SELECT 1 FROM txs WHERE type='PayingForTx' AND COALESCE(raw #>> '{tx,tx,contractId}',raw #>> '{tx,contractId}')=ANY($1::text[]) AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)
+          OR EXISTS(SELECT 1 FROM txs WHERE data ? 'shorts' AND type IN ('ContractCallTx','PayingForTx') AND (data->'shorts'->>'_version') IS DISTINCT FROM $2::text)) AS failed`,
       [contracts, SHORTS_INDEX_VERSION, Math.max(0, height - 1)],
     );
     const stale =

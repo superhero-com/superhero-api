@@ -1,4 +1,4 @@
-import { shortsRuntimeScope } from './shorts-runtime-scope';
+import { shortsStorageScope } from './shorts-runtime-scope';
 import {
   Injectable,
   OnModuleInit,
@@ -109,7 +109,7 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
   private scope() {
     if (!this.records?.chain.state.contract)
       throw new Error('Private media deployment is unavailable');
-    return shortsRuntimeScope(this.records.chain);
+    return shortsStorageScope(this.records.chain);
   }
   private async preparedFile(
     short: ShortRecord,
