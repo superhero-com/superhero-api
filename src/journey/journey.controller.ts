@@ -32,7 +32,7 @@ import { DEFAULT_JOURNEY_FUNNEL_ID } from './journey.constants';
  *
  * Always 204 with an empty body, whatever arrives: malformed input is dropped
  * silently, and the handler only queues rows in memory, so it never waits on
- * the database. It reads nothing but the body: no cookies, IP, user agent or
+ * the database. It reads nothing but the body: no cookies, IP, UA string or
  * referrer. The raw body is read by `journeyIngestBodyHandlers` (see main.ts).
  */
 @Controller('analytics/journey')

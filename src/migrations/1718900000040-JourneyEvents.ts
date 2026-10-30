@@ -2,7 +2,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * Anonymous user-journey events (see src/journey). Only a random per-browser
- * id, the step name, a route pattern and timestamps; no IP, user agent,
+ * id, the step name, a route pattern and timestamps; no IP, UA string,
  * wallet or session column. Rows older than 180 days are deleted daily by
  * JourneyRetentionService.
  *

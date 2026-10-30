@@ -3,7 +3,7 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 /**
  * One anonymous journey step. Deliberately narrow: a random per-browser id,
  * the step name, the route PATTERN (never the real URL) and two timestamps.
- * No IP, user agent, wallet, handle or session column exists, and one must
+ * No IP, UA string, wallet, handle or session column exists, and one must
  * not be added.
  */
 @Entity({ name: 'journey_events' })
