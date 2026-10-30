@@ -63,6 +63,7 @@ function makeConfig(): any {
     subscriberShards: 1,
     communityTokenRefreshSec: 300,
     relayHealthPauseSec: 1,
+    publishAckTimeoutMs: 5000,
   };
 }
 
@@ -199,6 +200,8 @@ d('RelaySubscriberService (integration)', () => {
       makeConfig(),
     );
   });
+
+  afterEach(() => svc?.onApplicationShutdown());
 
   afterAll(async () => {
     if (ds?.isInitialized) {

@@ -101,68 +101,237 @@ describe('BclPnlService', () => {
     expect(result.totalGainUsd).toBe(20);
   });
 
-  it('calculateTokenPnlsBatch runs a single query for all heights and groups results', async () => {
-    const { service, transactionRepository } = createService();
+  // Cumulative batch: one query for running trade totals, one for price
+  // lookups at snapshot heights; the per-height walk happens in memory.
+  const tradeRow = (
+    sale: string,
+    height: number,
+    holdings: string,
+    bought: string,
+    spentAe: string,
+    receivedAe = '0',
+    sold = '0',
+  ) => ({
+    sale_address: sale,
+    block_height: height,
+    current_holdings: holdings,
+    total_volume_bought: bought,
+    total_volume_sold: sold,
+    total_amount_spent_ae: spentAe,
+    total_amount_spent_usd: String(Number(spentAe) * 2),
+    total_amount_received_ae: receivedAe,
+    total_amount_received_usd: String(Number(receivedAe) * 2),
+  });
+  const priceRow = (
+    sale: string,
+    height: number,
+    ae: string | null,
+    usd: string | null,
+  ) => ({
+    sale_address: sale,
+    block_height: height,
+    price_ae: ae,
+    price_usd: usd,
+  });
 
-    // Two heights, one token each
-    transactionRepository.query.mockResolvedValue([
-      {
-        snapshot_height: 200,
-        sale_address: 'ct_alpha',
-        current_holdings: '3',
-        total_volume_bought: '3',
-        total_amount_spent_ae: '9',
-        total_amount_spent_usd: '18',
-        total_amount_received_ae: '0',
-        total_amount_received_usd: '0',
-        total_volume_sold: '0',
-        current_unit_price_ae: '4',
-        current_unit_price_usd: '8',
-      },
-      {
-        snapshot_height: 300,
-        sale_address: 'ct_alpha',
-        current_holdings: '5',
-        total_volume_bought: '5',
-        total_amount_spent_ae: '15',
-        total_amount_spent_usd: '30',
-        total_amount_received_ae: '0',
-        total_amount_received_usd: '0',
-        total_volume_sold: '0',
-        current_unit_price_ae: '6',
-        current_unit_price_usd: '12',
-      },
-    ]);
+  const mockCumulativeQueries = (
+    repository: { query: jest.Mock },
+    trades: Array<Record<string, any>>,
+    prices: Array<Record<string, any>>,
+  ) => {
+    repository.query.mockImplementation((sql: string) =>
+      Promise.resolve(sql.includes('held_tokens') ? prices : trades),
+    );
+  };
+
+  it('calculateTokenPnlsBatch values each height from running totals and price lookups', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_alpha', 150, '3', '3', '9'),
+        tradeRow('ct_alpha', 250, '5', '5', '15'),
+      ],
+      [
+        priceRow('ct_alpha', 200, '4', '8'),
+        priceRow('ct_alpha', 300, '6', '12'),
+      ],
+    );
 
     const result = await service.calculateTokenPnlsBatch('ak_test', [200, 300]);
 
-    // Single DB round-trip regardless of number of heights
-    expect(transactionRepository.query).toHaveBeenCalledTimes(1);
-    const [sql, params] = transactionRepository.query.mock.calls[0];
-
-    // Batch query uses UNNEST, a MATERIALIZED CTE (single tx scan), and LATERAL price lookups
-    expect(sql).toContain('unnest($2::int[])');
-    expect(sql).toContain('snapshot_height');
-    expect(sql).toContain('AS MATERIALIZED');
-    expect(sql).toContain('address_txs');
-    expect(sql).not.toContain('JOIN transactions tx'); // no repeated scan of transactions
-    expect(sql).toContain('LEFT JOIN LATERAL');
-    expect(sql).toContain('LIMIT 1');
-    expect(sql).not.toContain(
-      'DISTINCT ON (agg.snapshot_height, agg.sale_address)',
-    );
-    expect(params).toEqual(['ak_test', [200, 300]]);
+    expect(transactionRepository.query).toHaveBeenCalledTimes(2);
+    const [[, tradeParams], [, priceParams]] =
+      transactionRepository.query.mock.calls;
+    expect(tradeParams).toEqual(['ak_test', 300, 200]);
+    expect(priceParams).toEqual(['ak_test', 300, 200, [200, 300]]);
 
     expect(result).toBeInstanceOf(Map);
     expect(result.size).toBe(2);
+    // h=200: trades below 200 (block 150), price looked up at 200
+    expect(result.get(200)!.pnls.ct_alpha.current_value.ae).toBe(12); // 3 * 4
+    expect(result.get(200)!.totalCurrentValueAe).toBe(12);
+    // h=300: trades below 300 (block 250), price looked up at 300
+    expect(result.get(300)!.pnls.ct_alpha.current_value.ae).toBe(30); // 5 * 6
+    expect(result.get(300)!.pnls.ct_alpha.invested.ae).toBe(15);
+    expect(result.get(300)!.pnls.ct_alpha.gain.ae).toBe(15);
+  });
 
-    const at200 = result.get(200)!;
-    expect(at200.pnls.ct_alpha.current_value.ae).toBe(12); // 3 * 4
-    expect(at200.totalCurrentValueAe).toBe(12);
+  it('calculateTokenPnlsBatch counts trades strictly below and prices at or below each height', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_a', 100, '2', '2', '4'),
+        tradeRow('ct_b', 120, '1', '1', '1'),
+      ],
+      [priceRow('ct_a', 100, '3', '6'), priceRow('ct_b', 120, '7', '14')],
+    );
 
-    const at300 = result.get(300)!;
-    expect(at300.pnls.ct_alpha.current_value.ae).toBe(30); // 5 * 6
-    expect(at300.totalCurrentValueAe).toBe(30);
+    const result = await service.calculateTokenPnlsBatch(
+      'ak_test',
+      [100, 101, 120, 121],
+    );
+
+    // h=100: the trade at 100 is not counted yet
+    expect(Object.keys(result.get(100)!.pnls)).toEqual([]);
+    expect(result.get(101)!.pnls.ct_a.current_value.ae).toBe(6); // 2 * 3
+    expect(result.get(101)!.pnls.ct_b).toBeUndefined();
+    expect(result.get(120)!.pnls.ct_b).toBeUndefined();
+    expect(result.get(121)!.pnls.ct_b.current_value.ae).toBe(7);
+    expect(result.get(121)!.totalCurrentValueAe).toBe(13);
+  });
+
+  it('calculateTokenPnlsBatch carries a price forward to heights without a lookup', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [tradeRow('ct_a', 50, '2', '2', '4')],
+      [priceRow('ct_a', 100, '3', '6'), priceRow('ct_a', 300, '5', '10')],
+    );
+
+    const result = await service.calculateTokenPnlsBatch(
+      'ak_test',
+      [100, 200, 300],
+    );
+
+    expect(result.get(200)!.pnls.ct_a.current_value).toEqual({
+      ae: 6,
+      usd: 12,
+    });
+    expect(result.get(300)!.pnls.ct_a.current_value).toEqual({
+      ae: 10,
+      usd: 20,
+    });
+  });
+
+  it('calculateTokenPnlsBatch applies every trade between two heights', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_a', 110, '1', '1', '2'),
+        tradeRow('ct_a', 120, '2', '2', '4'),
+        tradeRow('ct_a', 130, '3', '3', '6'),
+      ],
+      [priceRow('ct_a', 200, '2', '4')],
+    );
+
+    const result = await service.calculateTokenPnlsBatch('ak_test', [100, 200]);
+
+    expect(result.get(100)!.pnls).toEqual({});
+    expect(result.get(200)!.pnls.ct_a.invested.ae).toBe(6);
+    expect(result.get(200)!.pnls.ct_a.current_value.ae).toBe(6); // 3 * 2
+  });
+
+  it('calculateTokenPnlsBatch values a token that never had a price at zero', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [tradeRow('ct_a', 10, '4', '4', '8')],
+      [priceRow('ct_a', 50, null, null)],
+    );
+
+    const result = await service.calculateTokenPnlsBatch('ak_test', [50]);
+
+    expect(result.get(50)!.pnls.ct_a).toEqual({
+      current_unit_price: { ae: 0, usd: 0 },
+      percentage: -100,
+      invested: { ae: 8, usd: 16 },
+      current_value: { ae: 0, usd: 0 },
+      gain: { ae: -8, usd: -16 },
+    });
+  });
+
+  it('calculateTokenPnlsBatch keeps fully closed positions and drops empty ones', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_closed', 10, '0', '5', '10', '12', '5'),
+        tradeRow('ct_empty', 10, '0', '0', '0'),
+      ],
+      [priceRow('ct_closed', 50, '1', '2')],
+    );
+
+    const result = await service.calculateTokenPnlsBatch('ak_test', [50]);
+    const at50 = result.get(50)!;
+
+    expect(at50.pnls.ct_closed.current_value.ae).toBe(0);
+    expect(at50.pnls.ct_closed.gain.ae).toBe(2); // 12 received - 10 spent
+    expect(at50.pnls.ct_empty).toBeUndefined();
+  });
+
+  it('calculateTokenPnlsBatch walks unsorted heights in order and returns them in input order', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_a', 150, '1', '1', '2'),
+        tradeRow('ct_a', 250, '3', '3', '6'),
+      ],
+      [priceRow('ct_a', 200, '2', '4'), priceRow('ct_a', 300, '4', '8')],
+    );
+
+    const result = await service.calculateTokenPnlsBatch(
+      'ak_test',
+      [300, 100, 200],
+    );
+
+    expect(transactionRepository.query.mock.calls[1][1][3]).toEqual([
+      100, 200, 300,
+    ]);
+    expect([...result.keys()]).toEqual([300, 100, 200]);
+    expect(result.get(100)!.pnls).toEqual({});
+    expect(result.get(200)!.totalCurrentValueAe).toBe(2); // 1 * 2
+    expect(result.get(300)!.totalCurrentValueAe).toBe(12); // 3 * 4
+  });
+
+  it('calculateTokenPnlsBatch without the per-token breakdown returns the same totals', async () => {
+    const { service, transactionRepository } = createService();
+    mockCumulativeQueries(
+      transactionRepository,
+      [
+        tradeRow('ct_a', 50, '2', '2', '4'),
+        tradeRow('ct_b', 150, '1', '3', '3', '5', '2'),
+      ],
+      [priceRow('ct_a', 100, '3', '6'), priceRow('ct_b', 200, '0.7', '1.4')],
+    );
+
+    const full = await service.calculateTokenPnlsBatch('ak_test', [100, 200]);
+    const totalsOnly = await service.calculateTokenPnlsBatch(
+      'ak_test',
+      [100, 200],
+      false,
+    );
+
+    expect(Object.keys(full.get(200)!.pnls)).toEqual(['ct_a', 'ct_b']);
+    for (const height of [100, 200]) {
+      expect(totalsOnly.get(height)).toEqual({
+        ...full.get(height)!,
+        pnls: {},
+      });
+    }
   });
 
   it('calculateTokenPnlsBatch returns empty map for empty heights array', async () => {
@@ -175,27 +344,17 @@ describe('BclPnlService', () => {
     expect(result.size).toBe(0);
   });
 
-  it('calculateTokenPnlsBatch deduplicates heights before querying', async () => {
+  it('calculateTokenPnlsBatch deduplicates heights and returns one entry per height', async () => {
     const { service, transactionRepository } = createService();
     transactionRepository.query.mockResolvedValue([]);
 
-    await service.calculateTokenPnlsBatch('ak_test', [100, 100, 200, 100]);
+    const result = await service.calculateTokenPnlsBatch(
+      'ak_test',
+      [100, 100, 200, 100],
+    );
 
-    expect(transactionRepository.query).toHaveBeenCalledTimes(1);
-    const [, params] = transactionRepository.query.mock.calls[0];
-    // Duplicates removed; order of unique values is preserved
-    expect(params[1]).toEqual([100, 200]);
-  });
-
-  it('calculateTokenPnlsBatch passes fromBlockHeight as $3 when provided', async () => {
-    const { service, transactionRepository } = createService();
-    transactionRepository.query.mockResolvedValue([]);
-
-    await service.calculateTokenPnlsBatch('ak_test', [500], 50);
-
-    const [sql, params] = transactionRepository.query.mock.calls[0];
-    expect(sql).toContain('block_height >= $3');
-    expect(params).toEqual(['ak_test', [500], 50]);
+    expect(transactionRepository.query).toHaveBeenCalledTimes(2);
+    expect([...result.keys()]).toEqual([100, 200]);
   });
 
   it('calculateTokenPnlsBatchForAddresses runs a single query for all addresses and heights', async () => {

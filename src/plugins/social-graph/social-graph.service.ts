@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ export function safeGraphNumber(value: unknown): number {
 
 @Injectable()
 export class SocialGraphService implements OnModuleInit {
+  private readonly logger = new Logger(SocialGraphService.name);
   private reader?: SocialGraphReader;
   constructor(
     private readonly ae: AeSdkService,
@@ -26,17 +28,27 @@ export class SocialGraphService implements OnModuleInit {
   ) {}
 
   isConfigured(): boolean {
-    return Boolean(process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS);
+    return Boolean(
+      process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS?.trim() &&
+      process.env.SOCIAL_GRAPH_NETWORK_ID?.trim(),
+    );
   }
 
   async onModuleInit(): Promise<void> {
-    if (this.isConfigured()) await this.getReader().verifyIdentity();
+    if (!this.isConfigured()) {
+      if (process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS?.trim())
+        this.logger.warn(
+          'Social graph disabled: set SOCIAL_GRAPH_NETWORK_ID alongside SOCIAL_GRAPH_CONTRACT_ADDRESS to enable it',
+        );
+      return;
+    }
+    await this.getReader().verifyIdentity();
   }
 
   getReader(): SocialGraphReader {
     if (this.reader) return this.reader;
-    const contract = process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS;
-    const network = process.env.SOCIAL_GRAPH_NETWORK_ID;
+    const contract = process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS?.trim();
+    const network = process.env.SOCIAL_GRAPH_NETWORK_ID?.trim();
     if (!contract || !network)
       throw new ServiceUnavailableException(
         'Social graph contract and network are not configured',

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { BigNumber } from 'bignumber.js';
 import { DataSource, Repository } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { DATABASE_CONFIG } from '@/configs/database';
+import { createIsolatedSchema, IsolatedSchema } from '@/test/harness/db';
 import { Token } from '@/tokens/entities/token.entity';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { TokenBalance } from '../entities/token-balance.entity';
@@ -15,14 +15,13 @@ import { TGR_COMMUNITY_UPSERTED } from '../events';
 import { SyncDirectionEnum } from '@/plugins/plugin.interface';
 
 /**
- * DB integration (Task 03, Task 02 harness style). Drives the real
+ * Drives the real
  * `BalanceIndexerService` / `Aex9TransferSyncService` / `BalanceReconciliationService`
- * against a live Postgres `token_balance` table. Requires `DB_HOST` (repo `.env`);
+ * against live Postgres tables. Requires `DB_HOST`;
  * skipped automatically otherwise so unit-only runs stay green.
  *
- * The `token_balance` table is ensured via raw DDL (idempotent) so the test does
- * not depend on the app having run its migrations, and rows are scoped to a unique
- * test token id then cleaned up.
+ * Each run creates all required tables in a disposable schema, without relying
+ * on application migrations or writing fixtures into the application tables.
  */
 const HAS_DB = !!process.env.DB_HOST;
 const d = HAS_DB ? describe : describe.skip;
@@ -39,29 +38,17 @@ const config: any = {
 
 d('AEX9 balance indexer (integration)', () => {
   let ds: DataSource;
+  let database: IsolatedSchema;
   let tokenBalanceRepo: Repository<TokenBalance>;
   let tokenRepo: Repository<Token>;
   let txRepo: Repository<Tx>;
   let emitter: EventEmitter2;
 
   beforeAll(async () => {
-    ds = new DataSource({
-      ...(DATABASE_CONFIG as any),
-      synchronize: false,
+    database = await createIsolatedSchema({
       entities: [Token, Tx, TokenBalance],
     });
-    await ds.initialize();
-    // Ensure the table exists (idempotent) so the test is self-contained.
-    await ds.query(`
-      CREATE TABLE IF NOT EXISTS "token_balance" (
-        "token_address" character varying NOT NULL,
-        "holder_address" character varying NOT NULL,
-        "balance" numeric NOT NULL DEFAULT 0,
-        "updated_height" integer NOT NULL DEFAULT 0,
-        "last_reconciled_at" timestamptz,
-        CONSTRAINT "PK_token_balance" PRIMARY KEY ("token_address", "holder_address")
-      )
-    `);
+    ds = database.dataSource;
     tokenBalanceRepo = ds.getRepository(TokenBalance);
     tokenRepo = ds.getRepository(Token);
     txRepo = ds.getRepository(Tx);
@@ -71,12 +58,12 @@ d('AEX9 balance indexer (integration)', () => {
   afterEach(async () => {
     await tokenBalanceRepo.delete({ token_address: TEST_TOKEN });
     await tokenRepo.delete({ sale_address: TEST_SALE }).catch(() => undefined);
+    await txRepo.delete({ hash: 'th_tgr03_transfer' });
+    emitter.removeAllListeners();
   });
 
   afterAll(async () => {
-    if (ds?.isInitialized) {
-      await ds.destroy();
-    }
+    await database?.drop();
   });
 
   const makeIndexer = () =>
@@ -209,15 +196,12 @@ d('AEX9 balance indexer (integration)', () => {
     await indexer.refreshAllowlist();
     expect(indexer.isCommunityToken(TEST_TOKEN)).toBe(false);
 
-    // Insert a minimal Token row via raw SQL so the test does not depend on the
-    // Task-00 TGR columns being migrated into the live `token` table (the
-    // allowlist only reads `address`; a full entity save would SELECT all cols).
-    await ds.query(
-      `INSERT INTO "token" ("sale_address","address","name","symbol")
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT ("sale_address") DO UPDATE SET "address" = EXCLUDED."address"`,
-      [TEST_SALE, TEST_TOKEN, 'TGR03', 'TGR03'],
-    );
+    await tokenRepo.save({
+      sale_address: TEST_SALE,
+      address: TEST_TOKEN,
+      name: 'TGR03',
+      symbol: 'TGR03',
+    });
 
     await indexer.onCommunityUpserted({ saleAddress: TEST_SALE });
     expect(indexer.isCommunityToken(TEST_TOKEN)).toBe(true);

@@ -160,9 +160,99 @@ describe('PortfolioService', () => {
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
       'ak_test',
       [123],
-      undefined,
+      false,
     );
     expect(snapshots.map((snapshot) => snapshot.ae_price)).toEqual([1, 2, 3]);
+  });
+
+  it('asks for the per-token PnL breakdown only when tokens_pnl is returned', async () => {
+    const { service, aeSdkService, coinGeckoService, bclPnlService } =
+      createService();
+
+    (batchTimestampToAeHeight as jest.Mock).mockImplementation(
+      async (timestamps: number[]) =>
+        new Map(timestamps.map((ts) => [ts, 123])),
+    );
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
+      [Date.UTC(2026, 0, 1), 1],
+    ]);
+    coinGeckoService.getPriceData.mockResolvedValue({ usd: 1 });
+    aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000');
+    const tokenPnl = {
+      current_unit_price: { ae: 2, usd: 4 },
+      percentage: 100,
+      invested: { ae: 1, usd: 2 },
+      current_value: { ae: 2, usd: 4 },
+      gain: { ae: 1, usd: 2 },
+    };
+    bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
+      new Map([[123, { ...basePnlResult, pnls: { ct_token: tokenPnl } }]]),
+    );
+
+    const snapshots = await service.getPortfolioHistory('ak_test', {
+      startDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      endDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      interval: 86400,
+      includePnl: true,
+      includeTokensPnl: true,
+    });
+
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      'ak_test',
+      [123],
+      true,
+    );
+    expect(snapshots[0].tokens_pnl).toEqual({ ct_token: tokenPnl });
+  });
+
+  it('takes tokens_pnl from the daily map with range PnL and skips the cumulative breakdown', async () => {
+    const { service, aeSdkService, coinGeckoService, bclPnlService } =
+      createService();
+
+    (batchTimestampToAeHeight as jest.Mock).mockImplementation(
+      async (timestamps: number[]) =>
+        new Map(timestamps.map((ts) => [ts, 123])),
+    );
+    coinGeckoService.getHistoricalPrice.mockResolvedValue([
+      [Date.UTC(2026, 0, 1), 1],
+    ]);
+    coinGeckoService.getPriceData.mockResolvedValue({ usd: 1 });
+    aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000');
+    const dailyTokenPnl = {
+      current_unit_price: { ae: 2, usd: 4 },
+      percentage: 50,
+      invested: { ae: 2, usd: 4 },
+      current_value: { ae: 0, usd: 0 },
+      gain: { ae: 1, usd: 2 },
+    };
+    bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
+      new Map([[123, basePnlResult]]),
+    );
+    bclPnlService.calculateDailyPnlBatch.mockImplementation(
+      async (_addr: string, windows: DailyPnlWindow[]) =>
+        new Map(
+          windows.map((w) => [
+            w.snapshotTs,
+            { ...basePnlResult, pnls: { ct_token: dailyTokenPnl } },
+          ]),
+        ),
+    );
+
+    const snapshots = await service.getPortfolioHistory('ak_test', {
+      startDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      endDate: moment.utc('2026-01-01T00:00:00.000Z'),
+      interval: 86400,
+      includePnl: true,
+      useRangeBasedPnl: true,
+      includeTokensPnl: true,
+    });
+
+    expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      'ak_test',
+      [123],
+      false,
+    );
+    expect(snapshots[0].tokens_pnl).toEqual({ ct_token: dailyTokenPnl });
   });
 
   it('surfaces a node-call failure as ServiceUnavailableException', async () => {
@@ -286,11 +376,9 @@ describe('PortfolioService', () => {
 
     expect(snapshots).toHaveLength(3);
 
-    // Cumulative map still uses calculateTokenPnlsBatch (once, no fromBlockHeight)
+    // Cumulative map still uses calculateTokenPnlsBatch (once, totals only)
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledTimes(1);
-    expect(
-      bclPnlService.calculateTokenPnlsBatch.mock.calls[0][2],
-    ).toBeUndefined();
+    expect(bclPnlService.calculateTokenPnlsBatch.mock.calls[0][2]).toBe(false);
 
     // Daily PnL now uses calculateDailyPnlBatch
     expect(bclPnlService.calculateDailyPnlBatch).toHaveBeenCalledTimes(1);
@@ -407,7 +495,7 @@ describe('PortfolioService', () => {
     expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
       'ak_resolved',
       [300],
-      undefined,
+      false,
     );
   });
 
@@ -490,18 +578,11 @@ describe('PortfolioService', () => {
       // Holdings are valued at currentHeight + 1 so the strict
       // `block_height < snapshot_height` rule includes current-block trades,
       // matching the tip-inclusive AE balance from getBalance.
-      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(
-        new Map([
-          [
-            123457,
-            {
-              ...basePnlResult,
-              totalCurrentValueAe: 10,
-              totalCurrentValueUsd: 20,
-            },
-          ],
-        ]),
-      );
+      bclPnlService.calculateTokenPnls.mockResolvedValue({
+        ...basePnlResult,
+        totalCurrentValueAe: 10,
+        totalCurrentValueUsd: 20,
+      });
 
       const resultAe = await service.getCurrentPortfolioValue('ak_test', 'ae');
       expect(resultAe.value).toBeCloseTo(15); // 5 AE balance + 10 AE tokens
@@ -513,22 +594,22 @@ describe('PortfolioService', () => {
       );
       expect(resultUsd.value).toBeCloseTo(30); // 5*2 + 20
 
-      expect(bclPnlService.calculateTokenPnlsBatch).toHaveBeenCalledWith(
+      expect(bclPnlService.calculateTokenPnls).toHaveBeenCalledWith(
         'ak_test',
-        [123457],
-        undefined,
+        123457,
       );
+      expect(bclPnlService.calculateTokenPnlsBatch).not.toHaveBeenCalled();
       expect(aeSdkService.sdk.getBalance).toHaveBeenCalledWith('ak_test');
     });
 
-    it('falls back to zero token value when no pnl data exists for the current height', async () => {
+    it('values tokens at zero when the account holds none', async () => {
       const { service, aeSdkService, coinGeckoService, bclPnlService } =
         createService();
 
       aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000'); // 1 AE
       aeSdkService.sdk.getHeight.mockResolvedValue(999);
       coinGeckoService.getPriceData.mockResolvedValue({ usd: 3 });
-      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      bclPnlService.calculateTokenPnls.mockResolvedValue(basePnlResult);
 
       const result = await service.getCurrentPortfolioValue('ak_test', 'ae');
 
@@ -555,7 +636,7 @@ describe('PortfolioService', () => {
 
       aeSdkService.sdk.getBalance.mockResolvedValue('1000000000000000000');
       aeSdkService.sdk.getHeight.mockResolvedValue(999);
-      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      bclPnlService.calculateTokenPnls.mockResolvedValue(basePnlResult);
       coinGeckoService.getPriceData.mockRejectedValue(
         new Error('coingecko down'),
       );
@@ -573,7 +654,7 @@ describe('PortfolioService', () => {
 
       aeSdkService.sdk.getBalance.mockResolvedValue('2000000000000000000');
       aeSdkService.sdk.getHeight.mockResolvedValue(999);
-      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      bclPnlService.calculateTokenPnls.mockResolvedValue(basePnlResult);
       coinGeckoService.getPriceData.mockRejectedValue(
         new Error('coingecko down'),
       );
@@ -591,7 +672,7 @@ describe('PortfolioService', () => {
 
       aeSdkService.sdk.getBalance.mockResolvedValue('5000000000000000000');
       aeSdkService.sdk.getHeight.mockResolvedValue(999);
-      bclPnlService.calculateTokenPnlsBatch.mockResolvedValue(new Map());
+      bclPnlService.calculateTokenPnls.mockResolvedValue(basePnlResult);
       // Pricing degrades to null rates rather than throwing; the old `|| 0`
       // would have answered 0 USD for a 5 AE balance and called it success.
       coinGeckoService.getPriceData.mockResolvedValue({ usd: null });
