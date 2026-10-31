@@ -8,6 +8,24 @@ describe('PostPersistenceService', () => {
     { emit: jest.fn() } as any,
   );
 
+  it('accepts image-only posts and replies but rejects completely empty posts', () => {
+    const tx = (content: unknown, media: unknown[]) =>
+      ({ raw: { arguments: [{ value: content }, { value: media }] } }) as any;
+    const media = [{ value: 'https://images.example/photo.webp' }];
+    expect(service.validateContent(tx('', media))).toBe('');
+    expect(
+      service.validateContent(tx('', [{ value: 'comment:42_v3' }, ...media])),
+    ).toBe('');
+    expect(service.validateContent(tx('', []))).toBeNull();
+    expect(
+      service.validateContent(tx(' ', [{ value: 'comment:42_v3' }])),
+    ).toBeNull();
+    expect(service.validateContent(tx(undefined, media))).toBeNull();
+    expect(
+      service.validateContent(tx('', [{ value: 'javascript:alert(1)' }])),
+    ).toBeNull();
+  });
+
   it('stamps new posts with the shared POST_SYNC_VERSION', () => {
     const postData = service.createPostData(
       {

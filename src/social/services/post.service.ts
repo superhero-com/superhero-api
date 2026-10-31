@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, EntityManager } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -29,7 +34,10 @@ import {
   ICommentProcessingResult,
   IPostTypeInfo,
 } from '../interfaces/post.interfaces';
-import { parsePostContent } from '../utils/content-parser.util';
+import {
+  parsePostContent,
+  validatePostContent,
+} from '../utils/content-parser.util';
 import { detectPostLanguage } from '../utils/post-language.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { normalizeTopicName } from '../utils/topic-name.util';
@@ -43,10 +51,12 @@ import { TokensService } from '@/tokens/tokens.service';
 const ORPHAN_CLEANUP_GRACE_PERIOD = '1 hour';
 
 @Injectable()
-export class PostService {
+export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
   syncVersion = POST_SYNC_VERSION;
   private readonly logger = new Logger(PostService.name);
   private readonly isProcessing = new Map<string, boolean>();
+  private startupTimer?: NodeJS.Timeout;
+  private stopped = false;
 
   constructor(
     @InjectRepository(Post)
@@ -62,14 +72,31 @@ export class PostService {
 
   async onModuleInit(): Promise<void> {
     this.logger.log('PostService module initialized successfully');
-    setTimeout(() => this.sync(), 10_000);
+  }
+
+  onApplicationBootstrap(): void {
+    this.startupTimer = setTimeout(() => {
+      void this.sync().catch((error: unknown) => {
+        if (!this.stopped)
+          this.logger.error('Post startup maintenance failed', error);
+      });
+    }, 10_000);
+    this.startupTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    this.stopped = true;
+    clearTimeout(this.startupTimer);
   }
 
   async sync() {
+    if (this.stopped) return;
     // delete posts and topics with different syncVersion with proper foreign key handling
     // Note: This will only clear posts and topics that don't match the current syncVersion
     await this.clearNonCompatibleData();
+    if (this.stopped) return;
     await this.pullLatestPostsForContracts();
+    if (this.stopped) return;
 
     // Note: Post syncing is now handled by SocialPlugin via MDW sync system
     // Old pull mechanism has been removed
@@ -440,15 +467,12 @@ export class PostService {
         return existingPost;
       }
 
-      // Validate required transaction data
-      if (!transaction.tx?.arguments?.[0]?.value) {
-        this.logger.warn('Transaction missing content argument', { txHash });
-        return null;
-      }
-
-      const content = transaction.tx.arguments[0].value;
-      if (typeof content !== 'string' || content.trim().length === 0) {
-        this.logger.warn('Invalid or empty content', { txHash });
+      const content = validatePostContent(
+        transaction.tx?.arguments?.[0]?.value,
+        transaction.tx?.arguments?.[1]?.value,
+      );
+      if (content === null) {
+        this.logger.warn('Transaction missing content and media', { txHash });
         return null;
       }
 
