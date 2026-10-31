@@ -47,7 +47,7 @@ import { ProfileXStreakBonusReward } from '@/profile/entities/profile-x-streak-b
     BclAffiliationTreeService,
     AffiliationDashboardAuthService,
   ],
-  exports: [OAuthService],
+  exports: [OAuthService, AffiliationDashboardAuthService],
   controllers: [
     AffiliationController,
     InvitationsController,
