@@ -1,0 +1,356 @@
+{{#> main-layout title="User journey" active="user-journey"}}
+<style>
+  .uj { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
+  .uj-card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    padding: 1rem;
+  }
+  .uj-card h2 { font-size: 1rem; color: #0f172a; margin-bottom: 0.25rem; }
+  .uj-card .sub { font-size: 0.8rem; color: #64748b; margin-bottom: 0.85rem; }
+  .uj-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: flex-end; }
+  .uj-field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .uj-field > span, .uj-field > label { font-size: 0.8rem; color: #475569; }
+  .uj-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid #e2e8f0; border-radius: 0.375rem; overflow: hidden; }
+  .uj-seg button {
+    min-height: 44px; min-width: 44px; padding: 0 0.9rem;
+    background: white; color: #334155; border: none; font-size: 0.85rem; cursor: pointer;
+  }
+  .uj-seg button + button { border-left: 1px solid #e2e8f0; }
+  .uj-seg button:hover { background: #f1f5f9; }
+  .uj-seg button[aria-pressed="true"] { background: #3b82f6; color: white; }
+  .uj-custom { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+  .uj-custom input, .uj-field select {
+    min-height: 44px; padding: 0 0.6rem; border: 1px solid #e2e8f0; border-radius: 0.375rem;
+    font-size: 0.875rem; color: #1e293b; background: white;
+  }
+  .uj-custom button {
+    min-height: 44px; padding: 0 1rem; background: #3b82f6; color: white; border: none;
+    border-radius: 0.375rem; font-size: 0.875rem; cursor: pointer;
+  }
+  .uj-custom button:hover { background: #2563eb; }
+  .uj button:focus-visible, .uj select:focus-visible, .uj input:focus-visible {
+    outline: 3px solid #1d4ed8; outline-offset: 2px;
+  }
+  .uj-status { font-size: 0.85rem; color: #64748b; }
+  .uj-status.error { color: #b91c1c; }
+  .uj-empty {
+    text-align: center; padding: 2.5rem 1rem; color: #475569; font-size: 0.95rem;
+    border: 1px dashed #cbd5e1; border-radius: 0.5rem; background: #f8fafc;
+  }
+  .uj-drops { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; list-style: none; }
+  .uj-drop {
+    border: 1px solid #fee2e2; background: #fff7f7; border-radius: 0.5rem; padding: 0.85rem;
+    display: flex; flex-direction: column; gap: 0.3rem;
+  }
+  .uj-drop .rank { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #991b1b; font-weight: 600; }
+  .uj-drop .lost { font-size: 1.4rem; font-weight: 600; color: #0f172a; font-variant-numeric: tabular-nums; }
+  .uj-drop .lost small { font-size: 0.85rem; font-weight: 500; color: #b91c1c; }
+  .uj-drop .path { font-size: 0.85rem; color: #334155; }
+  .uj-funnel { list-style: none; display: flex; flex-direction: column; }
+  .uj-step { display: grid; grid-template-columns: 200px 1fr 150px; gap: 0.75rem; align-items: center; padding: 0.35rem 0; }
+  .uj-step .label { font-size: 0.875rem; color: #0f172a; font-weight: 500; }
+  .uj-step .label .ev { display: block; font-size: 0.72rem; color: #94a3b8; font-weight: 400; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .uj-track { background: #f1f5f9; border-radius: 0.375rem; height: 28px; overflow: hidden; }
+  .uj-bar { height: 100%; background: #3b82f6; border-radius: 0.375rem; transition: width 0.4s ease; min-width: 2px; }
+  .uj-step.worst .uj-bar { background: #f59e0b; }
+  .uj-step .nums { font-size: 0.85rem; text-align: right; font-variant-numeric: tabular-nums; color: #0f172a; }
+  .uj-step .nums small { display: block; color: #64748b; font-size: 0.75rem; }
+  .uj-loss {
+    padding: 0.15rem 0 0.15rem 0.75rem; font-size: 0.78rem; color: #b91c1c;
+    border-left: 2px dashed #fecaca; margin-inline-start: calc(200px + 0.75rem);
+  }
+  .uj-loss.worst { font-weight: 600; }
+  .uj-loss .tag {
+    display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px;
+    background: #fef3c7; color: #92400e; font-size: 0.7rem; font-weight: 600;
+  }
+  .uj-loss .time { color: #64748b; font-weight: 400; margin-left: 0.4rem; }
+  .uj-table-wrap { overflow-x: auto; }
+  .uj table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .uj thead th {
+    background: #f8fafc; text-align: left; padding: 0.6rem 0.8rem; color: #475569;
+    font-weight: 600; border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+  }
+  .uj tbody td { padding: 0.55rem 0.8rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .uj .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .uj .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .uj .next { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .uj .next span { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; padding: 0.05rem 0.45rem; font-size: 0.75rem; }
+  .uj .muted { color: #94a3b8; }
+  @media (max-width: 900px) {
+    .uj-drops { grid-template-columns: 1fr; }
+    .uj-step { grid-template-columns: 1fr auto; grid-template-areas: "label nums" "track track"; row-gap: 0.35rem; }
+    .uj-step .label { grid-area: label; }
+    .uj-step .nums { grid-area: nums; }
+    .uj-track { grid-area: track; }
+    .uj-loss { margin-inline-start: 0.25rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .uj-bar { transition: none; }
+  }
+</style>
+
+<div class="uj" id="uj" data-funnels="{{funnels}}">
+  <section class="uj-card" aria-labelledby="uj-controls-title">
+    <h2 id="uj-controls-title">Where people drop off</h2>
+    <p class="sub">Anonymous step events from the web app. No cookies, IPs or account ids; pages are route patterns.</p>
+    <div class="uj-toolbar">
+      <div class="uj-field" role="group" aria-labelledby="uj-range-label">
+        <span id="uj-range-label">Date range</span>
+        <div class="uj-seg" id="uj-range">
+          <button type="button" data-days="7" aria-pressed="false">7 days</button>
+          <button type="button" data-days="30" aria-pressed="true">30 days</button>
+          <button type="button" data-days="90" aria-pressed="false">90 days</button>
+          <button type="button" data-days="custom" aria-pressed="false">Custom</button>
+        </div>
+      </div>
+      <form class="uj-custom" id="uj-custom" hidden>
+        <div class="uj-field">
+          <label for="uj-start">From</label>
+          <input type="date" id="uj-start" required />
+        </div>
+        <div class="uj-field">
+          <label for="uj-end">To</label>
+          <input type="date" id="uj-end" required />
+        </div>
+        <button type="submit">Apply</button>
+      </form>
+      <div class="uj-field">
+        <label for="uj-funnel">Funnel</label>
+        <select id="uj-funnel"></select>
+      </div>
+      <p class="uj-status" id="uj-status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <div id="uj-empty" class="uj-empty" hidden>
+    No journey events in this range yet. Events appear once the web app release with journey tracking is live.
+  </div>
+
+  <section class="uj-card" id="uj-drops-card" aria-labelledby="uj-drops-title" hidden>
+    <h2 id="uj-drops-title">Biggest drop-offs</h2>
+    <p class="sub">Steps that lose the most people in this funnel.</p>
+    <ol class="uj-drops" id="uj-drops"></ol>
+  </section>
+
+  <section class="uj-card" id="uj-funnel-card" aria-labelledby="uj-funnel-title" hidden>
+    <h2 id="uj-funnel-title">Funnel</h2>
+    <p class="sub" id="uj-funnel-sub"></p>
+    <ol class="uj-funnel" id="uj-funnel-list"></ol>
+  </section>
+
+  <section class="uj-card" id="uj-pages-card" aria-labelledby="uj-pages-title" hidden>
+    <h2 id="uj-pages-title">Page flow</h2>
+    <p class="sub" id="uj-pages-sub"></p>
+    <div class="uj-table-wrap">
+      <table>
+        <caption class="sub" style="text-align:left;caption-side:top;">Sorted by exits. Exit = no next page within the visit window.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Page</th>
+            <th scope="col" class="num">Views</th>
+            <th scope="col" class="num">Visitors</th>
+            <th scope="col" class="num">Exits</th>
+            <th scope="col" class="num">Exit rate</th>
+            <th scope="col">Top next pages</th>
+          </tr>
+        </thead>
+        <tbody id="uj-pages"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    var root = document.getElementById('uj');
+    var funnels = [];
+    try { funnels = JSON.parse(root.getAttribute('data-funnels') || '[]'); } catch (e) { funnels = []; }
+    var state = { days: 30, start: null, end: null, funnel: funnels.length ? funnels[0].id : 'onboarding' };
+    var nf = new Intl.NumberFormat('en-US');
+
+    function el(tag, attrs, children) {
+      var node = document.createElement(tag);
+      Object.keys(attrs || {}).forEach(function (k) {
+        if (k === 'text') node.textContent = attrs[k];
+        else if (k === 'class') node.className = attrs[k];
+        else node.setAttribute(k, attrs[k]);
+      });
+      (children || []).forEach(function (c) { if (c) node.appendChild(c); });
+      return node;
+    }
+    function day(d) { return d.toISOString().slice(0, 10); }
+    function pct(v) { return v === null || v === undefined ? '-' : (Math.round(v * 10) / 10) + '%'; }
+    function duration(s) {
+      if (s === null || s === undefined) return '';
+      if (s < 60) return Math.round(s) + 's';
+      if (s < 3600) return Math.round(s / 60) + 'm';
+      if (s < 86400) return (Math.round(s / 360) / 10) + 'h';
+      return (Math.round(s / 8640) / 10) + 'd';
+    }
+    function range() {
+      if (state.days === 'custom' && state.start && state.end) return { start: state.start, end: state.end };
+      var end = new Date();
+      var start = new Date(end.getTime() - (state.days - 1) * 86400000);
+      return { start: day(start), end: day(end) };
+    }
+    function setStatus(text, isError) {
+      var s = document.getElementById('uj-status');
+      s.textContent = text || '';
+      s.className = 'uj-status' + (isError ? ' error' : '');
+    }
+    function getJson(url) {
+      return fetch(url, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then(function (r) {
+        if (r.status === 401) { window.location.href = '/api/bcl-affiliation/auth/login'; throw new Error('Signed out'); }
+        if (!r.ok) throw new Error('Request failed (' + r.status + ')');
+        return r.json();
+      });
+    }
+
+    var select = document.getElementById('uj-funnel');
+    funnels.forEach(function (f) { select.appendChild(el('option', { value: f.id, text: f.label })); });
+    select.value = state.funnel;
+    select.addEventListener('change', function () { state.funnel = select.value; load(); });
+
+    var custom = document.getElementById('uj-custom');
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('#uj-range button'));
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () {
+        buttons.forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+        var v = b.getAttribute('data-days');
+        if (v === 'custom') {
+          custom.hidden = false;
+          var r = range();
+          document.getElementById('uj-start').value = state.start || r.start;
+          document.getElementById('uj-end').value = state.end || r.end;
+          document.getElementById('uj-start').focus();
+          return;
+        }
+        custom.hidden = true;
+        state.days = Number(v);
+        load();
+      });
+    });
+    custom.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var s = document.getElementById('uj-start').value;
+      var e = document.getElementById('uj-end').value;
+      if (!s || !e || s > e) { setStatus('Pick a start date on or before the end date.', true); return; }
+      state.days = 'custom'; state.start = s; state.end = e;
+      load();
+    });
+
+    function renderDrops(report) {
+      var list = document.getElementById('uj-drops');
+      list.textContent = '';
+      var top = (report.topDropOffs || []).slice(0, 3);
+      if (!top.length) {
+        list.appendChild(el('li', { class: 'uj-drop', text: 'Nobody was lost between steps in this range.' }));
+        return;
+      }
+      top.forEach(function (d, i) {
+        list.appendChild(el('li', { class: 'uj-drop' }, [
+          el('span', { class: 'rank', text: '#' + (i + 1) + ' drop-off' }),
+          el('span', { class: 'lost' }, [
+            document.createTextNode(nf.format(d.lost) + ' lost '),
+            el('small', { text: '(' + pct(d.pctLost) + ' lost)' }),
+          ]),
+          el('span', { class: 'path', text: d.from + ' \u2192 ' + d.to }),
+        ]));
+      });
+    }
+
+    function renderFunnel(report) {
+      var list = document.getElementById('uj-funnel-list');
+      list.textContent = '';
+      var worst = report.topDropOffs && report.topDropOffs.length ? report.topDropOffs[0].toIndex : -1;
+      var start = report.steps.length ? report.steps[0].count : 0;
+      document.getElementById('uj-funnel-sub').textContent =
+        report.funnel.label + ': ' + nf.format(start) + ' people started, ' + report.range.start_date + ' to ' + report.range.end_date + '. Each step only counts people who did the previous step first.';
+      report.steps.forEach(function (step, i) {
+        if (i > 0) {
+          var isWorst = i === worst;
+          var loss = el('li', { class: 'uj-loss' + (isWorst ? ' worst' : '') }, [
+            document.createTextNode('\u2212' + nf.format(step.lostFromPrevious) + ' (' + pct(step.pctLostFromPrevious) + ') lost'),
+            step.medianSecondsFromPrevious !== null ? el('span', { class: 'time', text: 'median ' + duration(step.medianSecondsFromPrevious) }) : null,
+            isWorst ? el('span', { class: 'tag', text: 'Biggest drop-off' }) : null,
+          ]);
+          loss.setAttribute('aria-label', nf.format(step.lostFromPrevious) + ' people lost between ' + report.steps[i - 1].label + ' and ' + step.label + ', ' + pct(step.pctLostFromPrevious));
+          list.appendChild(loss);
+        }
+        var width = Math.max(0, Math.min(100, step.pctOfStart || 0));
+        var bar = el('div', { class: 'uj-bar' });
+        bar.style.width = width + '%';
+        var track = el('div', {
+          class: 'uj-track', role: 'img',
+          'aria-label': step.label + ': ' + nf.format(step.count) + ' people, ' + pct(step.pctOfStart) + ' of start',
+        }, [bar]);
+        list.appendChild(el('li', { class: 'uj-step' + (i === worst ? ' worst' : '') }, [
+          el('span', { class: 'label' }, [
+            document.createTextNode((i + 1) + '. ' + step.label),
+            el('span', { class: 'ev', text: step.event }),
+          ]),
+          track,
+          el('span', { class: 'nums' }, [
+            document.createTextNode(nf.format(step.count)),
+            el('small', { text: pct(step.pctOfStart) + ' of start' }),
+          ]),
+        ]));
+      });
+    }
+
+    function renderPages(report) {
+      var body = document.getElementById('uj-pages');
+      body.textContent = '';
+      document.getElementById('uj-pages-sub').textContent =
+        'Page views in range, grouped by route pattern. A visit ends after ' + report.visitGapMinutes + ' minutes without another page view.';
+      if (!report.pages.length) {
+        body.appendChild(el('tr', {}, [el('td', { colspan: '6', class: 'muted', text: 'No page views in this range.' })]));
+        return;
+      }
+      report.pages.forEach(function (p) {
+        var next = el('div', { class: 'next' });
+        if (!p.nextPages.length) next.appendChild(el('span', { class: 'muted', text: 'none' }));
+        p.nextPages.forEach(function (n) { next.appendChild(el('span', { class: 'mono', text: n.page + ' \u00b7 ' + nf.format(n.count) })); });
+        body.appendChild(el('tr', {}, [
+          el('td', { class: 'mono', text: p.page }),
+          el('td', { class: 'num', text: nf.format(p.views) }),
+          el('td', { class: 'num', text: nf.format(p.visitors) }),
+          el('td', { class: 'num', text: nf.format(p.exits) }),
+          el('td', { class: 'num', text: pct(p.exitRate) }),
+          el('td', {}, [next]),
+        ]));
+      });
+    }
+
+    var seq = 0;
+    function load() {
+      var mine = ++seq;
+      var r = range();
+      var q = 'start_date=' + encodeURIComponent(r.start) + '&end_date=' + encodeURIComponent(r.end);
+      setStatus('Loading\u2026');
+      Promise.all([
+        getJson('/api/analytics/journey/funnel?funnel=' + encodeURIComponent(state.funnel) + '&' + q),
+        getJson('/api/analytics/journey/pages?' + q),
+      ]).then(function (res) {
+        if (mine !== seq) return;
+        var funnel = res[0], pages = res[1];
+        var empty = !funnel.eventsInRange;
+        document.getElementById('uj-empty').hidden = !empty;
+        ['uj-drops-card', 'uj-funnel-card', 'uj-pages-card'].forEach(function (id) { document.getElementById(id).hidden = empty; });
+        setStatus(empty ? '' : nf.format(funnel.eventsInRange) + ' events, ' + funnel.range.start_date + ' to ' + funnel.range.end_date);
+        if (empty) return;
+        renderDrops(funnel);
+        renderFunnel(funnel);
+        renderPages(pages);
+      }).catch(function (err) {
+        if (mine !== seq) return;
+        setStatus(err && err.message ? err.message : 'Could not load journey data.', true);
+      });
+    }
+    load();
+  })();
+</script>
+{{/main-layout}}

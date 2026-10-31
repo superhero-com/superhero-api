@@ -340,7 +340,9 @@ describe('TokensService', () => {
 
     expect(tokensRepository.query).toHaveBeenCalledTimes(1);
     const [sql, params] = tokensRepository.query.mock.calls[0];
-    expect(sql).toContain('WITH all_ranked_tokens AS');
+    expect(sql).toContain('WITH filtered_tokens AS MATERIALIZED');
+    expect(sql).toContain('SELECT filtered.sale_address, filtered.rank');
+    expect(sql).not.toContain('all_ranked_tokens');
     expect(sql).toContain('filtered_count AS');
     expect(sql).toContain('RIGHT JOIN filtered_count ON TRUE');
     expect(params).toEqual(['%alpha%', 2, 0]);
@@ -359,7 +361,7 @@ describe('TokensService', () => {
     });
   });
 
-  it('orders ranked token pages by treasury using dao balance', async () => {
+  it('orders ranked token pages by treasury using dao balance, then sale address', async () => {
     const queryBuilder = {
       getQueryAndParameters: jest
         .fn()
@@ -374,8 +376,42 @@ describe('TokensService', () => {
     await service.queryTokensWithRanks(queryBuilder, 20, 1, 'treasury', 'DESC');
 
     const [sql] = tokensRepository.query.mock.calls[0];
-    expect(sql).toContain('ORDER BY all_ranked_tokens.dao_balance DESC');
-    expect(sql).toContain('ORDER BY paged_tokens.dao_balance DESC');
+    expect(sql).toContain('SELECT filtered.sale_address, filtered.dao_balance');
+    expect(sql).toContain(
+      'ORDER BY filtered_tokens.dao_balance DESC, filtered_tokens.sale_address ASC',
+    );
+    expect(sql).toContain(
+      'ORDER BY paged_tokens.dao_balance DESC, paged_tokens.sale_address ASC',
+    );
+  });
+
+  it('breaks trending ties by sale address after created_at', async () => {
+    const queryBuilder = {
+      getQueryAndParameters: jest
+        .fn()
+        .mockReturnValue([
+          'SELECT token.* FROM token WHERE token.unlisted = false',
+          [],
+        ]),
+    } as any;
+
+    tokensRepository.query.mockResolvedValue([]);
+
+    await service.queryTokensWithRanks(
+      queryBuilder,
+      20,
+      1,
+      'trending_score',
+      'DESC',
+    );
+
+    const [sql] = tokensRepository.query.mock.calls[0];
+    expect(sql).toContain(
+      'SELECT filtered.sale_address, filtered.trending_score, filtered.created_at',
+    );
+    expect(sql.replace(/\s+/g, ' ')).toContain(
+      'paged_tokens.created_at DESC, paged_tokens.sale_address ASC',
+    );
   });
 
   it('returns empty items with the correct total when a ranked page is out of range', async () => {
