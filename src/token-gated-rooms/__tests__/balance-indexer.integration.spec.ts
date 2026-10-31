@@ -73,7 +73,13 @@ d('AEX9 balance indexer (integration)', () => {
     const indexer = makeIndexer();
     indexer.addToAllowlist(TEST_TOKEN);
 
-    const sync = new Aex9TransferSyncService({} as any, indexer, txRepo);
+    const sync = new Aex9TransferSyncService(
+      {} as any,
+      indexer,
+      txRepo,
+      tokenRepo,
+      { add: jest.fn() } as any,
+    );
 
     const changed: Array<{ tokenAddress: string; holderAddress: string }> = [];
     emitter.on(TGR_BALANCE_CHANGED, (p: any) => changed.push(p));

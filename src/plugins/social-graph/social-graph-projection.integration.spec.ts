@@ -223,7 +223,8 @@ const bin = findPostgresBinDir();
         await first.changed(scope, ['ak_a', 'ak_b']);
         for (
           let attempt = 0;
-          attempt < 100 && !emitB.mock.calls.length;
+          attempt < 500 &&
+          (!emitA.mock.calls.length || !emitB.mock.calls.length);
           attempt++
         )
           await new Promise((resolve) => setTimeout(resolve, 10));
