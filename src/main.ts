@@ -15,6 +15,10 @@ import {
 } from './configs/allowed-origins';
 import { resolveTrustProxyValue } from './configs/trust-proxy';
 import { registerProcessGuards } from './process-guards';
+import {
+  JOURNEY_INGEST_PATH,
+  journeyIngestBodyHandlers,
+} from './journey/journey-body-parser';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const bootstrapLogger = new Logger('Bootstrap');
@@ -82,6 +86,10 @@ async function bootstrap() {
   }
 
   app.setGlobalPrefix('api');
+  // The anonymous journey ingest reads its own raw body (beacons are
+  // text/plain) and must answer 204 even for garbage, so it is parsed here,
+  // ahead of the app-wide JSON parser that Nest adds during init.
+  app.use(JOURNEY_INGEST_PATH, ...journeyIngestBodyHandlers());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
