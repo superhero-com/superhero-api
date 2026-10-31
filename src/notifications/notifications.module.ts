@@ -38,6 +38,8 @@ import { ChainTransferListener } from './listeners/chain-transfer.listener';
 import { InvitationClaimedListener } from './listeners/invitation-claimed.listener';
 import { PostCommentListener } from './listeners/post-comment.listener';
 import { NewFollowListener } from './listeners/new-follow.listener';
+import { TipReceivedListener } from './listeners/tip-received.listener';
+import { PostMentionListener } from './listeners/post-mention.listener';
 import { SendExpoNotificationQueue } from './queues/send-expo-notification.queue';
 import { ExpoReceiptQueue } from './queues/expo-receipt.queue';
 import { SendWebPushQueue } from './queues/send-web-push.queue';
@@ -138,6 +140,8 @@ function webPushSendLimiter(): { max: number; duration: number } {
     InvitationClaimedListener,
     PostCommentListener,
     NewFollowListener,
+    TipReceivedListener,
+    PostMentionListener,
     // Channel registry: append a provider here to add a channel.
     {
       provide: NOTIFICATION_CHANNELS,

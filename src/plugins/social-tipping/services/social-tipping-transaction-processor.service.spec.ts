@@ -6,8 +6,10 @@ describe('SocialTippingTransactionProcessorService', () => {
   let postRepository: any;
   let accountService: any;
   let tokensService: any;
+  let eventEmitter: any;
 
   beforeEach(() => {
+    eventEmitter = { emit: jest.fn() };
     tipRepository = {
       manager: {
         transaction: jest.fn(),
@@ -28,7 +30,55 @@ describe('SocialTippingTransactionProcessorService', () => {
       accountService as any,
       postRepository as any,
       tokensService as any,
+      eventEmitter as any,
     );
+  });
+
+  describe('tip-received event', () => {
+    const tipTx = {
+      hash: 'th_tip',
+      sender_id: 'ak_sender',
+      recipient_id: 'ak_receiver',
+    } as any;
+
+    beforeEach(() => {
+      jest
+        .spyOn(service as any, 'validateTransaction')
+        .mockReturnValue('TIP_POST:post-1');
+      jest.spyOn(service as any, 'saveTipFromTransaction').mockResolvedValue({
+        tip: { tx_hash: 'th_tip', amount: '1.5' },
+        post: { id: 'post-1_v3', sender_address: 'ak_receiver' },
+      });
+      tipRepository.manager.transaction.mockImplementation(
+        async (handler: any) => handler({}),
+      );
+    });
+
+    it('emits after commit for a live tip', async () => {
+      await service.processTransaction(tipTx, 'live' as any);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'social-tipping.tip.received',
+        {
+          senderAddress: 'ak_sender',
+          receiverAddress: 'ak_receiver',
+          amountAe: '1.5',
+          txHash: 'th_tip',
+          postId: 'post-1_v3',
+        },
+      );
+    });
+
+    it('does not emit during backfill or reorg replay', async () => {
+      await service.processTransaction(tipTx, 'backward' as any);
+      await service.processTransaction(tipTx, 'reorg' as any);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('does not emit when nothing was saved (self tip)', async () => {
+      (service as any).saveTipFromTransaction.mockResolvedValue(null);
+      await service.processTransaction(tipTx, 'live' as any);
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
   });
 
   it('recalculates trending only after the tip transaction commits', async () => {
