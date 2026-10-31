@@ -22,6 +22,10 @@ import {
   buildPreferencesUpdateMessage,
 } from '../notifications.constants';
 import { buildRoomMuteMessage } from '@/token-gated-rooms/notifications/room-mute.message';
+import {
+  buildPriceAlertMessage,
+  PriceAlertIntent,
+} from '../price-alerts/price-alert.message';
 import notificationsConfig from '../notifications.config';
 
 export interface IssuedChallenge {
@@ -177,6 +181,24 @@ export class DeviceChallengeService {
       address,
       signature,
       buildFeedSessionMessage(address, nonce),
+    );
+  }
+
+  /**
+   * Same atomic verify, but against the **price-alert** message. The body hash
+   * binds token, direction and target (create) or the alert id (delete).
+   */
+  async verifyAndConsumeForPriceAlert(
+    nonce: string,
+    address: string,
+    intent: PriceAlertIntent,
+    signature: string,
+  ): Promise<void> {
+    await this.verifyWithMessage(
+      nonce,
+      address,
+      signature,
+      buildPriceAlertMessage(address, nonce, intent),
     );
   }
 

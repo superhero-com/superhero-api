@@ -3,6 +3,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Account } from '@/account/entities/account.entity';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokenPriceAlert } from './entities/token-price-alert.entity';
+import { PriceAlertService } from './price-alerts/price-alert.service';
+import { PriceAlertsController } from './controllers/price-alerts.controller';
 import { DeviceToken } from './entities/device-token.entity';
 import { DeviceChallenge } from './entities/device-challenge.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
@@ -98,6 +102,8 @@ function webPushSendLimiter(): { max: number; duration: number } {
       NotificationRecord,
       WebPushSubscription,
       Account,
+      Token,
+      TokenPriceAlert,
     ]),
     BullModule.registerQueue(
       { name: SEND_EXPO_NOTIFICATION_QUEUE, limiter: expoSendLimiter() },
@@ -110,6 +116,7 @@ function webPushSendLimiter(): { max: number; duration: number } {
     PreferencesController,
     FeedController,
     WebPushController,
+    PriceAlertsController,
   ],
   providers: [
     NotificationService,
@@ -138,6 +145,7 @@ function webPushSendLimiter(): { max: number; duration: number } {
     InvitationClaimedListener,
     PostCommentListener,
     NewFollowListener,
+    PriceAlertService,
     // Channel registry: append a provider here to add a channel.
     {
       provide: NOTIFICATION_CHANNELS,
