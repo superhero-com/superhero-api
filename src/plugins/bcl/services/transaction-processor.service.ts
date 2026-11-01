@@ -67,6 +67,13 @@ export class TransactionProcessorService {
     // Wrap all DB operations in a single transaction
     const result = await this.transactionRepository.manager.transaction(
       async (manager) => {
+        // Overlapping live/backfill/retry passes must take the transaction lock
+        // before token metadata writes. Taking it only during persistence can
+        // deadlock against another pass that owns this lock and needs the row.
+        await this.persistenceService.lockTransaction(
+          rawTransaction.hash,
+          manager,
+        );
         let transactionToken: Token | undefined;
         let cleanupAffectedAddresses: string[] = [];
 

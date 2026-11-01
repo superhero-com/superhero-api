@@ -31,6 +31,7 @@ describe('ProfileReadService', () => {
       profileCacheRepository,
       accountRepository,
       socialGraphCountRepository,
+      { config: { enabled: false } } as any,
     );
   };
 
@@ -54,6 +55,7 @@ describe('ProfileReadService', () => {
       { findOne: jest.fn().mockResolvedValue(null) } as any,
       { findOne: jest.fn().mockResolvedValue(null) } as any,
       graph as any,
+      { config: { enabled: false } } as any,
     );
     expect((await service.getProfile('ak_account')).profile).toMatchObject({
       followers_count: 7,
@@ -74,6 +76,7 @@ describe('ProfileReadService', () => {
             new ServiceUnavailableException('Projection not ready'),
           ),
       } as any,
+      { config: { enabled: false } } as any,
     );
     const result = await service.getProfile('ak_account');
     expect(result.profile.social_graph_available).toBe(false);

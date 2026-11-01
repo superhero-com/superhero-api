@@ -96,14 +96,11 @@ describe('TransactionPersistenceService', () => {
     expect(lockCallOrder).toBeLessThan(existsCallOrder);
   });
 
-  it('does not fail transaction persistence when the advisory lock cannot be acquired', async () => {
+  it('aborts persistence when the advisory lock cannot be acquired', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_lockfail' });
     const count = jest.fn().mockResolvedValue(1);
     const exists = jest.fn().mockResolvedValue(false);
-    const loggerError = jest
-      .spyOn(Logger.prototype, 'error')
-      .mockImplementation(() => undefined);
     const query = jest
       .fn()
       .mockRejectedValueOnce(new Error('lock unavailable'))
@@ -121,18 +118,19 @@ describe('TransactionPersistenceService', () => {
       }),
     };
 
-    const transaction = await service.saveTransaction(
-      {
-        tx_hash: 'th_lockfail',
-        sale_address: 'ct_sale',
-        tx_type: 'buy',
-      } as any,
-      manager as any,
-    );
+    await expect(
+      service.saveTransaction(
+        {
+          tx_hash: 'th_lockfail',
+          sale_address: 'ct_sale',
+          tx_type: 'buy',
+        } as any,
+        manager as any,
+      ),
+    ).rejects.toThrow('lock unavailable');
 
-    expect(transaction).toEqual({ tx_hash: 'th_lockfail' });
-    expect(loggerError).toHaveBeenCalled();
-    loggerError.mockRestore();
+    expect(exists).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('increments the trade eligibility counter for a new buy/sell transaction', async () => {
@@ -315,7 +313,7 @@ describe('TransactionPersistenceService', () => {
   it('does not fail transaction persistence when account totals refresh fails', async () => {
     const upsert = jest.fn().mockResolvedValue(undefined);
     const findOne = jest.fn().mockResolvedValue({ tx_hash: 'th_3' });
-    const query = jest.fn().mockRejectedValue(new Error('insert failed'));
+    const query = jest.fn().mockResolvedValue(undefined);
     const loggerError = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);

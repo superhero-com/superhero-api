@@ -10,6 +10,15 @@ The MDW plugin system allows you to:
 - Handle blockchain reorganizations automatically
 - Store processed data with automatic cascade deletion on reorgs
 
+Plugins that require contiguous coverage may implement the optional
+`catchUpToHeight(tipHeight)` hook from `src/plugins/plugin.interface.ts`. The shared
+indexer calls it every sync tick, including after global backward sync completes.
+The plugin owns its durable checkpoint, bounded page budget and restart recovery;
+it must not mark the still-growing current generation as covered. A failed hook is
+retried on the next tick and does not prevent other plugins from running. Plugins
+without the hook keep their existing behavior. Shorts uses this to close gaps left
+by missed websocket events without adding a separate chain listener.
+
 ## Creating a Plugin
 
 ### 1. Create Plugin Class

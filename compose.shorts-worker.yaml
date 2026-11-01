@@ -1,0 +1,41 @@
+services:
+  shorts-media-worker:
+    # Build/publish through the API's existing image pipeline. Pin a release digest.
+    image: ${SHORTS_WORKER_IMAGE:?Set the API image digest for the media worker}
+    command: ["node", "dist/shorts/worker-main"]
+    user: "1000:1000"
+    read_only: true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    cpus: 2
+    mem_limit: 1g
+    pids_limit: 96
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=512m,uid=1000,gid=1000,mode=0700
+    # A dedicated worker env file, never the API or publisher env file.
+    env_file: ${SHORTS_WORKER_ENV_FILE:?Set a dedicated worker env file}
+    environment:
+      NODE_ENV: production
+      DOTENV_CONFIG_PATH: /dev/null
+      ENABLE_SHORTS: "true"
+      SHORTS_TESTNET_MVP: "1"
+      AE_NETWORK_ID: ae_uat
+      SHORTS_DEMO_AUTO_APPROVE: "0"
+      SHORTS_DEMO_CONNECTED_WALLET: "0"
+      SHORTS_DEPLOYMENT_FILE: /run/secrets/deployment.json
+      SHORTS_PRIVATE_S3_CREDENTIALS_FILE: /run/secrets/private-s3.json
+      SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: /run/secrets/private-keys.json
+      SHORTS_MODERATION_TOKEN_FILE: /run/secrets/moderation-token
+      SHORTS_WORKER_TMP_DIR: /tmp
+    volumes:
+      - ${SHORTS_WORKER_DEPLOYMENT_FILE:?Mount the public deployment manifest}:/run/secrets/deployment.json:ro
+      - ${SHORTS_WORKER_S3_CREDENTIALS_FILE:?Mount worker-scoped S3 credentials}:/run/secrets/private-s3.json:ro
+      - ${SHORTS_WORKER_ENCRYPTION_KEYS_FILE:?Mount the private key ring}:/run/secrets/private-keys.json:ro
+      - ${SHORTS_WORKER_MODERATION_TOKEN_FILE:?Mount the moderation credential}:/run/secrets/moderation-token:ro
+    # No HTTP listener, published ports, API data volume, IPFS key or signing key.

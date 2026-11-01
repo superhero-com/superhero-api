@@ -126,7 +126,9 @@ async function bootstrap() {
   // SIGTERM/SIGINT. Without this, owned ioredis clients and pub/sub subscribers
   // (notifications, announcements, websocket, indexer, …) are never quit()ed on
   // a graceful shutdown — they leak until the process is force-killed.
-  app.enableShutdownHooks();
+  // Node runs as PID 1 in the container. Exit after teardown instead of
+  // re-sending the signal, whose default termination may be ignored by PID 1.
+  app.enableShutdownHooks(undefined, { useProcessExit: true });
 
   await app.listen(process.env.APP_PORT ?? 3000);
 }

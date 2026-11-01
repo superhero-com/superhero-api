@@ -382,3 +382,21 @@ describe('Content Parser Utilities', () => {
  *    - Multi-language content
  *    - Mixed content types
  */
+
+describe('portable Superhero image references', () => {
+  const full = `ipfs:superhero:images:bafy${'a'.repeat(55)}`;
+  it('indexes image-only posts and previews without depending on a delivery host', () => {
+    expect(isValidMediaUrl(full)).toBe(true);
+    expect(isValidMediaUrl(`${full}-preview`)).toBe(true);
+    expect(extractMedia([{ value: 'comment:4_v3' }, { value: full }])).toEqual([
+      full,
+    ]);
+    for (const value of [
+      `${full}/image.webp`,
+      `${full}?url=https://bad.example`,
+      'ipfs:superhero:images:bad',
+    ]) {
+      expect(isValidMediaUrl(value)).toBe(false);
+    }
+  });
+});

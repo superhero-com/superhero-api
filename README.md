@@ -184,11 +184,60 @@ cd bctsl-api
 # Setup environment variables
 cp .env.example .env
 
+# Set GITHUB_TOKEN in your shell with read access to the private dependencies.
+# Compose passes it as a temporary BuildKit secret, not a runtime variable.
+
 # Start all services
 docker compose up --build
 ```
 
 The application will be available at `http://localhost:3000`.
+
+The default Compose file builds the `development` stage, which includes npm,
+the Nest CLI and watch-mode dependencies. The final Docker image is the
+`runtime` stage: it contains Node, FFmpeg and production dependencies, without
+npm, Yarn, Corepack or native build tools. Its default command runs
+`node scripts/migrate-with-lock.js` before starting `node dist/main`; the database
+advisory lock still serializes migrations across replicas. Use the compiled
+`node dist/…` entrypoints when overriding a production container's command.
+
+Build with `docker build -t superhero-api:local .`. If a locked GitHub dependency
+requires authentication, supply the optional BuildKit secret:
+`docker build --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t superhero-api:local .`.
+Never pass the token as a build argument or put it in an image layer.
+
+System-package versions and archive SHA-256 hashes live in `docker/apk/amd64/`
+and `docker/apk/arm64/`. The build verifies each archive before APK checks its
+signature and installs it without network access. Missing packages, changed
+archives or an unsupported architecture fail the build; there is no floating
+version fallback. Keep an artifact mirror of the signed archives when preparing
+a release, because upstream repositories may retire old versions. Update the
+locks/checksums together with the base image, rebuild and scan on each target
+architecture, and retain the resulting image digest and dependency inventory.
+The runtime package set must stay aligned with the streaming service and its
+FFmpeg release layer. Only compiled output, production dependencies, views,
+contract metadata and historical pricing data enter the runtime image.
+
+Allow at least 2 GiB for a dedicated builder, with additional host headroom for
+any running services. Dependency installation and pruning use a 512 MiB Node
+heap; compilation defaults to 1152 MiB. These are separate build arguments:
+`INSTALL_NODE_OPTIONS` and `BUILD_NODE_OPTIONS`. Larger CI machines can override
+them, for example `--build-arg BUILD_NODE_OPTIONS=--max-old-space-size=2048`.
+Also limit the builder container's memory: Node heap limits do not include native
+install tools, other processes or filesystem cache.
+
+Check the packaged application without external services:
+
+```sh
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges -e ENABLE_SHORTS=false \
+  --mount type=bind,src="$(pwd)/test/container-runtime.cjs",dst=/checks/runtime.cjs,readonly \
+  superhero-api:local node --test /checks/runtime.cjs
+```
+
+This checks production SDK/native-module loading, compiled role entrypoints,
+migrations, required assets and removal of build tooling. It does not replace
+full startup, database migration, media or end-to-end release checks.
 
 ## 📦 Manual Installation
 
@@ -338,11 +387,25 @@ The database automatically syncs schema changes in development (`DB_SYNC=true`).
 For production deployment:
 
 1. Set appropriate environment variables
-2. Apply the required manual SQL migration files
+2. Run `node scripts/migrate-with-lock.js` as a deployment job with migration credentials
 3. Disable `DB_SYNC`
 4. Use proper secrets management
 5. Configure proper network settings
 6. Enable SSL/TLS
+
+Use the same release image for the migration job and API. Wait for the job to
+succeed, then start the API with `node dist/main` and its restricted runtime
+database credentials. The image's default command combines migration and startup;
+override it when the two roles are separate. Do not give the running API schema
+ownership or `CREATE` permissions just to run migrations.
+
+Apply `1791849600000-ProductionRuntimeSchema` before this runtime. It moves the
+legacy token eligibility tables and DEX schema additions into migrations.
+Production startup checks required columns without executing DDL. Existing data
+is preserved, including when reverting the migration. Missing indexes are built
+in the migration transaction; allow for its locks when scheduling an upgrade on
+large tables. Production GraphQL builds its schema in memory, so the application
+filesystem can be read-only.
 
 ## 🤝 Contributing
 

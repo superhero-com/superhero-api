@@ -1,0 +1,58 @@
+export type DemoActor = string;
+export interface ShortRecord {
+  /** Internal only. Kept immutable with the accepted prepared package. */
+  privateMedia?: {
+    version: 1;
+    fence: string;
+    source: import('./shorts-metadata.service').IngestionInput;
+    files: Record<
+      string,
+      import('./shorts-private-objects.service').PrivateObjectRef
+    >;
+  };
+  publication?: 'pending' | 'published' | 'withdrawn';
+  safety?: import('./shorts-safety.service').VisualSafety;
+  visualReviewHash?: string;
+  scanGeneration?: string;
+  description?: string;
+  language?: string;
+  synthetic?: boolean;
+  sponsored?: boolean;
+  captions?: boolean;
+  classification?: import('./shorts-labels.service').Classification;
+  reviewReason?: string;
+  reviewedTopic?: string;
+  reviewHistory?: {
+    at: number;
+    operator: string;
+    reason: string;
+    approved: boolean;
+    topic: string;
+  }[];
+  appeal?: { message: string; at: number; status: 'pending' | 'resolved' };
+  reportDetails?: { id: string; reason: string; detail: string; at: number }[];
+  id: string;
+  creator: string;
+  title: string;
+  topic: string;
+  cid: string;
+  bytes: number;
+  duration: number;
+  createdAt: number;
+  moderation: 'pending' | 'approved' | 'rejected';
+  files: { name: string; bytes: number; sha256: string }[];
+  views: string[];
+  reports: number;
+}
+export interface LocalReceipt {
+  actor: string;
+  action: string;
+  tx: string;
+  at: number;
+}
+export interface LocalState {
+  contract?: string;
+  sourceHash?: string;
+  shorts: ShortRecord[];
+  receipts: LocalReceipt[];
+}

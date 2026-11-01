@@ -60,53 +60,56 @@ describe('PostTransactionProcessorService', () => {
     );
   });
 
-  it('keeps the saved post when trending refresh fails', async () => {
-    const savedPost = { id: 'post-1', token_mentions: ['ALPHA'] };
+  it.each(['raw content', ''])(
+    'keeps a saved post, including an empty caption, when trending refresh fails: %j',
+    async (caption) => {
+      const savedPost = { id: 'post-1', token_mentions: ['ALPHA'] };
 
-    validationService.validateTransaction.mockResolvedValue({
-      isValid: true,
-      contract: {},
-    });
-    typeDetectionService.detectPostType.mockReturnValue({
-      isComment: false,
-      parentPostId: undefined,
-      isHidden: false,
-    });
-    persistenceService.getExistingPost.mockResolvedValue(null);
-    persistenceService.validateContent.mockReturnValue('raw content');
-    topicManagementService.createOrGetTopics.mockResolvedValue([]);
-    persistenceService.createPostData.mockReturnValue({
-      id: 'post-1',
-      post_id: null,
-      token_mentions: ['ALPHA'],
-      topics: [],
-      media: [],
-    });
-    persistenceService.validatePostData.mockImplementation(
-      (postData: any) => postData,
-    );
-    persistenceService.savePost.mockResolvedValue(savedPost);
-    topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
-    tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
-      new Error('refresh failed'),
-    );
+      validationService.validateTransaction.mockResolvedValue({
+        isValid: true,
+        contract: {},
+      });
+      typeDetectionService.detectPostType.mockReturnValue({
+        isComment: false,
+        parentPostId: undefined,
+        isHidden: false,
+      });
+      persistenceService.getExistingPost.mockResolvedValue(null);
+      persistenceService.validateContent.mockReturnValue(caption);
+      topicManagementService.createOrGetTopics.mockResolvedValue([]);
+      persistenceService.createPostData.mockReturnValue({
+        id: 'post-1',
+        post_id: null,
+        token_mentions: ['ALPHA'],
+        topics: [],
+        media: [],
+      });
+      persistenceService.validatePostData.mockImplementation(
+        (postData: any) => postData,
+      );
+      persistenceService.savePost.mockResolvedValue(savedPost);
+      topicManagementService.updateTopicPostCounts.mockResolvedValue(undefined);
+      tokensService.queueTrendingScoresForSymbols.mockRejectedValue(
+        new Error('refresh failed'),
+      );
 
-    const result = await service.processTransaction({
-      hash: 'th_post',
-      raw: {
-        arguments: [{ value: 'raw content' }, { value: [] }],
-      },
-    } as any);
+      const result = await service.processTransaction({
+        hash: 'th_post',
+        raw: {
+          arguments: [{ value: 'raw content' }, { value: [] }],
+        },
+      } as any);
 
-    expect(result).toEqual({
-      post: savedPost,
-      success: true,
-      skipped: false,
-    });
-    expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
-      'ALPHA',
-    ]);
-  });
+      expect(result).toEqual({
+        post: savedPost,
+        success: true,
+        skipped: false,
+      });
+      expect(tokensService.queueTrendingScoresForSymbols).toHaveBeenCalledWith([
+        'ALPHA',
+      ]);
+    },
+  );
 
   it('emits POST_COMMENT_CREATED_EVENT on the fresh-comment path after the savePost transaction', async () => {
     const parentPost = { id: 'p_parent', sender_address: 'ak_author' };
