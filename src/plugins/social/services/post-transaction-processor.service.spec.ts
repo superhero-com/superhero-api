@@ -44,6 +44,7 @@ describe('PostTransactionProcessorService', () => {
       updatePostCommentCount: jest.fn(),
       validateParentPost: jest.fn(),
       emitCommentCreatedEvent: jest.fn(),
+      emitMentionEvent: jest.fn(),
       generatePostId: jest.fn(),
     };
     tokensService = {

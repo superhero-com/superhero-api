@@ -14,8 +14,11 @@ import {
 } from '@/social/interfaces/post.interfaces';
 import {
   POST_COMMENT_CREATED_EVENT,
+  POST_MENTION_EVENT,
   PostCommentCreatedEventPayload,
+  PostMentionEventPayload,
 } from '../events';
+import { extractAccountMentions } from '@/social/utils/account-mentions.util';
 import { SyncDirection } from '../../plugin.interface';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import { POST_SYNC_VERSION } from '@/social/config/post-contracts.config';
@@ -210,6 +213,53 @@ export class PostPersistenceService {
       this.logger.warn('Failed to emit post-comment notification event', {
         txHash,
         parentPostId: parentPost.id,
+        error:
+          notifyError instanceof Error
+            ? notifyError.message
+            : String(notifyError),
+      });
+    }
+  }
+
+  /**
+   * Emits POST_MENTION_EVENT when a freshly indexed post tags accounts with
+   * the `[account:ak_…]` macro. Live only, like the comment event, so a
+   * backfill or reorg replay never pages anyone. The author is never in the
+   * list; the parent author of a comment is passed so the listener can skip
+   * them (post-comment already covers that account).
+   */
+  emitMentionEvent(
+    post: Post,
+    txHash: string,
+    syncDirection: SyncDirection,
+    parentAuthorAddress?: string,
+  ): void {
+    if (syncDirection !== SyncDirectionEnum.Live) {
+      return;
+    }
+    if (!post?.sender_address || !post.id) {
+      return;
+    }
+    try {
+      const mentionedAddresses = extractAccountMentions(post.content).filter(
+        (address) => address !== post.sender_address,
+      );
+      if (!mentionedAddresses.length) {
+        return;
+      }
+      const payload: PostMentionEventPayload = {
+        authorAddress: post.sender_address,
+        mentionedAddresses,
+        postId: post.id,
+        txHash,
+        ...(parentAuthorAddress ? { parentAuthorAddress } : {}),
+      };
+      this.eventEmitter.emit(POST_MENTION_EVENT, payload);
+    } catch (notifyError) {
+      // Notification dispatch must never break indexing.
+      this.logger.warn('Failed to emit post-mention notification event', {
+        txHash,
+        postId: post.id,
         error:
           notifyError instanceof Error
             ? notifyError.message
