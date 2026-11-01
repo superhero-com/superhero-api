@@ -36,6 +36,8 @@ describe('Aex9TransferSyncService.processTransaction (balance apply)', () => {
     >
   >;
   let txRepository: { update: jest.Mock };
+  let tokenRepository: { findOneBy: jest.Mock };
+  let holdersQueue: { add: jest.Mock };
   let service: Aex9TransferSyncService;
 
   beforeEach(() => {
@@ -45,10 +47,16 @@ describe('Aex9TransferSyncService.processTransaction (balance apply)', () => {
       emitBalanceChanged: jest.fn(),
     } as any;
     txRepository = { update: jest.fn().mockResolvedValue(undefined) };
+    tokenRepository = {
+      findOneBy: jest.fn().mockResolvedValue({ sale_address: 'ct_sale' }),
+    };
+    holdersQueue = { add: jest.fn().mockResolvedValue(undefined) };
     service = new Aex9TransferSyncService(
       {} as any, // aeSdkService
       indexer as unknown as BalanceIndexerService,
       txRepository as any,
+      tokenRepository as any,
+      holdersQueue as any,
     );
   });
 
@@ -79,6 +87,56 @@ describe('Aex9TransferSyncService.processTransaction (balance apply)', () => {
     // both holders changed → both emitted
     expect(indexer.emitBalanceChanged).toHaveBeenCalledWith(TOKEN, FROM);
     expect(indexer.emitBalanceChanged).toHaveBeenCalledWith(TOKEN, TO);
+  });
+
+  it('refreshes public holders after a live transfer but not a backfill', async () => {
+    indexer.applyDelta.mockResolvedValue(new BigNumber('1000'));
+
+    await service.processTransaction(
+      txWithTransfers([{ name: 'Transfer', args: [FROM, TO, '1000'] }]),
+      SyncDirectionEnum.Live,
+    );
+    expect(tokenRepository.findOneBy).toHaveBeenCalledWith({ address: TOKEN });
+    expect(holdersQueue.add).toHaveBeenCalledWith(
+      { saleAddress: 'ct_sale' },
+      expect.objectContaining({ jobId: 'syncTokenHolders-ct_sale' }),
+    );
+    holdersQueue.add.mockClear();
+    await service.processTransaction(
+      txWithTransfers([{ name: 'Transfer', args: [FROM, TO, '1000'] }], {
+        hash: 'th_backfill',
+      }),
+      SyncDirectionEnum.Backward,
+    );
+    expect(holdersQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue when the transfer is already applied', async () => {
+    const tx = txWithTransfers(
+      [{ name: 'Transfer', args: [FROM, TO, '1000'] }],
+      {
+        data: {
+          [AEX9_TRANSFER_PLUGIN_NAME]: {
+            _version: 1,
+            data: { _applied: true },
+          },
+        },
+      },
+    );
+    await service.processTransaction(tx, SyncDirectionEnum.Live);
+    expect(holdersQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('keeps the applied transfer when holder refresh enqueue fails', async () => {
+    indexer.applyDelta.mockResolvedValue(new BigNumber('1000'));
+    holdersQueue.add.mockRejectedValue(new Error('redis unavailable'));
+    const tx = txWithTransfers([
+      { name: 'Transfer', args: [FROM, TO, '1000'] },
+    ]);
+    await expect(
+      service.processTransaction(tx, SyncDirectionEnum.Live),
+    ).resolves.toBeUndefined();
+    expect(tx.data?.[AEX9_TRANSFER_PLUGIN_NAME]?.data?._applied).toBe(true);
   });
 
   it('ignores non-Transfer (Allowance) events — no balance moves', async () => {

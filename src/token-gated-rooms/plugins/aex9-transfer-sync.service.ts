@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { Repository } from 'typeorm';
 import { BigNumber } from 'bignumber.js';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -7,7 +9,9 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Encoded } from '@aeternity/aepp-sdk';
 import { serializeBigInts } from '@/utils/common';
 import { BasePluginSyncService } from '@/plugins/base-plugin-sync.service';
-import { SyncDirection } from '@/plugins/plugin.interface';
+import { SyncDirection, SyncDirectionEnum } from '@/plugins/plugin.interface';
+import { Token } from '@/tokens/entities/token.entity';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 import { BalanceIndexerService } from '../services/balance-indexer.service';
 import FungibleTokenFullACI from './aci/FungibleTokenFull.aci.json';
 
@@ -44,6 +48,10 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
     private readonly balanceIndexer: BalanceIndexerService,
     @InjectRepository(Tx)
     private readonly txRepository: Repository<Tx>,
+    @InjectRepository(Token)
+    private readonly tokenRepository: Repository<Token>,
+    @InjectQueue(SYNC_TOKEN_HOLDERS_QUEUE)
+    private readonly holdersQueue: Queue,
   ) {
     super(aeSdkService);
   }
@@ -101,7 +109,6 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
     tx: Tx,
     _syncDirection: SyncDirection,
   ): Promise<void> {
-    void _syncDirection;
     if (!tx.contract_id) {
       return;
     }
@@ -164,6 +171,39 @@ export class Aex9TransferSyncService extends BasePluginSyncService {
 
     for (const holder of changedHolders) {
       this.balanceIndexer.emitBalanceChanged(tokenAddress, holder);
+    }
+
+    // token_balance drives room eligibility, while the public Holders list
+    // reads token_holder. Refresh the latter after live transfers, not once per
+    // transaction during historical backfills.
+    if (changedHolders.size > 0 && _syncDirection === SyncDirectionEnum.Live) {
+      try {
+        const token = await this.tokenRepository.findOneBy({
+          address: tokenAddress,
+        });
+        if (token?.sale_address) {
+          await this.holdersQueue.add(
+            { saleAddress: token.sale_address },
+            {
+              jobId: `syncTokenHolders-${token.sale_address}`,
+              removeOnComplete: true,
+              removeOnFail: true,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 3_000 },
+              timeout: Number(
+                process.env.SYNC_TOKEN_HOLDERS_JOB_TIMEOUT_MS || 180_000,
+              ),
+            },
+          );
+        }
+      } catch (error: any) {
+        // The balance has already been applied; a queue outage must not replay
+        // the transfer or prevent the remaining transaction batch from syncing.
+        this.logger.warn(
+          `Failed to queue holders refresh for ${tokenAddress}`,
+          error,
+        );
+      }
     }
   }
 
