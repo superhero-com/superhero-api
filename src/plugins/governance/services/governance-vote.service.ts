@@ -13,6 +13,8 @@ import {
   GovernanceVoteDto,
 } from '../dto/governance-vote.dto';
 
+export type GovernancePollStatus = 'open' | 'closed' | 'all';
+
 @Injectable()
 export class GovernanceVoteService {
   constructor(
@@ -22,12 +24,39 @@ export class GovernanceVoteService {
     private readonly voteRepository: Repository<GovernancePollVote>,
   ) {}
 
+  /**
+   * List polls, newest first. `status` filters on close height against
+   * `currentHeight`: open = no close height or closing after it, closed =
+   * closed at or before it.
+   */
   async findAll(
     options: IPaginationOptions,
+    filter: {
+      status?: GovernancePollStatus;
+      currentHeight?: number;
+      author?: string;
+    } = {},
   ): Promise<Pagination<GovernancePollDto>> {
     const query = this.pollRepository
       .createQueryBuilder('poll')
-      .orderBy('poll.hash', 'ASC');
+      .orderBy('poll.block_height', 'DESC')
+      .addOrderBy('poll.hash', 'ASC');
+
+    const closeExpr = 'COALESCE(poll.close_at_height, poll.close_height)';
+    if (filter.status && filter.status !== 'all' && filter.currentHeight) {
+      if (filter.status === 'open') {
+        query.andWhere(`(${closeExpr} IS NULL OR ${closeExpr} > :height)`, {
+          height: filter.currentHeight,
+        });
+      } else {
+        query.andWhere(`${closeExpr} <= :height`, {
+          height: filter.currentHeight,
+        });
+      }
+    }
+    if (filter.author) {
+      query.andWhere('poll.author = :author', { author: filter.author });
+    }
 
     return paginate(query, options);
   }
