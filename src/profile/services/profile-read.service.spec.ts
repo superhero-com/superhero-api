@@ -248,6 +248,36 @@ describe('ProfileReadService', () => {
     expect(result.profile.site).toBe('example.com');
   });
 
+  it('serves the AddressLink avatar as an https URL', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_avatar_linked',
+        avatarurl: 'https://old.example.com/stale.png',
+      } as ProfileCache,
+      account: {
+        address: 'ak_avatar_linked',
+        links: { avatar: 'cdn.example.com/me.png' },
+      } as unknown as Account,
+    });
+
+    const result = await service.getProfile('ak_avatar_linked');
+
+    expect(result.profile.avatarurl).toBe('https://cdn.example.com/me.png');
+  });
+
+  it('falls back to the cached avatar when no AddressLink avatar exists', async () => {
+    const service = createService({
+      cache: {
+        address: 'ak_avatar_cached',
+        avatarurl: 'https://old.example.com/cached.png',
+      } as ProfileCache,
+    });
+
+    const result = await service.getProfile('ak_avatar_cached');
+
+    expect(result.profile.avatarurl).toBe('https://old.example.com/cached.png');
+  });
+
   it('returns null site when no AddressLink site exists', async () => {
     const service = createService({
       cache: {
