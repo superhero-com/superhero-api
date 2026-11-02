@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JourneyEvent } from './entities/journey-event.entity';
 import { JourneyIngestBuffer } from './journey-ingest.buffer';
 import { JourneyQueryService } from './journey-query.service';
+import { JourneyRateLimiter } from './journey-rate-limiter';
 import { JourneyRetentionService } from './journey-retention.service';
 import {
   JourneyDashboardController,
@@ -23,6 +24,7 @@ import {
   providers: [
     JourneyIngestBuffer,
     JourneyQueryService,
+    JourneyRateLimiter,
     JourneyRetentionService,
   ],
   controllers: [JourneyIngestController, JourneyDashboardController],

@@ -45,8 +45,9 @@ import {
 import { JourneyIngestBuffer } from './journey-ingest.buffer';
 import { JourneyQueryService } from './journey-query.service';
 import { resolveJourneyRange } from './journey-range';
+import { JourneyRateLimiter } from './journey-rate-limiter';
 import { JourneyRetentionService } from './journey-retention.service';
-import { JOURNEY_FUNNELS } from './journey.constants';
+import { JOURNEY_FUNNELS, JOURNEY_LIMITS } from './journey.constants';
 import {
   JourneyDashboardController,
   JourneyIngestController,
@@ -139,6 +140,7 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       providers: [
         JourneyIngestBuffer,
         JourneyQueryService,
+        JourneyRateLimiter,
         JourneyRetentionService,
         AffiliationDashboardAuthService,
         { provide: getDataSourceToken(), useValue: ds },
@@ -165,6 +167,8 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
     // Mirror main.ts: prefix, the route-scoped raw body reader, the strict
     // global ValidationPipe, and the Handlebars layout.
     nest.setGlobalPrefix('api');
+    // As with TRUST_PROXY set, so a test can pose as another client IP.
+    nest.set('trust proxy', 'loopback');
     nest.use(JOURNEY_INGEST_PATH, ...journeyIngestBodyHandlers());
     nest.useGlobalPipes(
       new ValidationPipe({
@@ -337,6 +341,37 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       await buffer.flush();
       const [row] = await ds.query(`SELECT page FROM journey_events`);
       expect(row.page).toBe('(other)');
+    });
+
+    it('caps the events stored per client IP each minute, still answering 204', async () => {
+      // Keep the current window open; a rollover mid-loop would refill the bucket.
+      (app.get(JourneyRateLimiter) as any).windowStart = Date.now();
+      const cap = JOURNEY_LIMITS.MAX_EVENTS_PER_CLIENT_PER_MINUTE;
+      const now = Date.now();
+      const events = Array.from(
+        { length: JOURNEY_LIMITS.MAX_EVENTS_PER_REQUEST },
+        (_, i) => ({ n: 'page_view', p: '/', t: now - i }),
+      );
+      for (let i = 0; i < cap / events.length + 2; i++) {
+        await request(server())
+          .post('/api/analytics/journey/events')
+          .set('Content-Type', 'text/plain')
+          // Its own bucket, so the other tests' 127.0.0.1 allowance is untouched.
+          .set('X-Forwarded-For', '203.0.113.7')
+          .send(payload(events))
+          .expect(204);
+      }
+      // Same browser from another IP: only that IP's bucket is full.
+      await request(server())
+        .post('/api/analytics/journey/events')
+        .set('Content-Type', 'text/plain')
+        .send(payload([{ n: 'page_view', p: '/', t: now }]))
+        .expect(204);
+      await buffer.flush();
+      const rows = await ds.query(
+        `SELECT anon_id, COUNT(*)::int AS count FROM journey_events GROUP BY anon_id ORDER BY anon_id`,
+      );
+      expect(rows).toEqual([{ anon_id: A, count: cap + 1 }]);
     });
 
     it('is not swallowed by a catch-all /analytics/:x/:y route', async () => {

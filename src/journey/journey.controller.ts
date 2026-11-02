@@ -19,6 +19,7 @@ import { Request } from 'express';
 import { AffiliationAnalyticsGuard } from '@/affiliation/guards/affiliation-analytics.guard';
 import { JourneyIngestBuffer } from './journey-ingest.buffer';
 import { parseJourneyPayload } from './journey-payload';
+import { JourneyRateLimiter } from './journey-rate-limiter';
 import {
   findJourneyFunnel,
   JourneyQueryService,
@@ -32,13 +33,17 @@ import { DEFAULT_JOURNEY_FUNNEL_ID } from './journey.constants';
  *
  * Always 204 with an empty body, whatever arrives: malformed input is dropped
  * silently, and the handler only queues rows in memory, so it never waits on
- * the database. It reads nothing but the body: no cookies, IP, UA string or
+ * the database. It reads only the body and the client IP, which the rate caps
+ * hold only in memory and never store or log; no cookies, UA string or
  * referrer. The raw body is read by `journeyIngestBodyHandlers` (see main.ts).
  */
 @Controller('analytics/journey')
 @ApiTags('Analytics')
 export class JourneyIngestController {
-  constructor(private readonly buffer: JourneyIngestBuffer) {}
+  constructor(
+    private readonly buffer: JourneyIngestBuffer,
+    private readonly limiter: JourneyRateLimiter,
+  ) {}
 
   @Post('events')
   @HttpCode(204)
@@ -49,7 +54,9 @@ export class JourneyIngestController {
   })
   ingest(@Req() request: Request): void {
     try {
-      this.buffer.push(parseJourneyPayload(request.body));
+      const rows = parseJourneyPayload(request.body);
+      const allowed = this.limiter.take(request.ip ?? '', rows.length);
+      this.buffer.push(rows.slice(0, allowed));
     } catch {
       // Never surface anything to the client.
     }
