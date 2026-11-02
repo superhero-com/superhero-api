@@ -318,6 +318,28 @@ d('EligibilityService (integration)', () => {
     });
   });
 
+  it('zero-threshold room lists a moderator without tokens as admin', async () => {
+    const moderator = 'ak_int_elig_moderator';
+    await seedRoom({
+      min_token_threshold: new BigNumber(0),
+      moderators: [moderator],
+    });
+    await accountRepo.insert({
+      address: moderator,
+      links: { [PROVIDER]: HEX },
+    });
+    const query = new RoomsQueryService(roomRepo, membershipRepo, {} as any);
+
+    await eventEmitter.emitAsync(TGR_BALANCE_CHANGED, {
+      tokenAddress: TOKEN,
+      holderAddress: moderator,
+    });
+
+    expect(
+      (await query.listEligibleRooms(moderator, 1, 10)).items[0],
+    ).toMatchObject({ role: 'admin', relay_state: 'pending_add' });
+  });
+
   it('cursor-batched recompute: every member of a room with > N members is recomputed', async () => {
     await seedRoom(); // reconcileBatchSize = 2 → forces multiple batches
     const count = 5;
