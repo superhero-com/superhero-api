@@ -23,7 +23,16 @@ import {
 import { ShortsScope } from './shorts-metadata.service';
 import { performance } from 'node:perf_hooks';
 import { ShortsJobAttempt } from './shorts-job-attempt';
-import { discardShortsResponse } from './shorts-upstream';
+import { discardShortsResponse, readShortsJson } from './shorts-upstream';
+import { ShortsDeliveryPackagesService } from './shorts-delivery-packages.service';
+import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
+import { ShortsDeliveryAcknowledgementService } from './shorts-delivery-acknowledgement.service';
+import { sourceKey } from './hls-protocol/hls-package';
+import { HlsPackage, validateSourcePackage } from './hls-protocol/hls-package';
+import {
+  PlaybackDescriptor,
+  validateDescriptor,
+} from './hls-protocol/playback-descriptor';
 
 export const SHORTS_STREAM_DISPATCH_MS = Symbol('SHORTS_STREAM_DISPATCH_MS');
 
@@ -51,6 +60,10 @@ export class ShortsStreamingService
     @Optional()
     @Inject(SHORTS_STREAM_DISPATCH_MS)
     private readonly attemptMs = 30000,
+    @Optional()
+    private readonly deliveryPackages?: ShortsDeliveryPackagesService,
+    @Optional()
+    private readonly acknowledgement?: ShortsDeliveryAcknowledgementService,
   ) {
     if (!Number.isSafeInteger(attemptMs) || attemptMs < 1 || attemptMs > 30000)
       throw new Error('Invalid playback dispatch deadline');
@@ -215,6 +228,22 @@ export class ShortsStreamingService
       }
     }
   }
+  /** Explicitly adopt the existing canonical package before a delivery switch. */
+  async acknowledgeCanonical(id: string, parent: AbortSignal) {
+    if (process.env.SHORTS_LEGACY_BACKFILL_ENABLED !== 'true')
+      throw new Error('Legacy delivery acknowledgement is disabled');
+    if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error('Invalid Short ID');
+    const status = await this.prepare(
+      id,
+      undefined,
+      AbortSignal.any([parent, AbortSignal.timeout(300000)]),
+    );
+    return {
+      id,
+      status:
+        status === 200 ? 'ready' : status === 202 ? 'preparing' : 'denied',
+    };
+  }
   private async prepare(id: string, cid?: string, parent?: AbortSignal) {
     const signal = parent
       ? AbortSignal.any([parent, this.shutdown.signal])
@@ -229,7 +258,8 @@ export class ShortsStreamingService
         short &&
         short.publication === 'published' &&
         (!cid || short.cid === cid) &&
-        officialContentPolicy(short, this.safety?.demoAutoApprove).serve
+        officialContentPolicy(short, this.safety?.demoAutoApprove).serve &&
+        short
       );
     };
     signal.throwIfAborted();
@@ -237,27 +267,120 @@ export class ShortsStreamingService
       await readFile(this.keyFile!, { encoding: 'utf8', signal })
     ).trim();
     if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid streaming key');
-    if (this.stopped || !(await eligible())) return null;
+    const source = await eligible();
+    if (this.stopped || !source) return null;
+    const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
     const response = await fetch(
       `${this.endpoint}/internal/videos/${encodeURIComponent(id)}/prepare`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },
         redirect: 'error',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        signal: requestSignal,
       },
     );
-    discardShortsResponse(response);
+    const durable =
+      !!source.original ||
+      process.env.SHORTS_LEGACY_BACKFILL_ENABLED === 'true';
+    let acknowledgement: any;
+    if (response.status === 200 && durable) {
+      acknowledgement = await readShortsJson(response, 147456, requestSignal);
+    } else discardShortsResponse(response);
     signal.throwIfAborted();
     if (![200, 202].includes(response.status))
       throw new Error('Preparation unavailable');
     // Policy may change during network IO. Shared completion also requires the same generation/lease.
-    return (await eligible()) ? response.status : null;
+    const current = await eligible();
+    if (!current) return null;
+    if (response.status === 200 && durable) {
+      if (!this.deliveryPackages)
+        throw new Error('Durable delivery metadata unavailable');
+      const descriptor = shortsPlaybackDescriptor(current, this.scope());
+      if (
+        acknowledgement?.status !== 'ready' ||
+        acknowledgement.sourceKey !== sourceKey(descriptor)
+      )
+        throw new Error('Playback acknowledgement source changed');
+      if (!current.original && !this.acknowledgement)
+        throw new Error('Legacy delivery requires physical verification');
+      if (this.acknowledgement) {
+        await this.acknowledgement.acknowledge(
+          current,
+          descriptor,
+          acknowledgement.prepared,
+          async () => {
+            const fresh = await eligible();
+            if (
+              !fresh ||
+              sourceKey(shortsPlaybackDescriptor(fresh, this.scope())) !==
+                sourceKey(descriptor)
+            )
+              throw new Error('Delivery publication authority changed');
+          },
+          signal,
+        );
+      } else
+        await this.deliveryPackages.acknowledge(
+          descriptor,
+          acknowledgement.prepared,
+        );
+      signal.throwIfAborted();
+    }
+    return response.status;
   }
   async onModuleDestroy() {
     this.stopped = true;
     this.shutdown.abort();
     if (this.timer) clearInterval(this.timer);
     await this.pending;
+  }
+  /** Explicit generation preparation; saving/selection belongs to the coordinator. */
+  async prepareGeneration(
+    descriptor: PlaybackDescriptor,
+    parent?: AbortSignal,
+  ): Promise<HlsPackage | undefined> {
+    validateDescriptor(descriptor, descriptor.id);
+    const job = descriptor.derivatives?.generation.job;
+    if (
+      !descriptor.original ||
+      !job ||
+      job === descriptor.id ||
+      !this.endpoint ||
+      !this.keyFile ||
+      this.stopped
+    )
+      throw new Error('Generation preparation is unavailable');
+    const signal = AbortSignal.any([
+      this.shutdown.signal,
+      AbortSignal.timeout(10000),
+      ...(parent ? [parent] : []),
+    ]);
+    signal.throwIfAborted();
+    const key = (
+      await readFile(this.keyFile, { encoding: 'utf8', signal })
+    ).trim();
+    if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid streaming key');
+    const response = await fetch(
+      `${this.endpoint}/internal/videos/${encodeURIComponent(descriptor.id)}/generations/${encodeURIComponent(job)}/prepare`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}` },
+        redirect: 'error',
+        signal,
+      },
+    );
+    if (response.status === 202) {
+      discardShortsResponse(response);
+      return undefined;
+    }
+    if (response.status !== 200) {
+      discardShortsResponse(response);
+      throw new Error('Generation preparation unavailable');
+    }
+    const value = await readShortsJson(response, 147456, signal);
+    signal.throwIfAborted();
+    if (value?.status !== 'ready' || value.sourceKey !== sourceKey(descriptor))
+      throw new Error('Generation acknowledgement source changed');
+    return validateSourcePackage(descriptor, value.prepared);
   }
 }

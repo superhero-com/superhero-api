@@ -10,8 +10,23 @@ including module boundaries, S3 configuration, secret files and provider require
 [Private storage inventory](STORAGE-INVENTORY.md) lists S3 versions and delete markers with durable scan checkpoints and no object-deletion authority.
 [Optional multipart inventory](MULTIPART-INVENTORY.md) observes unfinished provider-side uploads and parts; creator uploads still use ordinary object writes.
 [Storage reference reconciliation](STORAGE-REFERENCES.md) expands encrypted manifests and matches logical references and holds to a completed inventory, without deleting media.
+[Private version cleanup](PRIVATE-VERSION-CLEANUP.md) coordinates deletion of verified duplicate noncurrent versions through an isolated, default-off operations process.
 [HLS index inventory](HLS-INVENTORY.md) matches prepared streaming packages to source references and holds with resumable read-only Redis scans.
+[Original-file media](ORIGINAL-MEDIA.md) defines canonical original identity, separate temporary input and retained asset packages, and dual-format reader compatibility.
 [Reward reconciliation](ACCOUNTING.md) compares indexed creator/treasury rewards and claims with contract state at a fixed block.
+
+IPFS media requests are paced at a minimum of 75 ms between starts within each
+`ShortsMediaService` instance. Responses stream independently; upstream failures,
+including HTTP 429, are returned without replay. This reduces local bursts and
+does not replace the shared RPC rate limit across processes.
+
+Prepared/durable delivery verification may wait up to five seconds for an occupied
+media slot, checking every 250 ms and reserving the existing one-second Redis
+command deadline. Only explicit actor/global contention is retried; invalid
+scope, policy disagreement and Redis failures fail immediately. Cancellation
+stops waiting, and a lease granted after cancellation is released before returning.
+Shutdown retains the normal shared lease expiry fallback. Interactive previews
+and scans keep their existing fail-fast admission behavior.
 
 An opt-in NestJS feature module connected to a real æternity testnet contract. It can run inside the normal API on staging, or separately for local development without the main databases and relays. The web feature runs within Superhero's existing application and wallet providers.
 
@@ -32,6 +47,26 @@ versioned release manifest and publishing-policy file using the paths in
 [publisher process](PUBLISHER.md). Both local demo flags must be `0`; hosted startup rejects them.
 
 ### Media release image
+
+The application Dockerfile can install its exact signed APKs from a retained
+archive when the upstream package index no longer carries the locked versions:
+
+```sh
+docker build --build-arg APK_SOURCE=archives \
+  --build-context apk-archives=/absolute/path/to/retained-apks \
+  --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t superhero-api:application .
+```
+
+The archive context contains `<architecture>/api-build/*.apk` and
+`<architecture>/runtime/*.apk`, with architecture `amd64` or `arm64`. Each set
+must contain exactly the files in its `docker/apk` checksum manifest. Archive
+mode does not query package indexes or fall back to network package retrieval;
+checksums, archive count and APK signatures remain mandatory. Missing, extra or
+changed archives fail. Keep archives outside the product checkout; they are
+mounted only during installation and are not copied into the image. The default
+`APK_SOURCE=repository` retains exact-version retrieval from configured indexes.
+This option only controls OS package retrieval; npm dependencies and other source
+downloads retain their existing build and authentication requirements.
 
 Build the ordinary API image first. For a Shorts release, apply the shared
 media artifact built by `superhero-video-moderation/decoder/media.Dockerfile`:
@@ -401,6 +436,19 @@ waits for the normal BullMQ lease recovery. It decodes the resulting signed HLS
 with FFmpeg and checks a cold origin restart without a worker or retranscoding.
 Allow several minutes; the worker's 60-second lock is not shortened.
 
+Set `SHORTS_TEST_ASSEMBLED_ORIGINAL=1` to exercise the original-file format with
+a generated portrait 1080p60 clip and stereo audio. This path verifies the exact
+original bytes from their file CID, adaptive video/audio tracks, durable HLS
+acknowledgement, signed asset ranges and recovery. With the edge enabled it also
+checks cache authorization, actual token expiry and measured-view deduplication
+across rendition changes. Add `SHORTS_TEST_WEB_REPO` pointing to a local web
+checkout to exercise its real player in Chromium, including High quality and
+Data Saver selection. Browser integration requires the edge option below.
+`SHORTS_TEST_SCRATCH_MAX_USED_PERCENT` may explicitly adjust the disposable API
+fixture's disk admission threshold (default 85); it does not alter deployment
+configuration. These generated fixtures do not qualify camera/HDR quality,
+physical devices or parity with other platforms.
+
 Optionally set `SHORTS_TEST_EDGE_IMAGE` to an already available NGINX image
 matching the streaming edge Dockerfile. Docker access is required. The suite
 creates one disposable, bounded, loopback-only edge with the checkout's NGINX
@@ -478,6 +526,10 @@ The container test is opt-in and requires the following fixture configuration:
 | `SHORTS_TEST_S3_ACCESS_KEY`, `SHORTS_TEST_S3_SECRET_KEY` | Credentials for that disposable S3 store |
 | `SHORTS_TEST_WORKER_CA_FILE` | Absolute path to the fixture CA certificate, trusted by both HTTPS fixture endpoints |
 | `SHORTS_TEST_MODERATION_TOKEN_FILE` | Absolute path to the fixture scanner token; the real, ready scanner is reachable at `https://moderation:8443` |
+| `SHORTS_TEST_WORKER_PROFILE` | `legacy` (default) or `original` |
+| `SHORTS_TEST_WORKER_ORIGINAL_FIXTURES` | Required for `original`: absolute directory containing the two owned/generated MP4 fixtures described below |
+| `SHORTS_TEST_WORKER_HDR_FIXTURE` | Optional with `original`: absolute path to the maximum-duration 4K PQ HDR fixture described below |
+| `SHORTS_TEST_WORKER_HDR_FRAME_RATE` | Optional with the HDR fixture: `30` (default) or `60`, matching its actual cadence |
 
 The HTTPS fixtures must use certificates issued by the fixture CA, not the image's
 default trust store. The test verifies both trusted and untrusted connections
@@ -488,14 +540,41 @@ Docker, host FFmpeg and development dependencies are required by the test runner
 
 It starts `node dist/shorts/worker-main` with the real production configuration,
 restricted SQL role, encrypted S3 objects and no Nest provider overrides. Worker
-containers have two CPUs, 1 GiB memory with no additional swap, 96 tasks, a read-only
-root and 512 MiB scratch tmpfs. Generated 4K/60 fps and 60-second sources exercise
+containers have two CPUs, 96 tasks and a read-only root. The default legacy profile
+uses 1 GiB memory with no additional swap and 512 MiB scratch tmpfs. Generated 4K/60 fps and 60-second sources exercise
 scanning, encoding, SIGTERM and replacement recovery under the normal 120-second
 lease. Results must remain private and unapproved. The test removes only its own
 workers, secret volume, bucket, schema, role and temporary files; the fixture owner
-must stop the dependency services afterwards. Allow seven minutes. This validates
-worker isolation and recovery for synthetic inputs, not classifier accuracy,
-worst-case public capacity, provider IAM or an HTTP/browser upload journey.
+must stop the dependency services afterwards. Allow seven minutes for this profile.
+
+The `original` profile uses 2 GiB memory with no additional swap and a 1 GiB scratch
+tmpfs. Supply `landscape4k60.mp4` (four seconds, 3840×2160, constant 60 fps) and
+`portrait60-maxbytes.mp4` (60 seconds, 1080×1920, constant 60 fps, exactly
+100,000,000 bytes). Both must be valid SDR MP4 files; a valid MP4 `free` box may
+pad the second generated fixture to the byte limit. Keep media outside the
+checkout and use material owned or licensed for testing. HTTPS fixture ingress
+must admit the accepted original and encrypted-object overhead.
+
+Set `SHORTS_TEST_WORKER_HDR_FIXTURE` to exercise the maximum-original case with a
+60-second, 3840×2160, constant 30 fps HEVC 10-bit MP4 tagged BT.2020/PQ
+(`bt2020`, `smpte2084`, `bt2020nc`), exactly 100,000,000 bytes. Use actual HDR
+material or an explicitly converted HDR test pattern; metadata tags alone do not
+create HDR signal values. For a 60 fps source, set
+`SHORTS_TEST_WORKER_HDR_FRAME_RATE=60`; the default 30 fps setting deliberately
+rejects it. The test probes dimensions, cadence, decoded frame
+count, duration and color metadata before queueing each fixture. The two SDR
+files are still required for startup and recovery checks. This option changes
+only the full-length input case; it does not change worker budgets or deadlines.
+
+This profile checks encrypted source storage, original SHA-256/CID identity,
+all rendition hashes and decoded frame counts, derived package CIDs and scratch
+cleanup. SIGTERM and SIGKILL occur after a partial 1080p rendition exists; replacement
+workers recover through the normal lease and a new fence. The full worker must
+stay below 75% of its assigned memory without an OOM kill. Allow up to 30 minutes
+for all cases, including normal lease expiry; production scan and processing
+deadlines remain unchanged. These tests validate worker isolation and recovery
+for the supplied inputs, not classifier accuracy, worst-case public capacity,
+provider IAM or an HTTP/browser upload journey.
 
 For a combined distinct-media journey, set `SHORTS_TEST_VARIED_HLS=1` with
 `SHORTS_TEST_UPLOAD_LOAD=1`, `SHORTS_TEST_STREAMING_REPO` and `SHORTS_TEST_EDGE_IMAGE`.

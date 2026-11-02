@@ -6,13 +6,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { ShortsDatabaseService } from './shorts-database.service';
 import {
   RetentionConfig,
   SHORTS_RETENTION_CONFIG,
 } from './shorts-retention.config';
 import type { PrivateObjectRef } from './shorts-private-objects.service';
+import type { ShortRecord } from './shorts.types';
+import {
+  validateOriginalContent,
+  derivedFiles,
+} from './shorts-original-content';
+import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
+import { sourceKey, validateSourcePackage } from './hls-protocol/hls-package';
+import { SHORTS_ORIGINAL_HARD_LIMIT } from './shorts-media-file';
 
 const SOURCES = [
   'shorts_runtime',
@@ -20,6 +28,7 @@ const SOURCES = [
   'shorts_ingestion',
   'shorts_upload_sessions',
   'shorts_upload_parts',
+  'shorts_delivery_packages',
 ];
 const id = (value: unknown) => {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(value))
@@ -45,6 +54,31 @@ export class ShortsRetentionService {
   private scope() {
     return [this.config.scope.network, this.config.scope.contract];
   }
+  private async privateRetirementSchema(db: DataSource | EntityManager) {
+    const [{ present }] = await db.query(
+      "SELECT to_regclass('shorts_private_input_retirements') IS NOT NULL AS present",
+    );
+    return present === true;
+  }
+  private async generationSchema(db: DataSource | EntityManager) {
+    // During reader-first rollout an old schema cannot contain generation jobs.
+    // A half-applied or inconsistent schema is never interpreted as no references.
+    const [schema] =
+      await db.query(`SELECT to_regclass('shorts_delivery_generations') IS NOT NULL AS outputs,
+      EXISTS(SELECT FROM pg_attribute WHERE attrelid='shorts_ingestion'::regclass AND attname='delivery_short_id' AND NOT attisdropped) AS jobs,
+      to_regclass('shorts_delivery_staging') IS NOT NULL AS staging,
+      EXISTS(SELECT FROM pg_attribute WHERE attrelid='shorts_delivery_packages'::regclass AND attname='generation_job_id' AND NOT attisdropped) AS delivery_jobs`);
+    if (
+      schema.outputs !== schema.jobs ||
+      ((schema.delivery_jobs || schema.staging) && !schema.outputs)
+    )
+      throw new Error('Incomplete delivery generation schema');
+    return {
+      generations: schema.outputs === true,
+      staging: schema.staging === true,
+      deliveryRoot: schema.delivery_jobs ? 'generation_job_id' : 'short_id',
+    };
+  }
 
   async verify(accessMode: 'manage-holds' | 'read-only' = 'manage-holds') {
     const [role] = await this.db
@@ -54,7 +88,15 @@ export class ShortsRetentionService {
       FROM pg_roles r WHERE rolname=current_user`);
     if (!role?.direct || role.privileged || role.creates_schema)
       throw new Error('Use a dedicated restricted retention login');
-    for (const table of SOURCES) {
+    const { generations: generationSchema, staging } =
+      await this.generationSchema(this.db);
+    const privateRetirements = await this.privateRetirementSchema(this.db);
+    for (const table of [
+      ...SOURCES,
+      ...(generationSchema ? ['shorts_delivery_generations'] : []),
+      ...(staging ? ['shorts_delivery_staging'] : []),
+      ...(privateRetirements ? ['shorts_private_input_retirements'] : []),
+    ]) {
       const [access] = await this.db.query(
         `SELECT has_table_privilege($1,'SELECT') AS reads,
         has_table_privilege($1,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
@@ -190,6 +232,11 @@ export class ShortsRetentionService {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
       throw new BadRequestException('Inventory page size must be 1–50');
     return this.db.transaction('REPEATABLE READ', async (db) => {
+      const {
+        generations: generationSchema,
+        deliveryRoot,
+        staging,
+      } = await this.generationSchema(db);
       const args = [...this.scope(), after, limit + 1];
       const roots = await db.query(
         `SELECT id FROM (
@@ -207,8 +254,34 @@ export class ShortsRetentionService {
         'SELECT id,body FROM shorts_content WHERE network=$1 AND contract=$2 AND id=ANY($3)',
         keys,
       );
+      const generations = generationSchema
+        ? await db.query(
+            'SELECT job_id AS id,short_id,body FROM shorts_delivery_generations WHERE network=$1 AND contract=$2 AND job_id=ANY($3)',
+            keys,
+          )
+        : [];
+      content.push(...generations);
+      const stagedSources = staging
+        ? await db.query(
+            'SELECT job_id,state,manifest FROM shorts_delivery_staging WHERE network=$1 AND contract=$2 AND job_id=ANY($3)',
+            keys,
+          )
+        : [];
+      const retiredSources = (await this.privateRetirementSchema(db))
+        ? await db.query(
+            `SELECT resource_id,source_manifest FROM shorts_private_input_retirements
+              WHERE network=$1 AND contract=$2 AND resource_id=ANY($3)`,
+            keys,
+          )
+        : [];
+      const deliveries = await db.query(
+        `SELECT short_id,source_key,prepared,${deliveryRoot} AS resource_id
+        FROM shorts_delivery_packages d WHERE network=$1 AND contract=$2
+        AND ${deliveryRoot}=ANY($3)`,
+        keys,
+      );
       const ingestion = await db.query(
-        'SELECT id,creator,status,input FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=ANY($3)',
+        "SELECT id,creator,status,input,to_jsonb(shorts_ingestion)->>'delivery_short_id' AS delivery_short_id FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=ANY($3)",
         keys,
       );
       const uploads = await db.query(
@@ -219,17 +292,38 @@ export class ShortsRetentionService {
         'SELECT upload_id,object_ref FROM shorts_upload_parts WHERE network=$1 AND contract=$2 AND upload_id=ANY($3)',
         keys,
       );
+      const targetIds: string[] = [
+        ...new Set(
+          ingestion.map((row) => row.delivery_short_id).filter(Boolean),
+        ),
+      ] as string[];
+      const targets = targetIds.length
+        ? await db.query(
+            'SELECT id,body FROM shorts_content WHERE network=$1 AND contract=$2 AND id=ANY($3)',
+            [...this.scope(), targetIds],
+          )
+        : [];
       const holds = await db.query(
         'SELECT resource_id,count(*)::integer AS n FROM shorts_retention_holds WHERE network=$1 AND contract=$2 AND resource_id=ANY($3) AND released_at IS NULL GROUP BY resource_id',
-        keys,
+        [...this.scope(), [...ids, ...targetIds]],
       );
       const items = ids.map((resourceId) => {
         const record = content.find((row) => row.id === resourceId)?.body;
         const job = ingestion.find((row) => row.id === resourceId),
           upload = uploads.find((row) => row.id === resourceId);
+        const staged = stagedSources.find((row) => row.job_id === resourceId);
+        const target = job?.delivery_short_id
+          ? targets.find((row) => row.id === job.delivery_short_id)?.body
+          : undefined;
+        if (job?.delivery_short_id && (!generationSchema || !target))
+          throw new Error('Delivery generation target missing');
         const holdCount =
-          holds.find((row) => row.resource_id === resourceId)?.n || 0;
+          (holds.find((row) => row.resource_id === resourceId)?.n || 0) +
+          (target
+            ? holds.find((row) => row.resource_id === target.id)?.n || 0
+            : 0);
         const objects = new Map<string, PrivateObjectRef>();
+        const original = record ? validateOriginalContent(record) : false;
         const add = (ref?: PrivateObjectRef) => {
           if (ref) this.addReference(objects, ref);
         };
@@ -242,13 +336,60 @@ export class ShortsRetentionService {
           add(part.object);
         add(job?.input?.manifest);
         add(record?.privateMedia?.source?.manifest);
-        for (const ref of Object.values(record?.privateMedia?.files || {}))
-          add(ref as PrivateObjectRef);
+        if (staged) {
+          const bytes = Buffer.from(staged.manifest),
+            manifest = JSON.parse(staged.manifest);
+          if (
+            !job ||
+            !job.delivery_short_id ||
+            bytes.length !== job.input?.manifest?.bytes ||
+            createHash('sha256').update(bytes).digest('hex') !==
+              job.input?.manifest?.sha256 ||
+            manifest.id !== job.id ||
+            manifest.creator !== job.creator ||
+            manifest.bytes !== job.input.bytes ||
+            manifest.sha256 !== job.input.sha256 ||
+            !Array.isArray(manifest.parts)
+          )
+            throw new Error('Invalid reserved source manifest');
+          for (const part of manifest.parts) add(part.object);
+        }
+        for (const [name, ref] of Object.entries(
+          record?.privateMedia?.files || {},
+        )) {
+          const object = ref as PrivateObjectRef;
+          if (original) {
+            const file = record.files.find((file) => file.name === name);
+            if (
+              !file ||
+              file.bytes !== object?.bytes ||
+              file.sha256 !== object?.sha256
+            )
+              throw new Error(
+                'Private output differs from original derivative',
+              );
+          }
+          this.addReference(
+            objects,
+            object,
+            original ? SHORTS_ORIGINAL_HARD_LIMIT : 67108864,
+          );
+        }
         const reasons: string[] = [];
+        if (staged && staged.state !== 'ready')
+          reasons.push('original-restaging-reference');
         if (holdCount) reasons.push('explicit-hold');
-        if (record?.appeal?.status === 'pending')
+        if (
+          record?.appeal?.status === 'pending' ||
+          target?.appeal?.status === 'pending'
+        )
           reasons.push('pending-appeal');
-        if (record?.reports > 0 || record?.reportDetails?.length)
+        if (
+          record?.reports > 0 ||
+          record?.reportDetails?.length ||
+          target?.reports > 0 ||
+          target?.reportDetails?.length
+        )
           reasons.push('reports-without-disposition');
         if (job && ['queued', 'processing'].includes(job.status))
           reasons.push('active-preparation');
@@ -261,14 +402,21 @@ export class ShortsRetentionService {
               : 'content-reference',
           );
         if (job) reasons.push('source-job-reference');
+        if (target) reasons.push('delivery-generation-reference');
         // Source manifests are encrypted and may include parts absent from SQL (legacy import).
         const unresolvedManifests = !!(
-          job?.input || record?.privateMedia?.source
+          (!staged && job?.input) ||
+          record?.privateMedia?.source
         );
         if (unresolvedManifests)
           reasons.push('manifest-children-not-inventoried');
         const manifestSources = [
-          job && { id: resourceId, creator: job.creator, input: job.input },
+          job &&
+            !staged && {
+              id: resourceId,
+              creator: job.creator,
+              input: job.input,
+            },
           record?.privateMedia?.source && {
             id: resourceId,
             creator: record.creator,
@@ -284,29 +432,105 @@ export class ShortsRetentionService {
               manifest: source.input?.manifest,
               bytes: source.input?.bytes,
               sha256: source.input?.sha256,
+              processingProfile: source.input?.processingProfile,
+              acceptedMaxBytes: source.input?.acceptedMaxBytes,
             },
           }));
+        // The receipt preserves the authenticated document even after its encrypted
+        // object is reclaimed. Keep the edges; readers must still revalidate every
+        // claimant's current source identity and frozen admission policy.
+        const retiredDocuments: string[] = [
+          ...new Set<string>(
+            retiredSources
+              .filter((row) => row.resource_id === resourceId)
+              .map((row) => row.source_manifest),
+          ),
+        ];
+        if (retiredDocuments.length > 1)
+          throw new Error('Retired source manifests disagree');
+        const retiredManifest = retiredDocuments[0];
+        if (
+          retiredManifest !== undefined &&
+          manifestSources.some(
+            (source) => source.input.processingProfile !== 'original-h264-v1',
+          )
+        )
+          throw new Error('Retired source is no longer an original upload');
         const video = record?.files?.find((file) => file.name === 'video.mp4');
+        const pins: {
+          kind: 'original' | 'legacy' | 'inputs' | 'assets' | 'hls';
+          cid: string;
+          bytes: number | null;
+        }[] = record?.cid
+          ? [
+              {
+                kind: original ? 'original' : 'legacy',
+                cid: record.cid,
+                bytes: Number.isSafeInteger(record.bytes) ? record.bytes : null,
+              },
+            ]
+          : [];
+        if (original)
+          for (const kind of ['inputs', 'assets'] as const)
+            pins.push({
+              kind,
+              cid:
+                kind === 'inputs'
+                  ? record.derivatives.cid
+                  : record.derivatives.assetsCid,
+              bytes: derivedFiles<ShortRecord['files'][number]>(
+                record.files,
+                kind,
+              ).reduce((sum, file) => sum + file.bytes, 0),
+            });
+        for (const delivery of deliveries.filter(
+          (row) => row.resource_id === resourceId,
+        )) {
+          if (delivery.short_id !== (target?.id || resourceId))
+            throw new Error('Acknowledged delivery target changed');
+          const descriptor = {
+            ...shortsPlaybackDescriptor(record, this.config.scope),
+            id: delivery.short_id,
+          };
+          if (sourceKey(descriptor) !== delivery.source_key)
+            throw new Error('Acknowledged delivery source changed');
+          const prepared = validateSourcePackage(descriptor, delivery.prepared);
+          pins.push({
+            kind: 'hls',
+            cid: prepared.cid,
+            bytes: prepared.files.reduce((sum, file) => sum + file.bytes, 0),
+          });
+        }
         return {
           id: resourceId,
-          publication: record?.publication || null,
+          ...(target ? { deliveryOf: target.id } : {}),
+          publication: target?.publication || record?.publication || null,
           preparation: job?.status || null,
           activeHolds: holdCount,
           retainReasons: reasons,
           cid: record?.cid || null,
+          pins,
           hlsSource: record?.cid
-            ? {
-                id: resourceId,
-                cid: record.cid,
-                file: video && {
-                  name: video.name,
-                  bytes: video.bytes,
-                  sha256: video.sha256,
-                },
-              }
+            ? original
+              ? {
+                  ...shortsPlaybackDescriptor(record, this.config.scope),
+                  id: target?.id || record.id,
+                }
+              : {
+                  id: resourceId,
+                  cid: record.cid,
+                  file: video && {
+                    name: video.name,
+                    bytes: video.bytes,
+                    sha256: video.sha256,
+                  },
+                }
             : null,
           objects: [...objects.values()],
-          manifestSources,
+          manifestSources: manifestSources.map((source) => ({
+            ...source,
+            ...(retiredManifest !== undefined ? { retiredManifest } : {}),
+          })),
           knownPlaintextBytes: [...objects.values()].reduce(
             (n, ref) => n + ref.bytes,
             0,
@@ -315,11 +539,24 @@ export class ShortsRetentionService {
           eligibleForDeletion: false,
         };
       });
-      const cids = [...new Set(items.map((item) => item.cid).filter(Boolean))];
+      const cids = [
+        ...new Set(items.flatMap((item) => item.pins.map((pin) => pin.cid))),
+      ];
       const shared = cids.length
         ? await db.query(
-            `SELECT body->>'cid' AS cid,count(*)::integer AS n
-        FROM shorts_content WHERE body->>'cid'=ANY($1) GROUP BY body->>'cid'`,
+            `SELECT cid,count(DISTINCT (network,contract,id))::integer AS n FROM (
+        SELECT s.network,s.contract,s.id,c.cid
+        FROM shorts_content s CROSS JOIN LATERAL (VALUES(s.body->>'cid'),(s.body->'derivatives'->>'cid'),(s.body->'derivatives'->>'assetsCid')) c(cid)
+        WHERE c.cid=ANY($1)
+        UNION ALL SELECT network,contract,${deliveryRoot},prepared->>'cid'
+          FROM shorts_delivery_packages d WHERE prepared->>'cid'=ANY($1)
+        ${
+          generationSchema
+            ? `UNION ALL SELECT g.network,g.contract,g.job_id,c.cid FROM shorts_delivery_generations g
+          CROSS JOIN LATERAL (VALUES(g.body->>'cid'),(g.body->'derivatives'->>'cid'),(g.body->'derivatives'->>'assetsCid')) c(cid) WHERE c.cid=ANY($1)`
+            : ''
+        }
+        ) all_refs GROUP BY cid`,
             [cids],
           )
         : [];
@@ -327,6 +564,10 @@ export class ShortsRetentionService {
         items: items.map((item) => ({
           ...item,
           cidReferences: shared.find((row) => row.cid === item.cid)?.n || 0,
+          pins: item.pins.map((pin) => ({
+            ...pin,
+            references: shared.find((row) => row.cid === pin.cid)?.n || 0,
+          })),
         })),
         next: roots.length > limit ? ids.at(-1) : null,
         deletionEnabled: false,
@@ -336,11 +577,13 @@ export class ShortsRetentionService {
   private addReference(
     refs: Map<string, PrivateObjectRef>,
     ref: PrivateObjectRef,
+    maxBytes = 67108864,
   ) {
     const scopeHash = createHash('sha256')
       .update(JSON.stringify(this.scope()))
       .digest('hex');
     if (
+      !ref ||
       typeof ref.key !== 'string' ||
       !ref.key.startsWith(`${this.config.prefix}/${scopeHash}/`) ||
       !/^[a-zA-Z0-9_/-]{1,512}$/.test(ref.key) ||
@@ -350,7 +593,7 @@ export class ShortsRetentionService {
       !ref.key.endsWith(`/${ref.keyId}/${ref.sha256}`) ||
       !Number.isSafeInteger(ref.bytes) ||
       ref.bytes < 1 ||
-      ref.bytes > 67108864
+      ref.bytes > maxBytes
     )
       throw new Error('Cannot inventory an invalid private object reference');
     const previous = refs.get(ref.key);

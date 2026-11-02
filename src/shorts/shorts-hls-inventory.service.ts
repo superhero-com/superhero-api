@@ -56,6 +56,13 @@ export class ShortsHlsInventoryService {
       )
         throw new Error('Invalid HLS inventory database grants');
     }
+    await this.db.query(
+      'SELECT reference_version FROM shorts_hls_inventory_runs LIMIT 0',
+    );
+    await this.db.query('SELECT pins FROM shorts_hls_inventory_roots LIMIT 0');
+    await this.db.query(
+      'SELECT version FROM shorts_hls_inventory_entries LIMIT 0',
+    );
   }
   private async run(id: string) {
     const [run] = await this.db.query(
@@ -75,8 +82,8 @@ export class ShortsHlsInventoryService {
   }
   async start(id: string) {
     await this.db.query(
-      `INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace)
-      VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+      `INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,reference_version)
+      VALUES($1,$2,$3,$4,$5,$6,5) ON CONFLICT DO NOTHING`,
       [
         ...this.args(id),
         this.config.sourceHash,
@@ -94,6 +101,10 @@ export class ShortsHlsInventoryService {
     abort.throwIfAborted();
     const run = await this.run(id);
     if (run.phase === 'complete') return this.status(id);
+    if (run.reference_version !== 5)
+      throw new ConflictException(
+        'Start a new inventory for delivery generation references',
+      );
     const logical =
       run.phase === 'references'
         ? await this.records.inventory(run.after_resource, 25)
@@ -107,6 +118,7 @@ export class ShortsHlsInventoryService {
         resource_id: root.id,
         source_key: root.hlsSource ? hlsSourceKey(root.hlsSource) : null,
         source_cid: root.hlsSource?.cid || null,
+        pins: root.pins,
         active_holds: root.activeHolds,
         reasons: root.retainReasons,
       })) || [];
@@ -129,8 +141,8 @@ export class ShortsHlsInventoryService {
         );
       if (logical) {
         await db.query(
-          `INSERT INTO shorts_hls_inventory_roots(network,contract,run_id,resource_id,source_key,source_cid,active_holds,reasons)
-          SELECT $1,$2,$3,x.* FROM jsonb_to_recordset($4::jsonb) AS x(resource_id text,source_key text,source_cid text,active_holds integer,reasons jsonb)`,
+          `INSERT INTO shorts_hls_inventory_roots(network,contract,run_id,resource_id,source_key,source_cid,pins,active_holds,reasons)
+          SELECT $1,$2,$3,x.* FROM jsonb_to_recordset($4::jsonb) AS x(resource_id text,source_key text,source_cid text,pins jsonb,active_holds integer,reasons jsonb)`,
           [...args, JSON.stringify(roots)],
         );
         await db.query(
@@ -165,10 +177,11 @@ export class ShortsHlsInventoryService {
             metadata_hash: item.hash,
             bytes: item.bytes,
             files: item.files,
+            version: item.version,
           })),
         );
         const columns =
-          'source_key text,cid text,metadata_hash text,bytes bigint,files jsonb';
+          'source_key text,cid text,metadata_hash text,bytes bigint,files jsonb,version smallint';
         const [conflict] = await db.query(
           `SELECT EXISTS(SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS x(${columns})
           JOIN shorts_hls_inventory_entries e ON e.network=$1 AND e.contract=$2 AND e.run_id=$3 AND e.source_key=x.source_key
@@ -180,7 +193,7 @@ export class ShortsHlsInventoryService {
             'An HLS index changed during inventory; start a new run',
           );
         const [added] = await db.query(
-          `WITH inserted AS (INSERT INTO shorts_hls_inventory_entries(network,contract,run_id,source_key,cid,metadata_hash,bytes,files)
+          `WITH inserted AS (INSERT INTO shorts_hls_inventory_entries(network,contract,run_id,source_key,cid,metadata_hash,bytes,files,version)
           SELECT $1,$2,$3,x.* FROM jsonb_to_recordset($4::jsonb) AS x(${columns}) ON CONFLICT DO NOTHING RETURNING bytes)
           SELECT count(*)::text AS n,coalesce(sum(bytes),0)::text AS bytes FROM inserted`,
           [...args, entries],
@@ -211,6 +224,7 @@ export class ShortsHlsInventoryService {
     return {
       id,
       namespace: run.namespace,
+      referenceVersion: run.reference_version,
       storageId: run.storage_id,
       phase: run.phase,
       after: run.after_resource,
@@ -242,7 +256,7 @@ export class ShortsHlsInventoryService {
         'Finish the HLS scan before matching references',
       );
     const rows = await this.db.query(
-      `SELECT e.source_key AS "sourceKey",e.cid,e.bytes::text,e.files,
+      `SELECT e.source_key AS "sourceKey",e.cid,e.bytes::text,e.files,e.version,
       (SELECT count(*)::text FROM shorts_hls_inventory_roots r WHERE r.network=e.network AND r.contract=e.contract AND r.run_id=e.run_id AND r.source_key=e.source_key) AS references,
       (SELECT count(*)::text FROM shorts_hls_inventory_entries shared WHERE shared.network=e.network AND shared.contract=e.contract AND shared.run_id=e.run_id AND shared.cid=e.cid) AS "packageReferences",
       EXISTS(SELECT 1 FROM shorts_hls_inventory_entries shared JOIN shorts_hls_inventory_roots r USING(network,contract,run_id,source_key)
@@ -280,7 +294,7 @@ export class ShortsHlsInventoryService {
         'Finish the HLS scan before matching references',
       );
     const rows = await this.db.query(
-      `SELECT r.resource_id AS id,r.source_key AS "sourceKey",r.source_cid AS "sourceCid",r.active_holds AS "activeHolds",r.reasons,
+      `SELECT r.resource_id AS id,r.source_key AS "sourceKey",r.source_cid AS "sourceCid",r.pins,r.active_holds AS "activeHolds",r.reasons,
       EXISTS(SELECT 1 FROM shorts_hls_inventory_entries e WHERE e.network=r.network AND e.contract=r.contract AND e.run_id=r.run_id AND e.source_key=r.source_key) AS "indexObserved"
       FROM shorts_hls_inventory_roots r WHERE r.network=$1 AND r.contract=$2 AND r.run_id=$3 AND r.resource_id>$4 ORDER BY r.resource_id LIMIT $5`,
       [...this.args(id), after, limit + 1],

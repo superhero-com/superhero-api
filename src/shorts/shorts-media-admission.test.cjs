@@ -13,6 +13,7 @@ const { NestFactory } = require('@nestjs/core');
 const { DataSource } = require('typeorm');
 const { ShortsMediaAdmissionService, ShortsMediaUnavailableError, SHORTS_MEDIA_ADMISSION_LIMITS } = require('./shorts-media-admission.service');
 const { ShortsUploadAdmissionService } = require('./shorts-upload-admission.service');
+const { ShortsTransferAdmissionService } = require('./shorts-transfer-admission.service');
 const { ShortsMediaService } = require('./shorts-media.service');
 const { ShortsPackageService } = require('./shorts-package.service');
 const { ShortsModerationUnavailableError } = require('./shorts-safety.service');
@@ -76,6 +77,60 @@ async function fixture(t) {
   return { admission, service, config, chain, limits, services };
 }
 const short = (creator = 'ak_creator') => ({ id: 'owned', creator, cid: 'bafyowned', privateMedia: {} });
+
+test('delivery verification waits for actor/global contention and uses the same shared lease', async t => {
+  const f = await fixture(t), a = await f.admission({ ...f.limits, capacity: 1 }), b = await f.admission({ ...f.limits, capacity: 1 });
+  for (const actor of ['ak_owner', 'ak_other']) {
+    const held = await a.acquire('ak_owner'), parent = new AbortController();
+    const waiting = b.acquire(actor, parent.signal);
+    await pause(100); assert.equal(b.leases.size, 0);
+    await held.release(); const acquired = await waiting;
+    assert.equal(b.leases.size, 1); assert.equal(acquired.signal.aborted, false);
+    await assert.rejects(a.acquire('ak_third'), { status: 503 });
+    await acquired.release(); assert.equal(b.leases.size, 0);
+  }
+});
+
+test('delivery capacity waiting is bounded and invalid policy/scope/Redis remain fail-fast', async t => {
+  const f = await fixture(t), a = await f.admission({ ...f.limits, capacity: 1 }), b = await f.admission({ ...f.limits, capacity: 1 });
+  const held = await a.acquire('ak_owner'), signal = new AbortController().signal;
+  const start = performance.now();
+  await assert.rejects(b.acquire('ak_other', signal), { status: 503 });
+  assert.ok(performance.now() - start >= 3000); assert.ok(performance.now() - start < 5500);
+  assert.equal(b.leases.size, 0); await held.release();
+  const mismatch = await f.admission({ ...f.limits, capacity: 3 });
+  for (const [service, actor] of [[mismatch, 'ak_other'], [a, 'invalid']]) {
+    const start = performance.now(); await assert.rejects(service.acquire(actor, signal), { status: 503 });
+    assert.ok(performance.now() - start < 1000, 'non-contention errors must not enter the busy retry loop');
+  }
+  b.redis.disconnect();
+  const disconnected = performance.now(); await assert.rejects(b.acquire('ak_other', signal), { status: 503 });
+  assert.ok(performance.now() - disconnected < 1000);
+});
+
+test('delivery capacity waits cancel on caller abort/shutdown without starting media work', async t => {
+  const f = await fixture(t), a = await f.admission(), b = await f.admission();
+  const held = await a.acquire('ak_owner'), parent = new AbortController(), failure = new Error('cancelled');
+  const waiting = b.acquire('ak_owner', parent.signal), rejected = assert.rejects(waiting, { name: 'AbortError' });
+  await pause(100); parent.abort(failure); await rejected;
+  assert.equal(b.leases.size, 0); assert.equal(b.waiting, 0);
+  const shutdown = b.acquire('ak_owner', new AbortController().signal);
+  const stopped = assert.rejects(shutdown);
+  await pause(100); await b.beforeApplicationShutdown(); await stopped;
+  assert.equal(b.leases.size, 0); assert.equal(b.waiting, 0); await held.release();
+});
+
+test('a lease granted after caller cancellation is released before rejection', async t => {
+  const f = await fixture(t), a = await f.admission(), entered = gate(), finish = gate(), parent = new AbortController();
+  let released = false; const failure = new Error('cancelled during Redis command');
+  t.mock.method(ShortsTransferAdmissionService.prototype, 'acquire', async () => {
+    entered.resolve(); await finish.promise;
+    return { signal: new AbortController().signal, release: async () => { released = true; } };
+  });
+  const waiting = a.acquire('ak_owner', parent.signal), rejected = assert.rejects(waiting, error => error === failure);
+  await entered.promise; parent.abort(failure); assert.equal(released, false);
+  finish.resolve(); await rejected; assert.equal(released, true); assert.equal(a.waiting, 0);
+});
 
 test('two media instances share a renewed global limit and one operation per creator before reading bytes', async t => {
   const finish = gate(); t.after(() => finish.resolve());

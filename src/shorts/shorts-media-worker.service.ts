@@ -6,6 +6,15 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { ShortsMediaFile } from './shorts-media-file';
+import { ShortsRenditionEncodingService } from './shorts-rendition-encoding.service';
+import { SHORTS_ORIGINAL_PROFILE } from './shorts-rendition-policy';
+import {
+  validateOriginalContent,
+  derivedFiles,
+} from './shorts-original-content';
 import { IngestionJob, IngestionClaim } from './shorts-metadata.service';
 import { ShortsWorkerRepositoryService } from './shorts-worker-repository.service';
 import { ShortsSourceReaderService } from './shorts-source-reader.service';
@@ -53,6 +62,7 @@ export class ShortsMediaWorkerService
     private readonly safety: ShortsSafetyService,
     private readonly labels: ShortsLabelsService,
     private readonly scratch: ShortsScratchService,
+    private readonly renditions: ShortsRenditionEncodingService,
   ) {}
   async onApplicationBootstrap() {
     if (this.safety.demoAutoApprove)
@@ -199,9 +209,33 @@ export class ShortsMediaWorkerService
       Math.max(200, Math.floor(this.config.leaseMs / 3)),
     );
     timer.unref();
+    let sourceDirectory: string | undefined;
+    let sourceReservation:
+      Awaited<ReturnType<ShortsScratchService['reserve']>> | undefined;
     try {
       signal.throwIfAborted();
-      const original = await this.source.read(this.config.scope, job, signal);
+      sourceReservation = await this.scratch.reserve(
+        job.input.bytes,
+        2,
+        signal,
+      );
+      // A lost disk reservation also cancels all downstream decoder/network work.
+      const abortSource = () =>
+        controller.abort(sourceReservation.signal.reason);
+      sourceReservation.signal.addEventListener('abort', abortSource, {
+        once: true,
+      });
+      if (sourceReservation.signal.aborted) abortSource();
+      signal.throwIfAborted();
+      sourceDirectory = await mkdtemp(
+        join(this.scratch.directory, 'shorts-source-'),
+      );
+      const original = await this.source.readToFile(
+        this.config.scope,
+        job,
+        join(sourceDirectory, 'original'),
+        signal,
+      );
       // Inspect before encoding so a busy scanner does not repeatedly spend
       // decoder resources. Only current live claims can defer the saved source.
       const safety = await this.safety.scan(original, signal, true);
@@ -209,6 +243,12 @@ export class ShortsMediaWorkerService
       if (this.moderationFailures)
         this.logger.log('Visual inspection recovered.');
       this.moderationFailures = 0;
+      if (job.input.processingProfile === SHORTS_ORIGINAL_PROFILE) {
+        await this.prepareOriginal(job, claim, original, safety, signal);
+        return;
+      }
+      if (job.input.processingProfile !== undefined)
+        throw new Error('Unsupported accepted processing profile');
       const prepared = await this.encoding.encode(
         original,
         job.input.title.trim(),
@@ -310,6 +350,115 @@ export class ShortsMediaWorkerService
       clearTimeout(expiry);
       await heartbeat;
       if (this.active === controller) this.active = undefined;
+      try {
+        if (sourceDirectory)
+          await rm(sourceDirectory, { recursive: true, force: true });
+      } finally {
+        sourceReservation?.release();
+      }
     }
+  }
+
+  private async prepareOriginal(
+    job: IngestionJob,
+    claim: IngestionClaim,
+    source: ShortsMediaFile,
+    safety: ShortRecord['safety'],
+    signal: AbortSignal,
+  ) {
+    await this.renditions.prepare(
+      source,
+      async (prepared, workSignal) => {
+        const derivativeCid = await this.packages.derivativeCid(
+          derivedFiles(prepared.files, 'inputs'),
+          'inputs',
+          workSignal,
+        );
+        const assetsCid = await this.packages.derivativeCid(
+          derivedFiles(prepared.files, 'assets'),
+          'assets',
+          workSignal,
+        );
+        const refs: NonNullable<ShortRecord['privateMedia']>['files'] = {};
+        for (const file of prepared.files) {
+          refs[file.name] = await this.objects.putFile(
+            this.config.scope,
+            job.id,
+            `attempt/${job.fence}/${file.name.replaceAll('.', '-')}`,
+            file,
+            dirname(file.path),
+            workSignal,
+          );
+        }
+        const classification = await this.labels.classify(
+          {
+            title: job.input.title.trim(),
+            topic: job.input.topic,
+            description: job.input.details.description as string,
+            captions: job.input.details.captions as string,
+          },
+          workSignal,
+        );
+        const record: ShortRecord = {
+          id: job.id,
+          creator: job.creator,
+          title: job.input.title.trim(),
+          topic: job.input.topic,
+          cid: prepared.originalCid,
+          bytes: source.bytes,
+          duration: prepared.probe.duration,
+          createdAt: Date.now(),
+          original: {
+            version: 1,
+            sha256: source.sha256,
+            mediaType: prepared.probe.mediaType,
+            importProfile: 'unixfs-file-v1-262144',
+          },
+          derivatives: {
+            version: 1,
+            cid: derivativeCid,
+            assetsCid,
+            profile: SHORTS_ORIGINAL_PROFILE,
+            fingerprint: prepared.fingerprint,
+            generation: { job: job.id, fence: job.fence },
+            videos: prepared.videos.map(
+              ({ name, width, height, frameRate }) => ({
+                name,
+                width,
+                height,
+                frameRate,
+              }),
+            ),
+          },
+          files: prepared.files.map(({ name, bytes, sha256 }) => ({
+            name,
+            bytes,
+            sha256,
+          })),
+          description: String(job.input.details.description || ''),
+          language: String(job.input.details.language || 'und'),
+          synthetic: job.input.details.synthetic === true,
+          sponsored: job.input.details.sponsored === true,
+          captions: !!job.input.details.captions,
+          safety,
+          classification,
+          moderation: safety?.status === 'blocked' ? 'rejected' : 'pending',
+          reviewReason: safety?.reason,
+          reports: 0,
+          views: [],
+          privateMedia: {
+            version: 1,
+            fence: job.fence,
+            source: job.input,
+            files: refs,
+          },
+        };
+        validateOriginalContent(record);
+        workSignal.throwIfAborted();
+        await this.metadata.complete(this.config.scope, claim, record);
+      },
+      signal,
+      job.input,
+    );
   }
 }

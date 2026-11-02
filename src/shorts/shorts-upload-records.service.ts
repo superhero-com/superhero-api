@@ -1,3 +1,7 @@
+import {
+  shortsSourceLimit,
+  SHORTS_MAX_SOURCE_PARTS,
+} from './shorts-upload-policy';
 import { ShortsDatabaseService } from './shorts-database.service';
 import {
   Inject,
@@ -15,6 +19,10 @@ import type { PrivateObjectRef } from './shorts-private-objects.service';
 import type { UploadInput } from './shorts-uploads.service';
 import { SHORTS_TOPICS } from './shorts-labels.service';
 import { randomBytes } from 'node:crypto';
+import {
+  UploadRequestIdentity,
+  validateUploadRequest,
+} from './shorts-upload-request';
 
 export const SHORTS_PART_BYTES = 1024 * 1024;
 export interface DirectUploadPart {
@@ -62,7 +70,8 @@ export class ShortsUploadRecordsService {
       input.topic.length > 80 ||
       !Number.isSafeInteger(input.bytes) ||
       input.bytes < 1 ||
-      input.bytes > 40 * SHORTS_PART_BYTES ||
+      input.bytes > shortsSourceLimit(input) ||
+      typeof input.sha256 !== 'string' ||
       !/^[a-f0-9]{64}$/.test(input.sha256) ||
       !input.details ||
       typeof input.details !== 'object' ||
@@ -169,22 +178,65 @@ export class ShortsUploadRecordsService {
     const params = this.params(scope, id, creator);
     return this.result(this.db, params, await this.own(this.db, params));
   }
+  private async replay(
+    manager: EntityManager | DataSource,
+    scope: ShortsScope,
+    creator: string,
+    request: UploadRequestIdentity,
+  ) {
+    const params = this.params(scope, 'request', creator);
+    validateUploadRequest(request);
+    const [row] = await manager.query(
+      `SELECT upload_id,request_hash FROM shorts_upload_requests
+       WHERE network=$1 AND contract=$2 AND creator=$3 AND request_key=$4`,
+      [params[0], params[1], creator, request.key],
+    );
+    if (!row) return undefined;
+    if (row.request_hash !== request.hash)
+      throw new ConflictException(
+        'This upload request belongs to different content',
+      );
+    const identity = this.params(scope, row.upload_id, creator);
+    try {
+      return await this.result(
+        manager,
+        identity,
+        await this.own(manager, identity),
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException)
+        throw new GoneException('Upload expired. Start a new upload.');
+      throw error;
+    }
+  }
+  getRequest(
+    scope: ShortsScope,
+    creator: string,
+    request: UploadRequestIdentity,
+  ) {
+    return this.replay(this.db, scope, creator, request);
+  }
   async create(
     scope: ShortsScope,
     id: string,
     creator: string,
     input: UploadInput,
+    request?: UploadRequestIdentity,
   ) {
     const params = this.params(scope, id, creator);
     this.validateInput(input);
     return this.db.transaction(async (manager) => {
       await this.lock(manager, params);
+      if (request) {
+        const existing = await this.replay(manager, scope, creator, request);
+        if (existing) return existing;
+      }
       const [existing] = await manager.query(
         'SELECT *,creator=$4 AND input=$5::jsonb AS matches FROM shorts_upload_sessions WHERE network=$1 AND contract=$2 AND id=$3',
         [...params, JSON.stringify(input)],
       );
       if (existing) {
-        if (!existing.matches)
+        if (!existing.matches || request)
           throw new ConflictException('Upload identity already exists');
         return this.result(manager, params, await this.own(manager, params));
       }
@@ -227,6 +279,12 @@ export class ShortsUploadRecordsService {
         `INSERT INTO shorts_upload_admission(network,contract,upload_id,creator,bytes) VALUES($1,$2,$3,$4,$5)`,
         [...params, input.bytes],
       );
+      if (request)
+        await manager.query(
+          `INSERT INTO shorts_upload_requests(network,contract,creator,request_key,request_hash,upload_id)
+           VALUES($1,$2,$3,$4,$5,$6)`,
+          [params[0], params[1], creator, request.key, request.hash, id],
+        );
       return this.result(manager, params, row);
     });
   }
@@ -239,7 +297,11 @@ export class ShortsUploadRecordsService {
   ) {
     const params = this.params(scope, id, creator);
     this.object(object);
-    if (!Number.isSafeInteger(index) || index < 0 || index > 39)
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      index >= SHORTS_MAX_SOURCE_PARTS
+    )
       throw new BadRequestException('Invalid upload part');
     return this.db.transaction(async (manager) => {
       await this.lock(manager, params);
@@ -283,7 +345,11 @@ export class ShortsUploadRecordsService {
   ) {
     const params = this.params(scope, id, creator);
     this.object(object);
-    if (!Number.isInteger(index) || index < 0 || index > 39)
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= SHORTS_MAX_SOURCE_PARTS
+    )
       throw new BadRequestException('Invalid upload part');
     return this.db.transaction(async (manager) => {
       await this.lock(manager, params);
@@ -343,7 +409,7 @@ export class ShortsUploadRecordsService {
     if (
       !Number.isInteger(index) ||
       index < 0 ||
-      index > 39 ||
+      index >= SHORTS_MAX_SOURCE_PARTS ||
       !/^[a-f0-9]{64}$/.test(checksum)
     )
       throw new BadRequestException('Invalid direct upload checksum');
@@ -393,6 +459,7 @@ export class ShortsUploadRecordsService {
     id: string,
     creator: string,
     manifest: PrivateObjectRef,
+    sourceManifest?: string,
   ) {
     const params = this.params(scope, id, creator);
     this.object(manifest);
@@ -412,11 +479,19 @@ export class ShortsUploadRecordsService {
           manifest,
           sha256: row.input.sha256,
           bytes: row.input.bytes,
+          ...(row.input.acceptedMaxBytes !== undefined
+            ? { acceptedMaxBytes: row.input.acceptedMaxBytes }
+            : {}),
           title: row.input.title,
           topic: row.input.topic,
           details: row.input.details,
+          ...(row.input.processingProfile
+            ? { processingProfile: row.input.processingProfile }
+            : {}),
         },
         manager,
+        undefined,
+        sourceManifest,
       );
       await manager.query(
         "UPDATE shorts_upload_sessions SET state='enqueued' WHERE network=$1 AND contract=$2 AND id=$3",

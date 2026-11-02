@@ -22,6 +22,10 @@ import {
 import { officialContentPolicy } from './shorts-eligibility';
 import { ShortsJobAttempt } from './shorts-job-attempt';
 import { ShortsMediaUnavailableError } from './shorts-media-admission.service';
+import { ShortsDeliveryInputRetirementService } from './shorts-delivery-input-retirement.service';
+import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
+import { sourceKey } from './hls-protocol/hls-package';
+import { ShortRecord } from './shorts.types';
 
 export const SHORTS_LIFECYCLE_LIMITS = Symbol('SHORTS_LIFECYCLE_LIMITS');
 export const LIFECYCLE_LIMITS = {
@@ -47,6 +51,8 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
     @Optional()
     @Inject(SHORTS_LIFECYCLE_LIMITS)
     private readonly limits = LIFECYCLE_LIMITS,
+    @Optional()
+    private readonly retirements?: ShortsDeliveryInputRetirementService,
   ) {
     if (
       Object.values(limits).some(
@@ -60,6 +66,21 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
   }
   private scope() {
     return shortsStorageScope(this.chain);
+  }
+  private async inputsRetired(short: ShortRecord) {
+    if (!short.original || !this.retirements) return false;
+    const receipt = await this.retirements.get(
+      this.scope(),
+      short.id,
+      sourceKey(shortsPlaybackDescriptor(short, this.scope())),
+    );
+    if (!receipt) return false;
+    if (
+      receipt.inputCid !== short.derivatives?.cid ||
+      receipt.generationJobId !== short.id
+    )
+      throw new Error('Input retirement identity mismatch');
+    return true;
   }
   async initialize() {
     if (
@@ -253,12 +274,26 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
       // Never create a replacement payment/signature for an uncertain or reorged record.
       return 'reconciliation_required';
     }
-    if (!(await this.media.pinned(short.cid, attempt.signal))) {
+    const retired = await this.inputsRetired(short);
+    attempt.check();
+    if (
+      !(await this.media.pinned(short.cid, attempt.signal)) ||
+      (short.derivatives &&
+        ((!retired &&
+          !(await this.media.pinned(short.derivatives.cid, attempt.signal))) ||
+          !(await this.media.pinned(
+            short.derivatives.assetsCid,
+            attempt.signal,
+          ))))
+    ) {
       await live();
       short = await this.records.get(short.id);
       attempt.check();
-      if (officialContentPolicy(short).publish)
-        await this.media.pin(short, attempt.signal);
+      if (officialContentPolicy(short).publish) {
+        if (await this.inputsRetired(short))
+          await this.media.restoreDurablePins(short, attempt.signal);
+        else await this.media.pin(short, attempt.signal);
+      }
     }
     return 'checked';
   }

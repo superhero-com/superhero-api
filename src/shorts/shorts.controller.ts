@@ -544,9 +544,10 @@ export class ShortsController {
         throw new ServiceUnavailableException(
           'Playback measurement unavailable',
         );
-      const { startedAt, ...event } = this.playbackEvidence.validate(
+      const { startedAt, ...event } = await this.playbackEvidence.validate(
         short,
         body,
+        (key) => this.shorts.playbackVersion(id, key),
       );
       // The signed clock anchors the first qualified update, without a zero row.
       if (event.seconds < 2) {
@@ -634,6 +635,33 @@ export class ShortsController {
   @Header('Cache-Control', 'no-store')
   playbackDescriptor(@Param('id') id: string) {
     return this.shorts.playbackDescriptor(id);
+  }
+  @Get('playback/:id/versions/:sourceKey')
+  @Header('Cache-Control', 'no-store')
+  playbackVersion(@Param('id') id: string, @Param('sourceKey') key: string) {
+    return this.shorts.playbackVersion(id, key);
+  }
+  @Get('playback/:id/prepared/:sourceKey')
+  @Header('Cache-Control', 'no-store')
+  playbackPackage(
+    @Param('id') id: string,
+    @Param('sourceKey') sourceKey: string,
+  ) {
+    return this.shorts.playbackPackage(id, sourceKey);
+  }
+  @Get('playback/:id/generations/:jobId')
+  @Header('Cache-Control', 'no-store')
+  playbackGeneration(@Param('id') id: string, @Param('jobId') jobId: string) {
+    return this.shorts.playbackGeneration(id, jobId);
+  }
+  @Get('playback/:id/generations/:jobId/prepared/:sourceKey')
+  @Header('Cache-Control', 'no-store')
+  generationPackage(
+    @Param('id') id: string,
+    @Param('jobId') jobId: string,
+    @Param('sourceKey') key: string,
+  ) {
+    return this.shorts.generationPackage(id, jobId, key);
   }
   @Get('media/:id/:file')
   @Header('Cache-Control', 'no-store')

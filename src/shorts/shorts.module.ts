@@ -1,3 +1,8 @@
+import {
+  SHORTS_UPLOAD_POLICY,
+  shortsUploadPolicyConfig,
+  ShortsUploadPolicyService,
+} from './shorts-upload-policy.service';
 import { ShortsStreamingService } from './shorts-streaming.service';
 import { ShortsUploadsService } from './shorts-uploads.service';
 import { ShortsSafetyService } from './shorts-safety.service';
@@ -16,6 +21,27 @@ import { ShortsController } from './shorts.controller';
 import { ShortsService } from './shorts.service';
 import { ShortsHostingService } from './shorts-hosting.service';
 import { ShortsMediaService } from './shorts-media.service';
+import { ShortsOriginalRestagingService } from './shorts-original-restaging.service';
+import { ShortsDeliveryPreparationService } from './shorts-delivery-preparation.service';
+import { ShortsDeliveryActivationService } from './shorts-delivery-activation.service';
+import { ShortsDeliveryRetirementService } from './shorts-delivery-retirement.service';
+import { ShortsPrivateInputRetirementService } from './shorts-private-input-retirement.service';
+import { ShortsPrivateInputCleanupVerifierService } from './shorts-private-input-cleanup-verifier.service';
+import {
+  ShortsPrivateInputCleanupControlController,
+  ShortsPrivateInputCleanupControlGuard,
+} from './shorts-private-input-cleanup-control.controller';
+import { ShortsInputReclamationService } from './shorts-input-reclamation.service';
+import { ShortsStorageRecoveryService } from './shorts-storage-recovery.service';
+import {
+  SHORTS_BACKFILL_AUTOMATIC,
+  ShortsBackfillService,
+} from './shorts-backfill.service';
+import { ShortsDeliveryAcknowledgementService } from './shorts-delivery-acknowledgement.service';
+import {
+  ShortsStorageControlController,
+  ShortsStorageControlGuard,
+} from './shorts-storage-control.controller';
 import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 import { ShortsRecordsService } from './shorts-records.service';
 import { ShortsWalletTransactionsService } from './shorts-wallet-transactions.service';
@@ -34,6 +60,11 @@ import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service'
   imports: [ShortsCoreModule],
   controllers: [ShortsController],
   providers: [
+    {
+      provide: SHORTS_UPLOAD_POLICY,
+      useFactory: () => shortsUploadPolicyConfig(),
+    },
+    ShortsUploadPolicyService,
     {
       provide: SHORTS_LIKE_SPONSOR_CONFIG,
       useFactory: () => likeSponsorConfig(),
@@ -60,7 +91,10 @@ import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service'
   ],
 })
 export class ShortsTestnetModule {
-  static async register(indexed = false): Promise<DynamicModule> {
+  static async register(
+    indexed = false,
+    options: { operationsOnly?: boolean } = {},
+  ): Promise<DynamicModule> {
     if (indexed) {
       if (process.env.AE_NETWORK_ID !== 'ae_uat')
         throw new Error('Hosted Shorts indexing requires AE_NETWORK_ID=ae_uat');
@@ -92,6 +126,10 @@ export class ShortsTestnetModule {
         await import('./shorts-reconciliation.service');
       return {
         module: ShortsTestnetModule,
+        controllers: [
+          ShortsStorageControlController,
+          ShortsPrivateInputCleanupControlController,
+        ],
         imports: [
           ShortsIndexModule,
           ShortsRateModule,
@@ -100,9 +138,25 @@ export class ShortsTestnetModule {
           ShortsPublicationBoundaryModule,
         ],
         providers: [
+          {
+            provide: SHORTS_BACKFILL_AUTOMATIC,
+            useValue: !options.operationsOnly,
+          },
+          ShortsBackfillService,
+          ShortsOriginalRestagingService,
+          ShortsDeliveryAcknowledgementService,
+          ShortsStorageControlGuard,
+          ShortsDeliveryPreparationService,
+          ShortsDeliveryActivationService,
+          ShortsDeliveryRetirementService,
+          ShortsPrivateInputRetirementService,
+          ShortsPrivateInputCleanupVerifierService,
+          ShortsPrivateInputCleanupControlGuard,
+          ShortsInputReclamationService,
+          ShortsStorageRecoveryService,
           ShortsReconciliationService,
           ShortsFollowingService,
-          ShortsHostedBootstrapService,
+          ...(options.operationsOnly ? [] : [ShortsHostedBootstrapService]),
           ShortsApiPublicationService,
           ShortsStudioReadService,
           ShortsLifecycleJobsService,

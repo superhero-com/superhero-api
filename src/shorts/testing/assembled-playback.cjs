@@ -18,6 +18,7 @@ const { ownedEdgeName, startOwnedEdge } = require('./owned-edge.cjs');
 const exec = promisify(execFile);
 
 exports.assembledPlayback = async (t, f) => {
+  if (f.originals) return require('./assembled-adaptive-playback.cjs').assembledAdaptivePlayback(t, f);
   const { dir, endpoints, streamPort, id, b, owner, until, pause, request } = f;
   const repo = process.env.SHORTS_TEST_STREAMING_REPO;
   assert.ok(isAbsolute(repo));
@@ -58,7 +59,7 @@ exports.assembledPlayback = async (t, f) => {
   t.after(close);
   if (process.env.SHORTS_TEST_WEB_REPO) {
     assert.ok(process.env.SHORTS_TEST_EDGE_IMAGE, 'browser integration requires the real edge');
-    viewer = await assembledBrowser(t, { id, api: b.base, port: f.webPort,
+    viewer = await assembledBrowser(t, { id, api: b.base, port: f.webPort, release: f.release, uploadOrigin: endpoints.S3_ENDPOINT.origin,
       social: f.social && {
         ...f.social,
         // Notify from the other hosted process: the browser uses b, not c.
@@ -79,6 +80,7 @@ exports.assembledPlayback = async (t, f) => {
       upload: {
         input: f.input, startWorker: f.startUploadWorker,
         async approve(shortId) {
+          f.rememberMedia((await f.meta.get(f.scope, shortId)).record);
           assert.equal((await request(b, `/review/${shortId}`, { approved: true }, f.operatorToken)).status, 201);
         },
         async queued(shortId) {
@@ -88,7 +90,11 @@ exports.assembledPlayback = async (t, f) => {
         confirm: f.registerUpload,
         async startPlayback() { worker = await start('worker'); },
         async retire(shortId) {
-          if (!(await f.meta.get(f.scope, shortId))) return;
+          const record = await f.meta.get(f.scope, shortId).catch(error => {
+            if (error.status === 404) return undefined;
+            throw error;
+          });
+          if (!record) return; // Upload may have stopped before media preparation.
           assert.equal((await request(b, `/review/${shortId}`, { approved: false, reason: 'Completed owned upload fixture' }, f.operatorToken)).status, 201);
         },
       },
@@ -193,7 +199,7 @@ exports.assembledPlayback = async (t, f) => {
   }, async () => {
     edgeName = ownedEdgeName(process.env.SHORTS_TEST_EDGE_NAME || `sh-shorts-edge-${randomUUID()}`);
     const config = (await readFile(join(repo, 'edge/nginx.conf.template'), 'utf8'))
-      .replaceAll('${EDGE_KEY}', edgeKey).replace('server streaming:3335;', `server host.docker.internal:${streamPort};`)
+      .replaceAll('${EDGE_KEY}', edgeKey).replace(/server streaming:3335(?: resolve)?;/, `server host.docker.internal:${streamPort};`)
       .replace('worker_processes auto;', 'worker_processes 1;').replace('max_size=5g min_free=1g', 'max_size=64m min_free=1m');
     await writeFile(join(dir, 'nginx.conf'), config);
     await writeFile(join(dir, 'trusted-proxies.conf'), '# Test clients connect directly.\n');

@@ -12,6 +12,7 @@ async function bootstrap() {
     status: ['id'],
     objects: ['id', 'after', 'limit'],
     references: ['id', 'after', 'limit'],
+    'verify-versions': ['id', 'identity'],
   };
   if (!Object.hasOwn(fields, action) || !path || extra.length)
     throw new Error('Invalid inventory command');
@@ -48,6 +49,12 @@ async function bootstrap() {
         request.id,
         request.after,
         request.limit,
+      );
+    else if (action === 'verify-versions')
+      result = await service.verifyVersions(
+        request.id,
+        request.identity,
+        signal,
       );
     else {
       const pages = request.pages ?? 10;

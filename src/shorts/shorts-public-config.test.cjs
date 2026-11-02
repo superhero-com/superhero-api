@@ -85,3 +85,13 @@ test('free Like configuration advertises sponsorship only for the bound zero-pay
   chain.policy = async () => ({ likeFeeAetto: '1' });
   await assert.rejects(service.config(), /capability/);
 });
+
+
+test('public upload capabilities report the active contract ceiling and configured format', async () => {
+  const { ShortsUploadPolicyService } = require('./shorts-upload-policy.service');
+  const f = fixture(); f.service.records = { shared: true };
+  f.service.uploadPolicy = new ShortsUploadPolicyService({ originals: true, maxOriginalBytes: 80000000 });
+  const originalPolicy = await f.chain.policy(); f.chain.policy = async () => ({ ...originalPolicy, maxVideoBytes: 60000000 });
+  const config = await f.service.config();
+  assert.deepEqual(config.uploads, { version: 1, transport: 'direct-s3-v1', format: 'original-file-v1', maxBytes: 60000000, partSize: 1048576, minDuration: 2, maxDuration: 60 });
+});

@@ -1,12 +1,13 @@
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID, randomBytes } = require('node:crypto');
+const { randomUUID, randomBytes, createHmac } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { ShortsPlaybackEvidenceService } = require('./shorts-playback-evidence.service');
 const { LocalShortsAnalyticsService, playbackStart, ANALYTICS_DAY } = require('./shorts-analytics.service');
 const { ShortsController } = require('./shorts.controller');
 const { playbackProof } = require('./testing/playback-proof.cjs');
+const { sourceKey } = require('./hls-protocol/hls-package');
 
 function fixture(t) {
   const key = randomBytes(32), contract = 'ct_fixture';
@@ -16,9 +17,94 @@ function fixture(t) {
   const sign = (changes = {}, browser = event.session) => playbackProof(key, short, browser, contract, changes);
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const analytics = new LocalShortsAnalyticsService({ db });
-  const controller = new ShortsController({ ensurePlayable: async () => short, analytics }, {}, {}, undefined, undefined, verifier);
-  return { key, contract, short, event, sign, verifier, db, analytics, controller };
+  const shorts = { ensurePlayable: async () => short, analytics };
+  const controller = new ShortsController(shorts, {}, {}, undefined, undefined, verifier);
+  return { key, contract, short, event, sign, verifier, db, analytics, controller, shorts };
 }
+
+function sourceFixture(f) {
+  const descriptor = { ...structuredClone(require('./testing/hls-v3.json').descriptor), id: f.short.id, contract: f.contract };
+  const key = sourceKey(descriptor);
+  const sign = (changes = {}, browser = f.event.session) => {
+    const base = JSON.parse(Buffer.from(f.sign({}, browser).split('.')[1], 'base64url').toString());
+    const payload = Buffer.from(JSON.stringify({ ...base, v: 2, cid: descriptor.cid, sourceKey: key, ...changes })).toString('base64url');
+    return `m2.${payload}.${createHmac('sha256', f.key).update(`shorts-measurement:v2\0${payload}`).digest('base64url')}`;
+  };
+  return { descriptor, key, sign };
+}
+
+test('shared streaming m2 compatibility vector validates against its authorized delivery while preserving the published CID', async () => {
+  const vector=require('./testing/measurement-v2.json'), descriptor=require('./testing/hls-v3.json').descriptor;
+  const verifier=new ShortsPlaybackEvidenceService({ release:{ network:descriptor.network,contract:descriptor.contract },state:{ contract:descriptor.contract } });
+  verifier.key=Buffer.from(vector.testKeyHex,'hex');
+  const canonical={ id:descriptor.id,cid:vector.canonicalCid }, clock=Date.now;
+  try {
+    Date.now=()=>vector.now;
+    const result=await verifier.validate(canonical,{ id:randomUUID(),session:vector.session,seconds:10,source:'shared',proof:vector.proof },async key=>{
+      assert.equal(key,sourceKey(descriptor)); return descriptor;
+    });
+    assert.equal(result.seconds,2); assert.equal(result.startedAt,vector.evidence.startedAt);
+    assert.equal(canonical.cid,vector.canonicalCid); assert.notEqual(descriptor.cid,canonical.cid);
+  } finally { Date.now=clock; }
+});
+
+test('versioned evidence attributes a different delivery CID to the unchanged canonical post and preserves deduplication', async t => {
+  const f = fixture(t), source = sourceFixture(f), canonical = structuredClone(f.short);
+  let lookups = 0;
+  f.shorts.playbackVersion = async (id, key) => { lookups++; assert.equal(id, f.short.id); assert.equal(key, source.key); return source.descriptor; };
+  assert.notEqual(source.descriptor.cid, f.short.cid);
+  // An existing legacy receipt and an upgraded delivery still represent one viewer/post/day.
+  assert.equal((await f.controller.playback(f.short.id, { ...f.event, proof: f.sign() })).views, 1);
+  assert.equal(lookups, 0);
+  assert.equal((await f.controller.playback(f.short.id, { ...f.event, id: randomUUID(), proof: source.sign() })).views, 1);
+  assert.equal(lookups, 1); assert.deepEqual(f.short, canonical);
+  const rows = f.db.prepare('SELECT * FROM shorts_plays').all(); assert.equal(rows.length, 1); assert.equal(rows[0].short_id, f.short.id);
+  for (const secret of [source.key, source.descriptor.cid, f.event.session, 'm2.']) assert.ok(!JSON.stringify(rows).includes(secret));
+  f.analytics.forget(f.event.session);
+  assert.equal((await f.controller.playback(f.short.id, { ...f.event, proof: source.sign() })).accepted, false);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM shorts_plays').get().n, 0);
+});
+
+test('versioned receipt authentication and browser/time checks run before source resolution', async t => {
+  const f = fixture(t), source = sourceFixture(f); let lookups = 0;
+  f.shorts.playbackVersion = async () => { lookups++; return source.descriptor; };
+  for (const proof of [source.sign().replace(/^m2/, 'm1'), source.sign({ v: 1 }), source.sign({ sourceKey: 'bad' }),
+    source.sign({ sourceKey: undefined }), source.sign({ id: randomUUID() }), source.sign({ network: 'ae_mainnet' }),
+    source.sign({ contract: 'ct_other' }), source.sign({ admittedMs: 61001 }), source.sign({ expiresAt: Date.now()-1 }),
+    source.sign({}, randomUUID()), source.sign().slice(0,-4)+'AAAA'])
+    await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof }), { status: 401 });
+  assert.equal(lookups, 0);
+  assert.throws(() => f.verifier.validate(f.short, { ...f.event, proof: source.sign() }), { status: 401 });
+  await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof: f.sign({ cid: source.descriptor.cid }) }), { status: 401 });
+  assert.equal(lookups, 0); assert.equal(f.db.prepare('SELECT count(*) AS n FROM shorts_plays').get().n, 0);
+});
+
+test('only a currently authorized exact source can validate versioned evidence, including retained delivery sessions', async t => {
+  const f = fixture(t), source = sourceFixture(f);
+  for (const mutate of [d => { d.id = 'other'; }, d => { d.cid = 'b'+'z'.repeat(50); }, d => { d.network = 'ae_mainnet'; },
+    d => { d.contract = 'ct_other'; }, d => { d.derivatives.generation.fence = '99'; }]) {
+    const changed = structuredClone(source.descriptor); mutate(changed);
+    f.shorts.playbackVersion = async () => changed;
+    await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof: source.sign() }), { status: 401 });
+  }
+  // Withdrawal, expiry of retained history and a merely prepared candidate all deny lookup.
+  f.shorts.playbackVersion = async () => { throw new (require('@nestjs/common').NotFoundException)(); };
+  await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof: source.sign() }), { status: 404 });
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM shorts_plays').get().n, 0);
+  f.shorts.playbackVersion = async (_id, key) => { assert.equal(key, source.key); return source.descriptor; };
+  const accepted = await f.verifier.validate(f.short, { ...f.event, proof: source.sign({ admittedMs: 2000 }) }, key => f.shorts.playbackVersion(f.short.id,key));
+  assert.equal(accepted.seconds, 2); assert.deepEqual(Object.keys(accepted).sort(), ['id','seconds','session','source','startedAt']);
+});
+
+test('a receipt that expires while permission is being resolved never reaches analytics', async t => {
+  const f = fixture(t), source = sourceFixture(f), now = Date.now(), proof = source.sign({ expiresAt: now+1000 });
+  const clock = Date.now;
+  try {
+    f.shorts.playbackVersion = async () => { Date.now = () => now+1001; return source.descriptor; };
+    await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof }), { status: 401 });
+  } finally { Date.now = clock; }
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM shorts_plays').get().n, 0);
+});
 
 test('watch progress needs signed evidence for this browser, video, CID and deployment', async t => {
   const f = fixture(t), now = Date.now();

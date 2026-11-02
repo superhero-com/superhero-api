@@ -16,6 +16,7 @@ const { Global, Module } = require('@nestjs/common');
   assert.equal(url.hostname, '127.0.0.1');
   assert.match(schema, /^shorts_assembled_[a-f0-9]+$/);
   const manifest = JSON.parse(await readFile(process.env.SHORTS_DEPLOYMENT_FILE, 'utf8'));
+  const artifact = JSON.parse(await readFile(join(dirname(process.env.SHORTS_DEPLOYMENT_FILE), 'artifact.json'), 'utf8'));
   const db = await new DataSource({ type: 'postgres', url: url.href, schema,
     extra: { options: `-c search_path=${schema}`, max: 4 } }).initialize();
   class DatabaseModule {}
@@ -29,17 +30,21 @@ const { Global, Module } = require('@nestjs/common');
   const { ShortsHostingService } = runtimeRequire('../shorts-hosting.service');
   const { ShortsGateway } = runtimeRequire('../shorts.gateway');
   const { ShortsStreamingService } = runtimeRequire('../shorts-streaming.service');
+  const { shortsContractPolicy } = runtimeRequire('../shorts-contract-policy');
+  const configuration = [manifest.operator, manifest.treasury, manifest.likeFeeAetto, manifest.treasuryBps];
   const chainState = async () => JSON.parse(await readFile(join(dirname(process.env.SHORTS_DEPLOYMENT_FILE), 'chain.json'), 'utf8'));
   const social = await require('./assembled-social.cjs').socialRuntime(db);
   const module = await Test.createTestingModule({ imports: [DatabaseModule, ...social.imports, ShortsFeatureModule.register()] })
     .overrideProvider(ShortsChainService).useFactory({ inject: [ShortsWorkQueueService], factory: work => ({
       release: manifest,
       state: { ...manifest, shorts: [], receipts: [] }, sharedReceipts: true,
-      // This offline fixture never encodes a contract call. Supply the metadata
-      // normally loaded by ShortsChainService so the real config endpoint runs.
-      artifact: { aci: [], bytecodeHash: manifest.sourceHash },
+      // A bound synthetic artifact exercises real public capability validation;
+      // this fixture never encodes, signs or sends a chain transaction.
+      artifact,
       contract: { $options: { address: manifest.contract } }, operator: { address: manifest.operator },
       address: value => value, serial: callback => work.run(callback),
+      policy: async () => shortsContractPolicy(configuration, 1),
+      rewardContracts: () => [],
       account: async address => ({ address, wallet: '100', available: '0', earned: '0', claimed: '0', previousAvailable: '0' }),
       sdk: { getContext: () => ({ onNode: social.node }), api: {
         $host: manifest.node,
@@ -51,7 +56,7 @@ const { Global, Module } = require('@nestjs/common');
       async read(method, args) {
         if (method === 'get_short') return (await chainState()).shorts[args[0]];
         if (method === 'has_liked') return !!(await chainState()).shorts[args[1]]?.likers?.includes(args[0]);
-        if (method === 'get_config') return {};
+        if (method === 'get_config') return configuration;
         throw new Error(`Unexpected chain read in offline fixture: ${method}`);
       },
       write: () => assert.fail('Hosted API must not sign or write to a chain'),
@@ -65,6 +70,25 @@ const { Global, Module } = require('@nestjs/common');
   assert.equal(shorts.media.admission.constructor.name, 'ShortsMediaAdmissionService');
   process.on('message', async message => {
     try {
+      if (message?.action?.startsWith('delivery-')) {
+        assert.equal(process.env.SHORTS_TEST_DELIVERY_OPERATIONS, '1');
+        const scope = { network: manifest.network, contract: manifest.contract };
+        let result;
+        if (message.action === 'delivery-restage') {
+          const { ShortsOriginalRestagingService } = runtimeRequire('../shorts-original-restaging.service');
+          result = await app.get(ShortsOriginalRestagingService).restage(scope, message.shortId, message.jobId);
+        } else if (message.action === 'delivery-prepare') {
+          const { ShortsDeliveryPreparationService } = runtimeRequire('../shorts-delivery-preparation.service');
+          result = await app.get(ShortsDeliveryPreparationService).prepare(message.shortId, message.jobId);
+        } else if (message.action === 'delivery-state') {
+          const { ShortsDeliverySelectionService } = runtimeRequire('../shorts-delivery-selection.service');
+          result = await app.get(ShortsDeliverySelectionService).state(scope, await shorts.ensurePlayable(message.shortId));
+        } else if (message.action === 'delivery-select') {
+          const { ShortsDeliveryActivationService } = runtimeRequire('../shorts-delivery-activation.service');
+          result = await app.get(ShortsDeliveryActivationService).select(message.shortId, message.sourceKey, message.expected, message.operation, message.kind);
+        } else throw new Error('Unsupported delivery operation');
+        process.send?.({ type: 'command', id: message.id, result }); return;
+      }
       if (message?.action === 'listener') {
         const [row] = await app.get(ShortsGateway).runner.query('SELECT pg_backend_pid() AS pid');
         process.send?.({ type: 'command', id: message.id, pid: row.pid }); return;

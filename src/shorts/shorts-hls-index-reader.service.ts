@@ -13,7 +13,7 @@ import { hlsObservation } from './shorts-hls-inventory-data';
 
 // COUNT is a hint, not a bound. Enforce key/value/page bounds inside Redis before replying.
 const scan = `
-local page=redis.call('SCAN',ARGV[1],'MATCH',ARGV[2]..'*','COUNT',10)
+local page=redis.call('SCAN',ARGV[1],'MATCH',ARGV[2]..'*','COUNT',4)
 if #page[2]>64 then return redis.error_reply('HLS_PAGE_LIMIT') end
 local epoch=string.match(redis.call('INFO','server'),'run_id:([0-9a-f]+)')
 if not epoch or #epoch~=40 then return redis.error_reply('HLS_REDIS_IDENTITY') end
@@ -22,9 +22,9 @@ local bytes=0
 for _,key in ipairs(page[2]) do
   if #key~=#ARGV[2]+64 then return redis.error_reply('HLS_INDEX_KEY') end
   local length=redis.call('STRLEN',key)
-  if length<1 or length>32768 or redis.call('PTTL',key)~=-1 then return redis.error_reply('HLS_INDEX_SIZE_OR_TTL') end
+  if length<1 or length>131072 or redis.call('PTTL',key)~=-1 then return redis.error_reply('HLS_INDEX_SIZE_OR_TTL') end
   bytes=bytes+length
-  if bytes>262144 then return redis.error_reply('HLS_PAGE_LIMIT') end
+  if bytes>8388608 then return redis.error_reply('HLS_PAGE_LIMIT') end
   table.insert(result,{string.sub(key,#ARGV[2]+1),redis.call('GET',key)})
 end
 return result

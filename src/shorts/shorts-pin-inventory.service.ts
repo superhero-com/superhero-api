@@ -61,10 +61,15 @@ export class ShortsPinInventoryService {
       )
         throw new Error('Invalid pin inventory database grants');
     }
+    await this.db.query(
+      'SELECT reference_version FROM shorts_hls_inventory_runs LIMIT 0',
+    );
+    await this.db.query('SELECT pins FROM shorts_hls_inventory_roots LIMIT 0');
   }
   private async run(id: string) {
     const [run] = await this.db.query(
-      'SELECT * FROM shorts_pin_inventory_runs WHERE network=$1 AND contract=$2 AND id=$3',
+      `SELECT p.*,h.reference_version FROM shorts_pin_inventory_runs p JOIN shorts_hls_inventory_runs h
+      ON h.network=p.network AND h.contract=p.contract AND h.id=p.hls_run WHERE p.network=$1 AND p.contract=$2 AND p.id=$3`,
       this.args(id),
     );
     if (!run) throw new NotFoundException('Pin scan not found');
@@ -188,7 +193,17 @@ export class ShortsPinInventoryService {
       pinTraversalComplete: run.phase === 'complete',
       consistentSnapshot: false,
       blocksVerified: false,
-      referenceCoverage: 'selected-hls-inventory',
+      referenceCoverage:
+        run.reference_version === 5
+          ? 'original-and-acknowledged-generation-inventory'
+          : run.reference_version === 4
+            ? 'original-and-generation-delivery-inventory'
+            : run.reference_version === 3
+              ? 'original-and-acknowledged-delivery-inventory'
+              : run.reference_version === 2
+                ? 'original-and-derivative-inventory'
+                : 'legacy-hls-inventory',
+      referenceVersion: run.reference_version,
       deletionEnabled: false,
     };
   }
@@ -214,9 +229,12 @@ export class ShortsPinInventoryService {
       WHERE network=$1 AND contract=$2 AND run_id=$3 AND cid>$4 GROUP BY cid ORDER BY cid LIMIT $5)
       SELECT p.*,
       (SELECT count(*)::text FROM shorts_hls_inventory_roots r WHERE r.network=$1 AND r.contract=$2 AND r.run_id=$6 AND r.source_cid=p.cid) AS "sourceReferences",
+      (SELECT count(*)::text FROM shorts_hls_inventory_roots r WHERE r.network=$1 AND r.contract=$2 AND r.run_id=$6
+        AND r.pins @> jsonb_build_array(jsonb_build_object('cid',p.cid)) AND r.source_cid IS DISTINCT FROM p.cid) AS "derivativeReferences",
       (SELECT count(*)::text FROM shorts_hls_inventory_entries e WHERE e.network=$1 AND e.contract=$2 AND e.run_id=$6 AND e.cid=p.cid) AS "packageReferences",
       EXISTS(SELECT 1 FROM shorts_hls_inventory_roots r WHERE r.network=$1 AND r.contract=$2 AND r.run_id=$6 AND r.active_holds>0 AND
-        (r.source_cid=p.cid OR EXISTS(SELECT 1 FROM shorts_hls_inventory_entries e WHERE e.network=r.network AND e.contract=r.contract AND e.run_id=r.run_id AND e.source_key=r.source_key AND e.cid=p.cid))) AS "observedHold"
+        (r.source_cid=p.cid OR r.pins @> jsonb_build_array(jsonb_build_object('cid',p.cid))
+        OR EXISTS(SELECT 1 FROM shorts_hls_inventory_entries e WHERE e.network=r.network AND e.contract=r.contract AND e.run_id=r.run_id AND e.source_key=r.source_key AND e.cid=p.cid))) AS "observedHold"
       FROM pins p ORDER BY p.cid`,
       [...this.args(id), after, limit + 1, run.hls_run],
     );
@@ -225,7 +243,9 @@ export class ShortsPinInventoryService {
         ...row,
         classification: row.observedHold
           ? 'held'
-          : row.sourceReferences !== '0' || row.packageReferences !== '0'
+          : row.sourceReferences !== '0' ||
+              row.derivativeReferences !== '0' ||
+              row.packageReferences !== '0'
             ? 'referenced'
             : 'unresolved',
         eligibleForDeletion: false,
@@ -238,6 +258,8 @@ export class ShortsPinInventoryService {
     const rows = await this.db.query(
       `WITH expected AS (
       SELECT source_cid AS cid FROM shorts_hls_inventory_roots WHERE network=$1 AND contract=$2 AND run_id=$6 AND source_cid IS NOT NULL
+      UNION SELECT p->>'cid' AS cid FROM shorts_hls_inventory_roots r CROSS JOIN LATERAL jsonb_array_elements(r.pins) p
+        WHERE r.network=$1 AND r.contract=$2 AND r.run_id=$6 AND p->>'cid' IS NOT NULL
       UNION SELECT cid FROM shorts_hls_inventory_entries WHERE network=$1 AND contract=$2 AND run_id=$6)
       SELECT e.cid,EXISTS(SELECT 1 FROM shorts_pin_inventory_entries p WHERE p.network=$1 AND p.contract=$2 AND p.run_id=$3 AND p.cid=e.cid AND p.type='direct') AS "directOnly"
       FROM expected e WHERE e.cid>$4 AND NOT EXISTS(SELECT 1 FROM shorts_pin_inventory_entries p WHERE p.network=$1 AND p.contract=$2 AND p.run_id=$3 AND p.cid=e.cid AND p.type='recursive')

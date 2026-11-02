@@ -9,12 +9,15 @@ const { join } = require('node:path');
 const { runtimeRequire, runtimeEvidence } = require('./testing/fixture-runtime.cjs');
 const { ShortsEncodingService } = runtimeRequire('../shorts-encoding.service');
 const { ShortsScratchService, ShortsScratchProbeService } = runtimeRequire('../shorts-scratch.service');
+const { hashMediaFile } = runtimeRequire('../shorts-media-file');
 const exec = promisify(execFile);
 const MiB = 1048576;
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'shorts-encoding-test-'));
-  const scratch = new ShortsScratchService({ directory: join(root, 'work'), minFreeBytes: 64 * MiB, minFreeInodes: 128, maxUsedPercent: 85 }, new ShortsScratchProbeService());
+  const maxUsedPercent = Number(process.env.SHORTS_TEST_SCRATCH_MAX_USED_PERCENT || 85);
+  assert.ok(Number.isInteger(maxUsedPercent) && maxUsedPercent >= 50 && maxUsedPercent <= 99);
+  const scratch = new ShortsScratchService({ directory: join(root, 'work'), minFreeBytes: 64 * MiB, minFreeInodes: 128, maxUsedPercent }, new ShortsScratchProbeService());
   await scratch.onModuleInit();
   t.after(async () => { scratch.onModuleDestroy(); await rm(root, { recursive: true, force: true }); });
   const encoder = new ShortsEncodingService(scratch);
@@ -47,6 +50,16 @@ async function verify(f, output, expectedDuration) {
   assert.equal(JSON.parse(output.files.find(file => file.name === 'manifest.json').data).duration, expectedDuration);
   await f.clean();
 }
+
+test('worker decodes a verified source file without changing the uploaded original', { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const original = await generate(f.root);
+  const source = await hashMediaFile(join(f.root, 'source.mp4'));
+  await verify(f, await f.encoder.encode(source, 'Original identity fixture', 'Art'), 2);
+  assert.deepEqual(await readFile(source.path), original);
+  await assert.rejects(f.encoder.encode({ ...source, sha256: '0'.repeat(64) }, 'Corrupt source', 'Art'), /integrity mismatch/);
+  await f.clean();
+});
 
 for (const spec of [
   { name: 'minimum two-second video', duration: 2 },

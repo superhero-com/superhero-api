@@ -165,7 +165,7 @@ export class ShortsScratchService implements OnModuleInit, OnModuleDestroy {
     if (
       !Number.isSafeInteger(bytes) ||
       bytes < 1 ||
-      bytes > 256_000_000 ||
+      bytes > 1024 * 1048576 ||
       !Number.isSafeInteger(inodes) ||
       inodes < 1 ||
       inodes > 128 ||

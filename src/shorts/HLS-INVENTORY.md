@@ -12,7 +12,7 @@ currently limited to enabled testnet deployments.
 
 ## Setup
 
-1. Apply API migrations through `1791763219000-ShortsHlsInventory`, then
+1. Apply API migrations through `1793145606000-ShortsDeliveryStaging`, then
    `npm run build`. Use the same deployment manifest as the API.
 2. Create a dedicated Redis 7+ read account for the streaming namespace. For
    example, its ACL needs these permissions (supply its password privately):
@@ -35,7 +35,7 @@ currently limited to enabled testnet deployments.
    GRANT USAGE ON SCHEMA public TO shorts_hls_inventory;
    GRANT SELECT ON public.shorts_runtime, public.shorts_content,
      public.shorts_ingestion, public.shorts_upload_sessions,
-     public.shorts_upload_parts, public.shorts_retention_holds
+     public.shorts_delivery_packages, public.shorts_delivery_generations, public.shorts_delivery_staging, public.shorts_upload_parts, public.shorts_retention_holds
      TO shorts_hls_inventory;
    GRANT SELECT, INSERT, UPDATE ON public.shorts_hls_inventory_runs
      TO shorts_hls_inventory;
@@ -87,15 +87,19 @@ node --env-file=/secure/hls-inventory.env dist/shorts/hls-inventory-main roots /
 
 Use `{"id":"<run UUID>","limit":100}` and then pass the returned `next` as
 `after`. Null ends the pass. Keep outputs private. `entries` includes package
-files, byte counts, source-reference counts, shared-package counts and observed
-holds. `roots` includes source identities, retain reasons and whether an index
-was observed. Counters are decimal strings to preserve exact values.
+files, package version, byte counts, source-reference counts, shared-package
+counts and observed holds. `roots` includes canonical source identities, separate
+original/input/asset/acknowledged-HLS pin references, retain reasons and whether an index was observed.
+Counters are decimal strings to preserve exact values.
 
 ## Interpretation and limits
 
 Redis `SCAN` can repeat keys and return empty intermediate pages, and its count
 is a hint. The command deduplicates observations and checks bounds inside Redis:
-64 keys, 32 KiB per index and 256 KiB per response. See the
+64 keys, 128 KiB per adaptive index and 8 MiB per response. Legacy indexes retain
+their 32 KiB bound. A legacy package has at most 34 files and 100,000,000 bytes;
+an adaptive package has at most 256 files and 192 MiB, with a validated master
+and child-playlist graph. See the
 [Redis SCAN guarantees](https://redis.io/docs/latest/commands/scan/).
 
 `indexedMediaBytes` sums recorded package files once per source key. Shared CIDs
@@ -106,11 +110,22 @@ scratch files and backups are not included. `physicalPinInventoryComplete` stays
 false. Use the separate [IPFS pin inventory](PIN-INVENTORY.md) to compare this completed
 run with physical pin observations and repository-size samples.
 
-Source matching uses the streaming service's `hls-v2` identity: video ID, original
-CID, original `video.mp4` SHA-256 and byte count. Older source versions no longer
-in current API records stay unresolved. The command does not reverse a hash or
-infer ownership. It reads all current roots, including withdrawn content and
-hold-only records; it does not infer playback permission from the inventory.
+Legacy source matching preserves the streaming service's `hls-v2` identity:
+video ID, package CID and `video.mp4` SHA-256 and byte count. Original-file records
+use the shared `hls-v3` protocol, binding the required network/contract scope,
+original identity, generation job/fence, encoding fingerprint and prepared delivery
+metadata. Original, temporary input and retained asset CIDs have independent byte counts
+and reference counts across deployments. Older source versions no longer in
+current API records stay unresolved. The command does not reverse a hash or infer
+ownership. It reads all current roots, including withdrawn content and hold-only
+records; it does not infer playback permission from the inventory.
+
+New runs use `referenceVersion:5`, including private replacement generations, their
+original-post holds and each generation's durable HLS acknowledgements absent from
+Redis. Completed version 1, 2, 3 and 4 runs remain readable; references outside their coverage must not
+be treated as absent. An unfinished older run cannot resume under the new scanner: retain
+its partial observations and start a new run. Migration rollback refuses used
+adaptive inventory history.
 
 The two passes are historical observations, not a consistent snapshot. Holds,
 source versions and indexes can change between or after pages. Every result keeps

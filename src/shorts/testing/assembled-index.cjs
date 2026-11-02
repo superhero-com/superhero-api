@@ -8,7 +8,7 @@ const WebSocket = require('ws');
 const { AciContractCallEncoder } = require('@aeternity/aepp-calldata');
 const { hash, decode, encode, Encoding } = require('@aeternity/aepp-sdk');
 const { Tx } = require('../../mdw-sync/entities/tx.entity');
-const { ShortsIndexService } = require('../shorts-index.service');
+const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('../shorts-index.service');
 const { ShortsPluginSyncService } = require('../../plugins/shorts/shorts-plugin-sync.service');
 const { ShortsPlugin } = require('../../plugins/shorts/shorts.plugin');
 const { assembledPlayback } = require('./assembled-playback.cjs');
@@ -56,7 +56,7 @@ exports.assembledIndex = async (t, f) => {
     $decodeEvents: logs => logs.map(log => { const [name, args] = Object.entries(codec.decodeEvent('Shorts', log.data, log.topics))[0]; return { name, args }; }),
     $call: async (name, args) => { assert.equal(name, 'get_short'); return { decodedResult: state.shorts[args[0]] }; },
   };
-  const chain = { contract, release: { network: scope.network, contract: scope.contract }, state: { contract: scope.contract } };
+  const chain = { contract, release: { network: scope.network, contract: scope.contract, schemaVersion: 1 }, state: { contract: scope.contract }, rewardContracts: () => [] };
   const index = new ShortsIndexService(owner, chain, await require('./index-network.cjs').indexNetworkFixture(owner, chain));
   // This journey controls chain inputs; live endpoint proof is a separate HTTP suite.
   const network = { verify: async () => {}, bindings: () => ({ middleware: f.mdwUrl }),
@@ -68,7 +68,7 @@ exports.assembledIndex = async (t, f) => {
   const plugin = new ShortsPlugin(owner.getRepository(Tx), {}, processor, index, { changed }, backfill);
   t.after(() => plugin.onModuleDestroy());
   await owner.query("INSERT INTO sync_state VALUES('global',100,now())");
-  await owner.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,1,true,99)', [scope.contract]);
+  await owner.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,99)', [scope.contract, SHORTS_INDEX_VERSION]);
   function tx(name, height, shortId = id, account = creator.address) {
     const topics = [integer(hash(name))];
     if (name !== 'Withdrawn') topics.push(integer(decode(account)));

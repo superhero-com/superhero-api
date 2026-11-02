@@ -23,6 +23,7 @@ import { ShortRecord } from './shorts.types';
 /** This login has no table access. PostgreSQL owns scope, leases and draft-only writes. */
 @Injectable()
 export class ShortsWorkerRepositoryService {
+  private mediaProtocol = 2;
   constructor(
     @Inject(ShortsDatabaseService) private readonly db: DataSource,
     @Inject(SHORTS_WORKER_CONFIG) private readonly config: ShortsWorkerConfig,
@@ -63,6 +64,7 @@ export class ShortsWorkerRepositoryService {
     if (sourceHash !== this.config.sourceHash)
       throw new ConflictException('Worker source does not match');
     const capabilities = await this.call('verify', scope);
+    this.mediaProtocol = capabilities?.deliveryGenerationVersion === 1 ? 3 : 2;
     if (capabilities?.capacityDeferVersion !== 1)
       throw new ServiceUnavailableException(
         'Apply the Shorts worker capacity-backpressure migration before starting workers',
@@ -93,12 +95,19 @@ export class ShortsWorkerRepositoryService {
     scope: ShortsScope,
     leaseMs = 120000,
   ): Promise<IngestionJob | undefined> {
-    const row = await this.call('claim', scope, { leaseMs });
+    const row = await this.call('claim', scope, {
+      leaseMs,
+      mediaProtocol: this.mediaProtocol,
+      maxSourceBytes: 100000000,
+    });
     return row
       ? {
           id: row.id,
           creator: row.creator,
           input: row.input,
+          ...(row.delivery_short_id
+            ? { deliveryShortId: row.delivery_short_id }
+            : {}),
           status: row.status,
           attempts: row.attempts,
           fence: String(row.fence),

@@ -1,3 +1,7 @@
+import {
+  shortsSourceLimit,
+  SHORTS_SOURCE_MANIFEST_BYTES,
+} from './shorts-upload-policy';
 import { ShortsDatabaseService } from './shorts-database.service';
 import {
   Inject,
@@ -10,6 +14,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { ShortRecord } from './shorts.types';
+import { validateOriginalContent } from './shorts-original-content';
+import { SHORTS_ORIGINAL_PROFILE } from './shorts-rendition-policy';
 import type { PrivateObjectRef } from './shorts-private-objects.service';
 import {
   ShortsUploadBudgetLimits,
@@ -25,6 +31,9 @@ export interface StoredShort {
   revision: string;
 }
 export interface IngestionInput {
+  /** Server-selected at upload acceptance and immutable through retries. */
+  acceptedMaxBytes?: number;
+  processingProfile?: typeof SHORTS_ORIGINAL_PROFILE;
   /** Private durable object reference; never a browser-supplied fetch URL. */
   objectKey: string;
   /** Encrypted source manifest, when the upload uses private shared storage. */
@@ -46,6 +55,8 @@ export interface IngestionJob {
   leaseUntil?: Date;
   errorCode?: string;
   resultId?: string;
+  /** Internal replacement encode; never another creator upload/post. */
+  deliveryShortId?: string;
 }
 export interface IngestionClaim {
   id: string;
@@ -166,6 +177,11 @@ export class ShortsMetadataService {
       !['pending', 'approved', 'rejected'].includes(record.moderation)
     )
       throw new BadRequestException('Invalid prepared Short');
+    try {
+      validateOriginalContent(record);
+    } catch {
+      throw new BadRequestException('Invalid original video content');
+    }
     return JSON.stringify(record);
   }
   // TypeORM's PostgreSQL driver returns [rows, affectedCount] for UPDATE,
@@ -195,6 +211,9 @@ export class ShortsMetadataService {
       leaseUntil: row.lease_until ?? undefined,
       errorCode: row.error_code ?? undefined,
       resultId: row.result_id ?? undefined,
+      ...(row.delivery_short_id
+        ? { deliveryShortId: row.delivery_short_id }
+        : {}),
     };
   }
   private lease(ms: number) {
@@ -429,6 +448,8 @@ export class ShortsMetadataService {
       AND creator=$6 AND created_at=$7 AND body->>'cid'=$8
       AND body->'bytes'=$5::jsonb->'bytes' AND body->'files'=$5::jsonb->'files' AND body->'duration'=$5::jsonb->'duration'
       AND (body->'privateMedia') IS NOT DISTINCT FROM ($5::jsonb->'privateMedia')
+      AND (body->'original') IS NOT DISTINCT FROM ($5::jsonb->'original')
+      AND (body->'derivatives') IS NOT DISTINCT FROM ($5::jsonb->'derivatives')
       RETURNING body,revision`,
       [
         ...this.scope(scope),
@@ -467,6 +488,8 @@ export class ShortsMetadataService {
         record.duration,
         record.files,
         record.privateMedia,
+        record.original,
+        record.derivatives,
       ]);
       const result: unknown = update(record);
       if (result && typeof (result as any).then === 'function')
@@ -482,6 +505,8 @@ export class ShortsMetadataService {
           record.duration,
           record.files,
           record.privateMedia,
+          record.original,
+          record.derivatives,
         ]) !== immutable
       )
         throw new ConflictException('Content identity is immutable');
@@ -494,11 +519,8 @@ export class ShortsMetadataService {
     });
   }
 
-  private async admission(
-    manager: EntityManager,
-    scope: ShortsScope,
-    creator: string,
-  ) {
+  /** Shared admission for trusted operations inside the caller's transaction. */
+  async admission(manager: EntityManager, scope: ShortsScope, creator: string) {
     const params = this.scope(scope);
     // The scope row serializes admission counts across all API/worker instances.
     const [limits] = await manager.query(
@@ -531,14 +553,30 @@ export class ShortsMetadataService {
     creator: string,
     input: IngestionInput,
     transaction?: EntityManager,
+    deliveryShortId?: string,
+    sourceManifest?: string,
   ): Promise<IngestionJob> {
     this.identity(id, creator);
     if (
+      deliveryShortId !== undefined &&
+      (!/^[a-zA-Z0-9_-]{1,80}$/.test(deliveryShortId) || deliveryShortId === id)
+    )
+      throw new BadRequestException('Invalid delivery target');
+    if (
+      sourceManifest !== undefined &&
+      (typeof sourceManifest !== 'string' ||
+        !sourceManifest.length ||
+        Buffer.byteLength(sourceManifest) > SHORTS_SOURCE_MANIFEST_BYTES)
+    )
+      throw new BadRequestException('Invalid accepted source manifest');
+    if (
       !input ||
+      (input.processingProfile !== undefined &&
+        input.processingProfile !== SHORTS_ORIGINAL_PROFILE) ||
       !/^[a-f0-9]{64}$/.test(input.sha256) ||
       !Number.isSafeInteger(input.bytes) ||
       input.bytes < 1 ||
-      input.bytes > 40 * 1024 * 1024 ||
+      input.bytes > shortsSourceLimit(input) ||
       !/^[a-zA-Z0-9_/-]{1,512}$/.test(input.objectKey) ||
       input.objectKey.startsWith('/') ||
       input.objectKey.includes('//') ||
@@ -573,18 +611,48 @@ export class ShortsMetadataService {
       );
       if (existing) {
         // JSONB equality treats metadata key order as insignificant.
-        if (!existing.matches)
+        if (
+          !existing.matches ||
+          (existing.delivery_short_id ?? undefined) !== deliveryShortId
+        )
           throw new ConflictException(
             'Upload identity already exists with different input',
           );
+        if (
+          sourceManifest !== undefined &&
+          Object.hasOwn(existing, 'source_manifest')
+        ) {
+          if (
+            existing.source_manifest !== null &&
+            existing.source_manifest !== sourceManifest
+          )
+            throw new ConflictException('Accepted source manifest changed');
+          if (existing.source_manifest === null)
+            await manager.query(
+              'UPDATE shorts_ingestion SET source_manifest=$4 WHERE network=$1 AND contract=$2 AND id=$3',
+              [...params, id, sourceManifest],
+            );
+        }
         return this.job(existing);
       }
       await this.admission(manager, scope, creator);
       const [row] = await manager.query(
-        `INSERT INTO shorts_ingestion(network,contract,id,creator,input)
-        VALUES($1,$2,$3,$4,$5::jsonb) RETURNING *`,
-        [...params, id, creator, JSON.stringify(input)],
+        deliveryShortId === undefined
+          ? `INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,$3,$4,$5::jsonb) RETURNING *`
+          : `INSERT INTO shorts_ingestion(network,contract,id,creator,input,delivery_short_id) VALUES($1,$2,$3,$4,$5::jsonb,$6) RETURNING *`,
+        [
+          ...params,
+          id,
+          creator,
+          JSON.stringify(input),
+          ...(deliveryShortId === undefined ? [] : [deliveryShortId]),
+        ],
       );
+      if (sourceManifest !== undefined && Object.hasOwn(row, 'source_manifest'))
+        await manager.query(
+          'UPDATE shorts_ingestion SET source_manifest=$4 WHERE network=$1 AND contract=$2 AND id=$3',
+          [...params, id, sourceManifest],
+        );
       return this.job(row);
     };
     return transaction ? enqueue(transaction) : this.db.transaction(enqueue);
@@ -597,7 +665,7 @@ export class ShortsMetadataService {
   ) {
     this.identity(id, creator);
     const [row] = await (transaction || this.db).query(
-      'SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4',
+      "SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4 AND (to_jsonb(shorts_ingestion)->>'delivery_short_id') IS NULL",
       [...this.scope(scope), id, creator],
     );
     if (!row) throw new NotFoundException('Upload not found');
@@ -622,7 +690,7 @@ export class ShortsMetadataService {
       const [row] = await this.updatedRows(
         manager,
         `WITH candidate AS (
-        SELECT id FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND attempts<3
+        SELECT id FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND attempts<3 AND (to_jsonb(shorts_ingestion)->>'delivery_short_id') IS NULL
         AND ((status='queued' AND (error_code IS DISTINCT FROM 'capacity_wait' OR updated_at<=clock_timestamp()-interval '5 seconds')) OR (status='processing' AND lease_until<=clock_timestamp()))
         ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
       ) UPDATE shorts_ingestion j SET status='processing',attempts=attempts+1,fence=fence+1,
@@ -674,10 +742,13 @@ export class ShortsMetadataService {
           'Preparation claim expired or was replaced',
         );
       if (
+        job.delivery_short_id ||
         record.id !== job.id ||
         record.creator !== job.creator ||
         record.publication ||
         record.moderation === 'approved' ||
+        (job.input.processingProfile === SHORTS_ORIGINAL_PROFILE) !==
+          !!record.original ||
         (job.input.manifest &&
           (!record.privateMedia ||
             record.privateMedia.fence !== claim.fence ||
@@ -759,7 +830,7 @@ export class ShortsMetadataService {
         this.scope(scope),
       );
       const [row] = await manager.query(
-        'SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4 FOR UPDATE',
+        "SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4 AND (to_jsonb(shorts_ingestion)->>'delivery_short_id') IS NULL FOR UPDATE",
         params,
       );
       if (!row) throw new NotFoundException('Upload not found');
@@ -781,7 +852,7 @@ export class ShortsMetadataService {
     const params = [...this.scope(scope), id, creator];
     return this.db.transaction(async (manager) => {
       const [row] = await manager.query(
-        'SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4 FOR UPDATE',
+        "SELECT * FROM shorts_ingestion WHERE network=$1 AND contract=$2 AND id=$3 AND creator=$4 AND (to_jsonb(shorts_ingestion)->>'delivery_short_id') IS NULL FOR UPDATE",
         params,
       );
       if (!row) throw new NotFoundException('Upload not found');

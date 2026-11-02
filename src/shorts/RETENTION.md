@@ -10,7 +10,7 @@ objects. Do not configure bucket expiration or bulk IPFS unpinning from this rep
 
 ## Setup
 
-1. Apply the normal API migrations through `1791763216000-ShortsRetentionHolds`
+1. Apply the normal API migrations through `1793145606000-ShortsDeliveryStaging`
    using the migration owner. The command never runs migrations.
 2. Have the DBA create a dedicated login. It must not own the schema/tables, have
    role memberships, schema creation rights, superuser or bypass-RLS privileges.
@@ -23,7 +23,7 @@ objects. Do not configure bucket expiration or bulk IPFS unpinning from this rep
    GRANT USAGE ON SCHEMA public TO shorts_retention;
    GRANT SELECT ON public.shorts_runtime, public.shorts_content,
      public.shorts_ingestion, public.shorts_upload_sessions,
-     public.shorts_upload_parts TO shorts_retention;
+     public.shorts_delivery_packages, public.shorts_delivery_generations, public.shorts_delivery_staging, public.shorts_upload_parts TO shorts_retention;
    GRANT SELECT, INSERT, UPDATE ON public.shorts_retention_holds TO shorts_retention;
    ```
 
@@ -98,7 +98,11 @@ with any hold history, including released holds.
 - Source manifests may reference additional parts, especially after legacy
   migration. They are encrypted and this command has no decryption keys.
   `manifest-children-not-inventoried` makes that gap explicit.
-- `cidReferences` counts content rows across all deployments in the same
+- Replacement jobs remain separate inventory roots, with `deliveryOf` linking the
+  original post. Its holds, pending appeals and report-retention reasons apply to
+  their staged sources and outputs. Reader-first rollout accepts an older schema
+  only when both generation storage and its job discriminator are absent.
+- `cidReferences` counts content and generation roots across all deployments in the same
   database schema, including withdrawn rows. It does not count another database,
   an independent IPFS pin or an external user of that CID.
 - Active preparation/uploads, content/source references, pending appeals,

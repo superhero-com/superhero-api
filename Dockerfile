@@ -1,11 +1,20 @@
+ARG APK_SOURCE=repository
+# Override with --build-context apk-archives=/absolute/archive/directory.
+FROM scratch AS apk-archives
+
 FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS development
 # Native dependencies may compile when a platform has no prebuilt binary.
 ARG TARGETARCH
+ARG APK_SOURCE
 COPY docker/apk/${TARGETARCH}/api-build.lock /tmp/packages.lock
 COPY docker/apk/${TARGETARCH}/api-build.sha256 /tmp/packages.sha256
-RUN mkdir /tmp/apks \
-    && apk update \
-    && apk fetch --recursive --output /tmp/apks $(grep -v '^#' /tmp/packages.lock) \
+RUN --mount=type=bind,from=apk-archives,target=/retained-apks \
+    mkdir /tmp/apks \
+    && case "$APK_SOURCE" in \
+         repository) apk update && apk fetch --recursive --output /tmp/apks $(grep -v '^#' /tmp/packages.lock) ;; \
+         archives) cp /retained-apks/${TARGETARCH}/api-build/*.apk /tmp/apks/ ;; \
+         *) echo 'APK_SOURCE must be repository or archives' >&2; exit 1 ;; \
+       esac \
     && cd /tmp/apks && sha256sum -c /tmp/packages.sha256 \
     && test "$(ls -1 *.apk | wc -l)" -eq "$(wc -l < /tmp/packages.sha256)" \
     && apk add --no-network /tmp/apks/*.apk \
@@ -13,9 +22,10 @@ RUN mkdir /tmp/apks \
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY scripts/update-package-type.js ./scripts/update-package-type.js
-# Bound dependency resolution separately from TypeScript compilation. Native
-# install scripts inherit this limit as well; the builder still needs a cgroup cap.
+# Bound dependency resolution separately from lifecycle TypeScript compilation.
+# The builder still needs a cgroup cap for concurrent native install processes.
 ARG INSTALL_NODE_OPTIONS=--max-old-space-size=512
+ARG INSTALL_SCRIPT_NODE_OPTIONS=--max-old-space-size=1152
 # Private repository authentication exists only in this RUN's process environment.
 # Never write the token into a Git URL/configuration file or an image ENV layer.
 RUN --mount=type=secret,id=GITHUB_TOKEN \
@@ -29,7 +39,7 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
         GIT_CONFIG_KEY_2=http.https://github.com/.extraHeader \
         GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$(cat /run/secrets/GITHUB_TOKEN)" | base64 | tr -d '\n')"; \
     fi \
-    && NODE_OPTIONS="$INSTALL_NODE_OPTIONS" npm ci --no-audit --no-fund \
+    && NODE_OPTIONS="$INSTALL_NODE_OPTIONS" npm ci --node-options="$INSTALL_SCRIPT_NODE_OPTIONS" --no-audit --no-fund \
     && npm cache clean --force
 COPY . .
 CMD ["npm", "run", "start:dev"]
@@ -43,11 +53,16 @@ FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681
 ENV NODE_ENV=production
 # Verify exact signed archives, including transitive media dependencies.
 ARG TARGETARCH
+ARG APK_SOURCE
 COPY docker/apk/${TARGETARCH}/runtime.lock /usr/share/superhero-build/apk.lock
 COPY docker/apk/${TARGETARCH}/runtime.sha256 /usr/share/superhero-build/apk.sha256
-RUN mkdir /tmp/apks \
-    && apk update \
-    && apk fetch --recursive --output /tmp/apks $(grep -v '^#' /usr/share/superhero-build/apk.lock) \
+RUN --mount=type=bind,from=apk-archives,target=/retained-apks \
+    mkdir /tmp/apks \
+    && case "$APK_SOURCE" in \
+         repository) apk update && apk fetch --recursive --output /tmp/apks $(grep -v '^#' /usr/share/superhero-build/apk.lock) ;; \
+         archives) cp /retained-apks/${TARGETARCH}/runtime/*.apk /tmp/apks/ ;; \
+         *) echo 'APK_SOURCE must be repository or archives' >&2; exit 1 ;; \
+       esac \
     && cd /tmp/apks && sha256sum -c /usr/share/superhero-build/apk.sha256 \
     && test "$(ls -1 *.apk | wc -l)" -eq "$(wc -l < /usr/share/superhero-build/apk.sha256)" \
     && apk add --no-network /tmp/apks/*.apk \

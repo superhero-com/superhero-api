@@ -19,6 +19,8 @@ export interface ShortsAdmissionReservation {
   signal: AbortSignal;
   release(): Promise<void>;
 }
+/** Only a successful Redis admission decision can identify retryable contention. */
+export class ShortsAdmissionBusyError extends HttpException {}
 interface Lease {
   id: string;
   keys: string[];
@@ -266,11 +268,16 @@ export class ShortsTransferAdmissionService
       this.policy,
     ]);
     if (result === -2)
-      throw new HttpException(
+      throw new ShortsAdmissionBusyError(
         this.kind === 'upload'
           ? 'Another upload is in progress. Please wait for it to finish.'
           : 'Another video operation is in progress. Please wait for it to finish.',
         429,
+      );
+    if (result === -1)
+      throw new ShortsAdmissionBusyError(
+        `Shared ${this.kind} capacity is busy or temporarily unavailable. Please try again shortly.`,
+        503,
       );
     if (result !== 1)
       throw new ServiceUnavailableException(

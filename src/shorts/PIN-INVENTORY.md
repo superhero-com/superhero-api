@@ -1,14 +1,15 @@
 # IPFS pin and capacity inventory
 
 A separate Nest operations command compares physical pins on one Kubo node with
-original-video and HLS references from a completed [HLS inventory](HLS-INVENTORY.md).
+canonical original/legacy, temporary input, retained asset and HLS references from a completed
+[HLS inventory](HLS-INVENTORY.md).
 It reports missing recursive pins, known references, observed holds and unmatched
 pins. It never downloads video bytes, publishes, unpins or runs garbage collection.
 It does not start the API, media workers or signer. Enabled testnet only.
 
 ## Configure
 
-1. Apply API migrations through `1791763220000-ShortsPinInventory` and build with
+1. Apply API migrations through `1793145606000-ShortsDeliveryStaging` and build with
    `npm run build`. Complete an HLS inventory for the same deployment first.
 2. In `superhero-ipfs`, enable the distinct `IPFS_INVENTORY_TOKEN_FILE` credential
    and recreate Kubo and the TLS proxy. Fresh `make setup` installations include
@@ -26,7 +27,7 @@ It does not start the API, media workers or signer. Enabled testnet only.
    GRANT USAGE ON SCHEMA public TO shorts_pin_inventory;
    GRANT SELECT ON public.shorts_runtime, public.shorts_content,
      public.shorts_ingestion, public.shorts_upload_sessions,
-     public.shorts_upload_parts, public.shorts_retention_holds,
+     public.shorts_delivery_packages, public.shorts_delivery_generations, public.shorts_delivery_staging, public.shorts_upload_parts, public.shorts_retention_holds,
      public.shorts_hls_inventory_runs, public.shorts_hls_inventory_roots,
      public.shorts_hls_inventory_entries TO shorts_pin_inventory;
    GRANT SELECT, INSERT, UPDATE ON public.shorts_pin_inventory_runs
@@ -69,12 +70,25 @@ node --env-file=/secure/pin-inventory.env dist/shorts/pin-inventory-main entries
 node --env-file=/secure/pin-inventory.env dist/shorts/pin-inventory-main missing /secure/page.json
 ```
 
-- `entries`: pin types, original-reference count, HLS-package count, observed
+- `entries`: pin types, canonical source-reference count, derivative-reference
+  count, HLS-package count, observed
   shared holds and `held` / `referenced` / `unresolved` classification.
 - `missing`: expected CIDs without an observed **recursive** pin. A direct pin
   protects only that block, so a direct-only package is reported here too.
-- `status`: node/storage identity, HLS reference run, timestamps, counts and
-  repository-size observations before and after the traversal.
+- `status`: node/storage identity, HLS reference run and reference version,
+  timestamps, counts and repository-size observations before and after the traversal.
+
+Reference version 5 also includes durable replacement HLS acknowledgements in each
+generation's reference root and reports `original-and-acknowledged-generation-inventory`.
+Reference version 4 also inventories replacement generations and inherits their
+original-post holds, reporting `original-and-generation-delivery-inventory`.
+Reference version 3 also retains acknowledged HLS packages absent from Redis and
+reports `original-and-acknowledged-delivery-inventory`. Reference version 2 includes temporary input and retained asset pins and propagates source holds to
+them. Version 1 retains its original coverage and reports `legacy-hls-inventory`;
+version 2 reports `original-and-derivative-inventory`. Missing-reference reports
+include every recorded pin kind, but a historical version 1 run cannot prove that
+an input package is unreferenced. These counts represent logical references,
+not physical bytes or independent copies on disk.
 
 Keep outputs private; they include content identifiers across the node. Source
 references are restricted to the selected deployment's historical HLS inventory.

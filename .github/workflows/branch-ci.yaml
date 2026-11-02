@@ -34,3 +34,131 @@ jobs:
 
       - name: Run build
         run: npm run build
+
+  shorts-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shorts_qa
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: shorts_quality
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shorts_qa -d shorts_quality"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SHORTS_TEST_PG_URL: postgresql://shorts_qa:local-test-only@127.0.0.1:5432/shorts_quality
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install media test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg redis-server
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test original media and delivery lifecycle
+        run: npm run test:shorts:quality
+
+      - name: Test shared media admission
+        run: npm run test:shorts:media-admission
+
+  shorts-private-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shorts_qa
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: shorts_quality
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shorts_qa -d shorts_quality"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SHORTS_TEST_PG_URL: postgresql://shorts_qa:local-test-only@127.0.0.1:5432/shorts_quality
+      SHORTS_TEST_S3_ENDPOINT: http://127.0.0.1:19000
+      SHORTS_TEST_S3_ACCESS_KEY: shorts-local-test
+      SHORTS_TEST_S3_SECRET_KEY: shorts-local-test-only-secret
+      SHORTS_TEST_MINIO_STS: '1'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up storage fixture compiler
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build pinned local storage fixture
+        env:
+          GOBIN: ${{ runner.temp }}/shorts-tools
+          GOTOOLCHAIN: local
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 768MiB
+          GOFLAGS: -p=2
+          CGO_ENABLED: '0'
+        run: go install github.com/minio/minio@v0.0.0-20251015172955-9e49d5e7a648
+
+      - name: Install worker media test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: Verify storage cleanup and worker recovery
+        env:
+          MINIO_ROOT_USER: ${{ env.SHORTS_TEST_S3_ACCESS_KEY }}
+          MINIO_ROOT_PASSWORD: ${{ env.SHORTS_TEST_S3_SECRET_KEY }}
+          MINIO_BROWSER: 'off'
+          MINIO_UPDATE: 'off'
+        run: |
+          mkdir -p "$RUNNER_TEMP/shorts-minio"
+          "$RUNNER_TEMP/shorts-tools/minio" server "$RUNNER_TEMP/shorts-minio" \
+            --address 127.0.0.1:19000 --console-address 127.0.0.1:19001 --quiet \
+            > "$RUNNER_TEMP/shorts-minio.log" 2>&1 &
+          minio_pid=$!
+          trap 'kill "$minio_pid" 2>/dev/null || true; wait "$minio_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 60); do
+            kill -0 "$minio_pid" || exit 1
+            if curl --fail --silent http://127.0.0.1:19000/minio/health/ready >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          npm run test:shorts:private-version-provider
+          npm run test:shorts:worker

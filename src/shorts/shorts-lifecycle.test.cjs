@@ -104,6 +104,7 @@ function workerFixture(records, options = {}) {
       registry,
       jobs,
       options.limits,
+      options.retirements,
     ),
     chain,
     registry,
@@ -149,6 +150,41 @@ test('hosted recovery bounds each pass, coalesces calls and never auto-publishes
   await f.worker.onModuleDestroy();
   await f.worker.reconcile();
   assert.equal(f.results.length, 19);
+});
+
+test('published original recovery checks each independent pin and repairs missing groups without republishing', async () => {
+  const descriptor = require('./testing/hls-v3.json').descriptor;
+  for (const missing of [descriptor.cid, descriptor.derivatives.cid, descriptor.derivatives.assetsCid, undefined]) {
+    const record = item(descriptor.id, structuredClone(descriptor)), f = workerFixture([record]), checked = [];
+    f.media.pinned = async cid => { checked.push(cid); return cid !== missing; };
+    await f.worker.reconcile();
+    assert.deepEqual(f.effects, missing ? [['pin', record.id]] : []);
+    assert.deepEqual(f.results, [[record.id, 'checked']]);
+    if (!missing) assert.deepEqual(checked, [record.cid, record.derivatives.cid, record.derivatives.assetsCid]);
+    await f.worker.onModuleDestroy();
+  }
+});
+
+test('retired original input packages stay retired while source and assets recover normally', async () => {
+  const golden = require('./testing/hls-v3.json'), descriptor = golden.descriptor;
+  for (const missing of [descriptor.cid, descriptor.derivatives.cid, descriptor.derivatives.assetsCid, undefined]) {
+    const record = item(descriptor.id, structuredClone(descriptor)), checked = [];
+    const f = workerFixture([record], { retirements: { get: async (_scope,id,key) => {
+      assert.equal(id,record.id); assert.deepEqual(_scope,scope);
+      assert.equal(key,require('./hls-protocol/hls-package').sourceKey({ ...descriptor,...scope }));
+      return { inputCid:record.derivatives.cid,generationJobId:record.id };
+    } } });
+    f.media.pinned = async cid => { checked.push(cid); return cid !== missing; };
+    f.media.pin = () => assert.fail('retired inputs must not be restored');
+    f.media.restoreDurablePins = async short => { assert.equal(short.id,record.id); f.effects.push(['repair-durable',short.id]); };
+    await f.worker.reconcile();
+    assert.equal(checked.includes(descriptor.derivatives.cid),false);
+    assert.deepEqual(f.effects, missing && missing !== descriptor.derivatives.cid ? [['repair-durable',record.id]] : []);
+    assert.deepEqual(f.results,[[record.id,'checked']]); await f.worker.onModuleDestroy();
+  }
+  const f = workerFixture([item(descriptor.id,structuredClone(descriptor))], {retirements:{get:async()=>{throw new Error('ledger unavailable');}}});
+  await f.worker.reconcile(); assert.deepEqual(f.effects,[]); assert.deepEqual(f.results,[[descriptor.id,'failed']]);
+  await f.worker.onModuleDestroy();
 });
 
 test('publication recovery reuses the journal and separates unknown or reverted outcomes', async (t) => {

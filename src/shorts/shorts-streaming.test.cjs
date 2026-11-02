@@ -5,6 +5,33 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { ShortsStreamingService } = require('./shorts-streaming.service');
 const { DatabaseSync } = require('node:sqlite');
+const { ShortsDeliveryAcknowledgementService } = require('./shorts-delivery-acknowledgement.service');
+
+test('opt-in legacy dispatch requires a verified durable acknowledgement and leaves older streaming responses pending', async t => {
+  const env = { ...process.env }, fetch = global.fetch, fixture = require('./testing/hls-v2.json');
+  const directory = await mkdtemp(join(tmpdir(), 'shorts-legacy-outbox-')), key = join(directory,'key');
+  await writeFile(key,'a'.repeat(64));
+  Object.assign(process.env,{SHORTS_STREAM_INTERNAL_URL:'http://127.0.0.1:3337',SHORTS_STREAM_KEY_FILE:key,SHORTS_LEGACY_BACKFILL_ENABLED:'true'});
+  delete process.env.SHORTS_IPFS_EXPIRING_WRITES;
+  const db = new DatabaseSync(join(directory,'outbox.sqlite'));
+  const short = {...structuredClone(fixture.descriptor),bytes:100,publication:'published',moderation:'approved',safety:{status:'no_flags'}};
+  const records = {chain:{release:{network:short.network,contract:short.contract},state:{contract:short.contract}},find:async()=>short};
+  let saved=0, verified=0, corrupt=true, withdraw=false, value={status:'ready'};
+  const packages = {acknowledge:async()=>{saved++;}};
+  const acknowledgement = new ShortsDeliveryAcknowledgementService({verifyDurableDelivery:async()=>{
+    verified++;if(corrupt)throw new Error('Corrupt retained media');if(withdraw)short.moderation='rejected';
+  }},packages);
+  const service = new ShortsStreamingService({db},undefined,records,undefined,30000,packages,acknowledgement);
+  global.fetch=async()=>Response.json(value);
+  t.after(async()=>{await service.onModuleDestroy();db.close();global.fetch=fetch;process.env=env;await rm(directory,{recursive:true,force:true});});
+  await service.enqueue(short.id);
+  const retry=async()=>{db.exec('UPDATE shorts_stream_outbox SET ready=0,next_at=0');await service.dispatch();return db.prepare('SELECT ready FROM shorts_stream_outbox').get()?.ready;};
+  assert.equal(await retry(),0);assert.equal(verified,0);assert.equal(saved,0);
+  value={status:'ready',sourceKey:fixture.sourceKey,prepared:fixture.package};
+  assert.equal(await retry(),0);assert.equal(verified,1);assert.equal(saved,0);
+  corrupt=false;withdraw=true;assert.equal(await retry(),0);assert.equal(saved,0);
+  withdraw=false;short.moderation='approved';assert.equal(await retry(),1);assert.equal(saved,1);
+});
 
 test('HLS outbox survives failed dispatch and service restart, deduplicates publication, and sends no video or wallet secret', async t => {
   const env = { ...process.env }; const fetch = global.fetch;
@@ -39,4 +66,30 @@ test('HLS outbox survives failed dispatch and service restart, deduplicates publ
   await denied.dispatch(); denied.onModuleDestroy();
   assert.equal(calls.length, 3, 'revoked jobs never reach the streaming service after restart');
   assert.equal(db.prepare('SELECT count(*) AS n FROM shorts_stream_outbox').get().n, 0);
+});
+
+test('original HLS outbox settles only after a bounded, source-matched durable acknowledgement', async t => {
+  const env = { ...process.env }, fetch = global.fetch;
+  const fixture = require('./testing/hls-v3.json');
+  const directory = await mkdtemp(join(tmpdir(), 'shorts-ack-')), key = join(directory, 'key');
+  await writeFile(key, 'a'.repeat(64));
+  Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: key });
+  const db = new DatabaseSync(join(directory, 'outbox.sqlite'));
+  const short = { ...structuredClone(fixture.descriptor), publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
+  const records = { chain: { release: { network: short.network, contract: short.contract }, state: { contract: short.contract } }, find: async () => short };
+  const store = { db, load: () => ({ shorts: [short] }) };
+  let saved = 0, available = false, value = { status: 'ready', sourceKey: fixture.sourceKey, prepared: fixture.package };
+  const deliveries = { acknowledge: async (descriptor, prepared) => {
+    assert.equal(descriptor.cid, short.cid); assert.deepEqual(prepared, fixture.package);
+    if (!available) throw new Error('database unavailable'); saved++;
+  } };
+  global.fetch = async () => new Response(JSON.stringify(value), { status: 200 });
+  const service = new ShortsStreamingService(store, undefined, records, undefined, 30000, deliveries);
+  t.after(async () => { await service.onModuleDestroy(); db.close(); global.fetch = fetch; process.env = env; await rm(directory, { recursive: true, force: true }); });
+  const retry = async () => { db.exec('UPDATE shorts_stream_outbox SET next_at=0'); await service.dispatch(); return db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready; };
+  await service.enqueue(short.id);
+  assert.equal(await retry(), 0); available = true;
+  const good = value; value = { ...good, sourceKey: '0'.repeat(64) }; assert.equal(await retry(), 0);
+  value = { ...good, extra: 'x'.repeat(147456) }; assert.equal(await retry(), 0); assert.equal(saved, 0);
+  value = good; assert.equal(await retry(), 1); assert.equal(saved, 1);
 });

@@ -1,3 +1,4 @@
+const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -74,6 +75,7 @@ test('restricted retention inventory and hold history survive concurrent operati
   // Empty rollback/reapply is supported; used hold history later refuses rollback.
   await owner.undoLastMigration({ transaction: 'all' });
   await owner.runMigrations({ transaction: 'all' });
+  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
   await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending)
     VALUES($1,$2,$3,8,2),($1,'ct_other',$3,8,2)`, [scope.network,scope.contract,sourceHash]);
   async function principal() {
@@ -81,7 +83,7 @@ test('restricted retention inventory and hold history survive concurrent operati
     const p = { role, password }; principals.push(p);
     await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
     await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};
-      GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts'].map(table=>`${schema}.${table}`).join(',')} TO ${role};
+      GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_delivery_packages'].map(table=>`${schema}.${table}`).join(',')} TO ${role};
       GRANT SELECT,INSERT,UPDATE ON ${schema}.shorts_retention_holds TO ${role}`);
     const endpoint = new URL(url); endpoint.username = role; endpoint.password = password;
     p.db = new ShortsDatabaseService(new DataSource({ ...options, url: endpoint.href, migrations: [] }));

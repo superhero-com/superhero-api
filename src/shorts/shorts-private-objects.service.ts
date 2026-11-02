@@ -1,3 +1,4 @@
+import { SHORTS_MAX_SOURCE_PARTS } from './shorts-upload-policy';
 import {
   BadRequestException,
   Inject,
@@ -19,15 +20,22 @@ import {
   hkdfSync,
   randomBytes,
 } from 'node:crypto';
-import { open } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { open, mkdtemp, rm } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { ShortsScope } from './shorts-metadata.service';
+import {
+  ShortsMediaFile,
+  validateMediaIdentity,
+  verifiedMediaBytes,
+} from './shorts-media-file';
 
 export const SHORTS_PRIVATE_OBJECT_CONFIG = Symbol(
   'SHORTS_PRIVATE_OBJECT_CONFIG',
 );
 const MAX_BYTES = 64 * 1024 * 1024;
+const MAX_FILE_BYTES = 100_000_000;
 const MAGIC = Buffer.from('SHPRIV01');
 const DIRECT_MAGIC = Buffer.from('SHPRIV02');
 const OVERHEAD = MAGIC.length + 12 + 16;
@@ -269,7 +277,7 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
       !ref.key.endsWith(`/${ref.keyId}/${ref.sha256}`) ||
       !Number.isSafeInteger(ref.bytes) ||
       ref.bytes < 1 ||
-      ref.bytes > MAX_BYTES
+      ref.bytes > MAX_FILE_BYTES
     )
       throw new BadRequestException('Invalid private object reference');
     if (!Object.hasOwn(this.config.keys, ref.keyId))
@@ -319,7 +327,7 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
       !/^[a-zA-Z0-9_-]{1,80}$/.test(id) ||
       !Number.isInteger(index) ||
       index < 0 ||
-      index > 39 ||
+      index >= SHORTS_MAX_SOURCE_PARTS ||
       !Number.isSafeInteger(bytes) ||
       bytes < 1 ||
       bytes > 1024 * 1024
@@ -446,25 +454,61 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
     signal?: AbortSignal,
   ): Promise<PrivateObjectRef> {
     signal?.throwIfAborted();
+    if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > MAX_BYTES)
+      throw new BadRequestException('Invalid private media object');
+    const ref = this.plannedReference(scope, uploadId, slot, {
+      bytes: bytes.length,
+      sha256: hash(bytes),
+    });
+    return this.putPlanned(scope, ref, bytes, signal);
+  }
+  /** Compute an immutable reference before reserving its durable staging job. */
+  plannedReference(
+    scope: ShortsScope,
+    uploadId: string,
+    slot: string,
+    identity: Pick<PrivateObjectRef, 'bytes' | 'sha256'>,
+  ): PrivateObjectRef {
     if (
       !/^[a-zA-Z0-9_-]{1,80}$/.test(uploadId) ||
       !/^[a-z0-9_-]{1,40}(\/[a-z0-9_-]{1,40}){0,3}$/.test(slot) ||
-      !Buffer.isBuffer(bytes) ||
-      !bytes.length ||
-      bytes.length > MAX_BYTES
+      !Number.isSafeInteger(identity?.bytes) ||
+      identity.bytes < 1 ||
+      identity.bytes > MAX_BYTES ||
+      !/^[a-f0-9]{64}$/.test(identity.sha256)
     )
       throw new BadRequestException('Invalid private media object');
-    const sha256 = hash(bytes),
-      keyId = this.config.activeKeyId;
+    const keyId = this.config.activeKeyId;
     const ref = {
-      key: `${this.prefix(scope)}${uploadId}/${slot}/${keyId}/${sha256}`,
+      key: `${this.prefix(scope)}${uploadId}/${slot}/${keyId}/${identity.sha256}`,
       keyId,
-      bytes: bytes.length,
-      sha256,
+      bytes: identity.bytes,
+      sha256: identity.sha256,
     };
     this.validateReference(scope, ref);
+    return ref;
+  }
+  /** Resume the reserved key, including after active-key rotation. */
+  async putPlanned(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    bytes: Buffer,
+    signal?: AbortSignal,
+  ): Promise<PrivateObjectRef> {
+    signal?.throwIfAborted();
+    this.validateReference(scope, ref);
+    if (
+      this.direct(ref) ||
+      !Buffer.isBuffer(bytes) ||
+      bytes.length > MAX_BYTES ||
+      bytes.length !== ref.bytes ||
+      hash(bytes) !== ref.sha256
+    )
+      throw new BadRequestException(
+        'Private staging bytes differ from reservation',
+      );
     const iv = randomBytes(12),
-      cipher = createCipheriv('aes-256-gcm', this.config.keys[keyId], iv);
+      cipher = createCipheriv('aes-256-gcm', this.config.keys[ref.keyId], iv);
     cipher.setAAD(this.aad(ref));
     const encrypted = Buffer.concat([cipher.update(bytes), cipher.final()]);
     const body = Buffer.concat([MAGIC, iv, cipher.getAuthTag(), encrypted]);
@@ -506,6 +550,9 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
     ref: PrivateObjectRef,
     signal?: AbortSignal,
   ): Promise<Buffer> {
+    // Buffer consumers retain the legacy bound. Larger renditions use getToFile.
+    if (ref?.bytes > MAX_BYTES)
+      throw new BadRequestException('Use streamed media retrieval');
     this.validateReference(scope, ref);
     const abortSignal = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(60000)])
@@ -562,6 +609,303 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
     } finally {
       abortSignal.removeEventListener('abort', abort);
       stream?.destroy();
+    }
+  }
+
+  /** File transfer uses bounded memory and preserves the existing authenticated envelope. */
+  async putFile(
+    scope: ShortsScope,
+    uploadId: string,
+    slot: string,
+    source: ShortsMediaFile,
+    scratchDirectory: string,
+    parent?: AbortSignal,
+  ): Promise<PrivateObjectRef> {
+    validateMediaIdentity(source, MAX_FILE_BYTES);
+    if (
+      !/^[a-zA-Z0-9_-]{1,80}$/.test(uploadId) ||
+      !/^[a-z0-9_-]{1,40}(\/[a-z0-9_-]{1,40}){0,3}$/.test(slot) ||
+      !isAbsolute(scratchDirectory)
+    )
+      throw new BadRequestException('Invalid private media object');
+    const keyId = this.config.activeKeyId;
+    const ref = {
+      key: `${this.prefix(scope)}${uploadId}/${slot}/${keyId}/${source.sha256}`,
+      keyId,
+      bytes: source.bytes,
+      sha256: source.sha256,
+    };
+    this.validateReference(scope, ref);
+    const signal = AbortSignal.any([
+      AbortSignal.timeout(120000),
+      ...(parent ? [parent] : []),
+    ]);
+    signal.throwIfAborted();
+    const directory = await mkdtemp(
+      join(scratchDirectory, 'shorts-encrypted-'),
+    );
+    let body: Readable | undefined;
+    try {
+      const path = join(directory, 'object');
+      const file = await open(path, 'wx', 0o600);
+      const iv = randomBytes(12);
+      const cipher = createCipheriv('aes-256-gcm', this.config.keys[keyId], iv);
+      cipher.setAAD(this.aad(ref));
+      try {
+        await file.writeFile(Buffer.concat([MAGIC, iv, Buffer.alloc(16)]), {
+          signal,
+        });
+        for await (const chunk of verifiedMediaBytes(
+          createReadStream(source.path, { signal }),
+          source,
+          signal,
+        ))
+          await file.writeFile(cipher.update(chunk), { signal });
+        await file.writeFile(cipher.final(), { signal });
+        const tag = cipher.getAuthTag();
+        let written = 0;
+        while (written < tag.length) {
+          signal.throwIfAborted();
+          const result = await file.write(
+            tag,
+            written,
+            tag.length - written,
+            20 + written,
+          );
+          if (!result.bytesWritten)
+            throw new Error('Could not finish private media envelope');
+          written += result.bytesWritten;
+        }
+      } finally {
+        await file.close();
+      }
+      const checksum = createHash('sha256');
+      for await (const chunk of createReadStream(path, { signal }))
+        checksum.update(chunk);
+      body = createReadStream(path, { signal });
+      try {
+        await this.client.send(
+          new PutObjectCommand({
+            Bucket: this.config.bucket,
+            Key: ref.key,
+            Body: body,
+            IfNoneMatch: '*',
+            ContentType: 'application/octet-stream',
+            ContentLength: source.bytes + OVERHEAD,
+            CacheControl: 'no-store',
+            ChecksumSHA256: checksum.digest('base64'),
+          }),
+          { abortSignal: signal },
+        );
+      } catch (error) {
+        if (
+          (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+            ?.httpStatusCode !== 412
+        )
+          throw new ServiceUnavailableException(
+            'Private media storage is unavailable',
+          );
+        // A lost write acknowledgement is successful only after authenticated readback.
+        for await (const chunk of this.plaintext(scope, ref, signal))
+          void chunk;
+      }
+      signal.throwIfAborted();
+      return ref;
+    } finally {
+      body?.destroy();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  /** Yields only into private staging; callers may expose a result only after EOF verifies GCM. */
+  private async *plaintext(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    parent?: AbortSignal,
+    version?: string,
+  ) {
+    this.validateReference(scope, ref);
+    const signal = AbortSignal.any([
+      AbortSignal.timeout(120000),
+      ...(parent ? [parent] : []),
+    ]);
+    let stream: Readable | undefined;
+    const abort = () =>
+      stream?.destroy(new Error('Private media read aborted'));
+    try {
+      signal.throwIfAborted();
+      const response = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.config.bucket,
+          Key: ref.key,
+          ...(version ? { VersionId: version } : {}),
+        }),
+        { abortSignal: signal },
+      );
+      stream = response.Body as Readable;
+      if (
+        !(stream instanceof Readable) ||
+        response.ContentLength !== ref.bytes + OVERHEAD ||
+        (version &&
+          (response.VersionId !== version || response.DeleteMarker === true))
+      )
+        throw new Error('Private media length mismatch');
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      let header = Buffer.alloc(0),
+        received = 0;
+      let decipher: ReturnType<typeof createDecipheriv> | undefined;
+      const checksum = createHash('sha256');
+      for await (const chunk of stream) {
+        signal.throwIfAborted();
+        let data = Buffer.from(chunk);
+        received += data.length;
+        if (received > ref.bytes + OVERHEAD)
+          throw new Error('Private media exceeded expected size');
+        if (header.length < OVERHEAD) {
+          const length = Math.min(OVERHEAD - header.length, data.length);
+          header = Buffer.concat([header, data.subarray(0, length)]);
+          data = data.subarray(length);
+          if (header.length < OVERHEAD) continue;
+          if (
+            !header
+              .subarray(0, 8)
+              .equals(this.direct(ref) ? DIRECT_MAGIC : MAGIC)
+          )
+            throw new Error('Invalid private media envelope');
+          const authenticated = createDecipheriv(
+            'aes-256-gcm',
+            this.encryptionKey(ref),
+            header.subarray(8, 20),
+          );
+          authenticated.setAuthTag(header.subarray(20, 36));
+          authenticated.setAAD(this.aad(ref));
+          decipher = authenticated;
+        }
+        if (data.length) {
+          const plain = decipher.update(data);
+          checksum.update(plain);
+          yield plain;
+        }
+      }
+      signal.throwIfAborted();
+      if (received !== ref.bytes + OVERHEAD || !decipher)
+        throw new Error('Private media length mismatch');
+      const final = decipher.final();
+      checksum.update(final);
+      if (checksum.digest('hex') !== ref.sha256)
+        throw new Error('Private media hash mismatch');
+      if (final.length) yield final;
+    } catch {
+      throw new ServiceUnavailableException(
+        'Private media could not be verified',
+      );
+    } finally {
+      signal.removeEventListener('abort', abort);
+      stream?.destroy();
+    }
+  }
+
+  /** Authenticate an immutable retained copy when an older version is already absent. */
+  async verifyStoredVersion(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    version: string,
+    signal?: AbortSignal,
+  ) {
+    if (
+      typeof version !== 'string' ||
+      !version ||
+      version === 'null' ||
+      version.includes('\0') ||
+      Buffer.byteLength(version) > 1024
+    )
+      throw new BadRequestException('An immutable object version is required');
+    for await (const chunk of this.plaintext(scope, ref, signal, version))
+      void chunk;
+    signal?.throwIfAborted();
+  }
+
+  /** Byte equivalence only: this observation grants no deletion or retention authority. */
+  async verifyVersionCopies(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    candidate: string,
+    parent?: AbortSignal,
+  ) {
+    this.validateReference(scope, ref);
+    const immutableVersion = (value: unknown): value is string =>
+      typeof value === 'string' &&
+      value !== 'null' &&
+      value.length > 0 &&
+      !value.includes('\0') &&
+      Buffer.byteLength(value, 'utf8') <= 1024;
+    if (!immutableVersion(candidate))
+      throw new BadRequestException('An immutable object version is required');
+    const signal = AbortSignal.any([
+      AbortSignal.timeout(120000),
+      ...(parent ? [parent] : []),
+    ]);
+    const current = async () => {
+      signal.throwIfAborted();
+      const response = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.config.bucket, Key: ref.key }),
+        { abortSignal: signal },
+      );
+      if (
+        !immutableVersion(response.VersionId) ||
+        response.DeleteMarker === true ||
+        response.ContentLength !== ref.bytes + OVERHEAD
+      )
+        throw new Error('Current version could not be identified');
+      return response.VersionId;
+    };
+    try {
+      const retained = await current();
+      if (retained === candidate)
+        throw new Error('The candidate is the current version');
+      // Consume sequentially, without buffering plaintext or writing scratch files.
+      // EOF must verify both GCM authentication and the declared hash/length.
+      for (const version of [retained, candidate])
+        for await (const chunk of this.plaintext(scope, ref, signal, version))
+          void chunk;
+      if ((await current()) !== retained)
+        throw new Error('Current version changed during verification');
+      signal.throwIfAborted();
+      return {
+        key: ref.key,
+        retainedVersion: retained,
+        candidateVersion: candidate,
+        plaintextBytes: ref.bytes,
+        storedBytes: ref.bytes + OVERHEAD,
+        sha256: ref.sha256,
+      };
+    } catch {
+      throw new ServiceUnavailableException(
+        'Private object versions could not be verified',
+      );
+    }
+  }
+
+  async getToFile(
+    scope: ShortsScope,
+    ref: PrivateObjectRef,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<ShortsMediaFile> {
+    this.validateReference(scope, ref);
+    signal?.throwIfAborted();
+    const file = await open(path, 'wx', 0o600);
+    try {
+      for await (const plain of this.plaintext(scope, ref, signal))
+        await file.writeFile(plain, { signal });
+      signal?.throwIfAborted();
+      await file.close();
+      return { path, bytes: ref.bytes, sha256: ref.sha256 };
+    } catch (error) {
+      await file.close();
+      await rm(path, { force: true });
+      throw error;
     }
   }
 }

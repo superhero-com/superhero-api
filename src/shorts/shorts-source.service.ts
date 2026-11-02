@@ -1,3 +1,4 @@
+import { SHORTS_SOURCE_MANIFEST_BYTES } from './shorts-upload-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -72,7 +73,11 @@ export class ShortsSourceService extends ShortsSourceReaderService {
     signal?: AbortSignal,
   ) {
     const upload = await this.uploads.get(scope, id, creator);
-    if (!Number.isInteger(index) || index < 0 || index > 39)
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= Math.ceil(upload.input.bytes / SHORTS_PART_BYTES)
+    )
       throw new BadRequestException('Invalid upload part');
     if (upload.parts.some((part) => part.index === index)) return;
     const part = upload.directParts[index];
@@ -151,6 +156,8 @@ export class ShortsSourceService extends ShortsSourceReaderService {
         parts: upload.parts,
       }),
     );
+    if (manifest.length > SHORTS_SOURCE_MANIFEST_BYTES)
+      throw new BadRequestException('Source manifest exceeds the upload limit');
     const ref = await this.objects.put(
       scope,
       id,
@@ -161,6 +168,12 @@ export class ShortsSourceService extends ShortsSourceReaderService {
     signal?.throwIfAborted();
     // This transaction commits both the accepted job and the upload state. No
     // object-store or network operation occurs under the PostgreSQL locks.
-    return this.uploads.enqueue(scope, id, creator, ref);
+    return this.uploads.enqueue(
+      scope,
+      id,
+      creator,
+      ref,
+      manifest.toString('utf8'),
+    );
   }
 }

@@ -1,20 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { runShortsMediaCommand as run } from './shorts-media-command';
 import { readFile, writeFile, mkdtemp, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { ShortsMediaFile, verifiedMediaBytes } from './shorts-media-file';
 import {
   ShortsScratchService,
   ScratchCapacityError,
 } from './shorts-scratch.service';
-const run = promisify(execFile);
 
 /** Shared worker/local-demo decoder. Hosted API routes never decode media. */
 @Injectable()
 export class ShortsEncodingService {
   constructor(private readonly scratch: ShortsScratchService) {}
   async encode(
-    input: Buffer,
+    input: Buffer | ShortsMediaFile,
     title: string,
     topic: string,
     details: {
@@ -27,9 +29,12 @@ export class ShortsEncodingService {
     signal?: AbortSignal,
   ) {
     if (
-      !Buffer.isBuffer(input) ||
-      input.length < 1 ||
-      input.length > 40 * 1024 * 1024
+      !input ||
+      !Number.isSafeInteger(
+        Buffer.isBuffer(input) ? input.length : input.bytes,
+      ) ||
+      (Buffer.isBuffer(input) ? input.length : input.bytes) < 1 ||
+      (Buffer.isBuffer(input) ? input.length : input.bytes) > 40 * 1024 * 1024
     )
       throw new Error('Choose a video up to 40 MiB');
     const reservation = await this.scratch.reserve(192 * 1048576, 16, signal);
@@ -40,12 +45,26 @@ export class ShortsEncodingService {
       temp = await mkdtemp(join(this.scratch.directory, 'shorts-transcode-'));
       const options = {
         signal,
-        killSignal: 'SIGKILL' as const,
         maxBuffer: 1024 * 1024,
         cwd: temp,
         env: { PATH: process.env.PATH, LANG: 'C', HOME: temp, TMPDIR: temp },
       };
-      await writeFile(join(temp, 'input'), input, { mode: 0o600, signal });
+      if (Buffer.isBuffer(input)) {
+        await writeFile(join(temp, 'input'), input, { mode: 0o600, signal });
+      } else {
+        // Only decode after the entire scratch copy has passed integrity checks.
+        await pipeline(
+          Readable.from(
+            verifiedMediaBytes(
+              createReadStream(input.path, { signal }),
+              input,
+              signal,
+            ),
+          ),
+          createWriteStream(join(temp, 'input'), { flags: 'wx', mode: 0o600 }),
+          { signal },
+        );
+      }
       const { stdout } = await run(
         'ffprobe',
         [

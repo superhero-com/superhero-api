@@ -235,7 +235,7 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
     const uploads = new ShortsHostedUploadsService(f.two, b, {
       get: async (scope, id, creator) => {
         assert.deepEqual(scope, f.scope); assert.equal(id, job.id);
-        return { id, creator, state: 'enqueued', parts: [], expiresAt: 0 };
+        return { id, creator, input: input(), state: 'enqueued', parts: [], expiresAt: 0 };
       },
     }, { finish: async () => assert.fail('Polling a committed upload must not prepare it again') });
     const result = await uploads.get(job.creator, job.id);

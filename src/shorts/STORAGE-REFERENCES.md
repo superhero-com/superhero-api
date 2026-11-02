@@ -5,6 +5,23 @@ against upload records, prepared media and [retention holds](RETENTION.md). It
 decrypts source manifests to recover references to parts absent from SQL, including
 legacy imports. It does not download source video parts or rendered video files.
 
+Source references carry their saved processing profile and accepted byte limit
+through manifest inspection and snapshot comparison. This permits the 96 parts of
+a 100,000,000-byte original while keeping legacy and smaller accepted limits in
+force. Two claims for the same manifest with different saved policies are
+validated separately; a policy change during inspection invalidates the scan
+step before any reference rows are committed.
+
+After `ShortsPrivateInputRetirement` has recorded an authenticated source manifest,
+scans can recover its part references from that immutable database receipt. They
+recheck its complete byte length and SHA-256 against each current source claim,
+then validate the document identity, chunk sequence, scope and frozen upload limit.
+This permits traversal after the encrypted manifest is removed. It does not drop
+any object references or override holds, and it does not authorize removal. A
+mismatched receipt fails the scan; the scanner does not silently omit its parts.
+Receipts apply only to original-format uploads. Unretired and legacy sources
+continue to require their authenticated encrypted manifest reads.
+
 It writes resumable reference evidence to PostgreSQL. It never changes S3,
 publishes media, releases holds or deletes anything. It is a separate NestJS
 entrypoint in the API repository, currently restricted to enabled testnet
@@ -12,9 +29,12 @@ deployments. The ordinary API and workers do not start it.
 
 ## Setup
 
-1. Apply migrations through `1791763218000-ShortsStorageReferences`, then build
+1. Apply migrations through `1793145606000-ShortsDeliveryStaging`, then build
    with `npm run build`. Finish a storage inventory for this exact deployment,
    endpoint, region, bucket, prefix and addressing mode.
+   Original-media outputs are matched to their declared file name, size and hash
+   before accepting references up to 100,000,000 bytes. Legacy outputs retain the
+   64 MiB ceiling. Reference inspection reads metadata, not the large media files.
 2. Give the command a separate S3 identity with **GetObject only** on the private
    deployment prefix. Do not grant listing, writes, deletion or bucket management.
    Mount the private-media encryption key ring, including keys still referenced
@@ -30,7 +50,7 @@ deployments. The ordinary API and workers do not start it.
      NOINHERIT NOREPLICATION NOBYPASSRLS;
    GRANT USAGE ON SCHEMA public TO shorts_storage_reconciliation;
    GRANT SELECT ON public.shorts_runtime, public.shorts_content,
-     public.shorts_ingestion, public.shorts_upload_sessions, public.shorts_upload_parts,
+     public.shorts_ingestion, public.shorts_upload_sessions, public.shorts_delivery_packages, public.shorts_delivery_generations, public.shorts_delivery_staging, public.shorts_upload_parts,
      public.shorts_retention_holds, public.shorts_storage_inventory_runs,
      public.shorts_storage_inventory_objects TO shorts_storage_reconciliation;
    GRANT SELECT, INSERT, UPDATE ON public.shorts_storage_reconciliations
@@ -38,6 +58,11 @@ deployments. The ordinary API and workers do not start it.
    GRANT SELECT, INSERT ON public.shorts_storage_reference_roots,
      public.shorts_storage_references TO shorts_storage_reconciliation;
    ```
+
+   If migration `1793491200000-ShortsPrivateInputRetirement` is installed, also
+   grant SELECT on `shorts_private_input_retirements`. The source reader verifies
+   that access is complete and read-only; it rejects even column-level writes.
+   Older schemas without the retirement table keep the encrypted-manifest path.
 
    Set its password through your secret manager. The command rejects source or
    hold write permissions, filtered tables, mutable reference rows and destructive
@@ -70,7 +95,7 @@ node --env-file=/secure/storage-reconciliation.env dist/shorts/storage-reconcili
 
 Each scan invocation visits up to 10 roots by default (`pages`: 1–100), within a
 two-minute work budget. Each root has a one-minute budget, at most 256 references,
-and source manifests at most 32 KiB. SQL has its own deadlines. A failed, cancelled
+and source manifests at most 96 KiB. SQL has its own deadlines. A failed, cancelled
 or stale concurrent attempt cannot partially advance a root. Read status after an
 interruption or uncertain response, then resume the same ID. Invalid/missing
 manifests and unknown encryption keys stop progress; investigate and repair the
@@ -95,6 +120,38 @@ metadata.
   observed, not observed, delete marker, size mismatch or conflicting latest
   observations. Size comparison includes the 36-byte encryption envelope. It
   does not verify the content/checksum of video parts or rendered files.
+
+## Verify an older object's bytes
+
+The optional `verify-versions` action inspects one noncurrent, non-delete-marker
+observation after the reference scan completes. Give its dedicated S3 reader
+`GetObjectVersion` in addition to `GetObject` on the same deployment prefix.
+No deletion, listing or write permissions are needed.
+
+```json
+{"id":"<completed scan UUID>","identity":"<identity from the objects page>"}
+```
+
+```sh
+node --env-file=/secure/storage-reconciliation.env dist/shorts/storage-reconciliation-main verify-versions /secure/version.json
+```
+
+The action requires one consistent logical content identity and matching stored
+length. It identifies the current immutable version, then streams that version
+and the candidate sequentially. Each read must return the requested version and
+pass full AES-GCM authentication, plaintext length and SHA-256 verification.
+The current version is checked again after both reads. Missing versions, changed
+current pointers, delete markers and unversioned `null` IDs fail verification.
+The operation shares the command's two-minute deadline and does not accumulate
+plaintext in memory or create temporary media files.
+
+The result identifies both verified versions and their byte counts. It reports
+`retentionRechecked: false` and leaves deletion disabled: it is a point-in-time
+content observation, not a permit to delete either version. Holds, references,
+writers and current versions can still change afterward. A cleanup coordinator
+must establish fresh policy and mutation authority independently. In particular,
+[a version-specific S3 delete is permanent](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html);
+a key-only delete and deletion of a delete marker have different effects.
 
 ## Limits
 

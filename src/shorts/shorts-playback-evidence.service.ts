@@ -10,6 +10,11 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { PlaybackEvent } from './shorts-analytics.service';
 import { ShortsChainService } from './shorts-chain.service';
+import {
+  PlaybackDescriptor,
+  validateDescriptor,
+} from './hls-protocol/playback-descriptor';
+import { sourceKey } from './hls-protocol/hls-package';
 
 // Streaming evidence only proves that full segments were authorized. Existing
 // elapsed-time, browser/day deduplication and privacy checks still apply.
@@ -30,7 +35,10 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
   validate(
     short: { id: string; cid: string },
     event: PlaybackEvent & { proof?: unknown },
-  ): PlaybackEvent & { startedAt: number } {
+    authorizeSource?: (key: string) => Promise<PlaybackDescriptor>,
+  ):
+    | (PlaybackEvent & { startedAt: number })
+    | Promise<PlaybackEvent & { startedAt: number }> {
     if (
       !event ||
       typeof event.id !== 'string' ||
@@ -51,18 +59,18 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
       new UnauthorizedException('Invalid playback evidence');
     if (typeof event.proof !== 'string' || event.proof.length > 2048)
       throw invalid();
-    const match = /^m1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(
+    const match = /^m([12])\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(
       event.proof,
     );
     if (!match) throw invalid();
     const signature = createHmac('sha256', this.key)
-      .update(`shorts-measurement:v1\0${match[1]}`)
+      .update(`shorts-measurement:v${match[1]}\0${match[2]}`)
       .digest();
-    if (!timingSafeEqual(signature, Buffer.from(match[2], 'base64url')))
+    if (!timingSafeEqual(signature, Buffer.from(match[3], 'base64url')))
       throw invalid();
     let value: any;
     try {
-      value = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
+      value = JSON.parse(Buffer.from(match[2], 'base64url').toString('utf8'));
     } catch {
       throw invalid();
     }
@@ -71,9 +79,12 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
     if (
       !value ||
       Array.isArray(value) ||
-      value.v !== 1 ||
+      value.v !== Number(match[1]) ||
       value.id !== short.id ||
-      value.cid !== short.cid ||
+      (value.v === 1 && value.cid !== short.cid) ||
+      (value.v === 2 &&
+        (typeof value.sourceKey !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(value.sourceKey))) ||
       value.network !== scope.network ||
       value.contract !== scope.contract ||
       typeof value.nonce !== 'string' ||
@@ -102,6 +113,30 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
       )
       .digest('hex');
     if (viewer !== value.viewer) throw invalid();
+    // Authenticate and validate the browser/time bounds before any source lookup.
+    // A source CID may differ from a legacy post's immutable published CID.
+    if (value.v === 2) {
+      if (!authorizeSource) throw invalid();
+      return authorizeSource(value.sourceKey).then((descriptor) => {
+        try {
+          validateDescriptor(descriptor, short.id);
+          if (
+            descriptor.cid !== value.cid ||
+            descriptor.network !== scope.network ||
+            descriptor.contract !== scope.contract ||
+            sourceKey(descriptor) !== value.sourceKey ||
+            value.expiresAt <= Date.now()
+          )
+            throw invalid();
+        } catch {
+          throw invalid();
+        }
+        return this.measuredEvent(value, event);
+      });
+    }
+    return this.measuredEvent(value, event);
+  }
+  private measuredEvent(value: any, event: PlaybackEvent) {
     // Do not persist the receipt, nonce, token or public browser identifier.
     return {
       startedAt: value.startedAt,

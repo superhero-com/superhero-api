@@ -152,7 +152,7 @@ test('two API instances share atomic request and byte budgets with safe failure 
       {provide:SHORTS_RATE_CONFIG,useValue:rate.config},{provide:ShortsChainService,useValue:rate.chain},
       {provide:ShortsRateService,useValue:rate.service},{provide:ShortsAuthService,useValue:auth},
       {provide:ShortsService,useValue:{records:{shared:true},config:()=>({ready:true}),report:()=>{touches++;return {};},chain:{serial:work=>work()}}},
-      {provide:ShortsUploadsService,useValue:{part:()=>{touches++;return {};},health:()=>({ready:true})}},
+      {provide:ShortsUploadsService,useValue:{part:()=>assert.fail('Hosted APIs cannot accept multipart video'),prepareDirect:()=>{touches++;return {};},health:()=>({ready:true})}},
       {provide:ShortsWalletTransactionsService,useValue:{observe:()=>{touches++;return {status:'unknown'};}}},
     ]},{logger:false});
     // The services above are already started. Nest still owns the real guard/controller.
@@ -198,10 +198,12 @@ test('two API instances share atomic request and byte budgets with safe failure 
     });
     assert.equal(status,429);assert.equal(touches,before);
   });
-  await t.test('allowed multipart and authorized operator requests retain independent capacity',async()=>{
+  await t.test('direct upload controls and authorized operator requests retain independent capacity',async()=>{
     const before=touches;const part=new FormData();part.append('file',new Blob(['owned bytes']),'part');
     const result=await fetch(b+'/shorts/uploads/owned/parts/0',{method:'POST',headers:{Authorization:'Bearer allowed-session','X-Forwarded-For':'192.0.2.91'},body:part});
-    assert.equal(result.status,201);await result.arrayBuffer();assert.equal(touches,before+1);
+    assert.equal(result.status,400);await result.arrayBuffer();assert.equal(touches,before);
+    const direct=await fetch(b+'/shorts/uploads/owned/parts/0/prepare',{method:'POST',headers:{Authorization:'Bearer allowed-session','X-Forwarded-For':'192.0.2.91','Content-Type':'application/json'},body:JSON.stringify({sha256:'a'.repeat(64)})});
+    assert.equal(direct.status,201);await direct.arrayBuffer();assert.equal(touches,before+1);
     const denied=await fetch(a+'/shorts/operator/ingestion',{headers:{Authorization:'Bearer allowed-session','X-Forwarded-For':'192.0.2.92'}});
     assert.equal(denied.status,403);await denied.arrayBuffer();assert.equal(await admin.exists(prefixes[0]+'global:operator'),0);
     const allowed=await fetch(b+'/shorts/operator/ingestion',{headers:{Authorization:'Bearer operator-session','X-Forwarded-For':'192.0.2.93'}});

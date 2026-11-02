@@ -1,3 +1,4 @@
+import { shortsAcceptedSource } from './shorts-upload-policy';
 import {
   ConflictException,
   GoneException,
@@ -20,6 +21,13 @@ const TTL = 24 * 60 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 type JobState = 'queued' | 'processing' | 'ready' | 'failed';
 export interface UploadInput {
+  /** Hosted creation identity; a fresh UUID for each deliberate new upload. */
+  requestKey?: string;
+  /** Optional client precondition; never selects the server's processing profile. */
+  expectedFormat?: 'original-file-v1' | 'legacy-directory-v1';
+  /** Internal only: the hosted adapter replaces any caller-supplied value. */
+  acceptedMaxBytes?: number;
+  processingProfile?: typeof import('./shorts-rendition-policy').SHORTS_ORIGINAL_PROFILE;
   title: string;
   topic: string;
   rights: boolean;
@@ -155,6 +163,11 @@ export class ShortsUploadsService
       id: upload.id,
       parts: upload.parts,
       partSize: PART,
+      source: shortsAcceptedSource({
+        bytes: upload.bytes,
+        sha256: upload.sha256,
+        acceptedMaxBytes: upload.acceptedMaxBytes,
+      }),
       expires: Number(job?.updated || upload.created) + TTL,
       complete: upload.complete,
       status,
@@ -204,8 +217,24 @@ export class ShortsUploadsService
       .get();
     if (Number(global?.n) >= 100)
       throw new Error('Local upload capacity reached');
+    const publicInput = {
+      title: input.title,
+      topic: input.topic,
+      rights: input.rights,
+      bytes: input.bytes,
+      sha256: input.sha256,
+      details: input.details,
+      expectedFormat: input.expectedFormat,
+    };
+    const accepted = this.shorts.uploadPolicy
+      ? this.shorts.uploadPolicy.accept(
+          publicInput,
+          await this.shorts.chain.policy(),
+          false,
+        )
+      : publicInput;
     const upload: Upload = {
-      ...input,
+      ...accepted,
       id: randomUUID(),
       actor,
       created: Date.now(),

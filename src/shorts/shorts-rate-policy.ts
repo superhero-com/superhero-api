@@ -87,6 +87,10 @@ export const SHORTS_HTTP_POLICY: Record<string, ShortsHttpPolicy> = {
   view: { group: 'measurement' },
   report: { group: 'report' },
   playbackDescriptor: { group: 'playback' },
+  playbackVersion: { group: 'playback' },
+  playbackPackage: { group: 'playback' },
+  playbackGeneration: { group: 'playback' },
+  generationPackage: { group: 'playback' },
   media: { group: 'read' },
 };
 

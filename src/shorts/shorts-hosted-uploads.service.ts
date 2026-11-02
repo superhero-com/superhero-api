@@ -1,3 +1,5 @@
+import { ShortsUploadPolicyService } from './shorts-upload-policy.service';
+import { shortsAcceptedSource } from './shorts-upload-policy';
 import {
   shortsStorageScope,
   shortsStorageSourceHash,
@@ -14,6 +16,9 @@ import {
 import { ShortsSourceService } from './shorts-source.service';
 import { creatorContent } from './shorts-eligibility';
 import type { UploadInput } from './shorts-uploads.service';
+import { shortsUploadRequest } from './shorts-upload-request';
+import { SHORTS_ORIGINAL_PROFILE } from './shorts-rendition-policy';
+import { SHORTS_ORIGINAL_HARD_LIMIT } from './shorts-media-file';
 
 /** Hosted HTTP adapter. Never starts a decoder or a process-local upload queue. */
 @Injectable()
@@ -24,6 +29,7 @@ export class ShortsHostedUploadsService {
     private readonly metadata: ShortsMetadataService,
     private readonly uploads: ShortsUploadRecordsService,
     private readonly source: ShortsSourceService,
+    private readonly policy: ShortsUploadPolicyService,
   ) {}
   private scope() {
     if (!this.records.shared || !this.records.chain.state.contract)
@@ -40,7 +46,7 @@ export class ShortsHostedUploadsService {
     await this.metadata.verifyHostedStorage(this.scope());
   }
 
-  private async status(upload: SharedUpload) {
+  private async status(upload: SharedUpload, requestKey?: string) {
     const job =
       upload.state === 'enqueued'
         ? await this.metadata.getJob(this.scope(), upload.creator, upload.id)
@@ -51,9 +57,11 @@ export class ShortsHostedUploadsService {
       status === 'ready' ? await this.records.get(upload.id) : undefined;
     return {
       id: upload.id,
+      ...(requestKey ? { requestKey } : {}),
       parts: upload.parts.map((part) => part.index),
       partSize: SHORTS_PART_BYTES,
       transport: 'direct-s3-v1',
+      source: shortsAcceptedSource(upload.input),
       expires: upload.expiresAt,
       complete: status === 'ready',
       status,
@@ -67,9 +75,32 @@ export class ShortsHostedUploadsService {
   }
   async create(actor: string, input: UploadInput) {
     this.records.chain.address(actor);
+    const scope = this.scope();
+    const request = shortsUploadRequest(input);
+    if (request) {
+      // Validate public metadata, but admission flags cannot reinterpret a replay.
+      this.uploads.validateInput({
+        ...input,
+        processingProfile: SHORTS_ORIGINAL_PROFILE,
+        acceptedMaxBytes: SHORTS_ORIGINAL_HARD_LIMIT,
+      });
+      const existing = await this.uploads.getRequest(scope, actor, request);
+      if (existing) {
+        if (JSON.stringify(scope) !== JSON.stringify(this.scope()))
+          throw new ServiceUnavailableException('Upload deployment changed');
+        return this.status(existing, request.key);
+      }
+    }
     this.source.assertDirectUploadsConfigured();
+    const accepted = this.policy.accept(
+      input,
+      await this.records.chain.policy(),
+    );
+    if (JSON.stringify(scope) !== JSON.stringify(this.scope()))
+      throw new ServiceUnavailableException('Upload deployment changed');
     return this.status(
-      await this.uploads.create(this.scope(), randomUUID(), actor, input),
+      await this.uploads.create(scope, randomUUID(), actor, accepted, request),
+      request?.key,
     );
   }
   async get(actor: string, id: string) {

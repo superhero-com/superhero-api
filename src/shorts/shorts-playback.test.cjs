@@ -2,6 +2,28 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { ShortsService } = require('./shorts.service');
 const { ShortsController } = require('./shorts.controller');
+const { ShortsDeliverySelectionService } = require('./shorts-delivery-selection.service');
+const { sourceKey } = require('./hls-protocol/hls-package');
+
+test('legacy source lookup requires the exact initial key and current on-chain permission with or without selection metadata', async () => {
+  const short = { id: 'legacy', cid: 'Qm'+'1'.repeat(44), creator: 'ak_creator', bytes: 12,
+    files: [{ name: 'video.mp4', bytes: 10, sha256: 'a'.repeat(64) }, { name: 'poster.jpg', bytes: 2, sha256: 'b'.repeat(64) }],
+    moderation: 'approved', safety: { status: 'no_flags' } };
+  const published = { cid: short.cid, creator: short.creator, size: 12n, withdrawn: false };
+  const service = new ShortsService({ release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] }, read: async () => published });
+  const descriptor = await service.playbackDescriptor(short.id), key = sourceKey(descriptor);
+  for (const selection of [undefined, new ShortsDeliverySelectionService({ query: async () => [{ initial: true, active: false, retained: false }] })]) {
+    service.deliverySelection = selection;
+    assert.deepEqual(await service.playbackVersion(short.id,key), descriptor);
+    let reads = 0;
+    const prepared = require('./testing/hls-v2.json').package;
+    service.deliveryPackages = { get: async () => { reads++; return prepared; } };
+    assert.deepEqual(await service.playbackPackage(short.id,key), { sourceKey:key, prepared });
+    await assert.rejects(service.playbackVersion(short.id,'f'.repeat(64)), { status: 404 });
+    published.withdrawn = true; await assert.rejects(service.playbackVersion(short.id,key), { status: 404 });
+    await assert.rejects(service.playbackPackage(short.id,key), { status:404 }); assert.equal(reads,1); published.withdrawn = false;
+  }
+});
 
 test('playback descriptors contain public file metadata only and match on-chain publication', async () => {
   const short = { id: 'video-1', cid: 'cid', creator: 'ak_creator', bytes: 12, files: [
@@ -13,7 +35,7 @@ test('playback descriptors contain public file metadata only and match on-chain 
   const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short], contract: 'ct_fixture' }, read: async () => published };
   const service = new ShortsService(chain);
   assert.deepEqual(await service.playbackDescriptor(short.id), { id: short.id, cid: short.cid,
-    network: 'ae_uat', contract: 'ct_fixture', files: short.files.slice(0,2) });
+    network: 'ae_uat', contract: 'ct_fixture', canonical: { version:1,cid:short.cid,bytes:short.bytes }, files: short.files.slice(0,2) });
   for (const change of [undefined, { ...published, withdrawn: true }, { ...published, cid: 'wrong' }, { ...published, creator: 'wrong' }, { ...published, size: 13n }]) {
     const saved = published; published = change;
     await assert.rejects(service.playbackDescriptor(short.id), { status: 404 }); published = saved;
@@ -30,6 +52,31 @@ test('legacy media endpoint does not fetch IPFS bytes', () => {
   assert.throws(() => controller.media(), { status: 410 });
 });
 
+test('original-file playback keeps canonical CID and original size while exposing only separate public rendition metadata', async () => {
+  const hash = 'a'.repeat(64), cid = 'bafy' + 'a'.repeat(50), delivery = 'bafy' + 'b'.repeat(50);
+  const original = { version: 1, sha256: hash, mediaType: 'video/quicktime', importProfile: 'unixfs-file-v1-262144' };
+  const derivatives = { version: 1, cid: delivery, assetsCid: 'bafy' + 'e'.repeat(50), profile: 'original-h264-v1', fingerprint: hash, generation: { job: 'original-video', fence: '1' }, videos: [
+    { name: 'video-1080.mp4', width: 1080, height: 1920, frameRate: '60000/1001' },
+    { name: 'video-rescue.mp4', width: 144, height: 256, frameRate: '15000/1001' },
+  ] };
+  const files = ['video-1080.mp4', 'video-rescue.mp4', 'video.mp4', 'poster.jpg', 'manifest.json']
+    .map(name => ({ name, bytes: 100, sha256: hash }));
+  const short = { id: 'original-video', cid, creator: 'ak_creator', bytes: 5000, moderation: 'approved', safety: { status: 'no_flags' },
+    original: { ...original, internal: 'private fixture' }, derivatives: { ...derivatives, internal: 'private fixture' },
+    files: files.map(file => ({ ...file, objectKey: 'private fixture' })),
+    privateMedia: { version: 1, fence: '1', source: { processingProfile: 'original-h264-v1', bytes: 5000, sha256: hash, manifest: 'private fixture' } } };
+  let publication = { cid, creator: short.creator, size: 5000n, withdrawn: false };
+  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] }, read: async () => publication };
+  const service = new ShortsService(chain);
+  assert.deepEqual(await service.playbackDescriptor(short.id), { id: short.id, cid, network: 'ae_uat', contract: 'ct_fixture', bytes: 5000, original, derivatives, files });
+  for (const changed of [{ ...publication, cid: delivery }, { ...publication, size: 500n }]) {
+    const saved = publication; publication = changed;
+    await assert.rejects(service.playbackDescriptor(short.id), { status: 404 }); publication = saved;
+  }
+  short.derivatives.videos[0].frameRate = '61/1';
+  await assert.rejects(service.playbackDescriptor(short.id), /Invalid original video rendition/);
+});
+
 test('playback health checks storage and contract access without exposing dependency details', async () => {
   let storage = true;
   let config = { like_fee: 1n };
@@ -39,6 +86,20 @@ test('playback health checks storage and contract access without exposing depend
   storage = true; config = undefined; await assert.rejects(service.playbackHealth(), { status: 503 });
   service.chain.read = async () => { throw new Error('private dependency path'); };
   await assert.rejects(service.playbackHealth(), error => error.status === 503 && !error.message.includes('private'));
+});
+
+test('durable delivery endpoint rechecks publication and cannot expose a different source generation', async () => {
+  const fixture = require('./testing/hls-v3.json');
+  const short = { ...structuredClone(fixture.descriptor), creator: 'ak_creator', moderation: 'approved', safety: { status: 'no_flags' } };
+  let publication = { cid: short.cid, creator: short.creator, size: BigInt(short.bytes), withdrawn: false };
+  const chain = { release: { network: short.network, contract: short.contract }, state: { contract: short.contract, shorts: [short] }, read: async () => publication };
+  const service = new ShortsService(chain); let reads = 0;
+  service.deliveryPackages = { get: async () => { reads++; return fixture.package; } };
+  assert.deepEqual(await service.playbackPackage(short.id, fixture.sourceKey), { sourceKey: fixture.sourceKey, prepared: fixture.package });
+  for (const key of ['bad', '0'.repeat(64)]) await assert.rejects(service.playbackPackage(short.id, key), { status: 404 });
+  publication = { ...publication, withdrawn: true };
+  await assert.rejects(service.playbackPackage(short.id, fixture.sourceKey), { status: 404 });
+  assert.equal(reads, 1, 'revoked and mismatched requests never read durable metadata');
 });
 
 function fixture(changes = {}) {

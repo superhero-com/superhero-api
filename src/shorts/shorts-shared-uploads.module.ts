@@ -4,9 +4,14 @@ import { ShortsPrivateObjectsModule } from './shorts-private-objects.module';
 import { ShortsUploadRecordsService } from './shorts-upload-records.service';
 import { ShortsSourceService } from './shorts-source.service';
 import { ShortsPrivateMediaService } from './shorts-private-media.service';
+import { ShortsScratchModule } from './shorts-scratch.module';
 
 @Module({
-  imports: [ShortsMetadataModule, ShortsPrivateObjectsModule],
+  imports: [
+    ShortsMetadataModule,
+    ShortsPrivateObjectsModule,
+    ShortsScratchModule,
+  ],
   providers: [
     ShortsUploadRecordsService,
     ShortsSourceService,
@@ -17,6 +22,7 @@ import { ShortsPrivateMediaService } from './shorts-private-media.service';
     ShortsSourceService,
     ShortsPrivateMediaService,
     ShortsPrivateObjectsModule,
+    ShortsScratchModule,
   ],
 })
 export class ShortsSharedUploadsModule {}

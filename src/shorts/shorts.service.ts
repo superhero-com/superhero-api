@@ -1,3 +1,4 @@
+import { ShortsUploadPolicyService } from './shorts-upload-policy.service';
 import {
   shortsRuntimeScope,
   shortsStorageScope,
@@ -30,6 +31,11 @@ import { ShortsStreamingService } from './shorts-streaming.service';
 import { ShortsAuthService } from './shorts-auth.service';
 import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 import { ShortsRecordsService } from './shorts-records.service';
+import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
+import { ShortsDeliveryPackagesService } from './shorts-delivery-packages.service';
+import { ShortsDeliveryGenerationsService } from './shorts-delivery-generations.service';
+import { assertDeliveryEligible } from './shorts-delivery-eligibility';
+import { sourceKey } from './hls-protocol/hls-package';
 
 import { ShortsApiPublicationService } from './shorts-api-publication.service';
 import { catalogCursor, catalogMap } from './shorts-catalog';
@@ -39,6 +45,7 @@ import {
   StudioRow,
 } from './shorts-studio-read.service';
 import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
+import { ShortsDeliverySelectionService } from './shorts-delivery-selection.service';
 
 export const TOPICS = ['All', ...SHORTS_TOPICS];
 @Injectable()
@@ -60,6 +67,10 @@ export class ShortsService {
     @Optional() readonly studioRead?: ShortsStudioReadService,
     @Optional() readonly following?: ShortsFollowingService,
     @Optional() readonly likeSponsor?: ShortsLikeSponsorshipService,
+    @Optional() readonly deliveryPackages?: ShortsDeliveryPackagesService,
+    @Optional() readonly deliveryGenerations?: ShortsDeliveryGenerationsService,
+    @Optional() readonly deliverySelection?: ShortsDeliverySelectionService,
+    @Optional() readonly uploadPolicy?: ShortsUploadPolicyService,
   ) {}
   get demoAutoApprove() {
     return this.media?.safety?.demoAutoApprove === true;
@@ -118,6 +129,7 @@ export class ShortsService {
       })),
       ...scope,
       policy,
+      uploads: this.uploadPolicy?.describe(policy, this.records.shared),
       likeMode,
       likeSponsorship,
       likeFee: ae(policy.likeFeeAetto),
@@ -789,14 +801,73 @@ export class ShortsService {
   // Public metadata only. Video bytes are delivered by superhero-video-streaming.
   async playbackDescriptor(id: string) {
     const short = await this.ensurePlayable(id);
-    return {
-      id: short.id,
-      cid: short.cid,
-      ...shortsStorageScope(this.chain),
-      files: short.files.filter((file) =>
-        ['video.mp4', 'poster.jpg', 'captions.vtt'].includes(file.name),
-      ),
-    };
+    if (this.deliverySelection) {
+      const selected = await this.deliverySelection.current(
+        shortsStorageScope(this.chain),
+        short,
+      );
+      const current = await this.ensurePlayable(id);
+      if (selected.record.id !== current.id)
+        assertDeliveryEligible(current, selected.record);
+      return selected.descriptor;
+    }
+    return shortsPlaybackDescriptor(short, shortsStorageScope(this.chain));
+  }
+  async playbackVersion(id: string, key: string) {
+    if (!/^[a-f0-9]{64}$/.test(key)) throw new NotFoundException();
+    if (this.deliverySelection) {
+      const original = await this.ensurePlayable(id);
+      const selected = await this.deliverySelection.historical(
+        shortsStorageScope(this.chain),
+        original,
+        key,
+      );
+      const current = await this.ensurePlayable(id);
+      if (selected.record.id !== current.id)
+        assertDeliveryEligible(current, selected.record);
+      return selected.descriptor;
+    }
+    const descriptor = await this.playbackDescriptor(id);
+    if (sourceKey(descriptor) !== key) throw new NotFoundException();
+    return descriptor;
+  }
+  async playbackPackage(id: string, key: string) {
+    if (!/^[a-f0-9]{64}$/.test(key)) throw new NotFoundException();
+    // Reapply current on-chain publication and moderation before disclosing an index.
+    const descriptor = await this.playbackVersion(id, key);
+    if (sourceKey(descriptor) !== key || !this.deliveryPackages)
+      throw new NotFoundException();
+    const prepared = await this.deliveryPackages.get(descriptor);
+    if (!prepared) throw new NotFoundException();
+    await this.playbackVersion(id, key);
+    return { sourceKey: key, prepared };
+  }
+  /** Internal callers may use the private record; controllers expose only descriptor. */
+  async authorizedGeneration(id: string, jobId: string) {
+    await this.ensurePlayable(id);
+    if (!this.deliveryGenerations || !/^[a-zA-Z0-9_-]{1,80}$/.test(jobId))
+      throw new NotFoundException();
+    const generation = await this.deliveryGenerations.get(
+      shortsStorageScope(this.chain),
+      jobId,
+    );
+    const original = await this.ensurePlayable(id);
+    if (generation.shortId !== original.id) throw new NotFoundException();
+    assertDeliveryEligible(original, generation.record);
+    return generation;
+  }
+  async playbackGeneration(id: string, jobId: string) {
+    return (await this.authorizedGeneration(id, jobId)).descriptor;
+  }
+  async generationPackage(id: string, jobId: string, key: string) {
+    if (!/^[a-f0-9]{64}$/.test(key) || !this.deliveryPackages)
+      throw new NotFoundException();
+    const generation = await this.authorizedGeneration(id, jobId);
+    if (generation.sourceKey !== key) throw new NotFoundException();
+    const prepared = await this.deliveryPackages.get(generation.descriptor);
+    if (!prepared) throw new NotFoundException();
+    await this.authorizedGeneration(id, jobId);
+    return { sourceKey: key, prepared };
   }
   async ensurePlayable(id: string) {
     if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new NotFoundException();

@@ -111,3 +111,44 @@ Run `npm run test:shorts:direct-uploads` for signing, envelope and completion
 checks, and `npm run test:shorts:uploads` with `SHORTS_TEST_PG_URL` pointing to an
 isolated loopback database for concurrent reservation tests. Test a browser upload
 against the configured MinIO origin before enabling traffic.
+
+## Upload capabilities and original files
+
+`GET /config` advertises `uploads.version = 1`, the transport, source format,
+maximum source bytes, 1 MiB part size and 2–60 second duration range. Upload status
+also returns `source` with the accepted format, full-file SHA-256, byte count and
+frozen admission limit. Status never returns private object references or grants.
+Clients hash the original incrementally and verify this identity before resuming.
+
+Original-file admission is disabled by default. Apply migration
+`1793232000000-ShortsOriginalUploads` and qualify the original-file readers,
+moderation service, publisher and streaming delivery before enabling it on the
+hosted API. The migration permits 96 parts and larger bounded metadata, preserves
+existing sessions, and prevents workers without the larger-source capability
+from claiming originals above 40 MiB. New workers advertise a 100,000,000-byte
+source-reader ceiling. Rollback refuses while original-format jobs or sessions
+remain; it never discards them.
+
+If the upload proxy bounds part indexes in its route, allow exactly 0–95 for
+these 96-part sessions while preserving the existing method, origin, signature,
+body-size and rate limits.
+
+```dotenv
+SHORTS_ORIGINAL_UPLOADS_ENABLED=false
+SHORTS_ORIGINAL_UPLOAD_MAX_BYTES=100000000
+```
+
+When explicitly enabled, the effective new-upload maximum is the smaller of the
+configured operational limit and the active contract limit, with an absolute
+ceiling of 100,000,000 decimal bytes. The local demo stays on the legacy format.
+Clients may send `expectedFormat: "original-file-v1"` as a creation precondition;
+a mismatch returns 409 and cannot enable the writer. A new original upload must
+receive an original-format source confirmation before transferring any parts.
+
+The API, rather than request JSON, assigns and persists `processingProfile` and
+`acceptedMaxBytes`. Later flag or limit changes affect new admissions only.
+Resuming an accepted source verifies the saved bytes and hash and keeps its
+format. Legacy jobs retain their 40 MiB ceiling and directory-CID semantics.
+Existing hourly byte quotas and retained-source budgets are unchanged, so fewer
+maximum-size originals fit into a given budget. This setting does not increase
+capacity or authorize a larger on-chain file limit.

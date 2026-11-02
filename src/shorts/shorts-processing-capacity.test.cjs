@@ -3,6 +3,7 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { tmpdir } = require('node:os');
 const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
@@ -171,15 +172,17 @@ test('PostgreSQL processing capacity applies to restricted workers and legacy cl
 
 function workerFixture(overrides = {}) {
   let claims = 0; const completed = [], failed = [], encoded = [], deferred = [];
-  const job = { id: 'owned', creator: 'ak_creator', fence: '1', leaseToken: randomUUID(), input: { title: 'Owned clip', topic: 'Art', details: {} } };
+  const job = { id: 'owned', creator: 'ak_creator', fence: '1', leaseToken: randomUUID(), input: { bytes: 5, title: 'Owned clip', topic: 'Art', details: {} } };
   const repo = { claim: async () => claims++ === 0 ? job : undefined, heartbeat: async () => true,
     fail: async (_scope, claim) => { failed.push(claim); return true; },
     defer: async (_scope, claim) => { deferred.push(claim); return true; },
     complete: async (_scope, _claim, record) => { completed.push(record); }, workerStop: async () => {}, ...overrides.repo };
   const encoder = { encode: async (...args) => { encoded.push(args); return { files: [{ name: 'video.mp4', data: Buffer.from('test') }], bytes: 4, duration: 2 }; }, ...overrides.encoder };
   const worker = new ShortsMediaWorkerService({ scope: { network: 'ae_uat', contract: 'ct_test' }, sourceHash: 'a'.repeat(64), leaseMs: 1000 },
-    repo, { read: async () => Buffer.from('owned'), ...overrides.source }, { put: async () => ({}) }, encoder,
-    { cid: async () => 'bafytest' }, { accepting: async () => true, scan: async () => ({ status: 'no_flags' }), ...overrides.safety }, { classify: async () => ({}) }, { check: async () => {}, ...overrides.scratch });
+    repo, { readToFile: async (_scope, _job, path) => ({ path, bytes: 5, sha256: 'a'.repeat(64) }), ...overrides.source }, { put: async () => ({}) }, encoder,
+    { cid: async () => 'bafytest' }, { accepting: async () => true, scan: async () => ({ status: 'no_flags' }), ...overrides.safety }, { classify: async () => ({}) }, {
+      directory: tmpdir(), check: async () => {}, reserve: async () => ({ signal: new AbortController().signal, release() {} }), ...overrides.scratch,
+    });
   return { worker, repo, completed, failed, encoded, deferred, job };
 }
 test('a stalled heartbeat aborts processing before the lease expires; a late success cannot revive it', async () => {
@@ -223,7 +226,7 @@ test('a claim resolving during shutdown cannot start new processing', async () =
 test('scratch pressure before admission never claims or reads an accepted upload', async () => {
   const { ScratchCapacityError } = require('./shorts-scratch.service'); let claims = 0, reads = 0;
   const f = workerFixture({ scratch: { check: async () => { throw new ScratchCapacityError(); } },
-    repo: { claim: async () => { claims++; } }, source: { read: async () => { reads++; } } });
+    repo: { claim: async () => { claims++; } }, source: { readToFile: async () => { reads++; } } });
   await f.worker.drain(); await f.worker.drain(); assert.equal(claims, 0); assert.equal(reads, 0);
   assert.equal(f.failed.length, 0); await f.worker.onModuleDestroy();
 });
@@ -245,7 +248,7 @@ test('a lost deferral acknowledgement never converts a queued job to failed', as
 test('scanner unavailability backs off before claiming or downloading, then resumes the saved job', async () => {
   let available = false, checks = 0, reads = 0;
   const f = workerFixture({ safety: { accepting: async () => { checks++; return available; } },
-    source: { read: async () => { reads++; return Buffer.from('owned'); } } });
+    source: { readToFile: async (_scope, _job, path) => { reads++; return { path, bytes: 5, sha256: 'a'.repeat(64) }; } } });
   await f.worker.drain(); await f.worker.drain();
   assert.equal(checks, 1); assert.equal(reads, 0); assert.equal(f.encoded.length, 0);
   assert.equal(f.failed.length, 0); assert.equal(f.completed.length, 0);

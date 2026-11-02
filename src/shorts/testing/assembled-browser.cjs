@@ -9,10 +9,12 @@ const { assembledApp } = require('./assembled-app.cjs');
 const { assembledFeed } = require('./assembled-feed.cjs');
 const { assembledCreator } = require('./assembled-creator.cjs');
 const { walletModule } = require('./assembled-wallet.cjs');
+const { releaseHash, shortsRelease } = require('../shorts-release');
 
-exports.assembledBrowser = async (t, { id, api, port, changeVisibility, notify, creator, outsider, verifyRevoked, upload, social }) => {
+exports.assembledBrowser = async (t, { id, api, port, release, uploadOrigin, changeVisibility, notify, creator, outsider, verifyRevoked, upload, social, adaptive = false }) => {
   const root = process.env.SHORTS_TEST_WEB_REPO;
   assert.ok(isAbsolute(root));
+  if (uploadOrigin) assert.equal(new URL(uploadOrigin).hostname, '127.0.0.1');
   assert.equal(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).name, 'superhero');
   const requireWeb = createRequire(join(root, 'package.json'));
   const { createServer } = await import(pathToFileURL(requireWeb.resolve('vite')).href);
@@ -46,6 +48,8 @@ window.fixture.render();
       'import.meta.env.VITE_SHORTS_API_URL': 'window.location.origin',
       'import.meta.env.VITE_SUPERHERO_API_URL': 'window.location.origin',
       'import.meta.env.VITE_NETWORK': JSON.stringify('ae_uat'),
+      // Pin the parent fixture's intended release independently of HTTP config.
+      'import.meta.env.VITE_SHORTS_RELEASE_HASH': JSON.stringify(releaseHash(JSON.stringify(shortsRelease(release)))),
     },
     css: { postcss: { plugins: [requireWeb('tailwindcss')({ ...tailwind,
       content: tailwind.content.map(pattern => join(root, pattern)),
@@ -118,7 +122,7 @@ window.fixture.render();
       });
       await context.route('**/*', route => {
         const url = new URL(route.request().url());
-        if ([origin, edgeBase].includes(url.origin)) return route.continue();
+        if ([origin, edgeBase, uploadOrigin].includes(url.origin)) return route.continue();
         // App's global SDK polls the node even for a guest. Like the assembled
         // API, use controlled read-only chain observations; never contact a node.
         if (route.request().method() === 'GET' && url.hostname === 'testnet.aeternity.io') {
@@ -147,6 +151,19 @@ window.fixture.render();
       assert.ok([...sources].every(src => src?.startsWith('blob:')), 'real MediaSource URLs');
       assert.ok(requests.some(path => path.endsWith('.m4s')), 'browser decodes real segments');
       assert.ok(!requests.some(path => path.endsWith('/video.mp4')), 'no full MP4 fallback');
+      if (adaptive) {
+        const quality = page.getByRole('combobox', { name: 'Playback quality' });
+        await quality.selectOption('high');
+        await page.waitForFunction(() => document.querySelector('video')?.videoWidth === 1080, undefined, { timeout: 15000 });
+        await expect(page.locator('video')).toHaveJSProperty('videoHeight', 1920);
+        assert.ok(requests.some(path => /\/amain-segment-\d+\.m4s$/.test(path)), 'actual adaptive audio is fetched');
+        await quality.selectOption('data-saver');
+        await page.waitForFunction(() => { const video = document.querySelector('video'); return video && video.videoWidth > 0 && video.videoWidth <= 360; }, undefined, { timeout: 15000 });
+        await playable();
+        await quality.selectOption('high');
+        await page.waitForFunction(() => document.querySelector('video')?.videoWidth === 1080, undefined, { timeout: 15000 });
+        await playable();
+      }
       await page.getByRole('button', { name: 'Pause video', exact: true }).click();
       await expect(page.locator('video')).toHaveJSProperty('paused', true);
       await page.getByRole('button', { name: 'Video details and report' }).click();
@@ -210,6 +227,18 @@ window.fixture.render();
       await assembledCreator({ context: await createContext(edgeOrigin), origin, creator, outsider, id, expect, verifyRevoked, upload, social });
     },
     async restored() { await fresh(); assert.deepEqual(errors, []); },
+    async pause() {
+      const video = page.locator('video');
+      if (!(await video.evaluate(element => element.paused))) await page.getByRole('button', { name: 'Pause video', exact: true }).click();
+      await expect(video).toHaveJSProperty('paused', true);
+    },
+    async generation(sourceKey) {
+      const issued = page.waitForResponse(response => new URL(response.url()).pathname === `/videos/${id}/playback` && response.status() === 200);
+      await fresh();
+      const result = await (await issued).json();
+      const token = new URL(result.manifest, edgeOrigin).searchParams.get('token');
+      assert.equal(token?.split('.')[0], 'v3'); assert.equal(token.split('.')[2], sourceKey);
+    },
     close,
   };
 };

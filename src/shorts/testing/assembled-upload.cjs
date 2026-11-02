@@ -18,6 +18,7 @@ exports.assembledUpload = async ({ page, origin, expect, input, startWorker, app
   let id, stopWorker, finishAccepted = false;
   const overlay = page.getByRole('region', { name: 'Publishing your Short', exact: true });
   async function fill() {
+    await expect(page.getByLabel('Video file', { exact: true })).toBeEnabled();
     await page.getByLabel('Video file', { exact: true }).setInputFiles(input);
     await page.getByRole('button', { name: 'Next: Details', exact: true }).click();
     await page.locator('#short-title').fill(title);

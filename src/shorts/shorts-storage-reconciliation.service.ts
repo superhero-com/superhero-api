@@ -56,6 +56,14 @@ export class ShortsStorageReconciliationService {
   }
   async verify() {
     await this.records.verify('read-only');
+    const [schema] = await this.db.query(`SELECT
+      to_regprocedure('shorts_validate_original(jsonb)') IS NOT NULL AS originals,
+      EXISTS(SELECT FROM pg_constraint WHERE conrelid='shorts_storage_references'::regclass
+        AND conname='shorts_storage_references_file_bytes' AND convalidated) AS files`);
+    if (schema.originals && !schema.files)
+      throw new Error(
+        'Apply ShortsFileStorageReferences before inventorying original media',
+      );
     for (const table of [
       'shorts_storage_inventory_runs',
       'shorts_storage_inventory_objects',
@@ -160,11 +168,15 @@ export class ShortsStorageReconciliationService {
         const key = JSON.stringify(source);
         if (seen.has(key)) continue;
         seen.add(key);
-        const parts = await this.sources.manifestParts(
-          this.config.scope,
-          source,
-          abort,
-        );
+        const parts =
+          source.retiredManifest === undefined
+            ? await this.sources.manifestParts(this.config.scope, source, abort)
+            : this.sources.manifestPartsFromDocument(
+                this.config.scope,
+                source,
+                Buffer.from(source.retiredManifest),
+                abort,
+              );
         parts.forEach(add);
       }
     }
@@ -308,6 +320,68 @@ export class ShortsStorageReconciliationService {
       consistentSnapshot: false,
       deletionEnabled: false,
     };
+  }
+  /** Inspect one inventoried older version. Not a cleanup permit or a policy decision. */
+  async versionCandidate(id: string, identity: string, signal?: AbortSignal) {
+    if (typeof identity !== 'string' || !/^[a-f0-9]{64}$/.test(identity))
+      throw new BadRequestException('Invalid physical object identity');
+    const run = await this.run(id);
+    if (!run.complete)
+      throw new ConflictException(
+        'Finish the reference scan before verification',
+      );
+    const [candidate] = await this.db.query(
+      `SELECT object_key,version_id,deleted,latest,bytes::text
+      FROM shorts_storage_inventory_objects
+      WHERE network=$1 AND contract=$2 AND run_id=$3 AND identity=$4`,
+      [...this.scopeArgs(), run.inventory_id, identity],
+    );
+    if (!candidate || candidate.deleted || candidate.latest)
+      throw new ConflictException('Use an inventoried noncurrent data version');
+    const refs = await this.db.query(
+      `SELECT DISTINCT key_id,sha256,bytes::text FROM shorts_storage_references
+      WHERE network=$1 AND contract=$2 AND run_id=$3 AND object_key=$4 LIMIT 2`,
+      [...this.args(id), candidate.object_key],
+    );
+    if (
+      refs.length !== 1 ||
+      BigInt(refs[0].bytes) + 36n !== BigInt(candidate.bytes)
+    )
+      throw new ConflictException(
+        'An unambiguous matching content reference is required',
+      );
+    signal?.throwIfAborted();
+    return {
+      ref: {
+        key: candidate.object_key,
+        keyId: refs[0].key_id,
+        sha256: refs[0].sha256,
+        bytes: Number(refs[0].bytes),
+      },
+      version: candidate.version_id as string,
+    };
+  }
+  async verifyVersions(id: string, identity: string, signal?: AbortSignal) {
+    const candidate = await this.versionCandidate(id, identity, signal);
+    const copies = await this.privateObjects.verifyVersionCopies(
+      this.config.scope,
+      candidate.ref,
+      candidate.version,
+      signal,
+    );
+    return {
+      ...copies,
+      storageId: this.config.storageId,
+      sourceHash: this.config.sourceHash,
+      observedAt: new Date().toISOString(),
+      contentVerified: true,
+      retentionRechecked: false,
+      eligibleForDeletion: false,
+      deletionEnabled: false,
+    };
+  }
+  private scopeArgs() {
+    return [this.config.scope.network, this.config.scope.contract];
   }
   async references(id: string, after = '', limit = 100) {
     if (

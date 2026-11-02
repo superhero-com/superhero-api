@@ -81,7 +81,7 @@ test('completion uses HEAD only and refuses missing, wrong-size or wrong-checksu
 test('completion records a part only after storage verification and rejects another creator', async () => {
   const events = [], object = { key: 'owned' };
   const uploads = {
-    get: async (_scope, _id, actor) => { if (actor !== 'ak_owner') throw new Error('Not found'); return { parts: [], directParts: { 0: { object, checksum: 'checksum' } } }; },
+    get: async (_scope, _id, actor) => { if (actor !== 'ak_owner') throw new Error('Not found'); return { input: { bytes: 10 }, parts: [], directParts: { 0: { object, checksum: 'checksum' } } }; },
     part: async () => events.push('record'),
   };
   const source = new ShortsSourceService(uploads, { verifyDirect: async () => events.push('head') }, {});

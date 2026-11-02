@@ -1,3 +1,4 @@
+const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -14,12 +15,14 @@ const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsM
 const {ShortsUploads1791763202000}=require('../migrations/1791763202000-ShortsUploads');
 const {ShortsRetentionHolds1791763216000}=require('../migrations/1791763216000-ShortsRetentionHolds');
 const {ShortsHlsInventory1791763219000}=require('../migrations/1791763219000-ShortsHlsInventory');
+const {ShortsAdaptiveInventory1793145601000}=require('../migrations/1793145601000-ShortsAdaptiveInventory');
 const {ShortsDatabaseService}=require('./shorts-database.service');
 const {ShortsRetentionService}=require('./shorts-retention.service');
 const {ShortsHlsInventoryService}=require('./shorts-hls-inventory.service');
 const {ShortsHlsIndexReaderService}=require('./shorts-hls-index-reader.service');
 const {hlsInventoryConfig}=require('./shorts-hls-inventory.config');
 const {hlsSourceKey,hlsObservation}=require('./shorts-hls-inventory-data');
+const {fullAdaptivePackage}=require('./testing/hls-v3-fixture.cjs');
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const scope={network:'ae_uat',contract: releaseFixture().release.contract},sourceHash='a'.repeat(64);
 const playlist='#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:2.000000,\nsegment-000.m4s\n#EXT-X-ENDLIST\n';
@@ -66,11 +69,12 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
   await control.acl('SETUSER',user,'reset','on',`>${password}`,`~${namespace}:prepared:*`,'-@all','+ping','+select','+eval_ro','+scan','+strlen','+pttl','+get','+info');aclCreated=true;
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},
-    migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000]};
+    migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000,ShortsAdaptiveInventory1793145601000]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
+  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
   const args=[scope.network,scope.contract];await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[...args,sourceHash]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${dbPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;
-  await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_retention_holds'].map(x=>`${schema}.${x}`).join(',')} TO ${role};
+  await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_delivery_packages','shorts_retention_holds'].map(x=>`${schema}.${x}`).join(',')} TO ${role};
     GRANT SELECT,INSERT,UPDATE ON ${schema}.shorts_hls_inventory_runs TO ${role};
     GRANT SELECT,INSERT ON ${schema}.shorts_hls_inventory_roots,${schema}.shorts_hls_inventory_entries,${schema}.shorts_hls_inventory_pages TO ${role}`);
   const login=new URL(pg);login.username=role;login.password=dbPassword;
@@ -104,7 +108,7 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
     assert.equal(status.physicalPinInventoryComplete,false);assert.equal(status.consistentSnapshot,false);assert.equal(status.deletionEnabled,false);
     const forbidden={page:()=>{throw new Error('must not read again');}};assert.equal((await service(forbidden).step(runId)).indexTraversalComplete,true);
     await assert.rejects(service(read,db,{...config,storageId:'f'.repeat(64)}).status(runId),{status:409});
-    await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve HLS inventory history/);
+    await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve adaptive inventory history/);
   });
   await t.test('shared package inherits a hold and missing index roots remain visible',async()=>{
     let page=await s.entries(runId,'',25),all=[...page.items];while(page.next){page=await s.entries(runId,page.next,25);all.push(...page.items);}
@@ -142,14 +146,17 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
     const r=reader(),abort=new AbortController();abort.abort();await assert.rejects(r.page('0',abort.signal));r.onModuleDestroy();await assert.rejects(r.page('0'),{status:503});
     await assert.rejects(reader().page('18446744073709551616'),/Invalid HLS inventory cursor/);
   });
-  await t.test('aggregate response budget and cancellation bound a stalled Redis read',async()=>{
+  await t.test('full adaptive index pages remain bounded and cancellation stops a stalled Redis read',async()=>{
     const keys=await control.keys(`${namespace}:prepared:*`),originals=await control.mget(...keys);
     try {
-      const oversizedPage=JSON.stringify({...pkg,padding:'x'.repeat(30000)});
-      for(const k of keys)await control.set(k,oversizedPage);
-      const r=reader();let cursor='0',failed=false;
-      do{try{const p=await r.page(cursor);cursor=p.next;}catch(error){assert.equal(error.status,503);failed=true;break;}}while(cursor!=='0');
-      assert.equal(failed,true,'the script must bound the total response, not just each value');
+      const full=JSON.stringify(fullAdaptivePackage());assert.ok(Buffer.byteLength(full)>32768);
+      for(const k of keys)await control.set(k,full);
+      const r=reader();let cursor='0';const seen=new Set();
+      do{const page=await r.page(cursor);cursor=page.next;assert.ok(page.items.length<=64);
+        assert.ok(page.items.length*Buffer.byteLength(full)<=8388608);
+        for(const item of page.items){assert.equal(item.version,3);assert.equal(item.files.length,225);seen.add(item.sourceKey);}
+      }while(cursor!=='0');
+      assert.equal(seen.size,keys.length);
     } finally {for(let i=0;i<keys.length;i++)await control.set(keys[i],originals[i]);}
     const r=reader();await r.page('0');await control.call('CLIENT','PAUSE',3000,'ALL');
     const abort=new AbortController(),started=Date.now(),timer=setTimeout(()=>abort.abort(),100);
@@ -164,5 +171,39 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
     let result;do{result=await cli('scan',{id});}while(!result.indexTraversalComplete);
     assert.equal((await cli('status',{id})).entries,'107');assert.equal((await cli('entries',{id,limit:1})).items.length,1);assert.equal((await cli('roots',{id,limit:1})).items.length,1);
     await assert.rejects(cli('scan',{id,pages:101}));await assert.rejects(cli('entries',{id,delete:true}));
+  });
+  await t.test('original identities, temporary input references and full adaptive packages survive a complete SQL and Redis scan',async()=>{
+    const descriptor=structuredClone(require('./testing/hls-v3.json').descriptor);
+    Object.assign(descriptor,{id:'z-original',network:scope.network,contract:scope.contract});
+    descriptor.derivatives.generation.job=descriptor.id;
+    await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,'ak_creator',0,$4)`,
+      [...args,descriptor.id,JSON.stringify({...descriptor,creator:'ak_creator',publication:'published'})]);
+    await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,'ct_other',$2,8,2)`,[scope.network,sourceHash]);
+    await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,'ct_other','shared-input','ak_creator',0,$2)`,
+      [scope.network,JSON.stringify({id:'shared-input',creator:'ak_creator',cid:descriptor.derivatives.cid})]);
+    await holds.hold({id:randomUUID(),resourceId:descriptor.id,reason:'recovery',reference:'adaptive-fixture'});
+    const logical=(await records.inventory('z-',25)).items.find(item=>item.id===descriptor.id);
+    assert.deepEqual(logical.hlsSource,descriptor);
+    assert.deepEqual(logical.pins,[{kind:'original',cid:descriptor.cid,bytes:4096,references:1},
+      {kind:'inputs',cid:descriptor.derivatives.cid,bytes:4000,references:2},
+      {kind:'assets',cid:descriptor.derivatives.assetsCid,bytes:3000,references:1}]);
+    const adaptive=fullAdaptivePackage(),sourceKey=hlsSourceKey(descriptor);
+    await control.set(key(sourceKey),JSON.stringify(adaptive));
+    const id=randomUUID();await s.start(id);let status;do{status=await s.step(id);}while(!status.indexTraversalComplete);
+    assert.equal(status.referenceVersion,5);assert.equal(status.entries,'108');
+    const root=(await s.roots(id,'z-',25)).items.find(item=>item.id===descriptor.id);
+    assert.equal(root.sourceCid,descriptor.cid);assert.equal(root.sourceKey,sourceKey);assert.equal(root.indexObserved,true);
+    assert.deepEqual(root.pins,logical.pins);assert.equal(root.activeHolds,1);
+    const entries=[];let page;do{page=await s.entries(id,page?.next||'',100);entries.push(...page.items);}while(page.next);
+    const entry=entries.find(item=>item.sourceKey===sourceKey);
+    assert.equal(entry.version,3);assert.equal(entry.files.length,225);assert.ok(Number(entry.bytes)>100000000);
+    assert.equal(entry.classification,'held');assert.equal(entry.eligibleForDeletion,false);
+    await assert.rejects(owner.query(`UPDATE shorts_hls_inventory_entries SET version=2 WHERE network=$1 AND contract=$2 AND run_id=$3 AND source_key=$4`,[...args,id,sourceKey]),{code:'23514'});
+    await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve adaptive inventory history/);
+    for (const version of [1,2,3,4]) {
+      const old=randomUUID();await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,reference_version)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`,[...args,old,sourceHash,config.storageId,namespace,version]);
+      assert.equal((await s.status(old)).referenceVersion,version);await assert.rejects(s.step(old),{status:409});
+    }
   });
 });

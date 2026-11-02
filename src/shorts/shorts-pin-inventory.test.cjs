@@ -1,3 +1,4 @@
+const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -14,6 +15,7 @@ const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsM
 const {ShortsUploads1791763202000}=require('../migrations/1791763202000-ShortsUploads');
 const {ShortsRetentionHolds1791763216000}=require('../migrations/1791763216000-ShortsRetentionHolds');
 const {ShortsHlsInventory1791763219000}=require('../migrations/1791763219000-ShortsHlsInventory');
+const {ShortsAdaptiveInventory1793145601000}=require('../migrations/1793145601000-ShortsAdaptiveInventory');
 const {ShortsPinInventory1791763220000}=require('../migrations/1791763220000-ShortsPinInventory');
 const {ShortsDatabaseService}=require('./shorts-database.service');
 const {ShortsRetentionService}=require('./shorts-retention.service');
@@ -88,7 +90,7 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   const rpc=async(path,body)=>{const response=await fetch(api.href+'/'+path,{method:'POST',body,signal:AbortSignal.timeout(10000)});assert.equal(response.status,200);return response.text();};
   const peer=JSON.parse(await rpc('id')).ID,created=[];
   const add=async(recursive=true)=>{const body=new FormData();body.append('file',new Blob([randomUUID()]),'clip.txt');const item=JSON.parse((await rpc('add?pin='+recursive+'&cid-version=1',body)).trim());created.push(item.Hash);return item.Hash;};
-  const sourceCid=await add(),hlsCid=await add(),directCid=await add(false),unknownCid=await add();
+  const sourceCid=await add(),hlsCid=await add(),directCid=await add(false),unknownCid=await add(),inputsCid=await add(),assetsCid=await add(),acknowledgedCid=await add(),missingInputsCid='b'+'e'.repeat(58),missingAssetsCid='b'+'f'.repeat(58);
   await rpc('pin/add?recursive=false&arg='+directCid);
   for(let i=0;i<102;i++)await add();
   const schema='pins_'+randomUUID().replaceAll('-',''),role='pinrole_'+randomUUID().replaceAll('-',''),password=randomUUID(),hlsRun=randomUUID();
@@ -99,16 +101,18 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   const config=await pinInventoryConfig(env),admin=new DataSource({type:'postgres',url:pg.href});await admin.initialize();let owner,db,roleCreated=false;
   t.after(async()=>{if(db?.isInitialized)await db.onModuleDestroy();if(owner?.isInitialized)await owner.destroy();if(roleCreated)await admin.query(`DROP OWNED BY ${role};DROP ROLE ${role}`);await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.destroy();for(const pin of created)await rpc('pin/rm?arg='+pin);await rm(dir,{recursive:true,force:true});});
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000,ShortsPinInventory1791763220000]};
+  const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000,ShortsPinInventory1791763220000,ShortsAdaptiveInventory1793145601000]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
+  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
   const args=[scope.network,scope.contract];await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[...args,sourceHash]);
-  await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,phase) VALUES($1,$2,$3,$4,$4,'test','complete')`,[...args,hlsRun,sourceHash]);
+  await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,phase,reference_version) VALUES($1,$2,$3,$4,$4,'test','complete',3)`,[...args,hlsRun,sourceHash]);
   for(const [resource,cid,sourceKey,holds] of [['video-1',sourceCid,'b'.repeat(64),1],['video-2',directCid,'c'.repeat(64),0],['missing','b'+'c'.repeat(58),'d'.repeat(64),0]]){
     await owner.query(`INSERT INTO shorts_hls_inventory_roots(network,contract,run_id,resource_id,source_cid,source_key,active_holds,reasons) VALUES($1,$2,$3,$4,$5,$6,$7,'[]')`,[...args,hlsRun,resource,cid,sourceKey,holds]);
   }
+  await owner.query(`UPDATE shorts_hls_inventory_roots SET pins=$4::jsonb WHERE network=$1 AND contract=$2 AND run_id=$3 AND resource_id='video-1'`,[...args,hlsRun,JSON.stringify([{kind:'original',cid:sourceCid,bytes:100},{kind:'inputs',cid:inputsCid,bytes:100},{kind:'inputs',cid:missingInputsCid,bytes:100},{kind:'assets',cid:assetsCid,bytes:100},{kind:'assets',cid:missingAssetsCid,bytes:100},{kind:'hls',cid:acknowledgedCid,bytes:100}])]);
   for(const key of ['b'.repeat(64),'c'.repeat(64)])await owner.query(`INSERT INTO shorts_hls_inventory_entries(network,contract,run_id,source_key,cid,metadata_hash,bytes,files) VALUES($1,$2,$3,$4,$5,$4,100,'[{},{},{}]')`,[...args,hlsRun,key,hlsCid]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;
-  await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_retention_holds','shorts_hls_inventory_runs','shorts_hls_inventory_roots','shorts_hls_inventory_entries'].map(x=>`${schema}.${x}`).join(',')} TO ${role};
+  await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_delivery_packages','shorts_retention_holds','shorts_hls_inventory_runs','shorts_hls_inventory_roots','shorts_hls_inventory_entries'].map(x=>`${schema}.${x}`).join(',')} TO ${role};
     GRANT SELECT,INSERT,UPDATE ON ${schema}.shorts_pin_inventory_runs TO ${role};GRANT SELECT,INSERT ON ${schema}.shorts_pin_inventory_entries TO ${role}`);
   const login=new URL(pg);login.username=role;login.password=password;db=new ShortsDatabaseService(new DataSource({...options,url:login.href,migrations:[]}));await db.onModuleInit();
   const records=new ShortsRetentionService(db,config),reader=new ShortsPinReaderService(config);
@@ -122,15 +126,18 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   const run=randomUUID();
   await t.test('real stream completion, capacity, shared holds and missing recursive roots',async()=>{
     const result=await s.scan(run,hlsRun);assert.equal(result.pinTraversalComplete,true);assert.ok(Number(result.pins)>=106);assert.ok(Number(result.batches)>=4);assert.ok(BigInt(result.capacityAfter.repoBytes)>0n);
-    assert.equal(result.consistentSnapshot,false);assert.equal(result.deletionEnabled,false);assert.equal(result.blocksVerified,false);
+    assert.equal(result.consistentSnapshot,false);assert.equal(result.deletionEnabled,false);assert.equal(result.blocksVerified,false);assert.equal(result.referenceVersion,3);assert.equal(result.referenceCoverage,'original-and-acknowledged-delivery-inventory');
     const rows=[];let page;do{page=await s.entries(run,page?.next||'',25);rows.push(...page.items);}while(page.next);
     assert.equal(rows.find(x=>x.cid===sourceCid).classification,'held');assert.equal(rows.find(x=>x.cid===hlsCid).classification,'held');assert.equal(rows.find(x=>x.cid===hlsCid).packageReferences,'2');
+    assert.equal(rows.find(x=>x.cid===inputsCid).classification,'held');assert.equal(rows.find(x=>x.cid===inputsCid).derivativeReferences,'1');assert.equal(rows.find(x=>x.cid===inputsCid).sourceReferences,'0');
+    assert.equal(rows.find(x=>x.cid===assetsCid).classification,'held');assert.equal(rows.find(x=>x.cid===assetsCid).derivativeReferences,'1');
+    assert.equal(rows.find(x=>x.cid===acknowledgedCid).classification,'held');assert.equal(rows.find(x=>x.cid===acknowledgedCid).packageReferences,'0');assert.equal(rows.find(x=>x.cid===acknowledgedCid).derivativeReferences,'1');
     assert.equal(rows.find(x=>x.cid===unknownCid).classification,'unresolved');assert.ok(rows.every(x=>x.eligibleForDeletion===false));
-    const missing=(await s.missing(run)).items;assert.equal(missing.length,2);assert.equal(missing.find(x=>x.cid===directCid).directOnly,true);
+    const missing=(await s.missing(run)).items;assert.equal(missing.length,4);assert.equal(missing.find(x=>x.cid===missingAssetsCid).directOnly,false);assert.equal(missing.find(x=>x.cid===missingInputsCid).directOnly,false);assert.equal(missing.find(x=>x.cid===directCid).directOnly,true);
     assert.equal((await service({identity(){throw Error('must not read');}}).scan(run,hlsRun)).pinTraversalComplete,true);
     await assert.rejects(service(inert,db,{...config,storageId:'f'.repeat(64)}).status(run),{status:409});
     await assert.rejects(s.entries(run,'bad'),{status:400});await assert.rejects(s.entries(run,'',101),{status:400});await assert.rejects(s.scan(randomUUID(),randomUUID()),{status:409});
-    await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve IPFS inventory history/);
+    await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve adaptive inventory history/);
     await rpc('pin/rm?arg='+directCid);
     let directPins=0;for await(const page of reader.pins('direct'))directPins+=page.length;
     assert.equal(directPins,0);await rpc('pin/add?recursive=false&arg='+directCid);

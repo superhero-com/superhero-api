@@ -32,22 +32,31 @@ async function until(read, timeout = 45000) {
 
 test('complete hosted module shares upload, media and publication controls across process loss', {
   skip: !['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].every(name => process.env[`SHORTS_TEST_${name}`]),
-  timeout: process.env.SHORTS_TEST_UPLOAD_LOAD === '1' ? 420000 : 300000,
+  timeout: process.env.SHORTS_TEST_UPLOAD_LOAD === '1' || process.env.SHORTS_TEST_ASSEMBLED_ORIGINAL === '1' ? 600000 : 300000,
 }, async t => {
+  const originals = process.env.SHORTS_TEST_ASSEMBLED_ORIGINAL === '1';
   const endpoints = Object.fromEntries(['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].map(name => [name, new URL(process.env[`SHORTS_TEST_${name}`])]));
   for (const endpoint of Object.values(endpoints)) assert.equal(endpoint.hostname, '127.0.0.1');
   const schema = `shorts_assembled_${randomUUID().replaceAll('-', '')}`, dir = await mkdtemp(join(tmpdir(), 'shorts-assembled-'));
   const scope = { network: 'ae_uat', contract: encode(randomBytes(32), Encoding.ContractAddress) }, sourceHash = hash('owned offline contract');
   const creator = AccountMemory.generate(), operator = AccountMemory.generate();
+  const deployment = releaseFixture({ ...scope, sourceHash, operator: operator.address }, { sourceHash });
   const policy = { maxTransactionCost: '2000000000000000', rollingCostLimit: '10000000000000000', maxPending: 2,
     maxCreatorPending: 1, leaseMs: 3000, maxTtlBlocks: 20, confirmations: 3 };
   const admin = await new DataSource({ type: 'postgres', url: endpoints.PG_URL.href }).initialize();
-  const children = [], fixtureRuntimes = [], roles = [], sockets = new Set();
+  const children = [], fixtureRuntimes = [], roles = [], sockets = new Set(), ownedPins = new Set();
+  const rememberMedia = record => {
+    for (const cid of [record.cid, record.derivatives?.cid, record.derivatives?.assetsCid]) if (cid) ownedPins.add(cid);
+  };
   const compiled = process.env.SHORTS_TEST_COMPILED === '1';
   let owner, raw, redis, bucket, scanner, c;
   t.after(async () => {
     for (const child of children) if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'exit'); }
     for (const socket of sockets) socket.destroy(); if (scanner) await new Promise(resolve => scanner.close(resolve));
+    for (const cid of ownedPins) {
+      const response = await fetch(endpoints.KUBO_API.href + '/pin/rm?arg=' + cid, { method: 'POST', signal: AbortSignal.timeout(10000) });
+      await response.body?.cancel();
+    }
     if (redis) {
       const scopeHash = hash(`ae_uat:${scope.contract}`).slice(0, 32);
       for (const kind of ['rate','upload','media','ws']) { const keys = await redis.keys(`shorts:${kind}:v1:{${scopeHash}}:*`); if (keys.length) await redis.del(...keys); }
@@ -78,6 +87,8 @@ test('complete hosted module shares upload, media and publication controls acros
   const meta = new ShortsMetadataService(owner); await meta.initialize(scope, sourceHash);
   await new ShortsPublicationsService(owner).initialize(scope, sourceHash, operator.address, policy);
   const apiRole = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' }); roles.push(apiRole);
+  const operationsRole = originals ? await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' }) : undefined;
+  if (operationsRole) roles.push(operationsRole);
   const worker = await workerRole(admin, { url: endpoints.PG_URL.href, schema, scope }); roles.push(worker);
   const writeTables = ['shorts_content','shorts_runtime','shorts_auth_scopes','shorts_auth_challenges','shorts_auth_sessions',
     'shorts_upload_sessions','shorts_upload_parts','shorts_upload_admission','shorts_ingestion','shorts_measurement_settings',
@@ -85,14 +96,21 @@ test('complete hosted module shares upload, media and publication controls acros
   const tables = new Set((await owner.query(`SELECT tablename FROM pg_tables WHERE schemaname=$1`, [schema])).map(row => row.tablename));
   for (const table of tables) {
     if (/^shorts_(publishing|publication|publisher|worker_principals|retention|storage|hls|pin|multipart|upload_reservations)/.test(table)) continue;
-    await owner.query(`GRANT SELECT${writeTables.includes(table) ? ',INSERT,UPDATE,DELETE' : ''} ON ${table} TO ${apiRole.role}`);
+    for (const role of [apiRole, operationsRole].filter(Boolean))
+      await owner.query(`GRANT SELECT${writeTables.includes(table) ? ',INSERT,UPDATE,DELETE' : ''} ON ${table} TO ${role.role}`);
+  }
+  // HLS acknowledgements are append-only API metadata, never worker grants.
+  await owner.query(`GRANT INSERT ON shorts_delivery_packages TO ${apiRole.role}`);
+  if (operationsRole) {
+    await owner.query(`GRANT INSERT ON shorts_delivery_packages,shorts_delivery_selections TO ${operationsRole.role}`);
+    await owner.query(`GRANT INSERT,UPDATE ON shorts_delivery_staging TO ${operationsRole.role}`);
   }
   const credentials = { accessKeyId: process.env.SHORTS_TEST_S3_ACCESS_KEY || 'test', secretAccessKey: process.env.SHORTS_TEST_S3_SECRET_KEY || 'test' };
   raw = new S3Client({ endpoint: endpoints.S3_ENDPOINT.origin, region: 'us-east-1', forcePathStyle: true, credentials, requestChecksumCalculation: 'WHEN_REQUIRED' });
   bucket = `shorts-assembled-${randomUUID()}`; await raw.send(new CreateBucketCommand({ Bucket: bucket }));
   for (const [name, value] of Object.entries({
     'chain.json': JSON.stringify({ shorts: {}, height: 100 }),
-    'deployment.json': JSON.stringify(releaseFixture({ ...scope, sourceHash, operator: operator.address }).release), 'policy.json': JSON.stringify(policy),
+    'deployment.json': JSON.stringify(deployment.release), 'artifact.json': JSON.stringify(deployment.artifact), 'policy.json': JSON.stringify(policy),
     's3.json': JSON.stringify(credentials), 'keys.json': JSON.stringify({ activeKeyId: 'key1', keys: { key1: randomBytes(32).toString('hex') } }),
     'rate.key': randomBytes(32).toString('hex'), 'scanner.key': randomBytes(32).toString('hex'),
   })) await writeFile(join(dir, name), value, { mode: 0o600 });
@@ -127,11 +145,13 @@ test('complete hosted module shares upload, media and publication controls acros
   for (const key of Object.keys(env)) if (/^(SHORTS_|AWS_|REDIS_)/.test(key)) delete env[key];
   Object.assign(env, { ...(social?.env || {}), NODE_ENV: 'test', ENABLE_SHORTS: 'true', AE_NETWORK_ID: 'ae_uat', SHORTS_TESTNET_MVP: '1',
     SHORTS_TEST_COMPILED: compiled ? '1' : '0',
+    SHORTS_ORIGINAL_UPLOADS_ENABLED: originals ? 'true' : 'false',
     SHORTS_DEMO_AUTO_APPROVE: '0', SHORTS_DEMO_CONNECTED_WALLET: '0', SHORTS_WEB_ORIGIN: `http://127.0.0.1:${webPort || 5180}`,
     SHORTS_PRIVATE_S3_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
     SHORTS_PRIVATE_S3_CREDENTIALS_FILE: join(dir, 's3.json'), SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json'),
     SHORTS_DEPLOYMENT_FILE: join(dir, 'deployment.json'), SHORTS_PUBLISHING_POLICY_FILE: join(dir, 'policy.json'),
     SHORTS_RATE_KEY_FILE: join(dir, 'rate.key'), SHORTS_SHARED_CONCURRENT_MEDIA: '1', SHORTS_TEST_SCHEMA: schema,
+    SHORTS_WORKER_TMP_DIR: dir, SHORTS_WORKER_MAX_USED_PERCENT: process.env.SHORTS_TEST_SCRATCH_MAX_USED_PERCENT || '85',
     SHORTS_IPFS_API: endpoints.KUBO_API.href, SHORTS_MODERATION_URL: `http://127.0.0.1:${scanner.address().port}`, SHORTS_MODERATION_TOKEN_FILE: join(dir, 'scanner.key'),
     ...(streamPort ? { SHORTS_STREAM_INTERNAL_URL: `http://127.0.0.1:${streamPort}`, SHORTS_STREAM_KEY_FILE: join(dir, 'stream.key') } : {}),
     REDIS_HOST: endpoints.REDIS_URL.hostname, REDIS_PORT: endpoints.REDIS_URL.port, TRUST_PROXY: 'false',
@@ -193,11 +213,14 @@ test('complete hosted module shares upload, media and publication controls acros
     }
   });
   const creatorToken = await login(creator), operatorToken = await login(operator), outsiderToken = await login(AccountMemory.generate());
-  const input = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin','-v','error','-f','lavfi','-i','color=c=blue:s=72x128:r=12','-t','2.2','-c:v','libx264','-pix_fmt','yuv420p',input]);
+  const input = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin','-v','error','-f','lavfi','-i', originals ? 'testsrc2=s=1080x1920:r=60' : 'color=c=blue:s=72x128:r=12',
+    ...(originals ? ['-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-c:a','aac','-ac','2'] : []),
+    '-t','2.2','-c:v','libx264','-pix_fmt','yuv420p',input]);
   const video = await readFile(input);
   const created = await request(a, '/uploads', { title: 'Owned fixture', topic: 'Art', rights: true, bytes: video.length, sha256: hash(video), details: { language: 'und' } }, creatorToken);
   assert.equal(created.status, 201, JSON.stringify(created)); const id = created.body.id;
-  assert.equal((await directUploadPart(request, b, id, 0, video, creatorToken)).status, 201);
+  for (let offset=0, part=0; offset<video.length; offset+=1048576, part++)
+    assert.equal((await directUploadPart(request, b, id, part, video.subarray(offset,offset+1048576), creatorToken)).status, 201);
   assert.equal((await request(a, `/uploads/${id}/finish`, {}, creatorToken)).status, 202);
   const workerEnv = { ...env, SHORTS_TEST_PG_URL: worker.url, SHORTS_TEST_UPLOAD_ID: id, SHORTS_WORKER_TMP_DIR: dir, SHORTS_WORKER_MAX_USED_PERCENT: '99' };
   delete workerEnv.SHORTS_IPFS_API; delete workerEnv.SHORTS_PUBLISHING_POLICY_FILE;
@@ -205,6 +228,12 @@ test('complete hosted module shares upload, media and publication controls acros
   // Child helper uses real FFmpeg/S3 and production worker wiring; safety there is an owned-fixture result.
   const w = child('media-worker.cjs', workerEnv, false); await w.wait('started');
   await until(async () => (await meta.getJob(scope, creator.address, id)).status === 'ready');
+  const preparedRecord = (await meta.get(scope, id)).record;
+  rememberMedia(preparedRecord);
+  if (originals) {
+    assert.equal(preparedRecord.bytes, video.length); assert.equal(preparedRecord.original.sha256, hash(video));
+    assert.equal(preparedRecord.privateMedia.source.processingProfile, 'original-h264-v1');
+  }
   w.process.kill('SIGTERM'); await once(w.process, 'exit');
 
   await t.test('real module providers share sessions and deny unauthorized private previews', async () => {
@@ -213,8 +242,9 @@ test('complete hosted module shares upload, media and publication controls acros
     const preview = await request(b, `/review-media/${id}`, undefined, creatorToken); assert.equal(preview.status, 200); assert.ok(preview.body.length > 0);
     const status = await request(b, `/uploads/${id}`, undefined, creatorToken); assert.equal(status.status, 200); assert.equal(status.body.status, 'ready');
   });
-  const pending = request(a, `/${id}/scan`, {}, creatorToken, 60000).catch(error => ({ error }));
-  await until(() => scans === 1);
+  let scanResult;
+  const pending = request(a, `/${id}/scan`, {}, creatorToken, 60000).catch(error => ({ error: error.message })).then(value => { scanResult=value; return value; });
+  await until(() => { if (scanResult && scans === 0) assert.fail(`Scan completed without reaching the scanner: ${JSON.stringify(scanResult)}`); return scans === 1; });
   await t.test('other process cannot read private media while the shared permit is occupied', async () => {
     const blocked = await request(b, `/review-media/${id}`, undefined, creatorToken); assert.equal(blocked.status, 503);
     assert.equal((await request(b, `/uploads/${id}`, undefined, creatorToken)).status, 200);
@@ -256,7 +286,13 @@ test('complete hosted module shares upload, media and publication controls acros
     await require('./testing/assembled-real-moderation.cjs').assembledRealModeration(t, { owner, meta, scope, dir, b, c, request, until, pause,
       createWorker: extra => child('media-worker.cjs', { ...workerEnv, ...extra }, false) });
   });
-  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded,
+  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, originals, video, release: deployment.release, rememberMedia,
+    async startDeliveryOperations(enabled = true) {
+      assert.ok(operationsRole);
+      const next = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: operationsRole.url,
+        SHORTS_TEST_DELIVERY_OPERATIONS: '1', SHORTS_DELIVERY_SELECTION_ENABLED: String(enabled) });
+      await next.wait('ready'); return next;
+    },
     async startUploadWorker() {
       const next = child('media-worker.cjs', workerEnv, false); await next.wait('started');
       return async () => { if (next.process.exitCode === null && next.process.signalCode === null) {
@@ -264,8 +300,5 @@ test('complete hosted module shares upload, media and publication controls acros
       } };
     },
     mdwUrl: `http://127.0.0.1:${scanner.address().port}`, endpoints, streamPort, webPort });
-  // Only this suite's package on its disposable offline node is unpinned.
-  const cid = (await meta.get(scope, id)).record.cid;
-  await fetch(endpoints.KUBO_API.href + '/pin/rm?arg=' + cid, { method: 'POST' });
   t.diagnostic(JSON.stringify({ fixtureRuntimes }));
 });

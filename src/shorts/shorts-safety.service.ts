@@ -1,6 +1,8 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { openAsBlob } from 'node:fs';
+import { ShortsMediaFile, hashMediaFile } from './shorts-media-file';
 import { isAbsolute } from 'node:path';
 import { discardShortsResponse, readShortsJson } from './shorts-upstream';
 
@@ -113,14 +115,16 @@ export class ShortsSafetyService implements OnModuleDestroy {
     );
   }
   async scan(
-    video: Buffer,
+    video: Buffer | ShortsMediaFile,
     signal?: AbortSignal,
     retryUnavailable = false,
   ): Promise<VisualSafety | undefined> {
     // Skipping inspection must not create a successful scan receipt.
     if (this.demoAutoApprove) return undefined;
     const base = {
-      sourceSha256: createHash('sha256').update(video).digest('hex'),
+      sourceSha256: Buffer.isBuffer(video)
+        ? createHash('sha256').update(video).digest('hex')
+        : video.sha256,
       checkedAt: Date.now(),
       humanReviewRequired: true as const,
     };
@@ -135,10 +139,21 @@ export class ShortsSafetyService implements OnModuleDestroy {
         ...(signal ? [signal] : []),
       ]);
       deadline.throwIfAborted();
+      let body: Uint8Array<ArrayBuffer> | Blob;
+      if (Buffer.isBuffer(video)) {
+        body = new Uint8Array(video);
+      } else {
+        const verified = await hashMediaFile(video.path, deadline);
+        if (verified.bytes !== video.bytes || verified.sha256 !== video.sha256)
+          throw new Error('Original file integrity mismatch');
+        body = await openAsBlob(video.path, {
+          type: 'application/octet-stream',
+        });
+      }
       const response = await fetch(`${this.endpoint}/inspect`, {
         method: 'POST',
         redirect: 'error',
-        body: new Uint8Array(video),
+        body,
         signal: deadline,
         headers: {
           'Content-Type': 'application/octet-stream',
