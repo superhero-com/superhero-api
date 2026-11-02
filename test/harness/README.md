@@ -89,6 +89,13 @@ The existing relay-backed specs (`relay-subscriber`, `relay-writer`,
 `room-admins`, `membership-sync`) already inline this auto-skip; they were left
 as-is. New relay-backed specs should import from `relay.ts` instead of copying it.
 
+## Fake relay (`fake-relay.ts`)
+
+`startFakeRelay()` serves NIP-42 over a loopback socket inside the test process,
+so connection, AUTH and reconnect behaviour runs in plain unit specs (and CI).
+Options cover a delayed or missing challenge, a rejected AUTH, and custom REQ
+answers; it counts connections, accepted AUTHs and received REQs.
+
 ## Commands
 
 ```sh

@@ -718,7 +718,9 @@ export class RelaySubscriberService
       // `Relay.connect()` pending forever. A timeout lets `ensureConnected()` settle
       // so the reconnect/backoff loop can recover instead of wedging.
       relay = await this.withTimeout(
-        Relay.connect(url),
+        // The subscriber never publishes, so only a ping notices a dead socket
+        // (the writer's publish ACK timeout does that job for it).
+        Relay.connect(url, { enablePing: true }),
         this.config.publishAckTimeoutMs,
       );
     } catch (e) {
@@ -823,18 +825,25 @@ export class RelaySubscriberService
     if (this.shuttingDown) {
       return;
     }
-    try {
-      this.sub?.close();
-    } catch {
-      // ignore
-    }
+    // Detach before closing, same as RelayWriterService.reconnect.
+    const previousSub = this.sub;
     this.sub = undefined;
     try {
-      this.relay?.close();
+      previousSub?.close();
     } catch {
       // ignore
     }
+    const previous = this.relay;
     this.relay = undefined;
+    if (previous) {
+      previous.onclose = null;
+    }
+    this.markUnhealthy('reconnecting');
+    try {
+      previous?.close();
+    } catch {
+      // ignore
+    }
     try {
       await this.ensureConnected();
       // On reconnect, RE-ESTABLISH every subscription from the durable room set
