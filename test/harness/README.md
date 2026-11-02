@@ -116,6 +116,7 @@ npm run test:e2e  # the separate e2e project (test/jest-e2e.json)
 | `TG_TEST_DB_ADMIN_DATABASE` | `DB_DATABASE` | Maintenance DB used only to `CREATE`/`DROP` throwaway databases. |
 | `TG_RELAY_URL` | `ws://localhost:7777` | Relay endpoint; setting it also forces relay-backed cases to run (vouched external relay). |
 | `TG_BOT_NSEC` | `settings.test.yml` relay-admin nsec | Bot/relay-admin key for relay-backed specs. |
+| `TG_TEST_RELAY_URL` | unset | Disposable loopback relay for `room-access-relay.integration.spec.ts` (also needs `DB_HOST`). It creates groups, so it refuses non-loopback URLs. |
 
 ## Isolation guarantees
 
