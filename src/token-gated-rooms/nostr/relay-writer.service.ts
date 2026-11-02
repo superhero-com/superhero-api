@@ -426,12 +426,21 @@ export class RelayWriterService
     if (this.shuttingDown) {
       return;
     }
+    const previous = this.relay;
+    this.relay = undefined;
+    if (previous) {
+      // nostr-tools fires onclose even for our own close(); left attached, it
+      // would schedule another reconnect after every reconnect.
+      previous.onclose = null;
+    }
+    // That also skips onclose's markUnhealthy; without it the new socket
+    // would count as healthy before it authenticates.
+    this.markUnhealthy('reconnecting');
     try {
-      this.relay?.close();
+      previous?.close();
     } catch {
       // ignore
     }
-    this.relay = undefined;
     try {
       await this.ensureConnected();
       this.logger.log('relay reconnected');

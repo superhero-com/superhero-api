@@ -64,7 +64,7 @@ d('AEX9 balance indexer (integration)', () => {
 
   afterAll(async () => {
     await database?.drop();
-  });
+  }, 60_000);
 
   const makeIndexer = () =>
     new BalanceIndexerService(tokenRepo, tokenBalanceRepo, emitter, config);

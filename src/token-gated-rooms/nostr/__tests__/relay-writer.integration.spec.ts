@@ -52,14 +52,19 @@ async function relayReachable(url: string): Promise<boolean> {
 
 /** Read the relay-served `39000` group state (its `d` tag is the group id). */
 async function read39000(url: string, groupId: string): Promise<boolean> {
-  const relay = await Relay.connect(url);
   const decoded = nip19.decode(RELAY_ADMIN_NSEC);
   if (decoded.type !== 'nsec') throw new Error('Invalid test admin key');
-  await authenticateRelay(
-    relay,
-    async (event) => finalizeEvent(event, decoded.data),
-    5000,
-  );
+  const relay = await Relay.connect(url);
+  try {
+    await authenticateRelay(
+      relay,
+      async (event) => finalizeEvent(event, decoded.data),
+      5000,
+    );
+  } catch (error) {
+    relay.close();
+    throw error;
+  }
   return await new Promise<boolean>((resolve) => {
     let found = false;
     const sub = relay.subscribe([{ kinds: [39000], '#d': [groupId] }], {
