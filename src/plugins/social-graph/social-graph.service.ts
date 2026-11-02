@@ -64,18 +64,23 @@ export class SocialGraphService implements OnModuleInit {
     return this.reader;
   }
 
-  async getFollowCounts(address: string) {
+  private async readyScope() {
     const reader = this.getReader();
     await reader.verifyIdentity();
     const { network, contract } = reader.identity;
-    const counts = await this.queries.counts(
-      await this.queries.ready(network, contract),
-      address,
-    );
+    return this.queries.ready(network, contract);
+  }
+
+  async getFollowCounts(address: string) {
+    const counts = await this.queries.counts(await this.readyScope(), address);
     return {
       followers_count: safeGraphNumber(counts.followers),
       following_count: safeGraphNumber(counts.following),
     };
+  }
+
+  async followingSubquery(address: string) {
+    return this.queries.followingSubquery(await this.readyScope(), address);
   }
 
   async getConfig() {
