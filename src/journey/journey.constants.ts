@@ -116,10 +116,18 @@ export const JOURNEY_LIMITS = {
   MAX_ROWS_PER_INSERT: 2000,
   /** Hard cap on buffered rows; anything above is dropped. */
   MAX_BUFFERED_ROWS: 20000,
-  /** Events accepted per client IP per minute; the rest are dropped. */
-  MAX_EVENTS_PER_CLIENT_PER_MINUTE: 1200,
+  /**
+   * Events accepted per client IP per minute; the rest are dropped. Times 1440
+   * it stays under MAX_EVENTS_PER_DAY, so one IP alone can't use up the day.
+   */
+  MAX_EVENTS_PER_CLIENT_PER_MINUTE: 600,
   /** Events accepted per minute across all clients. */
   MAX_EVENTS_PER_MINUTE: 10000,
+  /**
+   * Events accepted per UTC day across all clients: ~0.36 GB of rows and
+   * indexes a day, ~65 GB over the retention.
+   */
+  MAX_EVENTS_PER_DAY: 1_000_000,
   /** Rows older than this are deleted by the daily retention job. */
   RETENTION_DAYS: 180,
   /** Dashboard default and maximum query ranges. */
