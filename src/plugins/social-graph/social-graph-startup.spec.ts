@@ -32,14 +32,14 @@ describe('Optional social graph startup', () => {
   });
 
   it.each([
-    ['both missing', '', ''],
-    ['network missing', 'ct_abc', ''],
-    ['network blank', 'ct_abc', '  '],
-    ['address missing', '', 'ae_mainnet'],
-    ['address blank', '  ', 'ae_mainnet'],
+    ['both missing', '', '', false],
+    ['network missing', 'ct_abc', '', true],
+    ['network blank', 'ct_abc', '  ', true],
+    ['address missing', '', 'ae_mainnet', false],
+    ['address blank', '  ', 'ae_mainnet', false],
   ])(
-    'boots with %s and keeps graph routes unavailable',
-    async (_, address, network) => {
+    'boots with %s, keeps graph routes unavailable and logs an error only for an address without a network',
+    async (_, address, network, logsError) => {
       process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = address;
       process.env.SOCIAL_GRAPH_NETWORK_ID = network;
       process.env.SOCIAL_GRAPH_WORKER_ENABLED = 'true';
@@ -47,6 +47,9 @@ describe('Optional social graph startup', () => {
       const db = { createQueryRunner: jest.fn(), query: jest.fn() };
       const queries = { ready: jest.fn(), counts: jest.fn() };
       const graph = new SocialGraphService(ae as any, queries as any);
+      const error = jest
+        .spyOn((graph as any).logger, 'error')
+        .mockImplementation(() => undefined);
       const gateway = new SocialGraphGateway(db as any, graph);
       const websocket = {
         subscribeForMicroBlocksUpdates: jest.fn(),
@@ -87,6 +90,7 @@ describe('Optional social graph startup', () => {
       const app = module.createNestApplication({ logger: false });
       try {
         await app.init();
+        expect(error).toHaveBeenCalledTimes(logsError ? 1 : 0);
         await request(app.getHttpServer())
           .get('/startup-probe')
           .expect(200, { ready: true });

@@ -16,9 +16,11 @@ const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PAGE_PATTERN = /^\/[A-Za-z0-9/_:\-.()]*$/;
 // Anything that looks like an on-chain account, contract, tx, oracle or name
-// hash, or a long hex string. A route pattern never contains one, so a page
-// that does was built from a real URL by mistake and must not be stored.
+// hash, an AENS name, or a long hex string. A route pattern never contains
+// one, so a page that does was built from a real URL by mistake and must not
+// be stored.
 const CHAIN_ID = /(ak|ct|th|ok|nm)_[1-9A-HJ-NP-Za-km-z]{20,}/;
+const AENS_NAME = /\.chain(\/|$)/i;
 const HEX_ID = /0x[0-9a-fA-F]{16,}/;
 
 /**
@@ -36,6 +38,7 @@ export function sanitizeJourneyPage(value: unknown): string {
     value.length > JOURNEY_LIMITS.MAX_PAGE_LENGTH ||
     !PAGE_PATTERN.test(value) ||
     CHAIN_ID.test(value) ||
+    AENS_NAME.test(value) ||
     HEX_ID.test(value)
   ) {
     return JOURNEY_OTHER_PAGE;

@@ -1,6 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { JOURNEY_FUNNELS } from './journey.constants';
-import { buildFunnelSql, buildFunnelSteps } from './journey-query.service';
+import {
+  buildFunnelSql,
+  buildFunnelSteps,
+  PAGE_FLOW_SQL,
+} from './journey-query.service';
 import { resolveJourneyRange } from './journey-range';
 
 describe('resolveJourneyRange', () => {
@@ -14,11 +18,12 @@ describe('resolveJourneyRange', () => {
     expect(range.to.toISOString()).toBe('2026-10-31T00:00:00.000Z');
   });
 
-  it('caps the range at 180 days', () => {
+  it('caps the range at 180 days by moving the start, not the end', () => {
     const range = resolveJourneyRange('2025-01-01', '2026-10-30', now);
-    const days =
-      (range.to.getTime() - range.from.getTime()) / (24 * 3600 * 1000);
-    expect(days).toBe(180);
+    expect(range.start_date).toBe('2026-05-04');
+    expect(range.end_date).toBe('2026-10-30');
+    expect(range.from.toISOString()).toBe('2026-05-04T00:00:00.000Z');
+    expect(range.to.toISOString()).toBe('2026-10-31T00:00:00.000Z');
   });
 
   it.each([
@@ -121,5 +126,15 @@ describe('buildFunnelSql', () => {
     expect(sql).not.toContain('s4 AS');
     expect(sql).toContain('e.occurred_at > p.t');
     expect(sql).toContain('e.event = $5');
+  });
+
+  it('bounds every later step by the range start, so its index scan starts there', () => {
+    expect(buildFunnelSql(3).match(/e\.occurred_at >= \$1/g)).toHaveLength(2);
+  });
+});
+
+describe('PAGE_FLOW_SQL', () => {
+  it('materialises next_ranked, so the per-page lookup does not rescan the range', () => {
+    expect(PAGE_FLOW_SQL).toContain('next_ranked AS MATERIALIZED');
   });
 });

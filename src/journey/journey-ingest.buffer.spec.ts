@@ -58,9 +58,11 @@ describe('JourneyIngestBuffer', () => {
     buffer.push(makeRows(JOURNEY_LIMITS.FLUSH_AT_ROWS - 1));
     expect(execute).not.toHaveBeenCalled();
     buffer.push(makeRows(1));
-    await buffer.flush();
+    // The 500th row starts the insert from inside push(), before any flush call.
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0][0]).toHaveLength(JOURNEY_LIMITS.FLUSH_AT_ROWS);
+    await buffer.flush();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('flushes on the 5 s timer and on module destroy', async () => {
@@ -109,17 +111,17 @@ describe('JourneyIngestBuffer', () => {
       .mockResolvedValue(undefined);
     const { repository } = makeRepository(execute);
     const buffer = new JourneyIngestBuffer(repository);
-    const warn = jest
-      .spyOn((buffer as any).logger, 'warn')
+    const error = jest
+      .spyOn((buffer as any).logger, 'error')
       .mockImplementation(() => undefined);
 
     buffer.push(makeRows(2));
     await expect(buffer.flush()).resolves.toBeUndefined();
     buffer.push(makeRows(2));
     await buffer.flush();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('22P02');
-    expect(String(warn.mock.calls[0][0])).not.toContain('secret');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain('22P02');
+    expect(String(error.mock.calls[0][0])).not.toContain('secret');
     expect(buffer.droppedCount).toBe(4);
     expect(buffer.size).toBe(0);
 

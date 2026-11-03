@@ -786,7 +786,9 @@ export class BaseSchema1718900000000 implements MigrationInterface {
   }
 
   public async down(): Promise<void> {
-    // Existing databases record this as their newest migration, so it is the
-    // first one `migration:revert` undoes; dropping the schema here would wipe them.
+    // Existing databases ran this as a no-op, so dropping the schema here would
+    // wipe them. `migration:revert` goes by execution order (highest id), not by
+    // timestamp: deployed in the same batch as later migrations, this row is
+    // reverted only after those are.
   }
 }

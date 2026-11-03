@@ -175,6 +175,7 @@ export class ReconciliationService {
 
     let added = 0;
     let removed = 0;
+    let scanned = 0;
     for (const token of rooms) {
       try {
         const result = await this.reconcileRoom(token);
@@ -188,18 +189,28 @@ export class ReconciliationService {
       // Advance the cursor even on a per-room failure so one bad room cannot wedge
       // the rotation (mirrors the balance-reconciliation cursor discipline).
       this.cursor = token.sale_address;
+      scanned += 1;
+      // A read that marked the relay down (e.g. it timed out) has a reconnect
+      // scheduled; the next room's read would open a second socket beside it.
+      // Stop like the outage check above and resume after this room next run.
+      if (
+        typeof this.relay.isHealthy === 'function' &&
+        !this.relay.isHealthy()
+      ) {
+        break;
+      }
     }
 
-    if (rooms.length < limit) {
+    if (scanned === rooms.length && rooms.length < limit) {
       // Reached the end of the room set this run → wrap for the next one.
       this.cursor = '';
     }
 
     this.logger.debug(
-      `reconcile batch: ${rooms.length} room(s), +${added} re-add, -${removed} re-remove`,
+      `reconcile batch: ${scanned} room(s), +${added} re-add, -${removed} re-remove`,
     );
     return {
-      roomsScanned: rooms.length,
+      roomsScanned: scanned,
       added,
       removed,
       nextCursor: this.cursor || null,

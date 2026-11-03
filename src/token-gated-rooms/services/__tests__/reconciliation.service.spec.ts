@@ -43,6 +43,7 @@ function token(over: Partial<Token> = {}): Token {
 interface Harness {
   service: ReconciliationService;
   queue: { add: jest.Mock };
+  relay: { isHealthy: jest.Mock; fetchGroupMembers: jest.Mock };
   relayMembers: Set<string>;
   convergeRoomAdmins: jest.Mock;
   markReconciledFor: string[];
@@ -130,6 +131,7 @@ function setup(opts: {
   return {
     service,
     queue,
+    relay,
     relayMembers,
     convergeRoomAdmins,
     markReconciledFor,
@@ -319,6 +321,49 @@ describe('ReconciliationService.reconcileBatch rotation + health', () => {
     // Page < batch → cursor wraps to '' for the next rotation.
     expect(service.getCursor()).toBe('');
     expect(result.nextCursor).toBeNull();
+  });
+
+  it('reconciles the rest of the page after a room fails while the relay stays healthy', async () => {
+    const { service, relay, markReconciledFor } = setup({
+      rows: [],
+      rooms: [
+        token({ sale_address: 'ct_first', nostr_group_id: 'ct_first' }),
+        token({ sale_address: 'ct_second', nostr_group_id: 'ct_second' }),
+      ],
+    });
+    relay.fetchGroupMembers.mockRejectedValueOnce(
+      new Error('Relay membership read failed: closed'),
+    );
+
+    const result = await service.reconcileBatch();
+
+    expect(relay.fetchGroupMembers).toHaveBeenCalledTimes(2);
+    expect(markReconciledFor).toEqual(['ct_second']);
+    expect(result.roomsScanned).toBe(2);
+    expect(service.getCursor()).toBe('');
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('stops once a room read marks the relay down and resumes after that room', async () => {
+    const { service, relay } = setup({
+      rows: [],
+      rooms: [
+        token({ sale_address: 'ct_first', nostr_group_id: 'ct_first' }),
+        token({ sale_address: 'ct_second', nostr_group_id: 'ct_second' }),
+      ],
+    });
+    relay.fetchGroupMembers.mockImplementationOnce(async () => {
+      relay.isHealthy.mockReturnValue(false);
+      throw new Error('Relay membership read timed out');
+    });
+
+    const result = await service.reconcileBatch();
+
+    expect(relay.fetchGroupMembers).toHaveBeenCalledTimes(1);
+    expect(result.roomsScanned).toBe(1);
+    // A short page that was cut off does not wrap: ct_second goes next run.
+    expect(service.getCursor()).toBe('ct_first');
+    expect(result.nextCursor).toBe('ct_first');
   });
 });
 

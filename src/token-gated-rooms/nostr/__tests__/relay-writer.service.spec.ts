@@ -153,6 +153,22 @@ describe('RelayWriterService against a NIP-42 relay', () => {
       );
       expect((writer as any).relay.openSubs.size).toBe(0);
     }, 15_000);
+
+    it('reconnects after a read times out, like after a publish timeout', async () => {
+      await start({ onReq: () => undefined });
+      await healthy();
+
+      await expect(writer.fetchGroupMembers('ct_room')).rejects.toThrow(
+        'timed out',
+      );
+      expect(writer.isHealthy()).toBe(false);
+      await waitForRelayState(
+        async () => relay.authenticated,
+        (n) => n === 2,
+      );
+      await healthy();
+      expect(relay.connections).toBe(2);
+    }, 15_000);
   });
 
   it('reconnects once after the relay drops the socket', async () => {

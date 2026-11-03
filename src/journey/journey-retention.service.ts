@@ -19,7 +19,7 @@ export class JourneyRetentionService {
         [JOURNEY_LIMITS.RETENTION_DAYS],
       );
     } catch (error) {
-      this.logger.warn(
+      this.logger.error(
         `Journey retention purge failed (code ${(error as { code?: string })?.code ?? 'unknown'})`,
       );
     }
