@@ -149,6 +149,8 @@ describe('journey page sanitising', () => {
       'an oracle id',
       '/o/ok_2bJvQzKR7KLA9kSbh3aSBiwjdrWMN4bRmRqq1Gc87k9jcmkXjF',
     ],
+    ['an AENS name', '/users/alice.chain'],
+    ['an AENS name before more path', '/users/Alice.Chain/posts'],
     ['a 0x hex string', '/eth/0x52908400098527886E0F7030069857D2E4169EE7'],
     ['a query string', '/users?address=x'],
     ['a hash fragment', '/users#me'],
