@@ -58,7 +58,6 @@ export type PageFlowRow = {
 
 export type PageFlowReport = {
   range: { start_date: string; end_date: string };
-  eventsInRange: number;
   visitGapMinutes: number;
   pages: PageFlowRow[];
 };
@@ -159,7 +158,9 @@ export function buildFunnelSteps(
  * step N-1. Taking the earliest match at each step is what maximises how far a
  * browser gets, so this is exact, not a sample: there is no row cap, and the
  * work is bounded by the (event, occurred_at) and (anon_id, occurred_at)
- * indexes and the 180-day range limit.
+ * indexes and the 180-day range limit. Later steps repeat `>= $1` although
+ * `> p.t` implies it, so an index scan on (event, occurred_at) starts at the
+ * range instead of reading all retained rows of that event.
  */
 export function buildFunnelSql(stepCount: number): string {
   const ctes: string[] = [
@@ -178,6 +179,7 @@ export function buildFunnelSql(stepCount: number): string {
         ON e.anon_id = p.anon_id
        AND e.event = $${i + 2}
        AND e.occurred_at > p.t
+       AND e.occurred_at >= $1
        AND e.occurred_at < $2
       GROUP BY p.anon_id
     )`);
@@ -226,7 +228,9 @@ export const PAGE_FLOW_SQL = `
     ORDER BY exits DESC, views DESC, page
     LIMIT $4
   ),
-  next_ranked AS (
+  -- MATERIALIZED: inlined, the per-page subquery below would rescan every
+  -- page view in the range once per page.
+  next_ranked AS MATERIALIZED (
     SELECT page, next_in_visit AS next_page, COUNT(*)::int AS count,
       ROW_NUMBER() OVER (PARTITION BY page ORDER BY COUNT(*) DESC, next_in_visit) AS rn
     FROM flagged
@@ -293,18 +297,14 @@ export class JourneyQueryService {
   }
 
   async getPageFlow(range: JourneyRange): Promise<PageFlowReport> {
-    const [rows, eventsInRange] = await Promise.all([
-      this.dataSource.query(PAGE_FLOW_SQL, [
-        range.from,
-        range.to,
-        JOURNEY_LIMITS.VISIT_GAP_MINUTES,
-        PAGE_FLOW_LIMIT,
-      ]),
-      this.countEvents(range),
+    const rows = await this.dataSource.query(PAGE_FLOW_SQL, [
+      range.from,
+      range.to,
+      JOURNEY_LIMITS.VISIT_GAP_MINUTES,
+      PAGE_FLOW_LIMIT,
     ]);
     return {
       range: { start_date: range.start_date, end_date: range.end_date },
-      eventsInRange,
       visitGapMinutes: JOURNEY_LIMITS.VISIT_GAP_MINUTES,
       pages: (rows as any[]).map((row) => {
         const views = Number(row.views);

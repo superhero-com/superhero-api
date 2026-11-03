@@ -1,6 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { JOURNEY_FUNNELS } from './journey.constants';
-import { buildFunnelSql, buildFunnelSteps } from './journey-query.service';
+import {
+  buildFunnelSql,
+  buildFunnelSteps,
+  PAGE_FLOW_SQL,
+} from './journey-query.service';
 import { resolveJourneyRange } from './journey-range';
 
 describe('resolveJourneyRange', () => {
@@ -122,5 +126,15 @@ describe('buildFunnelSql', () => {
     expect(sql).not.toContain('s4 AS');
     expect(sql).toContain('e.occurred_at > p.t');
     expect(sql).toContain('e.event = $5');
+  });
+
+  it('bounds every later step by the range start, so its index scan starts there', () => {
+    expect(buildFunnelSql(3).match(/e\.occurred_at >= \$1/g)).toHaveLength(2);
+  });
+});
+
+describe('PAGE_FLOW_SQL', () => {
+  it('materialises next_ranked, so the per-page lookup does not rescan the range', () => {
+    expect(PAGE_FLOW_SQL).toContain('next_ranked AS MATERIALIZED');
   });
 });

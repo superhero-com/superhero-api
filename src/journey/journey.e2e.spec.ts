@@ -491,7 +491,6 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       expect(byPage['/users/:address']).toMatchObject({ views: 1, exits: 1 });
       // Sorted by exits, most first.
       expect(report.pages[0].page).toBe('/trends');
-      expect(report.eventsInRange).toBe(7);
     });
   });
 
