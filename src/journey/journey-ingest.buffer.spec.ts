@@ -111,17 +111,17 @@ describe('JourneyIngestBuffer', () => {
       .mockResolvedValue(undefined);
     const { repository } = makeRepository(execute);
     const buffer = new JourneyIngestBuffer(repository);
-    const warn = jest
-      .spyOn((buffer as any).logger, 'warn')
+    const error = jest
+      .spyOn((buffer as any).logger, 'error')
       .mockImplementation(() => undefined);
 
     buffer.push(makeRows(2));
     await expect(buffer.flush()).resolves.toBeUndefined();
     buffer.push(makeRows(2));
     await buffer.flush();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0][0])).toContain('22P02');
-    expect(String(warn.mock.calls[0][0])).not.toContain('secret');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0][0])).toContain('22P02');
+    expect(String(error.mock.calls[0][0])).not.toContain('secret');
     expect(buffer.droppedCount).toBe(4);
     expect(buffer.size).toBe(0);
 

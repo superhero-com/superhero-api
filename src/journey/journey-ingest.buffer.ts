@@ -117,7 +117,7 @@ export class JourneyIngestBuffer implements OnModuleInit, OnModuleDestroy {
         if (!this.failing) {
           this.failing = true;
           const code = (error as { code?: string })?.code ?? 'unknown';
-          this.logger.warn(
+          this.logger.error(
             `Journey event insert failed (code ${code}); dropping ${batch.length} rows`,
           );
         }
