@@ -29,6 +29,8 @@ export type ShortsRateGroup = keyof typeof SHORTS_RATE_GROUPS;
 export interface ShortsHttpPolicy {
   group: ShortsRateGroup;
   private?: boolean;
+  /** Use the validated Like signature instead of a reusable creator session. */
+  signedLike?: boolean;
   /** Reserve the parser's maximum media bytes before accepting any body. */
   bytes?: number;
 }
@@ -82,7 +84,7 @@ export const SHORTS_HTTP_POLICY: Record<string, ShortsHttpPolicy> = {
   publish: { group: 'publish', private: true },
   receipt: { group: 'receipt', private: true },
   walletTransaction: { group: 'transactionStatus' },
-  sponsorLike: { group: 'sponsorLike', private: true },
+  sponsorLike: { group: 'sponsorLike', private: true, signedLike: true },
   sponsoredLikeStatus: { group: 'transactionStatus' },
   view: { group: 'measurement' },
   report: { group: 'report' },

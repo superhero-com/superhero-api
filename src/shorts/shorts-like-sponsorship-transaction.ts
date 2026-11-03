@@ -107,7 +107,7 @@ const signatureMatches = (
 export function likeInnerTransaction(
   raw: string,
   expected: {
-    actor: string;
+    actor?: string;
     contract: string;
     network: string;
     policy: LikeSponsorshipPolicy;
@@ -120,7 +120,8 @@ export function likeInnerTransaction(
       expected.network !== 'ae_uat' ||
       typeof raw !== 'string' ||
       raw.length > 8192 ||
-      !isAddressValid(expected.actor, Encoding.AccountAddress) ||
+      (expected.actor !== undefined &&
+        !isAddressValid(expected.actor, Encoding.AccountAddress)) ||
       !isAddressValid(expected.contract, Encoding.ContractAddress)
     )
       throw new Error();
@@ -131,7 +132,8 @@ export function likeInnerTransaction(
       call.tag !== Tag.ContractCallTx ||
       call.version !== 1 ||
       call.abiVersion !== 3 ||
-      call.callerId !== expected.actor ||
+      !isAddressValid(call.callerId, Encoding.AccountAddress) ||
+      (expected.actor !== undefined && call.callerId !== expected.actor) ||
       call.contractId !== expected.contract ||
       BigInt(call.amount) !== 0n ||
       !Number.isSafeInteger(call.nonce) ||

@@ -12,6 +12,7 @@ import { ShortsAuthService } from './shorts-auth.service';
 import { ShortsRateService } from './shorts-rate.service';
 import { SHORTS_HTTP_POLICY } from './shorts-rate-policy';
 import { ShortsMeasurementMonitorService } from './shorts-measurement-monitor.service';
+import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
 
 @Injectable()
 export class ShortsRateGuard implements CanActivate {
@@ -19,6 +20,7 @@ export class ShortsRateGuard implements CanActivate {
     private readonly auth: ShortsAuthService,
     @Optional() private readonly rates?: ShortsRateService,
     @Optional() private readonly measurements?: ShortsMeasurementMonitorService,
+    @Optional() private readonly sponsorships?: ShortsLikeSponsorshipService,
   ) {}
   async canActivate(context: ExecutionContext) {
     // The explicit loopback demo has no Redis dependency. A hosted session
@@ -41,9 +43,15 @@ export class ShortsRateGuard implements CanActivate {
       const ip = this.rates.config.client(request);
       await this.rates.request(policy, ip);
       if (policy.private) {
-        const actor = await this.auth.authenticate(
-          request.headers.authorization,
-        );
+        if (policy.signedLike && !this.sponsorships)
+          throw new ServiceUnavailableException(
+            'Like sponsorship is unavailable',
+          );
+        // IP/global admission runs before signature work. Wallet budgets are
+        // charged only to the cryptographically verified caller, never body.address.
+        const actor = policy.signedLike
+          ? this.sponsorships.authorize(request.body).actor
+          : await this.auth.authenticate(request.headers.authorization);
         if (policy.group === 'operator')
           await this.auth.operator(request.headers.authorization);
         if (policy.bytes) {

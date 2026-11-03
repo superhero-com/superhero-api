@@ -55,7 +55,14 @@ export class ShortsLikeSponsorshipService implements OnApplicationBootstrap {
       return { enabled: false };
     }
     const { gasLimit, gasPrice, maxFee, ttlBlocks } = this.config.policy;
-    return { enabled: true, gasLimit, gasPrice, maxFee, ttlBlocks };
+    return {
+      enabled: true,
+      authorization: 'signed-like' as const,
+      gasLimit,
+      gasPrice,
+      maxFee,
+      ttlBlocks,
+    };
   }
   private binding() {
     const c = this.config;
@@ -71,13 +78,13 @@ export class ShortsLikeSponsorshipService implements OnApplicationBootstrap {
       );
     }
   }
-  async enqueue(
-    actor: string,
-    request: { id: string; videoId: string; signedInnerTx: string },
-  ) {
+  /** Proves authority for this exact Like only; never creates a creator session. */
+  authorize(request: { id: string; videoId: string; signedInnerTx: string }) {
     this.binding();
     if (
       !request ||
+      typeof request.videoId !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(request.videoId) ||
       typeof request.id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         request.id,
@@ -89,13 +96,21 @@ export class ShortsLikeSponsorshipService implements OnApplicationBootstrap {
     }
     const c = this.config;
     // Validate the expensive/network-independent portion before asking the node.
-    const inner = likeInnerTransaction(request.signedInnerTx, {
-      actor,
+    return likeInnerTransaction(request.signedInnerTx, {
       contract: c.release.contract,
       network: c.release.network,
       policy: c.policy,
       videoId: request.videoId,
     });
+  }
+  async enqueue(request: {
+    id: string;
+    videoId: string;
+    signedInnerTx: string;
+  }) {
+    const inner = this.authorize(request);
+    const { actor } = inner;
+    const c = this.config;
     // Exact retries remain idempotent even after the original TTL passes.
     const existing = await this.repository.call('status', {
       actor,

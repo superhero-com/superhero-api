@@ -68,15 +68,11 @@ export class ShortsController {
   @Header('Cache-Control', 'no-store')
   @HttpCode(202)
   async sponsorLike(
-    @Headers('authorization') authorization: string,
     @Body() body: { id: string; videoId: string; signedInnerTx: string },
   ) {
     if (!this.likeSponsorships)
       throw new ServiceUnavailableException('Like sponsorship is unavailable');
-    return this.likeSponsorships.enqueue(
-      await this.auth.authenticate(authorization),
-      body,
-    );
+    return this.likeSponsorships.enqueue(body);
   }
   @Get('like-sponsorships/:innerHash')
   @Header('Cache-Control', 'no-store')

@@ -12,6 +12,8 @@ const { ShortsWalletTransactionsService } = require('./shorts-wallet-transaction
 const { likeSponsorConfig } = require('./shorts-like-sponsorship.config');
 const { ShortsLikeSponsorshipService } = require('./shorts-like-sponsorship.service');
 const { SHORTS_HTTP_POLICY } = require('./shorts-rate-policy');
+const { ShortsRateGuard } = require('./shorts-rate.guard');
+const { ShortsController } = require('./shorts.controller');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const policy = likeSponsorshipPolicy({
   gasLimit: 100000, gasPrice: '1000000000', maxFee: '1000000000000000',
@@ -131,6 +133,7 @@ test('default-disabled sponsorship has no database/key requirement, and HTTP adm
   await assert.rejects(likeSponsorConfig(false, { SHORTS_LIKE_SPONSOR_KEY_FILE: '/any/key' }), /isolated signer/);
   await assert.rejects(likeSponsorConfig(true, {}), /disabled/);
   assert.equal(SHORTS_HTTP_POLICY.sponsorLike.private, true);
+  assert.equal(SHORTS_HTTP_POLICY.sponsorLike.signedLike, true);
   assert.equal(SHORTS_HTTP_POLICY.sponsoredLikeStatus.group, 'transactionStatus');
 });
 
@@ -431,4 +434,65 @@ test('public-testnet gas price is supported within a bounded combined sponsor re
   assert.equal(sponsoredLikeTransaction(outer, inner, { ...f.expected, policy: livePolicy }).cost, '21030000000000000');
   assert.throws(() => likeSponsorshipPolicy({ ...livePolicy, gasPrice: '100000000001' }));
   assert.throws(() => likeSponsorshipPolicy({ ...livePolicy, maxFee: '10000000000000001' }));
+});
+
+
+test('signed Like proves only its own caller and needs no Studio session', async () => {
+  const f = await fixture();
+  const { actor: _actor, ...expected } = f.expected;
+  assert.equal(likeInnerTransaction(f.inner, expected).actor, f.actor.address);
+  const call = unpackTx(f.unsigned);
+  for (const raw of [
+    await f.sign(buildTx({ ...call, callerId: f.payer.address })),
+    await f.sign(f.unsigned, { innerTx: false }),
+    await f.sign(f.unsigned, { networkId: 'ae_mainnet' }),
+    await f.sign(buildTx({ ...call, amount: 1 })),
+    await f.sign(buildTx({ ...call, callData: coder.encodeCall('Shorts', 'claim', []) })),
+    f.outer,
+  ]) assert.throws(() => likeInnerTransaction(raw, expected));
+
+  const release = { network: 'ae_uat', contract: f.contract };
+  const body = { id: 'e424b2e1-67b4-4540-95ad-1f21152f0bc8', videoId: 'video-id', signedInnerTx: f.inner, address: f.payer.address };
+  const queued = [];
+  // Existing signed intent exercises retry admission without requiring node IO.
+  const repository = { call: async (operation, payload) => {
+    if (operation === 'enqueue') { queued.push(payload); return; }
+    assert.equal(operation, 'status');
+    return { actor: f.actor.address, videoId: 'video-id', intent: { nonce: 1, ttl: 110, version: '3' }, status: 'queued' };
+  } };
+  const service = new ShortsLikeSponsorshipService({ enabled: true, release, policy }, repository, { release, state: { contract: f.contract } }, {});
+  const calls = [];
+  const auth = { shared: true, authenticate: async () => { calls.push('session'); throw new Error('Studio session required'); } };
+  const rates = { config: { client: () => 'fixture-ip' }, request: async () => calls.push('ip'), actor: async (_policy, ip, actor) => {
+    assert.equal(ip, 'fixture-ip'); assert.equal(actor, f.actor.address); calls.push('actor');
+  } };
+  const headers = {};
+  const req = { headers: {}, body };
+  const context = { getHandler: () => ({ name: 'sponsorLike' }), switchToHttp: () => ({ getRequest: () => req, getResponse: () => ({ setHeader: (k,v) => { headers[k] = v; } }) }) };
+  const guard = new ShortsRateGuard(auth, rates, undefined, service);
+  assert.equal(await guard.canActivate(context), true);
+  assert.deepEqual(calls, ['ip', 'actor']);
+  const controller = new ShortsController({}, auth, {}, undefined, undefined, undefined, undefined, undefined, undefined, service);
+  const result = await controller.sponsorLike(body);
+  assert.equal(result.address, f.actor.address);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].actor, f.actor.address);
+  assert.equal(queued[0].rawInner, f.inner);
+  assert.equal(result.token, undefined);
+  assert.equal(result.status, 'unknown');
+  assert.equal(result.confirmations, 0);
+
+  for (const change of [{ videoId: 'other' }, { videoId: undefined }, { id: 'invalid' }, { signedInnerTx: 'tx_invalid' }, { signedInnerTx: await f.sign(buildTx({ ...call, callerId: f.payer.address })) }]) {
+    calls.length = 0; req.body = { ...body, ...change };
+    await assert.rejects(guard.canActivate(context));
+    assert.deepEqual(calls, ['ip']);
+    await assert.rejects(controller.sponsorLike(req.body));
+    assert.equal(queued.length, 1);
+  }
+  req.body = body;
+  await assert.rejects(new ShortsRateGuard(auth, rates).canActivate(context), { status: 503 });
+  await assert.rejects(new ShortsRateGuard(auth).canActivate(context), { status: 503 });
+  await assert.rejects(guard.canActivate({ ...context, getHandler: () => ({ name: 'dashboard' }) }), /Studio session required/);
+  await assert.rejects(new ShortsRateGuard(auth, { ...rates, request: async () => { throw new Error('IP limit'); } }, undefined, service).canActivate(context), /IP limit/);
+  await assert.rejects(new ShortsRateGuard(auth, { ...rates, actor: async () => { throw new Error('Wallet limit'); } }, undefined, service).canActivate(context), /Wallet limit/);
 });
