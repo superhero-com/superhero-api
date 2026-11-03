@@ -58,9 +58,11 @@ describe('JourneyIngestBuffer', () => {
     buffer.push(makeRows(JOURNEY_LIMITS.FLUSH_AT_ROWS - 1));
     expect(execute).not.toHaveBeenCalled();
     buffer.push(makeRows(1));
-    await buffer.flush();
+    // The 500th row starts the insert from inside push(), before any flush call.
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute.mock.calls[0][0]).toHaveLength(JOURNEY_LIMITS.FLUSH_AT_ROWS);
+    await buffer.flush();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('flushes on the 5 s timer and on module destroy', async () => {

@@ -14,11 +14,12 @@ describe('resolveJourneyRange', () => {
     expect(range.to.toISOString()).toBe('2026-10-31T00:00:00.000Z');
   });
 
-  it('caps the range at 180 days', () => {
+  it('caps the range at 180 days by moving the start, not the end', () => {
     const range = resolveJourneyRange('2025-01-01', '2026-10-30', now);
-    const days =
-      (range.to.getTime() - range.from.getTime()) / (24 * 3600 * 1000);
-    expect(days).toBe(180);
+    expect(range.start_date).toBe('2026-05-04');
+    expect(range.end_date).toBe('2026-10-30');
+    expect(range.from.toISOString()).toBe('2026-05-04T00:00:00.000Z');
+    expect(range.to.toISOString()).toBe('2026-10-31T00:00:00.000Z');
   });
 
   it.each([
