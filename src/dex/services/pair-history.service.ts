@@ -1,6 +1,6 @@
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
-import { CURRENCIES } from '@/configs';
+import { PRICE_CURRENCY_CODES } from '@/configs';
 import { HistoricalDataDto } from '@/transactions/dto/historical-data.dto';
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
 import { BadRequestException, Injectable } from '@nestjs/common';
@@ -16,11 +16,6 @@ import { isWae, priceScale as priceScaleOf } from '../utils/dex-math';
 import { clampLimit, clampPage } from '@/utils/pagination';
 
 type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
-
-/** Fiat currencies we can convert AE-denominated prices into. */
-const SUPPORTED_CURRENCIES = new Set<string>(
-  CURRENCIES.map(({ code }) => code),
-);
 
 export interface IGetPaginatedHistoricalDataProps {
   pair: Pair;
@@ -107,7 +102,7 @@ export class PairHistoryService {
           `Cannot convert price to ${requestedCurrency}: this pool is not quoted against AE (WAE).`,
         );
       }
-      if (!SUPPORTED_CURRENCIES.has(requestedCurrency)) {
+      if (!PRICE_CURRENCY_CODES.includes(requestedCurrency)) {
         throw new BadRequestException(
           `Unsupported convertTo currency: ${convertTo}`,
         );

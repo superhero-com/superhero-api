@@ -1,6 +1,7 @@
-import { TX_FUNCTIONS } from '@/configs';
+import { PRICE_CURRENCY_CODES, TX_FUNCTIONS } from '@/configs';
 import { Token } from '@/tokens/entities/token.entity';
-import { Injectable, Logger } from '@nestjs/common';
+import { clampLimit, clampPage } from '@/utils/pagination';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import BigNumber from 'bignumber.js';
 import type { Moment } from 'moment';
@@ -39,6 +40,28 @@ export interface ITransactionPreview {
   timeframe: string;
 }
 
+function parseConvertTo(convertTo: unknown): string {
+  const currency = String(convertTo || 'ae').toLowerCase();
+  if (!PRICE_CURRENCY_CODES.includes(currency)) {
+    throw new BadRequestException(
+      `Unsupported convertTo currency: ${convertTo}`,
+    );
+  }
+  return currency;
+}
+
+// 0 divides by zero in the candle SQL and a negative value never ends the
+// gap-filling loop in processAggregatedHistoricalData.
+function parseInterval(interval: unknown): number {
+  const seconds = Number(interval);
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    throw new BadRequestException(
+      'interval must be a positive whole number of seconds',
+    );
+  }
+  return seconds;
+}
+
 @Injectable()
 export class TransactionHistoryService {
   private readonly logger = new Logger(TransactionHistoryService.name);
@@ -65,33 +88,36 @@ export class TransactionHistoryService {
   async getPaginatedHistoricalData(
     props: IGetPaginatedHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
-    const { token, interval, page, limit, convertTo = 'ae' } = props;
+    const { token } = props;
+    const convertTo = parseConvertTo(props.convertTo);
+    const interval = parseInterval(props.interval);
+    const page = clampPage(props.page);
+    const limit = clampLimit(props.limit);
     const offset = (page - 1) * limit;
 
-    const queryRunner = this.dataSource.createQueryRunner();
     //"MAX(CAST(transactions.buy_price->>'ae' AS FLOAT)) AS max_buy_price",
-    const rawResults = await queryRunner.query(
+    const rawResults = await this.dataSource.query(
       `
         WITH transactions_in_intervals AS (
           SELECT 
             t.created_at,
-            CAST(NULLIF(t.buy_price->>'${convertTo}', 'NaN') AS decimal) as price,
+            CAST(NULLIF(t.buy_price->>$3, 'NaN') AS decimal) as price,
             t.volume,
-            (t.market_cap->>'${convertTo}') as market_cap,
+            (t.market_cap->>$3) as market_cap,
             t.total_supply,
             to_timestamp(
               floor(extract(epoch from t.created_at) / $2) * $2
             ) as interval_start
           FROM transactions t
           WHERE t.sale_address = $1
-            AND t.buy_price->>'${convertTo}' != 'NaN'
+            AND t.buy_price->>$3 != 'NaN'
         ),
         grouped_intervals AS (
           SELECT DISTINCT interval_start
           FROM transactions_in_intervals
           ORDER BY interval_start DESC
-          OFFSET ${offset}
-          LIMIT ${limit}
+          OFFSET $4
+          LIMIT $5
         ),
         interval_stats AS (
           SELECT 
@@ -136,10 +162,8 @@ export class TransactionHistoryService {
         GROUP BY interval_start
         ORDER BY interval_start ASC
       `,
-      [token.sale_address, interval],
+      [token.sale_address, interval, convertTo, offset, limit],
     );
-
-    await queryRunner.release();
 
     // Modify the mapping to handle the previous close price correctly
     let lastClose = null;
@@ -170,8 +194,13 @@ export class TransactionHistoryService {
   private static readonly MAX_HISTORICAL_ROWS = 10_000;
 
   async getHistoricalData(
-    props: IGetHistoricalDataProps,
+    rawProps: IGetHistoricalDataProps,
   ): Promise<HistoricalDataDto[]> {
+    const props: IGetHistoricalDataProps = {
+      ...rawProps,
+      convertTo: parseConvertTo(rawProps.convertTo),
+      interval: parseInterval(rawProps.interval),
+    };
     const { startDate, endDate } = props;
 
     const data = await this.transactionsRepository

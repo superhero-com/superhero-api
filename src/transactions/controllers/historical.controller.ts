@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
+import { PRICE_CURRENCY_CODES } from '@/configs';
 import { TokensService } from '@/tokens/tokens.service';
 import {
   buildSparklineSvg,
@@ -46,7 +47,7 @@ export class HistoricalController {
   })
   @ApiQuery({
     name: 'convertTo',
-    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    enum: PRICE_CURRENCY_CODES,
     required: false,
   })
   @ApiQuery({
@@ -98,7 +99,7 @@ export class HistoricalController {
   })
   @ApiQuery({
     name: 'convertTo',
-    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    enum: PRICE_CURRENCY_CODES,
     required: false,
   })
   @ApiParam({
