@@ -10,5 +10,4 @@ export const defaultBullBoardConfig = {
     remove: [],
     replace: [],
   },
-  guard: undefined,
 };

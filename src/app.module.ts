@@ -108,7 +108,7 @@ import { FeedModule } from './feed/feed.module';
     // /analytics/:something route in Express's registration order.
     JourneyModule,
     AnalyticsModule,
-    BullBoardModule,
+    BullBoardModule.forRoot(),
     AffiliationModule,
     AccountModule,
     TrendingTagsModule,
