@@ -276,10 +276,15 @@ export class RelayWriterService
         else resolve(members);
       };
 
-      const timer = setTimeout(
-        () => finish(new Error('Relay membership read timed out')),
-        this.config.publishAckTimeoutMs,
-      );
+      const timer = setTimeout(() => {
+        // Same as a publish ACK timeout: the socket may be dead without ever
+        // closing, and only a reconnect finds out.
+        if (this.relay === relay) {
+          this.markUnhealthy('membership read timed out');
+          this.scheduleReconnect();
+        }
+        finish(new Error('Relay membership read timed out'));
+      }, this.config.publishAckTimeoutMs);
       timer.unref?.();
 
       const sub = relay.subscribe(
