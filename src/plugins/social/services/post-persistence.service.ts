@@ -5,6 +5,7 @@ import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Topic } from '@/social/entities/topic.entity';
 import { detectPostLanguage } from '@/social/utils/post-language.util';
+import { refreshThreadCommentCounts } from '@/social/utils/thread-comment-counts.util';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import {
   IPostContract,
@@ -219,23 +220,17 @@ export class PostPersistenceService {
   }
 
   /**
-   * Updates the comment count for a parent post
+   * Updates the comment count for a parent post and every post above it
    */
   async updatePostCommentCount(parentPostId: string): Promise<void> {
     try {
-      const count = await this.postRepository
-        .createQueryBuilder('post')
-        .where('post.post_id = :parentPostId', { parentPostId })
-        .getCount();
-
-      await this.postRepository.update(
-        { id: parentPostId },
-        { total_comments: count },
+      await refreshThreadCommentCounts(
+        this.postRepository.manager,
+        parentPostId,
       );
 
-      this.logger.debug('Updated comment count for parent post', {
+      this.logger.debug('Updated comment counts for parent post thread', {
         parentPostId,
-        commentCount: count,
       });
     } catch (error) {
       const errorMessage =
