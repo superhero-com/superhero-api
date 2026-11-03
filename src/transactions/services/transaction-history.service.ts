@@ -147,7 +147,7 @@ export class TransactionHistoryService {
         )
         SELECT 
           interval_start as "timeOpen",
-          interval_start + (interval '$2 seconds') as "timeClose",
+          interval_start + make_interval(secs => $2) as "timeClose",
           MIN(low) as low,
           MAX(high) as high,
           MIN(open) as open,

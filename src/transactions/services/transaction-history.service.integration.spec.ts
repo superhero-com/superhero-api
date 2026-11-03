@@ -126,6 +126,15 @@ d('TransactionHistoryService.getPaginatedHistoricalData (integration)', () => {
     ]);
   });
 
+  it('closes each candle one interval after it opens', async () => {
+    const candles = await fetchHistory({ interval: 1800 });
+
+    expect(candles).toHaveLength(3);
+    for (const { timeOpen, timeClose } of candles) {
+      expect(timeClose.getTime() - timeOpen.getTime()).toBe(1800 * 1000);
+    }
+  });
+
   it('pages from the newest interval', async () => {
     const [latest] = quotes(await fetchHistory({ limit: 1 }));
     const [previous] = quotes(await fetchHistory({ page: 2, limit: 1 }));
