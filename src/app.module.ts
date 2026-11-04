@@ -17,7 +17,7 @@ import { QUERY_LIMIT_OPTIONS } from './api-core/graphql/query-limits';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
-import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
+import { APP_DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -84,7 +84,7 @@ import { FeedModule } from './feed/feed.module';
       },
     ),
     TypeOrmModule.forRoot({
-      ...DATABASE_CONFIG,
+      ...APP_DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
     }),
     TypeOrmModule.forFeature([SyncState]),

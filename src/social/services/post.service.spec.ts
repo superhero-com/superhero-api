@@ -512,15 +512,16 @@ describe('PostService', () => {
       const statements = manager.query.mock.calls.map(([sql]) =>
         sql.replace(/\s+/g, ' ').trim(),
       );
-      expect(statements.slice(0, 2)).toEqual([
+      expect(statements.slice(0, 3)).toEqual([
+        'SET LOCAL statement_timeout = 0',
         'UPDATE posts SET version = 8 WHERE version = 6',
         'UPDATE topics SET version = 8 WHERE version = 6',
       ]);
-      expect(statements.slice(2).every((sql) => sql.startsWith('DELETE'))).toBe(
+      expect(statements.slice(3).every((sql) => sql.startsWith('DELETE'))).toBe(
         true,
       );
-      expect(statements).toHaveLength(6);
-      for (const [, params] of manager.query.mock.calls.slice(2)) {
+      expect(statements).toHaveLength(7);
+      for (const [, params] of manager.query.mock.calls.slice(3)) {
         expect(params).toEqual([POST_SYNC_VERSION]);
       }
     });
