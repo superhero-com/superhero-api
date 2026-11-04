@@ -11,6 +11,7 @@ import { ChallengeAnalyticsService } from '../services/challenge-analytics.servi
 import { isAeAccountAddress } from '@/common/validation/request-validation';
 
 const MAX_ADDRESSES = 10;
+const MAX_RANGE_DAYS = 366;
 
 @Controller('analytics')
 @ApiTags('Analytics')
@@ -26,8 +27,18 @@ export class ChallengeAnalyticsController {
     required: true,
     description: `Comma-separated list of account addresses (max ${MAX_ADDRESSES})`,
   })
-  @ApiQuery({ name: 'start_date', type: 'string', required: false })
-  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiQuery({
+    name: 'start_date',
+    type: 'string',
+    required: false,
+    description: 'First day (YYYY-MM-DD), default 14 days ago',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    type: 'string',
+    required: false,
+    description: `Last day (YYYY-MM-DD), default today; the range covers at most ${MAX_RANGE_DAYS} days`,
+  })
   @ApiOperation({
     operationId: 'getChallengeAnalytics',
   })
@@ -65,17 +76,34 @@ export class ChallengeAnalyticsController {
 
     const startDate = moment(
       start_date ?? moment().subtract(14, 'day').format('YYYY-MM-DD'),
-    ).toDate();
-    const endDate = moment(end_date ?? moment().format('YYYY-MM-DD')).toDate();
+    );
+    const endDate = moment(end_date ?? moment().format('YYYY-MM-DD'));
 
-    if (startDate > endDate) {
+    if (!startDate.isValid() || !endDate.isValid()) {
+      throw new BadRequestException(
+        'start_date and end_date must be valid dates',
+      );
+    }
+
+    if (startDate.isAfter(endDate)) {
       throw new BadRequestException('Start date must be before end date');
+    }
+
+    // The response holds one row per address per day, built in memory.
+    const days =
+      moment(endDate)
+        .startOf('day')
+        .diff(moment(startDate).startOf('day'), 'days') + 1;
+    if (days > MAX_RANGE_DAYS) {
+      throw new BadRequestException(
+        `Date range must be at most ${MAX_RANGE_DAYS} days (got ${days})`,
+      );
     }
 
     const rows = await this.challengeAnalyticsService.getChallengeAnalytics(
       uniqueAddresses,
-      startDate,
-      endDate,
+      startDate.toDate(),
+      endDate.toDate(),
     );
 
     return rows;
