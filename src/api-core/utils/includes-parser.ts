@@ -35,13 +35,15 @@ export function parseIncludes(includesString: string): string[][] {
  * @returns Tree structure, e.g., { txs: { block: {} }, keyBlock: {} }
  */
 export function buildIncludesTree(includes: string[][]): IncludesTree {
-  const tree: IncludesTree = {};
+  // Segments come from the query string: on plain objects, `__proto__.x`
+  // would write to Object.prototype.
+  const tree: IncludesTree = Object.create(null);
 
   for (const path of includes) {
     let current = tree;
     for (const segment of path) {
       if (!current[segment]) {
-        current[segment] = {};
+        current[segment] = Object.create(null);
       }
       current = current[segment];
     }
