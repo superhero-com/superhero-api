@@ -14,7 +14,7 @@ import {
 import { fetchJson, resolveMiddlewareNextUrl } from '@/utils/common';
 import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
-import { Encoded } from '@aeternity/aepp-sdk';
+import { Contract, ContractMethodsBase, Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
@@ -38,7 +38,7 @@ import { tryLockTokenMaintenance } from './utils/token-maintenance-lock.util';
 
 type TokenContracts = {
   instance?: TokenSale;
-  tokenContractInstance?: any;
+  tokenContractInstance?: Contract<ContractMethodsBase>;
   token?: Token;
   lastUsedAt?: number;
 };
@@ -490,7 +490,7 @@ export class TokensService {
     ) {
       try {
         const { instance } = await initTokenSale(
-          this.aeSdkService.sdk as any,
+          this.aeSdkService.sdk,
           saleAddress,
         );
         const tokenContractInstance = await instance?.tokenContractInstance();
@@ -1283,7 +1283,7 @@ export class TokensService {
           return [];
         }
 
-        const holderBalances = await this.withTimeout<any>(
+        const holderBalances = await this.withTimeout(
           tokenContractInstance.balances(),
           this.contractCallTimeoutMs,
           `balances() timeout for ${aex9Address}`,

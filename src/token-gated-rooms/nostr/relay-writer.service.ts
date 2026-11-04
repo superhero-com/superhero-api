@@ -276,10 +276,15 @@ export class RelayWriterService
         else resolve(members);
       };
 
-      const timer = setTimeout(
-        () => finish(new Error('Relay membership read timed out')),
-        this.config.publishAckTimeoutMs,
-      );
+      const timer = setTimeout(() => {
+        // Same as a publish ACK timeout: the socket may be dead without ever
+        // closing, and only a reconnect finds out.
+        if (this.relay === relay) {
+          this.markUnhealthy('membership read timed out');
+          this.scheduleReconnect();
+        }
+        finish(new Error('Relay membership read timed out'));
+      }, this.config.publishAckTimeoutMs);
       timer.unref?.();
 
       const sub = relay.subscribe(
@@ -426,12 +431,21 @@ export class RelayWriterService
     if (this.shuttingDown) {
       return;
     }
+    const previous = this.relay;
+    this.relay = undefined;
+    if (previous) {
+      // nostr-tools fires onclose even for our own close(); left attached, it
+      // would schedule another reconnect after every reconnect.
+      previous.onclose = null;
+    }
+    // That also skips onclose's markUnhealthy; without it the new socket
+    // would count as healthy before it authenticates.
+    this.markUnhealthy('reconnecting');
     try {
-      this.relay?.close();
+      previous?.close();
     } catch {
       // ignore
     }
-    this.relay = undefined;
     try {
       await this.ensureConnected();
       this.logger.log('relay reconnected');

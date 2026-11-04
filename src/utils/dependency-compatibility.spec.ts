@@ -17,6 +17,30 @@ import { v4, v5, validate } from 'uuid';
 import * as argon2 from 'argon2';
 import qs from 'qs';
 import uri from 'fast-uri';
+import { Test } from '@nestjs/testing';
+import {
+  Args,
+  Field,
+  GraphQLModule,
+  ObjectType,
+  Query,
+  Resolver,
+} from '@nestjs/graphql';
+import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
+
+@ObjectType()
+class CompatItem {
+  @Field()
+  name: string;
+}
+
+@Resolver(() => CompatItem)
+class CompatResolver {
+  @Query(() => CompatItem)
+  compatItem(@Args('name') name: string): CompatItem {
+    return { name };
+  }
+}
 
 describe('Security dependency override compatibility', () => {
   it('preserves UUID consumers and deterministic namespace identifiers', () => {
@@ -102,8 +126,34 @@ describe('Security dependency override compatibility', () => {
     expect(yaml4.load('settings: [one, two]')).toEqual({
       settings: ['one', 'two'],
     });
+    const yaml5 = createRequire(require.resolve('@nestjs/swagger'))('js-yaml');
+    const openApi = { paths: { '/x': { get: { tags: ['a'] } } } };
+    expect(
+      yaml5.load(yaml5.dump(openApi, { skipInvalid: true, noRefs: true })),
+    ).toEqual(openApi);
     expect(uri.serialize(uri.parse('https://example.com/path?x=1'))).toBe(
       'https://example.com/path?x=1',
     );
+  });
+  it('serves code-first GraphQL queries through @nestjs/graphql', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        GraphQLModule.forRoot<ApolloDriverConfig>({
+          driver: ApolloDriver,
+          autoSchemaFile: true,
+        }),
+      ],
+      providers: [CompatResolver],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    try {
+      await request(app.getHttpServer())
+        .post('/graphql')
+        .send({ query: '{ compatItem(name: "fixture") { name } }' })
+        .expect(200, { data: { compatItem: { name: 'fixture' } } });
+    } finally {
+      await app.close();
+    }
   });
 });

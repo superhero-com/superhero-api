@@ -44,25 +44,27 @@ export function toShiftedBigNumber(
  * Pure eligibility predicate (plan §5.1, Task 06 req §2/§3). Decoupled from any
  * I/O so unit tests can exercise the threshold/decimals/mute edges directly.
  *
- * `eligible` iff the holder's **raw** balance is positive and meets the room's **raw** threshold
- * AND the member is not in the room's `muted` set. NO shifting at compare time —
- * both inputs are already raw integer base units (plan §5.4). A `null`/`undefined`
- * balance is treated as zero (the holder has no row yet).
+ * `eligible` iff the holder's **raw** balance is positive (moderators excepted) and
+ * meets the room's **raw** threshold AND the member is not in the room's `muted` set.
+ * NO shifting at compare time — both inputs are already raw integer base units
+ * (plan §5.4). A `null`/`undefined` balance is treated as zero (the holder has no
+ * row yet).
  */
 export function isEligible(
   balanceRaw: BigNumber.Value | null | undefined,
   thresholdRaw: BigNumber.Value | null | undefined,
   muted: readonly string[] | null | undefined,
   memberAddress: string,
+  isModerator = false,
 ): boolean {
   if (muted && muted.includes(memberAddress)) {
     return false;
   }
   const balance = new BigNumber(balanceRaw ?? 0);
   const threshold = new BigNumber(thresholdRaw ?? 0);
-  // A zero threshold removes the minimum holding requirement, not token gating.
-  // In particular, selling the last token must revoke an ordinary member's access.
-  return balance.gt(0) && balance.gte(threshold);
+  // A zero threshold removes the minimum holding requirement, not token gating:
+  // selling the last token revokes a member's access. Moderators keep it (§6.7).
+  return (isModerator || balance.gt(0)) && balance.gte(threshold);
 }
 
 /**
@@ -433,6 +435,7 @@ export class EligibilityService {
         room.min_token_threshold,
         room.muted,
         memberAddress,
+        role === 'admin',
       );
     }
 

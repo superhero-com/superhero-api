@@ -37,7 +37,7 @@ export class SocialGraphService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     if (!this.isConfigured()) {
       if (process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS?.trim())
-        this.logger.warn(
+        this.logger.error(
           'Social graph disabled: set SOCIAL_GRAPH_NETWORK_ID alongside SOCIAL_GRAPH_CONTRACT_ADDRESS to enable it',
         );
       return;

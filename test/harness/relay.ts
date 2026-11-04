@@ -34,9 +34,17 @@ export async function waitForRelayState<T>(
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const value = await read();
-    if (matches(value)) return value;
-    if (Date.now() >= deadline) throw new Error('Relay state did not converge');
+    // Reads reject on a transient CLOSED or timeout; keep polling until the deadline.
+    let failure: unknown;
+    try {
+      const value = await read();
+      if (matches(value)) return value;
+    } catch (error) {
+      failure = error;
+    }
+    if (Date.now() >= deadline) {
+      throw failure ?? new Error('Relay state did not converge');
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }

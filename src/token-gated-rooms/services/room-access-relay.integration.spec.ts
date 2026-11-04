@@ -59,7 +59,7 @@ run('balance → eligibility → real relay membership', () => {
   afterAll(async () => {
     writer?.onApplicationShutdown();
     await database?.drop();
-  });
+  }, 60_000);
 
   it('preserves both room rosters when management updates arrive together', async () => {
     const first = `ct_concurrent_${randomUUID()}`;

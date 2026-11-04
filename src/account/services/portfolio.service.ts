@@ -231,13 +231,14 @@ export class PortfolioService {
       dayStartTs: i > 0 ? timestamps[i - 1].valueOf() : ts.valueOf(),
     }));
 
-    // Pre-compute PNL for all unique block heights in a single batch query.
-    // This replaces the previous per-snapshot SQL calls (N queries → 1 query).
+    // Pre-compute PNL for all unique block heights in one batch call instead
+    // of per-snapshot SQL calls.
     const [pnlMap, dailyPnlMap] = await Promise.all([
       this.bclPnlService.calculateTokenPnlsBatch(
         resolvedAddress,
         uniqueBlockHeights,
-        undefined,
+        // With range PnL, tokens_pnl comes from the daily map instead.
+        includePnl && includeTokensPnl && !useRangeBasedPnl,
       ),
       includePnl && useRangeBasedPnl
         ? this.bclPnlService.calculateDailyPnlBatch(
@@ -431,18 +432,15 @@ export class PortfolioService {
     // current block; the price lateral joins (`block_height <= snapshot_height`)
     // are unaffected since no rows exist above currentHeight yet.
     const holdingsHeight = currentHeight + 1;
-    const pnlMap = await this.bclPnlService.calculateTokenPnlsBatch(
+    const tokensPnl = await this.bclPnlService.calculateTokenPnls(
       resolvedAddress,
-      [holdingsHeight],
-      undefined,
+      holdingsHeight,
     );
-    const tokensPnl = pnlMap.get(holdingsHeight);
 
     const balance = Number(toAe(aeBalance));
     const price = currentAePrice?.usd || 0;
-    const totalValueAe = balance + (tokensPnl?.totalCurrentValueAe ?? 0);
-    const totalValueUsd =
-      balance * price + (tokensPnl?.totalCurrentValueUsd ?? 0);
+    const totalValueAe = balance + tokensPnl.totalCurrentValueAe;
+    const totalValueUsd = balance * price + tokensPnl.totalCurrentValueUsd;
 
     return {
       value: convertTo === 'usd' ? totalValueUsd : totalValueAe,

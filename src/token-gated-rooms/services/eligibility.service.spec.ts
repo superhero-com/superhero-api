@@ -78,6 +78,13 @@ describe('isEligible (pure helper)', () => {
     expect(isEligible('1', '0', [], 'ak')).toBe(true);
   });
 
+  it('moderators need no tokens in zero-threshold rooms but still meet positive thresholds and mutes', () => {
+    expect(isEligible(null, '0', [], 'ak', true)).toBe(true);
+    expect(isEligible('0', '1000', [], 'ak', true)).toBe(false);
+    expect(isEligible('1000', '1000', [], 'ak', true)).toBe(true);
+    expect(isEligible(null, '0', ['ak'], 'ak', true)).toBe(false);
+  });
+
   it('muted holder above threshold → ineligible', () => {
     expect(isEligible('5000', '1000', ['ak'], 'ak')).toBe(false);
     // non-muted member with same balance stays eligible
@@ -280,6 +287,33 @@ describe('EligibilityService.recomputeMember (mocked repos)', () => {
     expect(flipped).toBe(false);
     expect(membershipRepo.insert).not.toHaveBeenCalled();
     expect(emitSpy).not.toHaveBeenCalled();
+  });
+
+  it('zero-threshold room provisions a moderator without tokens as admin', async () => {
+    membershipRepo.findOne.mockResolvedValue(null);
+    tokenBalanceRepo.findOne.mockResolvedValue(null);
+
+    const flipped = await service.recomputeMember(
+      makeRoom({
+        min_token_threshold: new BigNumber(0),
+        moderators: ['ak_member'],
+      }),
+      'ak_member',
+    );
+
+    expect(flipped).toBe(true);
+    expect(membershipRepo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eligible: true,
+        role: 'admin',
+        relay_state: 'pending_add',
+      }),
+    );
+    expect(emitSpy).toHaveBeenCalledWith(TGR_ELIGIBILITY_CHANGED, {
+      saleAddress: 'ct_sale',
+      memberAddress: 'ak_member',
+      eligible: true,
+    });
   });
 
   it('selling the last token in a zero-threshold room queues membership removal', async () => {

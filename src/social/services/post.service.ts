@@ -39,6 +39,10 @@ import {
   validatePostContent,
 } from '../utils/content-parser.util';
 import { detectPostLanguage } from '../utils/post-language.util';
+import {
+  recountAllThreadComments,
+  refreshThreadCommentCounts,
+} from '../utils/thread-comment-counts.util';
 import { refreshTrendingScoresForPostSafely } from '../utils/token-mentions.util';
 import { normalizeTopicName } from '../utils/topic-name.util';
 import { TokensService } from '@/tokens/tokens.service';
@@ -879,23 +883,17 @@ export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * Updates the comment count for a parent post
+   * Updates the comment count for a parent post and every post above it
    */
   private async updatePostCommentCount(parentPostId: string): Promise<void> {
     try {
-      const count = await this.postRepository
-        .createQueryBuilder('post')
-        .where('post.post_id = :parentPostId', { parentPostId })
-        .getCount();
-
-      await this.postRepository.update(
-        { id: parentPostId },
-        { total_comments: count },
+      await refreshThreadCommentCounts(
+        this.postRepository.manager,
+        parentPostId,
       );
 
-      this.logger.debug('Updated comment count for parent post', {
+      this.logger.debug('Updated comment counts for parent post thread', {
         parentPostId,
-        commentCount: count,
       });
     } catch (error) {
       const errorMessage =
@@ -914,11 +912,10 @@ export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
    *
    * Set-based instead of a per-comment validate+getCount() loop: one UPDATE
    * converts every comment whose parent is still missing back to a standalone
-   * post, then one UPDATE (joined via a single GROUP BY) recomputes
-   * total_comments for every parent whose count is out of date -- this also
-   * catches up parents that only just appeared (their comment count update
-   * was a no-op while the parent row didn't exist yet), which is the actual
-   * race this cleanup exists for.
+   * post, then `recountAllThreadComments` repairs every thread whose
+   * total_comments no longer add up -- this also catches up parents that only
+   * just appeared (their comment count update was a no-op while the parent
+   * row didn't exist yet), which is the actual race this cleanup exists for.
    *
    * This runs once, ~10s after boot (see `onModuleInit`/`sync`), with no
    * later re-run -- so unlinking is permanent for whatever it decides is
@@ -943,22 +940,13 @@ export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
           )
       `);
 
-      const recountResult = await this.postRepository.query(`
-        UPDATE posts parent
-        SET total_comments = counts.cnt
-        FROM (
-          SELECT post_id, COUNT(*)::int AS cnt
-          FROM posts
-          WHERE post_id IS NOT NULL
-          GROUP BY post_id
-        ) counts
-        WHERE parent.id = counts.post_id
-          AND parent.total_comments IS DISTINCT FROM counts.cnt
-      `);
+      const parentsRecounted = await recountAllThreadComments(
+        this.postRepository.manager,
+      );
 
       this.logger.log('Orphaned comments cleanup completed', {
         convertedToStandalonePosts: orphanResult[1] ?? 0,
-        parentsRecounted: recountResult[1] ?? 0,
+        parentsRecounted,
       });
     } catch (error) {
       this.logger.error('Failed to run orphaned comments cleanup', {

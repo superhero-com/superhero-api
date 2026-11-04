@@ -38,6 +38,20 @@ describe('NIP-42 authentication', () => {
     expect(auth).toHaveBeenCalledTimes(1);
   });
 
+  it('bounds an AUTH the relay never acknowledges', async () => {
+    jest.useFakeTimers();
+    const auth = jest.fn().mockReturnValue(new Promise(() => {}));
+    const result = authenticateRelay(
+      { connected: true, auth } as unknown as Relay,
+      jest.fn(),
+      100,
+    );
+    const assertion = expect(result).rejects.toThrow('timed out');
+    await jest.advanceTimersByTimeAsync(100);
+    await assertion;
+    expect(auth).toHaveBeenCalledTimes(1);
+  });
+
   it('bounds missing challenges and clears timers', async () => {
     jest.useFakeTimers();
     const auth = jest

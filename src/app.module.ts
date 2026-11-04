@@ -26,6 +26,7 @@ import {
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { JourneyModule } from './journey/journey.module';
 import { AffiliationModule } from './affiliation/affiliation.module';
 import { AccountModule } from './account/account.module';
 import { TrendingTagsModule } from './trending-tags/trending-tags.module';
@@ -109,6 +110,9 @@ import { FeedModule } from './feed/feed.module';
     TransactionsModule,
     AePricingModule,
     BclModule,
+    // Before AnalyticsModule: keeps /analytics/journey/* ahead of any
+    // /analytics/:something route in Express's registration order.
+    JourneyModule,
     AnalyticsModule,
     BullBoardModule,
     AffiliationModule,

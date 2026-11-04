@@ -79,7 +79,8 @@ export class PostDto {
   language: string | null;
 
   @ApiProperty({
-    description: 'Total number of comments on this post',
+    description:
+      'Total number of comments below this post, including replies to comments at any depth',
     example: 5,
   })
   total_comments: number;

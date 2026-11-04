@@ -9,6 +9,7 @@ import { TokensService } from '@/tokens/tokens.service';
 import { ITransaction } from '@/utils/types';
 import { Logger } from '@nestjs/common';
 import { POST_SYNC_VERSION } from '../config/post-contracts.config';
+import { THREAD_COMMENT_COUNTS_LOCK_KEY } from '../utils/thread-comment-counts.util';
 
 // Mock the external dependencies
 jest.mock('@/utils/common');
@@ -529,22 +530,37 @@ describe('PostService', () => {
   });
 
   describe('fixOrphanedComments', () => {
-    it('runs one UPDATE to unlink still-orphaned comments and one to recount parents', async () => {
-      mockRepository.query
-        .mockResolvedValueOnce([[], 3]) // 3 comments converted to standalone posts
-        .mockResolvedValueOnce([[], 2]); // 2 parents recounted
+    const mockRecount = (changed: number) => {
+      const manager = {
+        query: jest.fn(async (sql: string) => {
+          if (sql.includes('AS drifted')) return [{ drifted: changed }];
+          if (sql.includes('AS depth')) return [{ depth: 1 }];
+          return sql.includes('UPDATE posts') ? [[], changed] : [];
+        }),
+      };
+      mockRepository.manager.transaction.mockImplementation(
+        async (handler: any) => handler(manager),
+      );
+      return manager;
+    };
+
+    it('unlinks still-orphaned comments, then recounts every thread under the lock', async () => {
+      mockRepository.query.mockResolvedValueOnce([[], 3]); // 3 comments converted to standalone posts
+      const manager = mockRecount(2);
 
       await service.fixOrphanedComments();
 
-      expect(mockRepository.query).toHaveBeenCalledTimes(2);
+      expect(mockRepository.query).toHaveBeenCalledTimes(1);
       const [unlinkSql] = mockRepository.query.mock.calls[0];
       expect(unlinkSql).toContain('UPDATE posts');
       expect(unlinkSql).toContain('SET post_id = NULL');
       expect(unlinkSql).toContain('NOT EXISTS');
 
-      const [recountSql] = mockRepository.query.mock.calls[1];
-      expect(recountSql).toContain('SET total_comments = counts.cnt');
-      expect(recountSql).toContain('GROUP BY post_id');
+      const [lockSql, lockParams] = manager.query.mock.calls[0] as any[];
+      expect(lockSql).toContain('pg_advisory_xact_lock');
+      expect(lockParams).toEqual([THREAD_COMMENT_COUNTS_LOCK_KEY]);
+      const [recountSql] = manager.query.mock.calls.at(-1) as any[];
+      expect(recountSql).toContain('SET total_comments = t.total');
 
       expect(logger.log).toHaveBeenCalledWith(
         'Orphaned comments cleanup completed',
@@ -559,9 +575,8 @@ describe('PostService', () => {
       // detached the instant this runs. The unlink UPDATE must therefore
       // also require the comment to be older than the grace period, not
       // just "parent currently missing".
-      mockRepository.query
-        .mockResolvedValueOnce([[], 0])
-        .mockResolvedValueOnce([[], 0]);
+      mockRepository.query.mockResolvedValueOnce([[], 0]);
+      mockRecount(0);
 
       await service.fixOrphanedComments();
 
