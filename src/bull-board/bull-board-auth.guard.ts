@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -32,6 +33,20 @@ function safeEqual(provided: string, expected: string): boolean {
   return timingSafeEqual(digest(provided), digest(expected));
 }
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// Browsers resend Basic credentials to this origin even when another site
+// submits the request, and a plain form POST can add a job (the global
+// urlencoded parser fills the body addJob reads). Requests without the header
+// (curl, older browsers) keep working.
+function isCrossSiteWrite(request: Request): boolean {
+  if (SAFE_METHODS.has(request.method)) {
+    return false;
+  }
+  const site = request.headers['sec-fetch-site'];
+  return site !== undefined && site !== 'same-origin' && site !== 'none';
+}
+
 /**
  * HTTP Basic auth for Bull Board. The controller's catch-all route serves the
  * UI, its assets and its JSON API, so this one guard covers all of them.
@@ -50,9 +65,8 @@ export class BullBoardAuthGuard implements CanActivate {
     }
 
     const http = context.switchToHttp();
-    const provided = parseBasicAuth(
-      http.getRequest<Request>().headers.authorization,
-    );
+    const request = http.getRequest<Request>();
+    const provided = parseBasicAuth(request.headers.authorization);
     if (provided) {
       const userMatches = safeEqual(provided.user, credentials.user);
       const passwordMatches = safeEqual(
@@ -60,6 +74,9 @@ export class BullBoardAuthGuard implements CanActivate {
         credentials.password,
       );
       if (userMatches && passwordMatches) {
+        if (isCrossSiteWrite(request)) {
+          throw new ForbiddenException();
+        }
         return true;
       }
     }

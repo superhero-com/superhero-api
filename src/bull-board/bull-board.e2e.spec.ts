@@ -30,12 +30,13 @@ function basic(user: string, password: string): string {
 
 async function startApp(
   settings: BullBoardSettings,
+  boardQueue: Bull.Queue = queue,
 ): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({
     imports: [BullBoardModule.forRoot(settings)],
     providers: [
       ExampleProcessor,
-      { provide: getQueueToken(QUEUE), useValue: queue },
+      { provide: getQueueToken(QUEUE), useValue: boardQueue },
     ],
   }).compile();
   const app = moduleRef.createNestApplication({ logger: false });
@@ -105,6 +106,65 @@ describe('Bull Board (real HTTP)', () => {
         .put(`/api/bull-board/api/queues/${QUEUE}/pause`)
         .set('Authorization', basic(CREDENTIALS.user, CREDENTIALS.password))
         .expect(405);
+    });
+  });
+
+  describe('with credentials and writes allowed', () => {
+    const auth = basic(CREDENTIALS.user, CREDENTIALS.password);
+    let pause: jest.Mock;
+
+    beforeEach(async () => {
+      pause = jest.fn().mockResolvedValue(undefined);
+      const writable = Object.assign(Object.create(Bull.prototype), {
+        name: QUEUE,
+        pause,
+      });
+      app = await startApp(
+        { enabled: true, credentials: CREDENTIALS, readOnly: false },
+        writable,
+      );
+    });
+
+    it.each(['cross-site', 'same-site'])(
+      'refuses a %s form that adds a job',
+      async (site) => {
+        await request(app.getHttpServer())
+          .post(`/api/bull-board/api/queues/${QUEUE}/add`)
+          .set('Authorization', auth)
+          .set('Sec-Fetch-Site', site)
+          .type('form')
+          .send({ name: 'injected', 'data[x]': '1' })
+          .expect(403);
+      },
+    );
+
+    it('refuses a cross-site write before it reaches the queue', async () => {
+      await request(app.getHttpServer())
+        .put(`/api/bull-board/api/queues/${QUEUE}/pause`)
+        .set('Authorization', auth)
+        .set('Sec-Fetch-Site', 'cross-site')
+        .expect(403);
+      expect(pause).not.toHaveBeenCalled();
+    });
+
+    it.each([['same-origin'], ['none'], [undefined]])(
+      'accepts a write with Sec-Fetch-Site %p',
+      async (site) => {
+        const req = request(app.getHttpServer())
+          .put(`/api/bull-board/api/queues/${QUEUE}/pause`)
+          .set('Authorization', auth);
+        if (site) req.set('Sec-Fetch-Site', site);
+        await req.expect(200);
+        expect(pause).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('still serves the dashboard opened from another site', async () => {
+      await request(app.getHttpServer())
+        .get('/api/bull-board/')
+        .set('Authorization', auth)
+        .set('Sec-Fetch-Site', 'cross-site')
+        .expect(200);
     });
   });
 
