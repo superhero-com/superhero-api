@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { registerAs } from '@nestjs/config';
+import { pushServiceHosts } from './web-push/push-endpoint';
 
 export const NOTIFICATIONS_CONFIG = 'notifications';
 
@@ -247,4 +248,7 @@ export default registerAs(NOTIFICATIONS_CONFIG, () => ({
     10_000,
     'WEB_PUSH_FETCH_TIMEOUT_MS',
   ),
+
+  /** Push-service host suffixes a subscription endpoint may point at. */
+  webPushAllowedHosts: pushServiceHosts(),
 }));
