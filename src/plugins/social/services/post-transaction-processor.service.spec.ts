@@ -44,6 +44,7 @@ describe('PostTransactionProcessorService', () => {
       updatePostCommentCount: jest.fn(),
       validateParentPost: jest.fn(),
       emitCommentCreatedEvent: jest.fn(),
+      emitMentionEvent: jest.fn(),
       generatePostId: jest.fn(),
     };
     tokensService = {
@@ -157,6 +158,13 @@ describe('PostTransactionProcessorService', () => {
       'th_comment',
       'live',
     );
+    // The parent author is excluded from mentions: post-comment covers them.
+    expect(persistenceService.emitMentionEvent).toHaveBeenCalledWith(
+      savedComment,
+      'th_comment',
+      'live',
+      'ak_author',
+    );
   });
 
   it('does NOT emit POST_COMMENT_CREATED_EVENT when the parent post is missing (comment converts to a regular post)', async () => {
@@ -196,6 +204,12 @@ describe('PostTransactionProcessorService', () => {
     } as any);
 
     expect(persistenceService.emitCommentCreatedEvent).not.toHaveBeenCalled();
+    expect(persistenceService.emitMentionEvent).toHaveBeenCalledWith(
+      { id: 'p_orphan', token_mentions: [] },
+      'th_orphan',
+      'live',
+      undefined,
+    );
   });
 
   it('inserts once when runs for the same hash overlap', async () => {
