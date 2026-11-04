@@ -184,17 +184,52 @@ describe('TransactionHistoryService', () => {
     });
 
     it.each([
-      { convertTo: 'constructor' },
-      { convertTo: "ae' --" },
-      { interval: 0 },
-      { interval: -3600 },
-    ])('rejects %p without querying', async (overrides) => {
+      ['an unknown convertTo', { convertTo: 'constructor' }],
+      ['an injected convertTo', { convertTo: "ae' --" }],
+      ['a zero interval', { interval: 0 }],
+      ['a negative interval', { interval: -3600 }],
+      ['an invalid start date', { startDate: moment.invalid() }],
+      ['an invalid end date', { endDate: moment.invalid() }],
+      [
+        'one-second candles since 2000',
+        { startDate: moment.utc('2000-01-01T00:00:00Z'), interval: 1 },
+      ],
+      [
+        'one interval more than the cap',
+        {
+          startDate: moment.utc('2026-01-01T00:00:00Z'),
+          endDate: moment.utc('2026-01-01T00:00:00Z').add(3_001, 'minutes'),
+          interval: 60,
+        },
+      ],
+    ])('rejects %s without querying', async (_, overrides) => {
       (transactionsRepository.createQueryBuilder as jest.Mock).mockClear();
 
       await expect(fetchHistory(overrides)).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(transactionsRepository.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('fills one candle per interval up to the cap', async () => {
+      (
+        transactionsRepository.createQueryBuilder().getOne as jest.Mock
+      ).mockResolvedValueOnce(
+        Object.assign(new Transaction(), {
+          created_at: new Date('2025-12-31T23:00:00Z'),
+          buy_price: { ae: '1' },
+          market_cap: { ae: '10' },
+        }),
+      );
+
+      const candles = await fetchHistory({
+        mode: 'aggregated',
+        startDate: moment.utc('2026-01-01T00:00:00Z'),
+        endDate: moment.utc('2026-01-01T00:00:00Z').add(3_000, 'minutes'),
+        interval: 60,
+      });
+
+      expect(candles).toHaveLength(3_000);
     });
   });
 

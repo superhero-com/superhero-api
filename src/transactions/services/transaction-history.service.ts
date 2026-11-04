@@ -192,6 +192,9 @@ export class TransactionHistoryService {
   }
 
   private static readonly MAX_HISTORICAL_ROWS = 10_000;
+  // The candle loop walks (and gap filling emits) every interval in the range,
+  // traded or not. 3,000 still fits 1-minute candles over the default 2 days.
+  static readonly MAX_HISTORICAL_CANDLES = 3_000;
 
   async getHistoricalData(
     rawProps: IGetHistoricalDataProps,
@@ -202,6 +205,17 @@ export class TransactionHistoryService {
       interval: parseInterval(rawProps.interval),
     };
     const { startDate, endDate } = props;
+    if (!startDate.isValid() || !endDate.isValid()) {
+      throw new BadRequestException(
+        'start_date and end_date must be valid dates',
+      );
+    }
+    const candles = endDate.diff(startDate) / (props.interval * 1000);
+    if (candles > TransactionHistoryService.MAX_HISTORICAL_CANDLES) {
+      throw new BadRequestException(
+        `Date range spans more than ${TransactionHistoryService.MAX_HISTORICAL_CANDLES} intervals; use a larger interval or a shorter range`,
+      );
+    }
 
     const data = await this.transactionsRepository
       .createQueryBuilder('transactions')
