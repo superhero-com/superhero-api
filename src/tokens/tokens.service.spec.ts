@@ -3,11 +3,13 @@ import {
   TOKEN_LIST_ELIGIBILITY_CONFIG,
   TRENDING_SCORE_CONFIG,
 } from '@/configs/constants';
+import { ACTIVE_NETWORK } from '@/configs/network';
 import {
   RetryableTokenHoldersSyncError,
   TokensService,
 } from './tokens.service';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, FetchJsonHttpError } from '@/utils/common';
+import { Not } from 'typeorm';
 
 jest.mock('@/utils/common', () => {
   const actual = jest.requireActual('@/utils/common');
@@ -859,6 +861,214 @@ describe('TokensService', () => {
     expect(token).toEqual({
       sale_address: 'ct_sale',
       name: 'BLA',
+    });
+  });
+
+  describe('getToken for a sale address not in the database', () => {
+    const FACTORY = 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN';
+    const SALE = 'ct_2ZvHbJwx2jxaCFataLSjAavGAoG7JnZgwc1Gw3U4huv9GYTfw6';
+    const AEX9 = 'ct_2uvAiwHksaztBbGny4DsuvupKNFegeC1GWsLEZb6t9aXzC3PoK';
+    const CREATOR = 'ak_2MCVhgx8jReW332W95fYK6QqcMvjwjS2sZm1g8M96ytu7x4oT4';
+    const COLLECTION =
+      'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi';
+    const CREATE_TX_HASH =
+      'th_2tycccjfepCvEKwXjDjA7aCobLVZXihpZuvabqVs1JyP9rXNaV';
+
+    // Mainnet MDW /v3/transactions/{hash} for the call that created RTTT,
+    // trimmed to the fields the indexer reads.
+    const createTx = (tx: Record<string, unknown> = {}) => ({
+      hash: CREATE_TX_HASH,
+      micro_time: 1793759698409,
+      tx: {
+        type: 'ContractCallTx',
+        contract_id: FACTORY,
+        caller_id: CREATOR,
+        function: 'create_community',
+        result: 'ok',
+        return_type: 'ok',
+        arguments: [
+          { type: 'string', value: COLLECTION },
+          { type: 'string', value: 'RTTT' },
+        ],
+        return: {
+          type: 'tuple',
+          value: [
+            {
+              type: 'contract',
+              value: 'ct_2iWqCcQS3bYFwAyXQnVz3KNdPBzxT9WXyAy1RMbwV8Yk5hsCyW',
+            },
+            { type: 'contract', value: SALE },
+            {
+              type: 'contract',
+              value: 'ct_TBYmr69wKigVT8RtKcPxcr7p5DaZkMZdcAQhNnEK5ukVUWnW7',
+            },
+          ],
+        },
+        ...tx,
+      },
+    });
+
+    const indexed = (tx?: Record<string, unknown>) => ({
+      [`/v2/contracts/${SALE}`]: {
+        contract: SALE,
+        source_tx_hash: CREATE_TX_HASH,
+      },
+      [`/v3/transactions/${CREATE_TX_HASH}`]: createTx(tx),
+    });
+
+    // Answers 404 for anything else, as the middleware does before it has
+    // indexed a contract or transaction.
+    const serveMdw = (routes: Record<string, unknown>) =>
+      (fetchJson as jest.Mock).mockImplementation(async (url: string) => {
+        const path = url.replace(ACTIVE_NETWORK.middlewareUrl, '');
+        if (!(path in routes)) {
+          throw new FetchJsonHttpError('not found', 404);
+        }
+        if (routes[path] instanceof Error) {
+          throw routes[path];
+        }
+        return routes[path];
+      });
+
+    let rows: Record<string, any>;
+    let sleep: jest.SpyInstance;
+
+    beforeEach(() => {
+      rows = {};
+      tokensRepository.upsert.mockImplementation(async (row) => {
+        rows[row.sale_address] = { ...rows[row.sale_address], ...row };
+      });
+      tokensRepository.update.mockImplementation(async (saleAddress, data) => {
+        Object.assign(rows[saleAddress], data);
+      });
+      jest
+        .spyOn(service, 'findByAddress')
+        .mockImplementation(async (address) => rows[address] ?? null);
+
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: FACTORY,
+        collections: {},
+      });
+      jest.spyOn(service, 'getTokenContractsBySaleAddress').mockResolvedValue({
+        instance: {
+          metaInfo: jest.fn().mockResolvedValue({
+            token: { address: AEX9, name: 'RTTT', symbol: 'RTTT' },
+          }),
+        },
+      } as any);
+      jest.spyOn(service, 'syncTokenPrice').mockResolvedValue(undefined);
+      sleep = jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+    });
+
+    const expectNothingWritten = () => {
+      expect(tokensRepository.delete).not.toHaveBeenCalled();
+      expect(tokensRepository.upsert).not.toHaveBeenCalled();
+      expect(tokensRepository.update).not.toHaveBeenCalled();
+    };
+
+    it('creates a token minted by the current factory', async () => {
+      serveMdw(indexed());
+
+      await expect(service.getToken(SALE)).resolves.toMatchObject({
+        sale_address: SALE,
+        address: AEX9,
+        name: 'RTTT',
+        symbol: 'RTTT',
+        factory_address: FACTORY,
+        creator_address: CREATOR,
+        collection: COLLECTION,
+        created_at: new Date(1793759698409),
+      });
+      expect(tokensRepository.delete).toHaveBeenCalledWith({
+        symbol: 'RTTT',
+        name: 'RTTT',
+        sale_address: Not(SALE),
+      });
+    });
+
+    it('leaves the real token alone when a lookalike contract is looked up', async () => {
+      const LOOKALIKE = 'ct_lookalike';
+      rows[SALE] = { sale_address: SALE, name: 'RTTT', symbol: 'RTTT' };
+      serveMdw({
+        [`/v2/contracts/${LOOKALIKE}`]: {
+          contract: LOOKALIKE,
+          source_tx_hash: 'th_deploy',
+        },
+        '/v3/transactions/th_deploy': {
+          hash: 'th_deploy',
+          tx: {
+            type: 'ContractCreateTx',
+            contract_id: LOOKALIKE,
+            owner_id: 'ak_attacker',
+            return_type: 'ok',
+          },
+        },
+      });
+
+      await expect(service.getToken(LOOKALIKE)).resolves.toBeNull();
+
+      expectNothingWritten();
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a create_community on another factory', { contract_id: 'ct_other' }],
+      ['another factory entrypoint', { function: 'create_collection' }],
+      [
+        'a factory call that returned another sale',
+        {
+          return: {
+            type: 'tuple',
+            value: [
+              { type: 'contract', value: 'ct_dao' },
+              { type: 'contract', value: 'ct_other' },
+            ],
+          },
+        },
+      ],
+      ['a reverted factory call', { return_type: 'revert' }],
+    ])('rejects a sale created by %s', async (_, tx) => {
+      serveMdw(indexed(tx));
+
+      await expect(service.getToken(SALE)).resolves.toBeNull();
+
+      expectNothingWritten();
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it('waits for the middleware to index a new sale', async () => {
+      serveMdw({});
+      sleep.mockImplementationOnce(async () => {
+        serveMdw(indexed());
+      });
+
+      await expect(service.getToken(SALE)).resolves.toMatchObject({
+        sale_address: SALE,
+        factory_address: FACTORY,
+      });
+      expect(sleep).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes nothing when the middleware never indexes the sale', async () => {
+      serveMdw({});
+
+      await expect(service.getToken(SALE)).rejects.toThrow(
+        'failed to load the create transaction',
+      );
+
+      expectNothingWritten();
+      expect(fetchJson).toHaveBeenCalledTimes(3);
+    });
+
+    it('fails without retrying or writing when the middleware errors', async () => {
+      serveMdw({
+        [`/v2/contracts/${SALE}`]: new FetchJsonHttpError('bad gateway', 502),
+      });
+
+      await expect(service.getToken(SALE)).rejects.toThrow('bad gateway');
+
+      expectNothingWritten();
+      expect(sleep).not.toHaveBeenCalled();
     });
   });
 
