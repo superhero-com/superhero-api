@@ -832,6 +832,7 @@ describe('TokensService', () => {
         },
         arguments: [{ value: 'word' }, { value: 'BLA' }],
         callerId: 'ak_creator',
+        contractId: 'ct_factory',
       },
     });
 
@@ -894,6 +895,7 @@ describe('TokensService', () => {
         },
         arguments: [{ value: 'word' }, { value: 'BLA' }],
         callerId: 'ak_creator',
+        contractId: 'ct_factory',
       },
     });
 
@@ -909,6 +911,69 @@ describe('TokensService', () => {
       }),
       { conflictPaths: ['sale_address'] },
     );
+  });
+
+  describe('createTokenFromRawTransaction for a same-name token', () => {
+    // Snake case as /v3/transactions returns it; saveTransaction passes the
+    // camelCased payload instead.
+    const call = (tx: Record<string, unknown> = {}) => ({
+      hash: 'th_new',
+      micro_time: 1793759698409,
+      tx: {
+        type: 'ContractCallTx',
+        contract_id: 'ct_factory',
+        caller_id: 'ak_creator',
+        function: 'create_community',
+        return_type: 'ok',
+        arguments: [{ value: 'word' }, { value: 'BLA' }],
+        return: { value: [{ value: 'ct_dao' }, { value: 'ct_new_sale' }] },
+        ...tx,
+      },
+    });
+
+    beforeEach(() => {
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: 'ct_factory',
+        collections: { word: true },
+      });
+      jest
+        .spyOn(service, 'findByNameOrSymbol')
+        .mockResolvedValue({ sale_address: 'ct_real', name: 'BLA' } as any);
+    });
+
+    it.each([
+      ['another contract', { contract_id: 'ct_lookalike' }],
+      [
+        'another contract in a camelCased payload',
+        { contract_id: undefined, contractId: 'ct_lookalike' },
+      ],
+      ['no contract id', { contract_id: undefined }],
+    ])('keeps the real token when %s is called', async (_, tx) => {
+      await expect(
+        service.createTokenFromRawTransaction(call(tx)),
+      ).resolves.toBeNull();
+
+      expect(tokensRepository.delete).not.toHaveBeenCalled();
+      expect(tokensRepository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('replaces it with the sale the current factory created', async () => {
+      tokensRepository.findOneBy.mockResolvedValue({
+        sale_address: 'ct_new_sale',
+      });
+
+      await service.createTokenFromRawTransaction(call());
+
+      expect(tokensRepository.delete).toHaveBeenCalledWith('ct_real');
+      expect(tokensRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sale_address: 'ct_new_sale',
+          factory_address: 'ct_factory',
+          creator_address: 'ak_creator',
+        }),
+        { conflictPaths: ['sale_address'] },
+      );
+    });
   });
 
   describe('getToken for a sale address not in the database', () => {

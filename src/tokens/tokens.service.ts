@@ -937,6 +937,11 @@ export class TokensService {
     ) {
       return null;
     }
+    // Anyone can deploy a create_community lookalike, and the same-name
+    // delete below would then drop the real token.
+    if ((tx.contract_id ?? tx.contractId) !== factory.address) {
+      return null;
+    }
     if (
       // If it's not supported collection, skip
       !Object.keys(factory.collections).includes(tx.arguments[0].value)
