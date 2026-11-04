@@ -72,6 +72,12 @@ export const CURRENCIES: ICurrency[] = [
   },
 ];
 
+/** Keys of the per-currency price JSON columns (buy_price, market_cap, ...). */
+export const PRICE_CURRENCY_CODES: string[] = [
+  'ae',
+  ...CURRENCIES.map(({ code }) => code),
+];
+
 export const WEB_SOCKET_CHANNELS = {
   Transactions: 'Transactions',
   MicroBlocks: 'MicroBlocks',
