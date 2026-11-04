@@ -1,0 +1,9 @@
+{
+  "maxTransactionCost": "2000000000000000",
+  "rollingCostLimit": "10000000000000000",
+  "maxPending": 8,
+  "maxCreatorPending": 2,
+  "leaseMs": 120000,
+  "maxTtlBlocks": 30,
+  "confirmations": 3
+}

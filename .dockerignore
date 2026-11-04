@@ -7,6 +7,13 @@
 **/.env
 **/.env.*
 
+# Local Shorts state and private media must never enter API/worker images.
+**/.shorts-testnet/
+**/*.sqlite
+**/*.sqlite-*
+**/*.enc
+**/quarantine.key
+
 # Private local task artifacts
 /docs/evidence/
 /.internal/

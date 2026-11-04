@@ -1,0 +1,48 @@
+{
+  "descriptor": {
+    "id": "legacy",
+    "cid": "Qm11111111111111111111111111111111111111111111",
+    "network": "ae_uat",
+    "contract": "ct_protocol",
+    "files": [
+      {
+        "name": "video.mp4",
+        "bytes": 12,
+        "sha256": "483aa33db5ab440d9d6a11642a829e1b852a2738d39f953bc0e2ee8da1df4fe6"
+      },
+      {
+        "name": "poster.jpg",
+        "bytes": 13,
+        "sha256": "525a3f1a729794f6d7dab052a0199a1b6879bbf69346010489e68ed252b68a2b"
+      },
+      {
+        "name": "captions.vtt",
+        "bytes": 7,
+        "sha256": "73420fdc06730575e08b8a09b5b3824e0f2a9d2dd742640613490ef3abac2bd0"
+      }
+    ]
+  },
+  "sourceKey": "b7d43c29f1f49c9208437fbf63deba5e1b0b16c3a668d181e890d374557d6389",
+  "sourceIdentity": "{\"version\":2,\"id\":\"legacy\",\"network\":\"ae_uat\",\"contract\":\"ct_protocol\",\"cid\":\"Qm11111111111111111111111111111111111111111111\",\"generation\":{\"job\":\"legacy\"},\"files\":[{\"name\":\"captions.vtt\",\"bytes\":7,\"sha256\":\"73420fdc06730575e08b8a09b5b3824e0f2a9d2dd742640613490ef3abac2bd0\"},{\"name\":\"poster.jpg\",\"bytes\":13,\"sha256\":\"525a3f1a729794f6d7dab052a0199a1b6879bbf69346010489e68ed252b68a2b\"},{\"name\":\"video.mp4\",\"bytes\":12,\"sha256\":\"483aa33db5ab440d9d6a11642a829e1b852a2738d39f953bc0e2ee8da1df4fe6\"}]}",
+  "package": {
+    "cid": "bafyffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "playlist": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.000000,\nsegment-000.m4s\n#EXT-X-ENDLIST\n",
+    "files": [
+      {
+        "name": "index.m3u8",
+        "bytes": 173,
+        "sha256": "2260a3b0c4774f4c154e3cd1da9f2b8efacb87144f68138ca20d40f7d66cff92"
+      },
+      {
+        "name": "init.mp4",
+        "bytes": 11,
+        "sha256": "7df742fdc63816346f35c20fd10003fc71f95d24996530a19f2da1baf434e310"
+      },
+      {
+        "name": "segment-000.m4s",
+        "bytes": 14,
+        "sha256": "c96029d90678268ed7e881b2a387ea62b8e0873d8a84d7e8afaf1e5ed920c0d8"
+      }
+    ]
+  }
+}

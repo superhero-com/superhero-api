@@ -83,4 +83,23 @@ describe('resolveClientIp', () => {
       '1.2.3.4',
     );
   });
+
+  it.each(['::/1', '::ffff:10.0.0.0/8', '::ffff:10.0.0.0/104'])(
+    'ignores spoofed forwarding headers from IPv4 peers outside %s',
+    (cidr) => {
+      const resolveClientIp = loadWithTrustProxy(cidr);
+      for (const peer of ['198.51.100.25', '::ffff:198.51.100.25']) {
+        expect(
+          resolveClientIp({ 'x-forwarded-for': '203.0.113.99' }, peer),
+        ).toBe(peer);
+      }
+    },
+  );
+
+  it('resolves a client through the correctly scoped IPv4-mapped IPv6 proxy', () => {
+    const resolveClientIp = loadWithTrustProxy('::ffff:10.0.0.0/104');
+    expect(
+      resolveClientIp({ 'x-forwarded-for': '203.0.113.99' }, '::ffff:10.1.2.3'),
+    ).toBe('203.0.113.99');
+  });
 });

@@ -5,6 +5,8 @@
   "compilerOptions": {
     "deleteOutDir": true,
     "assets": [
+      { "include": "profile-media/image-worker.cjs", "outDir": "dist" },
+      { "include": "profile-media/image-worker.cjs", "outDir": "dist/src" },
       { "include": "../views/**/*", "outDir": "dist/views" },
       { "include": "profile/contract/*.json", "outDir": "dist" },
       { "include": "profile/contract/*.json", "outDir": "dist/src" }

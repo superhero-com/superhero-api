@@ -160,7 +160,7 @@ export class PostTransactionProcessorService {
 
       // Validate content
       const content = this.persistenceService.validateContent(tx);
-      if (!content) {
+      if (content === null) {
         this.logger.warn('Transaction missing or invalid content', { txHash });
         return {
           post: null,

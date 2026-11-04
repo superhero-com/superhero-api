@@ -148,6 +148,10 @@ export class IndexerService implements OnModuleInit {
         { tip_height: tipHeight },
       );
 
+      // Live websocket delivery is not a contiguous coverage guarantee. Resume
+      // opted-in plugin checkpoints even when global backward sync is complete.
+      await this.pluginRegistryService.catchUpToHeight(tipHeight);
+
       // Get target backward sync height (stop at 0 or configured start height)
       const targetBackwardHeight = 0; // Could be configurable in the future
       const currentBackwardHeight =

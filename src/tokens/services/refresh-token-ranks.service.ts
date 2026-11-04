@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { tryLockTokenMaintenance } from '../utils/token-maintenance-lock.util';
 
 /**
  * Persists `token.rank` (market-cap rank among unlisted=false tokens) so
@@ -22,7 +23,10 @@ export class RefreshTokenRanksService {
     try {
       const startTime = Date.now();
 
-      await this.dataSource.query(`
+      const refreshed = await this.dataSource.transaction(async (manager) => {
+        if (!(await tryLockTokenMaintenance(manager))) return false;
+
+        await manager.query(`
         UPDATE "token"
         SET "rank" = ranked.rank
         FROM (
@@ -39,7 +43,11 @@ export class RefreshTokenRanksService {
         ) ranked
         WHERE "token".sale_address = ranked.sale_address
           AND "token".rank IS DISTINCT FROM ranked.rank
-      `);
+        `);
+        return true;
+      });
+
+      if (!refreshed) return;
 
       this.logger.log(`Refreshed token ranks in ${Date.now() - startTime}ms`);
     } catch (error) {

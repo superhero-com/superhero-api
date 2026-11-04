@@ -90,4 +90,6 @@ export interface Plugin {
    * @param batchSize - Number of transactions to process per batch (default: 100)
    */
   updateTransactions(batchSize?: number): Promise<void>;
+  /** Resume durable coverage up to closed generations from the shared sync loop. */
+  catchUpToHeight?(tipHeight: number): Promise<void>;
 }

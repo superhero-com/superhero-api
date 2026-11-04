@@ -97,16 +97,34 @@ export class PluginFailedTransactionService {
       for (let i = 0; i < transactions.length; i += batchSize) {
         const batch = transactions.slice(i, i + batchSize);
         try {
-          await plugin.processBatch(batch, SyncDirectionEnum.Backward);
-          // Remove successful retries from failed transactions
-          const successfulHashes = batch.map((tx) => tx.hash);
-          await this.failedTransactionRepository
-            .createQueryBuilder()
-            .delete()
-            .from(PluginFailedTransaction)
-            .where('plugin_name = :pluginName', { pluginName })
-            .andWhere('tx_hash IN (:...hashes)', { hashes: successfulHashes })
-            .execute();
+          const result = await plugin.processBatch(
+            batch,
+            SyncDirectionEnum.Backward,
+          );
+          const failures = result ? result.failed : [];
+          const failedHashes = new Set(
+            failures.map((failure) => failure.tx.hash),
+          );
+          const successfulHashes = batch
+            .filter((tx) => !failedHashes.has(tx.hash))
+            .map((tx) => tx.hash);
+          for (const failure of failures) {
+            await this.recordFailure(
+              pluginName,
+              failure.tx,
+              failure.error,
+              newVersion,
+            );
+          }
+          // A resolved batch can still contain per-transaction failures.
+          if (successfulHashes.length)
+            await this.failedTransactionRepository
+              .createQueryBuilder()
+              .delete()
+              .from(PluginFailedTransaction)
+              .where('plugin_name = :pluginName', { pluginName })
+              .andWhere('tx_hash IN (:...hashes)', { hashes: successfulHashes })
+              .execute();
           this.logger.log(
             `[${pluginName}] Successfully retried ${successfulHashes.length} transactions`,
           );
@@ -176,7 +194,16 @@ export class PluginFailedTransactionService {
       }
 
       // Failed transaction retries are treated as 'backward' sync since they're typically historical
-      await plugin.processBatch([tx], SyncDirectionEnum.Backward);
+      const result = await plugin.processBatch(
+        [tx],
+        SyncDirectionEnum.Backward,
+      );
+      const failure =
+        result && result.failed.find((item) => item.tx.hash === tx.hash);
+      if (failure) {
+        await this.recordFailure(pluginName, tx, failure.error, plugin.version);
+        return false;
+      }
       await this.failedTransactionRepository.delete({
         plugin_name: pluginName,
         tx_hash: txHash,

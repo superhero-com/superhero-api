@@ -12,6 +12,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - GITHUB_TOKEN
     container_name: superhero-api-testnet2
     ports:
       - "${TESTNET_APP_PORT:-3001}:3000"
@@ -80,3 +82,7 @@ networks:
 volumes:
   postgres_testnet2_data:
   redis_testnet2_data:
+
+secrets:
+  GITHUB_TOKEN:
+    environment: GITHUB_TOKEN

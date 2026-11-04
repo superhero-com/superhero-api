@@ -1,0 +1,176 @@
+{
+  "descriptor": {
+    "id": "protocol-fixture",
+    "network": "ae_uat",
+    "contract": "ct_protocol",
+    "cid": "bafyaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bytes": 4096,
+    "original": {
+      "version": 1,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "mediaType": "video/mp4",
+      "importProfile": "unixfs-file-v1-262144"
+    },
+    "derivatives": {
+      "version": 1,
+      "cid": "bafybbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "profile": "original-h264-v1",
+      "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+      "videos": [
+        {
+          "name": "video-1080.mp4",
+          "width": 640,
+          "height": 360,
+          "frameRate": "60/1"
+        },
+        {
+          "name": "video-rescue.mp4",
+          "width": 256,
+          "height": 144,
+          "frameRate": "15/1"
+        }
+      ],
+      "generation": {
+        "job": "protocol-fixture",
+        "fence": "1"
+      },
+      "assetsCid": "bafyeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "files": [
+      {
+        "name": "video-1080.mp4",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "video-rescue.mp4",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "audio-main.m4a",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "audio-rescue.m4a",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "video.mp4",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "poster.jpg",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "name": "manifest.json",
+        "bytes": 1000,
+        "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      }
+    ]
+  },
+  "sourceKey": "7c91b1cfca8e53609021e3b1a1d79f2d5573946d6f166ce1c8ff383d0ad8dd14",
+  "package": {
+    "version": 3,
+    "cid": "bafycccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "playlist": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"amain\",NAME=\"Original\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"2\",URI=\"amain.m3u8\"\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"arescue\",NAME=\"Original\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"1\",URI=\"arescue.m3u8\"\n#EXT-X-STREAM-INF:BANDWIDTH=592000,AVERAGE-BANDWIDTH=592000,CODECS=\"avc1.64002a,mp4a.40.2\",RESOLUTION=640x360,FRAME-RATE=60.000,AUDIO=\"amain\"\nv1080.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=96000,AVERAGE-BANDWIDTH=96000,CODECS=\"avc1.640014,mp4a.40.2\",RESOLUTION=256x144,FRAME-RATE=15.000,AUDIO=\"arescue\"\nvrescue.m3u8\n",
+    "playlists": {
+      "v1080.m3u8": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MAP:URI=\"v1080-init.mp4\"\n#EXTINF:2.000000,\nv1080-segment-000.m4s\n#EXTINF:2.000000,\nv1080-segment-001.m4s\n#EXT-X-ENDLIST\n",
+      "vrescue.m3u8": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MAP:URI=\"vrescue-init.mp4\"\n#EXTINF:2.000000,\nvrescue-segment-000.m4s\n#EXTINF:2.000000,\nvrescue-segment-001.m4s\n#EXT-X-ENDLIST\n",
+      "amain.m3u8": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MAP:URI=\"amain-init.mp4\"\n#EXTINF:2.000000,\namain-segment-000.m4s\n#EXTINF:2.000000,\namain-segment-001.m4s\n#EXT-X-ENDLIST\n",
+      "arescue.m3u8": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MAP:URI=\"arescue-init.mp4\"\n#EXTINF:2.000000,\narescue-segment-000.m4s\n#EXTINF:2.000000,\narescue-segment-001.m4s\n#EXT-X-ENDLIST\n"
+    },
+    "files": [
+      {
+        "name": "index.m3u8",
+        "bytes": 593,
+        "sha256": "5993f05503472e8b7289e9cc3844b18eaa10749d5d7d8f2a676502f9551e3712"
+      },
+      {
+        "name": "v1080.m3u8",
+        "bytes": 253,
+        "sha256": "a9806ae8d9a590ccd55ca14b656e1bc54d73dd2ca4338374c00ce8213b0d2593"
+      },
+      {
+        "name": "v1080-init.mp4",
+        "bytes": 800,
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "name": "v1080-segment-000.m4s",
+        "bytes": 100000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "v1080-segment-001.m4s",
+        "bytes": 100000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "vrescue.m3u8",
+        "bytes": 259,
+        "sha256": "ba74430e0fe85f7224922417d0b28c5a5ab40abd349551dd758baf363e00f742"
+      },
+      {
+        "name": "vrescue-init.mp4",
+        "bytes": 800,
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "name": "vrescue-segment-000.m4s",
+        "bytes": 12000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "vrescue-segment-001.m4s",
+        "bytes": 12000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "amain.m3u8",
+        "bytes": 225,
+        "sha256": "9a151111cda573dc3ca682a595850669729c0fc795c556a89b548c034f8f5f91"
+      },
+      {
+        "name": "amain-init.mp4",
+        "bytes": 800,
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "name": "amain-segment-000.m4s",
+        "bytes": 48000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "amain-segment-001.m4s",
+        "bytes": 48000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "arescue.m3u8",
+        "bytes": 231,
+        "sha256": "56329c8dadcaf12dd5f6451cbfd982bf78c835599c18e4d74a4b5688dcf6f435"
+      },
+      {
+        "name": "arescue-init.mp4",
+        "bytes": 800,
+        "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      {
+        "name": "arescue-segment-000.m4s",
+        "bytes": 12000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      {
+        "name": "arescue-segment-001.m4s",
+        "bytes": 12000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+      }
+    ]
+  }
+}

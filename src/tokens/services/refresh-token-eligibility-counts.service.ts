@@ -250,6 +250,14 @@ export class RefreshTokenEligibilityCountsService {
   }
 
   private async ensureTableExists(): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      // Schema changes belong to the migration role, not the runtime account.
+      await this.dataSource.query(`SELECT symbol,post_count,stored_post_count,
+        content_post_count,refreshed_at FROM token_eligibility_counts WHERE false`);
+      await this.dataSource.query(`SELECT id,last_processed_created_at,
+        last_processed_post_id,updated_at FROM token_eligibility_refresh_state WHERE false`);
+      return;
+    }
     await runWithDatabaseIssueLogging({
       logger: this.logger,
       stage: 'token eligibility ensure counts table',
