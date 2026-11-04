@@ -14,6 +14,7 @@ import { LRUCache } from 'lru-cache';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
 import { QUERY_LIMIT_OPTIONS } from './api-core/graphql/query-limits';
+import { GRAPHQL_PATH } from './api-core/graphql/rate-limit';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
@@ -90,6 +91,7 @@ import { FeedModule } from './feed/feed.module';
     TypeOrmModule.forFeature([SyncState]),
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
+      path: GRAPHQL_PATH,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: false,
