@@ -6,6 +6,8 @@ import { Analytic } from '../entities/analytic.entity';
 import { CacheDailyAnalyticsDataService } from '../services/cache-daily-analytics-data.service';
 import { AnalyticController } from './analytic.controller';
 
+const ADDRESS = 'ak_2EZDUTjrzPUikzNereYcBHMYHXaLTn9F6SJJhw6kDEiP4F4Amo';
+
 describe('AnalyticController (HTTP)', () => {
   let app: INestApplication;
   const cachedRows = [{ date: '2026-01-01' }];
@@ -40,6 +42,8 @@ describe('AnalyticController (HTTP)', () => {
     await app.init();
   });
 
+  afterEach(() => jest.clearAllMocks());
+
   afterAll(async () => {
     await app.close();
   });
@@ -61,5 +65,41 @@ describe('AnalyticController (HTTP)', () => {
     expect(
       cacheDailyAnalyticsDataService.pullAnalyticsData,
     ).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'an address over 367 days',
+      { address: ADDRESS, start_date: '2024-01-01', end_date: '2025-01-01' },
+    ],
+    ['an impossible start_date', { start_date: '2026-02-30' }],
+  ])('answers 400 for %s without querying', async (_, query) => {
+    await request(app.getHttpServer())
+      .get('/analytics')
+      .query(query)
+      .expect(400);
+
+    expect(
+      cacheDailyAnalyticsDataService.getDateRangeAnalyticsLive,
+    ).not.toHaveBeenCalled();
+    expect(analyticRepository.find).not.toHaveBeenCalled();
+  });
+
+  it('serves an address over 366 days live', async () => {
+    const liveRows = [{ date: '2024-12-31' }];
+    cacheDailyAnalyticsDataService.getDateRangeAnalyticsLive.mockResolvedValueOnce(
+      liveRows,
+    );
+
+    const response = await request(app.getHttpServer())
+      .get('/analytics')
+      .query({
+        address: ADDRESS,
+        start_date: '2024-01-01',
+        end_date: '2024-12-31',
+      })
+      .expect(200);
+
+    expect(response.body).toEqual(liveRows);
   });
 });
