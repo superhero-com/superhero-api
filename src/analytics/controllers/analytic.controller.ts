@@ -28,7 +28,6 @@ export class AnalyticController {
   @Get('')
   @ApiQuery({ name: 'start_date', type: 'string', required: false })
   @ApiQuery({ name: 'end_date', type: 'string', required: false })
-  @ApiQuery({ name: 'force_pull', type: 'boolean', required: false })
   @ApiQuery({ name: 'address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'getAnalyticsData',
@@ -36,7 +35,6 @@ export class AnalyticController {
   async getAnalyticsData(
     @Query('start_date') start_date: string,
     @Query('end_date') end_date: string,
-    @Query('force_pull') force_pull: boolean,
     @Query('address', OptionalAeAccountAddressPipe)
     address: string | undefined,
   ) {
@@ -62,12 +60,6 @@ export class AnalyticController {
       );
     }
 
-    if (force_pull) {
-      await this.cacheDailyAnalyticsDataService.pullAnalyticsDataByDateRange(
-        startDate,
-        endDate,
-      );
-    }
     const analytics = await this.analyticRepository.find({
       where: {
         date: Between(startDate, endDate),
