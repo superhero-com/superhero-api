@@ -17,6 +17,12 @@ RUN --mount=type=secret,id=GITHUB_TOKEN,required=true \
 RUN npm run build
 RUN npm prune --omit=dev
 
+# Without NODE_ENV the app runs in dev mode (Swagger, GraphiQL, Bull Board
+# without a login, DB_SYNC allowed). Deploys and the compose files set it
+# themselves; this covers a plain `docker run`. It must come after the build:
+# npm ci skips devDependencies under NODE_ENV=production.
+ENV NODE_ENV=production
+
 # Run as an unprivileged user so a compromise of the Node process does not
 # grant root inside the container (and does not make container-escape
 # trivial). `node` is the default unprivileged user shipped in the
