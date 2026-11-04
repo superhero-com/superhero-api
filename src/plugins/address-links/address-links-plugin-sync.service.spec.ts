@@ -88,12 +88,15 @@ describe('AddressLinksPluginSyncService', () => {
     service = moduleRef.get(AddressLinksPluginSyncService);
   });
 
-  const baseTx = (overrides: Partial<Tx> = {}): Tx =>
+  const baseTx = ({ raw, ...overrides }: Partial<Tx> = {}): Tx =>
     ({
       hash: 'th_principal',
       micro_time: '1000',
       function: 'link_principal',
+      ...overrides,
       raw: {
+        // Stored rows are camel-cased, so the call outcome is `returnType`.
+        returnType: 'ok',
         // Middleware returns contract-call arguments positionally as
         // { type, value } with no `name` field, matching the ACI signature
         // link_principal(principal, signer, provider, value, nonce, sig).
@@ -103,8 +106,8 @@ describe('AddressLinksPluginSyncService', () => {
           { type: 'string', value: 'prefaens' },
           { type: 'string', value: 'hero.chain' },
         ],
+        ...raw,
       },
-      ...overrides,
     }) as Tx;
 
   it('updates accounts.links from link call arguments without fetching logs', async () => {
@@ -300,6 +303,93 @@ describe('AddressLinksPluginSyncService', () => {
     );
 
     fetchSpy.mockRestore();
+  });
+
+  describe('call outcome', () => {
+    const nostrArgs = {
+      link: [
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'string', value: 'npub1attacker' },
+        { type: 'int', value: '1' },
+      ],
+      unlink: [
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'int', value: '1' },
+      ],
+      link_principal: [
+        { type: 'string', value: 'hero.chain' },
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'string', value: 'npub1attacker' },
+      ],
+      unlink_principal: [
+        { type: 'string', value: 'hero.chain' },
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+      ],
+    };
+
+    const expectUntouched = (fetchSpy: jest.SpyInstance) => {
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(accountRepo.findOne).not.toHaveBeenCalled();
+      expect(queryBuilder.update).not.toHaveBeenCalled();
+      expect(profileCacheService.syncFromAccountLinks).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    };
+
+    it.each(Object.keys(nostrArgs))(
+      'ignores a reverted %s call despite its decoded arguments',
+      async (fn) => {
+        const fetchSpy = jest.spyOn(global, 'fetch');
+
+        await service.processTransaction(
+          baseTx({
+            function: fn,
+            raw: { returnType: 'revert', arguments: nostrArgs[fn] },
+          }),
+          SyncDirectionEnum.Live,
+        );
+
+        expectUntouched(fetchSpy);
+        fetchSpy.mockRestore();
+      },
+    );
+
+    it('ignores a call without a return type', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+
+      await service.processTransaction(
+        baseTx({
+          function: 'link',
+          raw: { returnType: undefined, arguments: nostrArgs.link },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expectUntouched(fetchSpy);
+      fetchSpy.mockRestore();
+    });
+
+    it('accepts a snake_case return_type of ok', async () => {
+      await service.processTransaction(
+        baseTx({
+          function: 'link',
+          raw: {
+            returnType: undefined,
+            return_type: 'ok',
+            arguments: nostrArgs.link,
+          },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+        'value',
+        'npub1attacker',
+      );
+    });
   });
 
   describe('tgr.link.changed seam (Task 05)', () => {

@@ -99,7 +99,7 @@ The address-links feature is split across two modules:
 
 ## Event indexing (plugin)
 
-When a `link()` or `unlink()` transaction is confirmed on-chain, the live indexer routes it to `AddressLinksPluginSyncService`, which:
+When a `link()` or `unlink()` transaction is confirmed on-chain, the live indexer routes it to `AddressLinksPluginSyncService`. Calls whose `returnType` is not `ok` are skipped: a reverted call is still mined and the middleware returns its decoded arguments, so applying it would let anyone rewrite another address's links. For successful calls, the service:
 
 1. Fetches contract logs from the Aeternity middleware for that transaction.
 2. Matches events by `event_hash` (base32hex-encoded Blake2b of the event name).
