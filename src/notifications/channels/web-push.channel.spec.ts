@@ -28,7 +28,10 @@ describe('WebPushChannel', () => {
       tryAcquire: jest.fn(),
       release: jest.fn().mockResolvedValue(undefined),
     };
-    client = { isConfigured: jest.fn().mockReturnValue(true) };
+    client = {
+      isConfigured: jest.fn().mockReturnValue(true),
+      acceptsEndpoint: jest.fn().mockReturnValue(true),
+    };
     queue = { add: jest.fn().mockResolvedValue(undefined) };
     channel = new WebPushChannel(subscriptions, dedup, client, queue);
   });
@@ -45,6 +48,21 @@ describe('WebPushChannel', () => {
     await channel.send(notifiable, notification);
     expect(dedup.tryAcquire).not.toHaveBeenCalled();
     expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('never enqueues a stored endpoint the client would refuse to contact', async () => {
+    const stale = { ...sub, endpoint: 'https://10.0.0.5/push' };
+    subscriptions.getActiveForAddress.mockResolvedValue([stale, sub]);
+    client.acceptsEndpoint.mockImplementation(
+      (endpoint: string) => endpoint === sub.endpoint,
+    );
+    dedup.tryAcquire.mockResolvedValue(true);
+
+    await channel.send(notifiable, notification);
+
+    expect(dedup.tryAcquire).toHaveBeenCalledTimes(1);
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][0].subscription.endpoint).toBe(sub.endpoint);
   });
 
   it('skips enqueue when dedup says already handled', async () => {
