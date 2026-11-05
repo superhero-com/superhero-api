@@ -20,7 +20,7 @@ interface StubPlugin {
   processBatch: jest.Mock;
 }
 
-d('PluginFailedTransactionService retry (integration)', () => {
+d('PluginFailedTransactionService (integration)', () => {
   // Default reorgDepth is 100 and the margin 5, so only rows below height 895
   // are retried.
   const TIP_HEIGHT = 1000;
@@ -350,6 +350,16 @@ d('PluginFailedTransactionService retry (integration)', () => {
 
     expect(plugin.processBatch).not.toHaveBeenCalled();
     expect(await rows()).toEqual([]);
+  });
+
+  it('clears the rows of reorged-out txs for every plugin and keeps the rest', async () => {
+    await parked('th_gone');
+    await parked('th_gone', { plugin: 'dex' });
+    await parked('th_keep');
+
+    await service.clearFailuresForTxs(['th_gone']);
+
+    expect((await rows()).map((row) => row.tx_hash)).toEqual(['th_keep']);
   });
 
   it('only retries rows of the plugin being run', async () => {
