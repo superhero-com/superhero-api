@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { PluginSyncState } from '@/mdw-sync/entities/plugin-sync-state.entity';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+import { AccountService } from '@/account/services/account.service';
 import { BasePlugin } from '../base-plugin';
 import { PluginFilter, TxPageCursor } from '../plugin.interface';
 import { BclPluginSyncService } from './bcl-plugin-sync.service';
@@ -26,6 +27,7 @@ export class BclPlugin extends BasePlugin {
     @InjectRepository(Transaction)
     private transactionRepository: Repository<Transaction>,
     private bclPluginSyncService: BclPluginSyncService,
+    private accountService: AccountService,
   ) {
     super();
   }
@@ -85,16 +87,23 @@ export class BclPlugin extends BasePlugin {
       `[${this.name}] Cleaning up ${removedTxHashes.length} removed transactions`,
     );
 
+    let traders: Set<string>;
     try {
       // Delete related Transaction records
       const deleted = await this.transactionRepository
         .createQueryBuilder()
         .delete()
         .where('tx_hash IN (:...hashes)', { hashes: removedTxHashes })
+        .returning('address')
         .execute();
 
       this.logger.log(
         `[${this.name}] Deleted ${deleted.affected || 0} Transaction records for removed transactions`,
+      );
+      traders = new Set(
+        ((deleted.raw ?? []) as Array<{ address: string | null }>)
+          .map((row) => row.address)
+          .filter((address): address is string => !!address),
       );
 
       // Note: Tx entities are already deleted by BlockValidationService
@@ -104,6 +113,20 @@ export class BclPlugin extends BasePlugin {
         `[${this.name}] Failed to clean up removed transactions`,
         error,
       );
+      return;
+    }
+
+    // Account totals are aggregated from `transactions`, so without this the
+    // traders would keep counting the deleted trades until they trade again.
+    for (const address of traders) {
+      try {
+        await this.accountService.ensureAccountFromTransactions(address);
+      } catch (error: any) {
+        this.logger.error(
+          `[${this.name}] Failed to refresh account totals for ${address} after reorg`,
+          error,
+        );
+      }
     }
   }
 
