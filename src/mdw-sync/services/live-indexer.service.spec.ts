@@ -310,6 +310,18 @@ describe('LiveIndexerService websocket subscriptions', () => {
     expect(handleLiveTransaction).toHaveBeenCalledTimes(102);
     expect(handledHashes(handleLiveTransaction).at(-1)).toBe('th_0');
   });
+
+  it('still drops resends of the latest 100 hashes after the oldest one is forgotten', () => {
+    const { onTransaction, handleLiveTransaction } = subscribe();
+
+    for (let i = 0; i <= 100; i++) {
+      onTransaction(buildTransaction({}, `th_${i}`));
+    }
+    onTransaction(buildTransaction({}, 'th_100'));
+    onTransaction(buildTransaction({}, 'th_1'));
+
+    expect(handleLiveTransaction).toHaveBeenCalledTimes(101);
+  });
 });
 
 describe('LiveIndexerService.handleKeyBlock', () => {
