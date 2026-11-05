@@ -26,10 +26,13 @@ import {
 } from '@nestjs/common';
 import {
   buildTxAsync,
+  getMinimumNameFee,
   sendTransaction,
   Tag,
+  TxTimedOutError,
   verifyMessageSignature,
 } from '@aeternity/aepp-sdk';
+import { PROFILE_CHAIN_NAME_PRIVATE_KEY } from '../profile.constants';
 import { ProfileChainNameService } from './profile-chain-name.service';
 import * as profileSignatureUtil from './profile-signature.util';
 import { ProfileChainNameClaim } from '../entities/profile-chain-name-claim.entity';
@@ -866,6 +869,480 @@ describe('ProfileChainNameService', () => {
       expect(claimRepository.find).toHaveBeenCalledTimes(1);
       resolveGuard!();
       await first;
+    });
+  });
+
+  describe('on-chain sends', () => {
+    const sponsorAddress = 'ak_sponsor';
+    const chainName = 'myuniquename123.chain';
+    // The SDK's real fee, not the estimator, so a wrong estimate fails the funds tests.
+    const nameFee = BigInt(getMinimumNameFee(chainName).toFixed());
+
+    // Stateful claim row and on-chain owner, so a test can run several cron
+    // ticks and count what each one sends.
+    const setupSends = (initial: Record<string, unknown>) => {
+      const ctx = getService();
+      const row: any = {
+        address: validAddress,
+        name: chainName,
+        salt: null,
+        preclaim_height: null,
+        retry_count: 0,
+        error: null,
+        ...initial,
+      };
+      const chain: { owner: string | null } = { owner: null };
+      const lostWrites: Array<(entry: any) => boolean> = [];
+
+      ctx.claimRepository.findOne.mockImplementation(async () => ({ ...row }));
+      ctx.lockedClaimRepository.createQueryBuilder.mockImplementation(() => ({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockImplementation(async () => ({ ...row })),
+      }));
+      ctx.lockedClaimRepository.save.mockImplementation(async (entry) => {
+        const lost = lostWrites.findIndex((matches) => matches(entry));
+        if (lost !== -1) {
+          lostWrites.splice(lost, 1);
+          throw new Error('db down');
+        }
+        Object.assign(row, entry);
+        return entry;
+      });
+      ctx.profileSpendQueueService.getRewardAccount.mockReturnValue({
+        address: sponsorAddress,
+      });
+      const wallet = { balance: 100n * 10n ** 18n };
+      ctx.aeSdkService.sdk.getBalance.mockImplementation(async () =>
+        wallet.balance.toString(),
+      );
+
+      const name = {
+        preclaim: jest.fn().mockResolvedValue({
+          hash: 'th_preclaim',
+          nameSalt: 42,
+          blockHeight: 99,
+        }),
+        update: jest.fn().mockResolvedValue({ hash: 'th_update' }),
+        transfer: jest.fn().mockImplementation(async () => {
+          chain.owner = validAddress;
+          return { hash: 'th_transfer' };
+        }),
+      };
+      jest
+        .spyOn(ctx.service as any, 'createNameInstance')
+        .mockReturnValue(name);
+      jest
+        .spyOn(ctx.service as any, 'getNameStateIfPresent')
+        .mockImplementation(async () =>
+          chain.owner ? { owner: chain.owner } : null,
+        );
+      (buildTxAsync as jest.Mock).mockReset().mockResolvedValue('tx_claim');
+      (sendTransaction as jest.Mock)
+        .mockReset()
+        .mockImplementation(async () => {
+          chain.owner = sponsorAddress;
+          return { hash: 'th_claim' };
+        });
+
+      return {
+        ...ctx,
+        row,
+        chain,
+        name,
+        wallet,
+        remainingCost: (status: string): bigint =>
+          (ctx.service as any).estimateRemainingClaimCost(chainName, status),
+        loseWriteWhere: (matches: (entry: any) => boolean) =>
+          lostWrites.push(matches),
+        tick: () => (ctx.service as any).processClaimInternal(validAddress),
+      };
+    };
+    const preclaimed = {
+      status: 'preclaimed',
+      salt: '42',
+      preclaim_height: 99,
+    };
+
+    it('preclaims through the sponsor spend queue and stores the salt', async () => {
+      const { tick, row, name, service, profileSpendQueueService } = setupSends(
+        { status: 'pending' },
+      );
+
+      await tick();
+
+      expect(profileSpendQueueService.enqueueSpend).toHaveBeenCalledWith(
+        PROFILE_CHAIN_NAME_PRIVATE_KEY,
+        expect.any(Function),
+      );
+      expect((service as any).createNameInstance).toHaveBeenCalledWith(
+        chainName,
+      );
+      expect(name.preclaim).toHaveBeenCalledTimes(1);
+      expect(row).toMatchObject({
+        status: 'preclaimed',
+        salt: '42',
+        preclaim_tx_hash: 'th_preclaim',
+        preclaim_height: 99,
+        error: null,
+      });
+    });
+
+    it('claims from the sponsor account with the persisted salt', async () => {
+      const { tick, row } = setupSends(preclaimed);
+
+      await tick();
+
+      expect(buildTxAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tag: Tag.NameClaimTx,
+          accountId: sponsorAddress,
+          name: chainName,
+          nameSalt: 42,
+        }),
+      );
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(row).toMatchObject({
+        status: 'claimed',
+        claim_tx_hash: 'th_claim',
+        error: null,
+      });
+    });
+
+    it('points the name at the user before transferring it', async () => {
+      const { tick, row, chain, name } = setupSends({ status: 'claimed' });
+      chain.owner = sponsorAddress;
+
+      await tick();
+
+      expect(name.update).toHaveBeenCalledWith({
+        account_pubkey: validAddress,
+      });
+      expect(name.transfer).toHaveBeenCalledWith(validAddress);
+      expect(name.update.mock.invocationCallOrder[0]).toBeLessThan(
+        name.transfer.mock.invocationCallOrder[0],
+      );
+      expect(row).toMatchObject({
+        status: 'completed',
+        update_tx_hash: 'th_update',
+        transfer_tx_hash: 'th_transfer',
+        next_retry_at: null,
+      });
+    });
+
+    it('sends each transaction once across the full flow', async () => {
+      const { tick, row, name } = setupSends({ status: 'pending' });
+
+      await tick();
+      await tick();
+      await tick();
+
+      expect(row.status).toBe('completed');
+      expect(name.preclaim).toHaveBeenCalledTimes(1);
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+      expect(name.update).toHaveBeenCalledTimes(1);
+      expect(name.transfer).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resend the claim when the claimed write is lost', async () => {
+      const { tick, row, loseWriteWhere } = setupSends(preclaimed);
+      loseWriteWhere((entry) => entry.status === 'claimed');
+
+      await tick();
+      expect(row).toMatchObject({
+        status: 'preclaimed',
+        retry_count: 1,
+        error: 'db down',
+      });
+
+      await tick();
+      expect(row.status).toBe('claimed');
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not resend the update or transfer when the completed write is lost', async () => {
+      const { tick, row, chain, name, loseWriteWhere } = setupSends({
+        status: 'claimed',
+      });
+      chain.owner = sponsorAddress;
+      loseWriteWhere((entry) => entry.status === 'completed');
+
+      await tick();
+      expect(row).toMatchObject({ status: 'claimed', error: 'db down' });
+
+      await tick();
+      expect(row.status).toBe('completed');
+      expect(name.update).toHaveBeenCalledTimes(1);
+      expect(name.transfer).toHaveBeenCalledTimes(1);
+    });
+
+    // The salt is gone with the write, so the orphaned commitment (one preclaim
+    // fee) is the accepted cost.
+    it('preclaims again when the preclaimed write is lost', async () => {
+      const { tick, row, name, loseWriteWhere } = setupSends({
+        status: 'pending',
+      });
+      loseWriteWhere((entry) => entry.status === 'preclaimed');
+      name.preclaim.mockResolvedValueOnce({
+        hash: 'th_preclaim_lost',
+        nameSalt: 41,
+        blockHeight: 99,
+      });
+
+      await tick();
+      expect(row).toMatchObject({
+        status: 'pending',
+        salt: null,
+        error: 'db down',
+      });
+
+      await tick();
+      expect(name.preclaim).toHaveBeenCalledTimes(2);
+      expect(row).toMatchObject({ status: 'preclaimed', salt: '42' });
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it('logs instead of throwing when the retry bookkeeping is lost too', async () => {
+      const { tick, row, service, loseWriteWhere } = setupSends(preclaimed);
+      loseWriteWhere((entry) => entry.status === 'claimed');
+      loseWriteWhere((entry) => entry.retry_count === 1);
+      const logError = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        (service as any).processClaimWithGuard(validAddress),
+      ).resolves.toBeUndefined();
+      expect(logError).toHaveBeenCalled();
+      expect(row).toMatchObject({ status: 'preclaimed', retry_count: 0 });
+
+      await tick();
+      expect(row.status).toBe('claimed');
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks a claim that lands after a send timeout as claimed without resending', async () => {
+      const { tick, row, chain } = setupSends(preclaimed);
+      (sendTransaction as jest.Mock).mockImplementationOnce(async () => {
+        chain.owner = sponsorAddress;
+        throw new TxTimedOutError(5, 'th_claim');
+      });
+
+      await tick();
+      expect(row).toMatchObject({ status: 'preclaimed', retry_count: 1 });
+
+      await tick();
+      expect(row.status).toBe('claimed');
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    // Only one claim of a name can succeed, so the resend cannot pay twice.
+    it('resubmits a timed-out claim that has not landed with the same salt', async () => {
+      const { tick, row } = setupSends(preclaimed);
+      (sendTransaction as jest.Mock).mockRejectedValueOnce(
+        new TxTimedOutError(5, 'th_claim'),
+      );
+
+      await tick();
+      await tick();
+
+      expect(row.status).toBe('claimed');
+      expect(
+        (buildTxAsync as jest.Mock).mock.calls.map(([tx]) => tx.nameSalt),
+      ).toEqual([42, 42]);
+    });
+
+    it('resends the update and transfer when the transfer fails', async () => {
+      const { tick, row, chain, name } = setupSends({ status: 'claimed' });
+      chain.owner = sponsorAddress;
+      name.transfer.mockRejectedValueOnce(new Error('node unavailable'));
+
+      await tick();
+      expect(row).toMatchObject({
+        status: 'claimed',
+        error: 'node unavailable',
+      });
+
+      await tick();
+      expect(row.status).toBe('completed');
+      expect(name.update).toHaveBeenCalledTimes(2);
+      expect(name.transfer).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the claim pending without a salt when the preclaim fails', async () => {
+      const { tick, row, name } = setupSends({ status: 'pending' });
+      name.preclaim.mockRejectedValueOnce(new Error('node unavailable'));
+
+      await tick();
+
+      expect(row).toMatchObject({
+        status: 'pending',
+        salt: null,
+        retry_count: 1,
+        error: 'node unavailable',
+      });
+    });
+
+    it.each([
+      { status: 'pending', movedTo: 'preclaimed', fields: {}, owner: null },
+      {
+        status: 'preclaimed',
+        movedTo: 'claimed',
+        fields: preclaimed,
+        owner: null,
+      },
+      {
+        status: 'claimed',
+        movedTo: 'completed',
+        fields: {},
+        owner: sponsorAddress,
+      },
+    ])(
+      'does not send when a $status claim moves on while queued',
+      async ({ status, movedTo, fields, owner }) => {
+        const { tick, row, chain, name, profileSpendQueueService } = setupSends(
+          { ...fields, status },
+        );
+        chain.owner = owner;
+        profileSpendQueueService.enqueueSpend.mockImplementationOnce(
+          async (_key, work) => {
+            row.status = movedTo;
+            return work();
+          },
+        );
+
+        await tick();
+
+        expect(name.preclaim).not.toHaveBeenCalled();
+        expect(sendTransaction).not.toHaveBeenCalled();
+        expect(name.update).not.toHaveBeenCalled();
+        expect(name.transfer).not.toHaveBeenCalled();
+        expect(row.status).toBe(movedTo);
+      },
+    );
+
+    it('does not update or transfer a name owned by an unexpected address', async () => {
+      const { tick, row, chain, name } = setupSends({ status: 'claimed' });
+      chain.owner = 'ak_stranger';
+
+      await tick();
+
+      expect(name.update).not.toHaveBeenCalled();
+      expect(name.transfer).not.toHaveBeenCalled();
+      expect(row).toMatchObject({
+        status: 'claimed',
+        retry_count: 1,
+        error: `Chain name ${chainName} is owned by an unexpected address`,
+      });
+    });
+
+    it('completes without claiming when the user already owns the name', async () => {
+      const { tick, row, chain } = setupSends(preclaimed);
+      chain.owner = validAddress;
+
+      await tick();
+
+      expect(row.status).toBe('completed');
+      expect(sendTransaction).not.toHaveBeenCalled();
+    });
+
+    it('finishes a claim whose name fee drops the wallet below a whole claim', async () => {
+      const { tick, row, chain, wallet, remainingCost } = setupSends({
+        status: 'pending',
+      });
+      wallet.balance = remainingCost('pending');
+      (sendTransaction as jest.Mock).mockImplementationOnce(async () => {
+        wallet.balance -= nameFee;
+        chain.owner = sponsorAddress;
+        return { hash: 'th_claim' };
+      });
+
+      await tick();
+      await tick();
+      await tick();
+
+      expect(row).toMatchObject({ status: 'completed', error: null });
+    });
+
+    it.each([
+      { status: 'pending', next: 'preclaimed', fields: {}, owner: null },
+      {
+        status: 'preclaimed',
+        next: 'claimed',
+        fields: preclaimed,
+        owner: null,
+      },
+      {
+        status: 'claimed',
+        next: 'completed',
+        fields: {},
+        owner: sponsorAddress,
+      },
+    ])(
+      'holds a $status claim until the wallet covers the steps left',
+      async ({ status, next, fields, owner }) => {
+        const { tick, row, chain, name, wallet, remainingCost } = setupSends({
+          ...fields,
+          status,
+        });
+        chain.owner = owner;
+        wallet.balance = remainingCost(status) - 1n;
+
+        await tick();
+        expect(row).toMatchObject({
+          status,
+          error: 'Sponsor account has insufficient funds',
+        });
+        expect(name.preclaim).not.toHaveBeenCalled();
+        expect(sendTransaction).not.toHaveBeenCalled();
+        expect(name.update).not.toHaveBeenCalled();
+
+        wallet.balance = remainingCost(status);
+        await tick();
+        expect(row.status).toBe(next);
+      },
+    );
+
+    it.each([
+      {
+        status: 'preclaimed',
+        fields: preclaimed,
+        owner: sponsorAddress,
+        next: 'claimed',
+      },
+      { status: 'claimed', fields: {}, owner: validAddress, next: 'completed' },
+    ])(
+      'syncs a $status claim that already landed even with an empty wallet',
+      async ({ status, fields, owner, next }) => {
+        const { tick, row, chain, name, wallet } = setupSends({
+          ...fields,
+          status,
+        });
+        chain.owner = owner;
+        wallet.balance = 0n;
+
+        await tick();
+
+        expect(row).toMatchObject({ status: next, error: null });
+        expect(sendTransaction).not.toHaveBeenCalled();
+        expect(name.update).not.toHaveBeenCalled();
+        expect(name.transfer).not.toHaveBeenCalled();
+      },
+    );
+
+    it('still requires the cost of a whole claim to start one', async () => {
+      const { service, aeSdkService } = getService();
+      aeSdkService.sdk.getBalance.mockResolvedValue(nameFee.toString());
+
+      await expect(
+        service.requestChainName({
+          address: validAddress,
+          name: 'myuniquename123',
+          challengeNonce: 'a'.repeat(24),
+          challengeExpiresAt: Date.now() + 10_000,
+          signatureHex: 'b'.repeat(128),
+        }),
+      ).rejects.toThrow('insufficient sponsor funds');
     });
   });
 });

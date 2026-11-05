@@ -373,16 +373,11 @@ export class ProfileChainNameService {
     });
     if (!claim) return;
 
-    try {
-      await this.assertSponsorHasFunds(claim.name);
-    } catch {
-      await this.markRetry(address, 'Sponsor account has insufficient funds');
-      return;
-    }
-
     switch (claim.status) {
       case 'pending':
-        await this.stepPreclaim(address);
+        if (await this.sponsorCanPay(address, claim)) {
+          await this.stepPreclaim(address);
+        }
         break;
       case 'preclaimed':
         await this.stepClaim(address);
@@ -496,6 +491,8 @@ export class ProfileChainNameService {
         return;
       }
 
+      if (!(await this.sponsorCanPay(address, claim))) return;
+
       await this.profileSpendQueueService.enqueueSpend(
         PROFILE_CHAIN_NAME_PRIVATE_KEY,
         async () => {
@@ -562,6 +559,8 @@ export class ProfileChainNameService {
           `Chain name ${claim.name} is owned by an unexpected address`,
         );
       }
+
+      if (!(await this.sponsorCanPay(address, claim))) return;
 
       await this.profileSpendQueueService.enqueueSpend(
         PROFILE_CHAIN_NAME_PRIVATE_KEY,
@@ -750,8 +749,26 @@ export class ProfileChainNameService {
     return `profile_chain_name_claim:${address}:${nonce}:${expiresAt}`;
   }
 
-  private async assertSponsorHasFunds(fullName: string): Promise<void> {
-    const requiredBalance = this.estimateTotalClaimCost(fullName);
+  // Checked after the on-chain sync, so a step that landed but lost its write
+  // never waits on funds it already spent.
+  private async sponsorCanPay(
+    address: string,
+    claim: ProfileChainNameClaim,
+  ): Promise<boolean> {
+    try {
+      await this.assertSponsorHasFunds(claim.name, claim.status);
+      return true;
+    } catch {
+      await this.markRetry(address, 'Sponsor account has insufficient funds');
+      return false;
+    }
+  }
+
+  private async assertSponsorHasFunds(
+    fullName: string,
+    status: ChainNameClaimStatus = 'pending',
+  ): Promise<void> {
+    const requiredBalance = this.estimateRemainingClaimCost(fullName, status);
     const funds = await this.getSponsorFundsStatus(fullName);
     if (!funds.balanceAvailable) {
       throw new ServiceUnavailableException(
@@ -789,6 +806,15 @@ export class ProfileChainNameService {
   }
 
   private estimateTotalClaimCost(fullName: string): bigint {
+    return this.estimateRemainingClaimCost(fullName, 'pending');
+  }
+
+  // Steps already on-chain are paid for. Charging them again stalls the claim
+  // whose name fee took the wallet below the cost of a whole claim.
+  private estimateRemainingClaimCost(
+    fullName: string,
+    status: ChainNameClaimStatus,
+  ): bigint {
     const nameTyped = fullName as `${string}.chain`;
     const nameId = produceNameId(nameTyped);
 
@@ -832,7 +858,10 @@ export class ProfileChainNameService {
       }),
     );
 
-    return preclaimCost + claimCost + updateCost + transferCost;
+    const afterClaim = updateCost + transferCost;
+    if (status === 'claimed') return afterClaim;
+    if (status === 'preclaimed') return claimCost + afterClaim;
+    return preclaimCost + claimCost + afterClaim;
   }
 
   private assertValidAddress(address: string): void {
