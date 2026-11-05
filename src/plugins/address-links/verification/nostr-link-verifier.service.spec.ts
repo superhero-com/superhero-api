@@ -60,6 +60,7 @@ describe('NostrLinkVerifierService', () => {
     ['a note id', nip19.noteEncode('0'.repeat(64))],
     ['a hex pubkey', ownerPubkey],
     ['garbage', 'npub1notbech32'],
+    ['an uppercase npub', ownerNpub.toUpperCase()],
   ];
 
   describe('verifyClaim', () => {
@@ -158,6 +159,27 @@ describe('NostrLinkVerifierService', () => {
     it('refuses an event that is not JSON', async () => {
       await expect(submit('{not json')).rejects.toThrow(
         'nostr_event must be valid JSON',
+      );
+    });
+
+    it.each(['null', '[]', '"text"', '42'])(
+      'refuses %s as the event',
+      async (raw) => {
+        await expect(submit(raw)).rejects.toThrow(
+          'nostr_event must be a JSON object',
+        );
+      },
+    );
+
+    it.each([
+      ['missing', undefined],
+      ['a string', String(NOW_SECONDS)],
+      ['a fraction', NOW_SECONDS + 0.5],
+    ])('refuses an event whose timestamp is %s', async (_, createdAt) => {
+      const event = { ...signedEvent(linkMessage()), created_at: createdAt };
+
+      await expect(submit(event)).rejects.toThrow(
+        'Nostr event timestamp is out of acceptable range',
       );
     });
 

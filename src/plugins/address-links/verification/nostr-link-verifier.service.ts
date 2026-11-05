@@ -26,6 +26,9 @@ export class NostrLinkVerifierService {
     } catch {
       throw new BadRequestException('nostr_event must be valid JSON');
     }
+    if (typeof event !== 'object' || event === null || Array.isArray(event)) {
+      throw new BadRequestException('nostr_event must be a JSON object');
+    }
 
     if (event.kind !== AUTH_EVENT_KIND) {
       throw new BadRequestException(
@@ -35,7 +38,11 @@ export class NostrLinkVerifierService {
 
     const now = Math.floor(Date.now() / 1000);
     const age = now - event.created_at;
-    if (age > ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS || age < -60) {
+    if (
+      !Number.isInteger(event.created_at) ||
+      age > ADDRESS_LINK_NOSTR_EVENT_MAX_AGE_SECONDS ||
+      age < -60
+    ) {
       throw new BadRequestException(
         'Nostr event timestamp is out of acceptable range',
       );
@@ -62,13 +69,15 @@ export class NostrLinkVerifierService {
   private decodeNpub(npub: string): string {
     try {
       const decoded = nip19.decode(npub);
-      if (decoded.type !== 'npub') {
-        throw new Error('not an npub');
+      // bech32 also decodes the all-uppercase form, which the contract would
+      // store as a second value for the same key, dodging its one-link rule.
+      if (decoded.type !== 'npub' || npub !== npub.toLowerCase()) {
+        throw new Error('not a lowercase npub');
       }
       return decoded.data as string;
     } catch {
       throw new BadRequestException(
-        'Invalid npub format. Must be a valid bech32-encoded Nostr public key.',
+        'Invalid npub format. Must be a valid lowercase bech32-encoded Nostr public key.',
       );
     }
   }

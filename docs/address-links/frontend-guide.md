@@ -92,7 +92,7 @@ Response:
 | Error | Reason |
 |---|---|
 | 400 | `address` missing |
-| 400 | `value` missing or invalid npub format |
+| 400 | `value` missing, not a valid npub, or not lowercase |
 
 ### Submit
 
@@ -122,12 +122,12 @@ Response:
 
 | Error | Reason |
 |---|---|
-| 400 | `nostr_event` missing or invalid JSON |
+| 400 | `nostr_event` missing, invalid JSON, or not a JSON object |
 | 400 | Event `kind` is not `22242` |
 | 400 | Event `content` doesn't match expected link message |
 | 400 | Event `pubkey` doesn't match the claimed npub |
 | 400 | Event signature is invalid |
-| 400 | Event timestamp too old (>5 min) or in the future (>60s) |
+| 400 | Event timestamp missing, not whole seconds, too old (>5 min) or in the future (>60s) |
 | 400 | Wallet signature verification failed |
 | 400 | Nonce mismatch |
 

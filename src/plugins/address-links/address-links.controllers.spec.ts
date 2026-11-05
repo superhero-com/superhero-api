@@ -344,6 +344,18 @@ describe('address-link routes (HTTP)', () => {
       expectNoWrite();
     });
 
+    it('answers 400, not 500, for a null nostr_event', async () => {
+      const claim = await claimFor(flows.nostr);
+
+      const res = await post('nostr/submit', {
+        ...flows.nostr.submit(claim),
+        nostr_event: 'null',
+      }).expect(400);
+
+      expect(res.body.message).toBe('nostr_event must be a JSON object');
+      expectNoWrite();
+    });
+
     it.each([
       ['no code', { x_code: undefined }],
       ['no code verifier', { x_code_verifier: undefined }],
