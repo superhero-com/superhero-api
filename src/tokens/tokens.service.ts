@@ -389,6 +389,9 @@ export class TokensService {
       this.logger.warn(`createToken->not_from_factory:: ${saleAddress}`);
       return null;
     }
+    // The indexer creates most tokens through here, not the raw-tx creators.
+    tokenData.dao_address = createTx.tx.return.value[0]?.value;
+    tokenData.create_tx_hash = createTx.hash;
 
     // prevent duplicate tokens by symbol
     if (tokenData?.symbol) {
@@ -1819,11 +1822,5 @@ export class TokensService {
         batch.map((token) => this.updateTokenTrendingScore(token)),
       );
     }
-  }
-
-  async deleteTokensWhereDaoAddressIsNull(): Promise<void> {
-    await this.tokensRepository.delete({
-      dao_address: IsNull(),
-    });
   }
 }
