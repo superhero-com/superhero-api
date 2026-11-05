@@ -71,13 +71,13 @@ describe('SocialTippingTransactionProcessorService', () => {
       );
     });
 
-    it('does not emit when the tip transaction rolls back', async () => {
+    it('does not emit when the tip transaction rolls back, and rethrows so the tx is parked', async () => {
       tipRepository.manager.transaction.mockRejectedValue(
         new Error('deadlock'),
       );
       await expect(
         service.processTransaction(tipTx, 'live' as any),
-      ).resolves.toBeNull();
+      ).rejects.toThrow('deadlock');
       expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 

@@ -10,7 +10,11 @@ import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
 import BigNumber from 'bignumber.js';
-import { fetchJson } from '@/utils/common';
+import {
+  fetchJson,
+  FetchJsonHttpError,
+  sanitizeJsonForPostgres,
+} from '@/utils/common';
 import { DEX_CONTRACTS } from '@/dex/config/dex-contracts.config';
 import { DexToken } from '@/dex/entities/dex-token.entity';
 import { PairTransaction } from '@/dex/entities/pair-transaction.entity';
@@ -139,42 +143,33 @@ export class DexTransactionProcessorService {
    * Process a DEX transaction
    * @param tx - Transaction entity from MDW sync
    * @param syncDirection - Sync direction (backward/live/reorg)
-   * @returns PairTransaction if processed successfully, null otherwise
+   * @returns PairTransaction if processed, null if the tx is not a DEX trade.
+   *   Errors propagate so the batch processor parks the tx for retry.
    */
   async processTransaction(
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<PairTransaction | null> {
     void syncDirection;
-    try {
-      // Check if this is a DEX router transaction
-      if (tx.contract_id !== DEX_CONTRACTS.router) {
-        this.logger.debug(
-          `Skipping non-DEX router transaction ${tx.hash ?? ''}`,
-        );
-        return null;
-      }
-
-      // Extract pair info from transaction
-      const pairInfo = await this.extractPairInfoFromTransaction(tx);
-      if (!pairInfo) {
-        return null;
-      }
-
-      // Wrap operations in a transaction for consistency
-      return await this.dexPairTransactionRepository.manager.transaction(
-        async (manager) => {
-          const pair = await this.saveDexPair(pairInfo, tx, manager);
-          return await this.saveDexPairTransaction(pair, pairInfo, tx, manager);
-        },
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process DEX transaction ${tx.hash}`,
-        error.stack,
-      );
+    // Check if this is a DEX router transaction
+    if (tx.contract_id !== DEX_CONTRACTS.router) {
+      this.logger.debug(`Skipping non-DEX router transaction ${tx.hash ?? ''}`);
       return null;
     }
+
+    // Extract pair info from transaction
+    const pairInfo = await this.extractPairInfoFromTransaction(tx);
+    if (!pairInfo) {
+      return null;
+    }
+
+    // Wrap operations in a transaction for consistency
+    return await this.dexPairTransactionRepository.manager.transaction(
+      async (manager) => {
+        const pair = await this.saveDexPair(pairInfo, tx, manager);
+        return await this.saveDexPairTransaction(pair, pairInfo, tx, manager);
+      },
+    );
   }
 
   /**
@@ -410,16 +405,23 @@ export class DexTransactionProcessorService {
         `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${address}`,
       );
 
+      // The deployer picks these, and a NUL byte or a missing value would fail
+      // the save on every retry and lose the swap.
       token = await this.dexTokenRepository.save({
         address,
-        name: tokenData.name,
-        symbol: tokenData.symbol,
+        name: sanitizeJsonForPostgres(tokenData.name) || 'Unknown',
+        symbol: sanitizeJsonForPostgres(tokenData.symbol) || 'UNK',
         decimals: tokenData.decimals,
         is_ae: tokenData.address === DEX_CONTRACTS.wae,
       });
     } catch (error) {
+      // Nothing repairs the placeholder later, so only settle for it when the
+      // middleware says it doesn't know the token. Anything else is transient
+      // and the swap is parked for retry.
+      if (!(error instanceof FetchJsonHttpError && error.status === 404)) {
+        throw error;
+      }
       this.logger.error(`Failed to fetch token data for ${address}`, error);
-      // Create a basic token entry if fetch fails
       token = await this.dexTokenRepository.save({
         address,
         name: 'Unknown',

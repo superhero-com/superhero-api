@@ -40,48 +40,41 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Tip | null> {
-    try {
-      // Validate transaction
-      const tipType = this.validateTransaction(tx);
-      if (!tipType) {
-        return null;
-      }
-
-      // Wrap persistence in a transaction, then recalculate after commit.
-      const savedTipResult = await this.tipRepository.manager.transaction(
-        async (manager) => {
-          return await this.saveTipFromTransaction(tx, tipType, manager);
-        },
-      );
-
-      if (!savedTipResult) {
-        return null;
-      }
-
-      // After commit, so a rollback can't leak a phantom push.
-      this.emitTipReceivedEvent(tx, savedTipResult, syncDirection);
-
-      await refreshTrendingScoresForPostSafely({
-        post: savedTipResult.post,
-        loadParentPost: (postId) =>
-          this.postRepository.findOne({
-            where: { id: postId },
-          }),
-        updateTrendingScoresForSymbols: (symbols) =>
-          this.tokensService.queueTrendingScoresForSymbols(symbols),
-        logError: (message, trace) => this.logger.error(message, trace),
-        errorMessage:
-          'Failed to refresh trending scores after processing tip transaction',
-      });
-
-      return savedTipResult.tip;
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process tip transaction ${tx.hash}`,
-        error.stack,
-      );
+    // Validate transaction
+    const tipType = this.validateTransaction(tx);
+    if (!tipType) {
       return null;
     }
+
+    // Wrap persistence in a transaction, then recalculate after commit.
+    // A failure propagates so the batch processor parks the tx for retry.
+    const savedTipResult = await this.tipRepository.manager.transaction(
+      async (manager) => {
+        return await this.saveTipFromTransaction(tx, tipType, manager);
+      },
+    );
+
+    if (!savedTipResult) {
+      return null;
+    }
+
+    // After commit, so a rollback can't leak a phantom push.
+    this.emitTipReceivedEvent(tx, savedTipResult, syncDirection);
+
+    await refreshTrendingScoresForPostSafely({
+      post: savedTipResult.post,
+      loadParentPost: (postId) =>
+        this.postRepository.findOne({
+          where: { id: postId },
+        }),
+      updateTrendingScoresForSymbols: (symbols) =>
+        this.tokensService.queueTrendingScoresForSymbols(symbols),
+      logError: (message, trace) => this.logger.error(message, trace),
+      errorMessage:
+        'Failed to refresh trending scores after processing tip transaction',
+    });
+
+    return savedTipResult.tip;
   }
 
   /**
