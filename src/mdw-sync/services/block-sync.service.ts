@@ -1,4 +1,8 @@
-import { fetchJson, resolveMiddlewareNextUrlSafely } from '@/utils/common';
+import {
+  fetchJson,
+  resolveMiddlewareNextUrl,
+  resolveMiddlewareNextUrlSafely,
+} from '@/utils/common';
 import {
   isDatabaseConnectionOrPoolError,
   logDatabaseIssue,
@@ -197,9 +201,18 @@ export class BlockSyncService {
   ): Promise<Map<number, string[]>> {
     let nextUrl: string | null = url;
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
+    // Block validation reads every height missing from txHashesByBlock as
+    // emptied and deletes its stored txs, so a page it cannot read or follow
+    // must abort the sweep instead of ending it early.
+    const mustReadEveryPage = txHashesByBlock !== null;
 
     while (nextUrl) {
       const response = await fetchJson(nextUrl);
+      if (mustReadEveryPage && !Array.isArray(response?.data)) {
+        throw new Error(
+          `Middleware returned no transaction page for ${nextUrl}`,
+        );
+      }
       const transactions = response?.data || [];
 
       if (transactions.length === 0) {
@@ -295,12 +308,14 @@ export class BlockSyncService {
         }
       }
 
-      nextUrl = resolveMiddlewareNextUrlSafely(
-        response.next,
-        middlewareUrl,
-        this.logger,
-        'BlockSyncService.processTransactionPage',
-      );
+      nextUrl = mustReadEveryPage
+        ? resolveMiddlewareNextUrl(response.next, middlewareUrl)
+        : resolveMiddlewareNextUrlSafely(
+            response.next,
+            middlewareUrl,
+            this.logger,
+            'BlockSyncService.processTransactionPage',
+          );
     }
 
     return txHashesByBlock ?? new Map();

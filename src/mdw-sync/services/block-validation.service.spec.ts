@@ -1,5 +1,6 @@
 import { In, Not } from 'typeorm';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, InvalidMiddlewareNextUrlError } from '@/utils/common';
+import { BlockSyncService } from './block-sync.service';
 import { BlockValidationService } from './block-validation.service';
 
 jest.mock('@/utils/common', () => ({
@@ -50,10 +51,22 @@ describe('BlockValidationService', () => {
       service,
       txRepository,
       deleteQuery,
+      configService,
       pluginBatchProcessor,
       blockSyncService,
     };
   };
+
+  const middlewareTx = (hash: string, height: number) => ({
+    hash,
+    block_height: height,
+    block_hash: 'mh_1',
+    micro_index: 0,
+    micro_time: 1700000000000,
+    signatures: [],
+    encoded_tx: '',
+    tx: { type: 'ContractCallTx', contract_id: 'ct_1', function: 'buy' },
+  });
 
   beforeEach(() => {
     (fetchJson as jest.Mock).mockReset();
@@ -260,6 +273,47 @@ describe('BlockValidationService', () => {
     expect(service.getIsValidating()).toBe(false);
     await service.validateBlocksPeriodically();
     expect(txRepository.find).toHaveBeenCalled();
+  });
+
+  it('deletes nothing when the refetch cannot page through the whole window', async () => {
+    const { txRepository, configService, pluginBatchProcessor } = setup({
+      'mdw.reorgDepth': 1,
+    });
+    const blockSyncService = new BlockSyncService(
+      {} as any,
+      { find: jest.fn().mockResolvedValue([]), upsert: jest.fn() } as any,
+      {} as any,
+      configService as any,
+      { filterRelevantTransactions: jest.fn(() => []) } as any,
+      {} as any,
+    );
+    (fetchJson as jest.Mock).mockImplementation(async (url: string) => {
+      if (url.endsWith('/v3/status')) return { mdw_height: 10 };
+      if (url.includes('/v3/key-blocks')) return { data: [], next: null };
+      // Height 10 sits on the second page, behind a next URL that is rejected.
+      return {
+        data: [middlewareTx('th_9', 9)],
+        next: 'https://elsewhere.test/v3/transactions?cursor=2',
+      };
+    });
+    // th_10 is still on chain; the refetch just never reached it.
+    txRepository.find.mockImplementation(async ({ where }) =>
+      where.block_height === 10 ? [{ hash: 'th_10' }] : [],
+    );
+    const service = new BlockValidationService(
+      txRepository as any,
+      configService as any,
+      pluginBatchProcessor as any,
+      blockSyncService,
+    );
+
+    await expect(service.validateAndRefreshBlocks()).rejects.toThrow(
+      InvalidMiddlewareNextUrlError,
+    );
+
+    expect(txRepository.delete).not.toHaveBeenCalled();
+    expect(txRepository.createQueryBuilder).not.toHaveBeenCalled();
+    expect(pluginBatchProcessor.handleReorg).not.toHaveBeenCalled();
   });
 
   it('does not start a second pass while one is running', async () => {
