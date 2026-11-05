@@ -25,7 +25,7 @@ import { toMdwTx } from '../utils/to-mdw-tx';
 @Injectable()
 export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LiveIndexerService.name);
-  private syncedTransactions: string[] = [];
+  private readonly syncedTransactions = new Set<string>();
   private unsubscribeTransactions: (() => void) | null = null;
   private unsubscribeKeyBlocks: (() => void) | null = null;
 
@@ -59,13 +59,16 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
             return;
           }
           // Prevent duplicate transactions
-          if (!this.syncedTransactions.includes(transaction.hash)) {
+          if (!this.syncedTransactions.has(transaction.hash)) {
             this.handleLiveTransaction(transaction);
-            this.syncedTransactions.push(transaction.hash);
+            this.syncedTransactions.add(transaction.hash);
 
-            // Reset synced transactions after 100 transactions
-            if (this.syncedTransactions.length > 100) {
-              this.syncedTransactions = [];
+            // Keep the latest 100 hashes. A Set iterates in insertion order,
+            // so its first value is the oldest.
+            if (this.syncedTransactions.size > 100) {
+              this.syncedTransactions.delete(
+                this.syncedTransactions.values().next().value,
+              );
             }
           }
         },
