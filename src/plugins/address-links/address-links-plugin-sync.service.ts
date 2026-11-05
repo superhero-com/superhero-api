@@ -74,7 +74,7 @@ export class AddressLinksPluginSyncService extends BasePluginSyncService {
   ): Promise<void> {
     // MDW lists reverted calls with their decoded arguments (and result "ok"),
     // so without this anyone could pay for a failing link() and get it applied.
-    const returnType = tx.raw?.returnType ?? tx.raw?.return_type;
+    const returnType = tx.raw?.returnType;
     if (returnType !== 'ok') {
       this.logger.warn(
         `Ignoring ${tx.function} tx ${tx.hash} with return type ${returnType}`,

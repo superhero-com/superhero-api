@@ -101,12 +101,10 @@ The address-links feature is split across two modules:
 
 When a `link()` or `unlink()` transaction is confirmed on-chain, the live indexer routes it to `AddressLinksPluginSyncService`. Calls whose `returnType` is not `ok` are skipped: a reverted call is still mined and the middleware returns its decoded arguments, so applying it would let anyone rewrite another address's links. For successful calls, the service:
 
-1. Fetches contract logs from the Aeternity middleware for that transaction.
-2. Matches events by `event_hash` (base32hex-encoded Blake2b of the event name).
-3. Converts the integer address from the log args to an `ak_...` address.
-4. Reads the payload from `log.data` (format: `provider:value`).
-5. Creates the account row if it doesn't exist (`ensureAccount`).
-6. Updates the `links` JSONB column via `jsonb_set` (link) or `links - 'key'` (unlink).
+1. Reads the address, provider and value from the decoded call arguments (`raw.arguments`), by position as in the ACI: `link(addr, provider, value, …)` updates `addr`, and `link_principal(principal, signer, provider, value, …)` updates `signer`. The unlink variants have no value.
+2. Other calls, and calls whose arguments are missing, fall back to the contract logs from the Aeternity middleware: it matches events by `event_hash` (base32hex-encoded Blake2b of the event name) or `event_name`, converts the integer address in the log args to an `ak_...` address, and reads the payload from `log.data` (format: `provider:value`).
+3. Creates the account row if it doesn't exist (`ensureAccount`).
+4. Updates the `links` JSONB column via `jsonb_set` (link) or `links - 'key'` (unlink).
 
 ## Database
 
@@ -178,8 +176,10 @@ Frontends should use `signMessage(message)` from `@aeternity/aepp-sdk`, which ha
 |---|---|
 | `Link` | `args[0]` = address (integer), `data` = `"provider:value"` |
 | `Unlink` | `args[0]` = address (integer), `data` = `"provider:value"` |
+| `PrincipalLink` | `args[0]` = signer address (integer), `data` = `"provider:value"` |
+| `PrincipalUnlink` | `args[0]` = signer address (integer), `data` = `"provider:value"` |
 
-Events are matched by `event_hash` (base32hex encoding), not by name.
+Events are matched by `event_hash` (base32hex encoding) or by `event_name`.
 
 ## Input constraints
 

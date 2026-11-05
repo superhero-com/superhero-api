@@ -2,7 +2,9 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { decode } from '@aeternity/aepp-sdk';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { toMdwTx } from '@/mdw-sync/utils/to-mdw-tx';
 import { AddressLinksPluginSyncService } from './address-links-plugin-sync.service';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -347,7 +349,11 @@ describe('AddressLinksPluginSyncService', () => {
         await service.processTransaction(
           baseTx({
             function: fn,
-            raw: { returnType: 'revert', arguments: nostrArgs[fn] },
+            raw: {
+              result: 'ok',
+              returnType: 'revert',
+              arguments: nostrArgs[fn],
+            },
           }),
           SyncDirectionEnum.Live,
         );
@@ -372,20 +378,44 @@ describe('AddressLinksPluginSyncService', () => {
       fetchSpy.mockRestore();
     });
 
-    it('accepts a snake_case return_type of ok', async () => {
+    it('applies only the successful call from middleware payloads', async () => {
+      // Shaped like the reverted duplicates at height 1324445: only
+      // return_type tells a revert apart, result is "ok" either way.
+      const fromMiddleware = (hash: string, returnType: string, npub: string) =>
+        toMdwTx(
+          camelcaseKeysDeep({
+            hash,
+            micro_time: 1000,
+            tx: {
+              type: 'ContractCallTx',
+              function: 'link',
+              arguments: [
+                { type: 'address', value: SIGNER_ADDRESS },
+                { type: 'string', value: 'nostr' },
+                { type: 'string', value: npub },
+                { type: 'int', value: '1' },
+              ],
+              result: 'ok',
+              return_type: returnType,
+            },
+          }),
+        ) as Tx;
+
       await service.processTransaction(
-        baseTx({
-          function: 'link',
-          raw: {
-            returnType: undefined,
-            return_type: 'ok',
-            arguments: nostrArgs.link,
-          },
-        }),
+        fromMiddleware('th_revert', 'revert', 'npub1attacker'),
+        SyncDirectionEnum.Live,
+      );
+      await service.processTransaction(
+        fromMiddleware('th_ok', 'ok', 'npub1owner'),
         SyncDirectionEnum.Live,
       );
 
+      expect(queryBuilder.update).toHaveBeenCalledTimes(1);
       expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+        'value',
+        'npub1owner',
+      );
+      expect(queryBuilder.setParameter).not.toHaveBeenCalledWith(
         'value',
         'npub1attacker',
       );
