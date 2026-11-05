@@ -109,8 +109,10 @@ export class BclPlugin extends BasePlugin {
       // Note: Tx entities are already deleted by BlockValidationService
       // We only clean up plugin-specific data (Transaction records)
     } catch (error: any) {
+      // The tx rows are gone, so nothing retries this; the hashes let an
+      // operator replay the cleanup by hand.
       this.logger.error(
-        `[${this.name}] Failed to clean up removed transactions`,
+        `[${this.name}] Failed to clean up removed transactions ${removedTxHashes.join(', ')}`,
         error,
       );
       return;

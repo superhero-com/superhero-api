@@ -77,7 +77,7 @@ describe('BclPlugin.onReorg', () => {
     await expect(plugin.onReorg(['th_1'])).resolves.toBeUndefined();
 
     expect(logError).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to clean up removed transactions'),
+      expect.stringContaining('Failed to clean up removed transactions th_1'),
       expect.any(Error),
     );
     expect(accountService.ensureAccountFromTransactions).not.toHaveBeenCalled();
