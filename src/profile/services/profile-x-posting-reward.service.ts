@@ -1780,7 +1780,7 @@ export class ProfileXPostingRewardService {
   private async isTxOnChain(txHash: string): Promise<boolean> {
     try {
       const tx = await fetchJson(
-        `${ACTIVE_NETWORK.middlewareUrl}/v3/txs/${encodeURIComponent(txHash)}`,
+        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${encodeURIComponent(txHash)}`,
       );
       return !!tx;
     } catch {
