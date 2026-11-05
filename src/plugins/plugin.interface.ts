@@ -48,6 +48,12 @@ export interface Plugin {
    * `getUpdateQueries` -- a plugin without one gets no re-decode.
    */
   version: number;
+  /**
+   * False keeps parked failures out of the automatic retry; they stay parked
+   * for manual repair. Needed when the plugin's writes are last-wins per key:
+   * the retry replays a tx after newer ones and would revert them.
+   */
+  retryParkedFailures?: boolean;
   startFromHeight(): number;
   filters(): PluginFilter[];
   /**

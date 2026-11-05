@@ -8,6 +8,7 @@ describe('TokenHolderService', () => {
     findOne: jest.Mock;
     update: jest.Mock;
     save: jest.Mock;
+    query: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
   let tokenService: {
@@ -30,6 +31,7 @@ describe('TokenHolderService', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue(undefined),
       save: jest.fn().mockResolvedValue(undefined),
+      query: jest.fn().mockResolvedValue([{ id: 'ak_user_ct_token' }]),
       createQueryBuilder: jest.fn(() => queryBuilder),
     };
 
@@ -199,6 +201,77 @@ describe('TokenHolderService', () => {
       expect.objectContaining({ address: 'ct_token' }),
       { holders_count: 0 },
     );
+  });
+
+  describe('first buy', () => {
+    const token = {
+      address: 'ct_token',
+      sale_address: 'ct_sale',
+      holders_count: 0,
+    } as any;
+    const buy = {
+      function: BCL_FUNCTIONS.buy,
+      caller_id: 'ak_user',
+      hash: 'th_first',
+      block_height: 20,
+    } as any;
+
+    it('inserts the holder without failing on a concurrent insert, and counts them', async () => {
+      repository.findOne.mockResolvedValue(null);
+      repository.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+      });
+
+      await service.updateTokenHolder(token, buy, new BigNumber(2));
+
+      const [sql, params] = repository.query.mock.calls[0];
+      expect(sql).toContain('ON CONFLICT ("id") DO NOTHING');
+      expect(params).toEqual([
+        'ak_user_ct_token',
+        'ct_token',
+        'ak_user',
+        '2000000000000000000',
+        'th_first',
+        20,
+      ]);
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(tokenService.update).toHaveBeenCalledWith(
+        expect.objectContaining({ address: 'ct_token' }),
+        { holders_count: 1 },
+      );
+    });
+
+    it('adds the delta to the row a concurrent trade or cron inserted first', async () => {
+      // Used to be a plain insert: the duplicate key rolled back the trade.
+      repository.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        id: 'ak_user_ct_token',
+        balance: new BigNumber('1000000000000000000'),
+      });
+      repository.query.mockResolvedValue([]);
+
+      await service.updateTokenHolder(token, buy, new BigNumber(2));
+
+      expect(repository.findOne).toHaveBeenCalledTimes(2);
+      expect(repository.update).toHaveBeenCalledTimes(1);
+      const [id, changes] = repository.update.mock.calls[0];
+      expect(id).toBe('ak_user_ct_token');
+      expect(changes.balance.toFixed()).toBe('3000000000000000000');
+    });
+
+    it('does not create a holder for a sell', async () => {
+      repository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateTokenHolder(
+          token,
+          { ...buy, function: BCL_FUNCTIONS.sell },
+          new BigNumber(2),
+        ),
+      ).resolves.toBeNull();
+      expect(repository.query).not.toHaveBeenCalled();
+    });
   });
 
   it('adds a zero-balance account back to the holder count after a buy', async () => {

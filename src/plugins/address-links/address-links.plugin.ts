@@ -13,6 +13,9 @@ export class AddressLinksPlugin extends BasePlugin {
   protected readonly logger = new Logger(AddressLinksPlugin.name);
   readonly name = 'address-links';
   readonly version = 1;
+  // Every link call comes from the provider wallet, so a replayed old link or
+  // unlink can't be told apart from a newer one and would overwrite it.
+  readonly retryParkedFailures = false;
 
   constructor(
     @InjectRepository(Tx)

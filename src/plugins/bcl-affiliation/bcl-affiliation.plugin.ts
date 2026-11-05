@@ -14,6 +14,9 @@ export class BclAffiliationPlugin extends BasePlugin {
   protected readonly logger = new Logger(BclAffiliationPlugin.name);
   readonly name = 'bcl-affiliation';
   readonly version = 1;
+  // Redeem and revoke overwrite the status and skip unregistered codes, so a
+  // late replay can leave a used code pending or flip a newer status.
+  readonly retryParkedFailures = false;
 
   constructor(
     @InjectRepository(Tx)

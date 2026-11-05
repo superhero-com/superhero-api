@@ -115,13 +115,52 @@ export class TokenHolderService {
       const repository =
         manager?.getRepository(TokenHolder) || this.tokenHolderRepository;
 
-      // Single query to find existing holder
-      const tokenHolder = await repository.findOne({
-        where: {
-          aex9_address: token.address,
-          address: tx.caller_id,
-        },
-      });
+      const findHolder = () =>
+        repository.findOne({
+          where: {
+            aex9_address: token.address,
+            address: tx.caller_id,
+          },
+          // Two trades by one wallet would otherwise read the same balance and
+          // one delta would be lost. Needs the outer transaction.
+          ...(manager ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+        });
+
+      let tokenHolder = await findHolder();
+      let created = false;
+      if (!tokenHolder) {
+        // Create new holder (only for buy transactions)
+        if (!isBuy) {
+          // Can't create holder for sell transaction
+          return null;
+        }
+        // Another live trade or the fix-holders cron can insert this holder
+        // between the read and here. A plain insert then aborts the whole
+        // trade, so on conflict apply the delta to their row instead.
+        const inserted = await repository.query(
+          `INSERT INTO "token_holder" ("id", "aex9_address", "address", "balance", "last_tx_hash", "block_number")
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT ("id") DO NOTHING
+           RETURNING "id"`,
+          [
+            `${tx.caller_id}_${token.address}`,
+            token.address,
+            tx.caller_id,
+            bigNumberVolume.toFixed(),
+            tx.hash,
+            tx.block_height,
+          ],
+        );
+        created = inserted.length > 0;
+        if (!created) {
+          tokenHolder = await findHolder();
+          if (!tokenHolder) {
+            throw new Error(
+              `Token holder ${tx.caller_id}_${token.address} conflicted on insert but could not be read`,
+            );
+          }
+        }
+      }
 
       if (tokenHolder) {
         // Update existing holder
@@ -146,22 +185,7 @@ export class TokenHolderService {
           );
           await this.updateTokenHoldersCount(token, tokenHolderCount, manager);
         }
-      } else {
-        // Create new holder (only for buy transactions)
-        if (!isBuy) {
-          // Can't create holder for sell transaction
-          return null;
-        }
-
-        await repository.save({
-          id: `${tx.caller_id}_${token.address}`,
-          aex9_address: token.address,
-          address: tx.caller_id,
-          balance: bigNumberVolume,
-          last_tx_hash: tx.hash,
-          block_number: tx.block_height,
-        });
-
+      } else if (created) {
         // Get current holders count only when creating new holder
         const tokenHolderCount = await this.getPositiveHolderCount(
           token.address,

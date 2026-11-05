@@ -1,5 +1,12 @@
 import { TX_FUNCTIONS } from '@/configs';
+import { DEX_CONTRACTS } from '@/dex/config/dex-contracts.config';
+import { fetchJson, FetchJsonHttpError } from '@/utils/common';
 import { DexTransactionProcessorService } from './dex-transaction-processor.service';
+
+jest.mock('@/utils/common', () => ({
+  ...jest.requireActual('@/utils/common'),
+  fetchJson: jest.fn(),
+}));
 
 describe('DexTransactionProcessorService', () => {
   const setup = () => {
@@ -34,10 +41,96 @@ describe('DexTransactionProcessorService', () => {
 
     return {
       service,
+      dexTokenRepository,
       dexPairTransactionRepository,
       dexTokenSummaryService,
     };
   };
+
+  describe('error handling', () => {
+    const routerTx = {
+      hash: 'th_swap',
+      contract_id: DEX_CONTRACTS.router,
+      function: TX_FUNCTIONS.swap_exact_tokens_for_tokens,
+    } as any;
+
+    it('rethrows when saving the trade fails, so the tx is parked', async () => {
+      const { service, dexPairTransactionRepository } = setup();
+      jest
+        .spyOn(service as any, 'extractPairInfoFromTransaction')
+        .mockResolvedValue({ pairAddress: 'ct_pair' });
+      dexPairTransactionRepository.manager.transaction.mockRejectedValue(
+        new Error('timeout exceeded when trying to connect'),
+      );
+
+      await expect(
+        service.processTransaction(routerTx, 'live' as any),
+      ).rejects.toThrow('timeout exceeded when trying to connect');
+    });
+
+    it('still skips transactions that are not DEX router calls', async () => {
+      const { service } = setup();
+
+      await expect(
+        service.processTransaction(
+          { ...routerTx, contract_id: 'ct_other' },
+          'live' as any,
+        ),
+      ).resolves.toBeNull();
+    });
+  });
+
+  describe('getOrCreateToken', () => {
+    beforeEach(() => {
+      (fetchJson as jest.Mock).mockReset();
+    });
+
+    it('stores a placeholder when the middleware does not know the token', async () => {
+      const { service, dexTokenRepository } = setup();
+      dexTokenRepository.findOne.mockResolvedValue(null);
+      dexTokenRepository.save.mockImplementation(async (token: any) => token);
+      (fetchJson as jest.Mock).mockRejectedValue(
+        new FetchJsonHttpError('not found', 404),
+      );
+      jest.spyOn((service as any).logger, 'error').mockImplementation();
+
+      const token = await (service as any).getOrCreateToken('ct_unknown');
+
+      expect(token).toMatchObject({ address: 'ct_unknown', symbol: 'UNK' });
+    });
+
+    it('stores a token whose middleware name and symbol Postgres would reject', async () => {
+      const { service, dexTokenRepository } = setup();
+      dexTokenRepository.findOne.mockResolvedValue(null);
+      dexTokenRepository.save.mockImplementation(async (token: any) => token);
+      (fetchJson as jest.Mock).mockResolvedValue({
+        name: 'Evil\u0000Token',
+        symbol: '\u0000',
+        decimals: 18,
+      });
+
+      const token = await (service as any).getOrCreateToken('ct_evil');
+
+      expect(token).toMatchObject({ name: 'EvilToken', symbol: 'UNK' });
+    });
+
+    it.each([
+      ['a middleware 5xx', new FetchJsonHttpError('bad gateway', 502)],
+      ['a network error', new TypeError('fetch failed')],
+    ])(
+      'throws on %s instead of storing a placeholder',
+      async (_label, error) => {
+        const { service, dexTokenRepository } = setup();
+        dexTokenRepository.findOne.mockResolvedValue(null);
+        (fetchJson as jest.Mock).mockRejectedValue(error);
+
+        await expect(
+          (service as any).getOrCreateToken('ct_token'),
+        ).rejects.toBe(error);
+        expect(dexTokenRepository.save).not.toHaveBeenCalled();
+      },
+    );
+  });
 
   it('falls back to factory decode when router decode returns empty array', async () => {
     const { service } = setup();

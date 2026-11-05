@@ -170,6 +170,8 @@ describe('PluginBatchProcessorService filtering', () => {
       } as unknown as PluginRegistryService;
       const failedTransactionService = {
         recordFailure: jest.fn().mockResolvedValue(undefined),
+        clearFailures: jest.fn().mockResolvedValue(undefined),
+        clearFailuresForTxs: jest.fn().mockResolvedValue(undefined),
       } as any;
       const pluginSyncStateRepository = {
         findOne: jest.fn().mockResolvedValue({
@@ -243,6 +245,94 @@ describe('PluginBatchProcessorService filtering', () => {
       );
 
       expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+    });
+
+    it('clears parked rows only for the transactions that went through', async () => {
+      const badTx = tx({ hash: 'th_bad', block_height: 10 }) as Tx;
+      const processBatch = jest
+        .fn()
+        .mockResolvedValue({ failed: [{ tx: badTx, error: new Error('x') }] });
+      const plugin = buildProcessingPlugin('bcl', processBatch);
+      const { service, failedTransactionService } = setupProcessing(plugin);
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx, badTx],
+        SyncDirectionEnum.Backward as any,
+      );
+
+      expect(failedTransactionService.clearFailures).toHaveBeenCalledWith(
+        'bcl',
+        ['th_ok'],
+      );
+    });
+
+    it('parks every transaction and leaves heights alone when the whole batch throws', async () => {
+      const error = new Error('timeout exceeded when trying to connect');
+      const processBatch = jest.fn().mockRejectedValue(error);
+      const plugin = buildProcessingPlugin('bcl', processBatch);
+      const { service, failedTransactionService, pluginSyncStateRepository } =
+        setupProcessing(plugin);
+      const txs = [
+        tx({ hash: 'th_a', block_height: 9 }) as Tx,
+        tx({ hash: 'th_b', block_height: 10 }) as Tx,
+      ];
+
+      await service.processBatch(txs, SyncDirectionEnum.Backward as any);
+
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledTimes(2);
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledWith(
+        'bcl',
+        txs[1],
+        error,
+        7,
+      );
+      const cleared = failedTransactionService.clearFailures.mock.calls.flatMap(
+        ([, hashes]: [string, string[]]) => hashes,
+      );
+      expect(cleared).toEqual([]);
+      expect(pluginSyncStateRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('does not park a processed batch when only the sync-height update fails', async () => {
+      // Before this, a pool timeout on the reporting-only height update parked
+      // every tx of a batch that had been processed fine.
+      const processBatch = jest.fn().mockResolvedValue({ failed: [] });
+      const plugin = buildProcessingPlugin('dex', processBatch);
+      const { service, failedTransactionService, pluginSyncStateRepository } =
+        setupProcessing(plugin);
+      pluginSyncStateRepository.update.mockRejectedValue(
+        new Error('timeout exceeded when trying to connect'),
+      );
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx],
+        SyncDirectionEnum.Live as any,
+      );
+
+      expect(pluginSyncStateRepository.update).toHaveBeenCalledWith(
+        { plugin_name: 'dex' },
+        expect.objectContaining({ live_synced_height: 9 }),
+      );
+      expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+      expect(failedTransactionService.clearFailures).toHaveBeenCalledWith(
+        'dex',
+        ['th_ok'],
+      );
+    });
+
+    it('clears parked rows of reorged-out transactions', async () => {
+      const plugin = {
+        ...buildProcessingPlugin('bcl', jest.fn()),
+        onReorg: jest.fn().mockResolvedValue(undefined),
+      } as unknown as Plugin;
+      const { service, failedTransactionService } = setupProcessing(plugin);
+
+      await service.handleReorg(['th_gone']);
+
+      expect(plugin.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(failedTransactionService.clearFailuresForTxs).toHaveBeenCalledWith(
+        ['th_gone'],
+      );
     });
   });
 
