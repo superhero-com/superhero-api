@@ -10,6 +10,8 @@ describe('BclPlugin.onReorg', () => {
     };
     const transactionRepository = {
       createQueryBuilder: jest.fn(() => deleteQuery),
+      query: jest.fn().mockResolvedValue([]),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     const accountService = {
       ensureAccountFromTransactions: jest.fn().mockResolvedValue(null),
@@ -56,7 +58,6 @@ describe('BclPlugin.onReorg', () => {
     expect(deleteQuery.where).toHaveBeenCalledWith('tx_hash IN (:...hashes)', {
       hashes: ['th_1', 'th_2', 'th_3'],
     });
-    expect(deleteQuery.returning).toHaveBeenCalledWith('address');
     expect(
       accountService.ensureAccountFromTransactions.mock.calls.map(([a]) => a),
     ).toEqual(['ak_a', 'ak_b']);
@@ -100,6 +101,36 @@ describe('BclPlugin.onReorg', () => {
     );
     expect(logError).toHaveBeenCalledWith(
       expect.stringContaining('ak_a'),
+      expect.any(Error),
+    );
+  });
+
+  it('keeps refreshing the other tokens when one token fails', async () => {
+    const { plugin, deleteQuery, transactionRepository, logError } = setup();
+    deleteQuery.execute.mockResolvedValue({
+      raw: [
+        { address: 'ak_a', sale_address: 'ct_x', tx_type: 'buy' },
+        { address: 'ak_a', sale_address: 'ct_y', tx_type: 'sell' },
+      ],
+      affected: 2,
+    });
+    transactionRepository.query.mockRejectedValueOnce(
+      new Error('pool timeout'),
+    );
+
+    await expect(plugin.onReorg(['th_1', 'th_2'])).resolves.toBeUndefined();
+
+    expect(transactionRepository.query).toHaveBeenLastCalledWith(
+      expect.any(String),
+      ['ct_y'],
+    );
+    expect(transactionRepository.manager.query).toHaveBeenCalledTimes(1);
+    expect(transactionRepository.manager.query).toHaveBeenCalledWith(
+      expect.any(String),
+      ['ct_y', 1],
+    );
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining('ct_x'),
       expect.any(Error),
     );
   });
