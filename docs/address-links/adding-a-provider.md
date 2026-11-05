@@ -19,7 +19,7 @@ Create `src/plugins/address-links/dto/foo/` with 4 files. Each DTO uses `class-v
 
 The claim DTO contains `address` (always required) plus any provider-specific fields needed to verify the claim. For example:
 - Nostr sends `value` (the npub to link)
-- X sends OAuth credentials (`x_access_token` or `x_code` + `x_code_verifier` + `x_redirect_uri`)
+- X sends the OAuth code from its redirect (`x_code` + `x_code_verifier` + `x_redirect_uri`)
 
 ```typescript
 import { IsString, IsNotEmpty } from 'class-validator';

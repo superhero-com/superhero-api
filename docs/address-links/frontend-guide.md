@@ -237,16 +237,7 @@ Response: { "txHash": "th_..." }
 POST /address-links/x/claim
 ```
 
-Option A -- with access token:
-
-```json
-{
-  "address": "ak_2Qktt...",
-  "x_access_token": "..."
-}
-```
-
-Option B -- with OAuth code:
+Send the OAuth 2.0 (PKCE) code from the X redirect. The backend exchanges it with its own client secret. A bare `x_access_token` is refused: it could have been issued to any X app, so it doesn't prove the user signed in through ours.
 
 ```json
 {
@@ -272,7 +263,8 @@ The `verification_token` is a server-signed HMAC token. Save it -- you need it f
 
 | Error | Reason |
 |---|---|
-| 400 | Neither `x_access_token` nor OAuth code fields provided |
+| 400 | `x_code`, `x_code_verifier` or `x_redirect_uri` missing |
+| 400 | `x_access_token` sent (`property x_access_token should not exist`) |
 | 400 | Unable to extract X username from OAuth profile |
 
 ### Submit
@@ -312,14 +304,23 @@ Response:
 ### Full X linking flow
 
 ```typescript
-async function linkX(apiBase: string, aeAccount: any, xAccessToken: string): Promise<string> {
+async function linkX(
+  apiBase: string,
+  aeAccount: any,
+  oauth: { code: string; codeVerifier: string; redirectUri: string },
+): Promise<string> {
   const address = aeAccount.address;
 
-  // 1. Claim (backend verifies X ownership via OAuth)
+  // 1. Claim (backend exchanges the code and reads the X handle)
   const res = await fetch(`${apiBase}/address-links/x/claim`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, x_access_token: xAccessToken }),
+    body: JSON.stringify({
+      address,
+      x_code: oauth.code,
+      x_code_verifier: oauth.codeVerifier,
+      x_redirect_uri: oauth.redirectUri,
+    }),
   });
   const claim = await res.json();
 

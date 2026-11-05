@@ -362,6 +362,25 @@ describe('address-link routes (HTTP)', () => {
       expect(oauthService.exchangeXCodeForAccessToken).not.toHaveBeenCalled();
       expect(oauthService.verifyAccessToken).not.toHaveBeenCalled();
     });
+
+    it.each([
+      ['alone', { address: ADDRESS }],
+      ['next to a code', flows.x.claim],
+    ])(
+      'refuses a bare X access token %s without calling X',
+      async (_, body) => {
+        const res = await post('x/claim', {
+          ...body,
+          x_access_token: 'token-from-another-x-app',
+        }).expect(400);
+
+        expect(res.body.message).toContain(
+          'property x_access_token should not exist',
+        );
+        expect(oauthService.exchangeXCodeForAccessToken).not.toHaveBeenCalled();
+        expect(oauthService.verifyAccessToken).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('unlink', () => {

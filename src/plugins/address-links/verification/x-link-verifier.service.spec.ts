@@ -95,6 +95,19 @@ describe('XLinkVerifierService', () => {
         'Invalid or expired X access token',
       );
     });
+
+    it('never falls back to the display name when X sends no username', async () => {
+      oauthService.verifyAccessToken.mockResolvedValue({
+        id: '42',
+        name: 'elonmusk',
+        email: '',
+        provider: 'x',
+      });
+
+      await expect(verifier.verifyClaim(ADDRESS, CODE_CLAIM)).rejects.toThrow(
+        'Unable to extract X username from OAuth profile',
+      );
+    });
   });
 
   describe('verifySubmit', () => {
