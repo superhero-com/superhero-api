@@ -91,7 +91,12 @@ export class DexPlugin extends BasePlugin {
         `[${this.name}] Reorg cleanup removed ${removed} pair_transactions for ${removedTxHashes.length} reverted transactions`,
       );
     } catch (error: any) {
-      this.logger.error(`[${this.name}] Reorg cleanup failed`, error.stack);
+      // The tx rows are gone, so nothing retries this; the hashes let an
+      // operator replay the cleanup by hand.
+      this.logger.error(
+        `[${this.name}] Reorg cleanup failed for ${removedTxHashes.join(', ')}`,
+        error.stack,
+      );
     }
   }
 }
