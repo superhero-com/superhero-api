@@ -864,11 +864,59 @@ describe('TokensService', () => {
     });
   });
 
+  it('fills in an existing token from its create tx without replacing it', async () => {
+    communityFactoryService.getCurrentFactory.mockResolvedValue({
+      address: 'ct_factory',
+      collections: { word: true },
+    });
+    const existing = {
+      sale_address: 'ct_sale',
+      name: 'BLA',
+      symbol: 'BLA',
+      address: 'ct_aex9',
+      dao_address: null,
+      tx_count: 3,
+      holders_count: 2,
+    };
+    jest
+      .spyOn(service, 'findByNameOrSymbol')
+      .mockResolvedValue(existing as any);
+    tokensRepository.findOneBy.mockResolvedValue(existing);
+
+    await service.createTokenFromRawTransaction({
+      hash: 'th_hash',
+      microTime: '2026-03-24T11:49:27.106Z',
+      tx: {
+        function: 'create_community',
+        return_type: 'ok',
+        return: {
+          value: [{ value: 'ct_dao' }, { value: 'ct_sale' }],
+        },
+        arguments: [{ value: 'word' }, { value: 'BLA' }],
+        callerId: 'ak_creator',
+      },
+    });
+
+    expect(tokensRepository.delete).not.toHaveBeenCalled();
+    expect(tokensRepository.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sale_address: 'ct_sale',
+        dao_address: 'ct_dao',
+        create_tx_hash: 'th_hash',
+        address: 'ct_aex9',
+        tx_count: 3,
+        holders_count: 2,
+      }),
+      { conflictPaths: ['sale_address'] },
+    );
+  });
+
   describe('getToken for a sale address not in the database', () => {
     const FACTORY = 'ct_25cqTw85wkF5cbcozmHHUCuybnfH9WaRZXSgEcNNXG9LsCJWTN';
     const SALE = 'ct_2ZvHbJwx2jxaCFataLSjAavGAoG7JnZgwc1Gw3U4huv9GYTfw6';
     const AEX9 = 'ct_2uvAiwHksaztBbGny4DsuvupKNFegeC1GWsLEZb6t9aXzC3PoK';
     const CREATOR = 'ak_2MCVhgx8jReW332W95fYK6QqcMvjwjS2sZm1g8M96ytu7x4oT4';
+    const DAO = 'ct_2iWqCcQS3bYFwAyXQnVz3KNdPBzxT9WXyAy1RMbwV8Yk5hsCyW';
     const COLLECTION =
       'WORDS-ak_2X6puZgdPKcfjSVdUGs2bvsvkbsCLN8XbKQwSVtqLUBc3518bi';
     const CREATE_TX_HASH =
@@ -893,10 +941,7 @@ describe('TokensService', () => {
         return: {
           type: 'tuple',
           value: [
-            {
-              type: 'contract',
-              value: 'ct_2iWqCcQS3bYFwAyXQnVz3KNdPBzxT9WXyAy1RMbwV8Yk5hsCyW',
-            },
+            { type: 'contract', value: DAO },
             { type: 'contract', value: SALE },
             {
               type: 'contract',
@@ -979,6 +1024,15 @@ describe('TokensService', () => {
         collection: COLLECTION,
         created_at: new Date(1793759698409),
       });
+      // In the insert itself, so the row never exists without them.
+      expect(tokensRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sale_address: SALE,
+          dao_address: DAO,
+          create_tx_hash: CREATE_TX_HASH,
+        }),
+        { conflictPaths: ['sale_address'] },
+      );
       expect(tokensRepository.delete).toHaveBeenCalledWith({
         symbol: 'RTTT',
         name: 'RTTT',

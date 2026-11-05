@@ -58,8 +58,6 @@ export class FastPullTokensService {
     }
     try {
       this.isPullingLatestCreatedTokens = true;
-      // delete all tokens where dao_address is null
-      await this.tokensService.deleteTokensWhereDaoAddressIsNull();
       const factory = await this.communityFactoryService.getCurrentFactory();
 
       // Get tip height from MDW sync state
