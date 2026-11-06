@@ -11,8 +11,10 @@ describe('APP_DATABASE_CONFIG statement timeout', () => {
   });
 
   // The config is read once at module load, so each value needs a fresh module.
+  // dotenv is stubbed so a developer's .env can't refill a deleted variable.
   function loadWith(value: string | undefined): typeof import('./database') {
     jest.resetModules();
+    jest.doMock('dotenv/config', () => ({}));
     if (value === undefined) {
       delete process.env.DB_STATEMENT_TIMEOUT_MS;
     } else {
