@@ -99,6 +99,41 @@ describe('TransactionProcessorService', () => {
     expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
   });
 
+  it('parks a buy whose token lookup fails instead of skipping it', async () => {
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      saleAddress: 'ct_sale',
+    });
+    tokenService.getToken.mockRejectedValue(
+      new Error('timeout exceeded when trying to connect'),
+    );
+
+    await expect(
+      service.processTransaction(
+        { hash: 'th_buy', function: BCL_FUNCTIONS.buy } as any,
+        SyncDirectionEnum.Live,
+      ),
+    ).rejects.toThrow('timeout exceeded when trying to connect');
+    expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
+  });
+
+  it('still falls back to the raw tx for create_community when the token lookup fails', async () => {
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      saleAddress: 'ct_sale',
+    });
+    tokenService.getToken.mockRejectedValue(new Error('not deployed yet'));
+    tokenService.createTokenFromRawTransaction.mockResolvedValue(null);
+
+    await expect(
+      service.processTransaction(
+        { hash: 'th_create', function: BCL_FUNCTIONS.create_community } as any,
+        SyncDirectionEnum.Live,
+      ),
+    ).resolves.toBeNull();
+    expect(tokenService.createTokenFromRawTransaction).toHaveBeenCalled();
+  });
+
   it('rejects buy transactions that have no decoded events yet', async () => {
     const rawTransaction = {
       hash: 'th_broken_live',

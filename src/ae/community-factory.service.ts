@@ -41,7 +41,7 @@ export class CommunityFactoryService {
       return inFlight;
     }
 
-    const pending = initCommunityFactory(this.aeSdkService.sdk as any, address)
+    const pending = initCommunityFactory(this.aeSdkService.sdk, address)
       .then((factory) => {
         this.factories[address] = factory;
         return factory;

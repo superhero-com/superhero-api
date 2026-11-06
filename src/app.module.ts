@@ -13,10 +13,12 @@ import { Keyv } from 'keyv';
 import { LRUCache } from 'lru-cache';
 import { AePricingModule } from './ae-pricing/ae-pricing.module';
 import { AeModule } from './ae/ae.module';
+import { QUERY_LIMIT_OPTIONS } from './api-core/graphql/query-limits';
+import { GRAPHQL_PATH } from './api-core/graphql/rate-limit';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { BclModule } from './bcl/bcl.module';
-import { DATABASE_CONFIG, REDIS_CONFIG } from './configs';
+import { APP_DATABASE_CONFIG, REDIS_CONFIG } from './configs';
 import {
   DELETE_OLD_TOKENS_QUEUE,
   PULL_TOKEN_INFO_QUEUE,
@@ -25,6 +27,7 @@ import {
 import { TokensModule } from './tokens/tokens.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { JourneyModule } from './journey/journey.module';
 import { AffiliationModule } from './affiliation/affiliation.module';
 import { AccountModule } from './account/account.module';
 import { TrendingTagsModule } from './trending-tags/trending-tags.module';
@@ -82,12 +85,13 @@ import { FeedModule } from './feed/feed.module';
       },
     ),
     TypeOrmModule.forRoot({
-      ...DATABASE_CONFIG,
+      ...APP_DATABASE_CONFIG,
       entities: [__dirname + '/**/entities/*.entity{.ts,.js}'],
     }),
     TypeOrmModule.forFeature([SyncState]),
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
+      path: GRAPHQL_PATH,
       autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: false,
@@ -96,6 +100,7 @@ import { FeedModule } from './feed/feed.module';
       graphiql: process.env.NODE_ENV !== 'production',
       introspection: process.env.NODE_ENV !== 'production',
       hideSchemaDetailsFromClientErrors: true,
+      ...QUERY_LIMIT_OPTIONS,
     }),
     MdwModule,
     AeModule,
@@ -103,8 +108,11 @@ import { FeedModule } from './feed/feed.module';
     TransactionsModule,
     AePricingModule,
     BclModule,
+    // Before AnalyticsModule: keeps /analytics/journey/* ahead of any
+    // /analytics/:something route in Express's registration order.
+    JourneyModule,
     AnalyticsModule,
-    BullBoardModule,
+    BullBoardModule.forRoot(),
     AffiliationModule,
     AccountModule,
     TrendingTagsModule,

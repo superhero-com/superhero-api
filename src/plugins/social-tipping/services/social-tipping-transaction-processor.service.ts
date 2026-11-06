@@ -10,6 +10,9 @@ import { Post } from '@/social/entities/post.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { refreshTrendingScoresForPostSafely } from '@/social/utils/token-mentions.util';
 import { isSelfTip } from '@/tipping/utils/is-self-tip.util';
+import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { TIP_RECEIVED_EVENT, TipReceivedEventPayload } from '../events';
 
 @Injectable()
 export class SocialTippingTransactionProcessorService {
@@ -24,6 +27,7 @@ export class SocialTippingTransactionProcessorService {
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
     private readonly tokensService: TokensService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -36,45 +40,84 @@ export class SocialTippingTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Tip | null> {
-    void syncDirection;
-    try {
-      // Validate transaction
-      const tipType = this.validateTransaction(tx);
-      if (!tipType) {
-        return null;
-      }
-
-      // Wrap persistence in a transaction, then recalculate after commit.
-      const savedTipResult = await this.tipRepository.manager.transaction(
-        async (manager) => {
-          return await this.saveTipFromTransaction(tx, tipType, manager);
-        },
-      );
-
-      if (!savedTipResult) {
-        return null;
-      }
-
-      await refreshTrendingScoresForPostSafely({
-        post: savedTipResult.post,
-        loadParentPost: (postId) =>
-          this.postRepository.findOne({
-            where: { id: postId },
-          }),
-        updateTrendingScoresForSymbols: (symbols) =>
-          this.tokensService.queueTrendingScoresForSymbols(symbols),
-        logError: (message, trace) => this.logger.error(message, trace),
-        errorMessage:
-          'Failed to refresh trending scores after processing tip transaction',
-      });
-
-      return savedTipResult.tip;
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process tip transaction ${tx.hash}`,
-        error.stack,
-      );
+    // Validate transaction
+    const tipType = this.validateTransaction(tx);
+    if (!tipType) {
       return null;
+    }
+
+    // Wrap persistence in a transaction, then recalculate after commit.
+    // A failure propagates so the batch processor parks the tx for retry.
+    const savedTipResult = await this.tipRepository.manager.transaction(
+      async (manager) => {
+        return await this.saveTipFromTransaction(tx, tipType, manager);
+      },
+    );
+
+    if (!savedTipResult) {
+      return null;
+    }
+
+    // After commit, so a rollback can't leak a phantom push.
+    this.emitTipReceivedEvent(tx, savedTipResult, syncDirection);
+
+    await refreshTrendingScoresForPostSafely({
+      post: savedTipResult.post,
+      loadParentPost: (postId) =>
+        this.postRepository.findOne({
+          where: { id: postId },
+        }),
+      updateTrendingScoresForSymbols: (symbols) =>
+        this.tokensService.queueTrendingScoresForSymbols(symbols),
+      logError: (message, trace) => this.logger.error(message, trace),
+      errorMessage:
+        'Failed to refresh trending scores after processing tip transaction',
+    });
+
+    return savedTipResult.tip;
+  }
+
+  /**
+   * Emits TIP_RECEIVED_EVENT for the notifications module. Live only, so a
+   * backfill or reorg replay never pages anyone. Never throws into indexing.
+   */
+  private emitTipReceivedEvent(
+    tx: Tx,
+    saved: { tip: Tip; post: Post | null },
+    syncDirection: SyncDirection,
+  ): void {
+    if (syncDirection !== SyncDirectionEnum.Live) {
+      return;
+    }
+    if (!tx.sender_id || !tx.recipient_id || !tx.hash) {
+      return;
+    }
+    try {
+      const rawAmount = tx.raw?.amount ?? 0;
+      // Link the post only when the tip paid its author; otherwise any spend
+      // could name someone else's post as its target.
+      const postId =
+        saved.post?.sender_address === tx.recipient_id
+          ? saved.post.id
+          : undefined;
+      const payload: TipReceivedEventPayload = {
+        senderAddress: tx.sender_id,
+        receiverAddress: tx.recipient_id,
+        amountAe: saved.tip.amount,
+        // mdw JSON can hand back a number; BigInt keeps it a plain decimal.
+        amountAettos: BigInt(
+          typeof rawAmount === 'number' ? Math.trunc(rawAmount) : rawAmount,
+        ).toString(),
+        txHash: tx.hash,
+        ...(postId ? { postId } : {}),
+      };
+      this.eventEmitter.emit(TIP_RECEIVED_EVENT, payload);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to emit tip-received event for ${tx.hash}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 

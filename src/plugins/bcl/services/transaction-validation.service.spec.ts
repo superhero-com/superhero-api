@@ -125,4 +125,39 @@ describe('TransactionValidationService', () => {
     });
     expect(tokenRepository.exist).not.toHaveBeenCalled();
   });
+
+  describe('create_community', () => {
+    const createCall = (contractId: string) =>
+      ({
+        hash: 'th_create',
+        function: BCL_FUNCTIONS.create_community,
+        contract_id: contractId,
+        raw: {
+          return_type: 'ok',
+          return: { value: [{ value: 'ct_dao' }, { value: 'ct_real_sale' }] },
+        },
+      }) as any;
+
+    beforeEach(() => {
+      createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: 'ct_factory',
+      });
+    });
+
+    it('accepts a call on the current factory', async () => {
+      await expect(
+        service.validateTransaction(createCall('ct_factory')),
+      ).resolves.toEqual({ isValid: true, saleAddress: 'ct_real_sale' });
+    });
+
+    it('rejects a call on any other contract, whatever sale it returns', async () => {
+      await expect(
+        service.validateTransaction(createCall('ct_attacker')),
+      ).resolves.toEqual({ isValid: false, saleAddress: null });
+    });
+  });
 });

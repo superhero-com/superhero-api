@@ -116,7 +116,7 @@ describe('ProfileXPostingRewardService (rewards v2)', () => {
       const url = new URL(input);
       const path = url.pathname;
       // Middleware tx lookup used by the confirmation-pending finalizer.
-      if (path.includes('/v3/txs/')) {
+      if (path.includes('/v3/transactions/')) {
         const hash = decodeURIComponent(path.split('/').pop() || '');
         if (confirmedTxHashes.has(hash)) {
           return {

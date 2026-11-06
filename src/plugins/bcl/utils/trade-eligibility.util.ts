@@ -24,3 +24,21 @@ export async function incrementTradeEligibilityCount(
     [saleAddress],
   );
 }
+
+// Subtracts instead of recounting: a recount's snapshot misses a trade saved
+// concurrently and would overwrite its increment.
+export async function decrementTradeEligibilityCount(
+  saleAddress: string,
+  removedTrades: number,
+  manager: EntityManager,
+): Promise<void> {
+  await manager.query(
+    `
+      UPDATE token_trade_eligibility_counts
+      SET trade_count = GREATEST(trade_count - $2, 0),
+          updated_at = CURRENT_TIMESTAMP(6)
+      WHERE sale_address = $1
+    `,
+    [saleAddress, removedTrades],
+  );
+}

@@ -1,20 +1,25 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
+import { In, IsNull, Not, Repository, SelectQueryBuilder } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import {
   ACTIVE_NETWORK,
+  BCL_FUNCTIONS,
   TOKEN_LIST_ELIGIBILITY_CONFIG,
   TRENDING_SCORE_CONFIG,
 } from '@/configs';
-import { fetchJson, resolveMiddlewareNextUrl } from '@/utils/common';
+import {
+  fetchJson,
+  FetchJsonHttpError,
+  resolveMiddlewareNextUrl,
+} from '@/utils/common';
 import { runWithDatabaseIssueLogging } from '@/utils/database-issue-logging';
 import { ITransaction } from '@/utils/types';
-import { Encoded } from '@aeternity/aepp-sdk';
+import { Contract, ContractMethodsBase, Encoded } from '@aeternity/aepp-sdk';
 import { InjectQueue } from '@nestjs/bull';
 import { CommunityFactory, initTokenSale, TokenSale } from 'bctsl-sdk';
 import BigNumber from 'bignumber.js';
@@ -37,7 +42,7 @@ import { visibleTokenRank } from './utils/token-rank.util';
 
 type TokenContracts = {
   instance?: TokenSale;
-  tokenContractInstance?: any;
+  tokenContractInstance?: Contract<ContractMethodsBase>;
   token?: Token;
   lastUsedAt?: number;
 };
@@ -377,11 +382,23 @@ export class TokensService {
       return existingToken;
     }
 
+    // Must run before the delete below: anyone can deploy a contract with the
+    // sale interface and a real token's name.
+    const createTx = await this.findFactoryCreateTx(saleAddress);
+    if (!createTx) {
+      this.logger.warn(`createToken->not_from_factory:: ${saleAddress}`);
+      return null;
+    }
+    // The indexer creates most tokens through here, not the raw-tx creators.
+    tokenData.dao_address = createTx.tx.return.value[0]?.value;
+    tokenData.create_tx_hash = createTx.hash;
+
     // prevent duplicate tokens by symbol
     if (tokenData?.symbol) {
       await this.tokensRepository.delete({
         symbol: tokenData.symbol,
         name: tokenData.name,
+        sale_address: Not(saleAddress),
       });
     }
 
@@ -397,60 +414,67 @@ export class TokensService {
         `Failed to create or retrieve token for sale address: ${saleAddress}`,
       );
     }
-    const factoryAddress = await this.updateTokenFactoryAddress(newToken);
-
-    if (!factoryAddress) {
-      await this.tokensRepository.delete(newToken.sale_address);
-      throw new Error(
-        `for sale address:${saleAddress}, failed to update factory address`,
-      );
-    }
+    await this.updateTokenMetaDataFromCreateTx(
+      newToken,
+      camelcaseKeysDeep(createTx),
+    );
     await this.syncTokenPrice(newToken);
 
     return this.findByAddress(newToken.sale_address, withoutRank);
   }
 
-  async updateTokenFactoryAddress(
-    token: Token,
-  ): Promise<Encoded.ContractAddress> {
-    if (token.factory_address) {
-      return token.factory_address as Encoded.ContractAddress;
-    }
-
-    let totalRetries = 0;
+  /**
+   * The create_community call on the current factory that returned
+   * `saleAddress`, or null when the contract came from anywhere else. Throws
+   * when the middleware can't answer.
+   */
+  private async findFactoryCreateTx(saleAddress: Encoded.ContractAddress) {
+    const factory = await this.communityFactoryService.getCurrentFactory();
     const maxRetries = 3;
     const retryDelay = 5000; // 5 seconds
 
-    while (totalRetries < maxRetries) {
-      const contractInfo = await fetchJson(
-        `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${token.sale_address}`,
-      );
-      const response = await fetchJson(
-        `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
-      );
-
-      if (response?.tx?.contract_id) {
-        const factory_address = response?.tx?.contract_id;
-        await this.updateTokenMetaDataFromCreateTx(
-          token,
-          camelcaseKeysDeep(response),
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      let response: any;
+      try {
+        const contractInfo = await fetchJson(
+          `${ACTIVE_NETWORK.middlewareUrl}/v2/contracts/${saleAddress}`,
         );
-        return factory_address as Encoded.ContractAddress;
+        if (contractInfo?.source_tx_hash) {
+          response = await fetchJson(
+            `${ACTIVE_NETWORK.middlewareUrl}/v3/transactions/${contractInfo.source_tx_hash}`,
+          );
+        }
+      } catch (error) {
+        // The node can serve a new sale before the middleware has indexed it.
+        if (!(error instanceof FetchJsonHttpError && error.status === 404)) {
+          throw error;
+        }
       }
 
-      this.logger.error(
-        `updateTokenFactoryAddress->error:: retry ${totalRetries + 1}/${maxRetries}`,
-        response,
-        contractInfo,
-      );
+      const tx = response?.tx;
+      if (tx) {
+        // A directly deployed contract's source tx names the contract itself
+        // as contract_id, so require the factory call that returned this sale.
+        const isFactoryCreate =
+          tx.type === 'ContractCallTx' &&
+          tx.contract_id === factory.address &&
+          tx.function === BCL_FUNCTIONS.create_community &&
+          tx.return_type === 'ok' &&
+          tx.return?.value?.[1]?.value === saleAddress;
+        return isFactoryCreate ? response : null;
+      }
 
-      totalRetries++;
-      if (totalRetries < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      this.logger.warn(
+        `findFactoryCreateTx->not_indexed:: ${saleAddress}, attempt ${attempt}/${maxRetries}`,
+      );
+      if (attempt < maxRetries) {
+        await this.sleep(retryDelay);
       }
     }
 
-    return null;
+    throw new Error(
+      `for sale address:${saleAddress}, failed to load the create transaction`,
+    );
   }
 
   async getTokenContracts(token: Token) {
@@ -489,7 +513,7 @@ export class TokensService {
     ) {
       try {
         const { instance } = await initTokenSale(
-          this.aeSdkService.sdk as any,
+          this.aeSdkService.sdk,
           saleAddress,
         );
         const tokenContractInstance = await instance?.tokenContractInstance();
@@ -704,7 +728,7 @@ export class TokensService {
 
     const offset = (page - 1) * limit;
     const pagedOrderClause = this.buildTokensOrderClause(
-      'all_ranked_tokens',
+      'filtered_tokens',
       orderBy,
       orderDirection,
     );
@@ -713,35 +737,44 @@ export class TokensService {
       orderBy,
       orderDirection,
     );
+    const sortColumns = this.tokensOrderColumns(orderBy)
+      .map((column) => `filtered.${column}`)
+      .join(', ');
     const limitPlaceholder = `$${parameters.length + 1}`;
     const offsetPlaceholder = `$${parameters.length + 2}`;
 
+    // The caller's query must select token.* (the sort keys come from it) and
+    // filter `unlisted = false`; the page join re-checks the latter so a
+    // caller that forgets it still can't list unlisted tokens. Only the sort
+    // keys are materialized: the filter runs once for both the count and the
+    // page (inlining it scans twice for filters like search), and full rows
+    // are read for the page alone.
     const rankedQuery = `
-      WITH all_ranked_tokens AS (
-        -- token.rank is persisted (RefreshTokenRanksService) instead of
-        -- computed here via RANK() OVER (...); that used to re-sort the
-        -- whole table on every list request regardless of orderBy.
-        SELECT token.*
-        FROM token
-        WHERE token.unlisted = false
-      ),
-      filtered_tokens AS (
-        ${filteredTokensQuery}
+      WITH filtered_tokens AS MATERIALIZED (
+        SELECT filtered.sale_address, ${sortColumns}
+        FROM (
+          ${filteredTokensQuery}
+        ) filtered
       ),
       filtered_count AS (
         SELECT COUNT(*)::int AS total_items
         FROM filtered_tokens
       ),
       paged_tokens AS (
-        SELECT 
-          all_ranked_tokens.*,
+        SELECT
+          token.*,
           row_to_json(token_performance.*) as performance
-        FROM all_ranked_tokens
-        INNER JOIN filtered_tokens ON all_ranked_tokens.sale_address = filtered_tokens.sale_address
-        LEFT JOIN token_performance ON all_ranked_tokens.sale_address = token_performance.sale_address
-        ORDER BY ${pagedOrderClause}
-        LIMIT ${limitPlaceholder}
-        OFFSET ${offsetPlaceholder}
+        FROM (
+          SELECT filtered_tokens.sale_address
+          FROM filtered_tokens
+          ORDER BY ${pagedOrderClause}
+          LIMIT ${limitPlaceholder}
+          OFFSET ${offsetPlaceholder}
+        ) page
+        INNER JOIN token
+          ON token.sale_address = page.sale_address
+          AND token.unlisted = false
+        LEFT JOIN token_performance ON token.sale_address = token_performance.sale_address
       )
       SELECT 
         paged_tokens.*,
@@ -780,6 +813,8 @@ export class TokensService {
     orderBy: string,
     orderDirection: 'ASC' | 'DESC',
   ): string {
+    // sale_address breaks ties, so paging through equal values (holders,
+    // price, the unranked block) never repeats or skips a token.
     if (orderBy === 'trending_score') {
       return `${alias}.trending_score ${orderDirection},
          CASE
@@ -787,12 +822,21 @@ export class TokensService {
              THEN ${alias}.created_at
            ELSE NULL
          END DESC,
-         ${alias}.created_at DESC`;
+         ${alias}.created_at DESC,
+         ${alias}.sale_address ASC`;
     }
 
-    const orderColumn = orderBy === 'treasury' ? 'dao_balance' : orderBy;
+    const [orderColumn] = this.tokensOrderColumns(orderBy);
 
-    return `${alias}.${orderColumn} ${orderDirection}`;
+    return `${alias}.${orderColumn} ${orderDirection}, ${alias}.sale_address ASC`;
+  }
+
+  // The columns buildTokensOrderClause reads besides sale_address.
+  private tokensOrderColumns(orderBy: string): string[] {
+    if (orderBy === 'trending_score') {
+      return ['trending_score', 'created_at'];
+    }
+    return [orderBy === 'treasury' ? 'dao_balance' : orderBy];
   }
 
   applyListEligibilityFilters(
@@ -891,6 +935,11 @@ export class TokensService {
       tx.return_type === 'revert' ||
       tx.return?.value?.length < 2
     ) {
+      return null;
+    }
+    // Anyone can deploy a create_community lookalike, and the same-name
+    // delete below would then drop the real token.
+    if ((tx.contract_id ?? tx.contractId) !== factory.address) {
       return null;
     }
     if (
@@ -1262,7 +1311,7 @@ export class TokensService {
           return [];
         }
 
-        const holderBalances = await this.withTimeout<any>(
+        const holderBalances = await this.withTimeout(
           tokenContractInstance.balances(),
           this.contractCallTimeoutMs,
           `balances() timeout for ${aex9Address}`,
@@ -1778,11 +1827,5 @@ export class TokensService {
         batch.map((token) => this.updateTokenTrendingScore(token)),
       );
     }
-  }
-
-  async deleteTokensWhereDaoAddressIsNull(): Promise<void> {
-    await this.tokensRepository.delete({
-      dao_address: IsNull(),
-    });
   }
 }

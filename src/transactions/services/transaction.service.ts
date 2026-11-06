@@ -56,6 +56,13 @@ export class TransactionService {
     } else {
       saleAddress = rawTransaction.tx.contractId;
       if (rawTransaction.tx.function == BCL_FUNCTIONS.create_community) {
+        // Only the factory's return value names a real sale. Any other
+        // contract can return a real token's sale address, and the delete
+        // below would drop that token's create row.
+        const factory = await this.communityFactoryService.getCurrentFactory();
+        if (rawTransaction.tx.contractId !== factory.address) {
+          return;
+        }
         if (!rawTransaction.tx.return.value.length) {
           return;
         }

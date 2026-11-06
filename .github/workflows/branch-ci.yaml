@@ -34,3 +34,48 @@ jobs:
 
       - name: Run build
         run: npm run build
+
+  # The DB_HOST-gated integration specs skip in the job above.
+  db-integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Production runs PostgreSQL 14.
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: api
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: api
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # In band: the specs create and drop their own databases. Social-graph
+      # starts its own server and already runs above.
+      - name: Run database integration specs
+        run: npx jest --runInBand --testPathPatterns 'integration\.spec\.ts$' --testPathIgnorePatterns social-graph

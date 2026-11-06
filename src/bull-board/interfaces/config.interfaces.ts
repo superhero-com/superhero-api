@@ -1,6 +1,7 @@
 import { QueueAdapterOptions } from '@bull-board/api/typings/app';
 import { ExpressAdapter } from '@bull-board/express';
 import { Queue } from 'bull';
+import { BullBoardCredentials } from '../bull-board.settings';
 import { BullBoard } from './bull-board.interfaces';
 
 export type QueueIdentity = Queue | string;
@@ -78,7 +79,8 @@ export interface BullBoardConfig {
      * */
     replace?: QueueConfig[];
   };
-  guard?: any;
+  /* HTTP Basic login checked by `BullBoardAuthGuard`; unset means no login, allowed only in development and tests */
+  credentials?: BullBoardCredentials;
 }
 
 export interface BullBoardModuleConfig {

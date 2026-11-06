@@ -145,6 +145,8 @@ export class PublishNip29Processor
       this.logger.error(
         `terminal publish reject kind ${template.kind} for ${groupId}: ${reason}`,
       );
+      // Bull retries any thrown error unless the job is discarded.
+      job.discard();
       this.emitAck(saleAddress, template.kind, pubkey, false);
       throw new TerminalPublishError(reason);
     }

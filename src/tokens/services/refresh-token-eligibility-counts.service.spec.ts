@@ -58,6 +58,9 @@ describe('RefreshTokenEligibilityCountsService', () => {
     );
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     expect(manager.query).toHaveBeenCalledWith(
+      'SET LOCAL statement_timeout = 0',
+    );
+    expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('TRUNCATE TABLE token_eligibility_counts'),
     );
     expect(manager.query).toHaveBeenCalledWith(
@@ -119,6 +122,9 @@ describe('RefreshTokenEligibilityCountsService', () => {
 
     expect(manager.query).not.toHaveBeenCalledWith(
       'TRUNCATE TABLE token_eligibility_counts',
+    );
+    expect(manager.query).not.toHaveBeenCalledWith(
+      'SET LOCAL statement_timeout = 0',
     );
     expect(manager.query).toHaveBeenCalledWith(
       expect.stringContaining('ON CONFLICT (symbol) DO UPDATE'),

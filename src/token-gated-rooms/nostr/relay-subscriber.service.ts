@@ -37,6 +37,7 @@ import {
 } from '../queues/room-message-notify.types';
 import { ownsGroupId, resolveShardIndex } from './shard';
 import { setRelaySubscriberConnected } from '../observability/tgr-metrics';
+import { authenticateRelay } from './relay-auth';
 
 // nostr-tools' `Relay` reads the global `WebSocket` at connect time (mirror the
 // writer). Idempotent — safe at module load; no socket is opened here.
@@ -232,8 +233,10 @@ export class RelaySubscriberService
       }
     }
     this.coalescing.clear();
+    const previous = this.sub;
+    this.sub = undefined;
     try {
-      this.sub?.close();
+      previous?.close();
     } catch {
       // already closed
     }
@@ -337,12 +340,13 @@ export class RelaySubscriberService
     }
     const relay = await this.ensureConnected();
 
+    const previous = this.sub;
+    this.sub = undefined;
     try {
-      this.sub?.close();
+      previous?.close();
     } catch {
       // already closed
     }
-    this.sub = undefined;
 
     if (this.subscribedGroups.size === 0) {
       return;
@@ -353,14 +357,21 @@ export class RelaySubscriberService
       '#h': [...this.subscribedGroups],
     };
 
-    this.sub = relay.subscribe([filter], {
+    const subscription = relay.subscribe([filter], {
       onevent: (event: NostrEvent) => {
         void this.onEvent(event);
       },
       oneose: () => {
         // Informational: backlog drained, keep the sub live for new events.
       },
+      onclose: (reason) => {
+        if (this.shuttingDown || this.sub !== subscription) return;
+        this.sub = undefined;
+        this.markUnhealthy(`room subscription closed: ${reason}`);
+        this.scheduleReconnect();
+      },
     });
+    this.sub = subscription;
   }
 
   /** Schedule the periodic room-set resync (worker-only; idempotent). */
@@ -707,7 +718,9 @@ export class RelaySubscriberService
       // `Relay.connect()` pending forever. A timeout lets `ensureConnected()` settle
       // so the reconnect/backoff loop can recover instead of wedging.
       relay = await this.withTimeout(
-        Relay.connect(url),
+        // The subscriber never publishes, so only a ping notices a dead socket
+        // (the writer's publish ACK timeout does that job for it).
+        Relay.connect(url, { enablePing: true }),
         this.config.publishAckTimeoutMs,
       );
     } catch (e) {
@@ -731,7 +744,12 @@ export class RelaySubscriberService
     this.relay = relay;
 
     // NIP-42 AUTH as relay admin so private-room chat is served.
-    await this.authenticate(relay);
+    try {
+      await this.authenticate(relay);
+    } catch (error) {
+      relay.close();
+      throw error;
+    }
 
     this.healthy = true;
     this.reconnectAttempts = 0;
@@ -740,24 +758,15 @@ export class RelaySubscriberService
 
   /**
    * Respond to the relay's NIP-42 AUTH challenge with a signed kind-22242 (mirror
-   * RelayWriterService.authenticate). No-op if the relay never challenges.
+   * RelayWriterService.authenticate). Missing or rejected AUTH fails closed.
    */
   private async authenticate(relay: Relay): Promise<void> {
-    try {
-      // Bound the AUTH: `relay.auth()` blocks until the relay sends a NIP-42
-      // challenge, but groups_relay only challenges on a protected REQ — so without
-      // a timeout this awaits forever and hangs the connect. A timeout is benign:
-      // the relay re-challenges on the next protected read.
-      await this.withTimeout(
-        relay.auth(async (evt: EventTemplate) => finalizeEvent(evt, this.sk)),
-        this.config.publishAckTimeoutMs,
-      );
-      this.logger.debug('NIP-42 authenticated as relay admin (subscriber)');
-    } catch (e) {
-      this.logger.debug(
-        `NIP-42 auth skipped/failed: ${(e as Error)?.message ?? e}`,
-      );
-    }
+    await authenticateRelay(
+      relay,
+      async (evt: EventTemplate) => finalizeEvent(evt, this.sk),
+      this.config.publishAckTimeoutMs,
+    );
+    this.logger.debug('NIP-42 authenticated as relay admin (subscriber)');
   }
 
   /**
@@ -816,18 +825,25 @@ export class RelaySubscriberService
     if (this.shuttingDown) {
       return;
     }
-    try {
-      this.sub?.close();
-    } catch {
-      // ignore
-    }
+    // Detach before closing, same as RelayWriterService.reconnect.
+    const previousSub = this.sub;
     this.sub = undefined;
     try {
-      this.relay?.close();
+      previousSub?.close();
     } catch {
       // ignore
     }
+    const previous = this.relay;
     this.relay = undefined;
+    if (previous) {
+      previous.onclose = null;
+    }
+    this.markUnhealthy('reconnecting');
+    try {
+      previous?.close();
+    } catch {
+      // ignore
+    }
     try {
       await this.ensureConnected();
       // On reconnect, RE-ESTABLISH every subscription from the durable room set

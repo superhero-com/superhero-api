@@ -3,6 +3,7 @@ import {
   CHAIN_NAME_SWEEP_MS,
   CHAIN_NAME_STALE_MS,
 } from './account.service';
+import BigNumber from 'bignumber.js';
 import { DataSource } from 'typeorm';
 import { fetchJson, FetchJsonHttpError } from '@/utils/common';
 import { Account } from '../entities/account.entity';
@@ -496,6 +497,88 @@ describe('AccountService', () => {
       await service.scheduledFullAccountsRebuild();
 
       expect(rebuildSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ensureAccountFromTransactions', () => {
+    const trader = {
+      address: 'ak_trader',
+      total_tx_count: 2,
+      total_buy_tx_count: 2,
+      total_sell_tx_count: 0,
+      total_created_tokens: 0,
+      total_volume: new BigNumber(5),
+    };
+
+    it('upserts the totals aggregated from transactions', async () => {
+      const { service, accountRepository, transactionRepository } =
+        createService();
+      transactionRepository.query.mockResolvedValue([
+        {
+          address: 'ak_trader',
+          total_tx_count: 3,
+          total_buy_tx_count: 2,
+          total_sell_tx_count: 1,
+          total_created_tokens: 0,
+          total_volume: '7.5',
+        },
+      ]);
+
+      await service.ensureAccountFromTransactions('ak_trader');
+
+      const [row, options] = accountRepository.upsert.mock.calls[0];
+      expect(row).toMatchObject({ address: 'ak_trader', total_tx_count: 3 });
+      expect(row.total_volume.toString()).toBe('7.5');
+      expect(options).toEqual({ conflictPaths: ['address'] });
+    });
+
+    it('zeroes the totals once every trade of the account is gone', async () => {
+      const { service, accountRepository, transactionRepository } =
+        createService();
+      transactionRepository.query.mockResolvedValue([]);
+      accountRepository.findOne
+        .mockResolvedValueOnce(trader)
+        .mockResolvedValueOnce({ ...trader, total_tx_count: 0 });
+
+      const result = await service.ensureAccountFromTransactions('ak_trader');
+
+      const [where, totals] = accountRepository.update.mock.calls[0];
+      expect(where).toEqual({ address: 'ak_trader' });
+      expect(totals).toMatchObject({
+        total_tx_count: 0,
+        total_buy_tx_count: 0,
+        total_sell_tx_count: 0,
+        total_created_tokens: 0,
+      });
+      expect(totals.total_volume.isZero()).toBe(true);
+      expect(result?.total_tx_count).toBe(0);
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('leaves an account without trades or totals untouched', async () => {
+      const { service, accountRepository, transactionRepository } =
+        createService();
+      transactionRepository.query.mockResolvedValue([]);
+      const untraded = { ...trader, total_tx_count: 0 };
+      accountRepository.findOne.mockResolvedValueOnce(untraded);
+
+      await expect(
+        service.ensureAccountFromTransactions('ak_trader'),
+      ).resolves.toBe(untraded);
+      expect(accountRepository.update).not.toHaveBeenCalled();
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('returns null for an unknown address without trades', async () => {
+      const { service, accountRepository, transactionRepository } =
+        createService();
+      transactionRepository.query.mockResolvedValue([]);
+
+      await expect(
+        service.ensureAccountFromTransactions('ak_nobody'),
+      ).resolves.toBeNull();
+      expect(accountRepository.update).not.toHaveBeenCalled();
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
     });
   });
 

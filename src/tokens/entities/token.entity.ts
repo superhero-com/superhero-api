@@ -21,6 +21,9 @@ export const UNRANKED_TOKEN_RANK = 2147483647;
 // Backs the home feed's token-creation source (`unlisted = false ORDER BY
 // created_at DESC`), which previously had no covering index on this table.
 @Index('IDX_TOKEN_UNLISTED_CREATED_AT', ['unlisted', 'created_at'])
+// Expression index on UPPER(symbol) for trend-mention lookups; TypeORM can't
+// declare it, so migration 1718900000039 creates it.
+@Index('IDX_TOKEN_UPPER_SYMBOL', { synchronize: false })
 @Entity({ name: 'token' })
 export class Token {
   @PrimaryColumn()
@@ -68,11 +71,6 @@ export class Token {
   })
   create_tx_hash: string;
 
-  // Partial index: the 10-minute `dao_address IS NULL` cleanup sweep in
-  // FastPullTokensService would otherwise sequentially scan `token` per tick.
-  @Index('idx_token_dao_address_null', ['dao_address'], {
-    where: 'dao_address IS NULL',
-  })
   @Column({
     nullable: true,
   })

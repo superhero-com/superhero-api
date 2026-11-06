@@ -3,18 +3,25 @@ import {
   DefaultValuePipe,
   Get,
   Param,
+  ParseEnumPipe,
   ParseIntPipe,
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { GovernanceVoteService } from '../services/governance-vote.service';
+import {
+  GovernancePollStatus,
+  GovernanceVoteService,
+} from '../services/governance-vote.service';
 import {
   GovernancePollDto,
   GovernanceVoteDto,
 } from '../dto/governance-vote.dto';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import { Pagination } from 'nestjs-typeorm-paginate';
-import { AeContractAddressPipe } from '@/common/validation/request-validation';
+import {
+  AeContractAddressPipe,
+  OptionalAeAccountAddressPipe,
+} from '@/common/validation/request-validation';
 
 @Controller('governance/votes')
 @ApiTags('Governance')
@@ -23,18 +30,39 @@ export class GovernanceVotesController {
 
   @ApiQuery({ name: 'page', type: 'number', required: false })
   @ApiQuery({ name: 'limit', type: 'number', required: false })
+  @ApiQuery({
+    name: 'status',
+    enum: GovernancePollStatus,
+    required: false,
+    description: 'Filter by open or closed polls (default all)',
+  })
+  @ApiQuery({
+    name: 'author',
+    type: String,
+    required: false,
+    description: 'Only polls created by this account',
+  })
   @ApiOperation({
     operationId: 'listGovernancePolls',
     summary: 'Get all governance polls',
-    description: 'Retrieve a paginated list of governance polls',
+    description: 'Retrieve a paginated list of governance polls, newest first',
   })
   @ApiOkResponsePaginated(GovernancePollDto)
   @Get()
   async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit = 100,
+    @Query(
+      'status',
+      new ParseEnumPipe(GovernancePollStatus, { optional: true }),
+    )
+    status?: GovernancePollStatus,
+    @Query('author', OptionalAeAccountAddressPipe) author?: string,
   ): Promise<Pagination<GovernancePollDto>> {
-    return this.governanceVoteService.findAll({ page, limit });
+    return this.governanceVoteService.findAll(
+      { page, limit },
+      { status, author },
+    );
   }
 
   @ApiParam({

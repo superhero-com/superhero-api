@@ -8,6 +8,11 @@ import moment from 'moment';
 import { LessThan, Repository } from 'typeorm';
 import { Analytic } from '../entities/analytic.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { mapWithConcurrency } from '@/utils/concurrency.util';
+
+// Each day runs two queries; without a bound one long range takes the whole
+// DB pool and starves every other request.
+const LIVE_DAY_CONCURRENCY = 4;
 
 @Injectable()
 export class CacheDailyAnalyticsDataService {
@@ -200,8 +205,10 @@ export class CacheDailyAnalyticsDataService {
       return [];
     }
 
-    const enriched = await Promise.all(
-      rows.map(async (row) => {
+    const enriched = await mapWithConcurrency(
+      rows,
+      LIVE_DAY_CONCURRENCY,
+      async (row) => {
         const dayKey = moment(row.day).startOf('day').format('YYYY-MM-DD');
         const endOfThatDay = moment(dayKey).endOf('day').toDate();
         const [totalTokens, totalMarketCap] = await Promise.all([
@@ -222,7 +229,7 @@ export class CacheDailyAnalyticsDataService {
           total_created_tokens: Number(row.total_created_tokens ?? 0),
           total_active_accounts: Number(row.total_active_accounts ?? 0),
         };
-      }),
+      },
     );
 
     return enriched;

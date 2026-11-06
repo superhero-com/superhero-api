@@ -22,7 +22,7 @@ describe('Social graph selection', () => {
       { sdk: { getContext: () => ({ onNode: {} }) } } as any,
       {} as any,
     );
-  it('stays disabled without a contract and refuses incomplete network configuration', async () => {
+  it('stays disabled without a contract or with incomplete network configuration', async () => {
     delete process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS;
     const graph = create();
     expect(graph.isConfigured()).toBe(false);
@@ -30,7 +30,9 @@ describe('Social graph selection', () => {
     expect(() => graph.getReader()).toThrow('not configured');
     process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';
     delete process.env.SOCIAL_GRAPH_NETWORK_ID;
-    await expect(graph.onModuleInit()).rejects.toThrow('not configured');
+    expect(graph.isConfigured()).toBe(false);
+    await expect(graph.onModuleInit()).resolves.toBeUndefined();
+    expect(() => graph.getReader()).toThrow('not configured');
   });
   it('verifies identity on startup through the existing configuration names', async () => {
     process.env.SOCIAL_GRAPH_CONTRACT_ADDRESS = 'ct_abc';

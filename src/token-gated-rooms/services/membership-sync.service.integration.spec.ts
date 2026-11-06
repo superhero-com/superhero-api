@@ -7,6 +7,7 @@ import { BigNumber } from 'bignumber.js';
 import { Relay } from 'nostr-tools';
 import WebSocket from 'ws';
 import { DATABASE_CONFIG } from '@/configs/database';
+import { waitForRelayState } from '@/test/harness/relay';
 import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from '../entities/community-room.entity';
 import { RoomMembership } from '../entities/room-membership.entity';
@@ -544,9 +545,10 @@ d('MembershipSyncService (integration)', () => {
         });
         const addJob = publishQueue.add.mock.calls.at(-1)![0];
         expect((await writer.publish(addJob.template)).ok).toBe(true);
-        await new Promise((r) => setTimeout(r, 600));
-
-        let members = await writer.fetchGroupMembers(gid);
+        let members = await waitForRelayState(
+          () => writer.fetchGroupMembers(gid),
+          (current) => current.has(memberPubkey),
+        );
         expect(members.has(memberPubkey)).toBe(true);
 
         // Flip eligible=false → 9001 → member gone from 39002.
@@ -561,9 +563,10 @@ d('MembershipSyncService (integration)', () => {
         });
         const removeJob = publishQueue.add.mock.calls.at(-1)![0];
         expect((await writer.publish(removeJob.template)).ok).toBe(true);
-        await new Promise((r) => setTimeout(r, 600));
-
-        members = await writer.fetchGroupMembers(gid);
+        members = await waitForRelayState(
+          () => writer.fetchGroupMembers(gid),
+          (current) => !current.has(memberPubkey),
+        );
         expect(members.has(memberPubkey)).toBe(false);
       },
     );

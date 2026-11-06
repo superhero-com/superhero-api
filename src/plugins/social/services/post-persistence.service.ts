@@ -5,6 +5,7 @@ import { Repository, EntityManager } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Topic } from '@/social/entities/topic.entity';
 import { detectPostLanguage } from '@/social/utils/post-language.util';
+import { refreshThreadCommentCounts } from '@/social/utils/thread-comment-counts.util';
 import { Tx } from '@/mdw-sync/entities/tx.entity';
 import {
   IPostContract,
@@ -14,8 +15,11 @@ import {
 } from '@/social/interfaces/post.interfaces';
 import {
   POST_COMMENT_CREATED_EVENT,
+  POST_MENTION_EVENT,
   PostCommentCreatedEventPayload,
+  PostMentionEventPayload,
 } from '../events';
+import { extractAccountMentions } from '@/social/utils/account-mentions.util';
 import { SyncDirection } from '../../plugin.interface';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
 import { POST_SYNC_VERSION } from '@/social/config/post-contracts.config';
@@ -219,23 +223,63 @@ export class PostPersistenceService {
   }
 
   /**
-   * Updates the comment count for a parent post
+   * Emits POST_MENTION_EVENT when a freshly indexed post tags accounts with
+   * the `[account:ak_…]` macro. Live only, like the comment event, so a
+   * backfill or reorg replay never pages anyone. Drops the author, and the
+   * parent author of a comment (post-comment already covers that account).
+   */
+  emitMentionEvent(
+    post: Post,
+    txHash: string,
+    syncDirection: SyncDirection,
+    parentAuthorAddress?: string,
+  ): void {
+    if (syncDirection !== SyncDirectionEnum.Live) {
+      return;
+    }
+    if (!post?.sender_address || !post.id) {
+      return;
+    }
+    try {
+      const mentionedAddresses = extractAccountMentions(post.content).filter(
+        (address) =>
+          address !== post.sender_address && address !== parentAuthorAddress,
+      );
+      if (!mentionedAddresses.length) {
+        return;
+      }
+      const payload: PostMentionEventPayload = {
+        authorAddress: post.sender_address,
+        mentionedAddresses,
+        postId: post.id,
+        txHash,
+      };
+      this.eventEmitter.emit(POST_MENTION_EVENT, payload);
+    } catch (notifyError) {
+      // Notification dispatch must never break indexing.
+      this.logger.warn('Failed to emit post-mention notification event', {
+        txHash,
+        postId: post.id,
+        error:
+          notifyError instanceof Error
+            ? notifyError.message
+            : String(notifyError),
+      });
+    }
+  }
+
+  /**
+   * Updates the comment count for a parent post and every post above it
    */
   async updatePostCommentCount(parentPostId: string): Promise<void> {
     try {
-      const count = await this.postRepository
-        .createQueryBuilder('post')
-        .where('post.post_id = :parentPostId', { parentPostId })
-        .getCount();
-
-      await this.postRepository.update(
-        { id: parentPostId },
-        { total_comments: count },
+      await refreshThreadCommentCounts(
+        this.postRepository.manager,
+        parentPostId,
       );
 
-      this.logger.debug('Updated comment count for parent post', {
+      this.logger.debug('Updated comment counts for parent post thread', {
         parentPostId,
-        commentCount: count,
       });
     } catch (error) {
       const errorMessage =

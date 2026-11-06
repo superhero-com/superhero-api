@@ -1,4 +1,3 @@
-import { TX_FUNCTIONS } from '@/configs';
 import { DexSyncService } from './dex-sync.service';
 
 describe('DexSyncService', () => {
@@ -20,11 +19,11 @@ describe('DexSyncService', () => {
       findOne: jest.fn(),
       save: jest.fn(),
       createQueryBuilder: jest.fn().mockReturnValue(pairQueryBuilder),
-      find: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
     } as any;
-    const dexPairTransactionRepository = {
-      upsert: jest.fn().mockResolvedValue(undefined),
-      findOne: jest.fn(),
+    const pairService = {
+      getFactoryPairAddresses: jest.fn().mockResolvedValue(new Set()),
+      syncPairFromChain: jest.fn().mockResolvedValue(undefined),
     } as any;
     const dexTokenService = {
       getAllPairsWithTokens: jest.fn(),
@@ -51,13 +50,10 @@ describe('DexSyncService', () => {
     const service = new DexSyncService(
       dexTokenRepository,
       dexPairRepository,
-      dexPairTransactionRepository,
       dataSource,
-      { sdk: {} } as any,
-      { findByAddress: jest.fn(), pullPairData: jest.fn() } as any,
+      pairService,
       dexTokenService,
       pairSummaryService,
-      {} as any,
       aePricingService,
       tokenSummaryService,
     );
@@ -66,7 +62,7 @@ describe('DexSyncService', () => {
       service,
       dexTokenRepository,
       dexPairRepository,
-      dexPairTransactionRepository,
+      pairService,
       dexTokenService,
       pairQueryBuilder,
       pairSummaryService,
@@ -77,62 +73,77 @@ describe('DexSyncService', () => {
     };
   };
 
-  it('falls back to factory decode when router decode returns empty array', async () => {
-    const { service } = setup();
-    const routerDecode = jest.fn().mockReturnValue([]);
-    const factoryDecode = jest
-      .fn()
-      .mockReturnValue([
-        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
+  describe('refreshing pairs from chain', () => {
+    const pricing = (ctx: ReturnType<typeof setup>) => {
+      ctx.dexTokenRepository.find
+        .mockResolvedValueOnce([{ address: 'ct_token' }])
+        .mockResolvedValueOnce([]);
+      ctx.dexTokenService.getAllPairsWithTokens.mockResolvedValue([]);
+      ctx.dexTokenService.getTokenPriceWithLiquidityAnalysis.mockResolvedValue(
+        null,
+      );
+      ctx.pairQueryBuilder.getMany.mockResolvedValue([]);
+    };
+
+    it('refreshes factory pairs before pricing and skips pairs the factory does not know', async () => {
+      const ctx = setup();
+      pricing(ctx);
+      const known = { address: 'ct_known' };
+      const unknown = { address: 'ct_unknown' };
+      ctx.dexPairRepository.find.mockResolvedValue([known, unknown]);
+      ctx.pairService.getFactoryPairAddresses.mockResolvedValue(
+        new Set(['ct_known']),
+      );
+
+      await ctx.service.syncTokenPrices();
+
+      expect(ctx.pairService.syncPairFromChain).toHaveBeenCalledTimes(1);
+      expect(ctx.pairService.syncPairFromChain).toHaveBeenCalledWith(known);
+      expect(
+        ctx.pairService.syncPairFromChain.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        ctx.dexTokenService.getAllPairsWithTokens.mock.invocationCallOrder[0],
+      );
+      expect(ctx.dexTokenService.getAllPairsWithTokens).toHaveBeenCalledWith({
+        fresh: true,
+      });
+    });
+
+    it('keeps refreshing and pricing when one pair fails', async () => {
+      const ctx = setup();
+      pricing(ctx);
+      ctx.dexPairRepository.find.mockResolvedValue([
+        { address: 'ct_a' },
+        { address: 'ct_b' },
       ]);
-    (service as any).routerContract = { $decodeEvents: routerDecode };
-    (service as any).factoryContract = { $decodeEvents: factoryDecode };
-    jest
-      .spyOn(service as any, 'getOrCreateToken')
-      .mockResolvedValueOnce({ address: 'ct_t0' })
-      .mockResolvedValueOnce({ address: 'ct_t1' });
+      ctx.pairService.getFactoryPairAddresses.mockResolvedValue(
+        new Set(['ct_a', 'ct_b']),
+      );
+      ctx.pairService.syncPairFromChain.mockRejectedValueOnce(
+        new Error('socket hang up'),
+      );
 
-    const result = await (service as any).extractPairInfoFromTransaction({
-      tx: {
-        function: TX_FUNCTIONS.add_liquidity,
-        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
-        log: [],
-      },
+      await ctx.service.syncTokenPrices();
+
+      expect(ctx.pairService.syncPairFromChain).toHaveBeenCalledTimes(2);
+      expect(
+        ctx.dexTokenService.getTokenPriceWithLiquidityAnalysis,
+      ).toHaveBeenCalledTimes(1);
     });
 
-    expect(routerDecode).toHaveBeenCalledTimes(1);
-    expect(factoryDecode).toHaveBeenCalledTimes(1);
-    expect(result?.pairAddress).toBe('ct_pair');
-  });
+    it('prices from stored reserves when the factory cannot be read', async () => {
+      const ctx = setup();
+      pricing(ctx);
+      ctx.pairService.getFactoryPairAddresses.mockRejectedValue(
+        new Error('socket hang up'),
+      );
 
-  it('loads pair relation after upsert when fetching saved tx', async () => {
-    const { service, dexPairTransactionRepository } = setup();
-    dexPairTransactionRepository.findOne.mockResolvedValue({
-      tx_hash: 'th_1',
-      pair: { address: 'ct_pair' },
-    });
+      await ctx.service.syncTokenPrices();
 
-    await (service as any).saveDexPairTransaction(
-      { address: 'ct_pair' },
-      {
-        hash: 'th_1',
-        blockHeight: 1,
-        microTime: 1000,
-        tx: { callerId: 'ak_1', function: 'swap' },
-      },
-      {
-        reserve0: 1,
-        reserve1: 1,
-        volume0: 0,
-        volume1: 0,
-        swapInfo: null,
-        pairMintInfo: null,
-      },
-    );
-
-    expect(dexPairTransactionRepository.findOne).toHaveBeenCalledWith({
-      where: { tx_hash: 'th_1' },
-      relations: { pair: true },
+      expect(ctx.pairService.syncPairFromChain).not.toHaveBeenCalled();
+      expect(
+        ctx.dexTokenService.getTokenPriceWithLiquidityAnalysis,
+      ).toHaveBeenCalledTimes(1);
     });
   });
 

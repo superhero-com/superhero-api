@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Raw, Repository } from 'typeorm';
 import { randomInt } from 'crypto';
 import { CreateAffiliationDto } from '../dto/create-affiliation.dto';
 import { Affiliation } from '../entities/affiliation.entity';
@@ -20,6 +20,10 @@ import {
   InviteCodePipe,
   ProviderParamPipe,
 } from '@/common/validation/request-validation';
+
+// Serializes invite claims across instances. Distinct from the other 1-arg
+// keys (…746–…750).
+export const INVITE_CLAIM_LOCK_KEY = 4019283751;
 
 @Controller('affiliations')
 @ApiTags('Affiliations')
@@ -59,57 +63,81 @@ export class AffiliationController {
       access_code,
     );
 
-    // make sure this user didn't claim any code yet.
-    const claimedCode = await this.affiliationCodeRepository.findOne({
-      where: { claimed_by: `${provider}@${userInfo.id}` },
-    });
-    if (claimedCode) {
-      if (claimedCode?.claimed_at) {
-        throw new ConflictException('User already claimed a code');
-      }
-      // delete the claimed code
-      await this.affiliationCodeRepository.delete(claimedCode.id);
-    }
+    // The provider param is case-insensitive, so every spelling of it must
+    // map to the same claimant.
+    const claimant = `${provider.toLowerCase()}@${userInfo.id}`;
 
-    // Check if the affiliation exists and has non-claimed codes
-    const affiliation = await this.affiliationRepository.findOne({
-      where: { code },
-      relations: ['codes'],
-    });
+    // The claimant check and the pick are read-then-write, so without the
+    // lock parallel requests could each walk away with a code, and two users
+    // could be handed the same one.
+    return this.affiliationCodeRepository.manager.transaction(
+      async (manager) => {
+        await manager.query('SELECT pg_advisory_xact_lock($1)', [
+          INVITE_CLAIM_LOCK_KEY,
+        ]);
 
-    if (!affiliation) {
-      throw new NotFoundException('Affiliation not found');
-    }
+        const affiliation = await manager.findOne(Affiliation, {
+          where: { code },
+          relations: ['codes'],
+        });
 
-    // Check if there are any non-claimed codes available
-    const availableCodes =
-      affiliation.codes?.filter((c) => !c.claimed_at) || [];
+        if (!affiliation) {
+          throw new NotFoundException('Affiliation not found');
+        }
 
-    if (availableCodes.length === 0) {
-      throw new ConflictException('No available codes for this affiliation');
-    }
+        // Lowercased on both sides so a mixed-case provider (old rows) or id
+        // can't hide an earlier claim.
+        const claimedCode = await manager.findOne(AffiliationCode, {
+          where: {
+            claimed_by: Raw((alias) => `LOWER(${alias}) = LOWER(:claimant)`, {
+              claimant,
+            }),
+          },
+        });
 
-    // shuffle availableCodes and pick one
-    const invitationCode = availableCodes[randomInt(availableCodes.length)];
+        // A code with claimed_by set has been shown to someone even when
+        // claimed_at is empty, which is how claims were stored before.
+        const availableCodes =
+          affiliation.codes?.filter((c) => !c.claimed_at && !c.claimed_by) ||
+          [];
 
-    // update the code with the user info
-    await this.affiliationCodeRepository.update(invitationCode.id, {
-      claimed_by: `${provider}@${userInfo.id}`,
-    });
+        let invitationCode: AffiliationCode;
+        if (claimedCode) {
+          // The user already holds this secret, so handing it out again leaks
+          // nothing and lets them recover from a lost response.
+          if (!affiliation.codes?.some((c) => c.id === claimedCode.id)) {
+            throw new ConflictException('User already claimed a code');
+          }
+          invitationCode = claimedCode;
+        } else {
+          if (availableCodes.length === 0) {
+            throw new ConflictException(
+              'No available codes for this affiliation',
+            );
+          }
 
-    // Return only the minimum data the client needs to redeem the invite.
-    // Previously this leaked the full OAuth profile (including email) and
-    // the full AffiliationCode entity (including claimed_by), which was
-    // unnecessary PII exposure over an unauthenticated endpoint.
-    return {
-      affiliation: {
-        code: affiliation.code,
-        available_codes: availableCodes.length,
+          invitationCode = availableCodes[randomInt(availableCodes.length)];
+          await manager.update(AffiliationCode, invitationCode.id, {
+            claimed_by: claimant,
+            claimed_at: new Date(),
+          });
+        }
+
+        // Return only the minimum data the client needs to redeem the invite.
+        // Previously this leaked the full OAuth profile (including email) and
+        // the full AffiliationCode entity (including claimed_by), which was
+        // unnecessary PII exposure over an unauthenticated endpoint.
+        return {
+          affiliation: {
+            code: affiliation.code,
+            available_codes: availableCodes.length,
+          },
+          invitationCode: {
+            private_code: invitationCode.private_code,
+          },
+        };
       },
-      invitationCode: {
-        private_code: invitationCode.private_code,
-      },
-    };
+    );
   }
 
   @Post('')

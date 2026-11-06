@@ -46,60 +46,53 @@ export class BclAffiliationTransactionProcessorService {
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<Invitation[] | null> {
-    try {
-      // Check transaction result
-      if (tx.raw.result !== 'ok') {
-        return null;
-      }
-
-      const functionName = tx.function;
-      if (!functionName) {
-        return null;
-      }
-
-      // Wrap operations in a transaction for consistency. Events the save
-      // helpers want to emit are returned alongside the invitations and
-      // emitted AFTER commit (see below) — emitting inside the callback would
-      // leak phantom notifications on rollback.
-      const outcome =
-        await this.invitationRepository.manager.transaction<ProcessOutcome>(
-          async (manager) => {
-            switch (functionName) {
-              case 'register_invitation_code':
-                return {
-                  invitations: await this.saveRegisterInvitation(tx, manager),
-                  events: [],
-                };
-              case 'redeem_invitation_code':
-                return await this.saveClaimInvitation(tx, manager);
-              case 'revoke_invitation_code':
-                return {
-                  invitations: await this.saveRevokeInvitation(tx, manager),
-                  events: [],
-                };
-              default:
-                return { invitations: null, events: [] };
-            }
-          },
-        );
-
-      // Backfill / reorg replays would re-emit historical claims and page
-      // every inviter for every old redeem — gate on Live so only fresh chain
-      // events trigger notifications.
-      if (syncDirection === SyncDirectionEnum.Live) {
-        for (const event of outcome.events) {
-          this.eventEmitter.emit(INVITATION_CLAIMED_EVENT, event);
-        }
-      }
-
-      return outcome.invitations;
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process affiliation transaction ${tx.hash}`,
-        error.stack,
-      );
+    // Check transaction result
+    if (tx.raw.result !== 'ok') {
       return null;
     }
+
+    const functionName = tx.function;
+    if (!functionName) {
+      return null;
+    }
+
+    // Wrap operations in a transaction for consistency. Events the save
+    // helpers want to emit are returned alongside the invitations and
+    // emitted AFTER commit (see below) — emitting inside the callback would
+    // leak phantom notifications on rollback. A failure propagates so the
+    // batch processor parks the tx for retry.
+    const outcome =
+      await this.invitationRepository.manager.transaction<ProcessOutcome>(
+        async (manager) => {
+          switch (functionName) {
+            case 'register_invitation_code':
+              return {
+                invitations: await this.saveRegisterInvitation(tx, manager),
+                events: [],
+              };
+            case 'redeem_invitation_code':
+              return await this.saveClaimInvitation(tx, manager);
+            case 'revoke_invitation_code':
+              return {
+                invitations: await this.saveRevokeInvitation(tx, manager),
+                events: [],
+              };
+            default:
+              return { invitations: null, events: [] };
+          }
+        },
+      );
+
+    // Backfill / reorg replays would re-emit historical claims and page
+    // every inviter for every old redeem — gate on Live so only fresh chain
+    // events trigger notifications.
+    if (syncDirection === SyncDirectionEnum.Live) {
+      for (const event of outcome.events) {
+        this.eventEmitter.emit(INVITATION_CLAIMED_EVENT, event);
+      }
+    }
+
+    return outcome.invitations;
   }
 
   /**

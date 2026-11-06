@@ -118,7 +118,11 @@ const bin = findPostgresBinDir();
         findOne: jest.fn().mockResolvedValue({ version: 1 }),
         update: jest.fn(),
       };
-      const failures: any = { recordFailure: jest.fn() };
+      const failures: any = {
+        recordFailure: jest.fn(),
+        clearFailures: jest.fn(),
+        clearFailuresForTxs: jest.fn(),
+      };
       const batches = new PluginBatchProcessorService(
         { getPlugins: () => [plugin] } as any,
         failures,
@@ -223,7 +227,8 @@ const bin = findPostgresBinDir();
         await first.changed(scope, ['ak_a', 'ak_b']);
         for (
           let attempt = 0;
-          attempt < 100 && !emitB.mock.calls.length;
+          attempt < 500 &&
+          (!emitA.mock.calls.length || !emitB.mock.calls.length);
           attempt++
         )
           await new Promise((resolve) => setTimeout(resolve, 10));

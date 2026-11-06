@@ -113,3 +113,23 @@ export const DATABASE_CONFIG: TypeOrmModuleOptions = {
     ),
   },
 };
+
+// 0 (the default) disables the limit. Long jobs opt out with
+// SET LOCAL statement_timeout = 0, or SET + RESET on a dedicated query runner.
+export const DB_STATEMENT_TIMEOUT_MS = parseNumber(
+  process.env.DB_STATEMENT_TIMEOUT_MS,
+  0,
+  { integer: true, min: 0 },
+);
+
+// The app pool only: the migration CLI (src/data-source.ts) spreads
+// DATABASE_CONFIG and must keep running without a limit.
+export const APP_DATABASE_CONFIG: TypeOrmModuleOptions = {
+  ...DATABASE_CONFIG,
+  extra: {
+    ...DATABASE_CONFIG.extra,
+    ...(DB_STATEMENT_TIMEOUT_MS > 0 && {
+      statement_timeout: DB_STATEMENT_TIMEOUT_MS,
+    }),
+  },
+};

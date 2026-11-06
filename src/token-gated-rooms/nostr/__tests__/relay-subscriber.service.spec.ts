@@ -1,13 +1,17 @@
+import {
+  FakeRelay,
+  FakeRelayOptions,
+  startFakeRelay,
+} from '@/test/harness/fake-relay';
+import { waitForRelayState } from '@/test/harness/relay';
 import { firstHTag, RelaySubscriberService } from '../relay-subscriber.service';
 import { shardForGroupId } from '../shard';
 
 /**
  * Unit coverage for the relay subscriber's ROUTER + dedup + coalescing + fan-out +
- * rate-cap + circuit-breaker (Task 14, plan §7.1). No real socket: we drive
- * `onEvent` directly and assert the resulting enqueues over mocked repos/queue/redis.
- *
- * A valid relay-admin nsec is required only so the constructor can decode it; the
- * connection lifecycle is never invoked here (no `onModuleInit`).
+ * rate-cap + circuit-breaker (Task 14, plan §7.1): we drive `onEvent` directly and
+ * assert the resulting enqueues over mocked repos/queue/redis. The connection
+ * lifecycle is covered last, against an in-process fake relay.
  */
 const RELAY_ADMIN_NSEC =
   'nsec1dwg3l5mumawgr4xq4kc6klagytkj2w4s4kd2rrthy47g3v5mwx8qwrh7sx';
@@ -36,6 +40,8 @@ function makeHarness(
     subscriberShards: number;
     communityTokenRefreshSec: number;
     relayHealthPauseSec: number;
+    nostrRelayUrl: string;
+    rooms: string[];
   }> = {},
 ): Harness {
   const add: Mock = jest.fn().mockResolvedValue({ id: 'job1' });
@@ -71,7 +77,14 @@ function makeHarness(
     { member_address: 'ak_bob', member_pubkey: 'pk_bob' },
   ]);
 
-  const tokenRepo = { find: jest.fn().mockResolvedValue([]) } as any;
+  const tokenRepo = {
+    find: jest.fn().mockResolvedValue(
+      (config.rooms ?? []).map((gid) => ({
+        sale_address: gid,
+        nostr_group_id: null,
+      })),
+    ),
+  } as any;
   const roomRepo = { findOne: findRoom } as any;
   const membershipRepo = { find: findMembers } as any;
   const seenRepo = {
@@ -82,7 +95,8 @@ function makeHarness(
   const notifyQueue = { add, getJobCounts } as any;
   const cfg = {
     nostrBotNsec: RELAY_ADMIN_NSEC,
-    nostrRelayUrl: 'ws://localhost:7777',
+    nostrRelayUrl: config.nostrRelayUrl ?? 'ws://localhost:7777',
+    publishAckTimeoutMs: 1000,
     msgCoalesceWindowSec: config.msgCoalesceWindowSec ?? 0,
     msgRateCap: config.msgRateCap ?? 0,
     roomNotifyDepthBreak: config.roomNotifyDepthBreak ?? 10000,
@@ -356,4 +370,95 @@ describe('RelaySubscriberService sharding (onEvent)', () => {
     expect(h.recordSeen).not.toHaveBeenCalled();
     expect(h.add).not.toHaveBeenCalled();
   });
+});
+
+describe('RelaySubscriberService relay connection', () => {
+  let relay: FakeRelay;
+  let svc: RelaySubscriberService;
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function start(options: FakeRelayOptions = {}): Promise<void> {
+    relay = await startFakeRelay(options);
+    ({ svc } = makeHarness({
+      nostrRelayUrl: relay.url,
+      relayHealthPauseSec: 1,
+      rooms: [GID],
+    }));
+    await svc.onModuleInit();
+  }
+  const roomReqs = (count: number) =>
+    waitForRelayState(
+      async () => relay.reqs.filter(([filter]) => filter['#h']).length,
+      (n) => n === count,
+    );
+
+  afterEach(async () => {
+    svc?.onApplicationShutdown();
+    await relay?.close();
+  });
+
+  it('does not subscribe when AUTH is rejected', async () => {
+    await start({ rejectAuth: 'auth-required: relay mismatch' });
+    await waitForRelayState(
+      async () => relay.connections === 1 && relay.openSockets() === 0,
+      Boolean,
+    );
+
+    expect(svc.isHealthy()).toBe(false);
+    expect(relay.reqs).toEqual([]);
+  });
+
+  it('keeps the connection when a new room replaces the subscription', async () => {
+    await start();
+    await roomReqs(1);
+
+    await svc.onRoomCreated({ saleAddress: 'ct_other_room' } as any);
+    await roomReqs(2);
+    expect(relay.reqs.at(-1)?.[0]['#h']).toEqual([GID, 'ct_other_room']);
+    // Closing the replaced subscription must not trigger the 1 s reconnect.
+    await sleep(1500);
+
+    expect(relay.connections).toBe(1);
+    expect(svc.isHealthy()).toBe(true);
+  }, 10_000);
+
+  it('reconnects and resubscribes when the relay closes the room subscription', async () => {
+    let closed = false;
+    await start({
+      onReq: (send, subId) => {
+        if (closed) return send(['EOSE', subId]);
+        closed = true;
+        send(['CLOSED', subId, 'auth-required: authenticate first']);
+      },
+    });
+
+    await roomReqs(2);
+    await waitForRelayState(async () => svc.isHealthy(), Boolean);
+    expect(relay.connections).toBe(2);
+  }, 10_000);
+
+  it('is not healthy until a reconnect re-authenticates', async () => {
+    await start({ challengeDelayMs: 500 });
+    await roomReqs(1);
+
+    const reconnecting = (svc as any).reconnect();
+    await waitForRelayState(async () => (svc as any).relay?.connected, Boolean);
+    expect(svc.isHealthy()).toBe(false);
+    await reconnecting;
+    expect(svc.isHealthy()).toBe(true);
+  });
+
+  it('reconnects once after the relay drops the socket', async () => {
+    await start();
+    await roomReqs(1);
+
+    relay.dropAll();
+    await roomReqs(2);
+    // A reconnect loop would open a third socket within 3 s.
+    await sleep(3000);
+
+    expect(relay.connections).toBe(2);
+    expect(svc.isHealthy()).toBe(true);
+  }, 15_000);
 });

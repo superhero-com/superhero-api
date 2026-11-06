@@ -1,24 +1,58 @@
+import { Plugin, PluginBatchFailure } from '@/plugins/plugin.interface';
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { Cron } from '@nestjs/schedule';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { PluginFailedTransaction } from '../entities/plugin-failed-transaction.entity';
-import { PluginSyncState } from '../entities/plugin-sync-state.entity';
+import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
-import { PluginRegistryService } from './plugin-registry.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
+import { PluginRegistryService } from './plugin-registry.service';
+
+export const MAX_RETRY_ATTEMPTS = 10;
+const RETRY_BASE_DELAY_MS = 10 * 60 * 1000;
+const RETRY_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
+const RETRY_BATCH_SIZE = 100;
+const RETRY_MAX_ROWS_PER_PLUGIN_RUN = 1000;
+const RETRY_TIP_MARGIN_BLOCKS = 5;
+// Each run reads `now` only once it holds the lock, so a row backed off from
+// the previous run's `now` can fall due a few ms after this run's `now`.
+const RETRY_DUE_SLACK_MS = 60 * 1000;
+const EXHAUSTED_LOG_HASH_LIMIT = 10;
+// Distinct from the other app advisory locks (4019283746-4019283751).
+export const FAILED_TX_RETRY_LOCK_KEY = 4019283752;
+
+export function nextRetryAt(attempts: number, now: Date): Date {
+  const delay = Math.min(
+    RETRY_BASE_DELAY_MS * 2 ** Math.max(attempts - 1, 0),
+    RETRY_MAX_DELAY_MS,
+  );
+  return new Date(now.getTime() + delay);
+}
+
+export interface RetryOutcome {
+  succeeded: number;
+  failed: number;
+  orphaned: number;
+}
 
 @Injectable()
 export class PluginFailedTransactionService {
   private readonly logger = new Logger(PluginFailedTransactionService.name);
+  private isRetrying = false;
 
   constructor(
     @InjectRepository(PluginFailedTransaction)
     private failedTransactionRepository: Repository<PluginFailedTransaction>,
     @InjectRepository(Tx)
     private txRepository: Repository<Tx>,
-    @InjectRepository(PluginSyncState)
-    private pluginSyncStateRepository: Repository<PluginSyncState>,
+    @InjectRepository(SyncState)
+    private syncStateRepository: Repository<SyncState>,
+    @InjectDataSource()
+    private dataSource: DataSource,
     private pluginRegistryService: PluginRegistryService,
+    private configService: ConfigService,
   ) {}
 
   /**
@@ -53,145 +87,109 @@ export class PluginFailedTransactionService {
   }
 
   /**
-   * Retry failed transactions for a plugin when version changes
+   * Drop parked rows for transactions a plugin has now processed. Never throws:
+   * it runs inside indexing, and a leftover row only costs one extra retry.
    */
-  async retryFailedTransactions(
-    pluginName: string,
-    oldVersion: number,
-    newVersion: number,
-  ): Promise<void> {
+  async clearFailures(pluginName: string, txHashes: string[]): Promise<void> {
     try {
-      // Find all failed transactions for this plugin at the old version
-      const failedTransactions = await this.failedTransactionRepository.find({
-        where: {
-          plugin_name: pluginName,
-          version: oldVersion,
-        },
-      });
-
-      if (failedTransactions.length === 0) {
-        return;
-      }
-
-      this.logger.log(
-        `[${pluginName}] Retrying ${failedTransactions.length} failed transactions from version ${oldVersion} to ${newVersion}`,
-      );
-
-      const plugin = this.pluginRegistryService.getPluginByName(pluginName);
-      if (!plugin) {
-        this.logger.warn(`[${pluginName}] Plugin not found, skipping retry`);
-        return;
-      }
-
-      // Fetch transactions from database
-      const txHashes = failedTransactions.map((ft) => ft.tx_hash);
-      const transactions = await this.txRepository.find({
-        where: {
-          hash: In(txHashes),
-        },
-      });
-
-      // Process transactions in batches
-      // Failed transaction retries are treated as 'backward' sync since they're typically historical
-      const batchSize = 100;
-      for (let i = 0; i < transactions.length; i += batchSize) {
-        const batch = transactions.slice(i, i + batchSize);
-        try {
-          await plugin.processBatch(batch, SyncDirectionEnum.Backward);
-          // Remove successful retries from failed transactions
-          const successfulHashes = batch.map((tx) => tx.hash);
-          await this.failedTransactionRepository
-            .createQueryBuilder()
-            .delete()
-            .from(PluginFailedTransaction)
-            .where('plugin_name = :pluginName', { pluginName })
-            .andWhere('tx_hash IN (:...hashes)', { hashes: successfulHashes })
-            .execute();
-          this.logger.log(
-            `[${pluginName}] Successfully retried ${successfulHashes.length} transactions`,
-          );
-        } catch (error: any) {
-          // Update version for failed retries
-          const failedHashes = batch.map((tx) => tx.hash);
-          // Use query builder for bulk update with IN clause
-          await this.failedTransactionRepository
-            .createQueryBuilder()
-            .update(PluginFailedTransaction)
-            .set({
-              version: newVersion,
-              error_message: error.message,
-              error_trace: error.stack || '',
-            })
-            .where('plugin_name = :pluginName', { pluginName })
-            .andWhere('tx_hash IN (:...hashes)', { hashes: failedHashes })
-            .execute();
-          this.logger.error(
-            `[${pluginName}] Failed to retry batch, updated to version ${newVersion}`,
-            error,
-          );
-        }
-      }
+      await this.deleteRows(pluginName, txHashes);
     } catch (error: any) {
       this.logger.error(
-        `Failed to retry failed transactions for ${pluginName}`,
+        `[${pluginName}] Failed to clear ${txHashes.length} parked transactions`,
         error,
       );
     }
   }
 
-  /**
-   * Retry a single failed transaction
-   */
-  async retryFailedTransaction(
-    pluginName: string,
-    txHash: string,
-  ): Promise<boolean> {
+  /** Drop parked rows for reorged-out transactions, for every plugin. */
+  async clearFailuresForTxs(txHashes: string[]): Promise<void> {
+    if (txHashes.length === 0) {
+      return;
+    }
     try {
-      const failedTx = await this.failedTransactionRepository.findOne({
-        where: {
-          plugin_name: pluginName,
-          tx_hash: txHash,
-        },
-      });
-
-      if (!failedTx) {
-        return false;
-      }
-
-      const tx = await this.txRepository.findOne({
-        where: { hash: txHash },
-      });
-
-      if (!tx) {
-        this.logger.warn(
-          `[${pluginName}] Transaction ${txHash} not found in database`,
-        );
-        return false;
-      }
-
-      const plugin = this.pluginRegistryService.getPluginByName(pluginName);
-      if (!plugin) {
-        this.logger.warn(`[${pluginName}] Plugin not found`);
-        return false;
-      }
-
-      // Failed transaction retries are treated as 'backward' sync since they're typically historical
-      await plugin.processBatch([tx], SyncDirectionEnum.Backward);
-      await this.failedTransactionRepository.delete({
-        plugin_name: pluginName,
-        tx_hash: txHash,
-      });
-
-      this.logger.log(
-        `[${pluginName}] Successfully retried transaction ${txHash}`,
-      );
-      return true;
+      await this.failedTransactionRepository.delete({ tx_hash: In(txHashes) });
     } catch (error: any) {
       this.logger.error(
-        `[${pluginName}] Failed to retry transaction ${txHash}`,
+        `Failed to clear parked rows for ${txHashes.length} removed transactions`,
         error,
       );
-      return false;
+    }
+  }
+
+  // Five minutes off the EVERY_10_MINUTES jobs, the validation pass among them.
+  @Cron('0 5-59/10 * * * *')
+  async retryDueFailedTransactions(): Promise<void> {
+    if (this.configService.get<boolean>('mdw.disableMdwSync', false)) {
+      return;
+    }
+    if (this.isRetrying) {
+      return;
+    }
+    this.isRetrying = true;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    let locked = false;
+    try {
+      await queryRunner.connect();
+      const rows = await queryRunner.query(
+        'SELECT pg_try_advisory_lock($1) AS locked',
+        [FAILED_TX_RETRY_LOCK_KEY],
+      );
+      locked = !!rows?.[0]?.locked;
+      if (!locked) {
+        this.logger.debug(
+          'Another instance holds the failed-transaction retry lock; skipping this tick',
+        );
+        return;
+      }
+      await this.retryDue(new Date());
+    } catch (error: any) {
+      this.logger.error('Failed-transaction retry run failed', error);
+    } finally {
+      if (locked) {
+        try {
+          await queryRunner.query('SELECT pg_advisory_unlock($1)', [
+            FAILED_TX_RETRY_LOCK_KEY,
+          ]);
+        } catch (error: any) {
+          this.logger.error(
+            'Failed to release the failed-transaction retry lock',
+            error,
+          );
+        }
+      }
+      await queryRunner.release().catch(() => undefined);
+      this.isRetrying = false;
+    }
+  }
+
+  async retryDue(now: Date): Promise<void> {
+    const syncState = await this.syncStateRepository.findOne({
+      where: { id: 'global' },
+    });
+    if (!syncState?.tip_height) {
+      return;
+    }
+    // BlockValidationService re-runs the last `reorgDepth` blocks below the MDW
+    // tip every pass, so those rows are left to it: no double processing, and
+    // they may still be reorged out. tip_height can come from the node, ahead
+    // of MDW, hence the margin.
+    const reorgDepth = this.configService.get<number>('mdw.reorgDepth', 100);
+    const belowHeight =
+      syncState.tip_height - reorgDepth - RETRY_TIP_MARGIN_BLOCKS;
+
+    for (const plugin of this.pluginRegistryService.getPlugins()) {
+      if (plugin.retryParkedFailures === false) {
+        continue;
+      }
+      try {
+        await this.retryDueForPlugin(plugin, belowHeight, now);
+      } catch (error: any) {
+        this.logger.error(
+          `[${plugin.name}] Failed to retry parked transactions`,
+          error,
+        );
+      }
     }
   }
 
@@ -207,58 +205,154 @@ export class PluginFailedTransactionService {
     });
   }
 
-  /**
-   * Check for version mismatches and retry failed transactions
-   * This should be called periodically or when plugin versions are updated
-   */
-  async checkAndRetryVersionMismatches(): Promise<void> {
-    try {
-      const plugins = this.pluginRegistryService.getPlugins();
+  private async retryDueForPlugin(
+    plugin: Plugin,
+    belowHeight: number,
+    now: Date,
+  ): Promise<void> {
+    // A version bump can fix what made these fail, so exhausted rows get a
+    // fresh set of attempts.
+    await this.failedTransactionRepository
+      .createQueryBuilder()
+      .update(PluginFailedTransaction)
+      .set({ attempts: 0, next_retry_at: null, version: plugin.version })
+      .where('plugin_name = :pluginName', { pluginName: plugin.name })
+      .andWhere('version < :version', { version: plugin.version })
+      .execute();
 
-      for (const plugin of plugins) {
-        const syncState = await this.pluginSyncStateRepository.findOne({
-          where: { plugin_name: plugin.name },
-        });
-
-        if (!syncState) {
-          continue;
-        }
-
-        const currentVersion = syncState.version;
-
-        // Find failed transactions with older versions
-        const failedTxs = await this.failedTransactionRepository.find({
-          where: {
-            plugin_name: plugin.name,
-          },
-        });
-
-        // Group by version
-        const versionGroups = new Map<number, PluginFailedTransaction[]>();
-        for (const ftx of failedTxs) {
-          if (ftx.version < currentVersion) {
-            const group = versionGroups.get(ftx.version) || [];
-            group.push(ftx);
-            versionGroups.set(ftx.version, group);
-          }
-        }
-
-        // Retry transactions from older versions
-        for (const [oldVersion, transactions] of versionGroups) {
-          if (oldVersion < currentVersion) {
-            this.logger.log(
-              `[${plugin.name}] Found ${transactions.length} failed transactions from version ${oldVersion}, retrying with version ${currentVersion}`,
-            );
-            await this.retryFailedTransactions(
-              plugin.name,
-              oldVersion,
-              currentVersion,
-            );
-          }
-        }
+    const total: RetryOutcome = { succeeded: 0, failed: 0, orphaned: 0 };
+    for (
+      let processed = 0;
+      processed < RETRY_MAX_ROWS_PER_PLUGIN_RUN;
+      processed += RETRY_BATCH_SIZE
+    ) {
+      const rows = await this.findDue(plugin.name, belowHeight, now);
+      if (rows.length === 0) {
+        break;
       }
-    } catch (error: any) {
-      this.logger.error('Error checking version mismatches', error);
+      // Every row is deleted or backed off past the due cutoff, so the next
+      // page is new.
+      const outcome = await this.retryRows(plugin, rows, now);
+      total.succeeded += outcome.succeeded;
+      total.failed += outcome.failed;
+      total.orphaned += outcome.orphaned;
     }
+
+    if (total.succeeded + total.failed + total.orphaned > 0) {
+      this.logger.log(
+        `[${plugin.name}] Retried parked transactions: ${total.succeeded} succeeded, ${total.failed} still failing, ${total.orphaned} no longer in txs`,
+      );
+    }
+  }
+
+  /** Due rows in chain order; orphans first, so the page cap never holds them back. */
+  private findDue(
+    pluginName: string,
+    belowHeight: number,
+    now: Date,
+  ): Promise<PluginFailedTransaction[]> {
+    return this.failedTransactionRepository
+      .createQueryBuilder('f')
+      .leftJoin(Tx, 'tx', 'tx.hash = f.tx_hash')
+      .where('f.plugin_name = :pluginName', { pluginName })
+      .andWhere('f.attempts < :maxAttempts', {
+        maxAttempts: MAX_RETRY_ATTEMPTS,
+      })
+      .andWhere('(f.next_retry_at IS NULL OR f.next_retry_at <= :dueBy)', {
+        dueBy: new Date(now.getTime() + RETRY_DUE_SLACK_MS),
+      })
+      .andWhere('(tx.hash IS NULL OR tx.block_height < :belowHeight)', {
+        belowHeight,
+      })
+      .orderBy('tx.block_height', 'ASC', 'NULLS FIRST')
+      .addOrderBy('tx.micro_time', 'ASC')
+      .addOrderBy('f.tx_hash', 'ASC')
+      .limit(RETRY_BATCH_SIZE)
+      .getMany();
+  }
+
+  private async retryRows(
+    plugin: Plugin,
+    rows: PluginFailedTransaction[],
+    now: Date,
+  ): Promise<RetryOutcome> {
+    const hashes = rows.map((row) => row.tx_hash);
+    const txs = await this.txRepository.find({
+      where: { hash: In(hashes) },
+      order: { block_height: 'ASC', micro_time: 'ASC', hash: 'ASC' },
+    });
+    const found = new Set(txs.map((tx) => tx.hash));
+
+    // Removed from txs by a reorg after it failed, so there is nothing to
+    // retry. If it comes back, indexing parks it again on failure.
+    const orphaned = hashes.filter((hash) => !found.has(hash));
+    await this.deleteRows(plugin.name, orphaned);
+    if (txs.length === 0) {
+      return { succeeded: 0, failed: 0, orphaned: orphaned.length };
+    }
+
+    let failures: PluginBatchFailure[];
+    try {
+      const result = await plugin.processBatch(txs, SyncDirectionEnum.Backward);
+      failures = (result && result.failed) || [];
+    } catch (error: any) {
+      failures = txs.map((tx) => ({ tx, error }));
+    }
+
+    const errorByHash = new Map(
+      failures.map((failure) => [failure.tx.hash, failure.error]),
+    );
+    const succeeded = txs
+      .map((tx) => tx.hash)
+      .filter((hash) => !errorByHash.has(hash));
+    await this.deleteRows(plugin.name, succeeded);
+
+    const attemptsByHash = new Map(
+      rows.map((row) => [row.tx_hash, row.attempts ?? 0]),
+    );
+    const exhausted: string[] = [];
+    for (const [hash, error] of errorByHash) {
+      const attempts = (attemptsByHash.get(hash) ?? 0) + 1;
+      if (attempts >= MAX_RETRY_ATTEMPTS) {
+        exhausted.push(hash);
+      }
+      await this.failedTransactionRepository.update(
+        { plugin_name: plugin.name, tx_hash: hash },
+        {
+          attempts,
+          next_retry_at: nextRetryAt(attempts, now),
+          error_message: error?.message ?? String(error),
+          error_trace: error?.stack || '',
+          version: plugin.version,
+        },
+      );
+    }
+    // Error level, as prod logs nothing below it.
+    if (exhausted.length > 0) {
+      const shown = exhausted.slice(0, EXHAUSTED_LOG_HASH_LIMIT).join(', ');
+      const more = exhausted.length > EXHAUSTED_LOG_HASH_LIMIT ? ', ...' : '';
+      this.logger.error(
+        `[${plugin.name}] ${exhausted.length} parked transactions are out of retries and need a manual fix: ${shown}${more}`,
+      );
+    }
+
+    return {
+      succeeded: succeeded.length,
+      failed: errorByHash.size,
+      orphaned: orphaned.length,
+    };
+  }
+
+  private async deleteRows(
+    pluginName: string,
+    txHashes: string[],
+  ): Promise<void> {
+    if (txHashes.length === 0) {
+      return;
+    }
+    await this.failedTransactionRepository.delete({
+      plugin_name: pluginName,
+      tx_hash: In(txHashes),
+    });
   }
 }

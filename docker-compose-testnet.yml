@@ -29,7 +29,7 @@ services:
       - DB_USER=${TESTNET_DB_USER:-testnet}
       - DB_PASSWORD=${TESTNET_DB_PASSWORD:-testnet}
       - DB_DATABASE=${TESTNET_DB_DATABASE:-api_testnet2}
-      # Sync schema on startup (volume starts empty; no migration step for this stack)
+      # Migrations build the schema on boot (Dockerfile CMD); sync then applies entity changes not yet migrated
       - DB_SYNC=true
       - REDIS_HOST=redis
       - REDIS_PORT=6379

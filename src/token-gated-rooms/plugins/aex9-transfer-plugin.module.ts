@@ -16,6 +16,7 @@ import { RECONCILE_BALANCE_QUEUE } from '../services/balance-reconciliation.serv
 import { ReorgEvictionService } from '../services/reorg-eviction.service';
 import { Aex9TransferSyncService } from './aex9-transfer-sync.service';
 import { Aex9TransferPlugin } from './aex9-transfer.plugin';
+import { SYNC_TOKEN_HOLDERS_QUEUE } from '@/tokens/queues/constants';
 
 /**
  * AEX9 balance indexer plugin module (Task 03), mirroring `BclPluginModule`. This
@@ -45,7 +46,10 @@ import { Aex9TransferPlugin } from './aex9-transfer.plugin';
       RoomMembership,
     ]),
     AeModule,
-    BullModule.registerQueue({ name: RECONCILE_BALANCE_QUEUE }),
+    BullModule.registerQueue(
+      { name: RECONCILE_BALANCE_QUEUE },
+      { name: SYNC_TOKEN_HOLDERS_QUEUE },
+    ),
   ],
   providers: [
     BalanceIndexerService,
