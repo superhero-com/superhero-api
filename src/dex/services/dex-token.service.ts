@@ -33,9 +33,10 @@ export class DexTokenService {
     private readonly pairRepository: Repository<Pair>,
   ) {}
 
-  async getAllPairsWithTokens(): Promise<Pair[]> {
+  async getAllPairsWithTokens({ fresh = false } = {}): Promise<Pair[]> {
     const now = Date.now();
     if (
+      !fresh &&
       this.cachedPairs &&
       now - this.pairsCacheTime < DexTokenService.PAIRS_CACHE_TTL_MS
     ) {

@@ -29,6 +29,21 @@ describe('DexTokenService', () => {
     return { service };
   };
 
+  it('reloads the pair list when asked for fresh rows', async () => {
+    const qb: any = {
+      leftJoinAndSelect: jest.fn(() => qb),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    const pairRepository = { createQueryBuilder: jest.fn(() => qb) };
+    const service = new DexTokenService({} as any, pairRepository as any);
+
+    await service.getAllPairsWithTokens();
+    await service.getAllPairsWithTokens();
+    await service.getAllPairsWithTokens({ fresh: true });
+
+    expect(qb.getMany).toHaveBeenCalledTimes(2);
+  });
+
   it('uses supplied allPairs instead of loading from DB', async () => {
     const { service } = setup();
     const allPairs = [makePair('ct_pair', 'ct_token', 'ct_wae', 0.5, 2)];

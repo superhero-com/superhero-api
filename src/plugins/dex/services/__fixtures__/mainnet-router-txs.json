@@ -1,0 +1,368 @@
+{
+  "swapAeForRpt": {
+    "hash": "th_gSjQuxywD1J16F7J4QdVghrwUUmLjENgRVwvWA9v6Ykn69omo",
+    "block_height": 1367398,
+    "micro_time": "1792057263074",
+    "type": "ContractCallTx",
+    "contract_id": "ct_azbNZ1XrPjXfqBqbAh1ffLNTQ1sbnuUDFvJrXjYz7JQA1saQ3",
+    "caller_id": "ak_2RSg7ffVkiWaanyBphrNVVbj2FLijPoo4Vyqgn9QiSRKEpgvYC",
+    "function": "swap_exact_ae_for_tokens",
+    "raw": {
+      "arguments": [
+        {
+          "type": "int",
+          "value": 1193230126880109800
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "contract",
+              "value": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa"
+            },
+            {
+              "type": "contract",
+              "value": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN"
+            }
+          ]
+        },
+        {
+          "type": "address",
+          "value": "ak_2RSg7ffVkiWaanyBphrNVVbj2FLijPoo4Vyqgn9QiSRKEpgvYC"
+        },
+        {
+          "type": "int",
+          "value": 1792059055962
+        },
+        {
+          "type": "variant",
+          "value": [
+            0
+          ]
+        }
+      ],
+      "log": [
+        {
+          "address": "ct_2uny6n3qLA1kgboiK4GBYmmdbQKvCCcgU2VvfrVwLiCc5gPFuP",
+          "data": "cb_MjUwMDAwMDAwMDAwMDAwMDAwfDEwMDAwMDAwMDAwMDAwMDAwfDEyNTYwMzE3MTI1MDUzNzg3NzJ8MCKoKm0=",
+          "topics": [
+            "72742236172837736358043391645586411318758140104138559400527506523271326125229",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "84671223630777112577800334268216289466597507638093146324803673504499534101498"
+          ]
+        },
+        {
+          "address": "ct_2uny6n3qLA1kgboiK4GBYmmdbQKvCCcgU2VvfrVwLiCc5gPFuP",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "24432301949580458371007546625426791671600583970925974457610567576514658171178",
+            "651429078341558327854687",
+            "5170855094038597954340"
+          ]
+        },
+        {
+          "address": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "113787444259978583425920719303118693122262874822718325504202523393086346892344",
+            "84671223630777112577800334268216289466597507638093146324803673504499534101498",
+            "1256031712505378772"
+          ]
+        },
+        {
+          "address": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "97248968993606906149864095761415446114204891017168990930824289305879066770211",
+            "113787444259978583425920719303118693122262874822718325504202523393086346892344",
+            "250000000000000000"
+          ]
+        },
+        {
+          "address": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "113787444259978583425920719303118693122262874822718325504202523393086346892344",
+            "10000000000000000"
+          ]
+        },
+        {
+          "address": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "41351702065710532483578406672343054931429779004654879061244444772998706402323",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "10000000000000000"
+          ]
+        }
+      ]
+    }
+  },
+  "removeLiquidityAeAbc": {
+    "hash": "th_Xxp8f5mgoBAYYEtb5AGFLbCg1TjJcRjJFXksjBG9efGzB5HeQ",
+    "block_height": 1335501,
+    "micro_time": "1786294192556",
+    "type": "ContractCallTx",
+    "contract_id": "ct_azbNZ1XrPjXfqBqbAh1ffLNTQ1sbnuUDFvJrXjYz7JQA1saQ3",
+    "caller_id": "ak_wfkC73Fw4tLgRQLRR3xyVv6tnrBiV1jkdZqE1Go5eDLAMPp99",
+    "function": "remove_liquidity_ae",
+    "raw": {
+      "arguments": [
+        {
+          "type": "contract",
+          "value": "ct_7UfopTwsRuLGFEcsScbYgQ6YnySXuyMxQWhw6fjycnzS5Nyzq"
+        },
+        {
+          "type": "int",
+          "value": 4436836163140026400
+        },
+        {
+          "type": "int",
+          "value": 4193609000440466400
+        },
+        {
+          "type": "int",
+          "value": 4375788228779630000
+        },
+        {
+          "type": "address",
+          "value": "ak_wfkC73Fw4tLgRQLRR3xyVv6tnrBiV1jkdZqE1Go5eDLAMPp99"
+        },
+        {
+          "type": "int",
+          "value": 1786295972037
+        }
+      ],
+      "log": [
+        {
+          "address": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "21551373694814533467334163970656514191399831838095241105854918675556585912443",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "4606092872399610827"
+          ]
+        },
+        {
+          "address": "ct_7UfopTwsRuLGFEcsScbYgQ6YnySXuyMxQWhw6fjycnzS5Nyzq",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "56145778587841545978085321023416855916585659390893927190952821092822353051972",
+            "4414325263621543684"
+          ]
+        },
+        {
+          "address": "ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z",
+          "data": "cb_NDQxNDMyNTI2MzYyMTU0MzY4NHw0NjA2MDkyODcyMzk5NjEwODI3OQE5aw==",
+          "topics": [
+            "88978675868420964748173135996126183549496444525344394218626270832788081638717",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711"
+          ]
+        },
+        {
+          "address": "ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "24432301949580458371007546625426791671600583970925974457610567576514658171178",
+            "3236906156230969387263",
+            "3377524193269355465624"
+          ]
+        },
+        {
+          "address": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "32753730148209424528669618570854040268882117776994679953149143100586060638861",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "4606092872399610827"
+          ]
+        },
+        {
+          "address": "ct_7UfopTwsRuLGFEcsScbYgQ6YnySXuyMxQWhw6fjycnzS5Nyzq",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "32753730148209424528669618570854040268882117776994679953149143100586060638861",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "4414325263621543684"
+          ]
+        },
+        {
+          "address": "ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "59519329313588602299792785325724171247065768738621522936987157301332531057158",
+            "32753730148209424528669618570854040268882117776994679953149143100586060638861",
+            "4436836163140026400"
+          ]
+        },
+        {
+          "address": "ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "6675387653529534352993899574763440621350730065146058041830673378811230846814",
+            "56145778587841545978085321023416855916585659390893927190952821092822353051972",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "0"
+          ]
+        },
+        {
+          "address": "ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "56145778587841545978085321023416855916585659390893927190952821092822353051972",
+            "32753730148209424528669618570854040268882117776994679953149143100586060638861",
+            "4436836163140026400"
+          ]
+        }
+      ]
+    }
+  },
+  "swapRptForAeethViaWae": {
+    "hash": "th_2BJAMNoUuCvzVefsyJGA6KBzYB4LTfCVBwNWzA4bovQJrD1hCv",
+    "block_height": 1207304,
+    "micro_time": "1763133036233",
+    "type": "ContractCallTx",
+    "contract_id": "ct_azbNZ1XrPjXfqBqbAh1ffLNTQ1sbnuUDFvJrXjYz7JQA1saQ3",
+    "caller_id": "ak_VP2cihEySCjMJXvMSkAk9eZ998p8FbmnssTpziH21fkV7prvG",
+    "function": "swap_exact_tokens_for_tokens",
+    "raw": {
+      "arguments": [
+        {
+          "type": "int",
+          "value": 8330872809421264000
+        },
+        {
+          "type": "int",
+          "value": 29535475176
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "contract",
+              "value": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN"
+            },
+            {
+              "type": "contract",
+              "value": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa"
+            },
+            {
+              "type": "contract",
+              "value": "ct_ryTY1mxqjCjq1yBn9i6HDaCSdA6thXUFZTA84EMzbWd1SLKdh"
+            }
+          ]
+        },
+        {
+          "type": "address",
+          "value": "ak_VP2cihEySCjMJXvMSkAk9eZ998p8FbmnssTpziH21fkV7prvG"
+        },
+        {
+          "type": "int",
+          "value": 1763134825946
+        },
+        {
+          "type": "variant",
+          "value": [
+            0
+          ]
+        }
+      ],
+      "log": [
+        {
+          "address": "ct_2iV2XwSftHrigPZGLrTJkhpxYvRQCHRgQA9V8NiEkGNe5Vb8hB",
+          "data": "cb_MjA0OTUxODE5MTMxMjE5NjV8MHwwfDMxMDg5OTczODY5ouh6nA==",
+          "topics": [
+            "72742236172837736358043391645586411318758140104138559400527506523271326125229",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "29146943403648851098211695451751520575861885123227834510226714538590006188185"
+          ]
+        },
+        {
+          "address": "ct_2iV2XwSftHrigPZGLrTJkhpxYvRQCHRgQA9V8NiEkGNe5Vb8hB",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "24432301949580458371007546625426791671600583970925974457610567576514658171178",
+            "28144949981655658672644",
+            "42822654626971121"
+          ]
+        },
+        {
+          "address": "ct_ryTY1mxqjCjq1yBn9i6HDaCSdA6thXUFZTA84EMzbWd1SLKdh",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "102172410437135073177701941771614248215700335362563205211247733826469981544955",
+            "29146943403648851098211695451751520575861885123227834510226714538590006188185",
+            "31089973869"
+          ]
+        },
+        {
+          "address": "ct_2uny6n3qLA1kgboiK4GBYmmdbQKvCCcgU2VvfrVwLiCc5gPFuP",
+          "data": "cb_ODMzMDg3MjgwOTQyMTI2NDAwMHwwfDB8MjA0OTUxODE5MTMxMjE5NjVGO9B7",
+          "topics": [
+            "72742236172837736358043391645586411318758140104138559400527506523271326125229",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "102172410437135073177701941771614248215700335362563205211247733826469981544955"
+          ]
+        },
+        {
+          "address": "ct_2uny6n3qLA1kgboiK4GBYmmdbQKvCCcgU2VvfrVwLiCc5gPFuP",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "24432301949580458371007546625426791671600583970925974457610567576514658171178",
+            "682286629042331945264960",
+            "1683556410014609346621"
+          ]
+        },
+        {
+          "address": "ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "113787444259978583425920719303118693122262874822718325504202523393086346892344",
+            "102172410437135073177701941771614248215700335362563205211247733826469981544955",
+            "20495181913121965"
+          ]
+        },
+        {
+          "address": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "6675387653529534352993899574763440621350730065146058041830673378811230846814",
+            "29146943403648851098211695451751520575861885123227834510226714538590006188185",
+            "34911862514869585062811384666969974548784552331620193048764787141156150225711",
+            "0"
+          ]
+        },
+        {
+          "address": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "15485047184846566156736396069994907050875216973023180189891727495730853981167",
+            "29146943403648851098211695451751520575861885123227834510226714538590006188185",
+            "113787444259978583425920719303118693122262874822718325504202523393086346892344",
+            "8330872809421264000"
+          ]
+        },
+        {
+          "address": "ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN",
+          "data": "cb_Xfbg4g==",
+          "topics": [
+            "97248968993606906149864095761415446114204891017168990930824289305879066770211",
+            "29146943403648851098211695451751520575861885123227834510226714538590006188185",
+            "250000000000000000"
+          ]
+        }
+      ]
+    }
+  }
+}

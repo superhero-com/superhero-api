@@ -1,7 +1,9 @@
 import { TX_FUNCTIONS } from '@/configs';
 import { DEX_CONTRACTS } from '@/dex/config/dex-contracts.config';
 import { fetchJson, FetchJsonHttpError } from '@/utils/common';
+import routerAci from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import { DexTransactionProcessorService } from './dex-transaction-processor.service';
+import mainnetTxs from './__fixtures__/mainnet-router-txs.json';
 
 jest.mock('@/utils/common', () => ({
   ...jest.requireActual('@/utils/common'),
@@ -25,16 +27,28 @@ describe('DexTransactionProcessorService', () => {
       createQueryBuilder: jest.fn(),
       delete: jest.fn(),
     } as any;
-    const pairService = { pullPairData: jest.fn() } as any;
+    const pairService = {
+      pullPairData: jest.fn(),
+      getFactoryPairAddress: jest.fn(),
+      getPairTokens: jest.fn(),
+    } as any;
     const dexTokenSummaryService = {
       createOrUpdateSummary: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    // Enough of a node for Contract.initialize, so events decode for real.
+    const aeSdkService = {
+      sdk: {
+        getContext: () => ({
+          onNode: { getContract: async () => ({ active: true }) },
+        }),
+      },
     } as any;
 
     const service = new DexTransactionProcessorService(
       dexTokenRepository,
       dexPairRepository,
       dexPairTransactionRepository,
-      { sdk: {} } as any,
+      aeSdkService,
       pairService,
       dexTokenSummaryService,
     );
@@ -44,6 +58,7 @@ describe('DexTransactionProcessorService', () => {
       dexTokenRepository,
       dexPairTransactionRepository,
       dexTokenSummaryService,
+      pairService,
     };
   };
 
@@ -132,125 +147,279 @@ describe('DexTransactionProcessorService', () => {
     );
   });
 
-  it('falls back to factory decode when router decode returns empty array', async () => {
-    const { service } = setup();
-    jest
-      .spyOn(service as any, 'ensureContractsInitialized')
-      .mockResolvedValue(undefined);
-    const routerDecode = jest.fn().mockReturnValue([]);
-    const factoryDecode = jest
-      .fn()
-      .mockReturnValue([
-        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
-      ]);
-    (service as any).routerContract = { $decodeEvents: routerDecode };
-    (service as any).factoryContract = { $decodeEvents: factoryDecode };
-    jest
-      .spyOn(service as any, 'getOrCreateToken')
-      .mockResolvedValueOnce({ address: 'ct_t0' })
-      .mockResolvedValueOnce({ address: 'ct_t1' });
+  describe('pair events (real mainnet logs)', () => {
+    const WAE = 'ct_J3zBY8xxjsRr3QojETNw48Eb38fjvEuJKkQ6KzECvubvEcvCa';
+    const RPT = 'ct_2U1usf3A8ZNUcZLkZe5rEoBTxk7eJvk9fcbRDNqmRiwXCHAYN';
+    const WAE_RPT_PAIR =
+      'ct_2uny6n3qLA1kgboiK4GBYmmdbQKvCCcgU2VvfrVwLiCc5gPFuP';
+    const ABC = 'ct_7UfopTwsRuLGFEcsScbYgQ6YnySXuyMxQWhw6fjycnzS5Nyzq';
+    const WAE_ABC_PAIR = 'ct_YtiVs9sGTqm8xoGgPt7iXNoXYTqMELvprUHXFbjpdZA1yQf5Z';
+    const AEETH = 'ct_ryTY1mxqjCjq1yBn9i6HDaCSdA6thXUFZTA84EMzbWd1SLKdh';
+    const WAE_AEETH_PAIR =
+      'ct_2iV2XwSftHrigPZGLrTJkhpxYvRQCHRgQA9V8NiEkGNe5Vb8hB';
+    // Token order as each pair stores it on mainnet.
+    const factoryPairs: Record<string, { token0: string; token1: string }> = {
+      [WAE_RPT_PAIR]: { token0: RPT, token1: WAE },
+      [WAE_ABC_PAIR]: { token0: ABC, token1: WAE },
+      [WAE_AEETH_PAIR]: { token0: WAE, token1: AEETH },
+    };
+    const SYNC_HASH =
+      '24432301949580458371007546625426791671600583970925974457610567576514658171178';
+    const PAIR_BURN_HASH =
+      '88978675868420964748173135996126183549496444525344394218626270832788081638717';
 
-    const result = await (service as any).extractPairInfoFromTransaction({
-      hash: 'th_1',
-      function: TX_FUNCTIONS.add_liquidity,
-      raw: {
-        log: [],
-        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
-      },
+    const swap = mainnetTxs.swapAeForRpt;
+    const removeLiquidity = mainnetTxs.removeLiquidityAeAbc;
+    const withLog = (tx: any, log: any[]) => ({
+      ...tx,
+      raw: { ...tx.raw, log },
+    });
+    const entry = (tx: any, address: string, topic0: string) => {
+      const found = tx.raw.log.find(
+        (e: any) => e.address === address && e.topics[0] === topic0,
+      );
+      if (!found) throw new Error(`No ${topic0} event from ${address}`);
+      return found;
+    };
+
+    const setupPairs = () => {
+      const ctx = setup();
+      ctx.dexTokenRepository.findOne.mockImplementation(({ where }) =>
+        Promise.resolve({ address: where.address }),
+      );
+      // Like factory.get_pair: either token order, null for unknown tokens.
+      ctx.pairService.getFactoryPairAddress.mockImplementation((a, b) =>
+        Promise.resolve(
+          Object.keys(factoryPairs).find((pair) => {
+            const { token0, token1 } = factoryPairs[pair];
+            return [a, b].sort().join() === [token0, token1].sort().join();
+          }) ?? null,
+        ),
+      );
+      ctx.pairService.getPairTokens.mockImplementation((pair) =>
+        Promise.resolve(factoryPairs[pair]),
+      );
+      return ctx;
+    };
+    const extract = (service: any, tx: any) =>
+      service.extractPairInfoFromTransaction(tx);
+
+    it('records the factory pair of a swap, with tokens in the pair order', async () => {
+      const { service, pairService } = setupPairs();
+
+      const result = await extract(service, swap);
+
+      expect(pairService.getFactoryPairAddress).toHaveBeenCalledWith(WAE, RPT);
+      expect(result.pairAddress).toBe(WAE_RPT_PAIR);
+      // The caller's path is WAE→RPT; the pair (and its reserves) are RPT/WAE.
+      expect(result.token0.address).toBe(RPT);
+      expect(result.token1.address).toBe(WAE);
+      expect(result.reserve0).toBe('651429078341558327854687');
+      expect(result.reserve1).toBe('5170855094038597954340');
+      expect(result.volume0).toBe('1506031712505378772');
+      expect(result.pairMintInfo).toBeNull();
     });
 
-    expect(routerDecode).toHaveBeenCalledTimes(1);
-    expect(factoryDecode).toHaveBeenCalledTimes(1);
-    expect(result?.pairAddress).toBe('ct_pair');
-  });
+    describe('finds the pair in the call arguments of', () => {
+      const routerFunctions = (routerAci as any[]).find(
+        (entry) => entry.contract?.name === 'AedexV2Router',
+      ).contract.functions;
+      // Builds arguments by the router's parameter names, so the positions come
+      // from its ACI rather than from the code under test.
+      const callArgs = (fn: string, values: Record<string, unknown>) =>
+        routerFunctions
+          .find((f: any) => f.name === fn)
+          .arguments.map(
+            ({ name }: any) => values[name] ?? { type: 'int', value: 0 },
+          );
+      const contract = (value: string) => ({ type: 'contract', value });
+      // Three tokens, so a first-hop lookup would find the ABC/WAE pair.
+      const path = {
+        path: {
+          type: 'list',
+          value: [contract(ABC), contract(WAE), contract(RPT)],
+        },
+      };
+      const tokens = { token_a: contract(WAE), token_b: contract(RPT) };
+      const token = { token: contract(RPT) };
 
-  it('normalizes string event topics to BigInt before decoding', async () => {
-    // The middleware stores topics as decimal strings; aepp-sdk matches them
-    // against BigInt event hashes with strict equality, so a string topic never
-    // matches and every event is silently dropped. The processor must convert
-    // topics to BigInt before calling $decodeEvents.
-    const { service } = setup();
-    jest
-      .spyOn(service as any, 'ensureContractsInitialized')
-      .mockResolvedValue(undefined);
-    const routerDecode = jest
-      .fn()
-      .mockReturnValue([
-        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
-      ]);
-    (service as any).routerContract = { $decodeEvents: routerDecode };
-    (service as any).factoryContract = { $decodeEvents: jest.fn() };
-    jest
-      .spyOn(service as any, 'getOrCreateToken')
-      .mockResolvedValueOnce({ address: 'ct_t0' })
-      .mockResolvedValueOnce({ address: 'ct_t1' });
+      it.each([
+        [TX_FUNCTIONS.swap_exact_tokens_for_tokens, path],
+        [TX_FUNCTIONS.swap_tokens_for_exact_tokens, path],
+        [TX_FUNCTIONS.swap_exact_tokens_for_ae, path],
+        [TX_FUNCTIONS.swap_tokens_for_exact_ae, path],
+        [TX_FUNCTIONS.swap_exact_ae_for_tokens, path],
+        [TX_FUNCTIONS.swap_ae_for_exact_tokens, path],
+        [TX_FUNCTIONS.add_liquidity, tokens],
+        [TX_FUNCTIONS.remove_liquidity, tokens],
+        [TX_FUNCTIONS.add_liquidity_ae, token],
+        [TX_FUNCTIONS.remove_liquidity_ae, token],
+      ])('%s', async (fn, values) => {
+        const { service } = setupPairs();
+        const tx = {
+          ...swap,
+          function: fn,
+          raw: { ...swap.raw, arguments: callArgs(fn, values) },
+        };
 
-    const swapTokensHash =
-      '72742236172837736358043391645586411318758140104138559400527506523271326125229';
-
-    await (service as any).extractPairInfoFromTransaction({
-      hash: 'th_1',
-      function: TX_FUNCTIONS.add_liquidity,
-      raw: {
-        log: [
-          { address: 'ct_pair', data: 'cb_x', topics: [swapTokensHash, '1'] },
-        ],
-        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
-      },
+        await expect(extract(service, tx)).resolves.toMatchObject({
+          pairAddress: WAE_RPT_PAIR,
+        });
+      });
     });
 
-    const passedLog = routerDecode.mock.calls[0][0];
-    expect(passedLog[0].topics.every((t: any) => typeof t === 'bigint')).toBe(
-      true,
-    );
-    expect(passedLog[0].topics[0]).toBe(BigInt(swapTokensHash));
-  });
+    it('records a multi-hop swap under its last hop', async () => {
+      // RPT → WAE → aeETH, stored under WAE/aeETH on prod too. The log is
+      // newest-first, so that hop's SwapTokens and Sync come first.
+      const { service, pairService } = setupPairs();
 
-  it('does not abort decoding when one log entry has an unconvertible topic', async () => {
-    // A non-pair log line in the same tx may carry a null/empty/non-numeric
-    // topic. BigInt() throws on those, so converting them unguarded would abort
-    // extraction for the whole transaction — even though the valid pair event
-    // would decode after conversion.
-    const { service } = setup();
-    jest
-      .spyOn(service as any, 'ensureContractsInitialized')
-      .mockResolvedValue(undefined);
-    const routerDecode = jest
-      .fn()
-      .mockReturnValue([
-        { contract: { name: 'IAedexV2Pair', address: 'ct_pair' } },
-      ]);
-    (service as any).routerContract = { $decodeEvents: routerDecode };
-    (service as any).factoryContract = { $decodeEvents: jest.fn() };
-    jest
-      .spyOn(service as any, 'getOrCreateToken')
-      .mockResolvedValueOnce({ address: 'ct_t0' })
-      .mockResolvedValueOnce({ address: 'ct_t1' });
+      const result = await extract(service, mainnetTxs.swapRptForAeethViaWae);
 
-    const validHash =
-      '72742236172837736358043391645586411318758140104138559400527506523271326125229';
-
-    const result = await (service as any).extractPairInfoFromTransaction({
-      hash: 'th_1',
-      function: TX_FUNCTIONS.add_liquidity,
-      raw: {
-        log: [
-          { address: 'ct_other', data: 'cb_x', topics: [null] }, // unconvertible
-          { address: 'ct_pair', data: 'cb_y', topics: [validHash, '1'] }, // valid
-        ],
-        arguments: [{ value: 'ct_t0' }, { value: 'ct_t1' }],
-      },
+      expect(pairService.getFactoryPairAddress).toHaveBeenCalledWith(
+        WAE,
+        AEETH,
+      );
+      expect(result).toMatchObject({
+        pairAddress: WAE_AEETH_PAIR,
+        token0: { address: WAE },
+        token1: { address: AEETH },
+        reserve0: '28144949981655658672644',
+        reserve1: '42822654626971121',
+        volume0: '20495181913121965',
+        volume1: '31089973869',
+      });
     });
 
-    // The valid pair event was still decoded — the bad topic did not abort it.
-    expect(result?.pairAddress).toBe('ct_pair');
-    const passedLog = routerDecode.mock.calls[0][0];
-    // Valid entry fully converted to BigInt...
-    expect(passedLog[1].topics.every((t: any) => typeof t === 'bigint')).toBe(
-      true,
-    );
-    // ...and the unconvertible topic was left untouched (omitUnknown drops it).
-    expect(passedLog[0].topics[0]).toBeNull();
+    it('reads the newest events of the pair, which the router caused', async () => {
+      // Anyone can call pair.sync(), e.g. the input token while the router
+      // moves it, but that happens before the swap, so further down the log.
+      const { service } = setupPairs();
+      const olderSync = {
+        ...entry(swap, WAE_RPT_PAIR, SYNC_HASH),
+        topics: [SYNC_HASH, '1', '1'],
+      };
+
+      const result = await extract(
+        service,
+        withLog(swap, [...swap.raw.log, olderSync]),
+      );
+
+      expect(result.reserve0).toBe('651429078341558327854687');
+      expect(result.reserve1).toBe('5170855094038597954340');
+    });
+
+    it('ignores pair-named events emitted by other contracts in the call', async () => {
+      const { service } = setupPairs();
+      const realSync = entry(swap, WAE_RPT_PAIR, SYNC_HASH);
+      const forgedSync = {
+        ...realSync,
+        address: 'ct_attacker',
+        topics: [SYNC_HASH, '1', '999999999999999999999999999'],
+      };
+
+      // Newest first: a forged event emitted last would be read first.
+      const result = await extract(
+        service,
+        withLog(swap, [forgedSync, ...swap.raw.log]),
+      );
+
+      expect(result.pairAddress).toBe(WAE_RPT_PAIR);
+      expect(result.reserve0).toBe('651429078341558327854687');
+      expect(result.reserve1).toBe('5170855094038597954340');
+    });
+
+    it('ignores events a token emits after the pair burns', async () => {
+      // remove_liquidity_ae calls token.transfer after pair.burn, so the
+      // token's events land ahead of the pair's in the log.
+      const { service, pairService } = setupPairs();
+      const forgedSync = {
+        ...entry(removeLiquidity, WAE_ABC_PAIR, SYNC_HASH),
+        address: ABC,
+        topics: [SYNC_HASH, '1', '1'],
+      };
+      const forgedBurn = {
+        ...entry(removeLiquidity, WAE_ABC_PAIR, PAIR_BURN_HASH),
+        address: ABC,
+      };
+
+      const result = await extract(
+        service,
+        withLog(removeLiquidity, [
+          forgedSync,
+          forgedBurn,
+          ...removeLiquidity.raw.log,
+        ]),
+      );
+
+      expect(pairService.getFactoryPairAddress).toHaveBeenCalledWith(
+        ABC,
+        DEX_CONTRACTS.wae,
+      );
+      expect(result.pairAddress).toBe(WAE_ABC_PAIR);
+      expect(result.reserve0).toBe('3236906156230969387263');
+      expect(result.reserve1).toBe('3377524193269355465624');
+      expect(result.pairMintInfo).toEqual({
+        type: 'PairBurn',
+        amount0: '4414325263621543684',
+        amount1: '4606092872399610827',
+      });
+    });
+
+    it('keeps swap volume when a swap callback emits a PairBurn', async () => {
+      // The pair calls the callback before its own Sync, so in the
+      // newest-first log the callback's events follow the pair's.
+      const { service } = setupPairs();
+      const callbackBurn = {
+        ...entry(removeLiquidity, WAE_ABC_PAIR, PAIR_BURN_HASH),
+        address: 'ct_callback',
+      };
+      const [swapTokens, sync, ...rest] = swap.raw.log;
+
+      const result = await extract(
+        service,
+        withLog(swap, [swapTokens, sync, callbackBurn, ...rest]),
+      );
+
+      expect(result.pairMintInfo).toBeNull();
+      expect(result.volume0).toBe('1506031712505378772');
+    });
+
+    it('throws when the factory has no pair for the called tokens', async () => {
+      const { service, pairService } = setupPairs();
+      pairService.getFactoryPairAddress.mockResolvedValue(null);
+
+      await expect(extract(service, swap)).rejects.toThrow(
+        'Factory has no pair',
+      );
+    });
+
+    it('propagates node errors from the factory lookup, so the tx is parked', async () => {
+      const { service, pairService } = setupPairs();
+      pairService.getFactoryPairAddress.mockRejectedValue(
+        new Error('socket hang up'),
+      );
+
+      await expect(extract(service, swap)).rejects.toThrow('socket hang up');
+    });
+
+    it('skips a reverted call without asking the factory', async () => {
+      const { service, pairService } = setupPairs();
+
+      await expect(extract(service, withLog(swap, []))).resolves.toBeNull();
+      expect(pairService.getFactoryPairAddress).not.toHaveBeenCalled();
+    });
+
+    it('skips a call in which its pair emitted nothing', async () => {
+      const { service } = setupPairs();
+      jest.spyOn((service as any).logger, 'error').mockImplementation();
+      const otherEvents = swap.raw.log.filter(
+        (e: any) => e.address !== WAE_RPT_PAIR,
+      );
+
+      await expect(
+        extract(service, withLog(swap, otherEvents)),
+      ).resolves.toBeNull();
+    });
   });
 
   it('stores reserves/ratios/volumes as full-precision strings (no toNumber truncation)', async () => {
