@@ -43,7 +43,7 @@ export function resolveRelation(
 /**
  * Every include is a LEFT JOIN, so rows multiply when a path comes back to an
  * entity already on it (txs.keyBlock.txs) or when array relations sit on
- * separate branches (txs,microBlocks): both are rejected.
+ * separate branches (two array includes side by side): both are rejected.
  * @returns whether the includes join an array relation
  */
 export function validateIncludesTree(
@@ -127,7 +127,7 @@ function generateJoinAlias(parentAlias: string, relationField: string): string {
  * @param includesTree - The parsed includes tree structure
  * @param configRegistry - Registry to look up related entity configs
  * @param parentAlias - The current table alias (defaults to entityConfig.tableAlias)
- * @param parentPath - The property path for mapping (e.g., "microBlock.txs")
+ * @param parentPath - The property path for mapping (e.g., "tx.keyBlock")
  * @param depth - Current recursion depth (to prevent infinite loops)
  */
 export function applyIncludesToQueryBuilder<T>(
@@ -177,8 +177,8 @@ export function applyIncludesToQueryBuilder<T>(
     const joinCondition = `${parentAlias}.${relationConfig.joinCondition.parentField} = ${joinAlias}.${relationConfig.joinCondition.localField}`;
 
     // Build the property path for mapping
-    // For root level relations, use rootAlias.relationField (e.g., "micro_block.keyBlock")
-    // For nested relations, use parentPath.relationField (e.g., "micro_block.txs.block")
+    // For root level relations, use rootAlias.relationField (e.g., "tx.keyBlock")
+    // For nested relations, use parentPath.relationField (e.g., "tx.keyBlock.<relation>")
     const mapPath =
       depth === 0
         ? `${rootAlias}.${relationField}`

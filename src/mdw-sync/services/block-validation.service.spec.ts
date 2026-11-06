@@ -281,11 +281,9 @@ describe('BlockValidationService', () => {
     });
     const blockSyncService = new BlockSyncService(
       {} as any,
-      { find: jest.fn().mockResolvedValue([]), upsert: jest.fn() } as any,
-      {} as any,
+      { upsert: jest.fn() } as any,
       configService as any,
       { filterRelevantTransactions: jest.fn(() => []) } as any,
-      {} as any,
     );
     (fetchJson as jest.Mock).mockImplementation(async (url: string) => {
       if (url.endsWith('/v3/status')) return { mdw_height: 10 };

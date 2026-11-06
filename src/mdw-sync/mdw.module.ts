@@ -4,7 +4,6 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import mdwConfig from './config/mdw.config';
 import { KeyBlock } from './entities/key-block.entity';
-import { MicroBlock } from './entities/micro-block.entity';
 import { PluginSyncState } from './entities/plugin-sync-state.entity';
 import { PluginFailedTransaction } from './entities/plugin-failed-transaction.entity';
 import { SyncState } from './entities/sync-state.entity';
@@ -15,7 +14,6 @@ import { LiveIndexerService } from './services/live-indexer.service';
 import { PluginRegistryService } from './services/plugin-registry.service';
 import { PluginBatchProcessorService } from './services/plugin-batch-processor.service';
 import { PluginFailedTransactionService } from './services/plugin-failed-transaction.service';
-import { MicroBlockService } from './services/micro-block.service';
 import { BlockValidationService } from './services/block-validation.service';
 import { BlockSyncService } from './services/block-sync.service';
 import { PLUGIN_MODULES, getPluginProvider } from '@/plugins';
@@ -39,7 +37,6 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     TypeOrmModule.forFeature([
       Tx,
       KeyBlock,
-      MicroBlock,
       SyncState,
       PluginSyncState,
       PluginFailedTransaction,
@@ -53,7 +50,6 @@ const generatedResolvers = createEntityResolvers(ENTITY_CONFIGS);
     PluginRegistryService,
     PluginBatchProcessorService,
     PluginFailedTransactionService,
-    MicroBlockService,
     BlockSyncService,
     IndexerService,
     LiveIndexerService,

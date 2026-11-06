@@ -36,18 +36,11 @@ describe('BlockSyncService', () => {
     } as any;
     const blockRepository = {
       upsert: jest.fn().mockResolvedValue(undefined),
-      find: jest.fn(),
-    } as any;
-    const microBlockRepository = {
-      upsert: jest.fn(),
     } as any;
     const configService = {
       get: jest.fn((key: string) => {
         if (key === 'mdw.middlewareUrl') {
           return 'https://mdw.test';
-        }
-        if (key === 'mdw.microBlocksParallelBatchSize') {
-          return 4;
         }
         if (key === 'mdw.pageLimit') {
           return 100;
@@ -62,17 +55,12 @@ describe('BlockSyncService', () => {
       filterRelevantTransactions: jest.fn((txs: any[]) => txs),
       isRelevantTransaction: jest.fn(() => true),
     } as any;
-    const microBlockService = {
-      fetchMicroBlocksForKeyBlock: jest.fn().mockResolvedValue([]),
-    } as any;
 
     const service = new BlockSyncService(
       txRepository,
       blockRepository,
-      microBlockRepository,
       configService,
       pluginBatchProcessor,
-      microBlockService,
     );
 
     return {
@@ -235,6 +223,31 @@ describe('BlockSyncService', () => {
       'BlockSyncService.processTransactionPage: stopping pagination after invalid next URL',
       expect.any(Error),
     );
+  });
+
+  it('syncs a range from key blocks and transactions only', async () => {
+    const { service, txRepository, blockRepository } = setup();
+    txRepository.upsert.mockResolvedValue(undefined);
+    txRepository.find.mockResolvedValue([]);
+    (fetchJson as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [{ hash: 'kh_123', height: 123, time: 1700000000000 }],
+        next: null,
+      })
+      .mockResolvedValueOnce({
+        data: [buildMiddlewareTransaction()],
+        next: null,
+      });
+
+    await expect(service.syncBlockRange(123, 123)).resolves.toEqual(
+      new Map([[123, ['th_test_1']]]),
+    );
+
+    expect((fetchJson as jest.Mock).mock.calls.map(([url]) => url)).toEqual([
+      'https://mdw.test/v3/key-blocks?scope=gen:123-123&limit=1',
+      expect.stringMatching(/^https:\/\/mdw\.test\/v3\/transactions\?/),
+    ]);
+    expect(blockRepository.upsert).toHaveBeenCalledTimes(1);
   });
 
   it('collects the hashes of every page while collecting for block validation', async () => {
