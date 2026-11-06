@@ -76,7 +76,7 @@ export function isGroupNotFound(e: unknown): boolean {
   return reasonText(e).includes('group not found');
 }
 
-/** A non-retryable error wrapper so Bull does not re-attempt terminal rejects. */
+/** Terminal reject. Bull ignores the error type: the processor must also discard the job. */
 export class TerminalPublishError extends Error {
   readonly terminal = true as const;
   constructor(message: string) {
