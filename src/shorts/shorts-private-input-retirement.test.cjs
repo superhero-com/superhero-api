@@ -237,8 +237,9 @@ test('private retirement binds authenticated source references without deleting 
     assert.equal(receipt.resourceId, base.id); assert.equal(receipt.rootHash, proof.rootHash);
     assert.equal('objects' in receipt, false); assert.equal('source_manifest' in receipt, false);
     const [row] = await owner.query('SELECT * FROM shorts_private_input_retirements');
-    assert.deepEqual(row.objects, [...Object.values(original.record.privateMedia.files), original.record.privateMedia.source.manifest,
-      ...original.parts.map(part => part.object)].sort((a, b) => a.key.localeCompare(b.key)));
+    const byKey = (a, b) => Buffer.compare(Buffer.from(a.key), Buffer.from(b.key));
+    assert.deepEqual([...row.objects].sort(byKey), [...Object.values(original.record.privateMedia.files), original.record.privateMedia.source.manifest,
+      ...original.parts.map(part => part.object)].sort(byKey));
     assert.equal(row.source_manifest, original.manifest);
     const withoutRetainedManifest = value => JSON.parse(JSON.stringify(value,
       (key, item) => key === 'retiredManifest' ? undefined : item));

@@ -1,3 +1,4 @@
+const { originalRecord } = require('./original-record.cjs');
 const schemaMigrations = require('./schema-migrations.cjs');
 require('reflect-metadata');
 const assert = require('node:assert/strict');
@@ -65,14 +66,13 @@ async function privateVersionDatabase(t, config, ref) {
     'INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)',
     [...args, config.sourceHash],
   );
-  const record = {
-    id: 'job',
+  const record = originalRecord('job', {
     creator: 'ak_creator',
     createdAt: 1,
     bytes: ref.bytes,
     publication: 'published',
-    privateMedia: { files: { video: ref } },
-  };
+    privateMedia: { files: { 'video.mp4': ref } },
+  });
   await owner.query(
     'INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
     [...args, record.id, record.creator, record],

@@ -39,8 +39,8 @@ jobs:
         run: npm run build
 
   shorts-quality:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -70,7 +70,31 @@ jobs:
       - name: Install media test tools
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg redis-server
+          sudo apt-get install --no-install-recommends -y redis-server nasm libx264-dev libx265-dev libzimg-dev
+
+      - name: Cache FFmpeg media test tools
+        uses: actions/cache@v4
+        id: media-tools
+        with:
+          path: ~/shorts-ffmpeg
+          key: shorts-ffmpeg-8.1.2-ubuntu-24.04-x264-x265-zimg-v1
+
+      - name: Build FFmpeg with the worker's media features
+        if: steps.media-tools.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 3 -o ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+          echo '464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c  ffmpeg.tar.xz' | sha256sum --check
+          tar -xf ffmpeg.tar.xz
+          cd ffmpeg-8.1.2
+          ./configure --prefix="$HOME/shorts-ffmpeg" --disable-autodetect --disable-doc --disable-debug \
+            --disable-network --disable-ffplay --enable-gpl --enable-libx264 --enable-libx265 --enable-libzimg
+          make -j"$(nproc)" ffmpeg ffprobe
+          install -d "$HOME/shorts-ffmpeg/bin"
+          install ffmpeg ffprobe "$HOME/shorts-ffmpeg/bin/"
+
+      - name: Use pinned media tools
+        run: echo "$HOME/shorts-ffmpeg/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         run: npm ci
