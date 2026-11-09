@@ -422,6 +422,150 @@ describe('PopularRankingService', () => {
     });
   });
 
+  describe('verified id memo', () => {
+    let zrevrange: jest.Mock;
+
+    beforeEach(() => {
+      redisMock.zcard.mockResolvedValue(1);
+      zrevrange = jest.fn().mockResolvedValue(['post-1', '10']);
+      (redisMock as any).zrevrange = zrevrange;
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('serves every page from one scan and shares it between concurrent requests', async () => {
+      await Promise.all([
+        service.getPopularPostsPage('all', 10, 0),
+        service.getPopularPostsPage('all', 10, 0),
+      ]);
+      await service.getPopularPostsPage('all', 10, 10);
+
+      expect(zrevrange).toHaveBeenCalledTimes(1);
+      expect(postRepository.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('still hydrates live, dropping a post that went away after the scan', async () => {
+      const first = await service.getPopularPostsPage('all', 10, 0);
+      postRepository.findBy.mockResolvedValue([]);
+      const second = await service.getPopularPostsPage('all', 10, 0);
+
+      expect(first.items.map((item) => item.id)).toEqual(['post-1']);
+      expect(second.items).toEqual([]);
+      expect(postRepository.find).toHaveBeenCalledTimes(1);
+      expect(postRepository.findBy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ is_hidden: false, post_id: null }),
+      );
+    });
+
+    it('stops waiting on a scan that never settles', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      zrevrange.mockReturnValueOnce(new Promise(() => undefined));
+
+      void service.getPopularPostsPage('all', 10, 0);
+      await new Promise(setImmediate);
+      now.mockReturnValue(1_029_999);
+      void service.getPopularPostsPage('all', 10, 0);
+      await new Promise(setImmediate);
+      expect(zrevrange).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(1_030_000);
+      const next = await service.getPopularPostsPage('all', 10, 0);
+
+      expect(next.items.map((item) => item.id)).toEqual(['post-1']);
+      expect(zrevrange).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the newer entry when a superseded scan fails late', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      let failSuperseded: (error: Error) => void = () => undefined;
+      postRepository.find.mockReturnValueOnce(
+        new Promise((_, reject) => {
+          failSuperseded = reject;
+        }),
+      );
+
+      const superseded = service.getPopularPostsPage('all', 10, 0);
+      await new Promise(setImmediate);
+      now.mockReturnValue(1_030_000);
+      await service.getPopularPostsPage('all', 10, 0);
+      expect(postRepository.find).toHaveBeenCalledTimes(2);
+
+      failSuperseded(new Error('db down'));
+      await expect(superseded).rejects.toThrow('db down');
+      await service.getPopularPostsPage('all', 10, 0);
+
+      expect(postRepository.find).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps each language separate', async () => {
+      const page = (language?: 'en' | 'zh') =>
+        service.getPopularPostsPage(
+          'all',
+          10,
+          0,
+          undefined,
+          undefined,
+          language,
+        );
+
+      await page('en');
+      await page('zh');
+      await page();
+      await page('en');
+
+      expect(postRepository.find).toHaveBeenCalledTimes(3);
+    });
+
+    it('rescans once the entry has expired', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+
+      await service.getPopularPostsPage('all', 10, 0);
+      now.mockReturnValue(1_014_999);
+      await service.getPopularPostsPage('all', 10, 0);
+      expect(zrevrange).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(1_015_000);
+      await service.getPopularPostsPage('all', 10, 0);
+      expect(zrevrange).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not keep an empty result', async () => {
+      const fallbackQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getCount: jest.fn().mockResolvedValue(0),
+      };
+      postRepository.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(fallbackQueryBuilder);
+      postRepository.find.mockResolvedValueOnce([]);
+
+      await service.getPopularPostsPage('all', 10, 0);
+      const next = await service.getPopularPostsPage('all', 10, 0);
+
+      expect(postRepository.find).toHaveBeenCalledTimes(2);
+      expect(next.items.map((item) => item.id)).toEqual(['post-1']);
+    });
+
+    it('does not keep a failed scan', async () => {
+      postRepository.find.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.getPopularPostsPage('all', 10, 0)).rejects.toThrow(
+        'db down',
+      );
+      const next = await service.getPopularPostsPage('all', 10, 0);
+
+      expect(postRepository.find).toHaveBeenCalledTimes(2);
+      expect(next.items.map((item) => item.id)).toEqual(['post-1']);
+    });
+  });
+
   describe('resolveWeights', () => {
     function buildServiceForWeightTests() {
       const now = Date.now();
