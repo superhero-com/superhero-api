@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { JOURNEY_FUNNELS } from './journey.constants';
+import { JOURNEY_FUNNELS, JourneyFunnel } from './journey.constants';
 import {
   buildFunnelSql,
   buildFunnelSteps,
@@ -39,12 +39,38 @@ describe('resolveJourneyRange', () => {
   });
 });
 
+describe('JOURNEY_FUNNELS', () => {
+  it('never joins steps across the X sign-in redirect', () => {
+    // The journey id is per page load, so x_connect_start and x_connected
+    // always carry different ids and can't sit in one funnel.
+    for (const funnel of JOURNEY_FUNNELS) {
+      const events = funnel.steps.map((s) => s.event);
+      expect(
+        events.includes('x_connect_start') && events.includes('x_connected'),
+      ).toBe(false);
+    }
+  });
+});
+
 describe('buildFunnelSteps', () => {
-  const onboarding = JOURNEY_FUNNELS.find((f) => f.id === 'onboarding');
+  // Only labels matter to the math; editing a real funnel must not break it.
+  const mathFunnel: JourneyFunnel = {
+    id: 'math',
+    label: 'Math fixture',
+    steps: [
+      'Profile page',
+      'Clicked Edit',
+      'Claim Superhero account',
+      'Connect X',
+      'X connected',
+      'Posted',
+      'Created a token',
+    ].map((label) => ({ label, event: 'page_view' })),
+  };
 
   it('computes % of start, % kept, lost and % lost per step', () => {
     const { steps } = buildFunnelSteps(
-      onboarding,
+      mathFunnel,
       [1000, 650, 300, 240, 180, 90, 9],
       [null, 12, 60, 30, 45, 600, 3600],
     );
@@ -77,7 +103,7 @@ describe('buildFunnelSteps', () => {
 
   it('orders drop-offs by people lost, then by % lost', () => {
     const { topDropOffs } = buildFunnelSteps(
-      onboarding,
+      mathFunnel,
       [1000, 650, 300, 240, 180, 90, 9],
       [],
     );
@@ -111,7 +137,7 @@ describe('buildFunnelSteps', () => {
   });
 
   it('handles an empty funnel without dividing by zero', () => {
-    const { steps, topDropOffs } = buildFunnelSteps(onboarding, [], []);
+    const { steps, topDropOffs } = buildFunnelSteps(mathFunnel, [], []);
     expect(steps.every((s) => s.count === 0 && s.pctOfStart === 0)).toBe(true);
     expect(steps[1].pctLostFromPrevious).toBeNull();
     expect(topDropOffs).toEqual([]);
