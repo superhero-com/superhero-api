@@ -6,6 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   finalizeEvent,
   getPublicKey,
@@ -19,6 +20,9 @@ import tgrConfig, { isRelayConfigured } from '../config/tgr.config';
 import type { Nip29Template } from './nip29';
 import type { PublishResult, RelayWriter } from './relay-writer.contract';
 import { authenticateRelay } from './relay-auth';
+import { verifyRelayAdminIdentity } from './relay-admin-identity';
+import { isRelayAdminReject } from '../queues/publish-policy';
+import { TGR_RELAY_READY } from '../events';
 import {
   incrementPublishFailed,
   incrementPublishOk,
@@ -54,7 +58,7 @@ const KIND_GROUP_MEMBERS = 39002;
  *
  * WORKER PROCESS ONLY. Holds the single connection through which every NIP-29
  * publish flows (the `publish-nip29` processor is the sole producer). It owns:
- *   - connect + NIP-42 AUTH as the relay admin (`TG_BOT_NSEC` → admin pubkey),
+ *   - connect + NIP-42 AUTH and verify the bot against the NIP-11 admin pubkey,
  *   - reconnect-with-backoff + an `isHealthy()` gate (the processor pauses the
  *     queue while unhealthy rather than burning retries),
  *   - `publish(template)` finalize+sign+publish that waits for the relay ACK up
@@ -77,6 +81,7 @@ export class RelayWriterService
   private relay?: Relay;
   private connecting?: Promise<void>;
   private healthy = false;
+  private adminRejected = false;
   private shuttingDown = false;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempts = 0;
@@ -85,6 +90,7 @@ export class RelayWriterService
   constructor(
     @Inject(tgrConfig.KEY)
     private readonly config: ConfigType<typeof tgrConfig>,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     if (!isRelayConfigured(this.config)) {
       // Relay not configured (worker mode removed — see `deworker-plan.md`): stay
@@ -192,7 +198,7 @@ export class RelayWriterService
     setRelayWriterConnected(false); // Task 15 observability (additive).
   }
 
-  /** Whether the relay socket is connected + AUTHed (gates the queue). */
+  /** Connected, authenticated and verified as relay admin (gates the queue). */
   isHealthy(): boolean {
     return this.healthy && !!this.relay?.connected;
   }
@@ -228,22 +234,21 @@ export class RelayWriterService
       return { ok: true, id: event.id };
     } catch (e) {
       const timedOut = e instanceof PublishTimeoutError;
+      const reason =
+        typeof e === 'string' ? e : ((e as Error)?.message ?? 'publish failed');
+      const adminRejected = isRelayAdminReject(reason);
+      if (adminRejected) this.adminRejected = true;
       // Task 15 observability (additive): count the failure (+ ACK timeout when
       // it was a timeout — handled inside incrementPublishFailed).
       incrementPublishFailed(timedOut);
-      if (timedOut) {
-        // No ACK in the window: the relay may be wedged — mark unhealthy so the
-        // processor pauses rather than retry-spinning against a dead socket.
-        // CRUCIAL: also schedule a reconnect. A publish ACK timeout does NOT close
-        // the socket, so `onclose` never fires — without this, `healthy` would stay
-        // false forever (the socket looks "connected" but we've flagged it down),
-        // which permanently pauses the publish queue. Reconnecting restores health
-        // within the backoff window so the queue resumes.
-        this.markUnhealthy('publish ACK timeout');
+      if (timedOut || adminRejected) {
+        // A missing ACK or denied admin authority makes the whole connection
+        // unfit for publishing. Neither necessarily closes the socket, so arm
+        // recovery explicitly. Reconnects re-check admin identity before the
+        // queue can resume, with capped backoff while setup remains incomplete.
+        this.markUnhealthy(timedOut ? 'publish ACK timeout' : reason);
         this.scheduleReconnect();
       }
-      const reason =
-        typeof e === 'string' ? e : ((e as Error)?.message ?? 'publish failed');
       return { ok: false, id: event.id, reason, timedOut };
     }
   }
@@ -370,7 +375,20 @@ export class RelayWriterService
     // connection healthy until authentication is acknowledged.
     try {
       await this.authenticate(relay);
+      // A valid NIP-42 identity may still be the wrong admin key. Never drain
+      // the publish queue until the relay's advertised admin identity matches.
+      await verifyRelayAdminIdentity(
+        this.config,
+        this.pubkey,
+        this.adminRejected,
+      );
+      if (this.shuttingDown || !relay.connected || this.relay !== relay) {
+        throw new Error('relay disconnected during admin verification');
+      }
     } catch (error) {
+      // This is our own close, not a fresh outage. Let the caller schedule the
+      // existing capped reconnect backoff once, after this attempt settles.
+      relay.onclose = null;
       relay.close();
       throw error;
     }
@@ -378,6 +396,7 @@ export class RelayWriterService
     this.healthy = true;
     this.reconnectAttempts = 0;
     setRelayWriterConnected(true); // Task 15 observability (additive).
+    this.eventEmitter.emit(TGR_RELAY_READY);
   }
 
   /**
@@ -390,7 +409,7 @@ export class RelayWriterService
       async (evt: EventTemplate) => finalizeEvent(evt, this.sk),
       this.config.publishAckTimeoutMs,
     );
-    this.logger.debug('NIP-42 authenticated as relay admin');
+    this.logger.debug('NIP-42 authenticated as bot');
   }
 
   private markUnhealthy(reason: string): void {
@@ -450,7 +469,7 @@ export class RelayWriterService
       await this.ensureConnected();
       this.logger.log('relay reconnected');
     } catch (e) {
-      this.logger.warn(
+      this.logger.error(
         `relay reconnect failed (${(e as Error)?.message}); retrying`,
       );
       this.scheduleReconnect();

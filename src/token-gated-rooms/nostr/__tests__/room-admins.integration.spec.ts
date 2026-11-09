@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import 'dotenv/config';
 import { generateSecretKey, getPublicKey, nip19, Relay } from 'nostr-tools';
 import WebSocket from 'ws';
@@ -118,6 +119,7 @@ describe('Task 08 relay admins (integration)', () => {
     async () => {
       const writer = new RelayWriterService(
         makeConfig(RELAY_URL, RELAY_ADMIN_NSEC),
+        new EventEmitter2(),
       );
       await writer.onModuleInit();
       const gid = uniqueGid();
@@ -154,6 +156,7 @@ describe('Task 08 relay admins (integration)', () => {
     async () => {
       const writer = new RelayWriterService(
         makeConfig(RELAY_URL, RELAY_ADMIN_NSEC),
+        new EventEmitter2(),
       );
       await writer.onModuleInit();
       const gid = uniqueGid();
@@ -177,6 +180,7 @@ describe('Task 08 relay admins (integration)', () => {
     async () => {
       const writer = new RelayWriterService(
         makeConfig(RELAY_URL, RELAY_ADMIN_NSEC),
+        new EventEmitter2(),
       );
       await writer.onModuleInit();
       const gid = uniqueGid();
@@ -213,6 +217,7 @@ describe('Task 08 relay admins (integration)', () => {
       // Correct admin key passes.
       const okWriter = new RelayWriterService(
         makeConfig(RELAY_URL, RELAY_ADMIN_NSEC),
+        new EventEmitter2(),
       );
       await okWriter.onModuleInit();
       const okHealth = new RelayAdminHealthService(
@@ -227,6 +232,7 @@ describe('Task 08 relay admins (integration)', () => {
       const strangerNsec = nip19.nsecEncode(generateSecretKey());
       const badWriter = new RelayWriterService(
         makeConfig(RELAY_URL, strangerNsec),
+        new EventEmitter2(),
       );
       await badWriter.onModuleInit();
       const badHealth = new RelayAdminHealthService(

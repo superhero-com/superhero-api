@@ -13,6 +13,9 @@
  * these strings elsewhere.
  */
 
+/** The writer has authenticated and verified relay-admin identity. No payload. */
+export const TGR_RELAY_READY = 'tgr.relay.ready';
+
 /** A BCL community-room desired-state row was created/updated (Task 04). */
 export const TGR_COMMUNITY_UPSERTED = 'tgr.community.upserted';
 export interface TgrCommunityUpsertedPayload {

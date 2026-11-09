@@ -22,6 +22,7 @@ import {
   TGR_ELIGIBILITY_CHANGED,
   TGR_PUBLISH_ACK,
   TGR_ROOM_CREATED,
+  TGR_RELAY_READY,
   type TgrCommunityUpsertedPayload,
   type TgrEligibilityChangedPayload,
   type TgrPublishAckPayload,
@@ -35,6 +36,7 @@ import {
   setRoles,
 } from '../nostr/nip29';
 import { groupIdFor } from '../nostr/group-id';
+import { RELAY_WRITER, type RelayWriter } from '../nostr/relay-writer.contract';
 import { publishNip29JobOptions } from '../queues/publish-nip29.job-options';
 import { PUBLISH_NIP29_QUEUE } from '../queues/publish-nip29.processor';
 import type { PublishNip29Job } from '../queues/publish-nip29.types';
@@ -113,6 +115,8 @@ export class MembershipSyncService
 {
   private readonly logger = new Logger(MembershipSyncService.name);
   private scanRunning = false;
+  private scanDeferred = false;
+  private stopped = false;
 
   constructor(
     @InjectRepository(RoomMembership)
@@ -128,6 +132,8 @@ export class MembershipSyncService
     private readonly scheduler: SchedulerRegistry,
     @Inject(tgrConfig.KEY)
     private readonly config: ConfigType<typeof tgrConfig>,
+    @Inject(RELAY_WRITER)
+    private readonly relay: RelayWriter,
     // Optional so the existing positional-construction unit tests keep working; the
     // DI container always provides it in the running app.
     @Optional()
@@ -176,6 +182,7 @@ export class MembershipSyncService
 
   /** Tear down the interval on shutdown so tests / restarts don't leak timers. */
   onApplicationShutdown(): void {
+    this.stopped = true;
     try {
       if (this.scheduler.doesExist?.('interval', MEMBERSHIP_SYNC_SCAN_JOB)) {
         this.scheduler.deleteInterval(MEMBERSHIP_SYNC_SCAN_JOB);
@@ -187,7 +194,7 @@ export class MembershipSyncService
 
   /** Run the scan with single-flight + error isolation (interval callback). */
   private async runScanSafely(): Promise<void> {
-    if (this.scanRunning) {
+    if (this.scanRunning || this.stopped) {
       return;
     }
     this.scanRunning = true;
@@ -199,6 +206,16 @@ export class MembershipSyncService
       );
     } finally {
       this.scanRunning = false;
+      if (this.scanDeferred && this.relay.isHealthy() && !this.stopped) {
+        await this.runScanSafely();
+      }
+    }
+  }
+
+  @OnEvent(TGR_RELAY_READY, { async: true, promisify: true })
+  async onRelayReady(): Promise<void> {
+    if (this.scanDeferred && isRelayConfigured(this.config)) {
+      await this.runScanSafely();
     }
   }
 
@@ -634,6 +651,11 @@ export class MembershipSyncService
    * @returns the number of publishes enqueued.
    */
   async scanAndPublishPending(): Promise<number> {
+    if (!this.relay.isHealthy()) {
+      this.scanDeferred = true;
+      return 0;
+    }
+    this.scanDeferred = false;
     const limit = this.config.reconcileBatchSize;
     let cursorId = 0;
     let published = 0;
@@ -643,6 +665,10 @@ export class MembershipSyncService
     const groupIds = new Map<string, string>();
 
     for (;;) {
+      if (!this.relay.isHealthy()) {
+        this.scanDeferred = true;
+        break;
+      }
       // §6.6 predicate: only rows that CAN be published —
       //   pending_add must have a non-null pubkey; pending_remove always qualifies.
       const batch = await this.membershipRepo
@@ -663,6 +689,10 @@ export class MembershipSyncService
       }
 
       for (const row of batch) {
+        if (!this.relay.isHealthy()) {
+          this.scanDeferred = true;
+          break;
+        }
         const sale = row.sale_address;
         let ready = roomReady.get(sale);
         if (ready === undefined) {
@@ -700,7 +730,7 @@ export class MembershipSyncService
       }
 
       cursorId = batch[batch.length - 1].id;
-      if (batch.length < limit) {
+      if (this.scanDeferred || batch.length < limit) {
         break;
       }
     }

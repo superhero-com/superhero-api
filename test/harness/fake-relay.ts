@@ -1,4 +1,10 @@
 import type { AddressInfo } from 'node:net';
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from 'node:http';
+import type { Event as NostrEvent } from 'nostr-tools';
 import { WebSocket, WebSocketServer } from 'ws';
 
 /**
@@ -7,10 +13,16 @@ import { WebSocket, WebSocketServer } from 'ws';
  * an external relay.
  */
 export interface FakeRelayOptions {
+  /** Override HTTP handling to exercise unavailable or stalled NIP-11 endpoints. */
+  onHttp?: (request: IncomingMessage, response: ServerResponse) => void;
+  /** Serve NIP-11 over the same HTTP endpoint as the WebSocket relay. */
+  relayInfo?: (request: IncomingMessage) => { pubkey?: string };
   /** Delay before the AUTH challenge after the socket opens; `null` never sends one. */
   challengeDelayMs?: number | null;
   /** Reject every AUTH with this OK reason. */
   rejectAuth?: string;
+  /** Answer an EVENT publish. The default accepts it. */
+  onEvent?: (send: (message: unknown[]) => void, event: NostrEvent) => void;
   /** Answer a REQ. The default replies EOSE. */
   onReq?: (
     send: (message: unknown[]) => void,
@@ -27,6 +39,8 @@ export interface FakeRelay {
   readonly authenticated: number;
   /** Filters of every REQ received, in arrival order. */
   readonly reqs: Record<string, unknown>[][];
+  /** Published events (excluding AUTH), in arrival order. */
+  readonly events: NostrEvent[];
   openSockets(): number;
   /** Drop every open socket without a close handshake. */
   dropAll(): void;
@@ -36,12 +50,28 @@ export interface FakeRelay {
 export async function startFakeRelay(
   options: FakeRelayOptions = {},
 ): Promise<FakeRelay> {
-  const { challengeDelayMs = 0, rejectAuth, onReq } = options;
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const { challengeDelayMs = 0, rejectAuth, onReq, onEvent } = options;
+  const httpServer = createServer((request, response) => {
+    if (options.onHttp) {
+      options.onHttp(request, response);
+      return;
+    }
+    if (options.relayInfo) {
+      response.writeHead(200, { 'Content-Type': 'application/nostr+json' });
+      response.end(JSON.stringify(options.relayInfo(request)));
+    } else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+  const server = new WebSocketServer({ server: httpServer });
+  await new Promise<void>((resolve) =>
+    httpServer.listen(0, '127.0.0.1', resolve),
+  );
   const sockets = new Set<WebSocket>();
   const state = { connections: 0, authenticated: 0 };
   const reqs: Record<string, unknown>[][] = [];
+  const events: NostrEvent[] = [];
 
   server.on('connection', (socket) => {
     state.connections += 1;
@@ -68,6 +98,11 @@ export async function startFakeRelay(
           rejectAuth ?? (signed ? '' : 'auth-required: challenge mismatch');
         if (!reason) state.authenticated += 1;
         send(['OK', event.id, !reason, reason]);
+      } else if (type === 'EVENT') {
+        const event = rest[0] as NostrEvent;
+        events.push(event);
+        if (onEvent) onEvent(send, event);
+        else send(['OK', event.id, true, '']);
       } else if (type === 'REQ') {
         const [subId, ...filters] = rest;
         reqs.push(filters);
@@ -86,11 +121,14 @@ export async function startFakeRelay(
       return state.authenticated;
     },
     reqs,
+    events,
     openSockets: () => sockets.size,
     dropAll: () => sockets.forEach((socket) => socket.terminate()),
     close: async () => {
       sockets.forEach((socket) => socket.terminate());
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      httpServer.closeAllConnections();
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },
   };
 }
