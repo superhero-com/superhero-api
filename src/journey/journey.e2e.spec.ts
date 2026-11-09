@@ -438,6 +438,19 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       expect(report.steps.map((s) => s.count).slice(0, 2)).toEqual([1, 1]);
     });
 
+    it('counts a step recorded in the same millisecond as the previous one', async () => {
+      await insert([
+        [A, 'page_view', '/', '2026-10-10T10:00:00.000Z'],
+        [A, 'wallet_connected', '/', '2026-10-10T10:00:00.000Z'],
+        [A, 'token_created', '/trends/create', '2026-10-10T10:05:00.000Z'],
+      ]);
+      const report = await queries.getFunnel(
+        JOURNEY_FUNNELS.find((f) => f.id === 'create'),
+        range,
+      );
+      expect(report.steps.map((s) => s.count)).toEqual([1, 1, 1]);
+    });
+
     it('returns zeros and eventsInRange 0 for an empty range', async () => {
       const report = await queries.getFunnel(funnel, range);
       expect(report.eventsInRange).toBe(0);

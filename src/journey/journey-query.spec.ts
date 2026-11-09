@@ -50,6 +50,13 @@ describe('JOURNEY_FUNNELS', () => {
       ).toBe(false);
     }
   });
+
+  it('never repeats an event in a funnel, or a step would match itself', () => {
+    for (const funnel of JOURNEY_FUNNELS) {
+      const events = funnel.steps.map((s) => s.event);
+      expect(new Set(events).size).toBe(events.length);
+    }
+  });
 });
 
 describe('buildFunnelSteps', () => {
@@ -145,12 +152,12 @@ describe('buildFunnelSteps', () => {
 });
 
 describe('buildFunnelSql', () => {
-  it('chains one CTE per step, each strictly after the previous match', () => {
+  it('chains one CTE per step, each at or after the previous match', () => {
     const sql = buildFunnelSql(3);
     expect(sql).toContain('s1 AS');
     expect(sql).toContain('s3 AS');
     expect(sql).not.toContain('s4 AS');
-    expect(sql).toContain('e.occurred_at > p.t');
+    expect(sql).toContain('e.occurred_at >= p.t');
     expect(sql).toContain('e.event = $5');
   });
 
