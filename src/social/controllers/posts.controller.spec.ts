@@ -126,6 +126,45 @@ describe('PostsController', () => {
     });
   });
 
+  it.each([
+    ['no filter', undefined, undefined],
+    ['only blank topics', undefined, ' , '],
+  ])('skips the topics join with %s', async (_name, search, topics) => {
+    await controller.listAll(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      search,
+      undefined,
+      topics,
+    );
+
+    expect(baseQueryBuilder.leftJoin).not.toHaveBeenCalled();
+    expect(baseQueryBuilder.groupBy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['search', 'governance', undefined],
+    ['topics', undefined, 'ae'],
+  ])('joins and groups topics with %s', async (_name, search, topics) => {
+    await controller.listAll(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      search,
+      undefined,
+      topics,
+    );
+
+    expect(baseQueryBuilder.leftJoin).toHaveBeenCalledWith(
+      'post.topics',
+      'topic',
+    );
+    expect(baseQueryBuilder.groupBy).toHaveBeenCalledWith('post.id');
+  });
+
   it('uses all-time ranking for popular posts and ignores legacy window queries', async () => {
     const popularPost = {
       id: 'post-popular',
