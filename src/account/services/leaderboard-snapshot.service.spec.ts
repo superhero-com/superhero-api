@@ -4,7 +4,7 @@ import {
   PNL_CACHE_TTL_MS,
 } from './leaderboard-snapshot.service';
 import { LEADERBOARD_SNAPSHOT_MAX_CANDIDATES } from './leaderboard.types';
-import { TokenPnlResult } from './bcl-pnl.service';
+import { BclPnlService, TokenPnlResult } from './bcl-pnl.service';
 import { timestampToAeHeight } from '@/utils/getBlochHeight';
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -67,6 +67,7 @@ interface ServiceOptions {
   counts?: CountRow[] | ((params: { start: Date; end: Date }) => CountRow[]);
   created?: Array<{ creator_address: string; created_count: string }>;
   owned?: Array<{ address: string; owned_count: string }>;
+  bclPnl?: BclPnlService;
 }
 
 function createService(candidateCount: number, options: ServiceOptions = {}) {
@@ -83,8 +84,25 @@ function createService(candidateCount: number, options: ServiceOptions = {}) {
   const transactionsRepository = {
     createQueryBuilder: armRun(jest.fn(), candidateCount),
   };
+  const points: Array<[string, number]> = [];
+  const pnlPoint = (address: string, height: number) => {
+    points.push([address, height]);
+    return (options.pnl ?? pnlAt)(address, height);
+  };
   const calculateTokenPnls = jest.fn(async (address: string, height: number) =>
-    (options.pnl ?? pnlAt)(address, height),
+    pnlPoint(address, height),
+  );
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const calculateTokenPnlsBatch = jest.fn(
+    async (...[address, heights]: [string, number[], boolean?, boolean?]) => {
+      peakInFlight = Math.max(peakInFlight, ++inFlight);
+      await Promise.resolve();
+      inFlight--;
+      return new Map(
+        heights.map((height) => [height, pnlPoint(address, height)]),
+      );
+    },
   );
   const written = new Map<string, any[]>();
   const deleted: string[] = [];
@@ -109,24 +127,27 @@ function createService(candidateCount: number, options: ServiceOptions = {}) {
         ),
       },
     } as any,
-    { calculateTokenPnls } as any,
+    options.bclPnl ?? ({ calculateTokenPnls, calculateTokenPnlsBatch } as any),
     {} as any,
   );
-  const callsFor = (address: string) =>
-    calculateTokenPnls.mock.calls.filter(([a]) => a === address);
-  const computedHeights = () =>
-    new Set(calculateTokenPnls.mock.calls.map(([, height]) => height));
-  const computedPoints = () => calculateTokenPnls.mock.calls.length;
+  const pointsFor = (address: string) => points.filter(([a]) => a === address);
+  const computedHeights = () => new Set(points.map(([, height]) => height));
+  const computedPoints = () => points.length;
   const nextRun = (count = candidateCount) => {
     armRun(transactionsRepository.createQueryBuilder, count);
+    points.length = 0;
     calculateTokenPnls.mockClear();
+    calculateTokenPnlsBatch.mockClear();
   };
   return {
     service,
     candidateQuery: () =>
       transactionsRepository.createQueryBuilder.mock.results[0].value,
     calculateTokenPnls,
-    callsFor,
+    calculateTokenPnlsBatch,
+    peakInFlight: () => peakInFlight,
+    points,
+    pointsFor,
     computedHeights,
     computedPoints,
     nextRun,
@@ -171,7 +192,7 @@ describe('LeaderboardSnapshotService', () => {
 
     await ctx.service.refreshAllWindows();
 
-    const points = ctx.calculateTokenPnls.mock.calls.map(
+    const points = ctx.points.map(
       ([address, height]) => `${address}:${height}`,
     );
     expect(new Set(points).size).toBe(points.length);
@@ -348,7 +369,7 @@ describe('LeaderboardSnapshotService', () => {
   it('forgets the points of an account that leaves the candidate list', async () => {
     const ctx = createService(2);
     await ctx.service.refreshAllWindows();
-    const coldPoints = ctx.callsFor('ak_1').length;
+    const coldPoints = ctx.pointsFor('ak_1').length;
 
     ctx.nextRun(1);
     await ctx.service.refreshAllWindows();
@@ -356,8 +377,161 @@ describe('LeaderboardSnapshotService', () => {
     await ctx.service.refreshAllWindows();
 
     // ak_0 stayed, so only its tip point is recomputed; ak_1 starts cold.
-    expect(ctx.callsFor('ak_0')).toHaveLength(1);
-    expect(ctx.callsFor('ak_1')).toHaveLength(coldPoints);
+    expect(ctx.pointsFor('ak_0')).toHaveLength(1);
+    expect(ctx.pointsFor('ak_1')).toHaveLength(coldPoints);
+  });
+
+  it("computes an account's missing heights in one totals-only batch", async () => {
+    const ctx = createService(3);
+
+    await ctx.service.refreshAllWindows();
+
+    expect(ctx.calculateTokenPnls).not.toHaveBeenCalled();
+    expect(ctx.calculateTokenPnlsBatch).toHaveBeenCalledTimes(3);
+    for (const [, heights, includeTokenPnls, consistentSnapshot] of ctx
+      .calculateTokenPnlsBatch.mock.calls) {
+      expect(new Set(heights)).toEqual(ctx.computedHeights());
+      expect(includeTokenPnls).toBe(false);
+      expect(consistentSnapshot).toBe(true);
+    }
+  });
+
+  it('batches only the heights the cache could not serve', async () => {
+    const ctx = createService(2);
+    await ctx.service.refreshAllWindows();
+
+    const now = noon + 10 * 60 * 1000;
+    jest.setSystemTime(now);
+    ctx.nextRun();
+    await ctx.service.refreshAllWindows();
+
+    expect(ctx.calculateTokenPnlsBatch).toHaveBeenCalledTimes(2);
+    for (const [, heights] of ctx.calculateTokenPnlsBatch.mock.calls) {
+      expect([...heights].sort()).toEqual(
+        [
+          heightAt(now - 2 * DAY_MS),
+          heightAt(now - DAY_MS),
+          heightAt(now),
+        ].sort(),
+      );
+    }
+  });
+
+  it('uses the single-height query when only one height is missing', async () => {
+    const ctx = createService(3);
+    await ctx.service.refreshAllWindows();
+
+    ctx.nextRun();
+    await ctx.service.refreshAllWindows();
+
+    expect(ctx.calculateTokenPnlsBatch).not.toHaveBeenCalled();
+    expect(ctx.calculateTokenPnls).toHaveBeenCalledTimes(3);
+  });
+
+  it('runs at most eight batches at once, as each takes one connection', async () => {
+    const ctx = createService(20);
+
+    await ctx.service.refreshAllWindows();
+
+    expect(ctx.calculateTokenPnlsBatch).toHaveBeenCalledTimes(20);
+    expect(ctx.peakInFlight()).toBe(8);
+  });
+
+  it('runs eight single-height computations at once as well', async () => {
+    const ctx = createService(20);
+    let running = 0;
+    let peak = 0;
+    ctx.calculateTokenPnls.mockImplementation(async (address, height) => {
+      peak = Math.max(peak, ++running);
+      await Promise.resolve();
+      running--;
+      return pnlAt(address, height);
+    });
+
+    await (ctx.service as any).resolvePnlTotals(
+      Array.from({ length: 20 }, (_, i) => `ak_${i}`),
+      [1000],
+    );
+
+    expect(ctx.calculateTokenPnlsBatch).not.toHaveBeenCalled();
+    expect(ctx.calculateTokenPnls).toHaveBeenCalledTimes(20);
+    expect(peak).toBe(8);
+  });
+
+  it('holds one connection per account when every batch fails', async () => {
+    let running = 0;
+    let peak = 0;
+    const query = jest.fn(async () => {
+      await Promise.resolve();
+      throw new Error('could not resize shared memory segment');
+    });
+    const transaction = jest.fn(
+      async (_isolation: string, work: (manager: unknown) => unknown) => {
+        peak = Math.max(peak, ++running);
+        try {
+          await Promise.resolve();
+          return await work({ query });
+        } finally {
+          running--;
+        }
+      },
+    );
+    const ctx = createService(LEADERBOARD_SNAPSHOT_MAX_CANDIDATES, {
+      bclPnl: new BclPnlService({ manager: { transaction } } as any),
+    });
+
+    await ctx.service.refreshAllWindows();
+
+    expect(transaction).toHaveBeenCalledTimes(
+      LEADERBOARD_SNAPSHOT_MAX_CANDIDATES,
+    );
+    expect(peak).toBe(8);
+    expect(running).toBe(0);
+    expect(ctx.written.size).toBe(0);
+  });
+
+  describe('with LEADERBOARD_PNL_BATCH_ENABLED=false', () => {
+    beforeEach(() => {
+      process.env.LEADERBOARD_PNL_BATCH_ENABLED = 'false';
+    });
+
+    afterEach(() => {
+      delete process.env.LEADERBOARD_PNL_BATCH_ENABLED;
+    });
+
+    it('runs one query per point and writes the rows the batch writes', async () => {
+      const single = createService(5);
+      await single.service.refreshAllWindows();
+      delete process.env.LEADERBOARD_PNL_BATCH_ENABLED;
+      const batched = createService(5);
+      await batched.service.refreshAllWindows();
+
+      expect(single.calculateTokenPnlsBatch).not.toHaveBeenCalled();
+      expect(single.calculateTokenPnls).toHaveBeenCalledTimes(
+        single.computedPoints(),
+      );
+      expect(batched.calculateTokenPnls).not.toHaveBeenCalled();
+      expect([...single.written]).toEqual([...batched.written]);
+    });
+
+    it('stops at the first failing point of an account', async () => {
+      const ctx = createService(3, {
+        pnl: (address, height) => {
+          if (address === 'ak_1') throw new Error('statement timeout');
+          return pnlAt(address, height);
+        },
+      });
+
+      await ctx.service.refreshAllWindows();
+
+      expect(
+        ctx.calculateTokenPnls.mock.calls.filter(([a]) => a === 'ak_1'),
+      ).toHaveLength(1);
+      expect(ctx.written.get('7d')!.map((r) => r.address)).toEqual([
+        'ak_0',
+        'ak_2',
+      ]);
+    });
   });
 
   it('drops a failing candidate after a single attempt and writes the others', async () => {
@@ -375,7 +549,9 @@ describe('LeaderboardSnapshotService', () => {
       expect(rows).toHaveLength(19);
       expect(rows.map((r) => r.address)).not.toContain('ak_2');
     }
-    expect(ctx.callsFor('ak_2')).toHaveLength(1);
+    expect(
+      ctx.calculateTokenPnlsBatch.mock.calls.filter(([a]) => a === 'ak_2'),
+    ).toHaveLength(1);
   });
 
   it('keeps the previous snapshot when every candidate fails', async () => {
@@ -396,7 +572,7 @@ describe('LeaderboardSnapshotService', () => {
 
     await ctx.service.refreshAllWindows();
 
-    expect(ctx.calculateTokenPnls).not.toHaveBeenCalled();
+    expect(ctx.computedPoints()).toBe(0);
     expect(ctx.deleted.sort()).toEqual(['30d', '7d', 'all']);
     expect(ctx.written.size).toBe(0);
   });
