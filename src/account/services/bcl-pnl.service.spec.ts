@@ -177,6 +177,166 @@ describe('BclPnlService', () => {
     expect(result.get(300)!.pnls.ct_alpha.gain.ae).toBe(15);
   });
 
+  it('calculateTokenPnlsBatch lets the event loop run while walking many tokens', async () => {
+    const { service, transactionRepository } = createService();
+    const tokens = Array.from({ length: 2500 }, (_, i) => `ct_${i}`);
+    mockCumulativeQueries(
+      transactionRepository,
+      tokens.map((sale) => tradeRow(sale, 150, '1', '1', '1')),
+      tokens.map((sale) => priceRow(sale, 200, '2', '2')),
+    );
+    let turns = 0;
+    const countTurn = () => {
+      turns++;
+      timer = setImmediate(countTurn);
+    };
+    let timer = setImmediate(countTurn);
+
+    const result = await service.calculateTokenPnlsBatch('ak_test', [200]);
+    clearImmediate(timer);
+
+    expect(turns).toBeGreaterThanOrEqual(2);
+    expect(result.get(200)!.totalCurrentValueAe).toBe(5000);
+  });
+
+  describe('calculateTokenPnlsBatch when a query fails', () => {
+    const deferred = () => {
+      let resolve!: (rows: unknown[]) => void;
+      let reject!: (error: Error) => void;
+      const promise = new Promise<unknown[]>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+
+    const startBatch = () => {
+      const { service, transactionRepository } = createService();
+      const trades = deferred();
+      const prices = deferred();
+      transactionRepository.query.mockImplementation((sql: string) =>
+        sql.includes('held_tokens') ? prices.promise : trades.promise,
+      );
+      let settled = false;
+      const failure = service
+        .calculateTokenPnlsBatch('ak_test', [100, 200])
+        .then(
+          () => {
+            throw new Error('expected the batch to fail');
+          },
+          (error: Error) => {
+            settled = true;
+            return error;
+          },
+        );
+      return { trades, prices, failure, isSettled: () => settled };
+    };
+
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    it('waits for the price query when the trade query fails', async () => {
+      const { trades, prices, failure, isSettled } = startBatch();
+      const error = new Error('trade query failed');
+
+      trades.reject(error);
+      await flush();
+      expect(isSettled()).toBe(false);
+
+      prices.resolve([]);
+      await expect(failure).resolves.toBe(error);
+    });
+
+    it('waits for the trade query when the price query fails', async () => {
+      const { trades, prices, failure, isSettled } = startBatch();
+      const error = new Error('price query failed');
+
+      prices.reject(error);
+      await flush();
+      expect(isSettled()).toBe(false);
+
+      trades.resolve([]);
+      await expect(failure).resolves.toBe(error);
+    });
+
+    it('reports the trade query error when both fail', async () => {
+      const { trades, prices, failure } = startBatch();
+      const error = new Error('trade query failed');
+
+      prices.reject(new Error('price query failed'));
+      trades.reject(error);
+
+      await expect(failure).resolves.toBe(error);
+    });
+  });
+
+  describe('calculateTokenPnlsBatch with a consistent snapshot', () => {
+    const createConsistentService = () => {
+      const manager = { query: jest.fn() };
+      const transaction = jest.fn(
+        (_isolation: string, work: (m: typeof manager) => unknown) =>
+          work(manager),
+      );
+      const repository = { query: jest.fn(), manager: { transaction } };
+      return {
+        service: new BclPnlService(repository as any),
+        manager,
+        transaction,
+        repository,
+      };
+    };
+
+    it('reads trades, then prices, in one repeatable-read transaction', async () => {
+      const { service, manager, transaction, repository } =
+        createConsistentService();
+      manager.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('held_tokens')
+            ? [priceRow('ct_alpha', 200, '4', '8')]
+            : [tradeRow('ct_alpha', 150, '3', '3', '9')],
+        ),
+      );
+
+      const result = await service.calculateTokenPnlsBatch(
+        'ak_test',
+        [100, 200],
+        true,
+        true,
+      );
+
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(transaction.mock.calls[0][0]).toBe('REPEATABLE READ');
+      expect(repository.query).not.toHaveBeenCalled();
+      const [[tradeSql, tradeParams], [priceSql, priceParams]] =
+        manager.query.mock.calls;
+      expect(tradeSql).toContain('per_block');
+      expect(tradeParams).toEqual(['ak_test', 200, 100]);
+      expect(priceSql).toContain('held_tokens');
+      expect(priceParams).toEqual(['ak_test', 200, 100, [100, 200]]);
+      expect(result.get(200)!.pnls.ct_alpha.current_value.ae).toBe(12);
+    });
+
+    it('does not run the price query after the trade query fails', async () => {
+      const { service, manager } = createConsistentService();
+      manager.query.mockRejectedValue(new Error('trade query failed'));
+
+      await expect(
+        service.calculateTokenPnlsBatch('ak_test', [100, 200], true, true),
+      ).rejects.toThrow('trade query failed');
+
+      expect(manager.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays outside a transaction by default', async () => {
+      const { service, transaction, repository } = createConsistentService();
+      repository.query.mockResolvedValue([]);
+
+      await service.calculateTokenPnlsBatch('ak_test', [100, 200]);
+
+      expect(transaction).not.toHaveBeenCalled();
+      expect(repository.query).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('calculateTokenPnlsBatch counts trades strictly below and prices at or below each height', async () => {
     const { service, transactionRepository } = createService();
     mockCumulativeQueries(
