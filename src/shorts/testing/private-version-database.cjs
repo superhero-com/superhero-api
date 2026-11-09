@@ -66,12 +66,20 @@ async function privateVersionDatabase(t, config, ref) {
     'INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)',
     [...args, config.sourceHash],
   );
+  await owner.query(
+    "INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'job','ak_creator',$3)",
+    [...args, { bytes: ref.bytes, processingProfile: 'original-h264-v1' }],
+  );
+  await owner.query(
+    "INSERT INTO shorts_upload_parts(network,contract,upload_id,part,object_ref) VALUES($1,$2,'job',0,$3)",
+    [...args, ref],
+  );
+  await owner.query("UPDATE shorts_upload_sessions SET state='enqueued' WHERE id='job'");
   const record = originalRecord('job', {
     creator: 'ak_creator',
     createdAt: 1,
     bytes: ref.bytes,
     publication: 'published',
-    privateMedia: { files: { 'video.mp4': ref } },
   });
   await owner.query(
     'INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',

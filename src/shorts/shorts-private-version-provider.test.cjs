@@ -160,7 +160,7 @@ test(
       'expiry',
       'current',
     ]) {
-      ref = await writer.put(scope, 'job', 'attempt/1/video', plaintext);
+      ref = await writer.put(scope, 'job', 'part/0', plaintext);
       const body = Buffer.from(previousCiphertext);
       if (label === 'corrupt') body[body.length - 1] ^= 1;
       const result = await raw.send(
