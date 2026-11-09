@@ -7,66 +7,19 @@ import {
 import { ConfigType } from '@nestjs/config';
 import tgrConfig, { isRelayConfigured } from '../config/tgr.config';
 import { createGroup, deleteGroup } from './nip29';
-import { normalizePubkey } from './pubkey';
+import {
+  ABUSE_VECTOR_NOTE,
+  verifyRelayAdminIdentity,
+} from './relay-admin-identity';
 import { RELAY_WRITER, type RelayWriter } from './relay-writer.contract';
 
-/**
- * Optional config-fallback for the relay's admin pubkey, read directly from the
- * environment (the shared `tgr.config.ts` is owned by Task 01 and not modified
- * here). Only consulted when the NIP-11 relay-info document does NOT advertise a
- * `pubkey`. May be npub or hex; normalized before comparison.
- */
-export const RELAY_ADMIN_PUBKEY_ENV = 'TG_RELAY_ADMIN_PUBKEY';
-
-/** A reserved `h`-tag for the disposable create/delete publish probe (Req 1). */
+/** Reserved group prefix for the disposable create/delete publish probe. */
 export const HEALTH_PROBE_GROUP_PREFIX = 'tgr-relay-admin-health-probe';
 
 /**
- * The abuse vector the relay-admin check defends against — included verbatim in
- * the fail-fast log so an operator sees WHY being relay admin is mandatory.
- */
-export const ABUSE_VECTOR_NOTE =
-  'A pre-existing event under a managed h-tag (= a future sale_address) blocks a ' +
-  'non-admin create — groups_relay rejects with "Only relay admin can create a ' +
-  'managed group from an unmanaged one" (groups.rs:445–450). Being the relay ' +
-  'admin is the mitigation; this worker must run as the relay-admin key.';
-
-/**
- * Minimal NIP-11 relay-information shape we read (the `pubkey` field). The
- * `groups_relay` serves its admin pubkey here (verified — `server.rs:85`,
- * `supported_nips` includes 11): `RelayInfo { pubkey, supported_nips, … }`.
- */
-interface Nip11RelayInfo {
-  pubkey?: string;
-  supported_nips?: number[];
-  name?: string;
-}
-
-/**
- * Startup fail-fast health-check: verifies the bot key is the `groups_relay` admin
- * and can create/publish (Task 08 Req 1, plan §6.4 / D7). Relay-gated (worker mode
- * removed — see `deworker-plan.md`): runs only when a relay is configured; with no
- * relay the writer is dormant, so there is nothing to verify and the check is
- * skipped (the API still boots).
- *
- * On bootstrap it:
- *  1. derives the bot pubkey from the relay writer (already decoded from
- *     `TG_BOT_NSEC`; the nsec is NEVER logged, §10);
- *  2. obtains the relay's advertised admin pubkey — primary: the NIP-11
- *     relay-info `pubkey` (fetched over `TG_RELAY_URL` with
- *     `Accept: application/nostr+json`; ws→http); fallback: the
- *     `TG_RELAY_ADMIN_PUBKEY` env when NIP-11 omits `pubkey`;
- *  3. asserts bot-pubkey == relay-admin-pubkey;
- *  4. confirms publish authority via a disposable `9007`(+`9008`) probe under a
- *     reserved health `h`-tag, expecting an OK / benign already-exists;
- *  5. THROWS on any failure → crashes the worker container, naming the abuse
- *     vector ({@link ABUSE_VECTOR_NOTE}) in the log.
- *
- * ### Spike outcome (recorded)
- * `groups_relay` DOES advertise its admin pubkey via NIP-11 (`RelayInfo.pubkey`,
- * `server.rs:82–91`; `supported_nips: [1,9,11,29,40,42,70]`). The NIP-11 path is
- * therefore primary; the `TG_RELAY_ADMIN_PUBKEY` config fallback exists only
- * for relays that omit `pubkey`.
+ * Background startup diagnostic for relay identity and group publishing. The
+ * writer independently verifies admin identity before becoming healthy on every
+ * connection, so an identity mismatch pauses publishing without blocking the API.
  */
 @Injectable()
 export class RelayAdminHealthService implements OnApplicationBootstrap {
@@ -116,84 +69,14 @@ export class RelayAdminHealthService implements OnApplicationBootstrap {
    * the lifecycle hook) so it is directly unit/integration testable.
    */
   async verify(): Promise<void> {
-    const botPubkey = normalizePubkey(this.relay.pubkey);
-    if (!botPubkey) {
-      this.fail('bot pubkey is missing or not 64-hex (check TG_BOT_NSEC)');
-    }
+    await verifyRelayAdminIdentity(this.config, this.relay.pubkey);
 
-    // 1) bot pubkey == relay admin pubkey -----------------------------------
-    const relayAdmin = await this.resolveRelayAdminPubkey();
-    if (!relayAdmin) {
-      this.fail(
-        'could not determine the relay admin pubkey: the NIP-11 relay-info ' +
-          `served no "pubkey" and ${RELAY_ADMIN_PUBKEY_ENV} is unset`,
-      );
-    }
-    if (relayAdmin !== botPubkey) {
-      this.fail(
-        `bot key is NOT the relay admin: bot=${short(botPubkey)} ` +
-          `relay-admin=${short(relayAdmin)}`,
-      );
-    }
-
-    // 2) can create/publish (disposable probe) ------------------------------
     await this.verifyCanPublish();
 
     this.logger.log(
-      `relay-admin health OK: bot ${short(botPubkey)} is the groups_relay admin ` +
+      `relay-admin health OK: bot ${short(this.relay.pubkey)} is the groups_relay admin ` +
         `and can publish`,
     );
-  }
-
-  /**
-   * Resolve the relay's admin pubkey: NIP-11 `pubkey` first, then the
-   * `TG_RELAY_ADMIN_PUBKEY` env fallback. Returns normalized hex or
-   * `undefined` if neither is available/parseable.
-   */
-  private async resolveRelayAdminPubkey(): Promise<string | undefined> {
-    const fromNip11 = await this.fetchNip11AdminPubkey();
-    if (fromNip11) {
-      return fromNip11;
-    }
-    const fromEnv = normalizePubkey(process.env[RELAY_ADMIN_PUBKEY_ENV]);
-    if (fromEnv) {
-      this.logger.warn(
-        `NIP-11 served no admin pubkey; falling back to ${RELAY_ADMIN_PUBKEY_ENV}`,
-      );
-      return fromEnv;
-    }
-    return undefined;
-  }
-
-  /**
-   * Fetch the NIP-11 relay-info document over HTTP(S) (ws→http) with
-   * `Accept: application/nostr+json` and return its normalized `pubkey`, or
-   * `undefined` if the relay omits it / the fetch fails (the env fallback then
-   * applies). Never throws — a fetch failure is not, on its own, fatal.
-   */
-  private async fetchNip11AdminPubkey(): Promise<string | undefined> {
-    const httpUrl = wsUrlToHttp(this.config.nostrRelayUrl);
-    if (!httpUrl) {
-      return undefined;
-    }
-    try {
-      const res = await fetch(httpUrl, {
-        headers: { Accept: 'application/nostr+json' },
-      });
-      if (!res.ok) {
-        this.logger.warn(`NIP-11 fetch returned HTTP ${res.status}`);
-        return undefined;
-      }
-      const info = (await res.json()) as Nip11RelayInfo;
-      const hex = normalizePubkey(info?.pubkey);
-      if (!hex) {
-        this.logger.warn('NIP-11 relay-info served no usable "pubkey"');
-      }
-      return hex ?? undefined;
-    } catch (e) {
-      this.logger.warn(`NIP-11 fetch failed: ${(e as Error)?.message ?? e}`);
-      return undefined;
-    }
   }
 
   /**
@@ -230,28 +113,6 @@ export class RelayAdminHealthService implements OnApplicationBootstrap {
     this.logger.error(message);
     throw new Error(message);
   }
-}
-
-/**
- * Convert a relay `ws://`/`wss://` URL to its `http://`/`https://` equivalent for
- * the NIP-11 fetch. Plain `http(s)://` passes through. Returns `undefined` for a
- * blank/garbage URL.
- */
-export function wsUrlToHttp(url: string | undefined): string | undefined {
-  if (!url || url.trim() === '') {
-    return undefined;
-  }
-  const trimmed = url.trim();
-  if (trimmed.startsWith('wss://')) {
-    return 'https://' + trimmed.slice('wss://'.length);
-  }
-  if (trimmed.startsWith('ws://')) {
-    return 'http://' + trimmed.slice('ws://'.length);
-  }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  return undefined;
 }
 
 /** Short pubkey for logs (never the nsec). */

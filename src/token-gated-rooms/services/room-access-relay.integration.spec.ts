@@ -52,7 +52,7 @@ run('balance → eligibility → real relay membership', () => {
     database = await createIsolatedSchema({
       entities: [Account, Token, CommunityRoom, RoomMembership, TokenBalance],
     });
-    writer = new RelayWriterService(config);
+    writer = new RelayWriterService(config, new EventEmitter2());
     await writer.onModuleInit();
   }, 30_000);
 
@@ -126,6 +126,7 @@ run('balance → eligibility → real relay membership', () => {
       emitter,
       new SchedulerRegistry(),
       config,
+      writer,
     );
     const sale = `ct_access_${randomUUID()}`;
     const token = `ct_token_${randomUUID()}`;

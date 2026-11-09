@@ -4,8 +4,12 @@ WORKDIR /src
 COPY . .
 # Private repository authentication exists only in this RUN's process environment.
 # Never write the token into a Git URL/configuration file or an image ENV layer.
+# Native dependencies also need a source-build fallback when a prebuilt binary
+# download fails. Keep the toolchain temporary, including during Git dependency
+# preparation inside npm ci.
 RUN --mount=type=secret,id=GITHUB_TOKEN,required=true \
-    export GIT_CONFIG_COUNT=3 \
+    apk add --no-cache --virtual .native-build-deps python3 make g++ \
+    && export GIT_CONFIG_COUNT=3 \
       GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf \
       GIT_CONFIG_VALUE_0=ssh://git@github.com/ \
       GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf \
@@ -13,7 +17,9 @@ RUN --mount=type=secret,id=GITHUB_TOKEN,required=true \
       GIT_CONFIG_KEY_2=http.https://github.com/.extraHeader \
       GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$(cat /run/secrets/GITHUB_TOKEN)" | base64 | tr -d '\n')" \
     && npm ci \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && apk del .native-build-deps \
+    && node -e "require('argon2')"
 RUN npm run build
 RUN npm prune --omit=dev
 

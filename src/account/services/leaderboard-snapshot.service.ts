@@ -17,6 +17,7 @@ import { timestampToAeHeight } from '@/utils/getBlochHeight';
 
 const WINDOWS: LeaderboardWindow[] = ['7d', '30d', 'all'];
 
+// An account holds one connection on either path.
 const PNL_CONCURRENCY = 8;
 // ~1 day of key blocks. PnL at a height only reads trades up to it, so points
 // this deep are reused across runs; nearer ones could still be reorged. Must
@@ -248,20 +249,24 @@ export class LeaderboardSnapshotService {
     const now = Date.now();
     const totals = new Map<string, PnlTotals>();
 
-    // Height-major, so concurrent workers query different accounts and a
-    // failing account is tried once instead of once per worker.
-    const queue: Array<[string, number]> = [];
-    for (const height of uniqueHeights) {
-      for (const address of addresses) {
+    const queue: Array<[string, number[]]> = [];
+    for (const address of addresses) {
+      const missing: number[] = [];
+      for (const height of uniqueHeights) {
         const cached = this.pnlCache.get(pnlKey(address, height));
         if (cached && now - cached.computedAt < PNL_CACHE_TTL_MS) {
           totals.set(pnlKey(address, height), cached.totals);
         } else {
-          queue.push([address, height]);
+          missing.push(height);
         }
+      }
+      if (missing.length) {
+        queue.push([address, missing]);
       }
     }
 
+    // Rollback switch: false restores one query per point.
+    const batched = process.env.LEADERBOARD_PNL_BATCH_ENABLED !== 'false';
     // One failing account skips its remaining points instead of failing the
     // run, so the rest of the leaderboard still refreshes.
     const failed = new Set<string>();
@@ -269,27 +274,28 @@ export class LeaderboardSnapshotService {
     await Promise.all(
       Array.from({ length: PNL_CONCURRENCY }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
-          const [address, height] = next;
-          if (failed.has(address)) {
-            continue;
-          }
+          const [address, missing] = next;
           try {
-            const pnlTotals = totalsOf(
-              await this.bclPnlService.calculateTokenPnls(address, height),
+            const points = await this.computePnlPoints(
+              address,
+              missing,
+              batched,
             );
-            totals.set(pnlKey(address, height), pnlTotals);
-            computed++;
-            if (height <= cacheableBelow) {
-              this.pnlCache.set(pnlKey(address, height), {
-                totals: pnlTotals,
-                computedAt: now,
-              });
+            for (const [height, pnlTotals] of points) {
+              totals.set(pnlKey(address, height), pnlTotals);
+              computed++;
+              if (height <= cacheableBelow) {
+                this.pnlCache.set(pnlKey(address, height), {
+                  totals: pnlTotals,
+                  computedAt: now,
+                });
+              }
             }
           } catch (e) {
             failed.add(address);
             this.logger.warn(
-              `Failed to compute PnL for ${address} at height ${height}: ` +
-                (e as Error).message,
+              `Failed to compute PnL for ${address} at ` +
+                `${missing.length} heights: ${(e as Error).message}`,
             );
           }
         }
@@ -303,6 +309,33 @@ export class LeaderboardSnapshotService {
       }
     }
     return { totals, computed, failed };
+  }
+
+  // The batch only pays off from two heights up; for one it runs an extra
+  // query and reads more.
+  private async computePnlPoints(
+    address: string,
+    heights: number[],
+    batched: boolean,
+  ): Promise<Array<[number, PnlTotals]>> {
+    if (batched && heights.length > 1) {
+      // One snapshot, as each point had alone: these results are cached.
+      const results = await this.bclPnlService.calculateTokenPnlsBatch(
+        address,
+        heights,
+        false,
+        true,
+      );
+      return heights.map((height) => [height, totalsOf(results.get(height)!)]);
+    }
+    const points: Array<[number, PnlTotals]> = [];
+    for (const height of heights) {
+      points.push([
+        height,
+        totalsOf(await this.bclPnlService.calculateTokenPnls(address, height)),
+      ]);
+    }
+    return points;
   }
 
   private async buildWindow(

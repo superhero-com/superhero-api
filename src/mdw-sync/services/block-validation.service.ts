@@ -72,7 +72,7 @@ export class BlockValidationService {
         `Validating and refreshing blocks from height ${startHeight} to ${endHeight}`,
       );
 
-      // Refetch blocks, microblocks, and transactions using BlockSyncService
+      // Refetch key blocks and transactions using BlockSyncService
       // Get transaction hashes grouped by block height that were just synced
       const syncedTxHashesByBlock = await this.blockSyncService.syncBlockRange(
         startHeight,

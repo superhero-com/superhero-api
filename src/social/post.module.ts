@@ -22,10 +22,12 @@ import { getPopularRankingContributorProvider } from '@/plugins';
 import { ProfileModule } from '@/profile/profile.module';
 import { TokensModule } from '@/tokens/tokens.module';
 import { AeModule } from '@/ae/ae.module';
+import { SocialGraphReadModule } from '@/plugins/social-graph/social-graph-read.module';
 
 @Module({
   imports: [
     ProfileModule,
+    SocialGraphReadModule,
     TokensModule,
     AeModule,
     TransactionsModule,

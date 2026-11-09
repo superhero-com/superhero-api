@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { setImmediate as yieldToEventLoop } from 'timers/promises';
 import { Transaction } from '@/transactions/entities/transaction.entity';
+
+// Walking a whale's tens of thousands of tokens otherwise stalls requests for
+// most of a second; about 20 ms of work fits in this many.
+const TOKENS_PER_EVENT_LOOP_TURN = 1000;
 
 export interface DailyPnlWindow {
   /** Unix epoch milliseconds — upper bound of the day window (exclusive) */
@@ -75,12 +80,16 @@ export class BclPnlService {
    * @param blockHeights - Block heights to calculate PNL at
    * @param includeTokenPnls - false leaves `pnls` empty and computes just
    * the totals
+   * @param consistentSnapshot - true reads trades and prices from one database
+   * snapshot on one connection, one after the other. Slower for one account;
+   * use it where a result outlives the request.
    * @returns Map from block height to its TokenPnlResult
    */
   async calculateTokenPnlsBatch(
     address: string,
     blockHeights: number[],
     includeTokenPnls = true,
+    consistentSnapshot = false,
   ): Promise<Map<number, TokenPnlResult>> {
     const uniqueHeights = [...new Set(blockHeights)];
     if (uniqueHeights.length === 0) {
@@ -93,19 +102,11 @@ export class BclPnlService {
     const sortedHeights = [...uniqueHeights].sort((a, b) => a - b);
     const minHeight = sortedHeights[0];
     const maxHeight = sortedHeights[sortedHeights.length - 1];
-    const [tradeRows, priceRows] = await Promise.all([
-      this.transactionRepository.query(this.buildCumulativeTradeTotalsQuery(), [
-        address,
-        maxHeight,
-        minHeight,
-      ]),
-      this.transactionRepository.query(this.buildPricePointsQuery(), [
-        address,
-        maxHeight,
-        minHeight,
-        sortedHeights,
-      ]),
-    ]);
+    const tradeParams = [address, maxHeight, minHeight];
+    const priceParams = [address, maxHeight, minHeight, sortedHeights];
+    const [tradeRows, priceRows] = consistentSnapshot
+      ? await this.queryTradesAndPricesInOneSnapshot(tradeParams, priceParams)
+      : await this.queryTradesAndPricesInParallel(tradeParams, priceParams);
 
     return this.mapCumulativeTokenPnlsBatch(
       tradeRows,
@@ -114,6 +115,47 @@ export class BclPnlService {
       sortedHeights,
       includeTokenPnls,
     );
+  }
+
+  private queryTradesAndPricesInOneSnapshot(
+    tradeParams: unknown[],
+    priceParams: unknown[],
+  ): Promise<Array<Array<Record<string, any>>>> {
+    return this.transactionRepository.manager.transaction(
+      'REPEATABLE READ',
+      async (manager) => [
+        await manager.query(
+          this.buildCumulativeTradeTotalsQuery(),
+          tradeParams,
+        ),
+        await manager.query(this.buildPricePointsQuery(), priceParams),
+      ],
+    );
+  }
+
+  private async queryTradesAndPricesInParallel(
+    tradeParams: unknown[],
+    priceParams: unknown[],
+  ): Promise<Array<Array<Record<string, any>>>> {
+    // Settles both before failing: a caller limiting its connections would
+    // otherwise start more work while the other query still holds one.
+    const [trades, prices] = await Promise.allSettled([
+      this.transactionRepository.query(
+        this.buildCumulativeTradeTotalsQuery(),
+        tradeParams,
+      ),
+      this.transactionRepository.query(
+        this.buildPricePointsQuery(),
+        priceParams,
+      ),
+    ]);
+    if (trades.status === 'rejected') {
+      throw trades.reason;
+    }
+    if (prices.status === 'rejected') {
+      throw prices.reason;
+    }
+    return [trades.value, prices.value];
   }
 
   /**
@@ -497,13 +539,13 @@ export class BclPnlService {
     `;
   }
 
-  private mapCumulativeTokenPnlsBatch(
+  private async mapCumulativeTokenPnlsBatch(
     tradeRows: Array<Record<string, any>>,
     priceRows: Array<Record<string, any>>,
     uniqueHeights: number[],
     sortedHeights: number[],
     includeTokenPnls: boolean,
-  ): Map<number, TokenPnlResult> {
+  ): Promise<Map<number, TokenPnlResult>> {
     // Both queries return rows ordered by sale_address, then height.
     const groupBySale = (rows: Array<Record<string, any>>) => {
       const groups = new Map<string, Array<Record<string, any>>>();
@@ -533,7 +575,11 @@ export class BclPnlService {
       });
     }
 
+    let walked = 0;
     for (const [saleAddress, trades] of tradesBySale.entries()) {
+      if (++walked % TOKENS_PER_EVENT_LOOP_TURN === 0) {
+        await yieldToEventLoop();
+      }
       const prices = pricesBySale.get(saleAddress) ?? [];
       let tradeIndex = -1;
       let priceIndex = 0;

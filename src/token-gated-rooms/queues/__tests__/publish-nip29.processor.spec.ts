@@ -194,6 +194,7 @@ describe('PublishNip29Processor', () => {
     expect(job.discard).toHaveBeenCalledTimes(1);
     expect(emitted).toHaveLength(1);
     expect(emitted[0].payload.ok).toBe(false);
+    expect(queue.pause).toHaveBeenCalledTimes(1);
   });
 
   it('terminal "…was deleted" reject: discards (no retry), throws TerminalPublishError, ack ok:false', async () => {
@@ -210,6 +211,7 @@ describe('PublishNip29Processor', () => {
     );
     expect(job.discard).toHaveBeenCalledTimes(1);
     expect(emitted[0].payload.ok).toBe(false);
+    expect(queue.pause).not.toHaveBeenCalled();
   });
 
   it('"Group not found" on a 9000 add: discards (no retry), emits TGR_GROUP_MISSING + ack ok:false', async () => {

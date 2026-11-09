@@ -13,12 +13,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { Between, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
-import { MicroBlock } from '../entities/micro-block.entity';
 import { Tx } from '../entities/tx.entity';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
-import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
 import { isSelfTransferTx } from '../utils/common';
 import { toMdwTx } from '../utils/to-mdw-tx';
@@ -32,11 +30,8 @@ export class BlockSyncService {
     private txRepository: Repository<Tx>,
     @InjectRepository(KeyBlock)
     private blockRepository: Repository<KeyBlock>,
-    @InjectRepository(MicroBlock)
-    private microBlockRepository: Repository<MicroBlock>,
     private configService: ConfigService,
     private pluginBatchProcessor: PluginBatchProcessorService,
-    private microBlockService: MicroBlockService,
   ) {}
 
   async syncBlocks(startHeight: number, endHeight: number): Promise<void> {
@@ -91,80 +86,6 @@ export class BlockSyncService {
       }
       this.logger.debug(
         `Synced ${blocksToSave.length} blocks (${startHeight}-${endHeight})`,
-      );
-    }
-  }
-
-  async syncMicroBlocks(startHeight: number, endHeight: number): Promise<void> {
-    // Get all key-blocks in the height range
-    const keyBlocks = await runWithDatabaseIssueLogging({
-      logger: this.logger,
-      stage: 'key-block lookup for micro-block sync',
-      context: {
-        startHeight,
-        endHeight,
-      },
-      operation: () =>
-        this.blockRepository.find({
-          where: {
-            height: Between(startHeight, endHeight) as any,
-          },
-        }),
-    });
-
-    if (keyBlocks.length === 0) {
-      return;
-    }
-
-    const microBlocksToSave: Partial<MicroBlock>[] = [];
-
-    // Process key-blocks in parallel batches (3-4 at a time)
-    const parallelBatchSize = this.configService.get<number>(
-      'mdw.microBlocksParallelBatchSize',
-      4,
-    );
-    for (let i = 0; i < keyBlocks.length; i += parallelBatchSize) {
-      const batch = keyBlocks.slice(i, i + parallelBatchSize);
-
-      // Fetch micro-blocks for multiple key-blocks concurrently
-      // Use Promise.all to fail fast on any error
-      const batchPromises = batch.map((keyBlock) =>
-        this.microBlockService.fetchMicroBlocksForKeyBlock(keyBlock.hash),
-      );
-
-      const batchResults = await Promise.all(batchPromises);
-
-      // Collect results from all batches
-      for (const result of batchResults) {
-        microBlocksToSave.push(...result);
-      }
-    }
-
-    // Batch upsert all micro-blocks (split into smaller batches to avoid PostgreSQL parameter limits)
-    // Using upsert to handle duplicate key violations gracefully during parallel processing
-    if (microBlocksToSave.length > 0) {
-      const saveBatchSize = 1000; // Safe batch size for PostgreSQL
-      for (let i = 0; i < microBlocksToSave.length; i += saveBatchSize) {
-        const batch = microBlocksToSave.slice(i, i + saveBatchSize);
-        await runWithDatabaseIssueLogging({
-          logger: this.logger,
-          stage: 'micro-block upsert',
-          context: {
-            startHeight,
-            endHeight,
-            keyBlockCount: keyBlocks.length,
-            batchStart: i,
-            batchSize: batch.length,
-          },
-          operation: () =>
-            this.microBlockRepository.upsert(batch, {
-              conflictPaths: ['hash'],
-              skipUpdateIfNoValuesChanged: true,
-            }),
-        });
-      }
-      this.logger.debug(
-        `Synced ${microBlocksToSave.length} micro-blocks for ${keyBlocks.length} key-blocks (${startHeight}-${endHeight})`,
       );
     }
   }
@@ -405,7 +326,7 @@ export class BlockSyncService {
   }
 
   /**
-   * Sync a single block range (blocks, micro-blocks, and transactions)
+   * Sync a single block range (key blocks and transactions)
    * Returns a Map of block heights to transaction hashes that were synced
    */
   async syncBlockRange(
@@ -415,7 +336,6 @@ export class BlockSyncService {
     collectHashes = !backward,
   ): Promise<Map<number, string[]>> {
     await this.syncBlocks(startHeight, endHeight);
-    await this.syncMicroBlocks(startHeight, endHeight);
     return this.syncTransactions(
       startHeight,
       endHeight,

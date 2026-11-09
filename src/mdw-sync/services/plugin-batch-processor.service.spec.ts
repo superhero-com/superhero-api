@@ -3,12 +3,7 @@ import { Tx } from '../entities/tx.entity';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { PluginRegistryService } from './plugin-registry.service';
 
-/**
- * Dedicated coverage for the predicate-aggregation logic that decides whether
- * a transaction should be persisted at all. The processBatch / reorg paths
- * are covered elsewhere; here we only care about the pre-save gate.
- */
-describe('PluginBatchProcessorService filtering', () => {
+describe('PluginBatchProcessorService', () => {
   const buildPlugin = (name: string, filters: PluginFilter[]): Plugin =>
     ({
       name,
@@ -171,7 +166,6 @@ describe('PluginBatchProcessorService filtering', () => {
       const failedTransactionService = {
         recordFailure: jest.fn().mockResolvedValue(undefined),
         clearFailures: jest.fn().mockResolvedValue(undefined),
-        clearFailuresForTxs: jest.fn().mockResolvedValue(undefined),
       } as any;
       const pluginSyncStateRepository = {
         findOne: jest.fn().mockResolvedValue({
@@ -319,19 +313,80 @@ describe('PluginBatchProcessorService filtering', () => {
         ['th_ok'],
       );
     });
+  });
+
+  describe('handleReorg', () => {
+    const reorgPlugin = (
+      name: string,
+      onReorg: jest.Mock = jest.fn().mockResolvedValue(undefined),
+    ) => ({ name, onReorg }) as unknown as Plugin & { onReorg: jest.Mock };
+
+    const setupReorg = (plugins: Plugin[]) => {
+      const failedTransactionService = {
+        clearFailuresForTxs: jest.fn().mockResolvedValue(undefined),
+      };
+      const service = new PluginBatchProcessorService(
+        {
+          getPlugins: jest.fn(() => plugins),
+        } as unknown as PluginRegistryService,
+        failedTransactionService as any,
+        {} as any,
+      );
+      return { service, failedTransactionService };
+    };
+
+    it('does nothing for an empty hash list', async () => {
+      const plugin = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([plugin]);
+
+      await service.handleReorg([]);
+
+      expect(plugin.onReorg).not.toHaveBeenCalled();
+      expect(
+        failedTransactionService.clearFailuresForTxs,
+      ).not.toHaveBeenCalled();
+    });
 
     it('clears parked rows of reorged-out transactions', async () => {
-      const plugin = {
-        ...buildProcessingPlugin('bcl', jest.fn()),
-        onReorg: jest.fn().mockResolvedValue(undefined),
-      } as unknown as Plugin;
-      const { service, failedTransactionService } = setupProcessing(plugin);
+      const plugin = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([plugin]);
 
       await service.handleReorg(['th_gone']);
 
       expect(plugin.onReorg).toHaveBeenCalledWith(['th_gone']);
       expect(failedTransactionService.clearFailuresForTxs).toHaveBeenCalledWith(
         ['th_gone'],
+      );
+    });
+
+    it('notifies the other plugins and clears parked rows when one plugin throws', async () => {
+      const failing = reorgPlugin(
+        'social-graph',
+        jest.fn().mockRejectedValue(new Error('pool timeout')),
+      );
+      const dex = reorgPlugin('dex');
+      const bcl = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([
+        failing,
+        dex,
+        bcl,
+      ]);
+      const logError = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.handleReorg(['th_gone'])).resolves.toBeUndefined();
+
+      expect(dex.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(bcl.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(failedTransactionService.clearFailuresForTxs).toHaveBeenCalledWith(
+        ['th_gone'],
+      );
+      // Without the catch, allSettled would drop the error silently; the log
+      // is the only trace of the data the failing plugin left behind.
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('[social-graph]'),
+        expect.any(Error),
       );
     });
   });

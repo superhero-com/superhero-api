@@ -12,12 +12,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LIVE_TX_EVENT } from '../events';
 import { KeyBlock } from '../entities/key-block.entity';
-import { MicroBlock } from '../entities/micro-block.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { WebSocketService } from '@/ae/websocket.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
-import { MicroBlockService } from './micro-block.service';
 import { SyncDirectionEnum } from '../types/sync-direction';
 import { isSelfTransferTx } from '../utils/common';
 import { toMdwTx } from '../utils/to-mdw-tx';
@@ -34,14 +32,11 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
     private txRepository: Repository<Tx>,
     @InjectRepository(KeyBlock)
     private blockRepository: Repository<KeyBlock>,
-    @InjectRepository(MicroBlock)
-    private microBlockRepository: Repository<MicroBlock>,
     @InjectRepository(SyncState)
     private syncStateRepository: Repository<SyncState>,
     private configService: ConfigService,
     private websocketService: WebSocketService,
     private pluginBatchProcessor: PluginBatchProcessorService,
-    private microBlockService: MicroBlockService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -149,37 +144,12 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
         },
       );
 
-      // Fetch and save micro-blocks for this key block
-      await this.fetchAndSaveMicroBlocks(keyBlockHeader.hash);
-
       this.logger.debug(
         `Live sync: saved key block ${keyBlockHeader.hash} at height ${keyBlockHeader.height}`,
       );
     } catch (error: any) {
       this.logger.error(
         `Failed to handle key block ${keyBlockHeader.hash}`,
-        error,
-      );
-    }
-  }
-
-  private async fetchAndSaveMicroBlocks(keyBlockHash: string): Promise<void> {
-    try {
-      const microBlocks =
-        await this.microBlockService.fetchMicroBlocksForKeyBlock(keyBlockHash);
-
-      if (microBlocks.length > 0) {
-        await this.microBlockRepository.upsert(microBlocks, {
-          conflictPaths: ['hash'],
-          skipUpdateIfNoValuesChanged: true,
-        });
-        this.logger.debug(
-          `Live sync: saved ${microBlocks.length} micro-blocks for key block ${keyBlockHash}`,
-        );
-      }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to fetch micro-blocks for key block ${keyBlockHash}`,
         error,
       );
     }

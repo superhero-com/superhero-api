@@ -56,7 +56,6 @@ const setup = () => {
     save: jest.fn(),
   } as any;
   const blockRepository = { upsert: jest.fn() } as any;
-  const microBlockRepository = { upsert: jest.fn() } as any;
   const syncStateRepository = { update: jest.fn() } as any;
   const configService = {
     get: jest.fn((key: string) =>
@@ -73,20 +72,15 @@ const setup = () => {
     isRelevantTransaction: jest.fn(),
     processBatch: jest.fn(),
   } as any;
-  const microBlockService = {
-    fetchMicroBlocksForKeyBlock: jest.fn().mockResolvedValue([]),
-  } as any;
   const eventEmitter = { emit: jest.fn() } as any;
 
   const service = new LiveIndexerService(
     txRepository,
     blockRepository,
-    microBlockRepository,
     syncStateRepository,
     configService,
     websocketService,
     pluginBatchProcessor,
-    microBlockService,
     eventEmitter,
   );
   const loggerError = jest
@@ -100,13 +94,11 @@ const setup = () => {
     service,
     txRepository,
     blockRepository,
-    microBlockRepository,
     syncStateRepository,
     websocketService,
     unsubscribeTransactions,
     unsubscribeKeyBlocks,
     pluginBatchProcessor,
-    microBlockService,
     eventEmitter,
     loggerError,
   };
@@ -337,21 +329,16 @@ describe('LiveIndexerService.handleKeyBlock', () => {
     info: 'cb_info',
     flags: 'ba_flags',
   };
-  const microBlocks = [
-    { hash: 'mh_1', height: 900 },
-    { hash: 'mh_2', height: 900 },
-  ];
-
-  it('upserts the full key block by height, advances the sync state, then stores its micro-blocks', async () => {
+  it('upserts the full key block by height and advances the sync state', async () => {
     const ctx = setup();
     fetchJson.mockResolvedValueOnce(fullBlock);
-    ctx.microBlockService.fetchMicroBlocksForKeyBlock.mockResolvedValueOnce(
-      microBlocks,
-    );
 
     await ctx.service.handleKeyBlock(header);
 
-    expect(fetchJson).toHaveBeenCalledWith(`${MDW_URL}/v3/key-blocks/kh_live`);
+    // The key block is the only middleware request: micro blocks are not stored.
+    expect(fetchJson.mock.calls).toEqual([
+      [`${MDW_URL}/v3/key-blocks/kh_live`],
+    ]);
     // Exact options: skipUpdateIfNoValuesChanged makes Postgres compare jsonb
     // with "=", which it cannot do.
     expect(ctx.blockRepository.upsert).toHaveBeenCalledWith(
@@ -362,27 +349,10 @@ describe('LiveIndexerService.handleKeyBlock', () => {
       { id: 'global' },
       { live_synced_height: 900, tip_height: 900 },
     );
-    expect(
-      ctx.microBlockService.fetchMicroBlocksForKeyBlock,
-    ).toHaveBeenCalledWith('kh_live');
-    expect(ctx.microBlockRepository.upsert).toHaveBeenCalledWith(microBlocks, {
-      conflictPaths: ['hash'],
-      skipUpdateIfNoValuesChanged: true,
-    });
     expect(ctx.blockRepository.upsert.mock.invocationCallOrder[0]).toBeLessThan(
       ctx.syncStateRepository.update.mock.invocationCallOrder[0],
     );
     expect(ctx.loggerError).not.toHaveBeenCalled();
-  });
-
-  it('skips the micro-block upsert when the key block has none', async () => {
-    const ctx = setup();
-    fetchJson.mockResolvedValueOnce(fullBlock);
-
-    await ctx.service.handleKeyBlock(header);
-
-    expect(ctx.syncStateRepository.update).toHaveBeenCalledTimes(1);
-    expect(ctx.microBlockRepository.upsert).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -402,9 +372,6 @@ describe('LiveIndexerService.handleKeyBlock', () => {
 
     expect(ctx.blockRepository.upsert).not.toHaveBeenCalled();
     expect(ctx.syncStateRepository.update).not.toHaveBeenCalled();
-    expect(
-      ctx.microBlockService.fetchMicroBlocksForKeyBlock,
-    ).not.toHaveBeenCalled();
     expect(ctx.loggerError).toHaveBeenCalledWith(
       'Failed to handle key block kh_live',
       expect.any(Error),
@@ -424,45 +391,4 @@ describe('LiveIndexerService.handleKeyBlock', () => {
       expect.any(Error),
     );
   });
-
-  it.each([
-    [
-      'fetched',
-      (ctx: ReturnType<typeof setup>) =>
-        ctx.microBlockService.fetchMicroBlocksForKeyBlock.mockRejectedValueOnce(
-          new Error('mdw timeout'),
-        ),
-    ],
-    [
-      'saved',
-      (ctx: ReturnType<typeof setup>) => {
-        ctx.microBlockService.fetchMicroBlocksForKeyBlock.mockResolvedValueOnce(
-          microBlocks,
-        );
-        ctx.microBlockRepository.upsert.mockRejectedValueOnce(
-          new Error('db is down'),
-        );
-      },
-    ],
-  ])(
-    'keeps the saved key block when its micro-blocks cannot be %s',
-    async (_label, arrange) => {
-      const ctx = setup();
-      fetchJson.mockResolvedValueOnce(fullBlock);
-      arrange(ctx);
-
-      await expect(ctx.service.handleKeyBlock(header)).resolves.toBeUndefined();
-
-      expect(ctx.blockRepository.upsert).toHaveBeenCalledTimes(1);
-      expect(ctx.syncStateRepository.update).toHaveBeenCalledTimes(1);
-      expect(ctx.loggerError).toHaveBeenCalledWith(
-        'Failed to fetch micro-blocks for key block kh_live',
-        expect.any(Error),
-      );
-      expect(ctx.loggerError).not.toHaveBeenCalledWith(
-        'Failed to handle key block kh_live',
-        expect.anything(),
-      );
-    },
-  );
 });
