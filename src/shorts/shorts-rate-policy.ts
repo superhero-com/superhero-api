@@ -67,7 +67,6 @@ export const SHORTS_HTTP_POLICY: Record<string, ShortsHttpPolicy> = {
   ingestionHealth: { group: 'operator', private: true },
   lifecycleHealth: { group: 'operator', private: true },
   measurementHealth: { group: 'operator', private: true },
-  reconcileAccounting: { group: 'operator', private: true },
   moderate: { group: 'operator', private: true },
   startUpload: { group: 'uploadStart', private: true },
   uploadStatus: { group: 'studio', private: true },

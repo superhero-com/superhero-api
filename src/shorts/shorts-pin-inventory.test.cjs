@@ -6,7 +6,7 @@ const {
   ShortsHlsInventory,
   ShortsAdaptiveInventory,
   ShortsPinInventory,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -107,12 +107,12 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
   await owner.transaction(db => new ShortsDeliveryPackages().up(db));
   const args=[scope.network,scope.contract];await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[...args,sourceHash]);
-  await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,phase,reference_version) VALUES($1,$2,$3,$4,$4,'test','complete',3)`,[...args,hlsRun,sourceHash]);
+  await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,phase,reference_version) VALUES($1,$2,$3,$4,$4,'test','complete',5)`,[...args,hlsRun,sourceHash]);
   for(const [resource,cid,sourceKey,holds] of [['video-1',sourceCid,'b'.repeat(64),1],['video-2',directCid,'c'.repeat(64),0],['missing','b'+'c'.repeat(58),'d'.repeat(64),0]]){
     await owner.query(`INSERT INTO shorts_hls_inventory_roots(network,contract,run_id,resource_id,source_cid,source_key,active_holds,reasons) VALUES($1,$2,$3,$4,$5,$6,$7,'[]')`,[...args,hlsRun,resource,cid,sourceKey,holds]);
   }
   await owner.query(`UPDATE shorts_hls_inventory_roots SET pins=$4::jsonb WHERE network=$1 AND contract=$2 AND run_id=$3 AND resource_id='video-1'`,[...args,hlsRun,JSON.stringify([{kind:'original',cid:sourceCid,bytes:100},{kind:'inputs',cid:inputsCid,bytes:100},{kind:'inputs',cid:missingInputsCid,bytes:100},{kind:'assets',cid:assetsCid,bytes:100},{kind:'assets',cid:missingAssetsCid,bytes:100},{kind:'hls',cid:acknowledgedCid,bytes:100}])]);
-  for(const key of ['b'.repeat(64),'c'.repeat(64)])await owner.query(`INSERT INTO shorts_hls_inventory_entries(network,contract,run_id,source_key,cid,metadata_hash,bytes,files) VALUES($1,$2,$3,$4,$5,$4,100,'[{},{},{}]')`,[...args,hlsRun,key,hlsCid]);
+  for(const key of ['b'.repeat(64),'c'.repeat(64)])await owner.query(`INSERT INTO shorts_hls_inventory_entries(network,contract,run_id,source_key,cid,metadata_hash,bytes,files) VALUES($1,$2,$3,$4,$5,$4,100,'[{},{},{},{},{},{},{}]')`,[...args,hlsRun,key,hlsCid]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;
   await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_delivery_packages','shorts_retention_holds','shorts_hls_inventory_runs','shorts_hls_inventory_roots','shorts_hls_inventory_entries'].map(x=>`${schema}.${x}`).join(',')} TO ${role};
     GRANT SELECT,INSERT,UPDATE ON ${schema}.shorts_pin_inventory_runs TO ${role};GRANT SELECT,INSERT ON ${schema}.shorts_pin_inventory_entries TO ${role}`);
@@ -128,7 +128,7 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   const run=randomUUID();
   await t.test('real stream completion, capacity, shared holds and missing recursive roots',async()=>{
     const result=await s.scan(run,hlsRun);assert.equal(result.pinTraversalComplete,true);assert.ok(Number(result.pins)>=106);assert.ok(Number(result.batches)>=4);assert.ok(BigInt(result.capacityAfter.repoBytes)>0n);
-    assert.equal(result.consistentSnapshot,false);assert.equal(result.deletionEnabled,false);assert.equal(result.blocksVerified,false);assert.equal(result.referenceVersion,3);assert.equal(result.referenceCoverage,'original-and-acknowledged-delivery-inventory');
+    assert.equal(result.consistentSnapshot,false);assert.equal(result.deletionEnabled,false);assert.equal(result.blocksVerified,false);assert.equal(result.referenceVersion,5);assert.equal(result.referenceCoverage,'original-and-acknowledged-generation-inventory');
     const rows=[];let page;do{page=await s.entries(run,page?.next||'',25);rows.push(...page.items);}while(page.next);
     assert.equal(rows.find(x=>x.cid===sourceCid).classification,'held');assert.equal(rows.find(x=>x.cid===hlsCid).classification,'held');assert.equal(rows.find(x=>x.cid===hlsCid).packageReferences,'2');
     assert.equal(rows.find(x=>x.cid===inputsCid).classification,'held');assert.equal(rows.find(x=>x.cid===inputsCid).derivativeReferences,'1');assert.equal(rows.find(x=>x.cid===inputsCid).sourceReferences,'0');

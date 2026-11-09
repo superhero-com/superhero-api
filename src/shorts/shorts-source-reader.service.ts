@@ -1,6 +1,6 @@
 import {
   shortsSourceLimit,
-  SHORTS_LEGACY_UPLOAD_BYTES,
+  SHORTS_BUFFERED_SOURCE_MAX_BYTES,
   SHORTS_SOURCE_MANIFEST_BYTES,
 } from './shorts-upload-policy';
 import { BadRequestException, Injectable } from '@nestjs/common';
@@ -142,7 +142,7 @@ export class ShortsSourceReaderService {
     job: Pick<IngestionJob, 'id' | 'creator' | 'input'>,
     signal?: AbortSignal,
   ): Promise<Buffer> {
-    if (job.input.bytes > SHORTS_LEGACY_UPLOAD_BYTES)
+    if (job.input.bytes > SHORTS_BUFFERED_SOURCE_MAX_BYTES)
       throw new BadRequestException(
         'Large originals require the bounded file reader',
       );

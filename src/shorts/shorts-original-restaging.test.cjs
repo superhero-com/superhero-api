@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsDeliveryStaging: Migration,
 } = schemaMigrations;
@@ -88,7 +88,7 @@ test('pinned-original restaging reserves before writes, resumes partial transfer
   });
   server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  media = new ShortsMediaService({}, undefined, { shared: true }, undefined, { acquire: async () => {
+  media = new ShortsMediaService({}, undefined, { shared: true }, { acquire: async () => {
     activeTransfers++; return { signal: new AbortController().signal, release: async () => { activeTransfers--; } };
   } }, scratch);
   media.api = `http://127.0.0.1:${server.address().port}/api/v0`;

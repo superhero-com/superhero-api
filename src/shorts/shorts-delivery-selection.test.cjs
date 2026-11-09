@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsDeliverySelection: Migration,
 } = schemaMigrations;
@@ -35,15 +35,11 @@ test('delivery selection is atomic, reversible, scoped and independent of canoni
       'ShortsHlsInventory', 'ShortsPinInventory', 'ShortsWorkerBackpressure',
       'ShortsUploadBudget', 'ShortsOriginalContent', 'ShortsAdaptiveInventory',
       'ShortsDeliveryPackages', 'ShortsDeliveryGenerations',
-      'ShortsGenerationDeliveryPackages', 'ShortsDeliveryStaging',
-      'ShortsLegacyDeliveryPackages'])
+      'ShortsGenerationDeliveryPackages', 'ShortsDeliveryStaging'])
       await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));
-  for (const name of ['ShortsLegacyDeliverySources', 'ShortsLegacyDeliverySelection'])
-    await owner.transaction(db => new schemaMigrations[name]().up(db));
-
   const original = { ...structuredClone(golden.descriptor), creator: 'ak_creator', title: 'Original title', topic: 'Art', duration: 4,
     publication: 'published', moderation: 'approved', safety: { status: 'no_flags', sourceSha256: golden.descriptor.original.sha256 },
     createdAt: 1, reports: 0, views: ['original-view'], likes: 42 };

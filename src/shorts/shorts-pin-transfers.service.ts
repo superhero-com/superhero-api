@@ -14,7 +14,7 @@ import { DataSource } from 'typeorm';
 import { ShortsDatabaseService } from './shorts-database.service';
 import { ShortsScope } from './shorts-metadata.service';
 
-export type PinPurpose = 'original' | 'assets' | 'inputs' | 'legacy' | 'hls';
+export type PinPurpose = 'original' | 'assets' | 'inputs' | 'hls';
 export interface PinTransferBinding {
   cid: string;
   jobId: string;
@@ -87,9 +87,7 @@ export class ShortsPinTransfersService {
     if (
       !/^b[a-z2-7]{20,118}$/.test(binding.cid) ||
       !/^[a-zA-Z0-9_-]{1,200}$/.test(binding.jobId) ||
-      !['original', 'assets', 'inputs', 'legacy', 'hls'].includes(
-        binding.purpose,
-      ) ||
+      !['original', 'assets', 'inputs', 'hls'].includes(binding.purpose) ||
       (binding.purpose === 'hls'
         ? !/^[a-f0-9]{64}$/.test(binding.sourceKey || '')
         : binding.sourceKey !== undefined)

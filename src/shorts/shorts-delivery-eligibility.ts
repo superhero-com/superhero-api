@@ -41,22 +41,11 @@ export function assertDeliveryEligible(
     candidate.safety.sourceSha256 !== source.sha256 ||
     candidate.bytes !== source.bytes ||
     candidate.original.sha256 !== source.sha256 ||
-    (source.kind === 'published-file' &&
-      (candidate.cid !== original.cid ||
-        candidate.original.mediaType !== original.original.mediaType)) ||
+    candidate.cid !== original.cid ||
+    candidate.original.mediaType !== original.original.mediaType ||
     JSON.stringify(metadata(original)) !==
       JSON.stringify(metadata(candidate)) ||
     JSON.stringify(captions(original)) !== JSON.stringify(captions(candidate))
   )
     throw new NotFoundException('Delivery generation is not eligible');
-}
-
-/** Original-only lifecycle operations must not inherit legacy selection authority. */
-export function assertOriginalDeliveryEligible(
-  original: ShortRecord,
-  candidate: ShortRecord,
-) {
-  if (!validateOriginalContent(original))
-    throw new NotFoundException('Original delivery required');
-  return assertDeliveryEligible(original, candidate);
 }

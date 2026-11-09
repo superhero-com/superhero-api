@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsPrivateInputRetirement: Migration,
 } = schemaMigrations;
@@ -193,7 +193,7 @@ test('private retirement binds authenticated source references without deleting 
       [...args, original.parts[0].object]);
     await assert.rejects(commit(proof), /references changed/);
     const current = await snapshot(); assert.notEqual(current.rootHash, proof.rootHash);
-    await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'other-upload',$3,'{"bytes":1}')`, [...scopeArgs, base.creator]);
+    await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'other-upload',$3,'{"bytes":1,"processingProfile":"original-h264-v1"}')`, [...scopeArgs, base.creator]);
     assert.equal((await snapshot()).rootHash, current.rootHash);
   });
   await t.test('SQL authenticates exact manifest bytes and rejects stale roots, missing parts and cross-scope references', async () => {

@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 const { AccountMemory, encode, Encoding } = require('@aeternity/aepp-sdk');
 const { shortsContractPolicy } = require('./shorts-contract-policy');
 const { ShortsCommentsService } = require('./shorts-comments.service');
-const { ShortsLegacyImportService } = require('./shorts-legacy-import.service');
 const { ShortsAuthService } = require('./shorts-auth.service');
 const { shortsRuntimeScope, shortsStorageScope, shortsStorageSourceHash } = require('./shorts-runtime-scope');
 const { shortsRelease } = require('./shorts-release');
@@ -35,12 +34,13 @@ test('compact free policy reads without economics fields while partial and unkno
   assert.equal(shortsContractPolicy([owner, owner, 1n, 2000n], 1).likeFeeAetto, '1');
 });
 
-test('content scope stays pinned while auth/transaction identity advances and mutation fails closed', () => {
-  const { release } = releaseFixture({ schemaVersion: 2, storage: { contract: address(2), sourceHash: 'b'.repeat(64) } });
+test('storage and chain use the same active contract', () => {
+  const { release } = releaseFixture();
   const chain = { release, state: { contract: release.contract, sourceHash: release.sourceHash } };
-  assert.equal(shortsRuntimeScope(chain).contract, release.contract); assert.equal(shortsStorageScope(chain).contract, address(2)); assert.equal(shortsStorageSourceHash(chain), 'b'.repeat(64));
-  chain.release.storage.sourceHash = 'c'.repeat(64); assert.throws(() => shortsStorageScope(chain), { status: 503 });
-  const frozen = shortsRelease(release); assert.ok(Object.isFrozen(frozen.storage));
+  assert.equal(shortsRuntimeScope(chain), shortsStorageScope(chain));
+  assert.equal(shortsStorageSourceHash(chain), release.sourceHash);
+  chain.state.contract = address(2);
+  assert.throws(() => shortsStorageScope(chain), { status: 503 });
 });
 
 test('on-chain operator rotation immediately removes privileged API access and fails closed offline', async () => {
@@ -66,63 +66,4 @@ test('comments use bounded versioned pages, exact counters, author sequence and 
   for (const query of [{ cursor: '1' }, { limit: '26' }, { cursor: '-1' }, { version: '1e3' }]) await assert.rejects(service.page('video', query), { status: 400 });
   stale = true; await assert.rejects(service.page('video', { cursor: '1', version: '7' }), { status: 409 });
   chain.release.schemaVersion = 1; await assert.rejects(service.page('video', {}), { status: 404 });
-});
-
-function imported() {
-  const s = new ShortsLegacyImportService({ read: f => f() });
-  const snapshot = { commitment: 'ab'.repeat(32), cutoff: { height: 4 } };
-  const manifest = { source: owner, totals: { videos: 1, likes: 0, comments: 0, authors: 0 } };
-  const state = { status: { import_started: true, importing: false, frozen: false, abandoned: false, totals: { videos: 4n, likes: 5n, comments: 2n, authors: 2n } }, writes: 0 };
-  s.release = { contract: address(8) }; s.commitment = async () => ({ manifest, items: [{}], commitment: snapshot.commitment });
-  s.verify = async value => value; s.canonical = async () => {};
-  s.destination = { $call: async (method, _args, options) => {
-    if (!options.callStatic) { state.writes++; throw new Error('No repeat signing'); }
-    if (method === 'migration_status') return { decodedResult: state.status };
-    if (method === 'get_import_source') return { decodedResult: [null, manifest] };
-    if (method === 'get_import_progress') return { decodedResult: [1n, 1n, Buffer.from(snapshot.commitment, 'hex'), Buffer.from(snapshot.commitment, 'hex'), 0n, 0n] };
-    throw new Error('Must not require unchanged live content: ' + method);
-  } };
-  return { s, snapshot, state };
-}
-test('immutable import proof supports setup after new activity but rejects inactive, abandoned, frozen and forged baselines', async () => {
-  const { s, snapshot, state } = imported(); await s.verifyBaseline(snapshot);
-  for (const key of ['importing', 'abandoned', 'frozen']) { state.status[key] = true; await assert.rejects(s.verifyBaseline(snapshot), /lifecycle/); state.status[key] = false; }
-  await assert.rejects(s.verifyBaseline({ ...snapshot, commitment: 'cd'.repeat(32) }), /commitment mismatch/);
-});
-test('lost activation acknowledgement reconciles already-completed import without a second signature', async () => {
-  const { s, snapshot, state } = imported(); assert.equal((await s.import(snapshot, true)).importing, false); assert.equal(state.writes, 0);
-});
-
-
-test('free accounts skip removed getters and preserve verified historical reward balances', async () => {
-  const { ShortsChainService } = require('./shorts-chain.service');
-  const like = { name: 'like', arguments: [{ name: 'id', type: 'string' }, { name: 'version', type: 'int' }], returns: { tuple: [] }, payable: false, stateful: true };
-  const aci = [{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions: [like] } }];
-  const { release, artifact } = releaseFixture({ schemaVersion: 2, likeFeeAetto: '0' }, { aci });
-  const chain = new ShortsChainService({}, {});
-  Object.assign(chain, { release, artifact, sdk: { getBalance: async () => '5000000000000000000' } });
-  chain.readNode = operation => operation();
-  chain.policy = async () => ({ likeFeeAetto: '0' });
-  chain.read = async () => { throw new Error('removed current reward getter'); };
-  let oldCalls = 0;
-  chain.rewardContracts = () => [
-    { artifact, contract: { $options: { address: address(9) }, $call: async () => { throw new Error('free predecessor has no reward getter'); } } },
-    { contract: { $options: { address: address(8) }, $call: async (method, args, options) => {
-    assert.equal(method, 'get_account'); assert.deepEqual(args, [owner]); assert.equal(options.callStatic, true); oldCalls++;
-    return { decodedResult: { available: 2n * 10n ** 18n, earned: 3n * 10n ** 18n, claimed: 10n ** 18n } };
-  } } }];
-  assert.deepEqual(await chain.account(owner), { address: owner, wallet: '5', available: '0', earned: '3', claimed: '1',
-    previousAvailable: '2', rewardAccounts: [{ contract: address(8), available: '2' }] });
-  assert.equal(oldCalls, 1);
-  chain.policy = async () => ({ likeFeeAetto: '1' });
-  await assert.rejects(chain.account(owner), /capability/);
-  assert.equal(oldCalls, 1);
-  chain.policy = async () => ({ likeFeeAetto: '0' });
-  chain.artifact = { ...artifact, aci: [] };
-  await assert.rejects(chain.account(owner));
-  assert.equal(oldCalls, 1);
-  const paid = releaseFixture();
-  Object.assign(chain, paid);
-  chain.read = async (method, args) => { assert.equal(method, 'get_account'); assert.deepEqual(args, [owner]); return { available: 1n, earned: 2n, claimed: 1n }; };
-  assert.equal((await chain.account(owner)).available, '0.000000000000000001');
 });

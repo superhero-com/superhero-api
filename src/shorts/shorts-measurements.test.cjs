@@ -1,4 +1,4 @@
-const { ShortsMetadata, ShortsAnalytics } = require('./testing/historical-migrations.cjs');
+const { ShortsMetadata, ShortsAnalytics } = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,10 +9,9 @@ const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMeasurementsService } = require('./shorts-measurements.service');
 const { ShortsHostedAnalyticsService } = require('./shorts-hosted-analytics.service');
 const { LocalShortsAnalyticsService, playbackSummary, ANALYTICS_DAY: DAY } = require('./shorts-analytics.service');
-const { legacyAnalytics } = require('./shorts-analytics-legacy');
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-test('shared analytics and privacy: consistent counts, deletion, bounded reports and explicit migration', {
+test('shared analytics and privacy: consistent counts, deletion, bounded reports', {
   skip: !process.env.SHORTS_TEST_PG_URL, timeout: 90000,
 }, async t => {
   const url = new URL(process.env.SHORTS_TEST_PG_URL);
@@ -37,9 +36,9 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
     await meta.initialize(s, hash); if (initialize) await a.initialize(s, hash); return s;
   }
   async function video(s, id = randomUUID(), duration = 10) {
-    await meta.insertDraft(s, { id, creator: 'ak_creator', cid: 'bafyfixture', bytes: 10, duration,
-      createdAt: Date.now(), title: 'Owned clip', topic: 'Art', moderation: 'pending', views: [], reports: 0,
-      files: [{ name: 'video.mp4', bytes: 10, sha256: hash }] }); return id;
+    await meta.insertDraft(s, require('./testing/original-record.cjs').originalRecord(id, {
+      creator: 'ak_creator', duration, createdAt: Date.now(), title: 'Owned clip', topic: 'Art', moderation: 'pending', views: [], reports: 0
+    })); return id;
   }
   const event = (session = randomUUID()) => ({ id: randomUUID(), session, seconds: 0, source: 'for-you' });
   async function elapsed(s, id, ms = 6000) {
@@ -163,52 +162,22 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
     await assert.rejects(b.record(s, extra, event(e.session)), /Playback limit/);
     await elapsed(s, e.id); assert.equal(await b.record(s, id, { ...e, seconds: 3 }), true);
   });
-  await t.test('legacy import preserves salt/totals/deletions and never resurrects data on the next bootstrap', async () => {
-    const s = await scope(false), id = await video(s), store = local(), session = randomUUID();
-    const salt = store.db.prepare('SELECT salt FROM shorts_analytics_settings').get().salt;
-    const viewer = createHash('sha256').update(`${salt}:${session}`).digest('hex'), now = Date.now();
-    store.db.prepare('INSERT INTO shorts_plays VALUES(?,?,?,?,?,?,?)').run(randomUUID(), id, viewer, now - 6000, 5, 'shared', 10);
-    store.db.prepare('INSERT INTO shorts_view_totals VALUES(?,?)').run(id, 7);
-    const forgotten = randomUUID(), forgottenHash = createHash('sha256').update(`${salt}:${forgotten}`).digest('hex');
-    store.db.prepare('INSERT INTO shorts_forgotten_viewers VALUES(?,?)').run(forgottenHash, now + DAY);
-    const legacy = legacyAnalytics(store);
-    await assert.rejects(a.initialize(s, hash, legacy), { status: 409 });
-    assert.equal((await raw(s, 'shorts_measurement_settings')).length, 0);
-    await a.initialize(s, hash, legacy, true); assert.equal((await b.counters(s, id)).views, 7);
-    assert.equal(await b.record(s, id, event(forgotten)), false);
-    await b.forget(s, session); assert.equal((await a.counters(s, id)).views, 6);
-    await a.initialize(s, hash, legacyAnalytics(store));
-    assert.equal((await raw(s, 'shorts_measurement_plays')).length, 0); assert.equal((await a.counters(s, id)).views, 6);
-    store.db.prepare('UPDATE shorts_view_totals SET views=8').run();
-    await assert.rejects(a.initialize(s, hash, legacyAnalytics(store), true), { status: 409 });
-    assert.equal((await a.counters(s, id)).views, 6);
-  });
-  await t.test('a paged legacy import rolls back on invalid data and refuses a nonempty destination', async () => {
-    const s = await scope(false), id = await video(s), store = local(), now = Date.now();
-    const insert = store.db.prepare('INSERT INTO shorts_plays VALUES(?,?,?,?,?,?,?)');
-    for (let i = 0; i < 1002; i++) insert.run(`event-${String(i).padStart(20, '0')}`, id, createHash('sha256').update(String(i)).digest('hex'), now - 6000, 5, 'recent', i === 1001 ? 0 : 10);
-    store.db.prepare('INSERT INTO shorts_view_totals VALUES(?,?)').run(id, 1002);
-    await assert.rejects(a.initialize(s, hash, legacyAnalytics(store), true), /Invalid legacy playback/);
-    assert.equal((await raw(s, 'shorts_measurement_settings')).length, 0); assert.equal((await raw(s, 'shorts_measurement_plays')).length, 0);
-    store.db.exec('UPDATE shorts_plays SET duration=10');
-    await a.initialize(s, hash, legacyAnalytics(store), true); assert.equal((await b.counters(s, id)).views, 1002);
-    const other = await scope(); await video(other, id);
-    await assert.rejects(b.initialize(other, hash, legacyAnalytics(store), true), { status: 409 });
-  });
   await t.test('SQL aggregation matches playback metrics, previous periods, reach and source suppression', async () => {
-    const s = await scope(false), id = await video(s), another = await video(s), store = local(), now = Date.now();
-    store.db.prepare('UPDATE shorts_analytics_settings SET since=?').run(now - 100 * DAY);
-    const plays = [], insert = store.db.prepare('INSERT INTO shorts_plays VALUES(?,?,?,?,?,?,?)');
+    const s = await scope(false), id = await video(s), another = await video(s), now = Date.now();
+    await a.initialize(s, hash);
+    await one.query('UPDATE shorts_measurement_settings SET since=$3 WHERE network=$1 AND contract=$2', [...params(s), now - 100 * DAY]);
+    const plays = [];
     function add(short, viewer, started, seconds, source = 'for-you') {
       const p = { id: randomUUID(), short_id: short, viewer: createHash('sha256').update(viewer).digest('hex'), started, seconds, source, duration: 10 };
-      insert.run(p.id, p.short_id, p.viewer, p.started, p.seconds, p.source, p.duration); plays.push(p);
+      plays.push(p);
     }
     for (let i = 0; i < 5; i++) add(id, `viewer-${i}`, now - DAY, 10);
     add(another, 'viewer-0', now - DAY, 5, 'saved'); add(id, 'viewer-0', now - 2 * DAY, 1, 'recent');
     add(id, 'before', now - 8 * DAY, 3); add(id, 'expired', now - 91 * DAY, 10);
-    store.db.prepare('INSERT INTO shorts_view_totals VALUES(?,?)').run(id, 7);
-    store.db.prepare('INSERT INTO shorts_view_totals VALUES(?,?)').run(another, 1);
-    await a.initialize(s, hash, legacyAnalytics(store), true);
+    for (const p of plays) {
+      await one.query('INSERT INTO shorts_measurement_viewers VALUES($1,$2,$3,$4,0) ON CONFLICT DO NOTHING', [...params(s), p.viewer, now]);
+      await one.query('INSERT INTO shorts_measurement_plays VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [...params(s), p.id, p.short_id, p.viewer, p.started, Math.floor(p.started / DAY), p.seconds, p.duration, p.source]);
+    }
     const report = await b.report(s, [id, another], 7);
     assert.deepEqual(report.summary, playbackSummary(plays.filter(p => p.started >= report.start)));
     assert.deepEqual(report.previous, playbackSummary(plays.filter(p => p.started < report.start && p.started >= report.start - 7 * DAY)));
@@ -291,7 +260,7 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
     const { ShortsController } = require('./shorts.controller');
     const { ShortsService } = require('./shorts.service');
     const { ShortsAuthService } = require('./shorts-auth.service');
-    const { ShortsUploadsService } = require('./shorts-uploads.service');
+    const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
     const { ShortsAuthGuard } = require('./shorts-auth.guard');
     const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
     const { ShortsPlaybackEvidenceService } = require('./shorts-playback-evidence.service');
@@ -299,14 +268,13 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
     const key = Buffer.from('d'.repeat(64), 'hex');
     const s = await scope(), id = await video(s), e = event(), bases = [];
     const verifier = new ShortsPlaybackEvidenceService({ release: { network: 'ae_uat', contract: s.contract  }, state: { contract: s.contract } }); verifier.key = key;
-    e.proof = playbackProof(key, { id, cid: 'bafyfixture' }, e.session, s.contract);
+    e.proof = playbackProof(key, (await meta.get(s,id)).record, e.session, s.contract);
     for (const measurements of [a, b]) {
       const db = new DatabaseSync(':memory:'); locals.push(db);
       const hosted = new ShortsHostedAnalyticsService(measurements, { shared: true, chain: { release: { network: 'ae_uat', contract: s.contract }, state: { contract: s.contract, sourceHash: hash } } }, { db }); services.push(hosted);
       await hosted.initialize();
       const core = new ShortsService({ address: value => value }, {}, hosted,
-        { report: async () => ({ earned: '0', paidLikes: 0 }) }, {}, {}, {}, {},
-        { shared: true, all: () => { throw new Error('Full library enumeration is forbidden'); } });
+        { report: async () => ({ earned: '0', paidLikes: 0 }) }, {}, {}, {}, { shared: true, all: () => { throw new Error('Full library enumeration is forbidden'); } });
       core.ensurePlayable = () => meta.get(s, id).then(v => v.record);
       const app = await NestFactory.create({ module: class MeasurementHttpTest {}, controllers: [ShortsController], providers: [
         ShortsAuthGuard, ShortsUploadInterceptor,
@@ -327,7 +295,7 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
     let response = await post(bases[0], `/${id}/playback`, e); assert.equal(response.status, 201); assert.equal((await response.json()).views, 0);
     for (let i = 0; i < 12; i++) {
       const unqualified = event();
-      unqualified.proof = playbackProof(key, { id, cid: 'bafyfixture' }, unqualified.session, s.contract, { admittedMs: i % 2 ? 1500 : 0 });
+      unqualified.proof = playbackProof(key, (await meta.get(s,id)).record, unqualified.session, s.contract, { admittedMs: i % 2 ? 1500 : 0 });
       response = await post(bases[i % 2], `/${id}/playback`, { ...unqualified, seconds: 60 });
       assert.equal(response.status, 201); assert.equal((await response.json()).views, 0);
     }

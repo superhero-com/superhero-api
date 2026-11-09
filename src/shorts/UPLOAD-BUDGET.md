@@ -5,18 +5,12 @@ is accepted or private objects are written. The budget belongs to one network/co
 same counters; starting another process does not reset or multiply them.
 
 Apply migration `1791763222001-ShortsUploadAdmission` with the migration owner before
-opening uploads. It locks the affected tables while backfilling existing upload
-sessions, ingestion jobs and content, counting each ID once. Run this migration
-in a coordinated maintenance window. Inconsistent historical ownership or
-source sizes stop the migration for repair; no records are discarded.
+opening uploads. A fresh deployment starts with zero reservations.
 
 ## Configure
 
 The initial budget is **50 retained uploads and 2,097,152,000 declared source
-bytes** (50 × 40 MiB). Existing usage can exceed these defaults after migration;
-new acceptance then pauses until the budget is explicitly raised. Existing
-reserved uploads can still be processed. These defaults are safeguards, not
-measured production capacity.
+bytes** (50 × 40 MiB) per deployment.
 
 To choose or update a budget, add **both** values to the private environment file
 used by the existing [NestJS setup command](PUBLISHER.md#configure-and-start):
@@ -52,9 +46,6 @@ checks that the reservation triggers are enabled and the scoped budget exists.
 - One count and the upload's declared plaintext source size, once per ID.
 - Preparation and publication reuse that reservation. Retry does not charge again.
 - Failed, cancelled, expired, rejected and withdrawn uploads retain their charges.
-- Legacy content without source metadata is conservatively charged its package size.
-  If the original source size becomes known later, it is bound once. A smaller
-  source does not refund the estimate; a larger source must reserve the difference.
 - A transaction that fails before accepting an upload rolls back its reservation.
 - An ignored duplicate insert does not alter the existing reservation.
 
@@ -64,7 +55,7 @@ Migration downgrade refuses to discard admitted reservations.
 
 Database triggers enforce the count and byte limits atomically. No whole-library
 count is needed for each upload. Budget exhaustion returns HTTP 503 before a new
-upload session is accepted. The legacy whole-file `/upload` route still receives
+upload session is accepted. The whole-file `/upload` route still receives
 its bounded multipart body before reservation, but cannot write it to S3 first.
 Retry the same accepted upload ID after an uncertain
 response; do not create new IDs automatically. Its saved identity and immutable

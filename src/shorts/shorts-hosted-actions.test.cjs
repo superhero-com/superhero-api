@@ -3,9 +3,8 @@ const {
   ShortsSessions,
   ShortsUploads,
   ShortsLifecycle,
-  ShortsSharedCutover,
   ShortsUploadBudget,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,7 +18,7 @@ const { ShortsService } = require('./shorts.service');
 const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
-const { ShortsUploadsService } = require('./shorts-uploads.service');
+const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsDatabaseService } = require('./shorts-database.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsRecordsService } = require('./shorts-records.service');
@@ -49,7 +48,7 @@ test('hosted content actions stay responsive and durable across two HTTP runtime
   const owner = new DataSource({ type: 'postgres', url: pg.href, schema, synchronize: false,
     extra: { options: `-c search_path=${schema}`, max: 4 }, migrations: [ShortsMetadata,
       ShortsSessions, ShortsUploads, ShortsLifecycle,
-      ShortsSharedCutover, ShortsUploadBudget] });
+      ShortsUploadBudget] });
   const runtimes = [], entered = deferred(), finish = deferred(), redis = new Redis(redisUrl.href);
   let scanResult;
   t.after(async () => {
@@ -89,7 +88,7 @@ test('hosted content actions stay responsive and durable across two HTTP runtime
     const media = { safety: { demoAutoApprove: false }, rescan: async () => {
       entered.resolve(); await finish.promise; return { status: 'no_flags', checkedAt: Date.now() };
     } };
-    const shorts = new ShortsService(chain, media, { counters: async () => ({ views: 0 }) }, {}, {}, auth, undefined, {}, records,
+    const shorts = new ShortsService(chain, media, { counters: async () => ({ views: 0 }) }, {}, {}, auth, undefined, records,
       { status: async () => undefined });
     const rates = new ShortsRateService(rateConfig, chain);
     const app = await NestFactory.create({ module: class HostedActions {}, controllers: [ShortsController], providers: [

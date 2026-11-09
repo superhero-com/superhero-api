@@ -29,7 +29,6 @@ import {
 } from './shorts-eligibility';
 import { ShortsStreamingService } from './shorts-streaming.service';
 import { ShortsAuthService } from './shorts-auth.service';
-import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 import { ShortsRecordsService } from './shorts-records.service';
 import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
 import { ShortsDeliveryPackagesService } from './shorts-delivery-packages.service';
@@ -61,7 +60,6 @@ export class ShortsService {
     readonly labels: ShortsLabelsService,
     readonly auth: ShortsAuthService,
     readonly streaming: ShortsStreamingService,
-    readonly uploadLimits: ShortsUploadLimitsService,
     readonly records: ShortsRecordsService = new ShortsRecordsService(chain),
     @Optional() readonly publisher?: ShortsApiPublicationService,
     @Optional() readonly studioRead?: ShortsStudioReadService,
@@ -121,15 +119,11 @@ export class ShortsService {
       studioPaging: !!this.studioRead,
       hosting: 'platform-funded',
       realtime: this.ledger?.realtime === true,
-      previousContract: this.chain.previous?.$options.address,
-      previousAci: this.chain.previousArtifact?.aci,
-      rewardContracts: this.chain.rewardContracts().map((item) => ({
-        contract: item.contract.$options.address,
-        aci: item.artifact.aci,
-      })),
       ...scope,
       policy,
-      uploads: this.uploadPolicy?.describe(policy, this.records.shared),
+      uploads: this.records.shared
+        ? this.uploadPolicy?.describe(policy)
+        : undefined,
       likeMode,
       likeSponsorship,
       likeFee: ae(policy.likeFeeAetto),
@@ -459,105 +453,6 @@ export class ShortsService {
       return match(b) - match(a) || b.createdAt - a.createdAt;
     });
   }
-  async upload(
-    actor: DemoActor,
-    title: string,
-    topic: string,
-    data: Buffer,
-    details: {
-      description?: string;
-      language?: string;
-      synthetic?: boolean;
-      sponsored?: boolean;
-      captions?: string;
-    } = {},
-    uploadId?: string,
-  ) {
-    if (this.records.shared)
-      throw new ServiceUnavailableException(
-        'Hosted uploads require the shared upload service',
-      );
-    if (
-      !title?.trim() ||
-      title.length > 100 ||
-      !TOPICS.slice(1).includes(topic)
-    )
-      throw new Error('Provide a title and a supported topic');
-    if (
-      (details.description?.length || 0) > 1000 ||
-      (details.captions?.length || 0) > 10000 ||
-      !['und', 'en', 'ar', 'fr', 'es', 'de', 'zh'].includes(
-        details.language || 'und',
-      )
-    )
-      throw new Error('Invalid description, captions or language');
-    if (
-      details.captions &&
-      (!details.captions.startsWith('WEBVTT') ||
-        !details.captions.includes('-->') ||
-        /<[^>]+>|STYLE|REGION|X-TIMESTAMP-MAP/.test(details.captions))
-    )
-      throw new Error(
-        'Use plain WebVTT captions with timed cues, without markup',
-      );
-    const id = uploadId || randomUUID();
-    const existing = await this.records.find(id);
-    if (existing) {
-      if (existing.creator !== actor)
-        throw new Error('Upload identity mismatch');
-      return existing;
-    }
-    if ((await this.records.all()).length >= 50)
-      throw new Error('Local preview is limited to 50 videos');
-    this.chain.address(actor);
-    if (!Buffer.isBuffer(data)) throw new Error('Choose a video');
-    if (!uploadId) this.uploadLimits.reserve(actor, id, data.length);
-    this.uploadLimits.beginPreparation(actor, id, data.length);
-    try {
-      const prepared = await this.media.prepare(
-        id,
-        data,
-        title.trim(),
-        topic,
-        details,
-      );
-      const short: ShortRecord = {
-        id,
-        creator: this.chain.address(actor),
-        title: title.trim(),
-        topic,
-        ...prepared,
-        createdAt: Date.now(),
-        description: details.description || '',
-        language: details.language || 'und',
-        synthetic: details.synthetic === true,
-        sponsored: details.sponsored === true,
-        captions: !!details.captions,
-        classification: this.demoAutoApprove
-          ? undefined
-          : await this.labels.classify({
-              title: title.trim(),
-              topic,
-              description: details.description,
-              captions: details.captions,
-            }),
-        moderation:
-          prepared.safety?.status === 'blocked'
-            ? ('rejected' as const)
-            : ('pending' as const),
-        reviewReason: prepared.safety?.reason,
-        views: [],
-        reports: 0,
-      };
-      // Registration commits the private draft; it never publishes or signs.
-      return await this.records.register(short);
-    } catch (error) {
-      // No publication occurs here. A registration failure must not leave an
-      // in-memory draft or encrypted originals/packages outside the registry.
-      if (!(await this.records.find(id))) await this.media.removePrepared(id);
-      throw error;
-    }
-  }
   async moderate(
     id: string,
     approve: boolean,
@@ -885,10 +780,8 @@ export class ShortsService {
           'Publisher connection is unavailable',
         );
       const job = await this.publisher.status(id, s.creator);
-      if (job && !['confirmed', 'reconciled'].includes(job.status))
+      if (!job || !['confirmed', 'reconciled'].includes(job.status))
         throw new NotFoundException('Publication is not confirmed');
-      // Legacy imported publications may have no journal entry. They still
-      // require an exact current-chain identity and policy match below.
     }
     s = await this.records.find(id);
     if (

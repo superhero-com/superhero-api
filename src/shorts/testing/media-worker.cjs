@@ -4,7 +4,6 @@ require('reflect-metadata');
 const { runtimeRequire, runtimeEvidence } = require('./fixture-runtime.cjs');
 const { DataSource } = require('typeorm');
 const { Test } = require('@nestjs/testing');
-const { ShortsEncodingService } = runtimeRequire('../shorts-encoding.service');
 const { ShortsRenditionEncodingService } = runtimeRequire('../shorts-rendition-encoding.service');
 const { ShortsPackageService } = runtimeRequire('../shorts-package.service');
 const { ShortsSafetyService } = runtimeRequire('../shorts-safety.service');
@@ -20,11 +19,6 @@ const { SHORTS_WORKER_CONFIG, shortsWorkerConfig } = runtimeRequire('../shorts-w
   const builder = Test.createTestingModule({ imports: [ShortsWorkerModule] })
     .overrideProvider(DataSource).useValue(db)
     .overrideProvider(SHORTS_WORKER_CONFIG).useValue(config)
-    .overrideProvider(ShortsEncodingService).useFactory({ inject: [runtimeRequire('../shorts-scratch.service').ShortsScratchService], factory: scratch => ({ encode: async (...args) => {
-      process.send?.({ type: 'encoding', title: args[1] });
-      if (process.env.SHORTS_TEST_PAUSE_ENCODING === '1') await new Promise(() => {});
-      return new ShortsEncodingService(scratch).encode(...args);
-    } }) })
     .overrideProvider(ShortsRenditionEncodingService).useFactory({
       inject: [runtimeRequire('../shorts-scratch.service').ShortsScratchService, ShortsPackageService],
       factory: (scratch, packages) => ({ prepare: async (...args) => {

@@ -62,9 +62,7 @@ export class LocalShortsLedgerService
       });
     return this.pending;
   }
-  private async collectContract(
-    contract: NonNullable<ShortsChainService['previous']>,
-  ) {
+  private async collectContract(contract: ShortsChainService['contract']) {
     const base = 'https://testnet.aeternity.io/mdw';
     let next: string | null =
       `/v3/contracts/logs?contract_id=${contract.$options.address}&limit=100`;
@@ -165,12 +163,8 @@ export class LocalShortsLedgerService
     return entries;
   }
   private async collect() {
-    const groups = await Promise.all([
-      this.collectContract(this.chain.contract),
-      this.chain.previous ? this.collectContract(this.chain.previous) : [],
-    ]);
+    const entries = await this.collectContract(this.chain.contract);
     if (this.stopped) return;
-    const entries = groups.flat();
     entries.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
     this.entries = entries;
     this.syncedAt = Date.now();

@@ -23,7 +23,7 @@ function harness(t, options={}) {
     return {...intents[0],state};
   }};
   const records={shared:true,chain:{state:{contract:'ct_protocol'},release:{network:'ae_uat',contract:'ct_protocol'}}};
-  const media=new ShortsMediaService({},undefined,records,undefined,undefined,undefined,ledger);
+  const media=new ShortsMediaService({},undefined,records,undefined,undefined,ledger);
   media.ipfsFetch=async(path,init)=>{
     requests.push({path,init});
     if(path==='shorts/capabilities')return new Response(JSON.stringify({epochVersion:1,nodeEpoch:'e'.repeat(64),peerId:'a'.repeat(52),writing:false,uncertain:false,version:1,addVersion:1,addMaxLifetimeMs:300000,

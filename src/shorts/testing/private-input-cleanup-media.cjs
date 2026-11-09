@@ -1,4 +1,4 @@
-const schemaMigrations = require('./historical-migrations.cjs');
+const schemaMigrations = require('./schema-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { mkdir, writeFile, readdir } = require('node:fs/promises');

@@ -201,42 +201,6 @@ test('ledger refresh is idempotent and discards orphaned history on a canonical 
   canonical = false; await l.sync(); assert.equal(l.entries.length, 0);
   t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); }); await l.sync(); assert.equal(l.report('creator', 0, 200).stale, true);
 });
-test('resumable uploads enforce ownership, exact parts, integrity and idempotent completion', async t => {
-  const { ShortsUploadsService } = require('./shorts-uploads.service');
-  const { createHash } = require('node:crypto');
-  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
-  const parts = new Map(), videos = new Map(); let preparations = 0;
-  const shorts = { chain: { state: { shorts: [] } }, media: {
-    saveUploadPart: async (id, index, bytes) => parts.set(`${id}:${index}`, bytes),
-    loadUploadPart: async (id, index) => parts.get(`${id}:${index}`),
-    removeUploadParts: async (id, count) => { for (let i = 0; i < count; i++) parts.delete(`${id}:${i}`); },
-  }, upload: async (actor, title, topic, bytes, details, id) => { preparations++; const video = { id, creator: actor, title, bytes:bytes.length }; videos.set(id, video); shorts.chain.state.shorts.push(video); return video; }, item: id => videos.get(id) };
-  const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
-  const limits = new ShortsUploadLimitsService({ db });
-  const u = new ShortsUploadsService({ db }, shorts, limits), bytes = Buffer.alloc(1024 * 1024 + 12, 'x');
-  const input = { title:'Example', topic:'Art', rights:true, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex'), details:{} };
-  const session = await u.create('creator', input);
-  await assert.rejects(u.get('other', session.id), /not found/);
-  await assert.rejects(u.part('creator', session.id, 0, Buffer.from('bad')), /size or position/);
-  await u.part('creator', session.id, 0, bytes.subarray(0, 1024 * 1024));
-  const resumed = new ShortsUploadsService({ db }, shorts, limits);
-  assert.deepEqual((await resumed.get('creator', session.id)).parts, [0]);
-  await assert.rejects(resumed.finish('creator', session.id), /incomplete/);
-  await resumed.part('creator', session.id, 1, bytes.subarray(1024 * 1024));
-  const queued = await resumed.finish('creator', session.id);
-  assert.equal(queued.status, 'queued');
-  assert.equal(preparations, 0);
-  await resumed.drain();
-  const ready = await resumed.get('creator', session.id);
-  assert.equal(ready.status, 'ready'); assert.equal(ready.video.bytes, bytes.length); assert.equal(parts.size, 0);
-  assert.deepEqual(await resumed.finish('creator', session.id), ready); assert.equal(preparations, 1);
-  const corrupt = await u.create('creator', { ...input, bytes:12 });
-  await u.part('creator', corrupt.id, 0, bytes.subarray(0,12));
-  await u.finish('creator', corrupt.id); await u.drain();
-  assert.equal((await u.get('creator', corrupt.id)).status, 'failed'); assert.equal(preparations, 1);
-});
-
-
 test('free publication verifies storage, persists intent and survives an ambiguous chain response', async () => {
   const short = { id: 'free', creator: 'creator', cid: 'cid', bytes: 1000, views: [], moderation: 'approved', safety: { status: 'no_flags' } };
   let video, writes = 0, pins = 0;
@@ -267,7 +231,7 @@ test('storage outage never registers publication or debits a creator', async () 
   assert.equal(short.publication, 'pending');
 });
 
-test('view totals migrate once, survive expiry and cannot be inflated by replay or the legacy endpoint', async t => {
+test('view totals survive restart and expiry and cannot be inflated by replay or a view lookup', async t => {
   let now = Date.UTC(2026, 9, 5); t.mock.method(Date, 'now', () => now);
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   let a = new ShortsAnalyticsService({ db });
@@ -279,10 +243,10 @@ test('view totals migrate once, survive expiry and cannot be inflated by replay 
   a.record(short, { ...event, seconds: 0 });
   assert.equal(a.counters('a').views, 1);
   a = new ShortsAnalyticsService({ db });
-  assert.equal(a.counters('a').views, 1, 'restart must not backfill twice');
+  assert.equal(a.counters('a').views, 1, 'restart preserves the count');
   const service = new ShortsService({ state: { shorts: [short] }, read: async () => ({ withdrawn: false, creator: 'creator', cid: 'cid', size: 12n }) }, {}, a, {}, {}, {});
   assert.equal((await service.view('a', randomUUID())).views, 1);
-  assert.deepEqual(short.views, ['legacy'], 'legacy endpoint is read only');
+  assert.deepEqual(short.views, ['legacy'], 'view lookup is read only');
   now += 91 * ANALYTICS_DAY;
   assert.equal(a.counters('a').views, 1);
   assert.equal(a.report(['a'], 90).summary.views, 0);
@@ -372,7 +336,7 @@ test('hosted creator analytics never enumerates the library and drains admission
     return { start: 1000, end: 2000, summary: { views: 121 }, videoBreakdown: { total: 121, returned: 100, complete: false } };
   } };
   const financial = [], ledger = { report: async (...args) => { financial.push(args); return { earned: '1', paidLikes: 10 }; } };
-  const service = new ShortsService(chain, {}, analytics, ledger, {}, {}, {}, {}, records);
+  const service = new ShortsService(chain, {}, analytics, ledger, {}, {}, {}, records);
   const pending = Array.from({ length: 4 }, () => service.performance('ak_creator', 7));
   await assert.rejects(service.performance('ak_creator', 7), { status: 503 });
   assert.equal(calls.length, 4); resolve();
@@ -381,6 +345,6 @@ test('hosted creator analytics never enumerates the library and drains admission
   assert.ok(financial.every(args => args[0] === 'ak_creator'));
   fail = true; await assert.rejects(service.performance('ak_creator', 7), /Measurements unavailable/);
   fail = false; await service.performance('ak_creator', 7);
-  const missing = new ShortsService(chain, {}, {}, ledger, {}, {}, {}, {}, records);
+  const missing = new ShortsService(chain, {}, {}, ledger, {}, {}, {}, records);
   await assert.rejects(missing.performance('ak_creator', 7), { status: 503 });
 });

@@ -5,7 +5,6 @@ import { ShortsChainService, ae } from './shorts-chain.service';
 import { LedgerReport, ShortsLedgerService } from './shorts-ledger.service';
 import { ShortsIndexNetworkService } from './shorts-index-network.service';
 import { shortsRuntimeScope } from './shorts-runtime-scope';
-import { shortsIndexSchema } from './shorts-index-schema';
 
 export const SHORTS_INDEX_VERSION = 4;
 export const SHORTS_UPDATES_CHANNEL = 'shorts_updated';
@@ -23,20 +22,13 @@ export class ShortsIndexService extends ShortsLedgerService {
   }
 
   contracts() {
-    return [
-      this.chain.contract,
-      ...this.chain.rewardContracts().map((item) => item.contract),
-    ].filter(Boolean);
+    return [this.chain.contract];
   }
 
   schema(contract: string): 1 | 2 {
-    if (contract === this.chain.release.contract)
-      return this.chain.release.schemaVersion;
-    const reward = this.chain
-      .rewardContracts()
-      .find((item) => item.contract.$options.address === contract);
-    if (!reward) throw new Error('Unbound Shorts accounting contract');
-    return shortsIndexSchema(reward.artifact);
+    if (contract !== this.chain.release.contract)
+      throw new Error('Unbound Shorts accounting contract');
+    return this.chain.release.schemaVersion;
   }
 
   assertNetwork() {

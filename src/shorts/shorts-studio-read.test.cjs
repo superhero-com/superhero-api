@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsMetadata,
   ShortsAnalytics,
@@ -121,9 +121,9 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     const { NestFactory } = require('@nestjs/core'); const { UnauthorizedException } = require('@nestjs/common');
     const { ShortsController } = require('./shorts.controller'); const { ShortsAuthService } = require('./shorts-auth.service');
     const { ShortsAuthGuard } = require('./shorts-auth.guard'); const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
-    const { ShortsUploadsService } = require('./shorts-uploads.service');
+    const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
     const analytics = { creatorReport: (creator, days, id) => measurements.creatorReport(scope, creator, days, id) };
-    const service = new ShortsService(chain, {}, analytics, index, {}, {}, {}, {}, { shared: true, all: () => { throw new Error('Whole library read'); } }, undefined, reader);
+    const service = new ShortsService(chain, {}, analytics, index, {}, {}, {}, { shared: true, all: () => { throw new Error('Whole library read'); } }, undefined, reader);
     const app = await NestFactory.create({ module: class StudioHttpTest {}, controllers: [ShortsController], providers: [ShortsAuthGuard, ShortsUploadInterceptor,
       { provide: ShortsService, useValue: service }, { provide: ShortsUploadsService, useValue: {} },
       { provide: ShortsAuthService, useValue: { authenticate: async auth => { if (auth !== 'Bearer creator') throw new UnauthorizedException(); return 'ak_creator'; } } },
@@ -139,26 +139,6 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     const performance = await (await get('/performance?days=28')).json(); assert.equal(performance.topShorts.length, 5);
     assert.equal(performance.summary.views, owned.reduce((n, r) => n + r.periodViews, 0));
     assert.ok(performance.topShorts.every(r => r.creator === 'ak_creator' && performance.videos[r.id].views === 4));
-  });
-  await t.test('V2 retains media analytics and combines imported memberships once with only new V2 events', async () => {
-    const ShortsReceipts = schemaMigrations.ShortsReceipts;
-    const ShortsImportSnapshot = schemaMigrations.ShortsImportSnapshot;
-    const runner = { query: (sql, args) => db.query(sql, args) };
-    await new ShortsReceipts().up(runner); await new ShortsImportSnapshot().up(runner);
-    await meta.initialize({ network: 'ae_uat', contract: 'ct_vtwo' }, 'b'.repeat(64));
-    await db.query("INSERT INTO shorts_import_snapshots(network,contract,source,cutoff_hash,cutoff_height,digest,videos,likes) VALUES('ae_uat','ct_vtwo','ct_current','kh_cutoff',5,$1,3,7)", ['c'.repeat(64)]);
-    await db.query("INSERT INTO shorts_import_videos(network,contract,id,likes,withdrawn) VALUES('ae_uat','ct_vtwo',$1,7,false),('ae_uat','ct_vtwo',$2,0,true),('ae_uat','ct_vtwo',$3,0,false)", [rows[3].id, rows[6].id, rows[0].id]);
-    await db.query("INSERT INTO txs(hash,type,contract_id,data) VALUES('th_vtwo','ContractCallTx','ct_vtwo',$1)", [JSON.stringify({ shorts: { _version: SHORTS_INDEX_VERSION } })]);
-    for (let n = 0; n < 2; n++) await db.query("INSERT INTO shorts_chain_events VALUES('ct_vtwo','th_vtwo',$1,10,1700000000000,'PaidLike','ak_viewer','ak_creator',17,$2)", [n, rows[3].id]);
-    const chain2 = { ...chain, release: { schemaVersion: 2, network: 'ae_uat', contract: 'ct_vtwo', sourceHash: 'b'.repeat(64), storage: { contract: scope.contract, sourceHash: hash } }, state: { contract: 'ct_vtwo', sourceHash: 'b'.repeat(64) } };
-    const v2 = new ShortsStudioReadService(db, chain2, { assertNetwork: async () => {}, health: async () => ({ height: 21, stale: false }) });
-    const page = await v2.page('ak_creator', { sort: 'likes' }, { ids: [rows[3].id, rows[6].id, rows[0].id] });
-    assert.equal(page.items[0].record.id, rows[3].id); assert.equal(page.items[0].likes, 9); assert.equal(page.items[0].periodViews, 3); assert.equal(page.items[0].publication, 'published');
-    assert.equal(page.items.find(r => r.record.id === rows[6].id).publication, 'withdrawn');
-    await db.query("INSERT INTO shorts_chain_events VALUES('ct_vtwo','th_vtwo',2,10,1700000000000,'Withdrawn','ak_creator','ak_creator',0,$1)", [rows[0].id]);
-    assert.equal((await v2.page('ak_creator', {}, { ids: [rows[0].id] })).items[0].publication, 'withdrawn');
-    // Historical rewards still retain every original payment, independent of membership deduplication.
-    assert.equal(Number((await db.query("SELECT count(*) FROM shorts_chain_events WHERE contract='ct_current' AND action='PaidLike' AND short_id=$1", [rows[3].id]))[0].count), 3);
   });
   const migration = new ShortsStudio(); await migration.down({ query: (sql, args) => db.query(sql, args) });
   assert.equal((await db.query("SELECT to_regclass('shorts_chain_events_video') AS name"))[0].name, null);

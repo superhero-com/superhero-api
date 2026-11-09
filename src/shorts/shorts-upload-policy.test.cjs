@@ -10,29 +10,27 @@ const policy = { maxVideoBytes: 100000000 };
 const input = { bytes: 100000000, sha256: 'a'.repeat(64), title: 'Original', topic: 'Art', rights: true, details: {} };
 const enabled = (maxOriginalBytes = 100000000) => new ShortsUploadPolicyService({ originals: true, maxOriginalBytes });
 
-test('original admission is opt-in, bounded by both operator and active contract limits', () => {
+test('original admission is the default, bounded by both operator and active contract limits', () => {
   const defaults = new ShortsUploadPolicyService(shortsUploadPolicyConfig({}));
-  assert.equal(defaults.describe(policy, true).maxBytes, 40 * 1048576);
-  assert.equal(defaults.describe(policy, true).format, 'legacy-directory-v1');
-  assert.throws(() => defaults.accept(input, policy), { status: 400 });
+  assert.equal(defaults.describe(policy, true).maxBytes, 100000000);
+  assert.equal(defaults.describe(policy, true).format, 'original-file-v1');
+  assert.equal(defaults.accept(input, policy).processingProfile, 'original-h264-v1');
   const upload = enabled().accept(input, policy);
   assert.equal(upload.processingProfile, 'original-h264-v1');
   assert.equal(upload.acceptedMaxBytes, input.bytes);
   assert.equal(enabled(50000000).describe(policy, true).maxBytes, 50000000);
   assert.equal(enabled().describe({ maxVideoBytes: 30000000 }, true).maxBytes, 30000000);
   assert.throws(() => enabled().accept({ ...input, bytes: 100000001 }, policy), { status: 400 });
-  assert.throws(() => enabled().describe(policy, false), /shared hosted/);
   for (const value of ['0', '100000001', '256000000', '1e8', '100000000.0', ' 123'])
     assert.throws(() => shortsUploadPolicyConfig({ SHORTS_ORIGINAL_UPLOAD_MAX_BYTES: value }));
-  assert.throws(() => shortsUploadPolicyConfig({ SHORTS_ORIGINAL_UPLOADS_ENABLED: '1' }));
 });
 
 test('caller fields cannot enable a writer; accepted profile and limit survive later configuration changes', () => {
   const malicious = { ...input, bytes: 100, processingProfile: 'original-h264-v1', acceptedMaxBytes: 256000000, objectKey: 'private/source', manifest: { key: 'secret' } };
-  const legacy = new ShortsUploadPolicyService(shortsUploadPolicyConfig({})).accept(malicious, policy);
-  assert.equal(legacy.processingProfile, undefined);
-  assert.throws(() => new ShortsUploadPolicyService(shortsUploadPolicyConfig({})).accept({ ...malicious, expectedFormat: 'original-file-v1' }, policy), { status: 409 });
-  assert.equal(legacy.objectKey, undefined); assert.equal(legacy.manifest, undefined);
+  const upload = new ShortsUploadPolicyService(shortsUploadPolicyConfig({})).accept(malicious, policy);
+  assert.equal(upload.processingProfile, 'original-h264-v1');
+  assert.throws(() => new ShortsUploadPolicyService(shortsUploadPolicyConfig({})).accept({ ...malicious, expectedFormat: 'legacy-directory-v1' }, policy), { status: 409 });
+  assert.equal(upload.objectKey, undefined); assert.equal(upload.manifest, undefined);
   const accepted = enabled(70000000).accept({ ...malicious, bytes: 70000000 }, policy);
   const source = shortsAcceptedSource(accepted);
   assert.deepEqual(source, { bytes: 70000000, sha256: input.sha256, maxBytes: 70000000, format: 'original-file-v1' });

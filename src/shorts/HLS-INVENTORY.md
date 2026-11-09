@@ -96,9 +96,7 @@ Counters are decimal strings to preserve exact values.
 
 Redis `SCAN` can repeat keys and return empty intermediate pages, and its count
 is a hint. The command deduplicates observations and checks bounds inside Redis:
-64 keys, 128 KiB per adaptive index and 8 MiB per response. Legacy indexes retain
-their 32 KiB bound. A legacy package has at most 34 files and 100,000,000 bytes;
-an adaptive package has at most 256 files and 192 MiB, with a validated master
+64 keys, 128 KiB per adaptive index and 8 MiB per response. An adaptive package has at most 256 files and 192 MiB, with a validated master
 and child-playlist graph. See the
 [Redis SCAN guarantees](https://redis.io/docs/latest/commands/scan/).
 
@@ -110,8 +108,7 @@ scratch files and backups are not included. `physicalPinInventoryComplete` stays
 false. Use the separate [IPFS pin inventory](PIN-INVENTORY.md) to compare this completed
 run with physical pin observations and repository-size samples.
 
-Legacy source matching preserves the streaming service's `hls-v2` identity:
-video ID, package CID and `video.mp4` SHA-256 and byte count. Original-file records
+Original-file records
 use the shared `hls-v3` protocol, binding the required network/contract scope,
 original identity, generation job/fence, encoding fingerprint and prepared delivery
 metadata. Original, temporary input and retained asset CIDs have independent byte counts
@@ -122,10 +119,7 @@ records; it does not infer playback permission from the inventory.
 
 New runs use `referenceVersion:5`, including private replacement generations, their
 original-post holds and each generation's durable HLS acknowledgements absent from
-Redis. Completed version 1, 2, 3 and 4 runs remain readable; references outside their coverage must not
-be treated as absent. An unfinished older run cannot resume under the new scanner: retain
-its partial observations and start a new run. Migration rollback refuses used
-adaptive inventory history.
+Redis. Each inventory records its coverage and retains the observations used in its report.
 
 The two passes are historical observations, not a consistent snapshot. Holds,
 source versions and indexes can change between or after pages. Every result keeps

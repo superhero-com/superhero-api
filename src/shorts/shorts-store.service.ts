@@ -23,18 +23,11 @@ export class ShortsStoreService implements OnApplicationShutdown {
   constructor(@Optional() source?: DataSource) {
     this.shared = !!source;
     if (this.shared) {
-      if (
-        process.env.SHORTS_DATA_DIR ||
-        ['CONTENT', 'ANALYTICS', 'RECEIPTS'].some(
-          (kind) => process.env[`SHORTS_IMPORT_LEGACY_${kind}`] === '1',
-        )
-      )
-        throw new Error(
-          'Hosted Shorts use shared storage. Complete the offline legacy migration, then remove SHORTS_DATA_DIR and legacy import flags from the API environment.',
-        );
+      if (process.env.SHORTS_DATA_DIR)
+        throw new Error('Hosted Shorts require shared storage');
       return;
     }
-    // SQLite is loaded only by the loopback demo or explicit offline migrator.
+    // SQLite is loaded only by the loopback demo.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DatabaseSync } = require('node:sqlite') as {
       DatabaseSync: new (path: string) => SqliteDatabase;

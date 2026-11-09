@@ -1,7 +1,6 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsDeliveryGenerations: Migration,
-  ShortsLegacyDeliverySources: LegacySourcesMigration,
   ShortsGenerationDeliveryPackages: PackagesMigration,
 } = schemaMigrations;
 require('reflect-metadata');
@@ -53,7 +52,6 @@ test('replacement jobs use fenced workers, preserve the post and expose no creat
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));
-  await owner.transaction(db => new LegacySourcesMigration().up(db));
   const scope = { network: 'ae_uat', contract: 'ct_protocol' }, metadata = new ShortsMetadataService(owner);
   await metadata.initialize(scope, hash, 30, 30);
   const original = { ...structuredClone(fixture.descriptor), creator: 'ak_creator', title: 'Original post', createdAt: 5, duration: 4,

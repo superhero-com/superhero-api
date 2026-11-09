@@ -1,7 +1,7 @@
 # IPFS pin and capacity inventory
 
 A separate Nest operations command compares physical pins on one Kubo node with
-canonical original/legacy, temporary input, retained asset and HLS references from a completed
+canonical original, temporary input, retained asset and HLS references from a completed
 [HLS inventory](HLS-INVENTORY.md).
 It reports missing recursive pins, known references, observed holds and unmatched
 pins. It never downloads video bytes, publishes, unpins or runs garbage collection.
@@ -80,14 +80,7 @@ node --env-file=/secure/pin-inventory.env dist/shorts/pin-inventory-main missing
 
 Reference version 5 also includes durable replacement HLS acknowledgements in each
 generation's reference root and reports `original-and-acknowledged-generation-inventory`.
-Reference version 4 also inventories replacement generations and inherits their
-original-post holds, reporting `original-and-generation-delivery-inventory`.
-Reference version 3 also retains acknowledged HLS packages absent from Redis and
-reports `original-and-acknowledged-delivery-inventory`. Reference version 2 includes temporary input and retained asset pins and propagates source holds to
-them. Version 1 retains its original coverage and reports `legacy-hls-inventory`;
-version 2 reports `original-and-derivative-inventory`. Missing-reference reports
-include every recorded pin kind, but a historical version 1 run cannot prove that
-an input package is unreferenced. These counts represent logical references,
+These counts represent logical references,
 not physical bytes or independent copies on disk.
 
 Keep outputs private; they include content identifiers across the node. Source

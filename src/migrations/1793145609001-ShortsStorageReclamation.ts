@@ -60,9 +60,9 @@ async function shortsStorageRecoveryGuards(
 }
 
 export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
-  readonly changes = {
+  readonly steps = {
     /** Durable reference quiescence. This schema deliberately issues no delete permits. */
-    ShortsInputReclamationReservations1793145609000: {
+    ShortsInputReclamationReservations: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -115,7 +115,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
         IF EXISTS(SELECT FROM ${s}.shorts_content WHERE ${s}.shorts_cid_pin_identity(body->>'cid')=target OR body->'derivatives'->>'assetsCid'=target)
           OR EXISTS(SELECT FROM ${s}.shorts_delivery_generations WHERE ${s}.shorts_cid_pin_identity(body->>'cid')=target OR body->'derivatives'->>'assetsCid'=target)
           OR EXISTS(SELECT FROM ${s}.shorts_delivery_packages WHERE prepared->>'cid'=target) THEN
-          RAISE EXCEPTION 'CID is retained by permanent or legacy media' USING ERRCODE='SH409';
+          RAISE EXCEPTION 'CID is retained by permanent media' USING ERRCODE='SH409';
         END IF;
         FOR item IN SELECT * FROM (
           SELECT network,contract,id AS short_id,id AS job_id,body FROM ${s}.shorts_content WHERE body->'derivatives'->>'cid'=target
@@ -310,7 +310,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
     },
 
     /** A crash cannot silently turn an outstanding IPFS import into delete authority. */
-    ShortsPinTransfers1793145610000: {
+    ShortsPinTransfers: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -322,7 +322,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
       network text NOT NULL CHECK(length(network) BETWEEN 1 AND 100),
       contract text NOT NULL CHECK(length(contract) BETWEEN 1 AND 200),
       job_id text NOT NULL CHECK(job_id ~ '^[a-zA-Z0-9_-]{1,200}$'),
-      purpose text NOT NULL CHECK(purpose IN ('original','assets','inputs','legacy','hls')),
+      purpose text NOT NULL CHECK(purpose IN ('original','assets','inputs','hls')),
       source_key text CHECK(source_key ~ '^[a-f0-9]{64}$'),
       state text NOT NULL DEFAULT 'issued' CHECK(state IN ('issued','pinned','rejected','uncertain')),
       issued_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -410,7 +410,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
     },
 
     /** An issued unpin cannot be cancelled by releasing its reference barrier. */
-    ShortsInputReclamationPermits1793145611000: {
+    ShortsInputReclamationPermits: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -508,7 +508,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
     },
 
     /** A process epoch is fixed durably before its first storage mutation is sent. */
-    ShortsStorageWriteEpochs1793145612000: {
+    ShortsStorageWriteEpochs: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -581,7 +581,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
     },
 
     /** Bound unpins retain their barrier until a fresh healthy-node observation. */
-    ShortsReclamationRelease1793232001000: {
+    ShortsReclamationRelease: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -682,7 +682,7 @@ export class ShortsStorageReclamation1793145609001 extends FeatureMigration {
     },
 
     /** Recovery records retire old process authority without rewriting its outcome. */
-    ShortsStorageRecovery1793232002000: {
+    ShortsStorageRecovery: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',

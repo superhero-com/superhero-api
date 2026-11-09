@@ -2,8 +2,8 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ShortsChainIndexing1791676800001 extends FeatureMigration {
-  readonly changes = {
-    ShortsChainIndex1791676800000: {
+  readonly steps = {
+    ShortsChainIndex: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_chain_events (
       contract text NOT NULL, tx_hash varchar NOT NULL REFERENCES txs(hash) ON DELETE CASCADE,
@@ -33,7 +33,7 @@ export class ShortsChainIndexing1791676800001 extends FeatureMigration {
       },
     },
 
-    ShortsCoverage1791734400000: {
+    ShortsCoverage: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`ALTER TABLE shorts_index_backfill
       ADD COLUMN covered_height integer NOT NULL DEFAULT -1,
@@ -55,7 +55,7 @@ export class ShortsChainIndexing1791676800001 extends FeatureMigration {
     },
 
     /** The shared chain index is dedicated to one network, even across releases. */
-    ShortsIndexNetwork1791763228000: {
+    ShortsIndexNetwork: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_index_network (
       singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),

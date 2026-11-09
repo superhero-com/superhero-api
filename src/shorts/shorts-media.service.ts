@@ -11,23 +11,8 @@ import {
   OnModuleDestroy,
   Optional,
 } from '@nestjs/common';
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto';
-import {
-  readFile,
-  writeFile,
-  mkdir,
-  readdir,
-  rm,
-  open,
-  rename,
-  mkdtemp,
-} from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, rm, open, mkdtemp } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { openAsBlob } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -41,13 +26,11 @@ import {
   ScratchCapacityError,
   ShortsScratchService,
 } from './shorts-scratch.service';
-import { LOCAL_DIR } from './shorts-chain.service';
 import { ShortRecord } from './shorts.types';
 import {
   ShortsSafetyService,
   ShortsModerationUnavailableError,
 } from './shorts-safety.service';
-import { ShortsEncodingService } from './shorts-encoding.service';
 import { ShortsPrivateMediaService } from './shorts-private-media.service';
 import { ShortsRecordsService } from './shorts-records.service';
 import { ShortsPackageService } from './shorts-package.service';
@@ -73,7 +56,6 @@ import {
 
 @Injectable()
 export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
-  private key: Buffer;
   private pinnedCids = new Set<string>();
   private readonly shutdown = new AbortController();
   private readonly operations = new Set<Promise<unknown>>();
@@ -89,7 +71,6 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     readonly safety: ShortsSafetyService,
     @Optional() private readonly privateMedia?: ShortsPrivateMediaService,
     @Optional() private readonly records?: ShortsRecordsService,
-    @Optional() private readonly encoder?: ShortsEncodingService,
     @Optional() private readonly admission?: ShortsMediaAdmissionService,
     @Optional() private readonly scratch?: ShortsScratchService,
     @Optional() private readonly pinTransfers?: ShortsPinTransfersService,
@@ -163,14 +144,9 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
   ) {
     const active = this.signal(signal);
     active.throwIfAborted();
-    if (short.privateMedia) {
-      if (!this.privateMedia)
-        throw new Error('Shared private media is unavailable');
-      return this.privateMedia.file(this.scope(), short, name, active);
-    }
-    if (this.records?.shared)
-      throw new Error('Migrate private media before using the hosted API');
-    return this.load(short.id, name);
+    if (!this.privateMedia || !short.privateMedia)
+      throw new Error('Shared private media is unavailable');
+    return this.privateMedia.file(this.scope(), short, name, active);
   }
   private signal(signal?: AbortSignal, timeoutMs?: number) {
     return AbortSignal.any([
@@ -191,18 +167,6 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
         throw new Error('Hosted media requires private shared storage');
       if (!this.admission)
         throw new Error('Hosted media requires shared transfer admission');
-      return;
-    }
-    await mkdir(join(LOCAL_DIR, 'private'), { recursive: true, mode: 0o700 });
-    try {
-      this.key = await readFile(join(LOCAL_DIR, 'quarantine.key'));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      this.key = randomBytes(32);
-      await writeFile(join(LOCAL_DIR, 'quarantine.key'), this.key, {
-        mode: 0o600,
-        flag: 'wx',
-      });
     }
   }
   private async ipfsHeaders(): Promise<Headers> {
@@ -282,212 +246,14 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
       });
     });
   }
-  private async store(id: string, name: string, data: Buffer) {
-    if (this.records?.shared)
-      throw new Error('Hosted media cannot write local files');
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.key, iv);
-    const bytes = Buffer.concat([cipher.update(data), cipher.final()]);
-    const directory = join(LOCAL_DIR, 'private');
-    const path = join(directory, `${id}-${name}.enc`);
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    try {
-      const file = await open(temporary, 'wx', 0o600);
-      try {
-        await file.writeFile(Buffer.concat([iv, cipher.getAuthTag(), bytes]));
-        await file.sync();
-      } finally {
-        await file.close();
-      }
-      await rename(temporary, path);
-      const parent = await open(directory, 'r');
-      try {
-        await parent.sync();
-      } finally {
-        await parent.close();
-      }
-    } finally {
-      await rm(temporary, { force: true });
-    }
-  }
-  private async load(id: string, name: string) {
-    if (this.records?.shared)
-      throw new Error('Hosted media cannot read local files');
-    const input = await readFile(
-      join(LOCAL_DIR, 'private', `${id}-${name}.enc`),
-    );
-    const decipher = createDecipheriv(
-      'aes-256-gcm',
-      this.key,
-      input.subarray(0, 12),
-    );
-    decipher.setAuthTag(input.subarray(12, 28));
-    return Buffer.concat([
-      decipher.update(input.subarray(28)),
-      decipher.final(),
-    ]);
-  }
-  async saveUploadPart(id: string, index: number, bytes: Buffer) {
-    await this.store(id, `part-${index}`, bytes);
-  }
-  async removePrepared(id: string) {
-    if (this.records?.shared)
-      throw new Error('Hosted media cannot delete local files');
-    await Promise.all(
-      [
-        'original',
-        'video.mp4',
-        'poster.jpg',
-        'manifest.json',
-        'captions.vtt',
-      ].map((name) =>
-        rm(join(LOCAL_DIR, 'private', `${id}-${name}.enc`), { force: true }),
-      ),
-    );
-  }
-  async removeOrphanedPrepared(registered: Set<string>) {
-    if (this.records?.shared)
-      throw new Error('Hosted media cannot sweep local files');
-    // Runs before HTTP starts, after the chain has loaded the registry. Parts
-    // belong to resumable sessions and are managed separately by their TTL.
-    for (const name of await readdir(join(LOCAL_DIR, 'private'))) {
-      // Only startup calls this, before an ingestion worker or HTTP can write.
-      if (/^[a-f0-9-]{36}-.+\.enc\.[a-f0-9-]{36}\.tmp$/.test(name)) {
-        await rm(join(LOCAL_DIR, 'private', name), { force: true });
-        continue;
-      }
-      const match =
-        /^([a-f0-9-]{36})-(original|video\.mp4|poster\.jpg|manifest\.json|captions\.vtt)\.enc$/.exec(
-          name,
-        );
-      if (match && !registered.has(match[1]))
-        await rm(join(LOCAL_DIR, 'private', name), { force: true });
-    }
-  }
-  async loadUploadPart(id: string, index: number) {
-    return this.load(id, `part-${index}`);
-  }
-  async removeUploadParts(id: string, count: number) {
-    if (this.records?.shared)
-      throw new Error('Hosted media cannot delete local files');
-    await Promise.all(
-      Array.from({ length: count }, (_, index) =>
-        rm(join(LOCAL_DIR, 'private', `${id}-part-${index}.enc`), {
-          force: true,
-        }),
-      ),
-    );
-  }
-  private async add(
-    files: { name: string; data: Buffer }[],
-    onlyHash: boolean,
-    parent?: AbortSignal,
-    short?: ShortRecord,
-  ) {
-    const signal = this.signal(parent, 60000);
-    signal.throwIfAborted();
-    const form = new FormData();
-    for (const file of files)
-      form.append('file', new Blob([new Uint8Array(file.data)]), file.name);
-    if (!onlyHash && this.expiringWrites)
-      return this.addWithIntent(
-        form,
-        true,
-        short,
-        short?.cid,
-        'legacy',
-        signal,
-      );
-    const response = await this.ipfsFetch(
-      `add?wrap-with-directory=true&${SHORTS_IPFS_IMPORT_QUERY}&pin=${!onlyHash}&only-hash=${onlyHash}`,
-      { method: 'POST', body: form, signal },
-    );
-    if (!response.ok) {
-      discardShortsResponse(response);
-      // Storage admission pauses writes under disk pressure or rate limits.
-      // Keep the durable lifecycle job in capacity_wait, without spending its
-      // failure attempts or retrying this upload outside the claimed job.
-      if (response.status === 429 || response.status === 503)
-        throw new ShortsMediaUnavailableError();
-      throw new Error(`IPFS add failed (${response.status})`);
-    }
-    const bytes = await readShortsResponse(response, 16384, signal);
-    let rows;
-    try {
-      rows = new TextDecoder('utf-8', { fatal: true })
-        .decode(bytes)
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
-    } catch {
-      throw new Error('Invalid IPFS add response');
-    }
-    if (rows.length > files.length + 1 || typeof rows.at(-1)?.Hash !== 'string')
-      throw new Error('Invalid IPFS add response');
-    return rows.at(-1).Hash as string;
-  }
-  async prepare(
-    id: string,
-    input: Buffer,
-    title: string,
-    topic: string,
-    details: {
-      description?: string;
-      language?: string;
-      synthetic?: boolean;
-      sponsored?: boolean;
-      captions?: string;
-    } = {},
-  ) {
-    if (this.records?.shared)
-      throw new Error('Hosted preparation requires the isolated media worker');
-    if (!this.encoder) throw new Error('Local media encoder is unavailable');
-    try {
-      await this.store(id, 'original', input);
-      const prepared = await this.encoder.encode(input, title, topic, details);
-      const safety = await this.safety.scan(input);
-      for (const file of prepared.files)
-        await this.store(id, file.name, file.data);
-      return {
-        safety,
-        cid: await this.add(prepared.files, true),
-        bytes: prepared.bytes,
-        duration: prepared.duration,
-        files: prepared.files.map((file) => ({
-          name: file.name,
-          bytes: file.data.length,
-          sha256: createHash('sha256').update(file.data).digest('hex'),
-        })),
-      };
-    } catch (error) {
-      await this.removePrepared(id);
-      throw error;
-    }
-  }
   /** A prior interrupted handoff may have left a complete, reusable package. */
   async ensurePinned(short: ShortRecord, parent?: AbortSignal) {
     return this.withCapacity(short, parent, (signal) =>
-      this.ensurePackage(short, signal),
+      this.pinOriginal(short, signal),
     );
-  }
-  private async ensurePackage(short: ShortRecord, signal: AbortSignal) {
-    signal.throwIfAborted();
-    if (validateOriginalContent(short)) return this.pinOriginal(short, signal);
-    if (!(await this.pinned(short.cid, signal))) {
-      await this.pinPackage(short, signal);
-      return;
-    }
-    // Recursive pin presence alone is not proof of the expected file hashes.
-    for (const file of short.files) {
-      signal.throwIfAborted();
-      await this.retrieveFile(short, file.name, signal);
-    }
-    signal.throwIfAborted();
   }
   async pin(short: ShortRecord, parent?: AbortSignal) {
-    return this.withCapacity(short, parent, (signal) =>
-      this.pinPackage(short, signal),
-    );
+    return this.ensurePinned(short, parent);
   }
   /** Repair permanent source/assets after the generation's inputs were retired. */
   async restoreDurablePins(short: ShortRecord, parent?: AbortSignal) {
@@ -496,53 +262,6 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     return this.withCapacity(short, parent, (signal) =>
       this.pinOriginal(short, signal, false),
     );
-  }
-  private async pinPackage(short: ShortRecord, parent?: AbortSignal) {
-    if (validateOriginalContent(short))
-      return this.pinOriginal(short, this.signal(parent));
-    const controller = new AbortController();
-    const signal = this.signal(
-      parent ? AbortSignal.any([parent, controller.signal]) : controller.signal,
-    );
-    try {
-      signal.throwIfAborted();
-      const results = await Promise.allSettled(
-        short.files.map(async (f) => {
-          try {
-            return {
-              name: f.name,
-              data: await this.preparedFile(short, f.name, signal),
-            };
-          } catch (error) {
-            controller.abort();
-            throw error;
-          }
-        }),
-      );
-      // Drain cancelled siblings before releasing lifecycle admission.
-      const failed = results.find((result) => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
-      signal.throwIfAborted();
-      const files = results.map(
-        (result) =>
-          (result as PromiseFulfilledResult<{ name: string; data: Buffer }>)
-            .value,
-      );
-      if (
-        short.privateMedia &&
-        (await new ShortsPackageService().cid(files, signal)) !== short.cid
-      )
-        throw new Error('Prepared package identity mismatch');
-      signal.throwIfAborted();
-      if ((await this.add(files, false, signal, short)) !== short.cid)
-        throw new Error('IPFS commitment mismatch');
-      for (const f of short.files)
-        await this.retrieveFile(short, f.name, signal);
-      signal.throwIfAborted();
-      this.rememberPin(short.cid);
-    } finally {
-      controller.abort();
-    }
   }
   private async addFiles(
     files: (ShortsMediaFile & { name: string })[],
@@ -840,17 +559,12 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     value: HlsPackage,
     parent?: AbortSignal,
   ) {
-    const original = validateOriginalContent(short);
+    validateOriginalContent(short);
     this.preparedDelivery(short, descriptor, value);
     await this.withCapacity(
       short,
       parent,
       async (signal) => {
-        if (!original) {
-          for (const file of descriptor.files)
-            await this.verifyPinnedBytes(short.cid, file.name, file, signal);
-          return;
-        }
         await this.verifyPinnedBytes(
           short.cid,
           undefined,
@@ -943,36 +657,23 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     );
   }
   async rescan(short: ShortRecord, parent?: AbortSignal) {
-    const originalFormat = validateOriginalContent(short);
+    validateOriginalContent(short);
     // Published originals remain the inspection source after staging retirement.
     // Do not nest admission: withPinnedOriginal owns its transfer and scratch.
-    if (
-      originalFormat &&
-      (short.publication === 'published' || short.publication === 'withdrawn')
-    )
+    if (short.publication === 'published' || short.publication === 'withdrawn')
       return this.withPinnedOriginal(
         short,
         (file, signal) => this.safety.scan(file, signal, true),
         parent,
       );
     return this.withCapacity(short, parent, async (signal) => {
-      if (originalFormat) {
-        if (!this.privateMedia) throw new Error('Original source unavailable');
-        return this.privateMedia.withOriginal(
-          this.scope(),
-          short,
-          (file, active) => this.safety.scan(file, active, true),
-          signal,
-        );
-      }
-      const original = short.privateMedia
-        ? await this.privateMedia?.original(this.scope(), short, signal)
-        : await this.load(short.id, 'original');
-      if (!original) throw new Error('Shared private media is unavailable');
-      signal.throwIfAborted();
-      const result = await this.safety.scan(original, signal, true);
-      signal.throwIfAborted();
-      return result;
+      if (!this.privateMedia) throw new Error('Original source unavailable');
+      return this.privateMedia.withOriginal(
+        this.scope(),
+        short,
+        (file, active) => this.safety.scan(file, active, true),
+        signal,
+      );
     });
   }
   async retrieve(short: ShortRecord, name: string, parent?: AbortSignal) {

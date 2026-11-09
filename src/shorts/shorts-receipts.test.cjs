@@ -3,8 +3,7 @@ const {
   ShortsUploadBudget,
   ShortsMetadata,
   ShortsReceipts,
-  ShortsSharedCutover,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,7 +21,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   const schema = `shorts_receipts_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
-    migrations: [ShortsMetadata, ShortsUploads, ShortsReceipts, ShortsSharedCutover, ShortsUploadBudget] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsReceipts, ShortsUploadBudget] };
   const one = new DataSource(options), two = new DataSource(options);
   const originalEnv = { ...process.env };
   t.after(async () => { process.env = originalEnv; await two.destroy(); await one.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
@@ -33,7 +32,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   const params = s => [s.network, s.contract];
   async function scope(initialize = true) {
     const s = { network: 'ae_uat', contract: `ct_${randomUUID().replaceAll('-', '')}` };
-    await meta.initialize(s, sourceHash); if (initialize) await a.initialize(s, sourceHash, 'ct_previous', []); return s;
+    await meta.initialize(s, sourceHash); if (initialize) await a.initialize(s, sourceHash); return s;
   }
   const submitted = (s, extra = {}) => ({ tx: txHash(), actor, action: 'wallet_transaction', verification: 'submitted', calledContract: s.contract, ...extra });
   const observed = (s, extra = {}) => ({ ...submitted(s), verification: 'node_observed', blockHash: blockHash(), blockHeight: 12, ...extra });
@@ -42,7 +41,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
     const chain = new ShortsChainService({ save() { assert.fail('Hosted receipts must not write the local snapshot'); } }, {}, repository);
     chain.release = { ...s };
     chain.state = { contract: s.contract, sourceHash, shorts: [], receipts: [] };
-    chain.previous = { $options: { address: 'ct_previous' } }; chain.operator = { address: actor };
+    chain.operator = { address: actor };
     await chain.onApplicationBootstrap();
     return chain;
   }
@@ -60,9 +59,8 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   }
 
   await t.test('deployment binding is shared, initialization fails closed and startup precedes any writes', async () => {
-    const s = await scope(false); await Promise.all([a.initialize(s, sourceHash, 'ct_previous', []), b.initialize(s, sourceHash, 'ct_previous', [])]);
-    await assert.rejects(b.initialize(s, 'b'.repeat(64), 'ct_previous', []), { status: 503 });
-    await assert.rejects(b.initialize(s, sourceHash, 'ct_other', []), { status: 409 });
+    const s = await scope(false); await Promise.all([a.initialize(s, sourceHash), b.initialize(s, sourceHash)]);
+    await assert.rejects(b.initialize(s, 'b'.repeat(64)), { status: 503 });
     await assert.rejects(new ShortsReceiptsService().list(s, actor), { status: 503 });
     const chain = new ShortsChainService({}, {}, a); chain.state.contract = s.contract; chain.release = { ...s };
     let sent = 0; chain.contract = { $call: async () => { sent++; } };
@@ -73,7 +71,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
     await Promise.all(Array.from({ length: 12 }, (_, i) => (i % 2 ? a : b).record(s, receipt)));
     assert.equal((await rows(s)).length, 1);
     await assert.rejects(b.record(s, { ...receipt, actor: other }), { status: 409 });
-    await assert.rejects(b.record(s, { ...receipt, calledContract: 'ct_previous' }), { status: 409 });
+    await assert.rejects(b.record(s, { ...receipt, calledContract: 'ct_other' }), { status: 400 });
     await assert.rejects(b.record(s, { ...receipt, tx: txHash(), calledContract: 'ct_unrelated' }), { status: 400 });
     assert.equal((await rows(s))[0].actor, actor);
     const alien = await scope(); await a.record(alien, { ...receipt, calledContract: alien.contract });
@@ -88,31 +86,6 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
     assert.equal(stored.action, 'publish'); assert.equal(stored.at, at);
     await assert.rejects(a.record(s, { ...proof, blockHeight: undefined }), { status: 400 });
     await assert.rejects(one.query('UPDATE shorts_transaction_receipts SET block_height=NULL WHERE contract=$1', [s.contract]), { code: '23514' });
-  });
-  await t.test('historical import is explicit, deduplicated and never replayed over newer observations', async () => {
-    const s = await scope(false), tx = txHash(), legacy = [{ actor, tx, action: 'publish', at: 100 }, { actor, tx, action: 'publish', at: 200 }];
-    await assert.rejects(a.initialize(s, sourceHash, 'ct_previous', legacy), { status: 409 });
-    assert.equal((await rows(s)).length, 0);
-    await a.initialize(s, sourceHash, 'ct_previous', legacy, true);
-    assert.equal((await rows(s)).length, 1); assert.equal((await rows(s))[0].verification, 'legacy');
-    assert.equal((await rows(s))[0].called_contract, null); assert.equal((await rows(s))[0].at, '100');
-    const proof = observed(s, { tx }); await b.record(s, proof);
-    await a.initialize(s, sourceHash, 'ct_previous', legacy);
-    assert.equal((await rows(s))[0].verification, 'node_observed'); assert.equal((await rows(s))[0].block_hash, proof.blockHash);
-    await assert.rejects(a.initialize(s, sourceHash, 'ct_previous', [...legacy, { ...legacy[0], at: 300 }], true), { status: 409 });
-    const otherScope = await scope(); await assert.rejects(a.initialize(otherScope, sourceHash, 'ct_previous', legacy, true), { status: 409 });
-  });
-  await t.test('conflicting history rolls back the whole import and malformed identifiers are rejected', async () => {
-    const s = await scope(false), tx = txHash();
-    await assert.rejects(a.initialize(s, sourceHash, undefined, [
-      { actor, tx, action: 'claim', at: 10 }, { actor: other, tx, action: 'claim', at: 20 },
-    ], true), { status: 409 });
-    assert.equal((await rows(s)).length, 0);
-    assert.equal((await one.query('SELECT * FROM shorts_receipt_scopes WHERE contract=$1', [s.contract])).length, 0);
-    await assert.rejects(a.initialize(s, sourceHash, undefined, [{ actor, tx: 'th_badchecksum', action: 'claim', at: 10 }], true), { status: 400 });
-    await a.initialize(s, sourceHash, undefined, [{ actor, tx, action: 'claim', at: 10 }], true);
-    await assert.rejects(a.record(s, { ...observed(s), blockHash: txHash() }), { status: 400 });
-    await assert.rejects(a.record(s, submitted(s, { actor: 'ak_invalid' })), { status: 400 });
   });
   await t.test('bounded cursor pages keep actor/deployment isolation and stable ordering', async () => {
     const s = await scope();
@@ -137,11 +110,11 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
       const scopeValue = await scope(), chain = await runtime(scopeValue), { tx, state } = node(chain);
       change(state); await assert.rejects(chain.recordTransaction(actor, tx)); assert.equal((await rows(scopeValue)).length, 0);
     }
-    const s = await scope(), chain = await runtime(s), { tx, state } = node(chain, undefined, 'ct_previous');
+    const s = await scope(), chain = await runtime(s), { tx, state } = node(chain);
     await assert.rejects(chain.recordTransaction(actor, 'th_wrongchecksum'), { status: 400 }); assert.equal(state.calls, 0);
     assert.deepEqual(await chain.recordTransaction(actor, tx), { tx });
     assert.equal((await chain.receiptHistory(actor))[0].verification, 'node_observed');
-    assert.equal((await rows(s))[0].called_contract, 'ct_previous');
+    assert.equal((await rows(s))[0].called_contract, s.contract);
     assert.deepEqual(chain.state.receipts, [], 'the former local snapshot remains unchanged');
   });
   await t.test('hosted receipt service never grants inline publication or payment signing authority', async () => {
@@ -167,7 +140,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
     const { ShortsCoreModule } = require('./shorts-core.module'); const { ShortsMetadataModule } = require('./shorts-metadata.module');
     const { ShortsStoreService } = require('./shorts-store.service'); const { ShortsRecordsService } = require('./shorts-records.service');
     class DatabaseModule {} Global()(DatabaseModule); Module({ providers: [{ provide: DataSource, useValue: one }], exports: [DataSource] })(DatabaseModule);
-    for(const key of ['SHORTS_DATA_DIR','SHORTS_IMPORT_LEGACY_CONTENT','SHORTS_IMPORT_LEGACY_ANALYTICS','SHORTS_IMPORT_LEGACY_RECEIPTS']) delete process.env[key];
+    for(const key of ['SHORTS_DATA_DIR']) delete process.env[key];
     const module = await Test.createTestingModule({ imports: [DatabaseModule, ShortsCoreModule, ShortsMetadataModule], providers: [ShortsRecordsService] }).compile();
     assert.equal(module.get(ShortsStoreService).shared, true);
     assert.throws(() => module.get(ShortsStoreService).db, /unavailable in the hosted API/);
@@ -182,7 +155,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   await t.test('receipt acknowledgement and dashboard history work across HTTP API instances', async t => {
     const { NestFactory } = require('@nestjs/core'); const { ShortsController } = require('./shorts.controller');
     const { ShortsService } = require('./shorts.service'); const { ShortsAuthService } = require('./shorts-auth.service');
-    const { ShortsUploadsService } = require('./shorts-uploads.service'); const { ShortsAuthGuard } = require('./shorts-auth.guard');
+    const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service'); const { ShortsAuthGuard } = require('./shorts-auth.guard');
     const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
     const s = await scope(), tx = txHash(), bases = [];
     for (const repository of [a, b]) {
@@ -206,7 +179,6 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   await t.test('schema downgrade does not discard initialized transaction history', async () => {
     const s = await scope(); await a.record(s, submitted(s)); const before = await rows(s);
     await one.undoLastMigration({ transaction: 'all' }); // Revert upload-budget prerequisites first.
-    await one.undoLastMigration({ transaction: 'all' }); // Empty cutover table can be removed.
     await assert.rejects(one.undoLastMigration({ transaction: 'all' }), /Restore\/reconcile/);
     assert.deepEqual(await rows(s), before);
   });

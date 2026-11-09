@@ -64,7 +64,7 @@ async function shortsPrivateReferenceBarriersWriters(
       BEGIN
         after_body=to_jsonb(NEW); before_body=to_jsonb(OLD);
         -- The existing AFTER epoch trigger has already serialized this writer. Lock again
-        -- so explicit SET CONSTRAINTS and legacy callers have the same boundary.
+        -- so explicit SET CONSTRAINTS and concurrent writers have the same boundary.
         PERFORM 1 FROM ${s}.shorts_private_storage_epochs WHERE network=after_body->>'network' AND contract=after_body->>'contract' FOR UPDATE;
         IF NOT EXISTS(SELECT FROM ${s}.shorts_private_cleanup_scopes WHERE network=after_body->>'network' AND contract=after_body->>'contract') THEN RETURN NEW; END IF;
         IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'Cleanup references require READ COMMITTED' USING ERRCODE='SH400'; END IF;
@@ -110,8 +110,8 @@ async function shortsPrivateReferenceBarriersWriters(
 }
 
 export class ShortsPrivateMediaCleanup1793232008001 extends FeatureMigration {
-  readonly changes = {
-    ShortsPrivateVersionCleanup1793232008000: {
+  readonly steps = {
+    ShortsPrivateVersionCleanup: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -312,7 +312,7 @@ export class ShortsPrivateMediaCleanup1793232008001 extends FeatureMigration {
     },
 
     /** Verified private-input closure; physical removal requires separate authority. */
-    ShortsPrivateInputRetirement1793491200000: {
+    ShortsPrivateInputRetirement: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -476,7 +476,7 @@ export class ShortsPrivateMediaCleanup1793232008001 extends FeatureMigration {
     },
 
     /** Makes accepted encrypted source children inspectable by transactional reference guards. */
-    ShortsAcceptedManifests1793491201000: {
+    ShortsAcceptedManifests: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -588,7 +588,7 @@ export class ShortsPrivateMediaCleanup1793232008001 extends FeatureMigration {
     },
 
     /** Serializes new references with retirement. A barrier is not deletion authority. */
-    ShortsPrivateReferenceBarriers1793491202000: {
+    ShortsPrivateReferenceBarriers: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -762,7 +762,7 @@ export class ShortsPrivateMediaCleanup1793232008001 extends FeatureMigration {
     },
 
     /** Separate media-verifier and deletion-operator authority for sealed private inputs. */
-    ShortsPrivateInputCleanupJournal1793491203000: {
+    ShortsPrivateInputCleanupJournal: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',

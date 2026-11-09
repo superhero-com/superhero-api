@@ -1,20 +1,17 @@
 // Playback wire protocol; mirrored by superhero-video-streaming with shared compatibility vectors.
 export interface PlaybackDescriptor {
   id: string;
-  /** Canonical legacy directory or exact original-file CID. */
   cid: string;
-  /** Immutable published legacy directory, including when delivery uses its retained original. */
-  canonical?: { version: 1; cid: string; bytes: number };
-  network?: 'ae_uat' | 'ae_mainnet';
-  contract?: string;
-  bytes?: number;
-  original?: {
+  network: 'ae_uat' | 'ae_mainnet';
+  contract: string;
+  bytes: number;
+  original: {
     version: 1;
     sha256: string;
     mediaType: 'video/mp4' | 'video/quicktime';
     importProfile: 'unixfs-file-v1-262144';
   };
-  derivatives?: {
+  derivatives: {
     version: 1;
     cid: string;
     assetsCid: string;
@@ -60,7 +57,6 @@ export function validateDescriptor(
 ): PlaybackDescriptor {
   const original = value?.original,
     delivery = value?.derivatives;
-  const adaptive = original !== undefined || delivery !== undefined;
   if (
     !value ||
     value.id !== id ||
@@ -68,15 +64,13 @@ export function validateDescriptor(
     !cidPattern.test(value.cid) ||
     !Array.isArray(value.files) ||
     !value.files.length ||
-    value.files.length > (adaptive ? 11 : 3) ||
+    value.files.length > 11 ||
     new Set(value.files.map((file) => file?.name)).size !==
       value.files.length ||
     value.files.some(
       (file) =>
         !file ||
-        !(
-          adaptive ? sourceNames : ['video.mp4', 'poster.jpg', 'captions.vtt']
-        ).includes(file.name) ||
+        !sourceNames.includes(file.name) ||
         !Number.isSafeInteger(file.bytes) ||
         file.bytes < 1 ||
         file.bytes > 100000000 ||
@@ -84,20 +78,6 @@ export function validateDescriptor(
     )
   )
     throw new Error('Invalid playback descriptor');
-  if (value.canonical !== undefined) {
-    const canonical = value.canonical;
-    if (
-      canonical?.version !== 1 ||
-      typeof canonical.cid !== 'string' ||
-      !cidPattern.test(canonical.cid) ||
-      !Number.isSafeInteger(canonical.bytes) ||
-      canonical.bytes < 1 ||
-      canonical.bytes > 100000000 ||
-      (adaptive ? canonical.cid === value.cid : canonical.cid !== value.cid)
-    )
-      throw new Error('Invalid canonical legacy publication');
-  }
-  if (!adaptive) return value;
   if (
     typeof value.network !== 'string' ||
     !['ae_uat', 'ae_mainnet'].includes(value.network) ||
@@ -212,25 +192,4 @@ export function adaptiveSourceIdentity(value: PlaybackDescriptor) {
   });
 }
 
-/** Durable acknowledgement identity; the legacy source key remains unchanged. */
-export function deliverySourceIdentity(value: PlaybackDescriptor) {
-  validateDescriptor(value);
-  if (value.original || value.derivatives) return adaptiveSourceIdentity(value);
-  if (
-    !['ae_uat', 'ae_mainnet'].includes(value.network || '') ||
-    !/^ct_[a-zA-Z0-9]{1,97}$/.test(value.contract || '') ||
-    !value.files.some((file) => file.name === 'video.mp4')
-  )
-    throw new Error('Invalid legacy delivery scope');
-  return JSON.stringify({
-    version: 2,
-    id: value.id,
-    network: value.network,
-    contract: value.contract,
-    cid: value.cid,
-    generation: { job: value.id },
-    files: value.files
-      .map(({ name, bytes, sha256 }) => ({ name, bytes, sha256 }))
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
-  });
-}
+export const deliverySourceIdentity = adaptiveSourceIdentity;

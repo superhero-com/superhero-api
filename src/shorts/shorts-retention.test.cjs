@@ -4,7 +4,7 @@ const {
   ShortsUploads,
   ShortsDirectUploads,
   ShortsRetentionHolds,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');

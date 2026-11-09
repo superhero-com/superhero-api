@@ -1,7 +1,6 @@
 import {
   shortsStorageScope,
   shortsStorageSourceHash,
-  shortsRuntimeScope,
 } from './shorts-runtime-scope';
 import {
   BadRequestException,
@@ -44,19 +43,10 @@ export class ShortsRecordsService implements OnModuleInit {
   }
   async onModuleInit() {
     if (!this.metadata) return;
-    if (this.chain.state.shorts.length)
-      throw new ConflictException(
-        'Move the local snapshot through the offline legacy migration',
-      );
     await this.metadata.initialize(
       this.scope(),
       shortsStorageSourceHash(this.chain),
     );
-    if (this.scope().contract !== this.chain.state.contract)
-      await this.metadata.initialize(
-        shortsRuntimeScope(this.chain),
-        this.chain.state.sourceHash,
-      );
     await this.metadata.verifyHostedStorage(this.scope());
   }
   async read(id: string): Promise<StoredShort> {

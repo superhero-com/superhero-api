@@ -139,7 +139,7 @@ test('worker persists the exact original CID and a separate derivative package, 
       assert.equal(id, job.id); persisted.set(file.name, await readFile(file.path));
       return { key: slot, keyId: 'test', bytes: file.bytes, sha256: file.sha256 };
     },
-  }, { encode: async () => assert.fail('original jobs must not use legacy encoding') }, packages,
+  }, packages,
   { scan: async () => ({ status: 'no_flags', sourceSha256: f.source.sha256 }) },
   { classify: async () => undefined }, f.scratch, f.encoder);
   await worker.prepare(job, performance.now());

@@ -1,4 +1,4 @@
-const { ShortsPrivateVersionCleanup: Migration } = require('./testing/historical-migrations.cjs');
+const { ShortsPrivateVersionCleanup: Migration } = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -30,8 +30,13 @@ test('private version cleanup coordinates actual PostgreSQL authority and S3 HTT
   const args = [scope.network, scope.contract], config = { scope, prefix: f.config.prefix, sourceHash: hash('source'), storageId: hash('storage'),
     objectPrefix: f.ref.key.split('/').slice(0,2).join('/')+'/', storage: f.config, objects: f.config };
   await owner.query('INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)', [...args,config.sourceHash]);
-  const record = { id:'job', creator:'ak_creator', createdAt:1, bytes:f.ref.bytes, publication:'published', privateMedia:{ files:{video:f.ref} } };
-  await owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)', [...args,record.id,record.creator,record]);
+  // An upload part can reference the current encrypted object while superseded versions are inspected.
+  await owner.query("INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'job','ak_creator',$3)",
+    [...args, {bytes:4096,processingProfile:'original-h264-v1'}]);
+  await owner.query("INSERT INTO shorts_upload_parts(network,contract,upload_id,part,object_ref) VALUES($1,$2,'job',0,$3)", [...args,f.ref]);
+  await owner.query("UPDATE shorts_upload_sessions SET state='enqueued' WHERE id='job'");
+  const record = require('./testing/original-record.cjs').originalRecord('job', {creator:'ak_creator',createdAt:1,publication:'published'});
+  await owner.query("INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,'job','ak_creator',1,$3)", [...args,record]);
   const inventoryId = randomUUID(), identity = hash('old-version');
   await owner.query(`INSERT INTO shorts_storage_inventory_runs(network,contract,id,source_hash,storage_id,object_prefix,complete) VALUES($1,$2,$3,$4,$5,$6,true)`, [...args,inventoryId,config.sourceHash,config.storageId,config.objectPrefix]);
   await owner.query(`INSERT INTO shorts_storage_inventory_objects(network,contract,run_id,identity,object_key,version_id,deleted,latest,bytes,modified_at)
@@ -77,7 +82,7 @@ test('private version cleanup coordinates actual PostgreSQL authority and S3 HTT
     const revision=async()=>String((await owner.query('SELECT revision FROM shorts_private_storage_epochs WHERE network=$1 AND contract=$2',args))[0].revision);
     const before=await revision();await owner.query("UPDATE shorts_content SET body=jsonb_set(body,'{views}','1')");assert.equal(await revision(),before);
     await owner.query('UPDATE shorts_content SET body=$1',[record]);assert.equal(await revision(),before);
-    await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'upload-writer','ak_creator',$3)`,[...args,{bytes:16,sha256:'a'.repeat(64)}]);
+    await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,'upload-writer','ak_creator',$3)`,[...args,{processingProfile:'original-h264-v1',bytes:16,sha256:'a'.repeat(64)}]);
     assert.notEqual(await revision(),before);await owner.query("DELETE FROM shorts_upload_sessions WHERE id='upload-writer'");
     await assert.rejects(owner.query('TRUNCATE shorts_content CASCADE'),{code:'SH400'});
   });

@@ -104,7 +104,7 @@ export class ShortsPluginSyncService extends BasePluginSyncService {
                     : undefined;
           if (event.name === 'Published') beneficiary = String(args[0]);
           if (['Liked', 'PaidLike', 'Withdrawn'].includes(event.name)) {
-            // Read from the event's own contract, including a previous deployment.
+            // Read the creator from the contract that emitted the event.
             // It works during reverse/backfill order and for creators absent from
             // this API's local metadata. A missing creator must never lose earnings.
             const { decodedResult: short } = await contract.$call(

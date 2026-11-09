@@ -6,7 +6,7 @@ const {
   ShortsMetadata,
   ShortsPublications,
   ShortsPublisherAuthority,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture, digest } = require('./shorts-release.fixture.cjs');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
@@ -57,8 +57,8 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     return { account, deployment, api: await role(scope, 'api'), signer: await role(scope, 'publisher'), other: await role(scope, 'publisher') };
   }
   async function content(f, extra = {}) {
-    const r = { id: randomUUID(), creator, title: 'Owned fixture', cid: 'bafy' + 'a'.repeat(50), bytes: 800,
-      createdAt: 0, publication: 'pending', moderation: 'approved', safety: { status: 'no_flags' }, ...extra };
+    const r = require('./testing/original-record.cjs').originalRecord(randomUUID(), { creator, title: 'Owned fixture', bytes: 800,
+      createdAt: 0, publication: 'pending', moderation: 'approved', safety: { status: 'no_flags' }, ...extra });
     await owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,0,$5::jsonb)',
       [f.deployment.scope.network, f.deployment.scope.contract, r.id, r.creator, JSON.stringify(r)]); return r;
   }
@@ -211,7 +211,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     const api = new ShortsApiPublicationService(chain, f.api.repo); api.deployment = f.deployment;
     const records = new ShortsRecordsService(chain, meta);
     const service = new ShortsService(chain, { async ensurePinned() { pins++; } }, { async counters() { return {}; } }, undefined, undefined, undefined,
-      { async enqueue() { streams++; } }, undefined, records, api);
+      { async enqueue() { streams++; } }, records, api);
     const response = await service.publish(creator, r.id);
     assert.equal(response.publicationPending, true); assert.equal(response.publicationRequest, 'preparing'); assert.equal(response.publicationStatus, 'draft'); assert.equal(pins, 0);
     const hosting = new ShortsHostedHostingService(chain, service.media, service, records, new ShortsLifecycleJobsService(owner));
@@ -238,7 +238,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     const records = new ShortsRecordsService(chain, meta), jobs = new ShortsLifecycleJobsService(owner);
     const media = { async ensurePinned() { pins++; if (denied) throw new Error('Storage full'); } };
     const service = new ShortsService(chain, media, { async counters() { return { views: 0 }; } }, undefined, undefined, undefined,
-      undefined, undefined, records, api);
+      undefined, records, api);
     const responses = await Promise.allSettled(Array.from({ length: 5 }, () => service.publish(creator, r.id)));
     assert.ok(responses.some(value => value.status === 'fulfilled'));
     assert.ok(responses.every(value => value.status === 'fulfilled'
@@ -351,19 +351,15 @@ test('real SDK and bounded HTTP transport build an absolute-TTL signature before
   const { unpackTx } = require('@aeternity/aepp-sdk'); const { AciContractCallEncoder, ContractByteArrayEncoder, TypeResolver } = require('@aeternity/aepp-calldata');
   const { publicationTransaction } = require('./shorts-publication-transaction');
   const account = AccountMemory.generate(), contract = encode(randomBytes(32), Encoding.ContractAddress), keyHash = encode(randomBytes(32), Encoding.KeyBlockHash);
-  const previousContract = encode(randomBytes(32), Encoding.ContractAddress);
-  const previousCode = encode(randomBytes(32), Encoding.ContractBytearray);
-  let observedPreviousCode = previousCode;
   const bytecode = encode(randomBytes(32), Encoding.ContractBytearray), dir = await mkdtemp(join(tmpdir(), 'publisher-sdk-'));
-  const aci = [{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions: [
-    { name: 'get_config', arguments: [], returns: { tuple: ['address', 'address', 'int', 'int'] }, payable: false, stateful: false },
-    { name: 'get_previous', arguments: [], returns: { option: ['contract_pubkey'] }, payable: false, stateful: false },
-    { name: 'publish', arguments: [{ name: 'id', type: 'string' }, { name: 'creator', type: 'address' }, { name: 'cid', type: 'string' }, { name: 'size', type: 'int' }], returns: { tuple: [] }, payable: false, stateful: true },
-  ] } }];
+  const { aci } = releaseFixture().artifact;
   const encoder = new AciContractCallEncoder(aci);
   const encodeResult = (method, value) => new ContractByteArrayEncoder().encodeWithType(value, new TypeResolver().resolveType(aci[0].contract.functions.find(fn => fn.name === method).returns));
   const requests = [], submitted = [];
-  let observedNetwork = 'ae_uat', observedCode = bytecode, observedConfig = [account.address, account.address, 100000000000000000n, 2000], observedPrevious;
+  const policy = { operator: account.address, max_video_bytes: 100000000n, max_comment_chars: 280n, max_comment_bytes: 1120n,
+    comment_cooldown: 1n, publishing_enabled: true, likes_enabled: true, comments_enabled: true };
+  let observedNetwork = 'ae_uat', observedCode = bytecode, observedConfig = [policy, 0n];
+  const status = {schema:2n, importing:false, import_started:false, abandoned:false, frozen:false, reserved_source:undefined};
   const server = createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk); const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : undefined;
     requests.push(req.url); let result; res.setHeader('content-type', 'application/json');
@@ -373,12 +369,10 @@ test('real SDK and bounded HTTP transport build an absolute-TTL signature before
     else if (req.url === '/v3/recent-gas-prices') result = [{ min_gas_price: 1000000000, utilization: 0, minutes: 1 }];
     else if (req.url.startsWith('/v3/accounts/')) result = { id: req.url.split('/')[3], balance: '100000000000000000000', nonce: 0, kind: 'basic' };
     else if (req.url === `/v3/contracts/${contract}`) result = { id: contract, active: true, owner_id: account.address, vm_version: 8, abi_version: 3, referrer_ids: [] };
-    else if (req.url === `/v3/contracts/${previousContract}`) result = { id: previousContract, active: true, owner_id: account.address, vm_version: 8, abi_version: 3, referrer_ids: [] };
-    else if (req.url === `/v3/contracts/${previousContract}/code`) result = { bytecode: observedPreviousCode };
     else if (req.url === `/v3/contracts/${contract}/code`) result = { bytecode: observedCode };
     else if (req.url === '/v3/dry-run') result = { results: body.txs.map(item => {
       const tx = unpackTx(item.tx, Tag.ContractCallTx), config = tx.callData === encoder.encodeCall('Shorts', 'get_config', []);
-      return { type: 'contract_call', result: 'ok', call_obj: { caller_id: tx.callerId, caller_nonce: tx.nonce, contract_id: contract, height: 100, gas_price: 1000000000, gas_used: 1000, log: [], return_type: 'ok', return_value: config ? encodeResult('get_config', observedConfig) : tx.callData === encoder.encodeCall('Shorts', 'get_previous', []) ? encodeResult('get_previous', observedPrevious) : encodeResult('publish', []) } };
+      return { type: 'contract_call', result: 'ok', call_obj: { caller_id: tx.callerId, caller_nonce: tx.nonce, contract_id: contract, height: 100, gas_price: 1000000000, gas_used: 1000, log: [], return_type: 'ok', return_value: config ? encodeResult('get_config', observedConfig) : tx.callData === encoder.encodeCall('Shorts', 'migration_status', []) ? encodeResult('migration_status', status) : encodeResult('publish', []) } };
     }) };
     else if (req.url === '/v3/transactions') { submitted.push(body.tx); result = { tx_hash: buildTxHash(body.tx) }; }
     else { res.statusCode = 404; result = {}; }
@@ -404,43 +398,17 @@ test('real SDK and bounded HTTP transport build an absolute-TTL signature before
   const intent = { id: randomUUID(), creator: AccountMemory.generate().address, cid: 'bafyfixture', bytes: 123 };
   let signatures = 0; const sign = service.account.signTransaction.bind(service.account);
   service.account.signTransaction = (...args) => { signatures++; return sign(...args); };
-  for (const mismatch of ['network', 'bytecode', 'operator', 'treasury', 'fee', 'split', 'previous']) {
-    const originalConfig = [...observedConfig];
+  for (const mismatch of ['network', 'bytecode', 'configuration', 'importing', 'import_started', 'frozen']) {
     if (mismatch === 'network') observedNetwork = 'ae_mainnet';
-    if (mismatch === 'bytecode') observedCode = encode(randomBytes(32), Encoding.ContractBytearray);
-    if (['operator', 'treasury', 'fee', 'split'].includes(mismatch)) { const i = ['operator', 'treasury', 'fee', 'split'].indexOf(mismatch); observedConfig[i] = i < 2 ? AccountMemory.generate().address : 1; }
-    if (mismatch === 'previous') observedPrevious = previousContract;
-    await assert.rejects(service.prepare(intent), /network|bytecode|configuration|previous/);
-    await assert.rejects(createChain().onModuleInit(), /testnet|bytecode|configuration|Previous/);
-    if (mismatch === 'network') await assert.rejects(chain.assertTestnet(), /testnet/);
+    else if (mismatch === 'bytecode') observedCode = encode(randomBytes(32), Encoding.ContractBytearray);
+    else if (mismatch === 'configuration') observedConfig = [{ ...policy, max_video_bytes: 0n }, 0n];
+    else status[mismatch] = true;
+    await assert.rejects(service.prepare(intent), /network|bytecode|limits|active/);
+    await assert.rejects(createChain().onModuleInit(), /testnet|bytecode|limits|active/);
     assert.equal(signatures, 0); assert.equal(submitted.length, 0);
-    observedNetwork = 'ae_uat'; observedCode = bytecode; observedConfig = originalConfig; observedPrevious = undefined;
+    observedNetwork = 'ae_uat'; observedCode = bytecode; observedConfig = [policy, 0n];
+    if (Object.hasOwn(status, mismatch)) status[mismatch] = false;
   }
-  await t.test('hosted predecessor loading binds its receipt, ABI and deployed code to the manifest', async () => {
-    const oldArtifact = { ...artifact, compiler: '7.0.0', sourceHash: 'b'.repeat(64), bytecode: previousCode, bytecodeHash: digest(previousCode) };
-    const oldReceipt = { contract: previousContract, network: 'ae_uat', compiler: oldArtifact.compiler, sourceHash: oldArtifact.sourceHash, bytecodeHash: oldArtifact.bytecodeHash };
-    const previousArtifact = { compiler: oldArtifact.compiler, sourceHash: oldArtifact.sourceHash, bytecodeHash: oldArtifact.bytecodeHash, aciHash: digest(JSON.stringify(oldArtifact.aci)) };
-    const oldReceiptPath = join(dir, 'previous.json'), oldArtifactPath = join(dir, 'previous-artifact.json');
-    Object.assign(process.env, { SHORTS_PREVIOUS_DEPLOYMENT_FILE: oldReceiptPath, SHORTS_PREVIOUS_CONTRACT_ARTIFACT: oldArtifactPath });
-    await writeFile(deploymentPath, JSON.stringify({ ...config.release, previousContract, previousArtifact }));
-    await writeFile(oldReceiptPath, JSON.stringify(oldReceipt)); await writeFile(oldArtifactPath, JSON.stringify(oldArtifact));
-    observedPrevious = previousContract;
-    const previousChain = createChain(); await previousChain.onModuleInit();
-    assert.equal(previousChain.previous.$options.address, previousContract);
-    await writeFile(oldArtifactPath, JSON.stringify({ ...oldArtifact, aci: [{ changed: true }] }));
-    await assert.rejects(createChain().onModuleInit(), /artifact/);
-    await writeFile(oldArtifactPath, JSON.stringify(oldArtifact));
-    await writeFile(oldReceiptPath, JSON.stringify({ ...oldReceipt, network: 'ae_mainnet' }));
-    await assert.rejects(createChain().onModuleInit(), /Previous deployment/);
-    await writeFile(oldReceiptPath, JSON.stringify({ ...oldReceipt, compiler: '9.0.0' }));
-    await assert.rejects(createChain().onModuleInit(), /Previous deployment/);
-    await writeFile(oldReceiptPath, JSON.stringify(oldReceipt));
-    observedPreviousCode = bytecode;
-    await assert.rejects(createChain().onModuleInit(), /Previous deployment/);
-    observedPreviousCode = previousCode; observedPrevious = undefined;
-    await writeFile(deploymentPath, JSON.stringify(config.release));
-    assert.equal(signatures, 0); assert.equal(submitted.length, 0);
-  });
   const prepared = await service.prepare(intent); const checked = publicationTransaction(prepared.rawTransaction, intent, contract, account.address, 0, 100, config.policy, config.scope.network);
   assert.equal(checked.ttl, 120); assert.equal(checked.nonce, 1); assert.equal(submitted.length, 0); assert.ok(requests.includes('/v3/dry-run'));
   await service.broadcast(prepared.rawTransaction, checked.hash); assert.deepEqual(submitted, [prepared.rawTransaction]);

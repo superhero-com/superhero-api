@@ -2,8 +2,8 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ProfileAndPostMedia1792954800001 extends FeatureMigration {
-  readonly changes = {
-    ProfileMedia1792954800000: {
+  readonly steps = {
+    ProfileMedia: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`
       CREATE TABLE profile_media_auth (
@@ -56,7 +56,7 @@ export class ProfileAndPostMedia1792954800001 extends FeatureMigration {
       },
     },
 
-    ProfileMediaCleanup1793008800000: {
+    ProfileMediaCleanup: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`
       ALTER TABLE profile_media_assets
@@ -76,7 +76,7 @@ export class ProfileAndPostMedia1792954800001 extends FeatureMigration {
       },
     },
 
-    PostImages1793012400000: {
+    PostImages: {
       async up(runner: QueryRunner): Promise<void> {
         for (const table of ['profile_media_uploads', 'profile_media_assets']) {
           await runner.query(

@@ -1,9 +1,9 @@
 export type DemoActor = string;
 export interface ShortRecord {
-  /** Present only when the published CID identifies the exact uploaded file. */
-  original?: import('./shorts-original-content').ShortsOriginalIdentity;
+  /** Identity of the original file committed on-chain. */
+  original: import('./shorts-original-content').ShortsOriginalIdentity;
   /** Separate, versioned playback inputs. Never substitute this CID on-chain. */
-  derivatives?: import('./shorts-original-content').ShortsDerivedMedia;
+  derivatives: import('./shorts-original-content').ShortsDerivedMedia;
   /** Internal only. Kept immutable with the accepted prepared package. */
   privateMedia?: {
     version: 1;

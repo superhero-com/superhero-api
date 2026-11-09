@@ -10,7 +10,7 @@ import {
   validateSourcePackage,
 } from './hls-protocol/hls-package';
 
-/** Adopt a physically verified HLS pin under fresh authority, including old cache entries. */
+/** Verify an adaptive HLS pin before recording its acknowledgement. */
 @Injectable()
 export class ShortsDeliveryAcknowledgementService {
   constructor(
@@ -27,26 +27,18 @@ export class ShortsDeliveryAcknowledgementService {
   ) {
     const prepared = validateSourcePackage(descriptor, value);
     if (process.env.SHORTS_IPFS_EXPIRING_WRITES !== 'true') {
-      if (!descriptor.original) {
-        await recheck();
-        await this.media.verifyDurableDelivery(
-          record,
-          descriptor,
-          prepared,
-          signal,
-        );
-        await recheck();
-        signal.throwIfAborted();
-      }
       return this.packages.acknowledge(descriptor, prepared);
     }
     if (!this.transfers) throw new Error('Delivery pin authority unavailable');
     const existing = await this.packages.get(descriptor);
     if (existing) {
       await recheck();
-      await this.media[
-        descriptor.original ? 'verifyPreparedDelivery' : 'verifyDurableDelivery'
-      ](record, descriptor, prepared, signal);
+      await this.media.verifyPreparedDelivery(
+        record,
+        descriptor,
+        prepared,
+        signal,
+      );
       await recheck();
       signal.throwIfAborted();
       return this.packages.acknowledge(descriptor, prepared);
@@ -64,9 +56,12 @@ export class ShortsDeliveryAcknowledgementService {
     try {
       await recheck();
       signal.throwIfAborted();
-      await this.media[
-        descriptor.original ? 'verifyPreparedDelivery' : 'verifyDurableDelivery'
-      ](record, descriptor, prepared, signal);
+      await this.media.verifyPreparedDelivery(
+        record,
+        descriptor,
+        prepared,
+        signal,
+      );
       await recheck();
       signal.throwIfAborted();
       await this.packages.acknowledge(descriptor, prepared, pin.operationId);

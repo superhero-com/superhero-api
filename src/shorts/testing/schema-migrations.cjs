@@ -11,11 +11,13 @@ for (const file of readdirSync(directory)) {
   if (!/^\d+-(Shorts|ProfileAndPostMedia)/.test(file) || !file.endsWith(suffix) || file.endsWith('.d.ts')) continue;
   const [Migration] = Object.values(require(join(directory, file)));
   const migration = new Migration();
-  for (const [name, change] of Object.entries(migration.changes ?? { [Migration.name]: migration })) {
-    const key = name.replace(/\d{13}$/, '');
+  const timestamp = Number(file.slice(0, 13));
+  const steps = migration.steps ?? { [Migration.name.replace(/\d{13}$/, '')]: migration };
+  for (const [offset, [key, change]] of Object.entries(steps).entries()) {
+    const name = key + (timestamp + offset);
     if (Object.hasOwn(schemaMigrations, key)) throw new Error('Duplicate test schema change: ' + key);
-    // Partial-upgrade fixtures also pass these constructors to DataSource.
-    schemaMigrations[key] = class HistoricalMigration {
+    // TypeORM requires a timestamp when a fixture runs an isolated schema step.
+    schemaMigrations[key] = class SchemaStep {
       name = name;
       up(runner) { return change.up(runner); }
       down(runner) { return change.down(runner); }

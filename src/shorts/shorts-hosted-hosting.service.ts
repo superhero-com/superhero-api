@@ -68,7 +68,7 @@ export class ShortsHostedHostingService implements OnModuleDestroy {
     return shortsStorageScope(this.chain);
   }
   private async inputsRetired(short: ShortRecord) {
-    if (!short.original || !this.retirements) return false;
+    if (!this.retirements) return false;
     const receipt = await this.retirements.get(
       this.scope(),
       short.id,

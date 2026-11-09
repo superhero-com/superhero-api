@@ -32,9 +32,8 @@ async function until(read, timeout = 45000) {
 
 test('complete hosted module shares upload, media and publication controls across process loss', {
   skip: !['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].every(name => process.env[`SHORTS_TEST_${name}`]),
-  timeout: process.env.SHORTS_TEST_UPLOAD_LOAD === '1' || process.env.SHORTS_TEST_ASSEMBLED_ORIGINAL === '1' ? 600000 : 300000,
+  timeout: 600000,
 }, async t => {
-  const originals = process.env.SHORTS_TEST_ASSEMBLED_ORIGINAL === '1';
   const endpoints = Object.fromEntries(['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].map(name => [name, new URL(process.env[`SHORTS_TEST_${name}`])]));
   for (const endpoint of Object.values(endpoints)) assert.equal(endpoint.hostname, '127.0.0.1');
   const schema = `shorts_assembled_${randomUUID().replaceAll('-', '')}`, dir = await mkdtemp(join(tmpdir(), 'shorts-assembled-'));
@@ -87,7 +86,7 @@ test('complete hosted module shares upload, media and publication controls acros
   const meta = new ShortsMetadataService(owner); await meta.initialize(scope, sourceHash);
   await new ShortsPublicationsService(owner).initialize(scope, sourceHash, operator.address, policy);
   const apiRole = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' }); roles.push(apiRole);
-  const operationsRole = originals ? await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' }) : undefined;
+  const operationsRole = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' });
   if (operationsRole) roles.push(operationsRole);
   const worker = await workerRole(admin, { url: endpoints.PG_URL.href, schema, scope }); roles.push(worker);
   const writeTables = ['shorts_content','shorts_runtime','shorts_auth_scopes','shorts_auth_challenges','shorts_auth_sessions',
@@ -145,7 +144,6 @@ test('complete hosted module shares upload, media and publication controls acros
   for (const key of Object.keys(env)) if (/^(SHORTS_|AWS_|REDIS_)/.test(key)) delete env[key];
   Object.assign(env, { ...(social?.env || {}), NODE_ENV: 'test', ENABLE_SHORTS: 'true', AE_NETWORK_ID: 'ae_uat', SHORTS_TESTNET_MVP: '1',
     SHORTS_TEST_COMPILED: compiled ? '1' : '0',
-    SHORTS_ORIGINAL_UPLOADS_ENABLED: originals ? 'true' : 'false',
     SHORTS_DEMO_AUTO_APPROVE: '0', SHORTS_DEMO_CONNECTED_WALLET: '0', SHORTS_WEB_ORIGIN: `http://127.0.0.1:${webPort || 5180}`,
     SHORTS_PRIVATE_S3_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT: endpoints.S3_ENDPOINT.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
     SHORTS_PRIVATE_S3_CREDENTIALS_FILE: join(dir, 's3.json'), SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json'),
@@ -181,7 +179,7 @@ test('complete hosted module shares upload, media and publication controls acros
     const missing = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: apiRole.url });
     await assert.rejects(missing.wait('ready'), /Apply the Shorts media-admission migration/);
     assert.equal(scans, 0);
-    const schemaMigrations = require('./testing/historical-migrations.cjs');
+    const schemaMigrations = require('./testing/schema-migrations.cjs');
     await new schemaMigrations.ShortsMediaAdmission().up(owner);
   });
   const a = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: apiRole.url }); a.base = (await a.wait('ready')).base;
@@ -213,8 +211,8 @@ test('complete hosted module shares upload, media and publication controls acros
     }
   });
   const creatorToken = await login(creator), operatorToken = await login(operator), outsiderToken = await login(AccountMemory.generate());
-  const input = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin','-v','error','-f','lavfi','-i', originals ? 'testsrc2=s=1080x1920:r=60' : 'color=c=blue:s=72x128:r=12',
-    ...(originals ? ['-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-c:a','aac','-ac','2'] : []),
+  const input = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin','-v','error','-f','lavfi','-i', 'testsrc2=s=1080x1920:r=60',
+    '-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-c:a','aac','-ac','2',
     '-t','2.2','-c:v','libx264','-pix_fmt','yuv420p',input]);
   const video = await readFile(input);
   const created = await request(a, '/uploads', { title: 'Owned fixture', topic: 'Art', rights: true, bytes: video.length, sha256: hash(video), details: { language: 'und' } }, creatorToken);
@@ -230,10 +228,8 @@ test('complete hosted module shares upload, media and publication controls acros
   await until(async () => (await meta.getJob(scope, creator.address, id)).status === 'ready');
   const preparedRecord = (await meta.get(scope, id)).record;
   rememberMedia(preparedRecord);
-  if (originals) {
-    assert.equal(preparedRecord.bytes, video.length); assert.equal(preparedRecord.original.sha256, hash(video));
-    assert.equal(preparedRecord.privateMedia.source.processingProfile, 'original-h264-v1');
-  }
+  assert.equal(preparedRecord.bytes, video.length); assert.equal(preparedRecord.original.sha256, hash(video));
+  assert.equal(preparedRecord.privateMedia.source.processingProfile, 'original-h264-v1');
   w.process.kill('SIGTERM'); await once(w.process, 'exit');
 
   await t.test('real module providers share sessions and deny unauthorized private previews', async () => {
@@ -286,7 +282,7 @@ test('complete hosted module shares upload, media and publication controls acros
     await require('./testing/assembled-real-moderation.cjs').assembledRealModeration(t, { owner, meta, scope, dir, b, c, request, until, pause,
       createWorker: extra => child('media-worker.cjs', { ...workerEnv, ...extra }, false) });
   });
-  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, originals, video, release: deployment.release, rememberMedia,
+  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, video, release: deployment.release, rememberMedia,
     async startDeliveryOperations(enabled = true) {
       assert.ok(operationsRole);
       const next = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: operationsRole.url,

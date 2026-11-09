@@ -2,13 +2,12 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
-  readonly changes = {
-    ShortsMetadata1791763200000: {
+  readonly steps = {
+    ShortsMetadata: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_runtime (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL,
       source_hash char(64) NOT NULL,
-      legacy_hash char(64),
       max_pending integer NOT NULL CHECK(max_pending BETWEEN 1 AND 10000),
       max_creator_pending integer NOT NULL CHECK(max_creator_pending BETWEEN 1 AND max_pending),
       PRIMARY KEY(network,contract)
@@ -28,7 +27,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
         await runner.query(`CREATE TABLE shorts_ingestion (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL,
       id varchar(80) NOT NULL, creator varchar(100) NOT NULL,
-      input jsonb NOT NULL CHECK(jsonb_typeof(input)='object'),
+      input jsonb NOT NULL CHECK(jsonb_typeof(input)='object' AND input->>'processingProfile' IS NOT DISTINCT FROM 'original-h264-v1'),
       status varchar(16) NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','ready','failed','cancelled')),
       created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
       updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -56,7 +55,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
       },
     },
 
-    ShortsSessions1791763201000: {
+    ShortsSessions: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_auth_scopes (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL, origin varchar(256) NOT NULL,
@@ -87,12 +86,12 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
       },
     },
 
-    ShortsUploads1791763202000: {
+    ShortsUploads: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_upload_sessions (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL,
       id varchar(80) NOT NULL, creator varchar(100) NOT NULL,
-      input jsonb NOT NULL CHECK(jsonb_typeof(input)='object'),
+      input jsonb NOT NULL CHECK(jsonb_typeof(input)='object' AND input->>'processingProfile' IS NOT DISTINCT FROM 'original-h264-v1'),
       state varchar(16) NOT NULL DEFAULT 'uploading' CHECK(state IN ('uploading','sealed','enqueued')),
       created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
       expires_at timestamptz NOT NULL DEFAULT clock_timestamp()+interval '24 hours',
@@ -111,7 +110,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
       creator varchar(100) NOT NULL, bytes integer NOT NULL CHECK(bytes BETWEEN 1 AND 41943040),
       created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
       PRIMARY KEY(network,contract,upload_id),
-      FOREIGN KEY(network,contract,upload_id) REFERENCES shorts_upload_sessions(network,contract,id)
+      FOREIGN KEY(network,contract) REFERENCES shorts_runtime(network,contract)
     )`);
         await runner.query(`CREATE INDEX shorts_upload_admission_time ON shorts_upload_admission(network,contract,created_at);
       CREATE INDEX shorts_upload_sessions_expiry ON shorts_upload_sessions(network,contract,expires_at)`);
@@ -123,7 +122,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
       },
     },
 
-    ShortsWorkers1791763203000: {
+    ShortsWorkers: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_media_workers (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL, id uuid NOT NULL,
@@ -138,7 +137,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
     },
 
     /** Workers receive EXECUTE on this boundary, never grants on application tables. */
-    ShortsWorkerAuthority1791763204000: {
+    ShortsWorkerAuthority: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -332,32 +331,7 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
       },
     },
 
-    ShortsLegacyStorage1791763205000: {
-      async up(runner: QueryRunner): Promise<void> {
-        await runner.query(`CREATE TABLE shorts_storage_imports (
-      network varchar(32) NOT NULL, contract varchar(100) NOT NULL,
-      kind varchar(16) NOT NULL CHECK(kind IN ('content','upload','budget')),
-      id varchar(80) NOT NULL, fingerprint char(64) NOT NULL,
-      completed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-      PRIMARY KEY(network,contract,kind,id),
-      FOREIGN KEY(network,contract) REFERENCES shorts_runtime(network,contract)
-    )`);
-        // Admission history must survive expired/removed upload sessions and also
-        // represents old failed preparation attempts that had their own IDs.
-        const table = await runner.getTable('shorts_upload_admission');
-        for (const key of table.foreignKeys)
-          if (key.columnNames.includes('upload_id'))
-            await runner.dropForeignKey(table, key);
-      },
-      async down(runner: QueryRunner): Promise<void> {
-        // Refuse a lossy rollback after legacy attempts with no session were copied.
-        await runner.query(`ALTER TABLE shorts_upload_admission ADD CONSTRAINT shorts_upload_admission_session_fk
-      FOREIGN KEY(network,contract,upload_id) REFERENCES shorts_upload_sessions(network,contract,id)`);
-        await runner.query('DROP TABLE shorts_storage_imports');
-      },
-    },
-
-    ShortsStreamingOutbox1791763206000: {
+    ShortsStreamingOutbox: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -403,8 +377,6 @@ export class ShortsMediaIngestion1791763200001 extends FeatureMigration {
         await runner.query(`REVOKE ALL ON FUNCTION ${s}.shorts_schedule_stream() FROM PUBLIC;
       CREATE TRIGGER shorts_schedule_stream AFTER INSERT OR UPDATE OF body ON ${s}.shorts_content
       FOR EACH ROW EXECUTE FUNCTION ${s}.shorts_schedule_stream()`);
-        await runner.query(`INSERT INTO ${s}.shorts_stream_jobs(network,contract,id,cid)
-      SELECT network,contract,id,body->>'cid' FROM ${s}.shorts_content WHERE body->>'publication'='published'`);
       },
       async down(runner: QueryRunner): Promise<void> {
         await runner.query(

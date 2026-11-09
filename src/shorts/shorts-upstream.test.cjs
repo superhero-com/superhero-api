@@ -1,3 +1,4 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createServer } = require('node:http');
@@ -178,17 +179,8 @@ test(
 
 test('IPFS media uses the committed byte budget and discards unread status bodies', async (t) => {
   const bytes = Buffer.from('owned fixture');
-  const short = {
-    id: 'owned',
-    cid: 'bafyfixture',
-    files: [
-      {
-        name: 'video.mp4',
-        bytes: bytes.length,
-        sha256: createHash('sha256').update(bytes).digest('hex'),
-      },
-    ],
-  };
+  const short = originalRecord();
+  Object.assign(short.files.find(file => file.name === 'video.mp4'), { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   const media = new ShortsMediaService({});
   let reply = () => new Response(bytes);
   let requests = 0;
@@ -209,7 +201,7 @@ test('IPFS media uses the committed byte budget and discards unread status bodie
         { ...short, files: [{ ...short.files[0], bytes: size }] },
         'video.mp4',
       ),
-      /manifest size/,
+      /derivatives|identity|derivative|manifest size/,
     );
   assert.equal(requests, n);
   let cancelled = false;
@@ -229,7 +221,7 @@ test('IPFS media uses the committed byte budget and discards unread status bodie
   assert.equal(cancelled, true);
   reply = () => new Response('x'.repeat(16385));
   await assert.rejects(
-    media.add([{ name: 'video.mp4', data: bytes }], false),
+    media.addFiles([], true, new AbortController().signal, short, short.derivatives.assetsCid, 'assets'),
     /too large/,
   );
   reply = () => new Response('x'.repeat(262145));

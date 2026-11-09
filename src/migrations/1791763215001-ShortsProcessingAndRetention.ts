@@ -2,9 +2,9 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ShortsProcessingAndRetention1791763215001 extends FeatureMigration {
-  readonly changes = {
+  readonly steps = {
     /** Enforce admission at the row transition, including restricted worker RPCs. */
-    ShortsProcessingCapacity1791763215000: {
+    ShortsProcessingCapacity: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -57,7 +57,7 @@ export class ShortsProcessingAndRetention1791763215001 extends FeatureMigration 
       },
     },
 
-    ShortsRetentionHolds1791763216000: {
+    ShortsRetentionHolds: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_retention_holds (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL,

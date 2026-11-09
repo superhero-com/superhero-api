@@ -1,5 +1,5 @@
 import { SHORTS_SOURCE_MANIFEST_BYTES } from './shorts-upload-policy';
-import { ConflictException, Injectable, Optional } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { ShortsMediaService } from './shorts-media.service';
@@ -14,11 +14,7 @@ import {
 } from './shorts-private-objects.service';
 import { ShortsDeliveryStagingService } from './shorts-delivery-staging.service';
 import { SHORTS_PART_BYTES } from './shorts-upload-records.service';
-import {
-  shortsDeliverySource,
-  assertDeliverySourcePreparation,
-} from './shorts-delivery-source';
-import { ShortsPrivateMediaService } from './shorts-private-media.service';
+import { shortsDeliverySource } from './shorts-delivery-source';
 import { officialContentPolicy } from './shorts-eligibility';
 
 const digest = (bytes: Buffer) =>
@@ -32,7 +28,6 @@ export class ShortsOriginalRestagingService {
     private readonly media: ShortsMediaService,
     private readonly objects: ShortsPrivateObjectsService,
     private readonly staging: ShortsDeliveryStagingService,
-    @Optional() private readonly privateMedia?: ShortsPrivateMediaService,
   ) {}
   async restage(
     scope: ShortsScope,
@@ -53,10 +48,7 @@ export class ShortsOriginalRestagingService {
       throw new ConflictException(
         'Original Short is not eligible for restaging',
       );
-    const source = shortsDeliverySource(short);
-    assertDeliverySourcePreparation(source);
-    if (source.kind === 'retained-upload' && !this.privateMedia)
-      throw new Error('Retained source reader unavailable');
+    shortsDeliverySource(short);
     const previous = await this.staging.get(scope, jobId);
     if (previous && previous.shortId !== shortId)
       throw new ConflictException('Staging job belongs to another Short');
@@ -205,8 +197,6 @@ export class ShortsOriginalRestagingService {
         await handle.close();
       }
     };
-    return source.kind === 'published-file'
-      ? this.media.withPinnedOriginal(short, prepare, signal)
-      : this.privateMedia.withRetainedOriginal(scope, short, prepare, signal);
+    return this.media.withPinnedOriginal(short, prepare, signal);
   }
 }

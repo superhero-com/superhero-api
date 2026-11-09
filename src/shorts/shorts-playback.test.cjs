@@ -1,3 +1,4 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { ShortsService } = require('./shorts.service');
@@ -5,37 +6,22 @@ const { ShortsController } = require('./shorts.controller');
 const { ShortsDeliverySelectionService } = require('./shorts-delivery-selection.service');
 const { sourceKey } = require('./hls-protocol/hls-package');
 
-test('legacy source lookup requires the exact initial key and current on-chain permission with or without selection metadata', async () => {
-  const short = { id: 'legacy', cid: 'Qm'+'1'.repeat(44), creator: 'ak_creator', bytes: 12,
-    files: [{ name: 'video.mp4', bytes: 10, sha256: 'a'.repeat(64) }, { name: 'poster.jpg', bytes: 2, sha256: 'b'.repeat(64) }],
-    moderation: 'approved', safety: { status: 'no_flags' } };
-  const published = { cid: short.cid, creator: short.creator, size: 12n, withdrawn: false };
-  const service = new ShortsService({ release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] }, read: async () => published });
-  const descriptor = await service.playbackDescriptor(short.id), key = sourceKey(descriptor);
-  for (const selection of [undefined, new ShortsDeliverySelectionService({ query: async () => [{ initial: true, active: false, retained: false }] })]) {
-    service.deliverySelection = selection;
-    assert.deepEqual(await service.playbackVersion(short.id,key), descriptor);
-    let reads = 0;
-    const prepared = require('./testing/hls-v2.json').package;
-    service.deliveryPackages = { get: async () => { reads++; return prepared; } };
-    assert.deepEqual(await service.playbackPackage(short.id,key), { sourceKey:key, prepared });
-    await assert.rejects(service.playbackVersion(short.id,'f'.repeat(64)), { status: 404 });
-    published.withdrawn = true; await assert.rejects(service.playbackVersion(short.id,key), { status: 404 });
-    await assert.rejects(service.playbackPackage(short.id,key), { status:404 }); assert.equal(reads,1); published.withdrawn = false;
-  }
+test('playback rejects directory-only media', async () => {
+  const f = fixture();
+  delete f.short.original;
+  delete f.short.derivatives;
+  f.register();
+  await assert.rejects(f.service.playbackDescriptor(f.short.id));
 });
 
 test('playback descriptors contain public file metadata only and match on-chain publication', async () => {
-  const short = { id: 'video-1', cid: 'cid', creator: 'ak_creator', bytes: 12, files: [
-    { name: 'video.mp4', bytes: 10, sha256: 'a'.repeat(64) },
-    { name: 'poster.jpg', bytes: 2, sha256: 'b'.repeat(64) },
-    { name: 'manifest.json', bytes: 20, sha256: 'c'.repeat(64) },
-  ], moderation: 'approved', safety: { status: 'no_flags', private: 'data' } };
-  let published = { cid: short.cid, creator: short.creator, size: 12n, withdrawn: false };
+  const short = originalRecord('video-1', { creator: 'ak_creator', moderation: 'approved', safety: { status: 'no_flags', private: 'data' } });
+  let published = { cid: short.cid, creator: short.creator, size: BigInt(short.bytes), withdrawn: false };
   const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short], contract: 'ct_fixture' }, read: async () => published };
   const service = new ShortsService(chain);
-  assert.deepEqual(await service.playbackDescriptor(short.id), { id: short.id, cid: short.cid,
-    network: 'ae_uat', contract: 'ct_fixture', canonical: { version:1,cid:short.cid,bytes:short.bytes }, files: short.files.slice(0,2) });
+  const descriptor = await service.playbackDescriptor(short.id);
+  assert.deepEqual(descriptor.files, short.files);
+  assert.equal(descriptor.safety, undefined);
   for (const change of [undefined, { ...published, withdrawn: true }, { ...published, cid: 'wrong' }, { ...published, creator: 'wrong' }, { ...published, size: 13n }]) {
     const saved = published; published = change;
     await assert.rejects(service.playbackDescriptor(short.id), { status: 404 }); published = saved;
@@ -103,18 +89,17 @@ test('durable delivery endpoint rechecks publication and cannot expose a differe
 });
 
 function fixture(changes = {}) {
-  const short = { id: 'video-1', creator: 'creator', cid: 'cid', bytes: 12, title: 'Owned clip',
-    moderation: 'approved', safety: { status: 'no_flags' }, files: [], ...changes };
+  const short = originalRecord('video-1', { creator: 'creator', title: 'Owned clip', moderation: 'approved', safety: { status: 'no_flags' }, ...changes });
   const effects = [];
   let published;
   const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] }, address: value => value,
     save: async () => {}, read: async method => method === 'has_liked' ? false : published,
-    write: async () => { effects.push('publish'); published = { cid: short.cid, creator: short.creator, size: 12n, likes: 0 }; },
+    write: async () => { effects.push('publish'); published = { cid: short.cid, creator: short.creator, size: BigInt(short.bytes), likes: 0 }; },
   };
   const service = new ShortsService(chain, { pin: async () => effects.push('pin') },
     { counters: () => ({ views: 0 }) }, {}, {}, {}, { enqueue: () => effects.push('enqueue') });
   return { short, chain, service, effects,
-    register: () => { published = { cid: short.cid, creator: short.creator, size: 12n, likes: 0 }; short.publication = 'published'; },
+    register: () => { published = { cid: short.cid, creator: short.creator, size: BigInt(short.bytes), likes: 0 }; short.publication = 'published'; },
   };
 }
 
@@ -148,7 +133,7 @@ test('approved content is playable, but revocation and a pending rescan immediat
   await f.service.publish('creator', f.short.id);
   assert.deepEqual(f.effects, ['pin', 'publish', 'enqueue']);
   assert.equal((await f.service.shared(f.short.id)).status, 'active');
-  assert.equal((await f.service.playbackDescriptor(f.short.id)).cid, 'cid');
+  assert.equal((await f.service.playbackDescriptor(f.short.id)).cid, f.short.cid);
   let finish;
   f.service.media.rescan = () => new Promise(resolve => { finish = resolve; });
   const scanning = f.service.rescan(f.short.id);

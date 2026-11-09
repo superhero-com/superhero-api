@@ -15,7 +15,6 @@ import {
 } from './shorts-original-content';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { shortsDeliverySource } from './shorts-delivery-source';
 
 @Injectable()
 export class ShortsPrivateMediaService {
@@ -72,32 +71,6 @@ export class ShortsPrivateMediaService {
         join(directory, 'original'),
         active,
       );
-      return work(file, active);
-    });
-  }
-  /** Bounded authenticated legacy upload read; never reads the compressed package as a source. */
-  withRetainedOriginal<T>(
-    scope: ShortsScope,
-    short: ShortRecord,
-    work: (file: ShortsMediaFile, signal: AbortSignal) => Promise<T>,
-    signal?: AbortSignal,
-  ) {
-    const source = shortsDeliverySource(short);
-    if (source.kind !== 'retained-upload')
-      throw new Error('Retained legacy source required');
-    return this.withScratch(source.bytes, signal, async (directory, active) => {
-      const file = await this.sources.readToFile(
-        scope,
-        {
-          id: short.id,
-          creator: short.creator,
-          input: short.privateMedia.source,
-        },
-        join(directory, 'original'),
-        active,
-      );
-      if (file.bytes !== source.bytes || file.sha256 !== source.sha256)
-        throw new Error('Retained source identity changed');
       return work(file, active);
     });
   }

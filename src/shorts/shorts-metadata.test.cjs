@@ -1,12 +1,12 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsMediaAdmission,
   ShortsUploads,
   ShortsUploadBudget,
   ShortsLifecycle,
   ShortsMetadata,
-  ShortsSharedCutover,
   ShortsProcessingCapacity,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
 require('reflect-metadata');
@@ -29,7 +29,7 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema,
     extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata, ShortsUploads, ShortsLifecycle, ShortsSharedCutover, ShortsProcessingCapacity, ShortsUploadBudget, ShortsMediaAdmission] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsLifecycle, ShortsProcessingCapacity, ShortsUploadBudget, ShortsMediaAdmission] };
   const first = new DataSource(options), second = new DataSource(options);
   let app;
   t.after(async () => {
@@ -45,11 +45,9 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
   app = await NestFactory.createApplicationContext(TestModule, { logger: false });
   const a = app.get(ShortsMetadataService), b = new ShortsMetadataService(second);
   const hash = 'a'.repeat(64);
-  const input = (id = 'input') => ({ objectKey: `originals/${id}`, sha256: hash, bytes: 100,
+  const input = (id = 'input') => ({ processingProfile: 'original-h264-v1', objectKey: `originals/${id}`, sha256: hash, bytes: 100,
     title: 'Owned clip', topic: 'Art', details: { language: 'en' } });
-  const record = (job, createdAt = 100) => ({ id: job.id, creator: job.creator, cid: `bafy${job.id}`,
-    bytes: 200, duration: 10, createdAt, title: 'Owned clip', topic: 'Art', moderation: 'pending',
-    files: [{ name: 'video.mp4', bytes: 200, sha256: hash }], reports: 0, views: [] });
+  const record = (job, createdAt = 100) => originalRecord(job.id, { creator: job.creator, bytes: job.input?.bytes ?? 100, createdAt, duration: 10, title: 'Owned clip', topic: 'Art', moderation: 'pending', reports: 0, views: [] });
   async function scope(max = 20, own = 10) {
     const scope = { network: 'ae_uat', contract: `ct_${randomUUID().replaceAll('-', '')}` };
     await a.initialize(scope, hash, max, own); return scope;
@@ -89,38 +87,6 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
     assert.equal((await mainRecords.get(id)).title, 'Mainnet edited');
   });
 
-  await t.test('legacy import is explicit, atomic and never restores stale approval over shared decisions', async () => {
-    const { createHash } = require('node:crypto');
-    const { ShortsRecordsService } = require('./shorts-records.service');
-    const s = await scope(8, 2);
-    const legacy = [{ ...record({ id: 'legacy', creator: 'ak_creator' }), moderation: 'approved', publication: 'published', safety: { status: 'no_flags' } }];
-    const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-    const chain = { release: { network: 'ae_uat', contract: s.contract }, state: { contract: s.contract, sourceHash: hash, shorts: legacy } };
-    const records = new ShortsRecordsService(chain, a);
-    const previous = process.env.SHORTS_IMPORT_LEGACY_CONTENT;
-    delete process.env.SHORTS_IMPORT_LEGACY_CONTENT;
-    try {
-      await assert.rejects(records.onModuleInit(), { status: 409 });
-      assert.equal((await a.page(s)).items.length, 0);
-      await assert.rejects(a.importLegacy(s, [...legacy, { ...legacy[0], id: 'invalid', creator: 'bad' }], fingerprint(legacy), true), { status: 400 });
-      assert.equal((await a.page(s)).items.length, 0, 'a failed import rolls back earlier rows');
-      await a.importLegacy(s, legacy, fingerprint(legacy), true);
-      await b.change(s, 'legacy', value => { value.moderation = 'rejected'; });
-      await a.importLegacy(s, legacy, fingerprint(legacy), true);
-      assert.equal((await records.get('legacy')).moderation, 'rejected');
-      assert.equal(chain.state.shorts[0].moderation, 'approved', 'the old local snapshot is not used as live metadata');
-      process.env.SHORTS_IMPORT_LEGACY_CONTENT = '1';
-      chain.state.shorts.push({ ...legacy[0], id: 'unexpected' });
-      await assert.rejects(a.importLegacy(s, chain.state.shorts, fingerprint(chain.state.shorts), true), { status: 409 });
-      assert.equal((await records.reviewPage()).items.length, 1);
-      const nonempty = await scope();
-      await a.insertDraft(nonempty, record({ id: 'fresh', creator: 'ak_creator' }));
-      await assert.rejects(a.importLegacy(nonempty, legacy, fingerprint(legacy), true), { status: 409 });
-    } finally {
-      if (previous === undefined) delete process.env.SHORTS_IMPORT_LEGACY_CONTENT; else process.env.SHORTS_IMPORT_LEGACY_CONTENT = previous;
-    }
-  });
-
   await t.test('draft registration is bounded across connections and retries cannot replace current metadata', async () => {
     const s = await scope();
     const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) =>
@@ -131,7 +97,7 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
     await b.change(s, draft.id, current => { current.moderation = 'rejected'; current.reports = 3; });
     const retry = await a.insertDraft(s, draft, 2);
     assert.equal(retry.record.moderation, 'rejected'); assert.equal(retry.record.reports, 3);
-    await assert.rejects(a.insertDraft(s, { ...draft, cid: 'different' }), { status: 409 });
+    await assert.rejects(a.insertDraft(s, { ...draft, cid: 'b'+'x'.repeat(50) }), { status: 409 });
     await assert.rejects(a.insertDraft(s, { ...draft, id: 'approved', moderation: 'approved' }), { status: 400 });
   });
 
@@ -152,7 +118,7 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
       async enqueue(id) { const item = await one.get(id); effects.push('admit'); published.set(id, { creator: item.creator, cid: item.cid, size: BigInt(item.bytes), likes: 0n, withdrawn: false }); },
       async status(id) { return published.has(id) ? { status: 'confirmed' } : undefined; },
     };
-    const service = records => new ShortsService(chain, media, { counters: () => ({ views: 0 }) }, {}, {}, {}, { enqueue: () => effects.push('enqueue') }, {}, records, publisher);
+    const service = records => new ShortsService(chain, media, { counters: () => ({ views: 0 }) }, {}, {}, {}, { enqueue: () => effects.push('enqueue') }, records, publisher);
     const firstService = service(one), secondService = service(two);
     await one.register({ ...record({ id: 'clip', creator: 'ak_creator' }), safety: { status: 'no_flags' } });
     await firstService.moderate('clip', true);

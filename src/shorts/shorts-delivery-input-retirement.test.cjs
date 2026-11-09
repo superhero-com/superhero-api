@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsDeliveryInputRetirement: Migration,
   ShortsInputReclamationReservations: ReservationsMigration,
@@ -23,7 +23,7 @@ const { ShortsPinTransfersService } = require('./shorts-pin-transfers.service');
 const { ShortsInputReclamationPermitsService } = require('./shorts-input-reclamation-permits.service');
 const { workerRole } = require('./testing/worker-role.cjs');
 const golden = structuredClone(require('./testing/hls-v3.json'));
-const legacyInputCid='QmPVGjYFugq4XUyBfoTHG6c3qxfBS26jEdaFM1gdAVuMZ2';
+const cidV0='QmPVGjYFugq4XUyBfoTHG6c3qxfBS26jEdaFM1gdAVuMZ2';
 golden.descriptor.derivatives.cid='bafybeiarceirceirceirceirceirceirceirceirceirceirceirceirce';
 golden.sourceKey=require('./hls-protocol/hls-package').sourceKey(golden.descriptor);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -185,9 +185,17 @@ test('input retirement preserves original identity and delivery while enforcing 
     assert.deepEqual(await retirements.get(scope,original.id,golden.sourceKey),receipt);
   });
   const reservations=new ShortsInputReclamationReservationsService(owner),cid=original.derivatives.cid;
+  function holder(id) {
+    const record = structuredClone(original);
+    record.id = record.derivatives.generation.job = id;
+    record.cid = cid;
+    record.derivatives.cid = original.cid;
+    record.creator = 'ak_other';
+    return record;
+  }
   let reservation;
-  await t.test('reclamation requires every shared reference and rejects permanent or legacy references globally',async()=>{
-    assert.equal((await owner.query('SELECT shorts_cid_pin_identity($1) AS cid',[legacyInputCid]))[0].cid,cid);
+  await t.test('reclamation requires every shared reference and rejects permanent references across contracts',async()=>{
+    assert.equal((await owner.query('SELECT shorts_cid_pin_identity($1) AS cid',[cidV0]))[0].cid,cid);
     await assert.rejects(reservations.reserve(cid,randomUUID()),{code:'SH409'}); // unselected third generation shares this CID
     for(const permanent of [original.cid,original.derivatives.assetsCid,golden.package.cid])
       await assert.rejects(reservations.reserve(permanent,randomUUID()),{code:'SH409'});
@@ -195,11 +203,11 @@ test('input retirement preserves original identity and delivery while enforcing 
     await age('shorts_delivery_selections','shorts_delivery_selection_guard','selected_at');
     await retirements.commit(scope,original.id,unused.sourceKey,randomUUID());
     const other={network:'ae_mainnet',contract:'ct_other'};await metadata.initialize(other,sourceHash,30,30);
-    const legacy={id:'legacy-holder',creator:'ak_other',cid:legacyInputCid,bytes:1,files:[],moderation:'approved'};
+    const shared = holder('other-holder');
     await owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
-      [other.network,other.contract,legacy.id,legacy.creator,JSON.stringify(legacy)]);
+      [other.network,other.contract,shared.id,shared.creator,JSON.stringify(shared)]);
     await assert.rejects(reservations.reserve(cid,randomUUID()),{code:'SH409'});
-    await owner.query('DELETE FROM shorts_content WHERE network=$1 AND contract=$2 AND id=$3',[other.network,other.contract,legacy.id]);
+    await owner.query('DELETE FROM shorts_content WHERE network=$1 AND contract=$2 AND id=$3',[other.network,other.contract,shared.id]);
     const op=randomUUID();const [a,b]=await Promise.all([reservations.reserve(cid,op),reservations.reserve(cid,op)]);
     assert.deepEqual(a,b);reservation=a;assert.equal(a.state,'reserved');assert.equal(a.roots.length,3);
     assert.deepEqual(a.roots.map(x=>x.jobId).sort(),[original.id,candidate.record.id,unused.record.id].sort());
@@ -209,9 +217,9 @@ test('input retirement preserves original identity and delivery while enforcing 
   });
   await t.test('active reservations survive service restart and block new references and switches without blocking engagement',async()=>{
     const fresh=new ShortsInputReclamationReservationsService(owner);assert.deepEqual(await fresh.get(reservation.operationId),reservation);
-    const other={network:'ae_mainnet',contract:'ct_other'},legacy={id:'blocked-reference',creator:'ak_other',cid:legacyInputCid,bytes:1,files:[]};
+    const other={network:'ae_mainnet',contract:'ct_other'},shared=holder('blocked-reference');
     await assert.rejects(owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
-      [other.network,other.contract,legacy.id,legacy.creator,JSON.stringify(legacy)]),{code:'SH409'});
+      [other.network,other.contract,shared.id,shared.creator,JSON.stringify(shared)]),{code:'SH409'});
     await assert.rejects(selections.commit(scope,original.id,{sourceKey:unused.sourceKey,revision:'2'},candidate.sourceKey,randomUUID(),'rollback'),{code:'SH409'});
     await assert.rejects(packages.acknowledge(golden.descriptor,golden.package),{code:'SH409'});
     await patch({...original,likes:43,views:['another-view']});assert.equal((await fresh.verify(reservation.operationId)).state,'reserved');
@@ -235,7 +243,7 @@ test('input retirement preserves original identity and delivery while enforcing 
   await t.test('CID lock serializes new references and reservations in either order',async()=>{
     const runner=owner.createQueryRunner();await runner.connect();const other={network:'ae_mainnet',contract:'ct_other'};
     const add=(db,id)=>db.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
-      [other.network,other.contract,id,'ak_other',JSON.stringify({id,creator:'ak_other',cid,bytes:1,files:[]})]);
+      [other.network,other.contract,id,'ak_other',JSON.stringify(holder(id))]);
     try{
       await runner.startTransaction();await add(runner,'uncommitted-reference');
       const blocked=reservations.reserve(cid,randomUUID());let ended=false;blocked.finally(()=>{ended=true;}).catch(()=>{});
@@ -428,7 +436,7 @@ test('input retirement preserves original identity and delivery while enforcing 
     await assert.rejects(owner.transaction(db=>new ReservationsMigration().down(db)),/Preserve input reclamation history/);
     const other={network:'ae_mainnet',contract:'ct_other'},id='reused-cid';
     await owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
-      [other.network,other.contract,id,'ak_other',JSON.stringify({id,creator:'ak_other',cid,bytes:1,files:[]})]);
+      [other.network,other.contract,id,'ak_other',JSON.stringify(holder(id))]);
     await assert.rejects(reservations.reserve(cid,randomUUID()),{code:'SH409'});
   });
   await t.test('expired and uncertain transfers never become cleanup authority and cannot be rewritten by workers',async()=>{

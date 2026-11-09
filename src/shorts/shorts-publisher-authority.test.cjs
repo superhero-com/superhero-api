@@ -3,7 +3,7 @@ const {
   ShortsMetadata,
   ShortsPublications,
   ShortsPublisherAuthority,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

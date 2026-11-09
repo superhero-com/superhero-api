@@ -18,8 +18,6 @@ import { shortsStorageScope } from './shorts-runtime-scope';
 export class ShortsDeliveryActivationService implements OnModuleDestroy {
   private readonly enabled =
     process.env.SHORTS_DELIVERY_SELECTION_ENABLED === 'true';
-  private readonly legacyEnabled =
-    process.env.SHORTS_LEGACY_PLAYBACK_ENABLED === 'true';
   private readonly shutdown = new AbortController();
   private readonly pending = new Set<Promise<unknown>>();
   constructor(
@@ -27,11 +25,6 @@ export class ShortsDeliveryActivationService implements OnModuleDestroy {
     private readonly media: ShortsMediaService,
     private readonly selections: ShortsDeliverySelectionService,
   ) {
-    if (
-      process.env.SHORTS_LEGACY_PLAYBACK_ENABLED !== undefined &&
-      !['true', 'false'].includes(process.env.SHORTS_LEGACY_PLAYBACK_ENABLED)
-    )
-      throw new Error('Invalid legacy playback flag');
     if (
       process.env.SHORTS_DELIVERY_SELECTION_ENABLED !== undefined &&
       !['true', 'false'].includes(process.env.SHORTS_DELIVERY_SELECTION_ENABLED)
@@ -78,10 +71,7 @@ export class ShortsDeliveryActivationService implements OnModuleDestroy {
       signal.throwIfAborted();
       return this.selections.match(saved, expected, nextKey, kind);
     }
-    if (
-      (!this.enabled || (!original.original && !this.legacyEnabled)) &&
-      kind !== 'rollback'
-    )
+    if (!this.enabled && kind !== 'rollback')
       throw new ServiceUnavailableException('Delivery selection unavailable');
     const current = await this.selections.state(scope, original);
     if (

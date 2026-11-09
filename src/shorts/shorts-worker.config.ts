@@ -46,9 +46,9 @@ export async function shortsWorkerConfig(
     release: deployment,
     scope: {
       network: deployment.network,
-      contract: deployment.storage?.contract ?? deployment.contract,
+      contract: deployment.contract,
     },
-    sourceHash: deployment.storage?.sourceHash ?? deployment.sourceHash,
+    sourceHash: deployment.sourceHash,
     leaseMs,
     scratch,
   };

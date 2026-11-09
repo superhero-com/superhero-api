@@ -8,7 +8,7 @@ const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
 const { ShortsService } = require('./shorts.service');
-const { ShortsUploadsService } = require('./shorts-uploads.service');
+const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 
 test('invalid upload admission settings cannot disable capacity or receive deadlines', () => {
   for (const [key, invalid] of [

@@ -64,7 +64,6 @@ export class ShortsStudioReadService {
     const limit = selection?.limit ?? STUDIO_PAGE_SIZE;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > STUDIO_PAGE_SIZE)
       throw new BadRequestException('Invalid Studio page size');
-    const v2 = this.chain.release.schemaVersion === 2;
     const media = shortsStorageScope(this.chain);
     const scope = [
       shortsRuntimeScope(this.chain).network,
@@ -108,11 +107,10 @@ export class ShortsStudioReadService {
           WHERE network=$1 AND contract=$2 AND started>=$5 AND started<$6 AND seconds>=2
             AND short_id IN (SELECT id FROM owned) GROUP BY short_id
         ), library AS MATERIALIZED (
-          SELECT o.*,CASE WHEN o.publication='withdrawn' OR e.withdrawn OR b.withdrawn THEN 'withdrawn'
-            WHEN o.publication='published' AND (e.published OR b.id IS NOT NULL) THEN 'published' ELSE 'draft' END AS status,
-            coalesce(e.likes,0)+coalesce(b.likes,0) AS likes,coalesce(p.views,0) AS period_views
+          SELECT o.*,CASE WHEN o.publication='withdrawn' OR e.withdrawn THEN 'withdrawn'
+            WHEN o.publication='published' AND e.published THEN 'published' ELSE 'draft' END AS status,
+            coalesce(e.likes,0) AS likes,coalesce(p.views,0) AS period_views
           FROM owned o LEFT JOIN events e ON e.short_id=o.id LEFT JOIN plays p ON p.short_id=o.id
-          ${v2 ? 'LEFT JOIN shorts_import_videos b ON b.network=$1 AND b.contract=$14 AND b.id=o.id' : 'LEFT JOIN (SELECT NULL::varchar AS id,0::bigint AS likes,false AS withdrawn) b ON false'}
         ), filtered AS MATERIALIZED (
           SELECT *,${rank} AS rank FROM library WHERE ($7='all' OR status=$7)
             AND ($8='' OR position(lower($8) in lower(coalesce(title,'')||' '||coalesce(topic,'')))>0)

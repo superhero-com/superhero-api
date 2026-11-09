@@ -2,7 +2,7 @@ import { SHORTS_ORIGINAL_HARD_LIMIT } from './shorts-media-file';
 import { SHORTS_ORIGINAL_PROFILE } from './shorts-rendition-policy';
 
 export const SHORTS_UPLOAD_PART_BYTES = 1048576;
-export const SHORTS_LEGACY_UPLOAD_BYTES = 40 * SHORTS_UPLOAD_PART_BYTES;
+export const SHORTS_BUFFERED_SOURCE_MAX_BYTES = 40 * SHORTS_UPLOAD_PART_BYTES;
 export const SHORTS_MAX_SOURCE_PARTS = Math.ceil(
   SHORTS_ORIGINAL_HARD_LIMIT / SHORTS_UPLOAD_PART_BYTES,
 );
@@ -16,15 +16,8 @@ export interface AcceptedSourcePolicy {
 
 /** Zero denotes an invalid persisted policy, including an unknown profile. */
 export function shortsSourceLimit(input: AcceptedSourcePolicy): number {
-  if (
-    input.processingProfile !== undefined &&
-    input.processingProfile !== SHORTS_ORIGINAL_PROFILE
-  )
-    return 0;
-  const ceiling =
-    input.processingProfile === SHORTS_ORIGINAL_PROFILE
-      ? SHORTS_ORIGINAL_HARD_LIMIT
-      : SHORTS_LEGACY_UPLOAD_BYTES;
+  if (input.processingProfile !== SHORTS_ORIGINAL_PROFILE) return 0;
+  const ceiling = SHORTS_ORIGINAL_HARD_LIMIT;
   const limit =
     input.acceptedMaxBytes === undefined ? ceiling : input.acceptedMaxBytes;
   return Number.isSafeInteger(limit) && limit > 0 && limit <= ceiling
@@ -39,9 +32,6 @@ export function shortsAcceptedSource(
     bytes: input.bytes,
     sha256: input.sha256,
     maxBytes: shortsSourceLimit(input),
-    format:
-      input.processingProfile === SHORTS_ORIGINAL_PROFILE
-        ? ('original-file-v1' as const)
-        : ('legacy-directory-v1' as const),
+    format: 'original-file-v1' as const,
   };
 }

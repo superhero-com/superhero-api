@@ -46,7 +46,7 @@ async function fixture(method = 'paid_like', options = {}) {
     getCurrentKeyBlock: async () => tip, getGenerationByHeight: async () => generation, getTransactionInfoByHash: async () => info,
     postTransaction: () => assert.fail('Observation must never broadcast') };
   const access = new ShortsNodeAccessService();
-  const chain = { release: { schemaVersion: options.v2 ? 2 : 1, network, contract: current, previousContract: previous }, sdk: { api }, state: { contract: current }, previous: { $options: { address: previous } },
+  const chain = { release: { schemaVersion: options.v2 ? 2 : 1, network, contract: current }, sdk: { api }, state: { contract: current },
     readNode: async op => { reads++; return access.read(op); }, save: () => assert.fail('Observation must not alter state'),
     recordTransaction: () => assert.fail('Observation must not record receipts') };
   const service = new ShortsWalletTransactionsService(chain);
@@ -78,7 +78,7 @@ test('release network binds modern and legacy signatures for every wallet action
   for (const network of ['ae_uat', 'ae_mainnet']) for (const rawSignature of [false, true]) {
     await t.test(`${network} ${rawSignature ? 'raw' : 'hash'}`, async () => {
       for (const method of ['paid_like', 'withdraw', 'claim']) {
-        const options = { network, rawSignature, previous: method === 'claim' };
+        const options = { network, rawSignature };
         const f = await fixture(method, options), result = await f.observe();
         assert.equal(result.network, network); assert.equal(result.status, 'confirmed');
         assert.equal(result.contract, f.contract);
@@ -90,26 +90,24 @@ test('release network binds modern and legacy signatures for every wallet action
 });
 
 test('missing or inconsistent release identity refuses to consult the node', async t => {
-  for (const change of ['missing', 'network', 'contract', 'previous']) await t.test(change, async () => {
+  for (const change of ['missing', 'network', 'contract']) await t.test(change, async () => {
     const f = await fixture();
     if (change === 'missing') delete f.chain.release;
     if (change === 'network') f.chain.release.network = 'unknown';
     if (change === 'contract') f.chain.release.contract = f.previous;
-    if (change === 'previous') f.chain.release.previousContract = null;
     f.api.getStatus = () => assert.fail('Invalid binding must fail before any node read');
     await assert.rejects(f.observe(), { status: 503 });
   });
 });
 
 test('release or selected-node changes while observing never return a stale result', async t => {
-  for (const change of ['release', 'network', 'contract', 'previous', 'node', 'state']) await t.test(change, async () => {
+  for (const change of ['release', 'network', 'contract', 'node', 'state']) await t.test(change, async () => {
     const f = await fixture();
     const original = f.api.getTransactionByHash;
     f.api.getTransactionByHash = async () => {
       if (change === 'release') f.chain.release = { ...f.chain.release };
       if (change === 'network') f.chain.release.network = 'ae_mainnet';
       if (change === 'contract') f.chain.release.contract = f.previous;
-      if (change === 'previous') f.chain.release.previousContract = null;
       if (change === 'node') f.chain.sdk.api = { ...f.api };
       if (change === 'state') f.chain.state.contract = f.previous;
       return original();
@@ -215,8 +213,8 @@ test('caller, contract, payload, signature and network are cryptographically bou
 
 test('only configured contracts and supported wallet methods can be inspected', async () => {
   for (const method of ['claim','withdraw']) assert.equal((await (await fixture(method)).observe()).method, method);
-  assert.equal((await (await fixture('claim', { previous: true })).observe()).status, 'confirmed');
-  assert.equal((await (await fixture('paid_like', { previous: true })).observe()).status, 'confirmed');
+  await assert.rejects((await fixture('claim', { previous: true })).observe(), {status:400});
+  await assert.rejects((await fixture('paid_like', { previous: true })).observe(), {status:400});
   await assert.rejects((await fixture('other')).observe(), { status: 400 });
   const f = await fixture();
   for (const args of [['bad', f.account.address, f.contract], [f.tx, 'bad', f.contract], [f.tx, f.account.address, encoded(Encoding.ContractAddress)]]) {
@@ -300,5 +298,5 @@ test('V2 observation binds exact configuration versions and comment text/sequenc
     const result = await f.observe(); assert.equal(result.status, 'confirmed'); assert.deepEqual(result.args, args);
   }
   const old = await fixture('paid_like', { v2: true, previous: true });
-  assert.equal((await old.observe()).status, 'confirmed'); assert.equal((await old.observe()).args, undefined);
+  await assert.rejects(old.observe(), {status:400});
 });

@@ -29,8 +29,7 @@ exports.exercise = async f => {
   const scratch = api.get(ShortsScratchService), transfers = new ShortsPinTransfersService(owner);
   // The outer upload fixture already isolates admission; this phase exercises
   // actual media IO, SQL barriers and guard transport, not distributed load.
-  const publisher = new ShortsMediaService({}, privateMedia, records, undefined,
-    { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) }, scratch, transfers);
+  const publisher = new ShortsMediaService({}, privateMedia, records, { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) }, scratch, transfers);
   const selections = new ShortsDeliverySelectionService(owner), staging = new ShortsDeliveryStagingService(owner, metadata);
   const restaging = new ShortsOriginalRestagingService(metadata, publisher, objects, staging);
   const generations = new ShortsDeliveryGenerationsService(owner, metadata), packages = new ShortsDeliveryPackagesService(owner);

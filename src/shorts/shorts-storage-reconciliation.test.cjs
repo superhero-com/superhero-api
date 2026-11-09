@@ -5,7 +5,7 @@ const {
   ShortsRetentionHolds,
   ShortsStorageInventory,
   ShortsStorageReferences,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -33,7 +33,7 @@ const ref=(id,slot,bytes=10)=>{const sha256=digest([id,slot]);return {key:`${sco
 
 test('manifest-only expansion validates ownership and parts without fetching video bytes',async()=>{
   const part=ref('clip','part/0'),manifest=ref('clip','manifest',500),sha256='b'.repeat(64);
-  const job={id:'clip',creator:'ak_creator',input:{objectKey:manifest.key,manifest,bytes:10,sha256}};
+  const job={id:'clip',creator:'ak_creator',input:{processingProfile:"original-h264-v1",objectKey:manifest.key,manifest,bytes:10,sha256}};
   let data={version:1,id:job.id,creator:job.creator,bytes:10,sha256,parts:[{index:0,object:part}]},reads=0;
   const validate=new ShortsPrivateObjectsService({endpoint:'http://127.0.0.1:9',region:'us-east-1',bucket:'test',prefix,forcePathStyle:true,credentials:{accessKeyId:'test',secretAccessKey:'test'},keys:{key1:Buffer.alloc(32)},activeKeyId:'key1'});
   const reader=new ShortsSourceReaderService({validateReference:(...args)=>validate.validateReference(...args),get:async(_s,r)=>{assert.equal(r.key,manifest.key);reads++;return Buffer.from(JSON.stringify(data));}});

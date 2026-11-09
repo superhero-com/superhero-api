@@ -120,35 +120,27 @@ also returns `source` with the accepted format, full-file SHA-256, byte count an
 frozen admission limit. Status never returns private object references or grants.
 Clients hash the original incrementally and verify this identity before resuming.
 
-Original-file admission is disabled by default. Apply migration
-`1793232000001-ShortsOriginalUploadRequests` and qualify the original-file readers,
-moderation service, publisher and streaming delivery before enabling it on the
-hosted API. The migration permits 96 parts and larger bounded metadata, preserves
-existing sessions, and prevents workers without the larger-source capability
-from claiming originals above 40 MiB. New workers advertise a 100,000,000-byte
-source-reader ceiling. Rollback refuses while original-format jobs or sessions
-remain; it never discards them.
+The hosted API accepts original MP4 and MOV files by default. Run the API migrations before starting the worker. The maximum is 100,000,000 bytes across up to 96 parts. The accepted size limit stays with the session through retries.
 
 If the upload proxy bounds part indexes in its route, allow exactly 0–95 for
 these 96-part sessions while preserving the existing method, origin, signature,
 body-size and rate limits.
 
 ```dotenv
-SHORTS_ORIGINAL_UPLOADS_ENABLED=false
 SHORTS_ORIGINAL_UPLOAD_MAX_BYTES=100000000
 ```
 
-When explicitly enabled, the effective new-upload maximum is the smaller of the
+The effective new-upload maximum is the smaller of the
 configured operational limit and the active contract limit, with an absolute
-ceiling of 100,000,000 decimal bytes. The local demo stays on the legacy format.
+ceiling of 100,000,000 decimal bytes. Uploads require the hosted media worker.
 Clients may send `expectedFormat: "original-file-v1"` as a creation precondition;
-a mismatch returns 409 and cannot enable the writer. A new original upload must
+a mismatch is rejected. A new original upload must
 receive an original-format source confirmation before transferring any parts.
 
 The API, rather than request JSON, assigns and persists `processingProfile` and
-`acceptedMaxBytes`. Later flag or limit changes affect new admissions only.
+`acceptedMaxBytes`. Later limit changes affect new admissions only.
 Resuming an accepted source verifies the saved bytes and hash and keeps its
-format. Legacy jobs retain their 40 MiB ceiling and directory-CID semantics.
+format.
 Existing hourly byte quotas and retained-source budgets are unchanged, so fewer
 maximum-size originals fit into a given budget. This setting does not increase
 capacity or authorize a larger on-chain file limit.

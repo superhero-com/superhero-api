@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsAcceptedManifests: Migration,
 } = schemaMigrations;
@@ -55,9 +55,9 @@ test('accepted manifests bind every ordinary and restaged source child atomicall
       const bytes = stored.get(ref.key); assert.equal(bytes.length, ref.bytes); assert.equal(hash(bytes), ref.sha256); return bytes;
     } };
   const sources = new ShortsSourceService(records, transport, metadata);
-  const make = (id, bytes = 5, original = false) => {
+  const make = (id, bytes = 5) => {
     const input = { bytes, sha256: hash('source-' + id), title: 'Title', topic: 'Art', details: {},
-      ...(original ? { processingProfile: 'original-h264-v1', acceptedMaxBytes: 100000000 } : {}) };
+      processingProfile: 'original-h264-v1', acceptedMaxBytes: 100000000 };
     const document = { version: 1, id, creator, bytes, sha256: input.sha256,
       parts: Array.from({ length: Math.ceil(bytes / 1048576) }, (_, index) => ({ index,
         object: objects.plannedReference(scope, id, 'part/' + index, {
@@ -89,9 +89,9 @@ test('accepted manifests bind every ordinary and restaged source child atomicall
     await assert.rejects(metadata.enqueue(scope, 'older', creator, old.input, undefined, undefined, old.manifest + ' '), { status: 409 });
     assert.equal(await epoch(), before + 1);
   });
-  await t.test('ordinary legacy uploads persist the actual manifest through the existing upload coordinator', async () => {
+  await t.test('ordinary original uploads persist the actual manifest through the existing upload coordinator', async () => {
     const id = 'ordinary', bytes = Buffer.from('hello');
-    await records.create(scope, id, creator, { bytes: bytes.length, sha256: hash(bytes), title: 'Title', topic: 'Art', rights: true, details: {} });
+    await records.create(scope, id, creator, { processingProfile: 'original-h264-v1', bytes: bytes.length, sha256: hash(bytes), title: 'Title', topic: 'Art', rights: true, details: {} });
     await sources.part(scope, id, creator, 0, bytes);
     const job = await sources.finish(scope, id, creator);
     const accepted = await row(id);
@@ -131,7 +131,7 @@ test('accepted manifests bind every ordinary and restaged source child atomicall
     } };
     const uploadRecords = new ShortsUploadRecordsService(db, fault), source = new ShortsSourceService(uploadRecords, encrypted, metadata);
     const id = 'encrypted', bytes = Buffer.from('exact original source fixture');
-    await uploadRecords.create(scope, id, creator, { bytes: bytes.length, sha256: hash(bytes), title: 'Title', topic: 'Art', rights: true, details: {} });
+    await uploadRecords.create(scope, id, creator, { processingProfile: 'original-h264-v1', bytes: bytes.length, sha256: hash(bytes), title: 'Title', topic: 'Art', rights: true, details: {} });
     await source.part(scope, id, creator, 0, bytes);
     await assert.rejects(source.finish(scope, id, creator), /fixture admission rollback/);
     assert.equal(await row(id), undefined); assert.equal((await uploadRecords.get(scope, id, creator)).state, 'sealed');

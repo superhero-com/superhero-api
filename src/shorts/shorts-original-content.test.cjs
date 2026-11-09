@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsOriginalContent: Migration,
 } = schemaMigrations;
@@ -58,7 +58,7 @@ const mutations = [
 ];
 test('original identity describes the source separately from its delivery package', () => {
   assert.equal(validateOriginalContent(record()), true);
-  assert.equal(validateOriginalContent({}), false);
+  assert.throws(() => validateOriginalContent({}));
   for (const mutate of mutations) {
     const candidate = record(); mutate(candidate);
     assert.throws(() => validateOriginalContent(candidate), undefined, String(mutate));
@@ -98,8 +98,7 @@ test('PostgreSQL fences original identity, handles mixed workers and rejects for
     assert.equal((await rpc('verify')).originalContentVersion, 1);
     await assert.rejects(worker.query("SELECT shorts_validate_original('{}')"), { code: '42501' });
     await metadata.enqueue(scope, 'original', 'ak_creator', input('original'));
-    await metadata.enqueue(scope, 'legacy', 'ak_creator', input('legacy', false));
-    const old = await rpc('claim', { leaseMs: 120000 }); assert.equal(old.id, 'legacy');
+    await assert.rejects(metadata.enqueue(scope, 'directory', 'ak_creator', input('directory', false)));
     assert.equal(await rpc('claim', { leaseMs: 120000 }), null);
     const raw = await rpc('claim', { leaseMs: 120000, mediaProtocol: 2 }); assert.equal(raw.id, 'original');
     const job = { ...raw, fence: String(raw.fence), leaseToken: raw.lease_token };
@@ -111,7 +110,6 @@ test('PostgreSQL fences original identity, handles mixed workers and rejects for
     forgedAttempt.derivatives.generation.fence = forgedAttempt.privateMedia.fence = String(BigInt(job.fence) + 1n);
     assert.equal(validateOriginalContent(forgedAttempt), true);
     await assert.rejects(rpc('complete', { ...job, record: forgedAttempt }), { code: 'SH400' });
-    await assert.rejects(rpc('complete', { ...old, fence: String(old.fence), leaseToken: old.lease_token, record: record({ ...old, fence: String(old.fence) }) }), { code: 'SH400' });
     const result = await rpc('complete', { ...job, record: record(job) });
     assert.equal(result.record.cid, cid); assert.equal(result.record.bytes, 1234);
     assert.equal(result.record.derivatives.cid, 'bafy' + 'b'.repeat(50));
@@ -123,10 +121,4 @@ test('PostgreSQL fences original identity, handles mixed workers and rejects for
         [key, JSON.stringify(value), job.id]), { code: 'SH409' });
     }
     await assert.rejects(owner.transaction(manager => new Migration().down(manager)), /rollback is unsafe/);
-    // Legacy jobs retain the previous summed-package byte count and no new identity fields.
-    const legacy = record({ ...old, fence: String(old.fence) }); delete legacy.original; delete legacy.derivatives;
-    legacy.files = legacy.files.filter(f => !f.name.startsWith('video-')); legacy.bytes = 300;
-    for (const name of Object.keys(legacy.privateMedia.files)) if (name.startsWith('video-')) delete legacy.privateMedia.files[name];
-    const accepted = await rpc('complete', { ...old, fence: String(old.fence), leaseToken: old.lease_token, record: legacy });
-    assert.equal(accepted.record.bytes, 300); assert.equal(accepted.record.original, undefined);
   });

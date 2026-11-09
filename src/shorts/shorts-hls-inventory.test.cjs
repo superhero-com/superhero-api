@@ -5,7 +5,7 @@ const {
   ShortsRetentionHolds,
   ShortsHlsInventory,
   ShortsAdaptiveInventory,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -27,21 +27,17 @@ const {hlsSourceKey,hlsObservation}=require('./shorts-hls-inventory-data');
 const {fullAdaptivePackage}=require('./testing/hls-v3-fixture.cjs');
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const scope={network:'ae_uat',contract: releaseFixture().release.contract},sourceHash='a'.repeat(64);
-const playlist='#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:2.000000,\nsegment-000.m4s\n#EXT-X-ENDLIST\n';
-const pkg={cid:'b'+'a'.repeat(58),playlist,files:[{name:'index.m3u8',bytes:Buffer.byteLength(playlist),sha256:hash(playlist)},
-  ...['init.mp4','segment-000.m4s'].map(name=>({name,bytes:8,sha256:'b'.repeat(64)}))]};
-const bytes=pkg.files.reduce((n,f)=>n+f.bytes,0);
-const source=id=>({id,cid:'Qm'+'1'.repeat(44),file:{name:'video.mp4',bytes:64,sha256:'a'.repeat(64)}});
+const golden = require('./testing/hls-v3.json');
+const pkg = golden.package, bytes = pkg.files.reduce((sum, f) => sum + f.bytes, 0);
+const source = id => require('./testing/original-record.cjs').originalRecord(id, scope);
 
 test('HLS inventory rejects malformed indexes instead of treating them as garbage',()=>{
   const key=hlsSourceKey(source('clip')),raw=JSON.stringify(pkg);
   assert.equal(hlsObservation(key,raw).bytes,bytes);
-  assert.equal(key,hash(`hls-v2\nclip\n${source('clip').cid}\n${'a'.repeat(64)}\n64`));
+  assert.equal(hlsSourceKey(golden.descriptor), golden.sourceKey);
   for(const bad of [{...pkg,cid:'invalid'},{...pkg,files:[]},{...pkg,files:[...pkg.files,pkg.files[0]]},
-    {...pkg,files:pkg.files.map(f=>({...f,bytes:0}))},{...pkg,playlist:playlist.replace('segment-000.m4s','https://remote/video')},
-    {...pkg,playlist:playlist.replace('#EXT-X-ENDLIST','')},{...pkg,playlist:playlist.replace('2.000000','200.000000')},
-    {...pkg,files:pkg.files.map(f=>({...f,sha256:'0'.repeat(64)}))}])assert.throws(()=>hlsObservation(key,JSON.stringify(bad)));
-  assert.throws(()=>hlsObservation(key,'x'.repeat(32769)));assert.throws(()=>hlsSourceKey({...source('clip'),file:null}));
+    {...pkg,files:pkg.files.map(f=>({...f,bytes:0}))},{...pkg,playlist:'#EXTM3U'}, {...pkg,files:pkg.files.map(f=>({...f,sha256:'0'.repeat(64)}))}])assert.throws(()=>hlsObservation(key,JSON.stringify(bad)));
+  assert.throws(()=>hlsObservation(key,'x'.repeat(32769)));assert.throws(()=>hlsSourceKey({...source('clip'),original:null}));
 });
 
 test('read-only Redis HLS inventory checkpoints metadata and preserves shared/held packages',{
@@ -83,7 +79,7 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
   db=new ShortsDatabaseService(new DataSource({...options,url:login.href,migrations:[]}));await db.onModuleInit();
   const records=new ShortsRetentionService(db,config),read=reader(),service=(index=read,database=db,settings=config)=>new ShortsHlsInventoryService(database,settings,records,index),s=service();await s.verify();
   const content=async id=>{const input=source(id);await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,'ak_creator',0,$4)`,
-    [...args,id,JSON.stringify({id,creator:'ak_creator',cid:input.cid,files:[input.file],publication:'withdrawn'})]);};
+    [...args,id,JSON.stringify({...input,creator:'ak_creator',publication:'withdrawn'})]);};
   for(const id of ['a-video','b-video','c-missing'])await content(id);
   const holds=new ShortsRetentionService(owner,config);await holds.hold({id:randomUUID(),resourceId:'a-video',reason:'safety',reference:'case-a'});
   for(let i=0;i<30;i++)await holds.hold({id:randomUUID(),resourceId:`hold-${String(i).padStart(2,'0')}`,reason:'recovery',reference:'case-unrecorded'});
@@ -203,9 +199,8 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
     await assert.rejects(owner.query(`UPDATE shorts_hls_inventory_entries SET version=2 WHERE network=$1 AND contract=$2 AND run_id=$3 AND source_key=$4`,[...args,id,sourceKey]),{code:'23514'});
     await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve adaptive inventory history/);
     for (const version of [1,2,3,4]) {
-      const old=randomUUID();await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,reference_version)
-        VALUES($1,$2,$3,$4,$5,$6,$7)`,[...args,old,sourceHash,config.storageId,namespace,version]);
-      assert.equal((await s.status(old)).referenceVersion,version);await assert.rejects(s.step(old),{status:409});
+      const old=randomUUID();await assert.rejects(owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,reference_version)
+        VALUES($1,$2,$3,$4,$5,$6,$7)`,[...args,old,sourceHash,config.storageId,namespace,version]),{code:'23514'});
     }
   });
 });

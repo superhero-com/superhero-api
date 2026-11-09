@@ -44,8 +44,7 @@ const { Global, Module } = require('@nestjs/common');
       contract: { $options: { address: manifest.contract } }, operator: { address: manifest.operator },
       address: value => value, serial: callback => work.run(callback),
       policy: async () => shortsContractPolicy(configuration, 1),
-      rewardContracts: () => [],
-      account: async address => ({ address, wallet: '100', available: '0', earned: '0', claimed: '0', previousAvailable: '0' }),
+      account: async address => ({ address, wallet: '100', available: '0', earned: '0', claimed: '0' }),
       sdk: { getContext: () => ({ onNode: social.node }), api: {
         $host: manifest.node,
         getCurrentKeyBlock: async () => ({ height: (await chainState()).height }),

@@ -1,4 +1,4 @@
-const { ShortsPrivateInputCleanupJournal: Migration } = require('./historical-migrations.cjs');
+const { ShortsPrivateInputCleanupJournal: Migration } = require('./schema-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
@@ -195,7 +195,7 @@ module.exports = async f => {
   await t.test('a batch locks every canonical Short before the epoch, without granting proof to a synthetic root',async()=>{
     const other='zz-batch-lock-canonical',fakeBarrier=randomUUID(),fakeOperation=randomUUID();
     await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body)
-      VALUES($1,$2,$3,'ak_fixture',1,$4)`,[...args,other,{id:other,creator:'ak_fixture',createdAt:1,bytes:1,publication:'withdrawn'}]);
+      VALUES($1,$2,$3,'ak_fixture',1,$4)`,[...args,other,require('./original-record.cjs').originalRecord(other,{creator:'ak_fixture',createdAt:1,publication:'withdrawn'})]);
     // Owner-only fault fixture: the helper's lock ordering can be exercised without
     // inventing a playable second Short. Its ordinary snapshot must still reject it.
     await owner.transaction(async db=>{

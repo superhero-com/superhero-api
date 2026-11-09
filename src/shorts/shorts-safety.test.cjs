@@ -126,15 +126,13 @@ test('creator upload and rescan responses omit operator-only inspection evidence
   const short = { id: 'a', creator: 'creator', moderation: 'pending', safety: { status: 'review', frames: ['internal-frame'] }, classification: { evidenceHash: 'private-classification' } };
   let actor = 'creator';
   const chain = { serial: fn => fn(), address: value => value, operator: { address: 'operator' }, release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [short] } };
-  const shorts = new ShortsService(chain, {}, {}, {}, {}, {}, {}, {});
+  const shorts = new ShortsService(chain, {}, {}, {}, {}, {}, {}, );
   shorts.rescan = async () => short.safety;
-  const { DatabaseSync } = require('node:sqlite');
-  const { ShortsUploadsService } = require('./shorts-uploads.service');
-  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
-  const uploads = new ShortsUploadsService({ db }, shorts, {});
-  shorts.records = uploads.records;
-  const created = Date.now();
-  db.prepare('INSERT INTO shorts_uploads VALUES(?,?,?,?)').run('a', 'creator', created, JSON.stringify({ id: 'a', actor: 'creator', created, complete: true, parts: [0] }));
+  const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service');
+  const records = { shared: true, chain, get: async () => short };
+  const uploads = new ShortsHostedUploadsService(records, { getJob: async () => ({ status: 'ready' }) }, {
+    get: async () => ({ id: short.id, creator: actor, state: 'enqueued', parts: [], input: { processingProfile: 'original-h264-v1', bytes: 1, sha256: 'a'.repeat(64) } })
+  }, { finish: async () => ({ status: 'ready' }) });
   const controller = new ShortsController(shorts, { authenticate: () => actor, operator: () => { if (actor !== 'operator') throw new Error('Operator required'); return actor; } }, uploads);
   assert.doesNotMatch(JSON.stringify(await controller.finishUpload('auth', 'a')), /internal-frame|private-classification/);
   assert.deepEqual(await controller.scan('auth', 'a'), { status: 'reviewing' });
@@ -202,40 +200,6 @@ test('demo approval opens pending videos without changing evidence, publication 
   media.safety.demoAutoApprove = false;
   assert.equal((await service.list()).length, 0);
   for (const id of ['pending', 'missing']) await assert.rejects(service.shared(id), { status: 404 });
-});
-
-test('demo approval applies to a prepared job, never to an unprocessed acknowledgement', async t => {
-  const { ShortsController } = require('./shorts.controller');
-  const { ShortsUploadsService } = require('./shorts-uploads.service');
-  const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
-  const { DatabaseSync } = require('node:sqlite');
-  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
-  const parts = new Map();
-  const chain = { release: { network: 'ae_uat', contract: 'ct_fixture' }, state: { contract: 'ct_fixture', shorts: [] }, address: a => a, serial: fn => fn(), save: async () => {}, registerPrepared: short => { chain.state.shorts.unshift(short); return short; } };
-  let preparations = 0;
-  const service = new ShortsService(chain, {
-    safety: { demoAutoApprove: true },
-    saveUploadPart: async (id, index, bytes) => parts.set(`${id}:${index}`, bytes),
-    loadUploadPart: async (id, index) => parts.get(`${id}:${index}`),
-    removeUploadParts: async () => parts.clear(),
-    prepare: async () => { preparations++; return { cid: 'bafy-demo', bytes: 1000, duration: 12, files: [], safety: undefined }; },
-  }, {}, {}, { classify: async () => { throw new Error('Demo must not classify'); } }, {}, {}, new ShortsUploadLimitsService({ db }));
-  const uploads = new ShortsUploadsService({ db }, service, service.uploadLimits);
-  const controller = new ShortsController(service, { authenticate: () => 'creator' }, uploads);
-  await assert.rejects(controller.upload('auth', { rights: 'false' }, { buffer: Buffer.from('video') }), /publishing rights/);
-  const queued = await controller.upload('auth', { title: 'Demo', topic: 'Art', rights: 'true' }, { buffer: Buffer.from('video') });
-  assert.equal(queued.status, 'queued'); assert.equal(queued.video, undefined); assert.equal(preparations, 0);
-  await uploads.drain();
-  const result = await controller.finishUpload('auth', queued.id);
-  assert.equal(preparations, 1); assert.equal(result.status, 'ready');
-  assert.equal(result.video.moderation, 'approved');
-  assert.deepEqual(result.video.guidelines, { status: 'eligible', approval: 'demo' });
-  const stored = chain.state.shorts[0];
-  assert.equal(stored.moderation, 'pending');
-  assert.equal(stored.safety, undefined);
-  assert.equal(stored.classification, undefined);
-  service.media.safety.demoAutoApprove = false;
-  assert.equal((await controller.finishUpload('auth', queued.id)).video.guidelines.status, 'analyzing');
 });
 
 test('demo worker continues publication recovery and pin repair while pausing scan retries', async () => {

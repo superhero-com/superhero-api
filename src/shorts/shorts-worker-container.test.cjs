@@ -27,22 +27,20 @@ async function until(read, timeout = 30000) {
   throw new Error('Container fixture condition did not become true');
 }
 const docker = async (...args) => (await run('docker', args, { timeout: 45000, maxBuffer: 1048576 })).stdout.trim();
-const originals = process.env.SHORTS_TEST_WORKER_PROFILE === 'original';
 
 test('production worker image preserves private jobs under its container limits', {
-  skip: !process.env.SHORTS_TEST_WORKER_IMAGE, timeout: originals ? 1800000 : 420000,
+  skip: !process.env.SHORTS_TEST_WORKER_IMAGE, timeout: 1800000,
 }, async t => {
   assert.equal(process.env.SHORTS_TEST_WORKER_DISPOSABLE, '1');
-  assert.ok([undefined, 'legacy', 'original'].includes(process.env.SHORTS_TEST_WORKER_PROFILE));
   const fixtures = process.env.SHORTS_TEST_WORKER_ORIGINAL_FIXTURES;
-  if (originals) assert.ok(isAbsolute(fixtures));
+  assert.ok(isAbsolute(fixtures));
   const hdrFixture = process.env.SHORTS_TEST_WORKER_HDR_FIXTURE;
   const hdrFrameRate = process.env.SHORTS_TEST_WORKER_HDR_FRAME_RATE === undefined ? 30 : Number(process.env.SHORTS_TEST_WORKER_HDR_FRAME_RATE);
   if (hdrFixture !== undefined) {
-    assert.ok(originals && isAbsolute(hdrFixture), 'HDR fixture requires the original profile and an absolute path');
+    assert.ok(isAbsolute(hdrFixture), 'HDR fixture requires the original profile and an absolute path');
     assert.ok([30, 60].includes(hdrFrameRate), 'HDR fixture frame rate must be 30 or 60');
   } else assert.equal(process.env.SHORTS_TEST_WORKER_HDR_FRAME_RATE, undefined, 'HDR frame rate requires an HDR fixture');
-  const memoryBytes = (originals ? 2 : 1) * 1024 ** 3;
+  const memoryBytes = 2 * 1024 ** 3;
   const image = process.env.SHORTS_TEST_WORKER_IMAGE;
   assert.match(image, /^sha256:[a-f0-9]{64}$/);
   const network = process.env.SHORTS_TEST_WORKER_NETWORK;
@@ -114,7 +112,7 @@ test('production worker image preserves private jobs under its container limits'
     await writeFile(envFile, Object.entries({ ...env, ...extra }).filter(([, value]) => value !== undefined).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
     await docker('run', '--pull=never', '-d', '--name', name, '--label', `superhero.disposable-worker-network=${network}`, '--network', network, '--init', '--read-only', '--user=1000:1000',
       '--cpus=2', `--memory=${memoryBytes}`, `--memory-swap=${memoryBytes}`, '--pids-limit=96', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-      '--log-opt=max-size=10m', '--log-opt=max-file=3', `--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=${originals ? '1g' : '512m'},uid=1000,gid=1000,mode=0700`,
+      '--log-opt=max-size=10m', '--log-opt=max-file=3', `--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=${'1g'},uid=1000,gid=1000,mode=0700`,
       '--mount', `type=volume,src=${volume},dst=/run/secrets,readonly`, '--env-file', envFile, image, 'node', 'dist/shorts/worker-main');
     return name;
   }
@@ -128,7 +126,7 @@ test('production worker image preserves private jobs under its container limits'
     observations.push({ label, ...result }); assert.match(result['memory.events'], /oom_kill 0/);
     assert.equal(result['memory.max'], String(memoryBytes)); assert.equal(result['memory.swap.max'], '0');
     assert.equal(result['cpu.max'], '200000 100000');
-    if (originals) assert.ok(Number(result['memory.peak']) < memoryBytes * .75, 'Whole-worker peak must remain below 75% of its assigned memory');
+    assert.ok(Number(result['memory.peak']) < memoryBytes * .75, 'Whole-worker peak must remain below 75% of its assigned memory');
   }
   async function stop(name) {
     await docker('stop', '-t', '30', name); const value = await state(name);
@@ -149,14 +147,14 @@ test('production worker image preserves private jobs under its container limits'
       assert.equal(video.codec_name, 'hevc'); assert.equal(video.pix_fmt, 'yuv420p10le');
       assert.equal(video.color_transfer, 'smpte2084'); assert.equal(video.color_primaries, 'bt2020'); assert.equal(video.color_space, 'bt2020nc');
     } else assert.ok(!['smpte2084', 'arib-std-b67'].includes(video.color_transfer), 'SDR fixture must not silently substitute HDR');
-    const bytes = await readFile(file); assert.ok(bytes.length <= (originals ? 100000000 : 40 * 1048576)); const parts = [];
-    if (originals && seconds === 60) assert.equal(bytes.length, 100000000, 'Maximum-size fixture must exercise the complete accepted limit');
+    const bytes = await readFile(file); assert.ok(bytes.length <= 100000000); const parts = [];
+    if (seconds === 60) assert.equal(bytes.length, 100000000, 'Maximum-size fixture must exercise the complete accepted limit');
     for (let offset = 0, index = 0; offset < bytes.length; offset += 1048576, index++)
       parts.push({ index, object: await objects.put(scope, id, `source/${index}`, bytes.subarray(offset, offset + 1048576)) });
     const manifest = await objects.put(scope, id, 'manifest', Buffer.from(JSON.stringify({ version: 1, id, creator, sha256: hash(bytes), bytes: bytes.length, parts })));
     const input = { objectKey: manifest.key, manifest, sha256: hash(bytes), bytes: bytes.length, title: 'Owned container clip', topic: 'Art', details: {},
-      ...(originals ? { processingProfile: 'original-h264-v1', acceptedMaxBytes: 100000000 } : {}) };
-    if (originals) {
+      processingProfile: 'original-h264-v1', acceptedMaxBytes: 100000000 };
+    {
       const encrypted = await raw.send(new GetObjectCommand({ Bucket: bucket, Key: parts[0].object.key, Range: 'bytes=0-63' }));
       const header = Buffer.from(await encrypted.Body.transformToByteArray());
       assert.equal(header.subarray(0, 8).toString(), 'SHPRIV01'); assert.notDeepEqual(header, bytes.subarray(0, header.length));
@@ -177,7 +175,7 @@ test('production worker image preserves private jobs under its container limits'
     await until(async () => !(await state(name)).Running); assert.equal((await state(name)).ExitCode, 1);
     assert.equal(await metadata.workerCount(scope), 0);
   });
-  const first = await enqueue(originals ? 4 : 2, '3840x2160', 60, originals ? join(fixtures, 'landscape4k60.mp4') : undefined);
+  const first = await enqueue(4, '3840x2160', 60, join(fixtures, 'landscape4k60.mp4'));
   await t.test('untrusted TLS cannot claim a private upload', async () => {
     const name = await start({ NODE_EXTRA_CA_CERTS: undefined });
     await until(async () => await metadata.workerCount(scope) === 1); await pause(6500); await healthy(name);
@@ -187,7 +185,7 @@ test('production worker image preserves private jobs under its container limits'
   const worker = await start();
   async function ready(name, job, attempts) {
     await until(async () => { await healthy(name); const row = await metadata.getJob(scope, job.creator, job.id);
-      assert.notEqual(row.status, 'failed'); return row.status === 'ready'; }, originals ? 725000 : 210000);
+      assert.notEqual(row.status, 'failed'); return row.status === 'ready'; }, 725000);
     // Original-profile recovery can include the normal 120-second lease expiry
     // plus one production 600-second attempt. No worker/decoder deadline changes.
     const row = await metadata.getJob(scope, job.creator, job.id), record = (await metadata.get(scope, job.id)).record;
@@ -198,7 +196,7 @@ test('production worker image preserves private jobs under its container limits'
     observations.push({ label: 'job-ready', elapsedSeconds: (performance.now() - job.queuedAt) / 1000, attempts,
       source: { sha256: job.sha256, bytes: job.bytes, seconds: job.seconds, fps: job.fps, width: job.width, height: job.height, hdr: job.hdr },
       originalCid: record.cid, fingerprint: record.derivatives?.fingerprint, scannedFrames: record.safety.frameCount });
-    if (originals) {
+    {
       assert.equal(record.original.sha256, job.sha256); assert.equal(record.bytes, job.bytes);
       assert.equal(record.privateMedia.source.processingProfile, 'original-h264-v1');
       assert.deepEqual(record.derivatives.generation, { job: job.id, fence: String(attempts) });
@@ -233,9 +231,6 @@ test('production worker image preserves private jobs under its container limits'
       for (const file of downloaded) await rm(file.path);
       await until(async () => JSON.parse(await docker('exec', name, 'node', '-e',
         "console.log(JSON.stringify(require('node:fs').readdirSync('/tmp').filter(name=>name.startsWith('shorts-'))))")).length === 0);
-    } else {
-      const output = await objects.get(scope, record.privateMedia.files['video.mp4']), file = join(dir, job.id + '-output.mp4'); await writeFile(file, output);
-      await run('ffmpeg', ['-nostdin','-v','error','-xerror','-i',file,'-f','null','-'], { timeout: 60000 });
     }
     await sample(name, `ready-${job.seconds}s-attempt-${attempts}`);
   }
@@ -247,7 +242,7 @@ test('production worker image preserves private jobs under its container limits'
     assert.deepEqual(config.HostConfig.CapDrop, ['ALL']); assert.equal(Object.keys(config.HostConfig.PortBindings || {}).length, 0);
     assert.equal(await docker('exec', worker, 'sh', '-c', 'command -v g++ || command -v python3 || command -v make || command -v npm || command -v npx || command -v corepack || command -v yarn || true'), '');
   });
-  if (originals) await t.test(`maximum ${hdrFixture ? `4K${hdrFrameRate} PQ HDR` : 'SDR'} original passes the real scanner, encrypted storage and every rendition`, async () => {
+  await t.test(`maximum ${hdrFixture ? `4K${hdrFrameRate} PQ HDR` : 'SDR'} original passes the real scanner, encrypted storage and every rendition`, async () => {
     const job = hdrFixture
       ? await enqueue(60, '3840x2160', hdrFrameRate, hdrFixture, true)
       : await enqueue(60, '1080x1920', 60, join(fixtures, 'portrait60-maxbytes.mp4'));
@@ -258,16 +253,16 @@ test('production worker image preserves private jobs under its container limits'
       "const fs=require('node:fs');console.log(JSON.stringify(fs.readdirSync('/proc').filter(p=>/^\\d+$/.test(p)).some(p=>{try{const a=fs.readFileSync('/proc/'+p+'/cmdline','utf8').split('\\0'),out=a.find(s=>s.endsWith('/video-1080.mp4'));return a.includes('-i')&&!!out&&fs.statSync(out).size>0;}catch{return false;}})))")), 120000);
   }
   await t.test('SIGTERM preserves work for normal-lease recovery in a replacement container', async () => {
-    const job = await enqueue(60, originals ? '1080x1920' : '540x960', originals ? 60 : 12, originals ? join(fixtures, 'portrait60-maxbytes.mp4') : undefined);
+    const job = await enqueue(60, '1080x1920', 60, join(fixtures, 'portrait60-maxbytes.mp4'));
     await until(async () => (await metadata.getJob(scope, job.creator, job.id)).status === 'processing');
-    if (originals) await activeEncoding(worker);
+    await activeEncoding(worker);
     await sample(worker, 'before-SIGTERM'); await stop(worker);
     assert.equal((await metadata.getJob(scope, job.creator, job.id)).status, 'processing');
     const replacement = await start(); await ready(replacement, job, 2); await stop(replacement);
     assert.equal(await metadata.workerCount(scope), 0);
     assert.equal(Number((await owner.query('SELECT count(*) AS n FROM shorts_publication_jobs'))[0].n), 0);
   });
-  if (originals) await t.test('SIGKILL leaves the accepted maximum original recoverable at the next fence', async () => {
+  await t.test('SIGKILL leaves the accepted maximum original recoverable at the next fence', async () => {
     const crashing = await start(), job = await enqueue(60, '1080x1920', 60, join(fixtures, 'portrait60-maxbytes.mp4'));
     await activeEncoding(crashing); await sample(crashing, 'before-SIGKILL');
     await docker('kill', '--signal=KILL', crashing);
@@ -279,5 +274,5 @@ test('production worker image preserves private jobs under its container limits'
     assert.equal(await metadata.workerCount(scope), 0);
     assert.equal(Number((await owner.query('SELECT count(*) AS n FROM shorts_publication_jobs'))[0].n), 0);
   });
-  t.diagnostic(JSON.stringify({ workerImage: image, profile: originals ? 'original' : 'legacy', maximumOriginal: originals ? (hdrFixture ? `4k${hdrFrameRate}-pq-hdr` : 'portrait60-sdr') : undefined, productionEntrypoint: 'dist/shorts/worker-main', observations }));
+  t.diagnostic(JSON.stringify({ workerImage: image, profile: 'original', maximumOriginal: hdrFixture ? `4k${hdrFrameRate}-pq-hdr` : 'portrait60-sdr', productionEntrypoint: 'dist/shorts/worker-main', observations }));
 });

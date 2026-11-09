@@ -1,13 +1,5 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
-import {
-  AccountMemory,
-  AeSdk,
-  Contract,
-  Node,
-  decode,
-  encode,
-  Encoding,
-} from '@aeternity/aepp-sdk';
+import { AccountMemory, AeSdk, Contract, Node } from '@aeternity/aepp-sdk';
 import { shortsContractPolicy, shortsVideo } from './shorts-contract-policy';
 import { createHttpHeaders, HttpClient } from '@azure/core-rest-pipeline';
 import { createHash } from 'node:crypto';
@@ -23,7 +15,10 @@ import {
 import { SignedPublicationClaim } from './shorts-publication-boundary.service';
 import { receiptHash } from './shorts-receipts.service';
 import { currentPublisherAttempt } from './shorts-publisher-attempt';
-import { assertShortsReleaseConfig } from './shorts-release';
+import {
+  assertActiveShortsContract,
+  assertShortsReleaseConfig,
+} from './shorts-release';
 
 /** No redirects, implicit retries, unbounded response bodies or ambient credentials. */
 export function publisherTransport(
@@ -145,36 +140,12 @@ export class ShortsPublisherNodeService implements OnModuleInit {
     const policy = shortsContractPolicy(cfg, this.config.release.schemaVersion);
     if (policy.operator !== this.config.operator || !policy.publishingEnabled)
       throw new Error('Publisher is no longer authorized by the contract');
-    let previous;
-    if (this.config.release.schemaVersion === 2) {
-      const {
-        decodedResult: [native, legacy],
-      } = await this.contract.$call('get_import_source', [], {
-        callStatic: true,
-      });
-      const source = native || legacy?.source;
-      previous = source
-        ? encode(decode(source), Encoding.ContractAddress)
-        : null;
-      const { decodedResult: status } = await this.contract.$call(
-        'migration_status',
-        [],
-        { callStatic: true },
-      );
-      if (
-        status.schema !== 2n ||
-        status.importing ||
-        status.abandoned ||
-        status.frozen
-      )
-        throw new Error('Publisher contract is not active');
-    } else {
-      previous = (
-        await this.contract.$call('get_previous', [], { callStatic: true })
-      ).decodedResult;
-    }
-    if ((previous || null) !== this.config.release.previousContract)
-      throw new Error('Publisher previous contract changed');
+    const { decodedResult: status } = await this.contract.$call(
+      'migration_status',
+      [],
+      { callStatic: true },
+    );
+    assertActiveShortsContract(status);
   }
   private async head() {
     if ((await this.node.getStatus()).networkId !== this.config.release.network)

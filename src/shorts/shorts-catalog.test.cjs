@@ -3,7 +3,7 @@ const {
   ShortsUploads,
   ShortsMetadata,
   ShortsCatalog,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,7 +19,7 @@ const { ShortsController } = require('./shorts.controller');
 const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
-const { ShortsUploadsService } = require('./shorts-uploads.service');
+const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(r => setImmediate(r));
@@ -44,7 +44,7 @@ function service(shorts) {
     },
   };
   const records = new ShortsRecordsService(chain);
-  const api = new ShortsService(chain, {}, { counters: async () => ({ views: 1 }) }, {}, {}, {}, {}, {}, records);
+  const api = new ShortsService(chain, {}, { counters: async () => ({ views: 1 }) }, {}, {}, {}, {}, records);
   return { api, chain, calls, records };
 }
 

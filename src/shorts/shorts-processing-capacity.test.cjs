@@ -4,7 +4,7 @@ const {
   ShortsWorkers,
   ShortsWorkerAuthority,
   ShortsProcessingCapacity,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -181,8 +181,7 @@ function workerFixture(overrides = {}) {
     complete: async (_scope, _claim, record) => { completed.push(record); }, workerStop: async () => {}, ...overrides.repo };
   const encoder = { encode: async (...args) => { encoded.push(args); return { files: [{ name: 'video.mp4', data: Buffer.from('test') }], bytes: 4, duration: 2 }; }, ...overrides.encoder };
   const worker = new ShortsMediaWorkerService({ scope: { network: 'ae_uat', contract: 'ct_test' }, sourceHash: 'a'.repeat(64), leaseMs: 1000 },
-    repo, { readToFile: async (_scope, _job, path) => ({ path, bytes: 5, sha256: 'a'.repeat(64) }), ...overrides.source }, { put: async () => ({}) }, encoder,
-    { cid: async () => 'bafytest' }, { accepting: async () => true, scan: async () => ({ status: 'no_flags' }), ...overrides.safety }, { classify: async () => ({}) }, {
+    repo, { readToFile: async (_scope, _job, path) => ({ path, bytes: 5, sha256: 'a'.repeat(64) }), ...overrides.source }, { put: async () => ({}) }, { cid: async () => 'bafytest' }, { accepting: async () => true, scan: async () => ({ status: 'no_flags' }), ...overrides.safety }, { classify: async () => ({}) }, {
       directory: tmpdir(), check: async () => {}, reserve: async () => ({ signal: new AbortController().signal, release() {} }), ...overrides.scratch,
     });
   return { worker, repo, completed, failed, encoded, deferred, job };

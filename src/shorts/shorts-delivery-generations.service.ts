@@ -16,10 +16,7 @@ import { officialContentPolicy } from './shorts-eligibility';
 import { shortsPlaybackDescriptor } from './shorts-playback-descriptor';
 import { sourceKey } from './hls-protocol/hls-package';
 import type { ShortRecord } from './shorts.types';
-import {
-  shortsDeliverySource,
-  assertDeliverySourcePreparation,
-} from './shorts-delivery-source';
+import { shortsDeliverySource } from './shorts-delivery-source';
 
 /** Internal operations only. Preparing media never selects or publishes it. */
 @Injectable()
@@ -59,7 +56,6 @@ export class ShortsDeliveryGenerationsService {
         'Original Short is not eligible for replacement preparation',
       );
     const source = shortsDeliverySource(record);
-    assertDeliverySourcePreparation(source);
     if (
       input.processingProfile !== 'original-h264-v1' ||
       input.sha256 !== source.sha256 ||
@@ -80,8 +76,7 @@ export class ShortsDeliveryGenerationsService {
   }
   async get(scope: ShortsScope, jobId: string) {
     const [row] = await this.db.query(
-      `SELECT g.short_id,g.fence,g.body,c.body AS canonical FROM shorts_delivery_generations g JOIN shorts_content c
-        ON c.network=g.network AND c.contract=g.contract AND c.id=g.short_id
+      `SELECT g.short_id,g.fence,g.body FROM shorts_delivery_generations g
         WHERE g.network=$1 AND g.contract=$2 AND g.job_id=$3`,
       this.args(scope, jobId),
     );
@@ -95,7 +90,7 @@ export class ShortsDeliveryGenerationsService {
     )
       throw new ConflictException('Invalid prepared delivery generation');
     const descriptor = {
-      ...shortsPlaybackDescriptor(record, scope, row.canonical),
+      ...shortsPlaybackDescriptor(record, scope),
       id: row.short_id,
     };
     return {

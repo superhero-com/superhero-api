@@ -18,13 +18,7 @@ requires its S3 configuration. The loopback-only demo retains its local adapter.
 The hosted API accepts jobs; `npm run start:shorts:worker` runs the separate Nest
 media worker. It has no HTTP listener, contract signer or IPFS write key.
 
-Existing prepared records must move to shared object references before hosted
-startup. Use the [offline migration](LEGACY-STORAGE.md) for content, private media,
-saved uploads, analytics and receipts. The API checks its shared completion record
-and rejects missing private references. It never creates or reads local quarantine
-files. Keep source backups and keys until restore and retention requirements permit
-removal. Signing belongs only to the separate publisher. Retain the single-instance
-deployment limit until distributed ingress limits and capacity tests permit scaling.
+Hosted content uses encrypted shared object references scoped to the active deployment.
 
 The shared module's flow is:
 

@@ -1,3 +1,4 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, randomUUID } = require('node:crypto');
@@ -19,112 +20,26 @@ function environment(t, values = {}) {
   Object.assign(process.env, values);
 }
 
-function manifest(bytes, cid = 'test-cid') {
-  return { id: 'test-short', cid, files: [{ name: 'video.mp4', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }] };
-}
-
-test('publication uploads once to one endpoint, verifies bytes, and reloads rotated keys', async t => {
+test('adaptive media reads verify bytes, fail on corruption and reload rotated keys', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'shorts-ipfs-auth-'));
   t.after(() => rm(dir, { recursive: true }));
-  const endpoint = 'https://ipfs.example.com/api/v0';
   const tokenFile = join(dir, 'token');
-  environment(t, { SHORTS_IPFS_API: endpoint, SHORTS_IPFS_TOKEN_FILE: tokenFile });
-  let token = 'a'.repeat(64);
-  await writeFile(tokenFile, token, { mode: 0o600 });
+  environment(t, { SHORTS_IPFS_API: 'https://ipfs.example.com/api/v0', SHORTS_IPFS_TOKEN_FILE: tokenFile });
+  const short = originalRecord(), bytes = Buffer.from('verified preview');
+  Object.assign(short.files.find(file => file.name === 'video.mp4'), { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
   const media = new ShortsMediaService({});
-  const bytes = Buffer.from('verified storage bytes');
-  const short = manifest(bytes);
-  t.mock.method(media, 'load', async () => bytes);
-  const requests = [];
+  let token = 'a'.repeat(64), body = bytes;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
-    assert.ok(url.startsWith(`${endpoint}/`));
     assert.equal(options.headers.get('authorization'), `Bearer ${token}`);
     assert.equal(options.redirect, 'error');
-    requests.push(new URL(url).pathname);
-    if (url.includes('/cat?')) return new Response(bytes);
-    if (url.includes('/add?')) {
-      assert.equal(new URL(url).searchParams.get('pin'), 'true');
-      return new Response(JSON.stringify({ Hash: short.cid }));
-    }
-    if (url.includes('/pin/ls?')) return new Response(JSON.stringify({ Keys: { [short.cid]: {} } }));
-    return new Response('{}');
+    assert.equal(new URL(url).searchParams.get('arg'), short.derivatives.assetsCid + '/video.mp4');
+    return new Response(body);
   });
-  assert.equal(await media.health(), true);
-  await media.pin(short);
-  assert.equal(requests.filter(path => path === '/api/v0/add').length, 1);
-  assert.equal(media.hasPin(short.cid), true);
-  assert.deepEqual(await media.retrieve(short, 'video.mp4'), bytes);
-  assert.deepEqual(await media.pins(), new Set([short.cid]));
-  await media.unpin(short.cid);
-  assert.equal(media.hasPin(short.cid), false);
-  await media.unpin(short.cid);
-  assert.equal(requests.filter(path => path === '/api/v0/pin/rm').length, 1);
-  token = 'b'.repeat(64);
   await writeFile(tokenFile, token);
-  assert.equal(await media.health(), true, 'rotation needs no API restart');
-});
-
-test('corrupt or unavailable media fails without fallback, and failed publication is not marked pinned', async t => {
-  environment(t);
-  const bytes = Buffer.from('verified media');
-  const short = manifest(bytes);
-  const media = new ShortsMediaService({});
-  t.mock.method(media, 'load', async () => bytes);
-  let reply = () => new Response('corrupt');
-  const request = t.mock.method(globalThis, 'fetch', async () => reply());
+  assert.deepEqual(await media.retrieve(short, 'video.mp4'), bytes);
+  token = 'b'.repeat(64); await writeFile(tokenFile, token);
+  body = Buffer.from('corrupt');
   await assert.rejects(media.retrieve(short, 'video.mp4'), /integrity/);
-  assert.equal(request.mock.callCount(), 1);
-  reply = () => new Response('unavailable', { status: 503 });
-  assert.equal(await media.health(), false);
-  await assert.rejects(media.pins(), /inspect IPFS pins/);
-  await assert.rejects(media.retrieve(short, 'video.mp4'), /unavailable/);
-  reply = () => { throw new Error('storage unreachable'); };
-  await assert.rejects(media.retrieve(short, 'video.mp4'), /storage unreachable/);
-  reply = () => new Response(JSON.stringify({ Hash: 'different-cid' }));
-  await assert.rejects(media.pin(short), /commitment mismatch/);
-  assert.equal(media.hasPin(short.cid), false);
-  request.mock.mockImplementation(async url => new Response(url.includes('/add?') ? JSON.stringify({ Hash: short.cid }) : 'corrupt'));
-  await assert.rejects(media.pin(short), /integrity/);
-  assert.equal(media.hasPin(short.cid), false);
-});
-
-test('HTTP storage write admission waits safely and resumes the same package after capacity recovers', async t => {
-  const bytes = Buffer.from('owned capacity recovery fixture');
-  const short = manifest(bytes, 'bafycapacityfixture');
-  let admission = 503, adds = 0, reads = 0;
-  const server = createServer((req, res) => {
-    req.resume();
-    req.on('end', () => {
-      if (req.url.startsWith('/api/v0/pin/ls?')) {
-        res.writeHead(500); res.end(JSON.stringify({ Code: 0, Message: `path '${short.cid}' is not pinned` }));
-      } else if (req.url.startsWith('/api/v0/add?')) {
-        adds++;
-        res.writeHead(admission);
-        res.end(admission === 200 ? JSON.stringify({ Hash: short.cid }) : 'storage unavailable');
-      } else if (req.url.startsWith('/api/v0/cat?')) {
-        reads++; res.end(bytes);
-      } else { res.writeHead(404); res.end(); }
-    });
-  });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
-  environment(t, { SHORTS_IPFS_API: `http://127.0.0.1:${server.address().port}/api/v0` });
-  const media = new ShortsMediaService({});
-  t.after(() => media.onModuleDestroy());
-  t.mock.method(media, 'load', async () => bytes);
-  for (admission of [503, 429]) {
-    await assert.rejects(media.ensurePinned(short), error => error instanceof ShortsMediaUnavailableError);
-    assert.equal(media.hasPin(short.cid), false);
-    assert.equal(reads, 0, 'denied writes cannot become verified/public media');
-  }
-  admission = 403;
-  await assert.rejects(media.ensurePinned(short), error => !(error instanceof ShortsMediaUnavailableError) && /403/.test(error.message));
-  assert.equal(adds, 3, 'each claimed attempt makes only one write request');
-  admission = 200;
-  await media.ensurePinned(short);
-  assert.equal(adds, 4);
-  assert.equal(reads, 1);
-  assert.equal(media.hasPin(short.cid), true);
 });
 
 test('missing pins and failed unpins do not erase the cached inventory', async t => {
@@ -207,15 +122,14 @@ test('storage outage pauses reconciliation without unpinning or publishing anyth
 test('real storage round trip uses one node and cleans up only its own test pin', { skip: process.env.SHORTS_IPFS_INTEGRATION !== '1' }, async t => {
   const media = new ShortsMediaService({});
   const bytes = Buffer.from(`shorts-storage-test-${randomUUID()}`);
-  const files = [{ name: 'video.mp4', data: bytes }];
-  assert.equal(await media.health(), true);
-  const cid = await media.add(files, true);
-  const short = manifest(bytes, cid);
-  t.mock.method(media, 'load', async () => bytes);
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-original-'));
+  t.after(() => rm(dir, { recursive: true }));
+  const path = join(dir, 'source.mp4'); await writeFile(path, bytes);
+  const file = { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  const { ShortsPackageService } = require('./shorts-package.service');
+  const cid = await new ShortsPackageService().originalCid(file);
   t.after(async () => { await media.pins(); await media.unpin(cid); });
-  await media.pin(short);
-  assert.deepEqual(await media.retrieve(short, 'video.mp4'), bytes);
+  assert.equal(await media.addFiles([{ ...file, name: 'source.mp4' }], false, new AbortController().signal, originalRecord(), cid, 'original'), cid);
+  await media.verifyPinnedBytes(cid, undefined, file, new AbortController().signal);
   assert.ok((await media.pins()).has(cid));
-  await media.unpin(cid);
-  assert.equal((await media.pins()).has(cid), false);
 });

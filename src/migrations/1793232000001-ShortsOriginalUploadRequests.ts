@@ -34,9 +34,9 @@ async function shortsOriginalUploadsLimits(db: QueryRunner, original: boolean) {
 }
 
 export class ShortsOriginalUploadRequests1793232000001 extends FeatureMigration {
-  readonly changes = {
-    /** Reader/storage capacity only. The original upload writer remains opt-in. */
-    ShortsOriginalUploads1793232000000: {
+  readonly steps = {
+    /** Capacity for original uploads and their source manifests. */
+    ShortsOriginalUploads: {
       async up(db: QueryRunner): Promise<void> {
         await shortsOriginalUploadsLimits(db, true);
         await shortsOriginalUploadsReaders(db, false);
@@ -55,7 +55,7 @@ export class ShortsOriginalUploadRequests1793232000001 extends FeatureMigration 
       },
     },
 
-    ShortsUploadRequests1793232007000: {
+    ShortsUploadRequests: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',

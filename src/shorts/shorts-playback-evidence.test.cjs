@@ -24,6 +24,7 @@ function fixture(t) {
 
 function sourceFixture(f) {
   const descriptor = { ...structuredClone(require('./testing/hls-v3.json').descriptor), id: f.short.id, contract: f.contract };
+  f.short.cid = descriptor.cid;
   const key = sourceKey(descriptor);
   const sign = (changes = {}, browser = f.event.session) => {
     const base = JSON.parse(Buffer.from(f.sign({}, browser).split('.')[1], 'base64url').toString());
@@ -37,23 +38,22 @@ test('shared streaming m2 compatibility vector validates against its authorized 
   const vector=require('./testing/measurement-v2.json'), descriptor=require('./testing/hls-v3.json').descriptor;
   const verifier=new ShortsPlaybackEvidenceService({ release:{ network:descriptor.network,contract:descriptor.contract },state:{ contract:descriptor.contract } });
   verifier.key=Buffer.from(vector.testKeyHex,'hex');
-  const canonical={ id:descriptor.id,cid:vector.canonicalCid }, clock=Date.now;
+  const canonical={ id:descriptor.id,cid:descriptor.cid }, clock=Date.now;
   try {
     Date.now=()=>vector.now;
     const result=await verifier.validate(canonical,{ id:randomUUID(),session:vector.session,seconds:10,source:'shared',proof:vector.proof },async key=>{
       assert.equal(key,sourceKey(descriptor)); return descriptor;
     });
     assert.equal(result.seconds,2); assert.equal(result.startedAt,vector.evidence.startedAt);
-    assert.equal(canonical.cid,vector.canonicalCid); assert.notEqual(descriptor.cid,canonical.cid);
+    assert.equal(descriptor.cid,canonical.cid);
   } finally { Date.now=clock; }
 });
 
-test('versioned evidence attributes a different delivery CID to the unchanged canonical post and preserves deduplication', async t => {
+test('versioned evidence binds the adaptive delivery to its canonical post and preserves deduplication', async t => {
   const f = fixture(t), source = sourceFixture(f), canonical = structuredClone(f.short);
   let lookups = 0;
   f.shorts.playbackVersion = async (id, key) => { lookups++; assert.equal(id, f.short.id); assert.equal(key, source.key); return source.descriptor; };
-  assert.notEqual(source.descriptor.cid, f.short.cid);
-  // An existing legacy receipt and an upgraded delivery still represent one viewer/post/day.
+  assert.equal(source.descriptor.cid, f.short.cid);
   assert.equal((await f.controller.playback(f.short.id, { ...f.event, proof: f.sign() })).views, 1);
   assert.equal(lookups, 0);
   assert.equal((await f.controller.playback(f.short.id, { ...f.event, id: randomUUID(), proof: source.sign() })).views, 1);
@@ -75,7 +75,7 @@ test('versioned receipt authentication and browser/time checks run before source
     await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof }), { status: 401 });
   assert.equal(lookups, 0);
   assert.throws(() => f.verifier.validate(f.short, { ...f.event, proof: source.sign() }), { status: 401 });
-  await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof: f.sign({ cid: source.descriptor.cid }) }), { status: 401 });
+  await assert.rejects(f.controller.playback(f.short.id, { ...f.event, proof: f.sign({ cid: 'other-source' }) }), { status: 401 });
   assert.equal(lookups, 0); assert.equal(f.db.prepare('SELECT count(*) AS n FROM shorts_plays').get().n, 0);
 });
 

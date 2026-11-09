@@ -107,8 +107,7 @@ export class LocalShortsAnalyticsService extends ShortsAnalyticsService {
     store.db
       .exec(`CREATE TABLE IF NOT EXISTS shorts_view_totals (short_id TEXT PRIMARY KEY, views INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS shorts_forgotten_viewers (viewer TEXT PRIMARY KEY, expires INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS shorts_plays_viewer ON shorts_plays(viewer,short_id,started);
-      INSERT OR IGNORE INTO shorts_view_totals SELECT short_id, COUNT(*) FROM shorts_plays WHERE seconds>=2 GROUP BY short_id;`);
+      CREATE INDEX IF NOT EXISTS shorts_plays_viewer ON shorts_plays(viewer,short_id,started);`);
     store.db
       .prepare('INSERT OR IGNORE INTO shorts_analytics_settings VALUES(1,?,?)')
       .run(randomBytes(32).toString('hex'), Date.now());

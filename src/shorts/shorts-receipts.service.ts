@@ -8,11 +8,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { createHash } from 'node:crypto';
 import { decode, Encoding, isAddressValid } from '@aeternity/aepp-sdk';
 import { isAeEncoded } from '../common/validation/request-validation';
 import { ShortsScope } from './shorts-metadata.service';
-import { LocalReceipt } from './shorts.types';
 
 export interface ReceiptObservation {
   actor: string;
@@ -81,54 +79,12 @@ export class ShortsReceiptsService {
       throw new BadRequestException('Invalid wallet address');
     return actor;
   }
-  private legacy(receipt: LocalReceipt) {
-    this.actor(receipt?.actor);
-    receiptHash(receipt?.tx);
-    if (
-      !Number.isSafeInteger(receipt.at) ||
-      receipt.at < 0 ||
-      typeof receipt.action !== 'string' ||
-      !/^[a-zA-Z0-9_-]{1,64}$/.test(receipt.action)
-    )
-      throw new BadRequestException('Invalid historical receipt');
-  }
-  async initialize(
-    scope: ShortsScope,
-    sourceHash: string,
-    previous: string | undefined,
-    legacy: LocalReceipt[],
-    allowImport = false,
-    rewards: string[] = [],
-  ) {
+  async initialize(scope: ShortsScope, sourceHash: string) {
     const params = this.scope(scope);
-    if (
-      rewards.length > 16 ||
-      new Set(rewards).size !== rewards.length ||
-      rewards.some(
-        (c) =>
-          !isAddressValid(c, Encoding.ContractAddress) ||
-          [scope.contract, previous].includes(c),
-      )
-    )
-      throw new BadRequestException('Invalid reward receipt targets');
-    if (
-      !/^[a-f0-9]{64}$/.test(sourceHash) ||
-      !Array.isArray(legacy) ||
-      (previous !== undefined &&
-        (!/^ct_[a-zA-Z0-9]{1,97}$/.test(previous) ||
-          previous === scope.contract))
-    )
+    if (!/^[a-f0-9]{64}$/.test(sourceHash))
       throw new BadRequestException(
         'Invalid transaction-history configuration',
       );
-    const hash = createHash('sha256');
-    for (const receipt of legacy) {
-      this.legacy(receipt);
-      hash.update(
-        JSON.stringify([receipt.tx, receipt.actor, receipt.action, receipt.at]),
-      );
-    }
-    const fingerprint = hash.digest('hex');
     return this.transaction(async (db) => {
       const [runtime] = await db.query(
         'SELECT source_hash FROM shorts_runtime WHERE network=$1 AND contract=$2 FOR UPDATE',
@@ -138,61 +94,10 @@ export class ShortsReceiptsService {
         throw new ServiceUnavailableException(
           'Transaction-history deployment does not match',
         );
-      const [existing] = await db.query(
-        'SELECT previous_contract,legacy_hash FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2 FOR UPDATE',
+      await db.query(
+        'INSERT INTO shorts_receipt_scopes(network,contract) VALUES($1,$2) ON CONFLICT DO NOTHING',
         params,
       );
-      if (rewards.length) {
-        const [targets] = await db.query(
-          'SELECT reward_contracts FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2',
-          params,
-        );
-        if (
-          targets &&
-          JSON.stringify(targets.reward_contracts) !== JSON.stringify(rewards)
-        )
-          throw new ConflictException('Reward receipt targets changed');
-      }
-      if (existing) {
-        if (
-          existing.previous_contract !== (previous ?? null) ||
-          (legacy.length && existing.legacy_hash !== fingerprint)
-        )
-          throw new ConflictException(
-            'Transaction history needs an empty destination and matching migration',
-          );
-        return;
-      }
-      if (legacy.length && !allowImport)
-        throw new ConflictException(
-          'Historical receipts require explicit migration',
-        );
-      await db.query(
-        'INSERT INTO shorts_receipt_scopes(network,contract,previous_contract,legacy_hash) VALUES($1,$2,$3,$4)',
-        [...params, previous ?? null, legacy.length ? fingerprint : null],
-      );
-      if (rewards.length)
-        await db.query(
-          'UPDATE shorts_receipt_scopes SET reward_contracts=$3::text[] WHERE network=$1 AND contract=$2',
-          [...params, rewards],
-        );
-      for (const r of legacy) {
-        const [duplicate] = await db.query(
-          'SELECT actor,action FROM shorts_transaction_receipts WHERE network=$1 AND contract=$2 AND tx=$3',
-          [...params, r.tx],
-        );
-        if (
-          duplicate &&
-          (duplicate.actor !== r.actor || duplicate.action !== r.action)
-        )
-          throw new ConflictException('Historical receipt identity conflicts');
-        await db.query(
-          `INSERT INTO shorts_transaction_receipts(network,contract,tx,actor,action,at,verification)
-          VALUES($1,$2,$3,$4,$5,$6,'legacy') ON CONFLICT(network,contract,tx) DO UPDATE SET
-          at=least(shorts_transaction_receipts.at,excluded.at)`,
-          [...params, r.tx, r.actor, r.action, r.at],
-        );
-      }
     });
   }
   async record(scope: ShortsScope, observation: ReceiptObservation) {
@@ -218,20 +123,14 @@ export class ShortsReceiptsService {
       throw new BadRequestException('Unverified block evidence');
     return this.transaction(async (db) => {
       const [binding] = await db.query(
-        "SELECT previous_contract,to_jsonb(s)->'reward_contracts' AS reward_contracts FROM shorts_receipt_scopes s WHERE network=$1 AND contract=$2",
+        'SELECT contract FROM shorts_receipt_scopes WHERE network=$1 AND contract=$2',
         params,
       );
       if (!binding)
         throw new ServiceUnavailableException(
           'Transaction history is not initialized',
         );
-      if (
-        ![
-          scope.contract,
-          binding.previous_contract,
-          ...(binding.reward_contracts ?? []),
-        ].includes(observation.calledContract)
-      )
+      if (observation.calledContract !== scope.contract)
         throw new BadRequestException('Unrecognized Shorts contract');
       const args = [
         ...params,
@@ -259,7 +158,7 @@ export class ShortsReceiptsService {
       )
         throw new ConflictException('Transaction receipt identity conflicts');
       // A late submission acknowledgement cannot overwrite a stronger observation.
-      // Retain the original activity timestamp and any specific historical action.
+      // Retain the original activity timestamp and any specific recorded action.
       await db.query(
         `UPDATE shorts_transaction_receipts SET
         action=CASE WHEN $5='publish' THEN $5 ELSE action END,

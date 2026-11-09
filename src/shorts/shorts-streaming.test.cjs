@@ -7,20 +7,20 @@ const { ShortsStreamingService } = require('./shorts-streaming.service');
 const { DatabaseSync } = require('node:sqlite');
 const { ShortsDeliveryAcknowledgementService } = require('./shorts-delivery-acknowledgement.service');
 
-test('opt-in legacy dispatch requires a verified durable acknowledgement and leaves older streaming responses pending', async t => {
-  const env = { ...process.env }, fetch = global.fetch, fixture = require('./testing/hls-v2.json');
-  const directory = await mkdtemp(join(tmpdir(), 'shorts-legacy-outbox-')), key = join(directory,'key');
+test('dispatch requires the current adaptive acknowledgement and leaves incomplete responses pending', async t => {
+  const env = { ...process.env }, fetch = global.fetch, fixture = require('./testing/hls-v3.json');
+  const directory = await mkdtemp(join(tmpdir(), 'shorts-durable-outbox-')), key = join(directory,'key');
   await writeFile(key,'a'.repeat(64));
-  Object.assign(process.env,{SHORTS_STREAM_INTERNAL_URL:'http://127.0.0.1:3337',SHORTS_STREAM_KEY_FILE:key,SHORTS_LEGACY_BACKFILL_ENABLED:'true'});
-  delete process.env.SHORTS_IPFS_EXPIRING_WRITES;
+  Object.assign(process.env,{SHORTS_STREAM_INTERNAL_URL:'http://127.0.0.1:3337',SHORTS_STREAM_KEY_FILE:key,SHORTS_IPFS_EXPIRING_WRITES:'true'});
+
   const db = new DatabaseSync(join(directory,'outbox.sqlite'));
-  const short = {...structuredClone(fixture.descriptor),bytes:100,publication:'published',moderation:'approved',safety:{status:'no_flags'}};
+  const short = {...structuredClone(fixture.descriptor),publication:'published',moderation:'approved',safety:{status:'no_flags'}};
   const records = {chain:{release:{network:short.network,contract:short.contract},state:{contract:short.contract}},find:async()=>short};
   let saved=0, verified=0, corrupt=true, withdraw=false, value={status:'ready'};
-  const packages = {acknowledge:async()=>{saved++;}};
-  const acknowledgement = new ShortsDeliveryAcknowledgementService({verifyDurableDelivery:async()=>{
+  const packages = {get:async()=>fixture.package,acknowledge:async()=>{saved++;}};
+  const acknowledgement = new ShortsDeliveryAcknowledgementService({verifyPreparedDelivery:async()=>{
     verified++;if(corrupt)throw new Error('Corrupt retained media');if(withdraw)short.moderation='rejected';
-  }},packages);
+  }},packages,{});
   const service = new ShortsStreamingService({db},undefined,records,undefined,30000,packages,acknowledgement);
   global.fetch=async()=>Response.json(value);
   t.after(async()=>{await service.onModuleDestroy();db.close();global.fetch=fetch;process.env=env;await rm(directory,{recursive:true,force:true});});
@@ -39,28 +39,31 @@ test('HLS outbox survives failed dispatch and service restart, deduplicates publ
   const file = join(directory, 'key'); await writeFile(file, 'a'.repeat(64));
   Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: file });
   const db = new DatabaseSync(join(directory, 'outbox.sqlite'));
-  const short = { id: 'short-1', publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
+  const fixture = require('./testing/hls-v3.json');
+  const short = { ...structuredClone(fixture.descriptor), publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
   const store = { db, load: () => ({ shorts: [short] }) };
+  const records = { chain: { release: short, state: { contract: short.contract } }, find: async () => short };
+  const start = () => new ShortsStreamingService(store, {}, records, undefined, 30000, { acknowledge: async () => {} });
   const calls = []; let status = 503;
-  global.fetch = async (url, init) => { calls.push({ url, init }); return new Response(null, { status }); };
+  global.fetch = async (url, init) => { calls.push({ url, init }); return status === 200 ? Response.json({ status: 'ready', sourceKey: fixture.sourceKey, prepared: fixture.package }) : new Response(null, { status }); };
   t.after(async () => { global.fetch = fetch; process.env = env; db.close(); await rm(directory, { recursive: true, force: true }); });
-  const first = new ShortsStreamingService(store);
-  first.enqueue('short-1'); first.enqueue('short-1');
+  const first = start();
+  first.enqueue(short.id); first.enqueue(short.id);
   await first.dispatch(); first.onModuleDestroy();
   assert.equal(db.prepare('SELECT count(*) AS n FROM shorts_stream_outbox').get().n, 1);
   assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 0);
-  const next = new ShortsStreamingService(store);
+  const next = start();
   db.exec('UPDATE shorts_stream_outbox SET next_at=0'); status = 202; await next.dispatch();
   assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 0);
   db.exec('UPDATE shorts_stream_outbox SET next_at=0'); status = 200; await next.dispatch();
   assert.equal(db.prepare('SELECT ready FROM shorts_stream_outbox').get().ready, 1);
-  next.enqueue('short-1'); await next.dispatch(); next.onModuleDestroy();
+  next.enqueue(short.id); await next.dispatch(); next.onModuleDestroy();
   assert.equal(calls.length, 3);
-  assert.equal(calls[0].url, 'http://127.0.0.1:3337/internal/videos/short-1/prepare');
+  assert.equal(calls[0].url, 'http://127.0.0.1:3337/internal/videos/protocol-fixture/prepare');
   assert.equal(calls[0].init.body, undefined);
   assert.equal(calls[0].init.redirect, 'error');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${'a'.repeat(64)}`);
-  const denied = new ShortsStreamingService(store);
+  const denied = start();
   db.exec('UPDATE shorts_stream_outbox SET ready=0, next_at=0');
   short.moderation = 'rejected';
   await denied.dispatch(); denied.onModuleDestroy();

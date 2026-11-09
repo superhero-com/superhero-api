@@ -228,22 +228,6 @@ export class ShortsStreamingService
       }
     }
   }
-  /** Explicitly adopt the existing canonical package before a delivery switch. */
-  async acknowledgeCanonical(id: string, parent: AbortSignal) {
-    if (process.env.SHORTS_LEGACY_BACKFILL_ENABLED !== 'true')
-      throw new Error('Legacy delivery acknowledgement is disabled');
-    if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error('Invalid Short ID');
-    const status = await this.prepare(
-      id,
-      undefined,
-      AbortSignal.any([parent, AbortSignal.timeout(300000)]),
-    );
-    return {
-      id,
-      status:
-        status === 200 ? 'ready' : status === 202 ? 'preparing' : 'denied',
-    };
-  }
   private async prepare(id: string, cid?: string, parent?: AbortSignal) {
     const signal = parent
       ? AbortSignal.any([parent, this.shutdown.signal])
@@ -256,6 +240,7 @@ export class ShortsStreamingService
       signal.throwIfAborted();
       return (
         short &&
+        short.original &&
         short.publication === 'published' &&
         (!cid || short.cid === cid) &&
         officialContentPolicy(short, this.safety?.demoAutoApprove).serve &&
@@ -279,11 +264,8 @@ export class ShortsStreamingService
         signal: requestSignal,
       },
     );
-    const durable =
-      !!source.original ||
-      process.env.SHORTS_LEGACY_BACKFILL_ENABLED === 'true';
     let acknowledgement: any;
-    if (response.status === 200 && durable) {
+    if (response.status === 200) {
       acknowledgement = await readShortsJson(response, 147456, requestSignal);
     } else discardShortsResponse(response);
     signal.throwIfAborted();
@@ -292,7 +274,7 @@ export class ShortsStreamingService
     // Policy may change during network IO. Shared completion also requires the same generation/lease.
     const current = await eligible();
     if (!current) return null;
-    if (response.status === 200 && durable) {
+    if (response.status === 200) {
       if (!this.deliveryPackages)
         throw new Error('Durable delivery metadata unavailable');
       const descriptor = shortsPlaybackDescriptor(current, this.scope());
@@ -301,8 +283,6 @@ export class ShortsStreamingService
         acknowledgement.sourceKey !== sourceKey(descriptor)
       )
         throw new Error('Playback acknowledgement source changed');
-      if (!current.original && !this.acknowledgement)
-        throw new Error('Legacy delivery requires physical verification');
       if (this.acknowledgement) {
         await this.acknowledgement.acknowledge(
           current,

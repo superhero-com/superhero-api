@@ -5,7 +5,7 @@ const {
   ShortsPublications,
   ShortsPublisherAuthority,
   ShortsPublicationAdmission,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -24,11 +24,10 @@ const { ShortsUploadRecordsService } = require('./shorts-upload-records.service'
 const { shortsUploadBudgetConfig } = require('./shorts-upload-budget');
 const { ShortsPublicationBoundaryService } = require('./shorts-publication-boundary.service');
 const hash = 'a'.repeat(64);
-const input = (bytes = 10) => ({ bytes, title: 'Owned video', topic: 'Art', rights: true, sha256: hash, details: {} });
+const input = (bytes = 10) => ({ processingProfile: 'original-h264-v1', bytes, title: 'Owned video', topic: 'Art', rights: true, sha256: hash, details: {} });
 const jobInput = (bytes = 10) => ({ ...input(bytes), objectKey: `originals/${hash}` });
-const record = (id, creator = 'ak_creator') => ({ id, creator, bytes: 100, createdAt: 1000,
-  title: 'Owned video', topic: 'Art', cid: `bafy${id}`, moderation: 'pending', reports: 0, views: [], duration: 5,
-  files: [{ name: 'video.mp4', bytes: 100, sha256: hash }] });
+const { originalRecord } = require('./testing/original-record.cjs');
+const record = (id, creator='ak_creator') => originalRecord(id, {creator,bytes:10,createdAt:1000,title:'Owned video',topic:'Art',moderation:'pending',reports:0,views:[],duration:5});
 
 test('retained upload budgets are explicit setup inputs with strict integer bounds', () => {
   assert.equal(shortsUploadBudgetConfig({}), undefined);
@@ -60,28 +59,9 @@ test('shared retained upload budgets survive competing requests, recovery, histo
     for (const role of roles) { await admin.query(`DROP OWNED BY "${role}"`); await admin.query(`DROP ROLE "${role}"`); }
     await admin.destroy();
   });
-  const old = { network: 'ae_uat', contract: 'ct_existing' };
-  await adminMeta.initialize(old, hash);
-  await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input,expires_at)
-    SELECT $1,$2,'old-'||i,'ak_creator',$3::jsonb,now()-interval '1 day' FROM generate_series(1,61) i`,
-    [old.network, old.contract, JSON.stringify(input())]);
-  await adminMeta.enqueue(old, 'old-1', 'ak_creator', jobInput());
-  await adminMeta.insertDraft(old, record('old-1'));
-  await assert.rejects(adminMeta.verifyUploadBudget(old), { status: 503 });
-  // Failed backfill must roll back its DDL and leave historical records intact.
-  await owner.query("UPDATE shorts_content SET creator='ak_inconsistent',body=jsonb_set(body,'{creator}','\"ak_inconsistent\"') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
-  assert.equal((await owner.query("SELECT to_regclass('shorts_upload_budgets') AS relation"))[0].relation, null);
-  await owner.query("UPDATE shorts_content SET creator='ak_creator',body=jsonb_set(body,'{creator}','\"ak_creator\"') WHERE contract=$1", [old.contract]);
-  await owner.query("UPDATE shorts_ingestion SET input=jsonb_set(input,'{bytes}','11') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
-  await owner.query("UPDATE shorts_ingestion SET input=jsonb_set(input,'{bytes}','10') WHERE contract=$1", [old.contract]);
-  await owner.query("UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia}','{\"source\":{\"bytes\":11}}') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
-  await owner.query("UPDATE shorts_content SET body=body-'privateMedia' WHERE contract=$1", [old.contract]);
   await owner.transaction(manager => new ShortsUploadBudget().up(manager));
-  await adminMeta.verifyUploadBudget(old);
-  assert.deepEqual(await adminMeta.uploadBudget(old), { maxUploads: '50', maxSourceBytes: '2097152000', usedUploads: '61', usedSourceBytes: '610', exhausted: true });
+  const old = {network:'ae_uat',contract:'ct_existing'};
+  await adminMeta.initialize(old, hash);
 
   async function guard() {
     const db = new ShortsDatabaseService(owner); await db.onModuleInit(); guards.push(db);
@@ -95,15 +75,6 @@ test('shared retained upload budgets survive competing requests, recovery, histo
     await adminMeta.configureUploadBudget(s, { uploads, sourceBytes });
     await a.metadata.verifyUploadBudget(s); return s;
   }
-
-  await t.test('backfilled identities charge once and do not discard uploads above the new default', async () => {
-    await assert.rejects(a.uploads.create(old, 'extra', 'ak_other', input()), { status: 503 });
-    assert.equal((await owner.query('SELECT count(*)::integer AS n FROM shorts_upload_sessions WHERE contract=$1', [old.contract]))[0].n, 61);
-    await adminMeta.configureUploadBudget(old, { uploads: 100, sourceBytes: 1000 });
-    await a.uploads.create(old, 'extra', 'ak_other', input());
-    await b.metadata.initialize(old, hash);
-    assert.deepEqual(await b.metadata.uploadBudget(old), { maxUploads: '100', maxSourceBytes: '1000', usedUploads: '62', usedSourceBytes: '620', exhausted: false });
-  });
 
   await t.test('two API pools cannot overshoot the last byte reservation or charge duplicate requests', async () => {
     const s = await scope(3, 25);
@@ -154,36 +125,23 @@ test('shared retained upload budgets survive competing requests, recovery, histo
     assert.equal((await a.metadata.uploadBudget(s)).usedUploads, '1');
   });
 
-  await t.test('legacy package estimates bind a later source once, preserving charges and rejecting growth beyond budget', async () => {
-    const s = await scope(3, 200);
-    await a.metadata.insertDraft(s, record('small-source'));
-    await a.uploads.create(s, 'small-source', 'ak_creator', input(10));
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '100', 'smaller source does not refund the legacy estimate');
-    await a.metadata.insertDraft(s, record('large-source'));
-    await assert.rejects(a.uploads.create(s, 'large-source', 'ak_creator', input(150)), { status: 503 });
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '200');
-    await adminMeta.configureUploadBudget(s, { uploads: 3, sourceBytes: 250 });
-    await a.uploads.create(s, 'large-source', 'ak_creator', input(150));
-    await a.metadata.enqueue(s, 'large-source', 'ak_creator', jobInput(150));
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '250');
-    assert.equal((await a.metadata.uploadBudget(s)).usedUploads, '2');
-    await assert.rejects(owner.query('INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,$3,$4,$5::jsonb)',
-      [s.network, s.contract, 'small-source', 'ak_creator', JSON.stringify(jobInput(11))]), { code: 'SH409' });
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '250');
+  await t.test('a later upload cannot change the reserved original size', async () => {
+    const s = await scope();
+    await a.metadata.insertDraft(s, record('bound'));
+    await assert.rejects(a.uploads.create(s, 'bound', 'ak_creator', input(11)), { status: 409 });
+    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '10');
   });
 
   await t.test('an ignored duplicate content insert cannot bind or increase an existing reservation', async () => {
     const s = await scope(1, 200);
     await a.metadata.insertDraft(s, record('duplicate'));
-    const ignored = { ...record('duplicate'), privateMedia: { source: { bytes: 150 } } };
+    const ignored = { ...record('duplicate'), bytes: 150 };
     await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body)
       VALUES($1,$2,$3,$4,$5,$6::jsonb) ON CONFLICT DO NOTHING`,
       [s.network, s.contract, ignored.id, ignored.creator, ignored.createdAt, JSON.stringify(ignored)]);
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '100');
-    const [reservation] = await owner.query('SELECT declared_source_bytes FROM shorts_upload_reservations WHERE contract=$1', [s.contract]);
-    assert.equal(reservation.declared_source_bytes, null);
+    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '10');
     await a.uploads.create(s, 'duplicate', 'ak_creator', input(10));
-    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '100');
+    assert.equal((await a.metadata.uploadBudget(s)).usedSourceBytes, '10');
   });
 
   await t.test('a configured library can exceed 50 while preparation limits remain independent', async () => {

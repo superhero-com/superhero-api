@@ -1,4 +1,4 @@
-const { ShortsMetadata, ShortsStreamingOutbox } = require('./testing/historical-migrations.cjs');
+const { ShortsMetadata, ShortsStreamingOutbox } = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -48,12 +48,15 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
     await meta.initialize(s, 'a'.repeat(64)); return s;
   }
   async function video(s, id = randomUUID(), published = true) {
-    await meta.insertDraft(s, { id, creator: 'ak_creator', cid: 'bafyfixture', bytes: 100,
-      duration: 10, createdAt: Date.now(), title: 'Owned video', topic: 'Art',
-      files: [{ name: 'video.mp4', bytes: 100, sha256: 'a'.repeat(64) }],
-      moderation: 'pending', views: [], reports: 0 });
+    await meta.insertDraft(s, require('./testing/original-record.cjs').originalRecord(id, { creator: 'ak_creator', bytes: 100,
+      duration: 10, createdAt: Date.now(), title: 'Owned video', topic: 'Art', moderation: 'pending', views: [], reports: 0 }));
     if (published) await meta.change(s, id, v => { v.publication = 'published'; v.moderation = 'approved'; v.safety = { status: 'no_flags' }; });
     return id;
+  }
+  async function ready(s, id) {
+    const { shortsPlaybackDescriptor } = require('./shorts-playback-descriptor');
+    const { sourceKey } = require('./hls-protocol/hls-package');
+    return { status:'ready', sourceKey:sourceKey(shortsPlaybackDescriptor((await meta.get(s,id)).record,s)), prepared:require('./testing/hls-v3.json').package };
   }
   async function job(s, id) {
     return (await one.query('SELECT * FROM shorts_stream_jobs WHERE network=$1 AND contract=$2 AND id=$3', [s.network, s.contract, id]))[0];
@@ -66,7 +69,7 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
     const records = new ShortsRecordsService({ release: { network: 'ae_uat', contract: s.contract }, state: { contract: s.contract, sourceHash: 'a'.repeat(64) } }, metadata);
     // Hosted dispatch must never consult a process-local SQLite outbox or snapshot.
     const store = new Proxy({}, { get() { throw new Error('Unexpected local state access'); } });
-    return new ShortsStreamingService(store, { demoAutoApprove: false }, records, db === one ? a : b);
+    return new ShortsStreamingService(store, { demoAutoApprove: false }, records, db === one ? a : b, 30000, {acknowledge: async () => {}});
   }
   Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: key });
 
@@ -107,11 +110,11 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
     const rejected = await b.claim(s); assert.equal(await b.settle(s, rejected, 'denied'), true);
     await meta.change(s, id, v => { v.moderation = 'approved'; });
     const reapproved = await a.claim(s); assert.ok(reapproved);
-    await assert.rejects(meta.change(s, id, v => { v.cid = 'bafynewfixture'; }), { status: 409 });
+    await assert.rejects(meta.change(s, id, v => { v.cid = 'bafy'+'x'.repeat(50); }), { status: 409 });
     // A privileged repair still invalidates delivery even though ordinary API changes forbid CID mutation.
-    await one.query(`UPDATE shorts_content SET body=jsonb_set(body,'{cid}','"bafynewfixture"') WHERE contract=$1 AND id=$2`, [s.contract, id]);
+    await one.query(`UPDATE shorts_content SET body=jsonb_set(body,'{cid}','"bafyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"') WHERE contract=$1 AND id=$2`, [s.contract, id]);
     assert.equal(await a.settle(s, reapproved, 'denied'), false);
-    const changed = await b.claim(s); assert.equal(changed.cid, 'bafynewfixture');
+    const changed = await b.claim(s); assert.equal(changed.cid, 'bafy'+'x'.repeat(50));
     await meta.change(s, id, v => { v.publication = 'withdrawn'; });
     await a.enqueue(s, id); assert.equal(await job(s, id), undefined);
     assert.equal(await b.settle(s, changed, 'ready'), false);
@@ -132,7 +135,7 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
   await t.test('HTTP dispatch retries unavailable/preparing responses and rechecks policy after IO', async () => {
     const s = await scope(), id = await video(s), calls = [];
     let status = 503, after;
-    global.fetch = async (url, init) => { calls.push({ url, init }); if (after) await after(); return new Response(null, { status }); };
+    global.fetch = async (url, init) => { calls.push({ url, init }); if (after) await after(); return status === 200 ? Response.json(await ready(s,id)) : new Response(null, { status }); };
     const first = runtime(s); await first.dispatch(); await first.onModuleDestroy();
     assert.equal((await job(s, id)).attempts, 1); assert.equal((await job(s, id)).ready, false);
     const next = runtime(s, two); status = 202; await due(s, id); await next.dispatch();
@@ -151,7 +154,8 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
     const s = await scope(), id = await video(s);
     let firstRequest; const accepted = new Promise(resolve => { firstRequest = resolve; });
     let requests = 0;
-    server = createServer((req, res) => { requests++; if (requests === 1) firstRequest(); else { res.writeHead(200); res.end(); } });
+    const reply = JSON.stringify(await ready(s,id));
+    server = createServer((req, res) => { requests++; if (requests === 1) firstRequest(); else { res.writeHead(200); res.end(reply); } });
     server.listen(0, '127.0.0.1'); await once(server, 'listening');
     const endpoint = `http://127.0.0.1:${server.address().port}`;
     const script = `require('reflect-metadata');
@@ -195,14 +199,8 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
     await unavailable.dispatch(); await unavailable.onModuleDestroy();
     assert.equal((await job(s, id)).ready, false); global.fetch = originalFetch;
   });
-  await t.test('migration backfills published records and bootstrap verifies the deployment without a local scan', async () => {
-    const s = await scope(), id = await video(s), pending = await video(s, undefined, false);
-    const before = (await meta.get(s, id)).record;
-    await one.undoLastMigration({ transaction: 'all' });
-    const without = runtime(s); await assert.rejects(without.initialize());
-    await one.runMigrations({ transaction: 'all' });
-    assert.equal((await job(s, id)).ready, false); assert.equal(await job(s, pending), undefined);
-    assert.deepEqual((await meta.get(s, id)).record, before);
+  await t.test('bootstrap verifies the deployment and retains pending publications without scanning local storage', async () => {
+    const s = await scope(), id = await video(s);
     await assert.rejects(a.verify(s, 'b'.repeat(64)), { status: 503 });
     delete process.env.SHORTS_STREAM_INTERNAL_URL;
     const boot = runtime(s); await boot.initialize(); boot.start(); await boot.onModuleDestroy();
@@ -217,14 +215,14 @@ test('dispatch deadline covers both metadata reads and HTTP; no late ready ackno
   await writeFile(key, 'a'.repeat(64), { mode: 0o600 });
   let requests = 0;
   const server = createServer((_req, res) => {
-    requests++; res.writeHead(200); res.end();
+    requests++; res.writeHead(200); res.end('{}');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { process.env = env; server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true, force: true }); });
   Object.assign(process.env, { SHORTS_STREAM_INTERNAL_URL: `http://127.0.0.1:${server.address().port}`, SHORTS_STREAM_KEY_FILE: key });
   for (const mode of ['before-request', 'after-response']) {
     let claimed = false, settled = 0, reads = 0;
-    const record = { id: 'fixture', cid: 'bafyfixture', publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
+    const record = { ...require('./testing/original-record.cjs').originalRecord('fixture'), publication: 'published', moderation: 'approved', safety: { status: 'no_flags' } };
     const jobs = {
       async claim() { if (claimed) return; claimed = true; return { id: record.id, cid: record.cid }; },
       async settle() { settled++; },

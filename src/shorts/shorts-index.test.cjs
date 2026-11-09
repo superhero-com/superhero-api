@@ -1,4 +1,4 @@
-const { ShortsCoverage, ShortsChainIndex } = require('./testing/historical-migrations.cjs');
+const { ShortsCoverage, ShortsChainIndex } = require('./testing/schema-migrations.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -36,14 +36,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     $decodeEvents: logs => { if (badDecode) throw new Error('bad event'); return logs.flatMap(log => log.decoded || []); },
     $call: async () => ({ decodedResult: { creator: 'ak_creator' } }),
   };
-  const previous = { ...contract, $options: { address: 'ct_previous' } };
-  const previousArtifact = { aci: [{ contract: {
-    kind: 'contract_main',
-    functions: [{ name: 'get_short', arguments: [{ type: 'string' }], payable: false, stateful: false }],
-    event: { variant: [{ PaidLike: ['address', 'int', 'string'] }, { Published: ['address', 'string'] }] },
-  } }] };
-  const chain = { contract, previous, state: { contract: 'ct_current' }, release: { schemaVersion: 1, network: 'ae_uat', contract: 'ct_current' },
-    rewardContracts: () => [{ contract: previous, artifact: previousArtifact }] };
+  const chain = { contract, state: { contract: 'ct_current' }, release: { schemaVersion: 1, network: 'ae_uat', contract: 'ct_current' } };
   const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain));
   // Ledger/projection fixtures isolate external identity checks, covered by the
   // real HTTP/SDK tests in shorts-plugin-network.test.cjs.
@@ -64,7 +57,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
   const first = tx('th_first', [like]);
   first.data = { another_plugin: { keep: true } };
   await repo.save(first);
-  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',$1,true,11),('ct_previous',$1,true,11)", [SHORTS_INDEX_VERSION]);
+  await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES('ct_current',$1,true,11)", [SHORTS_INDEX_VERSION]);
 
   await t.test('V2 shifted publication/like event indices retain exact rewards and use native video reads', async () => {
     chain.release.schemaVersion = 2; const original = contract.$call, calls = [];
@@ -80,10 +73,10 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
   });
   await t.test('duplicate delivery, previous deployment, and failed calls', async () => {
     await processor.processTransaction(first, 'live'); await processor.processTransaction(first, 'backward');
-    const old = tx('th_previous', [like], 5, 'ct_previous'); await repo.save(old); await processor.processTransaction(old, 'live');
+    const old = tx('th_previous', [like], 5, 'ct_previous'); await repo.save(old); await assert.rejects(processor.processTransaction(old, 'live'), /Unrecognized Shorts contract/);
     const failed = tx('th_failed', [like]); failed.raw.returnType = 'revert'; await repo.save(failed); await processor.processTransaction(failed, 'live');
     const report = await index.report('ak_creator', 86400000, 172800000);
-    assert.equal(report.earned, '0.16'); assert.equal(report.paidLikes, 2); assert.equal(report.stale, false);
+    assert.equal(report.earned, '0.08'); assert.equal(report.paidLikes, 1); assert.equal(report.stale, false);
     assert.equal((await repo.findOneBy({ hash: first.hash })).data.another_plugin.keep, true);
     assert.equal((await index.report('ak_someone_else', 0, 172800000)).earned, '0');
     assert.equal((await index.report('ak_creator', 0, 172800000, 'other-video')).earned, '0');
@@ -128,9 +121,9 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
     // One transaction can emit multiple events; populate a large valid projection.
     await db.query(`INSERT INTO shorts_chain_events SELECT 'ct_current','th_first',i,5,86400100,'PaidLike','ak_viewer','ak_creator',80000000000000000,'video' FROM generate_series(1,2200) AS i`);
     const report = await index.report('ak_creator', 86400000, 172800000);
-    assert.equal(report.paidLikes, 2204); assert.equal(report.earned, '176.32');
+    assert.equal(report.paidLikes, 2203); assert.equal(report.earned, '176.24');
     assert.equal(report.entries.length, 200); assert.equal(report.truncated, true);
-    assert.equal(report.series[0].earnedAe, '176.32');
+    assert.equal(report.series[0].earnedAe, '176.24');
   });
   await t.test('plugin predicates and version sweep are contract-scoped', async () => {
     const plugin = new ShortsPlugin(repo, {}, processor, index, { changed: async () => {} }, { run: async () => {} });
@@ -270,7 +263,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
         .overrideModule(AeModule).useModule(TestAeModule)
         .overrideProvider(require('./shorts-private-objects.service').SHORTS_PRIVATE_OBJECT_CONFIG).useValue({ endpoint: 'http://127.0.0.1:1', region: 'us-east-1', bucket: 'test-only', prefix: 'test', forcePathStyle: true, credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, activeKeyId: 'test', keys: { test: Buffer.alloc(32) } })
         .overrideProvider(require('./shorts-rate.config').SHORTS_RATE_CONFIG).useValue({ key: Buffer.alloc(32), client: () => 'test', redis: {host:'127.0.0.1',port:1} })
-        .overrideProvider(ShortsChainService).useValue({ contract, previous, release: { network: 'ae_uat' } })
+        .overrideProvider(ShortsChainService).useValue(chain)
         .overrideProvider(ShortsStoreService).useValue({ db: sqlite }).compile();
       assert.equal(module.get(ShortsService).ledger, module.get(ShortsIndexService));
       assert.equal(module.get(ShortsLedgerService), module.get(ShortsIndexService));
@@ -281,7 +274,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
       assert.equal(module.get(require('./shorts-upload.interceptor').ShortsUploadInterceptor).admission,
         module.get(require('./shorts-upload-admission.service').ShortsUploadAdmissionService),
         'hosted upload interception resolves the shared admission provider');
-      assert.equal(module.get(require('./shorts-uploads.service').ShortsUploadsService).constructor.name, 'ShortsHostedUploadsService', 'hosted HTTP never starts the local decoder queue');
+      assert.equal(module.get(require('./shorts-hosted-uploads.service').ShortsHostedUploadsService).constructor.name, 'ShortsHostedUploadsService', 'hosted HTTP never starts the local decoder queue');
       assert.equal(module.get(require('./shorts-streaming.service').ShortsStreamingService).jobs, module.get(require('./shorts-stream-jobs.service').ShortsStreamJobsService), 'hosted playback dispatch uses shared PostgreSQL jobs');
       assert.equal(module.get(require('./shorts-analytics.service').ShortsAnalyticsService).constructor.name, 'ShortsHostedAnalyticsService', 'hosted measurement uses shared storage');
       assert.equal(module.get(require('./shorts-receipts.service').ShortsReceiptsService).shared, true, 'hosted transaction references use shared storage');

@@ -34,9 +34,9 @@ export async function retentionConfig(
   return {
     scope: {
       network: manifest.network,
-      contract: manifest.storage?.contract ?? manifest.contract,
+      contract: manifest.contract,
     },
-    sourceHash: manifest.storage?.sourceHash ?? manifest.sourceHash,
+    sourceHash: manifest.sourceHash,
     prefix,
   };
 }

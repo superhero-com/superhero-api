@@ -1,5 +1,6 @@
 import { shortsStorageScope } from './shorts-runtime-scope';
-import { ShortsUploadsService, UploadInput } from './shorts-uploads.service';
+import type { UploadInput } from './shorts-upload-input';
+import { ShortsHostedUploadsService } from './shorts-hosted-uploads.service';
 import {
   Body,
   Controller,
@@ -39,7 +40,6 @@ import { ShortsRateGuard } from './shorts-rate.guard';
 import { ShortsWalletTransactionsService } from './shorts-wallet-transactions.service';
 import { ShortsPlaybackEvidenceService } from './shorts-playback-evidence.service';
 import { ShortsMeasurementMonitorService } from './shorts-measurement-monitor.service';
-import { ShortsReconciliationService } from './shorts-reconciliation.service';
 import { ShortsCommentsService } from './shorts-comments.service';
 import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
 
@@ -50,7 +50,7 @@ export class ShortsController {
   constructor(
     private readonly shorts: ShortsService,
     private readonly auth: ShortsAuthService,
-    private readonly uploads: ShortsUploadsService,
+    @Optional() private readonly hostedUploads?: ShortsHostedUploadsService,
     @Optional() private readonly lifecycle?: ShortsLifecycleJobsService,
     @Optional()
     private readonly walletTransactions?: ShortsWalletTransactionsService,
@@ -58,12 +58,17 @@ export class ShortsController {
     private readonly playbackEvidence?: ShortsPlaybackEvidenceService,
     @Optional()
     private readonly measurements?: ShortsMeasurementMonitorService,
-    @Optional()
-    private readonly reconciliation?: ShortsReconciliationService,
     @Optional() private readonly comments?: ShortsCommentsService,
     @Optional()
     private readonly likeSponsorships?: ShortsLikeSponsorshipService,
   ) {}
+  private get uploads() {
+    if (!this.hostedUploads)
+      throw new ServiceUnavailableException(
+        'Adaptive uploads require the hosted media worker',
+      );
+    return this.hostedUploads;
+  }
   @Post('like-sponsorships')
   @Header('Cache-Control', 'no-store')
   @HttpCode(202)
@@ -280,9 +285,7 @@ export class ShortsController {
     @Body() body: UploadInput,
   ) {
     const actor = await this.auth.authenticate(authorization);
-    return this.uploads.shared
-      ? this.uploads.create(actor, body)
-      : this.shorts.chain.serial(() => this.uploads.create(actor, body));
+    return this.uploads.create(actor, body);
   }
   @Get('uploads/:id') async uploadStatus(
     @Headers('authorization') authorization: string,
@@ -316,22 +319,6 @@ export class ShortsController {
       );
     return this.measurements.snapshot();
   }
-  @Get('operator/reconciliation')
-  @Header('Cache-Control', 'no-store')
-  async reconcileAccounting(
-    @Headers('authorization') authorization: string,
-    @Query('contract') contract?: string,
-    @Query('height') height?: string,
-    @Query('blockHash') blockHash?: string,
-    @Query('after') after?: string,
-  ) {
-    await this.auth.operator(authorization);
-    if (!this.reconciliation)
-      throw new ServiceUnavailableException(
-        'Accounting reconciliation requires the hosted API',
-      );
-    return this.reconciliation.compare({ contract, height, blockHash, after });
-  }
   @Post('uploads/:id/parts/:index')
   @UseGuards(ShortsAuthGuard)
   @UseInterceptors(
@@ -348,23 +335,13 @@ export class ShortsController {
     @Req() request: ShortsUploadRequest,
   ) {
     const actor = await this.auth.authenticate(authorization);
-    return this.uploads.shared
-      ? this.uploads.part(
-          actor,
-          id,
-          Number(index),
-          file?.buffer,
-          request?.[SHORTS_UPLOAD_SIGNAL],
-        )
-      : this.shorts.chain.serial(() =>
-          this.uploads.part(
-            actor,
-            id,
-            Number(index),
-            file?.buffer,
-            request?.[SHORTS_UPLOAD_SIGNAL],
-          ),
-        );
+    return this.uploads.part(
+      actor,
+      id,
+      Number(index),
+      file?.buffer,
+      request?.[SHORTS_UPLOAD_SIGNAL],
+    );
   }
   @Post('uploads/:id/parts/:index/prepare')
   @Header('Cache-Control', 'no-store')

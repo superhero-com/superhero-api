@@ -26,7 +26,6 @@ export interface PublishingDeployment {
   sourceHash: string;
   operator: string;
   policy: PublishingPolicy;
-  content?: { contract: string; sourceHash: string };
 }
 export interface SignedPublicationClaim extends PublicationClaim {
   nonce?: number;
@@ -65,9 +64,6 @@ export class ShortsPublicationBoundaryService {
               ...deployment.scope,
               sourceHash: deployment.sourceHash,
               operator: deployment.operator,
-              ...(deployment.content
-                ? { contentContract: deployment.content.contract }
-                : {}),
               policy: publishingPolicy(deployment.policy),
             }),
           ],

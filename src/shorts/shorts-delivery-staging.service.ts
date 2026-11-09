@@ -7,10 +7,7 @@ import {
   ShortsMetadataService,
   ShortsScope,
 } from './shorts-metadata.service';
-import {
-  shortsDeliverySource,
-  assertDeliverySourcePreparation,
-} from './shorts-delivery-source';
+import { shortsDeliverySource } from './shorts-delivery-source';
 import { officialContentPolicy } from './shorts-eligibility';
 import type { ShortRecord } from './shorts.types';
 
@@ -102,7 +99,6 @@ export class ShortsDeliveryStagingService {
       );
       const short = await this.eligible(db, scope, shortId);
       const source = shortsDeliverySource(short);
-      assertDeliverySourcePreparation(source);
       if (
         input.processingProfile !== 'original-h264-v1' ||
         input.bytes !== source.bytes ||

@@ -31,7 +31,7 @@ for (const network of ['ae_uat', 'ae_mainnet']) {
 }
 
 test('uninitialized or malformed configuration never advertises a default price', async () => {
-  for (const patch of [{ likeFeeAetto: undefined }, { likeFeeAetto: '0' }, { likeFeeAetto: '-1' }, { treasuryBps: 10001 }, { network: 'other' }]) {
+  for (const patch of [{ likeFeeAetto: undefined }, { likeFeeAetto: '-1' }, { treasuryBps: 10001 }, { network: 'other' }]) {
     const f = fixture(patch); let called = false;
     f.media.health = async () => { called = true; return true; };
     await assert.rejects(f.service.config()); assert.equal(called, false);

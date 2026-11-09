@@ -4,8 +4,7 @@ The server-assigned `original-h264-v1` processing profile preserves the uploaded
 file byte-for-byte. `ShortRecord.cid` identifies that single UnixFS file and
 `ShortRecord.bytes` is its length. The on-chain publication uses those values.
 MP4 and MOV metadata, rotation and container layout remain unchanged in the
-original. Legacy jobs and records retain their existing directory-CID and
-summed-package byte semantics; no historical CID is rewritten.
+original.
 
 The original identity records its SHA-256, media type and import profile
 `unixfs-file-v1-262144`: CIDv1, raw leaves, 262144-byte chunks, balanced UnixFS
@@ -63,7 +62,7 @@ The media test tools must include `libzimg` and `libx265`; the PQ/HLG tests gene
 their own tagged HEVC fixtures and check neutral ordered tones in video/posters,
 SDR output tags and decoded frame counts.
 
-Both legacy and original-derived encoders terminate their direct FFmpeg/ffprobe
+The rendition encoder terminates its direct FFmpeg/ffprobe
 child with `SIGKILL` when work is cancelled, and wait for the child to close
 before releasing scratch reservations or deleting partial output. Deadlines and
 output-buffer limits use the same termination signal. Parallel version probes
@@ -130,7 +129,7 @@ Playback measurement accepts both `m1` receipts and domain-separated `m2`
 receipts. The latter bind the delivery CID and source key; after signature,
 browser and timing checks, the API reauthorizes that exact active or retained
 source against current publication policy. Analytics remain attached to the
-canonical post and keep their existing deduplication/privacy rules. Legacy
+canonical post and keep their existing deduplication/privacy rules. Version 1
 receipts continue to require the published CID. Deploy these readers and clients
 that accept `m2` before enabling `STREAM_VERSIONED_MEASUREMENTS` on streaming.
 
@@ -158,12 +157,12 @@ directory and verify the recorded file hash. These paths also apply after a
 published post is withdrawn; inspection does not grant playback permission.
 They do not fall back to encrypted processing storage when a durable source is
 missing or corrupt. Pending uploads continue to use their private source and
-preview, and legacy directory-CID posts keep their retained-source path.
+preview..
 Each operation owns one admission reservation; cancelled inspection drains before
 releasing its scratch file. Storage retirement still requires the separate
 retention, durable-delivery and reference checks.
 
-`npm run test:shorts:worker` covers legacy and original-file HTTP uploads through
+`npm run test:shorts:worker` covers original-file HTTP uploads through
 real PostgreSQL and S3-compatible storage when `SHORTS_TEST_PG_URL` and the
 `SHORTS_TEST_S3_*` fixture settings are provided. It kills a worker holding a
 claim, resumes on a new worker, and checks stale-claim rejection and the persisted
@@ -233,38 +232,6 @@ its complete part manifest before writing encrypted 1 MiB parts. Restaging accep
 using the enlarged bounded source manifest. Captions and creator metadata are preserved; restaging
 does not imply a new moderation approval.
 
-With `SHORTS_LEGACY_BACKFILL_ENABLED=true` (default off), internal restaging can
-also prepare legacy directory-CID posts from their retained encrypted upload.
-The retained source must match the recorded safety hash and its frozen admission
-limit, at most 40 MiB for legacy uploads. Its manifest, every encrypted part and
-the full file are authenticated before a replacement job is reserved. The legacy
-package's byte count and compressed video are never used as the original source.
-The candidate records the computed original-file CID and new derivative identities;
-the published directory CID, byte count, post ID and engagement remain unchanged.
-SQL independently binds candidate bytes and SHA-256 to the retained upload.
-This flag admits source preparation; activation requires the separate selection
-controls below. A legacy candidate remains a delivery generation, never a new post
-or a rewrite of the published CID. Used legacy preparation history prevents rolling
-back its source-binding migration.
-
-The same opt-in flag requires a durable acknowledgement for the legacy post's
-existing HLS when its publication outbox dispatches. The streaming internal prepare
-response supplies the existing `hls-v2` source key and bounded index. The API verifies
-the canonical directory's video, poster and captions and every HLS file against
-their hashes and recursive pins before storing the acknowledgement. Its scoped
-identity includes all public source files; it never substitutes the compressed
-video hash for the retained original hash. With expiring writes enabled, adoption
-also requires fresh HLS pin authority and an atomic ledger settlement.
-
-Migration `1793232003001` admits this legacy format separately from adaptive
-packages. Acknowledgements are immutable, retries converge, and rollback of the
-migration refuses to discard a used legacy acknowledgement. The canonical content
-row, old source key and engagement remain unchanged. Deploy the migration and
-streaming response support before enabling the flag; an older ready response
-without its source-bound index stays pending. Scoped legacy indices can then be
-restored from PostgreSQL after Redis index loss, with current playback authorization.
-This acknowledgement alone does not select a replacement or reclaim the canonical directory or HLS.
-
 `shorts_delivery_staging` keeps the source plan and an expiring, fenced lease.
 Workers skip incomplete staging. Every stored part and manifest is authenticated
 before readiness; retries reuse their reserved keys even after active-key rotation.
@@ -302,32 +269,6 @@ plus a UUID operation identity. The coordinator verifies the target's exact orig
 retained assets and every HLS file, then verifies the previous delivery. It never
 restores temporary encoded inputs merely to perform a switch. Current canonical
 publication is rechecked around asynchronous work.
-
-Legacy upgrades additionally require `SHORTS_LEGACY_PLAYBACK_ENABLED=true` (default
-off). Migration `1793232003001` binds accepted candidate originals to the retained
-upload's verified bytes and SHA-256, while preserving original-format CID equality.
-Candidate safety, creator metadata, duration and captions must still match the
-published post. The initial legacy package must be acknowledged before activation
-so it is available for rollback. The new flag controls new activations; it does not
-revoke already selected playback or disable rollback. Original-only input retirement
-and reclamation retain their stricter eligibility boundary.
-
-Legacy descriptors include `canonical: { version: 1, cid, bytes }`, identifying the
-immutable published directory. An upgraded descriptor's top-level `cid` identifies
-its source file for delivery; it never replaces the on-chain directory CID. These
-fields come from current canonical storage and chain authorization, not a creator
-request. Existing v2/v3 generation keys are unchanged. Historical lookup binds the
-post, scope, exact version and this canonical identity before allowing a legacy
-session to cross delivery formats.
-
-Roll out API readers/migrations and streaming readers first. Enable
-`STREAM_VERSIONED_MEASUREMENTS=true` on every serving origin, which also makes
-scoped legacy playback issue v3 tokens carrying the authorized source key. After
-the last old writer is removed, allow at least 3720 seconds for preexisting tokens
-and policy caches to drain before enabling legacy activation. Old v1/v2 playback
-tokens remain readable but cannot name their earlier source after a cross-CID
-switch. The API activation flag is an operator assertion that this fleet-wide
-rollout gate and client receipt compatibility have been completed.
 
 `shorts_delivery_selections` records each successful switch as an immutable event.
 A transaction locks the canonical post and compares the expected source/revision
@@ -463,8 +404,7 @@ object is not itself a cleanup success or a reason to skip reference validation.
 Migration `1793232008001-ShortsPrivateMediaCleanup` provides an internal,
 explicit per-scope enrollment for retiring temporary encrypted objects. Enrollment
 is permanent and initially empty. It requires new or changed opaque source claims
-to have an authenticated document bound to the ingestion job. Existing legacy
-claims remain protected by normal reference scans. Deferred constraints inspect
+to have an authenticated document bound to the ingestion job. Claims recorded before enrollment remain protected by normal reference scans. Deferred constraints inspect
 the final admission transaction, so inserting a job and binding its manifest in
 that transaction is supported. Upload parts, direct-upload intents, private output
 files, staging documents and hidden source-manifest children all participate.
@@ -517,10 +457,10 @@ A caller-supplied callback or a saved barrier is not production proof.
 ### Explicit retirement and barrier commands
 
 The existing `shorts:delivery-operations` Nest entrypoint exposes these operations
-without a listener, automatic backfill or hosted background jobs. Pass one action
+without a listener, hosted background jobs. Pass one action
 and an absolute request JSON path. Every request below includes `scope` with exactly
 `network` and `contract`, which must match the loaded storage deployment. Existing
-delivery/backfill request formats are unchanged.
+delivery request formats are unchanged.
 
 | Action | Additional request fields |
 | --- | --- |
@@ -705,7 +645,7 @@ participate in one reservation; exceeding that limit refuses the operation.
 Admission checks every initial/generation input reference for durable HLS
 acknowledgement and its own retirement receipt, current publication/moderation,
 metadata consistency, holds/reports/appeals, active preparation and the current
-3720-second retry/rollback window. Any original, legacy, asset or acknowledged HLS
+3720-second retry/rollback window. Any original, asset or acknowledged HLS
 use of the CID prevents reservation. CIDv0 legacy references are normalized to the
 equivalent dag-pb CIDv1 pin identity, including when new references are created.
 
@@ -827,7 +767,7 @@ not permission to overwrite an uncertain outcome or publish an old prepared pack
 
 `SHORTS_IPFS_EXPIRING_WRITES=false` preserves the existing API transport during
 rollout. With `true`, hosted API uploads for originals, assets, processing inputs
-and legacy packages register an intent before using the guard's `shorts/add`
+register an intent before using the guard's `shorts/add`
 route. The request binds its expected CID, operation, expiry and recorded storage epoch. The API requires
 an exact matching pin receipt before recording success and never retries through
 legacy `add` after an ambiguous response. Hash-only CID calculation is unchanged.
@@ -919,82 +859,13 @@ Apply migrations through `1793145609001-ShortsStorageReclamation`, including
 the file-reference size migration, before admitting this profile. API, streaming origin/worker and inventory readers must support the
 same descriptor. Shared `hls-v3` compatibility vectors bind required network and
 contract, original identity, both directory CIDs, recipe fingerprint, generation
-job/fence and file/rendition metadata. Legacy `hls-v2` keys remain unchanged.
+job/fence and file/rendition metadata.
 Client-supplied processing profiles are discarded; the profile must be chosen
 by server policy when the upload is accepted and persist through retries.
 
 
-## Bounded legacy backfill operations
-
-`ShortsBackfillService` is an internal provider in the hosted Shorts module. It has
-no creator-facing HTTP route and gives the media worker no additional database or
-publishing grants. Apply the backfill-batches migration after the legacy selection
-migration. Keep `SHORTS_BACKFILL_ENABLED=false` until the reader-first rollout and
-3720-second old-token drain described above are complete. Starting or advancing a
-batch also requires `SHORTS_LEGACY_BACKFILL_ENABLED`,
-`SHORTS_LEGACY_PLAYBACK_ENABLED` and `SHORTS_DELIVERY_SELECTION_ENABLED` to be true.
-
-Use `node dist/shorts/delivery-operations-main.js <action> /absolute/request.json`
-inside the API's existing runtime with its API credentials and read-only configuration
-mounts. It creates a bounded Nest application context without the full API indexer,
-HTTP listeners or hosted polling. It does not require publisher credentials.
-Actions are `dry-run`, `start`, `status`, `advance`, `cancel`, `acknowledge`, and `rollback`.
-The JSON request names the corresponding method parameters below; `start` uses
-`id` for the operation UUID and `planHash` for the reviewed hash. Status, advance
-and cancel take only `id`. Rollback takes the post `id`, acknowledged `nextKey`,
-current `{ revision, sourceKey }` in `expected`, and a new operation UUID in
-`operation`. Before starting a batch, run `acknowledge` with each post's `id` and
-require `status: ready`; this physically verifies and saves its current package
-as a rollback target without changing selection. Keep request files and operation
-output private. Rollback retains
-both versions and can run while new selection is disabled.
-
-The command delegates to the existing providers:
-
-- `dryRun(ids, budget)` checks one to ten unique post IDs against current chain
-  permission, retained-source metadata, retention holds and the selected delivery.
-  It returns eligible items, explicit skip reasons, a plan hash and conservative
-  logical-byte/encoding-time allocations. It does not read source bytes, encode,
-  pin or select media. Complete source authentication happens during restaging.
-- `start(operationUuid, ids, budget, planHash)` rechecks the plan and requires its
-  exact hash. The budget contains `replicas` (1–8),
-  `maxAdditionalLogicalBytes` and `maxEncodingSeconds`. An identical operation is
-  idempotent, including after completion; conflicting reuse fails. There is at
-  most one running batch per network/contract.
-- `status(operationUuid)` returns durable per-post progress. With the flag enabled,
-  the service polls every ten seconds and advances one stage of one post at a
-  time; `advance` also supports controlled operations/tests. Six-minute database
-  leases exclude simultaneous coordinators. Each stage has a five-minute abort
-  deadline; crashes resume from persisted state after lease expiry. Three stage
-  failures terminate that item, and a batch expires after 24 hours of database
-  time. Completed batches can contain failed items: inspect each item phase.
-- `cancel(operationUuid)` stops future batch work and fences queued/processing
-  media jobs. The final selection INSERT checks the batch under a database lock,
-  preventing a switch after cancellation has committed. Already committed
-  activations remain recorded, including when their acknowledgement was lost.
-  Cancellation retains prepared assets/history; it is not a rollback or deletion.
-
-The coordinator yields before a new stage when ordinary uploads are queued or
-processing. The existing media queue also prioritizes ordinary uploads over
-replacement jobs; it does not preempt an encoding already in progress. Current
-permission, source identity, content metadata and selected revision are rechecked
-before work and before pinning; the existing verified activation protocol and SQL
-checks protect the final switch. The initial durable legacy delivery must already
-be acknowledged for rollback. Missing originals remain at legacy quality.
-
-Cost output separates retained source bytes, new private payloads and new public
-payloads. It allocates one restaged source, up to three fenced encoding attempts,
-original/rendition/HLS payload ceilings and bounded metadata overhead, then applies
-the explicitly supplied replica count. The encoding allocation is three existing
-600-second attempt limits per eligible post. These are conservative planning
-allocations, not measured output sizes, CPU billing predictions or a provider
-quota. Existing legacy media, object-version history, filesystem/IPFS DAG overhead,
-request charges and egress are outside that incremental logical-payload estimate;
-measure and price them separately before increasing the cohort.
-
-
 The UnixFS request profile is centralized in `shorts-ipfs-import-profile.ts`.
-Original, derivative and legacy imports explicitly select CIDv1/raw leaves,
+Original and derivative imports explicitly select CIDv1/raw leaves,
 SHA-256, 256 KiB chunks, balanced layout, 174 file links and canonical directory
 parameters; filesystem metadata and inline CIDs remain disabled. Deploy the
 matching storage gateway before the API. Kubo startup also fixes DAG-PB field

@@ -34,7 +34,6 @@ async function deploymentForRelease(
   return {
     scope: { network: release.network, contract: release.contract },
     sourceHash: release.sourceHash,
-    ...(release.storage ? { content: release.storage } : {}),
     operator: release.operator,
     policy: publishingPolicy(
       await publisherJson(env.SHORTS_PUBLISHING_POLICY_FILE),

@@ -2,7 +2,6 @@ import { ShortsDatabaseService } from './shorts-database.service';
 import {
   Inject,
   BadRequestException,
-  ConflictException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -17,11 +16,9 @@ import {
   PlaybackSummary,
   playbackStart,
 } from './shorts-analytics.service';
-import { LegacyAnalytics } from './shorts-analytics-legacy';
 
 const SOURCES = ['for-you', 'following', 'recent', 'saved', 'shared'];
 const clock = 'floor(extract(epoch FROM clock_timestamp())*1000)::bigint';
-const digest = /^[a-f0-9]{64}$/;
 const sessionId = /^[a-zA-Z0-9-]{20,80}$/;
 
 @Injectable()
@@ -68,12 +65,7 @@ export class ShortsMeasurementsService {
       throw new BadRequestException('Invalid viewer session');
     return createHash('sha256').update(`${salt}:${session}`).digest('hex');
   }
-  async initialize(
-    scope: ShortsScope,
-    sourceHash: string,
-    legacy?: LegacyAnalytics,
-    allowImport = false,
-  ) {
+  async initialize(scope: ShortsScope, sourceHash: string) {
     const params = this.scope(scope);
     return this.transaction(async (db) => {
       const [runtime] = await db.query(
@@ -85,122 +77,17 @@ export class ShortsMeasurementsService {
           'Analytics deployment does not match',
         );
       const [existing] = await db.query(
-        'SELECT since,legacy_hash FROM shorts_measurement_settings WHERE network=$1 AND contract=$2 FOR UPDATE',
+        'SELECT since FROM shorts_measurement_settings WHERE network=$1 AND contract=$2 FOR UPDATE',
         params,
       );
-      if (existing) {
-        if (legacy && existing.legacy_hash !== legacy.fingerprint)
-          throw new ConflictException(
-            'Legacy analytics need an empty destination and matching migration',
-          );
-        return Number(existing.since);
-      }
-      if (legacy && !allowImport)
-        throw new ConflictException(
-          'Legacy analytics require explicit migration',
-        );
-      const now = await this.now(db),
-        since = legacy?.since ?? now;
+      if (existing) return Number(existing.since);
+      const since = await this.now(db);
       await db.query(
         'INSERT INTO shorts_measurement_settings(network,contract,salt,since) VALUES($1,$2,$3,$4)',
-        [...params, legacy?.salt ?? randomBytes(32).toString('hex'), since],
+        [...params, randomBytes(32).toString('hex'), since],
       );
-      if (legacy) {
-        await this.importLegacy(db, params, legacy, now);
-        await db.query(
-          'UPDATE shorts_measurement_settings SET legacy_hash=$3 WHERE network=$1 AND contract=$2',
-          [...params, legacy.fingerprint],
-        );
-      }
       return since;
     });
-  }
-  private async importLegacy(
-    db: EntityManager,
-    params: string[],
-    legacy: LegacyAnalytics,
-    now: number,
-  ) {
-    for (const rows of legacy.pages('forgotten'))
-      for (const r of rows) {
-        if (
-          !digest.test(String(r.id)) ||
-          !Number.isSafeInteger(r.expires) ||
-          Number(r.expires) < 0
-        )
-          throw new Error('Invalid legacy privacy marker');
-        if (Number(r.expires) > now)
-          await db.query(
-            `INSERT INTO shorts_measurement_viewers(network,contract,viewer,touched,forgotten_until)
-        VALUES($1,$2,$3,$4,$5)`,
-            [...params, r.id, now, r.expires],
-          );
-      }
-    for (const rows of legacy.pages('plays'))
-      for (const r of rows) {
-        this.id(r.short_id);
-        if (
-          !sessionId.test(String(r.id)) ||
-          !digest.test(String(r.viewer)) ||
-          !Number.isSafeInteger(r.started) ||
-          Number(r.started) < 0 ||
-          Number(r.started) > now ||
-          !Number.isFinite(r.seconds) ||
-          Number(r.seconds) < 0 ||
-          Number(r.seconds) > Number(r.duration) ||
-          !Number.isFinite(r.duration) ||
-          Number(r.duration) < 2 ||
-          Number(r.duration) > 60 ||
-          !SOURCES.includes(String(r.source))
-        )
-          throw new Error('Invalid legacy playback');
-        if (Number(r.started) < now - 90 * ANALYTICS_DAY) continue;
-        await db.query(
-          `INSERT INTO shorts_measurement_viewers(network,contract,viewer,touched) VALUES($1,$2,$3,$4)
-        ON CONFLICT(network,contract,viewer) DO UPDATE SET touched=greatest(shorts_measurement_viewers.touched,excluded.touched)`,
-          [...params, r.viewer, r.started],
-        );
-        const [blocked] = await db.query(
-          'SELECT forgotten_until FROM shorts_measurement_viewers WHERE network=$1 AND contract=$2 AND viewer=$3',
-          [...params, r.viewer],
-        );
-        if (Number(blocked.forgotten_until) > now)
-          throw new Error('Deleted legacy playback cannot be reimported');
-        await db.query(
-          `INSERT INTO shorts_measurement_plays(network,contract,id,short_id,viewer,started,day,seconds,source,duration)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [
-            ...params,
-            r.id,
-            r.short_id,
-            r.viewer,
-            r.started,
-            Math.floor(Number(r.started) / ANALYTICS_DAY),
-            r.seconds,
-            r.source,
-            r.duration,
-          ],
-        );
-      }
-    for (const rows of legacy.pages('totals'))
-      for (const r of rows) {
-        this.id(r.id);
-        if (!Number.isSafeInteger(r.views) || Number(r.views) < 0)
-          throw new Error('Invalid legacy view total');
-        await db.query(
-          'INSERT INTO shorts_measurement_totals VALUES($1,$2,$3,$4)',
-          [...params, r.id, r.views],
-        );
-      }
-    const [invalid] = await db.query(
-      `SELECT 1 FROM shorts_measurement_plays p LEFT JOIN shorts_measurement_totals t
-      ON t.network=p.network AND t.contract=p.contract AND t.short_id=p.short_id
-      WHERE p.network=$1 AND p.contract=$2 AND p.seconds>=2 GROUP BY p.short_id,t.views
-      HAVING count(*)>coalesce(t.views,0) LIMIT 1`,
-      params,
-    );
-    if (invalid)
-      throw new Error('Legacy lifetime totals do not cover retained playback');
   }
   private async lockViewer(
     db: EntityManager,

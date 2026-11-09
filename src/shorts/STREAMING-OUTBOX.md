@@ -38,8 +38,7 @@ loopback-only local demo uses its existing SQLite outbox.
 
 ## Delivery and recovery
 
-Saving publication and scheduling its job commit together. The migration seeds
-existing published content, and later imports/recovery use the same trigger.
+Saving publication and scheduling its job commit together. The publication trigger enqueues work for each new post.
 Playback-affecting changes invalidate an earlier delivery claim; unrelated title,
 view or report updates do not restart preparation. Withdrawal removes its job.
 The dispatcher and streaming catalog independently check current content policy;

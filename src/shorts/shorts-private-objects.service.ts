@@ -550,7 +550,7 @@ export class ShortsPrivateObjectsService implements OnModuleDestroy {
     ref: PrivateObjectRef,
     signal?: AbortSignal,
   ): Promise<Buffer> {
-    // Buffer consumers retain the legacy bound. Larger renditions use getToFile.
+    // Buffer consumers retain the in-memory size limit. Larger renditions use getToFile.
     if (ref?.bytes > MAX_BYTES)
       throw new BadRequestException('Use streamed media retrieval');
     this.validateReference(scope, ref);

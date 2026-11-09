@@ -16,16 +16,17 @@ test('versioned manifests bind every release field without enabling mainnet or c
   assertSupportedShortsRelease(release, { AE_NETWORK_ID: 'ae_uat' });
   for (const field of Object.keys(release)) {
     const missing = { ...release }; delete missing[field];
-    assert.throws(() => shortsRelease(missing), undefined, field);
+    if (field === 'previousContract') assert.equal(shortsRelease(missing).previousContract, null);
+    else assert.throws(() => shortsRelease(missing), undefined, field);
   }
   for (const patch of [
     { schemaVersion: '1' }, { network: 'ae_dev' }, { contract: release.operator },
     { previousContract: release.contract }, { treasury: release.contract }, { operator: '' },
     { compiler: 'unknown' }, { sourceHash: 'A'.repeat(64) }, { bytecodeHash: '' }, { aciHash: 1 },
-    { likeFeeAetto: 1 }, { likeFeeAetto: '1e18' }, { likeFeeAetto: '01' }, { likeFeeAetto: '0' },
+    { likeFeeAetto: 1 }, { likeFeeAetto: '1e18' }, { likeFeeAetto: '01' },
     { likeFeeAetto: (2n ** 256n).toString() }, { treasuryBps: '2000' }, { treasuryBps: 0.2 }, { treasuryBps: 10001 },
   ]) assert.throws(() => shortsRelease({ ...release, ...patch }));
-  for (const patch of [{ network: 'ae_mainnet' }, { likeFeeAetto: '1' }, { treasuryBps: 999 }, { middleware: 'https://wrong.invalid/mdw' }]) {
+  for (const patch of [{ network: 'ae_mainnet' }, { middleware: 'https://wrong.invalid/mdw' }]) {
     const parsed = shortsRelease({ ...release, ...patch });
     assert.throws(() => assertSupportedShortsRelease(parsed, { AE_NETWORK_ID: 'ae_uat' }));
   }
@@ -53,13 +54,11 @@ test('artifact source, compiler, bytecode and ABI are tied to independently moun
   // Updating a tampered artifact's self-declared hash still cannot replace the release.
   const bytecode = artifact.bytecode + 'x';
   assert.throws(() => shortsArtifact({ ...artifact, bytecode, bytecodeHash: digest(bytecode) }, release));
-  const cfg = [release.operator, release.treasury, BigInt(release.likeFeeAetto), BigInt(release.treasuryBps)];
-  assertShortsReleaseConfig(release, cfg);
-  for (let i = 0; i < 4; i++) {
-    const wrong = [...cfg]; wrong[i] = i < 2 ? release.contract : 1n;
-    assert.throws(() => assertShortsReleaseConfig(release, wrong), /configuration/);
-  }
-  assert.throws(() => assertShortsReleaseConfig(release, [...cfg, 0]));
+  const config = { operator: release.operator, max_video_bytes: 100000000, max_comment_chars: 280,
+    max_comment_bytes: 1120, comment_cooldown: 0, publishing_enabled: true, likes_enabled: true, comments_enabled: true };
+  assertShortsReleaseConfig(release, [config, 1]);
+  assert.throws(() => assertShortsReleaseConfig(release, [{ ...config, operator: release.contract }, 1]));
+
 });
 
 test('bounded configuration reads reject symlinks, relative paths, malformed and oversized files', async t => {
@@ -107,18 +106,20 @@ test('API and publisher fail on release or artifact mismatch before node access 
 test('canonical release hashing matches the web golden vector and ignores receipt ordering', () => {
   const vector = require('./shorts-release-vector.fixture.json');
   const input = Object.fromEntries(Object.entries(vector.release).reverse());
-  input.previousArtifact = Object.fromEntries(Object.entries(input.previousArtifact).reverse());
   input.transaction = 'receipt-metadata';
   assert.equal(digest(JSON.stringify(shortsRelease(input))), vector.digest);
 });
 
-test('a predecessor requires an independently pinned compiler, source, bytecode and ABI', () => {
-  const { release } = require('./shorts-release-vector.fixture.json');
-  assert.deepEqual(shortsRelease(release), release);
-  for (const field of ['compiler', 'sourceHash', 'bytecodeHash', 'aciHash']) {
-    const previousArtifact = { ...release.previousArtifact }; delete previousArtifact[field];
-    assert.throws(() => shortsRelease({ ...release, previousArtifact }), /previous artifact/);
-  }
-  assert.throws(() => shortsRelease({ ...release, previousArtifact: undefined }), /previous artifact/);
-  assert.throws(() => shortsRelease({ ...release, previousContract: null }), /Unexpected/);
+test('a fresh release rejects external contract, reward and storage bindings', () => {
+  const { release } = releaseFixture();
+  for (const patch of [{ previousContract: release.contract }, { previousArtifact: {} }, { rewardContracts: [release] }, { storage: release }])
+    assert.throws(() => shortsRelease({ ...release, ...patch }));
+});
+
+test('startup requires an active contract deployed without an import', () => {
+  const { assertActiveShortsContract } = require('./shorts-release');
+  const fresh = {schema: 2n, importing: false, import_started: false, abandoned: false, frozen: false};
+  assert.doesNotThrow(() => assertActiveShortsContract(fresh));
+  for (const patch of [{schema:1n}, {importing:true}, {import_started:true}, {abandoned:true}, {frozen:true}, {reserved_source:'ct_other'}])
+    assert.throws(() => assertActiveShortsContract({...fresh, ...patch}));
 });

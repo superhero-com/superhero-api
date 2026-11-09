@@ -72,19 +72,6 @@ export class ShortsMetadataService {
   async verifyHostedStorage(scope: ShortsScope) {
     await this.verifyUploadBudget(scope);
     const params = this.scope(scope);
-    const [runtime] = await this.db.query(
-      `SELECT r.legacy_hash,c.completed_at,c.fingerprint FROM shorts_runtime r
-      LEFT JOIN shorts_legacy_cutovers c USING(network,contract)
-      WHERE r.network=$1 AND r.contract=$2`,
-      params,
-    );
-    if (
-      !runtime ||
-      ((runtime.legacy_hash || runtime.fingerprint) && !runtime.completed_at)
-    )
-      throw new ServiceUnavailableException(
-        'Complete the offline Shorts legacy migration before starting the hosted API',
-      );
     const [missing] = await this.db.query(
       `SELECT 1 FROM shorts_content WHERE network=$1 AND contract=$2
       AND (body->'privateMedia' IS NULL OR body->'privateMedia'='null'::jsonb) LIMIT 1`,
@@ -92,7 +79,7 @@ export class ShortsMetadataService {
     );
     if (missing)
       throw new ServiceUnavailableException(
-        'Hosted content is missing private shared media; complete its migration',
+        'Hosted content is missing its private media reference',
       );
   }
 
@@ -283,57 +270,6 @@ export class ShortsMetadataService {
     return this.stored(row);
   }
   /** One-time explicit import from the verified local registry. Never overwrite shared records. */
-  async importLegacy(
-    scope: ShortsScope,
-    records: ShortRecord[],
-    fingerprint: string,
-    allowImport: boolean,
-  ) {
-    const params = this.scope(scope);
-    if (!/^[a-f0-9]{64}$/.test(fingerprint))
-      throw new BadRequestException('Invalid migration identity');
-    return this.db.transaction(async (manager) => {
-      const [runtime] = await manager.query(
-        'SELECT legacy_hash FROM shorts_runtime WHERE network=$1 AND contract=$2 FOR UPDATE',
-        params,
-      );
-      if (!runtime)
-        throw new ServiceUnavailableException(
-          'Shorts deployment is not initialized',
-        );
-      if (runtime.legacy_hash === fingerprint) return;
-      if (!records.length && !runtime.legacy_hash) return;
-      if (runtime.legacy_hash || !allowImport)
-        throw new ConflictException(
-          'Legacy Shorts content needs an explicit matching migration',
-        );
-      const [count] = await manager.query(
-        'SELECT count(*)::integer AS n FROM shorts_content WHERE network=$1 AND contract=$2',
-        params,
-      );
-      if (count.n)
-        throw new ConflictException(
-          'Cannot import over existing shared Shorts content',
-        );
-      for (const record of records)
-        await manager.query(
-          `INSERT INTO shorts_content(network,contract,id,creator,created_at,body)
-        VALUES($1,$2,$3,$4,$5,$6::jsonb)`,
-          [
-            ...params,
-            record.id,
-            record.creator,
-            record.createdAt,
-            this.record(record),
-          ],
-        );
-      await manager.query(
-        'UPDATE shorts_runtime SET legacy_hash=$3 WHERE network=$1 AND contract=$2',
-        [...params, fingerprint],
-      );
-    });
-  }
-  /** Trusted API preparation during migration; isolated workers use fenced complete(). */
   async insertDraft(
     scope: ShortsScope,
     record: ShortRecord,

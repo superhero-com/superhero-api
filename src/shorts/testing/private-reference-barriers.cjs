@@ -1,7 +1,7 @@
 const {
   ShortsPrivateReferenceBarriers: Migration,
   ShortsAcceptedManifests: Manifests,
-} = require('./historical-migrations.cjs');
+} = require('./schema-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { ShortsPrivateReferenceBarriersService } = require('../shorts-private-reference-barriers.service');
@@ -53,8 +53,8 @@ module.exports = async f => {
   let operation, run;
   await t.test('cleanup barriers require explicit enrolment, derive their proof, and serialize duplicate reservations', async () => {
     await assert.rejects(service.reserve(scope, randomUUID(), await scan(), target.key), /fresh enrolled/);
-    await adopt('legacy-before-enrolment', false, false);
-    await owner.query("UPDATE shorts_ingestion SET status='cancelled' WHERE id='legacy-before-enrolment'");
+    await adopt('before-enrolment', false, false);
+    await owner.query("UPDATE shorts_ingestion SET status='cancelled' WHERE id='before-enrolment'");
     await service.enrol(scope); await service.enrol(scope);
     run = await scan(); operation = randomUUID();
     const results = await Promise.all([service.reserve(scope, operation, run, target.key), service.reserve(scope, operation, run, target.key)]);
@@ -69,13 +69,14 @@ module.exports = async f => {
     await assert.rejects(addPart(), /reserved for retirement/);
     await assert.rejects(owner.query(`UPDATE shorts_upload_sessions SET direct_parts=$3 WHERE network=$1 AND contract=$2 AND id='other-upload'`,
       [...args, { 0: { object: target } }]), /reserved for retirement/);
+    const fresh = await adopt('late-content', true, false);
     await assert.rejects(owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body)
-      VALUES($1,$2,'late-content','ak_creator',1,$3)`, [...args, { id: 'late-content', creator: 'ak_creator', createdAt: 1,
-        bytes: target.bytes, publication: 'published', privateMedia: { files: { video: target } } }]), /reserved for retirement/);
+      VALUES($1,$2,'late-content','ak_creator',1,$3)`, [...args, { ...structuredClone(original.record), id: 'late-content', derivatives: { ...original.record.derivatives, generation: { ...original.record.derivatives.generation, job: 'late-content' } }, privateMedia: { ...original.record.privateMedia, source: fresh.input, files: { video: target } } }]), /reserved for retirement/);
+    await owner.query("UPDATE shorts_ingestion SET status='cancelled' WHERE id='late-content'");
     await assert.rejects(adopt('opaque-adopter', false), /bound manifest/);
     await assert.rejects(adopt('bound-adopter'), /reserved for retirement/);
     assert.equal((await owner.query("SELECT count(*)::int AS n FROM shorts_ingestion WHERE id IN ('opaque-adopter','bound-adopter')"))[0].n, 0);
-    // Existing legacy references and lifecycle fields remain usable after enrolment.
+    // Earlier references and lifecycle fields remain usable after enrolment.
     await owner.query('UPDATE shorts_ingestion SET updated_at=clock_timestamp() WHERE network=$1 AND contract=$2 AND id=$3', [...args, base.id]);
     await owner.query("UPDATE shorts_content SET body=jsonb_set(body,'{likes}','43') WHERE id=$1", [base.id]);
     await owner.query('UPDATE shorts_content SET body=$1 WHERE id=$2', [original.record, base.id]);

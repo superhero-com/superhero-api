@@ -11,7 +11,7 @@ const { Tx } = require('../../mdw-sync/entities/tx.entity');
 const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('../shorts-index.service');
 const { ShortsPluginSyncService } = require('../../plugins/shorts/shorts-plugin-sync.service');
 const { ShortsPlugin } = require('../../plugins/shorts/shorts.plugin');
-const { assembledPlayback } = require('./assembled-playback.cjs');
+const { assembledAdaptivePlayback } = require('./assembled-adaptive-playback.cjs');
 const { ShortsBackfillService } = require('../../plugins/shorts/shorts-backfill.service');
 
 const codec = new AciContractCallEncoder([{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions: [],
@@ -56,7 +56,7 @@ exports.assembledIndex = async (t, f) => {
     $decodeEvents: logs => logs.map(log => { const [name, args] = Object.entries(codec.decodeEvent('Shorts', log.data, log.topics))[0]; return { name, args }; }),
     $call: async (name, args) => { assert.equal(name, 'get_short'); return { decodedResult: state.shorts[args[0]] }; },
   };
-  const chain = { contract, release: { network: scope.network, contract: scope.contract, schemaVersion: 1 }, state: { contract: scope.contract }, rewardContracts: () => [] };
+  const chain = { contract, release: { network: scope.network, contract: scope.contract, schemaVersion: 1 }, state: { contract: scope.contract } };
   const index = new ShortsIndexService(owner, chain, await require('./index-network.cjs').indexNetworkFixture(owner, chain));
   // This journey controls chain inputs; live endpoint proof is a separate HTTP suite.
   const network = { verify: async () => {}, bindings: () => ({ middleware: f.mdwUrl }),
@@ -134,35 +134,7 @@ exports.assembledIndex = async (t, f) => {
     assert.equal((await finance(c)).paidLikes, 0);
   });
 
-  async function catalog(count = 24) {
-    // Additional already-published observations, analogous to legacy imports.
-    // They share this test's owned media; normal HTTP policy, paging and HLS
-    // preparation still run. These are not independent uploads.
-    assert.ok(Number.isInteger(count) && count > 0 && count <= 24);
-    const original = (await meta.get(scope, id)).record;
-    const rows = Array.from({ length: count }, (_, i) => ({ ...original,
-      id: randomUUID(), title: `Catalog fixture ${i + 1}`, createdAt: original.createdAt - (i + 1) * 1000,
-    }));
-    for (const row of rows) state.shorts[row.id] = { ...state.shorts[id], likes: 0, likers: [] };
-    await save();
-    let closed = false;
-    const close = async () => {
-      if (closed) return; closed = true;
-      // Browser measurements reference these rows. Keep the fixture references
-      // intact until the enclosing owned schema is dropped; remove eligibility.
-      await owner.query("UPDATE shorts_content SET body=jsonb_set(body - 'publication','{moderation}','\"pending\"'::jsonb) WHERE network=$1 AND contract=$2 AND id=ANY($3::text[])",
-        [scope.network, scope.contract, rows.map(row => row.id)]);
-      for (const row of rows) delete state.shorts[row.id];
-      await save();
-    };
-    t.after(close);
-    await owner.transaction(async manager => {
-      for (const row of rows) await manager.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,$5,$6)',
-        [scope.network, scope.contract, row.id, row.creator, row.createdAt, row]);
-    });
-    return { ids: [id, ...rows.map(row => row.id)], close };
-  }
-  const playback = f.streamPort ? await assembledPlayback(t, { ...f, catalog,
+  const playback = f.streamPort ? await assembledAdaptivePlayback(t, { ...f,
     async registerUpload(shortId) {
       // Only the external signer/chain observation is controlled. Upload,
       // approval, storage preparation, journal and plugin consumers remain real.

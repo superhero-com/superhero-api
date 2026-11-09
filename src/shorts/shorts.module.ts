@@ -4,7 +4,6 @@ import {
   ShortsUploadPolicyService,
 } from './shorts-upload-policy.service';
 import { ShortsStreamingService } from './shorts-streaming.service';
-import { ShortsUploadsService } from './shorts-uploads.service';
 import { ShortsSafetyService } from './shorts-safety.service';
 import {
   ShortsAnalyticsService,
@@ -33,16 +32,11 @@ import {
 } from './shorts-private-input-cleanup-control.controller';
 import { ShortsInputReclamationService } from './shorts-input-reclamation.service';
 import { ShortsStorageRecoveryService } from './shorts-storage-recovery.service';
-import {
-  SHORTS_BACKFILL_AUTOMATIC,
-  ShortsBackfillService,
-} from './shorts-backfill.service';
 import { ShortsDeliveryAcknowledgementService } from './shorts-delivery-acknowledgement.service';
 import {
   ShortsStorageControlController,
   ShortsStorageControlGuard,
 } from './shorts-storage-control.controller';
-import { ShortsUploadLimitsService } from './shorts-upload-limits.service';
 import { ShortsRecordsService } from './shorts-records.service';
 import { ShortsWalletTransactionsService } from './shorts-wallet-transactions.service';
 import { ShortsPlaybackEvidenceService } from './shorts-playback-evidence.service';
@@ -76,10 +70,8 @@ import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service'
     ShortsWalletTransactionsService,
     ShortsPlaybackEvidenceService,
     ShortsMeasurementMonitorService,
-    ShortsUploadLimitsService,
     ShortsStreamingService,
     ShortsSafetyService,
-    ShortsUploadsService,
     { provide: ShortsAnalyticsService, useClass: LocalShortsAnalyticsService },
     ShortsLabelsService,
     ShortsAuthService,
@@ -122,8 +114,6 @@ export class ShortsTestnetModule {
         await import('./shorts-hosted-bootstrap.service');
       const { ShortsFollowingService } =
         await import('./shorts-following.service');
-      const { ShortsReconciliationService } =
-        await import('./shorts-reconciliation.service');
       return {
         module: ShortsTestnetModule,
         controllers: [
@@ -138,11 +128,6 @@ export class ShortsTestnetModule {
           ShortsPublicationBoundaryModule,
         ],
         providers: [
-          {
-            provide: SHORTS_BACKFILL_AUTOMATIC,
-            useValue: !options.operationsOnly,
-          },
-          ShortsBackfillService,
           ShortsOriginalRestagingService,
           ShortsDeliveryAcknowledgementService,
           ShortsStorageControlGuard,
@@ -154,7 +139,6 @@ export class ShortsTestnetModule {
           ShortsPrivateInputCleanupControlGuard,
           ShortsInputReclamationService,
           ShortsStorageRecoveryService,
-          ShortsReconciliationService,
           ShortsFollowingService,
           ...(options.operationsOnly ? [] : [ShortsHostedBootstrapService]),
           ShortsApiPublicationService,
@@ -169,20 +153,15 @@ export class ShortsTestnetModule {
             useClass: ShortsHostedAnalyticsService,
           },
           { provide: ShortsLedgerService, useExisting: ShortsIndexService },
-          {
-            provide: ShortsUploadsService,
-            useClass: ShortsHostedUploadsService,
-          },
+          ShortsHostedUploadsService,
         ],
       };
     }
     if (process.env.NODE_ENV === 'production')
       throw new Error('Local ledger is unavailable in production');
     const { LocalShortsLedgerService } = await import('./local-ledger.service');
-    const { ShortsEncodingModule } = await import('./shorts-encoding.module');
     return {
       module: ShortsTestnetModule,
-      imports: [ShortsEncodingModule],
       providers: [
         { provide: ShortsLedgerService, useClass: LocalShortsLedgerService },
       ],

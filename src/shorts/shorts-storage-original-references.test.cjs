@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsFileStorageReferences: Migration,
 } = schemaMigrations;
@@ -158,10 +158,6 @@ test('maximum original sources and large renditions remain accounted for without
     await assert.rejects(retention.inventory(), /Private output differs/);
   }
   await owner.query('UPDATE shorts_content SET body=$4 WHERE network=$1 AND contract=$2 AND id=$3', [...args, record.id, record]);
-  const legacy = { id: 'z-legacy', creator: 'ak_creator', bytes: 10, privateMedia: { files: { video: { ...large, bytes: 67108865 } } } };
-  await owner.query("INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,'z-legacy','ak_creator',1,$3)", [...args, legacy]);
-  await assert.rejects(retention.inventory(), /invalid private object/);
-  legacy.privateMedia.files.video.bytes = 67108864;
-  await owner.query("UPDATE shorts_content SET body=$3 WHERE network=$1 AND contract=$2 AND id='z-legacy'", [...args, legacy]);
-  assert.equal((await retention.inventory()).items.length, 2);
+  await assert.rejects(owner.query("INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,'directory','ak_creator',1,$3)",
+    [...args, { id: 'directory', creator: 'ak_creator', bytes: 10 }]), {code:'SH400'});
 });

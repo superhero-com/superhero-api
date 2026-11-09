@@ -472,7 +472,7 @@ test('signed Like proves only its own caller and needs no Studio session', async
   const guard = new ShortsRateGuard(auth, rates, undefined, service);
   assert.equal(await guard.canActivate(context), true);
   assert.deepEqual(calls, ['ip', 'actor']);
-  const controller = new ShortsController({}, auth, {}, undefined, undefined, undefined, undefined, undefined, undefined, service);
+  const controller = new ShortsController({}, auth, {}, undefined, undefined, undefined, undefined, undefined, service);
   const result = await controller.sponsorLike(body);
   assert.equal(result.address, f.actor.address);
   assert.equal(queued.length, 1);

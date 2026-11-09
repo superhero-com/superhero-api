@@ -125,9 +125,9 @@ async function shortsPublicationAdmissionDefinition(
 }
 
 export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
-  readonly changes = {
+  readonly steps = {
     /** Capacity waits preserve the source and retry budget under the existing worker authority. */
-    ShortsWorkerBackpressure1791763222000: {
+    ShortsWorkerBackpressure: {
       async up(runner: QueryRunner): Promise<void> {
         await shortsWorkerBackpressureDefinitions(runner, false);
       },
@@ -145,7 +145,7 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     },
 
     /** Read-only preparation admission within the existing scoped publisher boundary. */
-    ShortsPublicationAdmission1791763223000: {
+    ShortsPublicationAdmission: {
       async up(runner: QueryRunner): Promise<void> {
         await shortsPublicationAdmissionDefinition(runner, false);
       },
@@ -158,7 +158,7 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     },
 
     /** Durable ingress reservations. Expiry, failure and withdrawal never refund storage. */
-    ShortsUploadBudget1791763224000: {
+    ShortsUploadBudget: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -179,40 +179,11 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     CREATE TABLE ${s}.shorts_upload_reservations (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL, id varchar(80) NOT NULL,
       creator varchar(100) NOT NULL, source_bytes bigint NOT NULL CHECK(source_bytes>0),
-      declared_source_bytes bigint CHECK(declared_source_bytes>0),
       created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
       PRIMARY KEY(network,contract,id),
       FOREIGN KEY(network,contract) REFERENCES ${s}.shorts_upload_budgets(network,contract)
     );
     INSERT INTO ${s}.shorts_upload_budgets(network,contract) SELECT network,contract FROM ${s}.shorts_runtime`);
-        await runner.query(`DO $verify$ BEGIN
-      IF EXISTS(SELECT 1 FROM (
-        SELECT network,contract,id,creator FROM ${s}.shorts_upload_sessions
-        UNION ALL SELECT network,contract,id,creator FROM ${s}.shorts_ingestion
-        UNION ALL SELECT network,contract,id,creator FROM ${s}.shorts_content
-      ) identities GROUP BY network,contract,id HAVING count(DISTINCT creator)>1)
-      OR EXISTS(SELECT 1 FROM (
-        SELECT network,contract,id,(input->>'bytes')::bigint AS bytes FROM ${s}.shorts_upload_sessions
-        UNION ALL SELECT network,contract,id,(input->>'bytes')::bigint FROM ${s}.shorts_ingestion
-        UNION ALL SELECT network,contract,id,(body#>>'{privateMedia,source,bytes}')::bigint FROM ${s}.shorts_content
-      ) sources GROUP BY network,contract,id HAVING count(DISTINCT bytes)>1) THEN
-        RAISE EXCEPTION 'Resolve inconsistent upload identities before reserving capacity';
-      END IF;
-    END $verify$`);
-        // Only the offline migration walks historical rows. Prefer declared source
-        // size; a legacy package without a source reference is charged its package size.
-        await runner.query(`INSERT INTO ${s}.shorts_upload_reservations(network,contract,id,creator,source_bytes,declared_source_bytes)
-      SELECT DISTINCT ON(network,contract,id) network,contract,id,creator,bytes,declared_bytes FROM (
-        SELECT network,contract,id,creator,(input->>'bytes')::bigint AS bytes,(input->>'bytes')::bigint AS declared_bytes,1 AS priority FROM ${s}.shorts_upload_sessions
-        UNION ALL SELECT network,contract,id,creator,(input->>'bytes')::bigint,(input->>'bytes')::bigint,2 FROM ${s}.shorts_ingestion
-        UNION ALL SELECT network,contract,id,creator,
-          COALESCE(body#>>'{privateMedia,source,bytes}',body->>'bytes')::bigint,
-          (body#>>'{privateMedia,source,bytes}')::bigint,3 FROM ${s}.shorts_content
-      ) sources ORDER BY network,contract,id,priority;
-      UPDATE ${s}.shorts_upload_budgets b SET used_uploads=n.uploads,used_source_bytes=n.bytes
-      FROM (SELECT network,contract,count(*) AS uploads,sum(source_bytes) AS bytes
-        FROM ${s}.shorts_upload_reservations GROUP BY network,contract) n
-      WHERE b.network=n.network AND b.contract=n.contract`);
         await runner.query(`CREATE FUNCTION ${s}.shorts_upload_budget_initialize() RETURNS trigger
       LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $init$
       BEGIN
@@ -224,17 +195,16 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
         FOR EACH ROW EXECUTE FUNCTION ${s}.shorts_upload_budget_initialize()`);
         await runner.query(`CREATE FUNCTION ${s}.shorts_reserve_upload() RETURNS trigger
       LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $reserve$
-      DECLARE existing ${s}.shorts_upload_reservations%ROWTYPE; declared_bytes bigint; charged_bytes bigint; extra_bytes bigint;
+      DECLARE existing ${s}.shorts_upload_reservations%ROWTYPE; charged_bytes bigint;
         budget ${s}.shorts_upload_budgets%ROWTYPE;
       BEGIN
         IF current_setting('transaction_isolation')<>'read committed' THEN
           RAISE EXCEPTION 'Upload admission requires READ COMMITTED' USING ERRCODE='SH400';
         END IF;
         IF TG_TABLE_NAME='shorts_content' THEN
-          declared_bytes=(NEW.body#>>'{privateMedia,source,bytes}')::bigint;
-          charged_bytes=COALESCE(declared_bytes,(NEW.body->>'bytes')::bigint);
-        ELSE declared_bytes=(NEW.input->>'bytes')::bigint; charged_bytes=declared_bytes; END IF;
-        IF charged_bytes IS NULL OR charged_bytes<1 OR declared_bytes<1 THEN
+          charged_bytes=(NEW.body->>'bytes')::bigint;
+        ELSE charged_bytes=(NEW.input->>'bytes')::bigint; END IF;
+        IF charged_bytes IS NULL OR charged_bytes<1 THEN
           RAISE EXCEPTION 'Invalid upload size' USING ERRCODE='SH400';
         END IF;
         -- This lock never acquires runtime or job rows. Worker completion can
@@ -245,29 +215,16 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
         SELECT * INTO existing FROM ${s}.shorts_upload_reservations
           WHERE network=NEW.network AND contract=NEW.contract AND id=NEW.id;
         IF FOUND THEN
-          IF existing.creator<>NEW.creator OR (declared_bytes IS NOT NULL AND existing.declared_source_bytes IS NOT NULL
-            AND existing.declared_source_bytes<>declared_bytes) THEN
+          IF existing.creator<>NEW.creator OR existing.source_bytes<>charged_bytes THEN
             RAISE EXCEPTION 'Upload reservation identity differs' USING ERRCODE='SH409';
-          END IF;
-          -- Offline migration can import prepared content before its original
-          -- upload. Bind the newly known source size without refunding estimates.
-          IF declared_bytes IS NOT NULL AND existing.declared_source_bytes IS NULL THEN
-            extra_bytes=GREATEST(declared_bytes-existing.source_bytes,0);
-            IF extra_bytes>0 AND extra_bytes>budget.max_source_bytes-budget.used_source_bytes THEN
-              RAISE EXCEPTION 'Upload budget exhausted' USING ERRCODE='SH509';
-            END IF;
-            UPDATE ${s}.shorts_upload_reservations SET declared_source_bytes=declared_bytes,
-              source_bytes=source_bytes+extra_bytes WHERE network=NEW.network AND contract=NEW.contract AND id=NEW.id;
-            UPDATE ${s}.shorts_upload_budgets SET used_source_bytes=used_source_bytes+extra_bytes,updated_at=clock_timestamp()
-              WHERE network=NEW.network AND contract=NEW.contract;
           END IF;
           RETURN NEW;
         END IF;
         IF budget.used_uploads>=budget.max_uploads OR charged_bytes>budget.max_source_bytes-budget.used_source_bytes THEN
           RAISE EXCEPTION 'Upload budget exhausted' USING ERRCODE='SH509';
         END IF;
-        INSERT INTO ${s}.shorts_upload_reservations(network,contract,id,creator,source_bytes,declared_source_bytes)
-          VALUES(NEW.network,NEW.contract,NEW.id,NEW.creator,charged_bytes,declared_bytes);
+        INSERT INTO ${s}.shorts_upload_reservations(network,contract,id,creator,source_bytes)
+          VALUES(NEW.network,NEW.contract,NEW.id,NEW.creator,charged_bytes);
         UPDATE ${s}.shorts_upload_budgets SET used_uploads=used_uploads+1,
           used_source_bytes=used_source_bytes+charged_bytes,updated_at=clock_timestamp()
           WHERE network=NEW.network AND contract=NEW.contract;
@@ -305,7 +262,7 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     },
 
     /** Preserve lifecycle retries while shared media transfer capacity is unavailable. */
-    ShortsMediaAdmission1791763225000: {
+    ShortsMediaAdmission: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`ALTER TABLE shorts_lifecycle_jobs DROP CONSTRAINT shorts_lifecycle_jobs_result_check,
       ADD CONSTRAINT shorts_lifecycle_jobs_result_check CHECK(result IN
@@ -320,7 +277,7 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     },
 
     /** Content and chain updates share the existing scoped live-update channel. */
-    ShortsContentUpdates1791763226000: {
+    ShortsContentUpdates: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -350,7 +307,7 @@ export class ShortsUploadAdmission1791763222001 extends FeatureMigration {
     },
 
     /** Bounded, immutable per-part permissions; abandoned intents remain inventoried. */
-    ShortsDirectUploads1792022400000: {
+    ShortsDirectUploads: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`ALTER TABLE shorts_upload_sessions ADD COLUMN direct_parts jsonb NOT NULL DEFAULT '{}'::jsonb
       CHECK(jsonb_typeof(direct_parts)='object' AND octet_length(direct_parts::text)<=65536)`);

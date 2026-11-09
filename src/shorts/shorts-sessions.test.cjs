@@ -1,4 +1,4 @@
-const { ShortsSessions } = require('./testing/historical-migrations.cjs');
+const { ShortsSessions } = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -170,7 +170,7 @@ test('shared wallet sessions: real signatures, atomic admission, replay and revo
     const { NestFactory } = require('@nestjs/core');
     const { ShortsController } = require('./shorts.controller');
     const { ShortsService } = require('./shorts.service');
-    const { ShortsUploadsService } = require('./shorts-uploads.service');
+    const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
     const { ShortsAuthGuard } = require('./shorts-auth.guard');
     const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
     const f = setup(), bases = [];

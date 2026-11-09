@@ -2,7 +2,7 @@ const {
   ShortsMediaAdmission,
   ShortsMetadata,
   ShortsLifecycle,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
@@ -22,18 +22,8 @@ const { ShortsController } = require('./shorts.controller');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const scope = { network: 'ae_uat', contract: 'ct_lifecycle' };
 const hash = 'a'.repeat(64);
-const item = (id, overrides = {}) => ({
-  id,
-  creator: 'ak_creator',
-  cid: `bafy${id}`,
-  bytes: 10,
-  duration: 2,
-  createdAt: 1,
-  files: [],
-  moderation: 'approved',
-  safety: { status: 'no_flags' },
-  publication: 'published',
-  ...overrides,
+const item = (id, overrides = {}) => require('./testing/original-record.cjs').originalRecord(id, {
+  creator:'ak_creator', bytes:10, duration:2, createdAt:1, moderation:'approved', safety:{status:'no_flags'}, publication:'published', ...overrides,
 });
 const assertNo = () =>
   assert.fail(
@@ -302,7 +292,7 @@ test(
     });
     const migration = new ShortsLifecycle();
     await new ShortsMetadata().up(a);
-    await a.query(`INSERT INTO shorts_runtime VALUES($1,$2,$3,NULL,50,5)`, [
+    await a.query(`INSERT INTO shorts_runtime VALUES($1,$2,$3,50,5)`, [
       scope.network,
       scope.contract,
       hash,
@@ -312,16 +302,16 @@ test(
         'INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
         [scope.network, scope.contract, id, 'ak_creator', item(id)],
       );
+    await migration.up(a);
     for (let i = 0; i < 125; i++)
       await insert(`short${String(i).padStart(3, '0')}`);
-    await migration.up(a);
     await new ShortsMediaAdmission().up(a);
     const jobs = new ShortsLifecycleJobsService(a),
       other = new ShortsLifecycleJobsService(b);
     await jobs.verify(scope, hash);
     await assert.rejects(jobs.verify(scope, 'b'.repeat(64)), /mismatch/);
     await t.test(
-      'backfill and atomic concurrent claims include the complete catalog',
+      'atomic concurrent claims include the complete catalog',
       async () => {
         const ids = new Set();
         for (let n = 0; n < 25; n++) {
@@ -460,14 +450,14 @@ test(
       for (const mode of ['success', 'review', 'cancel', 'locked-cancel']) {
         const id = 'retry-' + mode;
         const short = item(id, { publication: 'pending', moderation: 'pending', safety: undefined,
-          title: 'Fixture', topic: 'Art', files: [{ name: 'video.mp4', bytes: 10, sha256: 'a'.repeat(64) }] });
+          title: 'Fixture', topic: 'Art' });
         await a.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
           [scope.network, scope.contract, id, 'ak_creator', short]);
         const claim = await boundedJobs.claim(scope); assert.equal(claim.id, id);
         const entered = gate(), finish = gate(), stop = new AbortController();
         const media = { async rescan(_short, signal) { assert.equal(signal, stop.signal); entered.resolve(); await finish.promise;
           return { status: 'no_flags', checkedAt: Date.now(), reason: 'Owned fixture' }; } };
-        const service = new ShortsService(chain, media, undefined, undefined, undefined, undefined, undefined, undefined, records);
+        const service = new ShortsService(chain, media, undefined, undefined, undefined, undefined, undefined, records);
         const operation = service.retryInspection(id, stop.signal);
         const outcome = mode === 'success' ? operation : assert.rejects(operation);
         await entered.promise;
@@ -566,7 +556,7 @@ test(
         assert.equal(
           (await a.query('SELECT count(*) FROM shorts_lifecycle_jobs'))[0]
             .count,
-          '132',
+          '0',
         );
       },
     );
@@ -621,29 +611,19 @@ test(
       else process.env.SHORTS_IPFS_API = saved;
     });
     const media = new ShortsMediaService({});
-    const files = [
-      {
-        name: 'video.mp4',
-        data: Buffer.from(`owned lifecycle test ${randomUUID()}`),
-      },
-    ];
-    const cid = await new ShortsPackageService().cid(files);
+    const {mkdtemp, writeFile, rm} = require('node:fs/promises');
+    const {join} = require('node:path');
+    const dir = await mkdtemp(join(require('node:os').tmpdir(),'shorts-pin-'));
+    t.after(() => rm(dir,{recursive:true,force:true}));
+    const bytes = Buffer.from(randomUUID()), path = join(dir,'owned.mp4');
+    await writeFile(path,bytes);
+    const file = {path, bytes:bytes.length, sha256:createHash('sha256').update(bytes).digest('hex')};
+    const cid = await new ShortsPackageService().originalCid(file), signal = new AbortController().signal;
     assert.equal(await media.pinned(cid), false);
-    const short = item(randomUUID(), {
-      cid, privateMedia: {},
-      files: files.map(file => ({ name: file.name, bytes: file.data.length, sha256: createHash('sha256').update(file.data).digest('hex') })),
-    });
-    let reads = 0, adds = 0;
-    media.preparedFile = async () => { reads++; return files[0].data; };
-    const add = media.add.bind(media);
-    media.add = async (...args) => { adds++; return add(...args); };
-    await media.ensurePinned(short);
+    assert.equal(await media.addFiles([{...file,name:'original.mp4'}],false,signal,item('owned'),cid,'original'), cid);
+    t.after(() => media.unpin(cid));
     assert.equal(await media.pinned(cid), true);
-    await media.ensurePinned(short);
-    assert.equal(reads, 1, 'retry must not read private storage again');
-    assert.equal(adds, 1, 'retry must verify and reuse the actual pin');
-    await assert.rejects(media.ensurePinned({ ...short, files: [{ ...short.files[0], sha256: '0'.repeat(64) }] }), /integrity/);
-    assert.equal(adds, 1); assert.equal(reads, 1);
+    await media.verifyPinnedBytes(cid,undefined,file,signal);
     await media.unpin(cid);
     assert.equal(await media.pinned(cid), false);
   },
@@ -694,38 +674,37 @@ async function stalledPin(t) {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
-  const media = new ShortsMediaService({});
+  const media = new ShortsMediaService({}, {});
   media.api = `http://127.0.0.1:${server.address().port}/api/v0`;
   media.ipfsHeaders = async () => new Headers();
-  media.preparedFile = async () => Buffer.from('fixture');
   return { media, entered, closed };
 }
 
-test('lifecycle shutdown cancels an actual IPFS add response and leaves its claim recoverable', { timeout: 5000 }, async t => {
-  const io = await stalledPin(t), f = workerFixture([item('a', { files: [{ name: 'video.mp4' }] })]);
+test('lifecycle shutdown cancels an active IPFS pin lookup and leaves its claim recoverable', { timeout: 5000 }, async t => {
+  const io = await stalledPin(t), f = workerFixture([item('a')]);
   f.media.pin = io.media.pin.bind(io.media);
   const work = f.worker.reconcile(); await io.entered.promise;
   await f.worker.onModuleDestroy(); await work; await io.closed.promise;
-  assert.deepEqual(f.results, []); assert.equal(io.media.hasPin('bafya'), false);
+  assert.deepEqual(f.results, []); assert.equal(io.media.hasPin(item('a').cid), false);
 });
 
 test('failed renewal and whole-job deadline cancel IPFS work even while the process stays up', { timeout: 5000 }, async t => {
   for (const reason of ['renewal', 'deadline']) await t.test(reason, async t => {
-    const io = await stalledPin(t), f = workerFixture([item('a', { files: [{ name: 'video.mp4' }] })], {
+    const io = await stalledPin(t), f = workerFixture([item('a')], {
       limits: { attemptMs: reason === 'deadline' ? 180 : 1000, leaseMs: 700, renewMs: 30 },
     });
     f.media.pin = io.media.pin.bind(io.media);
     const work = f.worker.reconcile(); await io.entered.promise;
     if (reason === 'renewal') f.jobs.renew = async () => false;
     await work; await io.closed.promise;
-    assert.deepEqual(f.results, []); assert.equal(io.media.hasPin('bafya'), false);
+    assert.deepEqual(f.results, []); assert.equal(io.media.hasPin(item('a').cid), false);
     await f.worker.onModuleDestroy();
   });
 });
 
 test('lease expiry closes media IO but a late renewal drains before releasing the running operation', { timeout: 5000 }, async t => {
   const io = await stalledPin(t), entered = gate(), finish = gate(); let finished = false;
-  const f = workerFixture([item('a', { files: [{ name: 'video.mp4' }] })], {
+  const f = workerFixture([item('a')], {
     limits: { attemptMs: 1500, leaseMs: 150, renewMs: 30 },
   });
   f.media.pin = io.media.pin.bind(io.media);
@@ -736,29 +715,21 @@ test('lease expiry closes media IO but a late renewal drains before releasing th
   assert.deepEqual(f.results, []); await f.worker.onModuleDestroy();
 });
 
-test('failed private package read cancels and drains sibling reads before pin returns', { timeout: 5000 }, async () => {
-  const finish = gate(), aborted = gate(); let settled = false, adds = 0;
-  const media = new ShortsMediaService({});
-  media.preparedFile = async (_short, name, signal) => {
-    if (name === 'video.mp4') throw new Error('Missing source');
-    signal.addEventListener('abort', aborted.resolve, { once: true });
-    if (signal.aborted) aborted.resolve();
-    await finish.promise; signal.throwIfAborted();
-  };
-  media.add = async () => { adds++; };
-  const result = media.pin(item('a', { files: [{ name: 'video.mp4' }, { name: 'poster.jpg' }] })).finally(() => { settled = true; });
-  const rejected = assert.rejects(result, /Missing source/); await aborted.promise;
-  assert.equal(settled, false); finish.resolve(); await rejected; assert.equal(adds, 0);
+test('failed private original read prevents all IPFS writes', async () => {
+  const media = new ShortsMediaService({}, { withOriginal: async () => { throw new Error('Missing source'); } }, {chain:{release:scope,state:scope}});
+  media.pinned = async () => false;
+  media.addFiles = () => assert.fail('No bytes should be written');
+  await assert.rejects(media.pin(item('a')), /Missing source/);
 });
 
 test('job cancellation reaches private original reads and prevents moderation IO', async () => {
   const started = gate(); let scans = 0;
   const media = new ShortsMediaService({ async scan() { scans++; } }, {
-    async original(_scope, _short, signal) {
+    async withOriginal(_scope, _short, _work, signal) {
       started.resolve(); return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     },
   }, { chain: { release: { network: 'ae_uat', contract: 'ct_fixture'  }, state: { contract: 'ct_fixture' } } });
-  const stop = new AbortController(), result = media.rescan(item('a', { privateMedia: {} }), stop.signal);
+  const stop = new AbortController(), result = media.rescan(item('a', { publication: 'pending' }), stop.signal);
   const rejected = assert.rejects(result); await started.promise; stop.abort(); await rejected; assert.equal(scans, 0);
 });
 
@@ -783,7 +754,7 @@ test('creator requests acknowledge durable intent without storage, node IO or th
   const no = () => assert.fail('Request must not perform expensive work');
   const media = { safety: { demoAutoApprove: false }, pin: no };
   const service = new ShortsService({ address: value => value, serial: no, read: no, write: no }, media,
-    { counters: async () => ({ views: 0 }) }, undefined, undefined, undefined, undefined, undefined, records,
+    { counters: async () => ({ views: 0 }) }, undefined, undefined, undefined, undefined, records,
     { enqueue: no, async status() {} });
   const controller = new ShortsController(service, { authenticate: async () => record.creator }, {});
   const result = await controller.publish('session', record.id, { status: value => { code = value; } });
@@ -808,7 +779,7 @@ test('a delayed creator request cannot revert a concurrently confirmed publicati
       update(record); return structuredClone(record);
     },
   };
-  const service = new ShortsService({ address: value => value }, {}, {}, undefined, undefined, undefined, undefined, undefined, records,
+  const service = new ShortsService({ address: value => value }, {}, {}, undefined, undefined, undefined, undefined, records,
     { async status() { throw new Error('Status connection lost after intent commit'); } });
   await assert.rejects(service.publish(record.creator, record.id), /Status connection lost/);
   assert.equal(record.publication, 'published');
@@ -830,19 +801,17 @@ test('unknown publisher capacity fails closed and cannot start media work', asyn
   assert.deepEqual(f.effects, []); assert.deepEqual(f.results, [['a', 'failed']]);
 });
 
-test('a reused recursive pin must verify each file and cannot silently upload over ambiguous reads', async () => {
-  const media = new ShortsMediaService({}), short = item('a', { files: [{ name: 'video.mp4' }, { name: 'poster.jpg' }] });
-  let reads = [], pins = 0;
+test('existing adaptive pins verify each file and fail closed on ambiguous reads', async () => {
+  const record = item('a'), media = new ShortsMediaService({}, {});
+  const reads = [];
   media.pinned = async () => true;
-  media.retrieveFile = async (_s, name) => { reads.push(name); };
-  media.pinPackage = async () => { pins++; };
-  await media.ensurePinned(short);
-  assert.deepEqual(reads, ['video.mp4', 'poster.jpg']); assert.equal(pins, 0);
-  media.retrieveFile = async () => { throw new Error('Hash mismatch'); };
-  await assert.rejects(media.ensurePinned(short), /Hash mismatch/); assert.equal(pins, 0);
+  media.verifyPinnedBytes = async (cid, name) => reads.push([cid, name]);
+  media.addFiles = () => assert.fail('A recursive pin should be reused');
+  await media.ensurePinned(record);
+  assert.equal(reads.length, record.files.length + 1);
+  assert.deepEqual(reads[0], [record.cid, undefined]);
+  media.verifyPinnedBytes = async () => { throw new Error('Hash mismatch'); };
+  await assert.rejects(media.ensurePinned(record), /Hash mismatch/);
   media.pinned = async () => { throw new Error('Pin lookup unavailable'); };
-  await assert.rejects(media.ensurePinned(short), /Pin lookup unavailable/); assert.equal(pins, 0);
-  media.pinned = async () => false;
-  await media.ensurePinned(short); assert.equal(pins, 1);
-  await assert.rejects(media.ensurePinned(short, AbortSignal.abort())); assert.equal(pins, 1);
+  await assert.rejects(media.ensurePinned(record), /Pin lookup unavailable/);
 });

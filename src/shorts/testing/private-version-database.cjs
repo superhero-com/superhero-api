@@ -1,4 +1,4 @@
-const schemaMigrations = require('./historical-migrations.cjs');
+const schemaMigrations = require('./schema-migrations.cjs');
 require('reflect-metadata');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');

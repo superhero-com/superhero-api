@@ -5,7 +5,7 @@ import {
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { ShortsMediaFile } from './shorts-media-file';
@@ -19,7 +19,6 @@ import { IngestionJob, IngestionClaim } from './shorts-metadata.service';
 import { ShortsWorkerRepositoryService } from './shorts-worker-repository.service';
 import { ShortsSourceReaderService } from './shorts-source-reader.service';
 import { ShortsPrivateObjectsService } from './shorts-private-objects.service';
-import { ShortsEncodingService } from './shorts-encoding.service';
 import { ShortsPackageService } from './shorts-package.service';
 import {
   ShortsSafetyService,
@@ -57,7 +56,6 @@ export class ShortsMediaWorkerService
     private readonly metadata: ShortsWorkerRepositoryService,
     private readonly source: ShortsSourceReaderService,
     private readonly objects: ShortsPrivateObjectsService,
-    private readonly encoding: ShortsEncodingService,
     private readonly packages: ShortsPackageService,
     private readonly safety: ShortsSafetyService,
     private readonly labels: ShortsLabelsService,
@@ -230,6 +228,8 @@ export class ShortsMediaWorkerService
       sourceDirectory = await mkdtemp(
         join(this.scratch.directory, 'shorts-source-'),
       );
+      if (job.input.processingProfile !== SHORTS_ORIGINAL_PROFILE)
+        throw new Error('Unsupported accepted processing profile');
       const original = await this.source.readToFile(
         this.config.scope,
         job,
@@ -243,78 +243,7 @@ export class ShortsMediaWorkerService
       if (this.moderationFailures)
         this.logger.log('Visual inspection recovered.');
       this.moderationFailures = 0;
-      if (job.input.processingProfile === SHORTS_ORIGINAL_PROFILE) {
-        await this.prepareOriginal(job, claim, original, safety, signal);
-        return;
-      }
-      if (job.input.processingProfile !== undefined)
-        throw new Error('Unsupported accepted processing profile');
-      const prepared = await this.encoding.encode(
-        original,
-        job.input.title.trim(),
-        job.input.topic,
-        job.input.details,
-        signal,
-      );
-      signal.throwIfAborted();
-      const cid = await this.packages.cid(prepared.files, signal);
-      const files = prepared.files.map((file) => ({
-        name: file.name,
-        bytes: file.data.length,
-        sha256: createHash('sha256').update(file.data).digest('hex'),
-      }));
-      const refs: NonNullable<ShortRecord['privateMedia']>['files'] = {};
-      for (const file of prepared.files) {
-        signal.throwIfAborted();
-        refs[file.name] = await this.objects.put(
-          this.config.scope,
-          job.id,
-          `attempt/${job.fence}/${file.name.replaceAll('.', '-')}`,
-          file.data,
-          signal,
-        );
-      }
-      const classification = await this.labels.classify(
-        {
-          title: job.input.title.trim(),
-          topic: job.input.topic,
-          description: job.input.details.description as string,
-          captions: job.input.details.captions as string,
-        },
-        signal,
-      );
-      signal.throwIfAborted();
-      const record: ShortRecord = {
-        id: job.id,
-        creator: job.creator,
-        title: job.input.title.trim(),
-        topic: job.input.topic,
-        cid,
-        bytes: prepared.bytes,
-        duration: prepared.duration,
-        files,
-        safety,
-        classification,
-        createdAt: Date.now(),
-        description: String(job.input.details.description || ''),
-        language: String(job.input.details.language || 'und'),
-        synthetic: job.input.details.synthetic === true,
-        sponsored: job.input.details.sponsored === true,
-        captions: !!job.input.details.captions,
-        moderation: safety?.status === 'blocked' ? 'rejected' : 'pending',
-        reviewReason: safety?.reason,
-        reports: 0,
-        views: [],
-        privateMedia: {
-          version: 1,
-          fence: job.fence,
-          source: job.input,
-          files: refs,
-        },
-      };
-      // Outputs can outlive a dead worker, but only the current fenced claim
-      // may attach them to a content record. No publish/pin/sign action exists here.
-      await this.metadata.complete(this.config.scope, claim, record);
+      await this.prepareOriginal(job, claim, original, safety, signal);
     } catch (error) {
       if (
         (error instanceof ScratchCapacityError ||

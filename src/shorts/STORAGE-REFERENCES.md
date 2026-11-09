@@ -3,11 +3,11 @@
 This operations command matches a completed [S3 inventory](STORAGE-INVENTORY.md)
 against upload records, prepared media and [retention holds](RETENTION.md). It
 decrypts source manifests to recover references to parts absent from SQL, including
-legacy imports. It does not download source video parts or rendered video files.
+accepted uploads. It does not download source video parts or rendered video files.
 
 Source references carry their saved processing profile and accepted byte limit
 through manifest inspection and snapshot comparison. This permits the 96 parts of
-a 100,000,000-byte original while keeping legacy and smaller accepted limits in
+a 100,000,000-byte original while keeping smaller accepted limits in
 force. Two claims for the same manifest with different saved policies are
 validated separately; a policy change during inspection invalidates the scan
 step before any reference rows are committed.
@@ -19,7 +19,7 @@ then validate the document identity, chunk sequence, scope and frozen upload lim
 This permits traversal after the encrypted manifest is removed. It does not drop
 any object references or override holds, and it does not authorize removal. A
 mismatched receipt fails the scan; the scanner does not silently omit its parts.
-Receipts apply only to original-format uploads. Unretired and legacy sources
+Receipts apply only to original-format uploads. Unretired sources
 continue to require their authenticated encrypted manifest reads.
 
 It writes resumable reference evidence to PostgreSQL. It never changes S3,

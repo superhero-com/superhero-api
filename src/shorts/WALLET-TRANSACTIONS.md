@@ -1,14 +1,13 @@
 # Wallet transaction observations
 
 `GET /api/shorts/wallet-transactions/:tx?address=ak_...&contract=ct_...`
-returns a fresh observation for a paid Like, reward claim or withdrawal. It reads
+returns a fresh observation for a wallet-signed Shorts transaction. It reads
 public chain data, needs no wallet ownership signature, returns `Cache-Control:
 no-store`, and never signs, submits, writes a receipt or changes content. It is
 available only when Shorts is enabled. The current runtime supports testnet only.
 
 The caller supplies the saved transaction hash, wallet and exact contract. The
-contract must be the configured current deployment, or its configured previous
-deployment for a claim. Changing any supplied identifier does not give the caller
+contract must be the configured deployment. Changing any supplied identifier does not give the caller
 a new rate-limit allowance. The shared budget allows 30 checks per minute per
 client address and 120 across the deployment; overload returns 429 with
 `Retry-After`. Existing bounded node transport, operation deadlines and shutdown

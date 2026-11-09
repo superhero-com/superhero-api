@@ -2,14 +2,14 @@ const {
   ShortsMetadata,
   ShortsLifecycle,
   ShortsMediaAdmission,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
-const { mkdtemp, rm } = require('node:fs/promises');
+const { mkdtemp, rm, writeFile } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const http = require('node:http');
@@ -72,13 +72,23 @@ async function fixture(t) {
   }
   function service(admission, source, safety) {
     const value = new ShortsMediaService(safety || { scan: async () => ({ status: 'no_flags' }) },
-      source || { original: async () => Buffer.from('owned'), file: async () => Buffer.from('preview') },
-      { shared: true, chain }, undefined, admission);
+      { file: source?.file ?? (async () => Buffer.from('preview')),
+        withOriginal: source?.withOriginal ?? (async (scope, short, work, signal) => {
+          const file = await (source?.original ?? (async () => Buffer.from('owned')))(scope, short, signal);
+          signal.throwIfAborted();
+          return work(file, signal);
+        }) },
+      { shared: true, chain }, admission);
     media.push(value); return value;
   }
   return { admission, service, config, chain, limits, services };
 }
-const short = (creator = 'ak_creator') => ({ id: 'owned', creator, cid: 'bafyowned', privateMedia: {} });
+const short = (creator = 'ak_creator') => {
+  const record = require('./testing/original-record.cjs').originalRecord('owned', { creator });
+  record.privateMedia = {fence: record.derivatives.generation.fence,
+    source: { bytes: record.bytes, sha256: record.original.sha256, processingProfile:'original-h264-v1' }};
+  return record;
+};
 
 test('delivery verification waits for actor/global contention and uses the same shared lease', async t => {
   const f = await fixture(t), a = await f.admission({ ...f.limits, capacity: 1 }), b = await f.admission({ ...f.limits, capacity: 1 });
@@ -195,15 +205,13 @@ test('lost leases abort original reads and shutdown drains active media before r
 
 test('nested pin and integrity verification use one reservation and cancel every transfer', async t => {
   const f = await fixture(t), a = await f.admission(), media = f.service(a);
-  let acquired = 0, pins = 0, verified = 0;
+  let acquired = 0, verified = 0;
   const acquire = a.acquire.bind(a); a.acquire = async actor => { acquired++; return acquire(actor); };
-  media.pinned = async () => false;
-  media.pinPackage = async (_short, signal) => { assert.equal(signal.aborted, false); pins++; };
-  await media.ensurePinned(short()); assert.equal(acquired, 1); assert.equal(pins, 1);
   media.pinned = async () => true;
-  media.retrieveFile = async (_short, _name, signal) => { assert.equal(signal.aborted, false); verified++; };
-  await media.ensurePinned({ ...short(), files: [{ name: 'video.mp4' }, { name: 'poster.jpg' }] });
-  assert.equal(acquired, 2); assert.equal(verified, 2); assert.equal(a.leases.size, 0);
+  media.verifyPinnedBytes = async (_cid, _name, _identity, signal) => { signal.throwIfAborted(); verified++; };
+  const record = short();
+  await media.ensurePinned(record);
+  assert.equal(acquired, 1); assert.equal(verified, record.files.length + 1); assert.equal(a.leases.size, 0);
 });
 
 test('lost media admission returns retryable unavailability without accepting late scan evidence', async t => {
@@ -259,14 +267,19 @@ test('HTTP storage capacity waits survive database claims and defer publication 
   t.after(async () => { await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
   await new ShortsMetadata().up(db); await new ShortsLifecycle().up(db);
   const scope = f.chain.release, hash = f.chain.state.sourceHash;
-  await db.query('INSERT INTO shorts_runtime VALUES($1,$2,$3,NULL,8,2)', [scope.network, scope.contract, hash]);
+  await db.query('INSERT INTO shorts_runtime VALUES($1,$2,$3,8,2)', [scope.network, scope.contract, hash]);
   const jobs = new ShortsLifecycleJobsService(db);
   await assert.rejects(jobs.verify(scope, hash), { status: 503 });
   await new ShortsMediaAdmission().up(db); await jobs.verify(scope, hash);
   const bytes = Buffer.from('owned durable storage recovery fixture');
-  const cid = await new ShortsPackageService().cid([{ name: 'video.mp4', data: bytes }]);
-  const video = { ...short(), cid, bytes: bytes.length, moderation: 'approved', safety: { status: 'no_flags' }, publication: 'pending',
-    files: [{ name: 'video.mp4', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }] };
+  const path = join(directory, randomUUID() + '.mp4');
+  await writeFile(path, bytes);
+  const file = { path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  const cid = await new ShortsPackageService().originalCid(file);
+  const video = { ...short(), cid, bytes: bytes.length, moderation:'approved', safety:{status:'no_flags'}, publication:'pending' };
+  video.original.sha256 = file.sha256;
+  video.privateMedia.source = {processingProfile:'original-h264-v1', bytes:file.bytes, sha256:file.sha256};
+  for (const entry of video.files) Object.assign(entry, {bytes:file.bytes, sha256:file.sha256});
   await db.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
     [scope.network, scope.contract, video.id, video.creator, video]);
   await db.query('UPDATE shorts_lifecycle_jobs SET attempts=3');
@@ -275,7 +288,10 @@ test('HTTP storage capacity waits survive database claims and defer publication 
     req.resume();
     req.on('end', () => {
       if (req.url.startsWith('/api/v0/pin/ls?')) {
-        res.writeHead(500); res.end(JSON.stringify({ Code: 0, Message: `path '${cid}' is not pinned` }));
+        const requested = new URL(req.url, 'http://localhost').searchParams.get('arg');
+        if ([video.derivatives.cid, video.derivatives.assetsCid].includes(requested) || (requested === cid && status === 200 && adds === 4)) {
+          res.end(JSON.stringify({ Keys: { [requested]: {Type:'recursive'} } }));
+        } else { res.writeHead(500); res.end(JSON.stringify({ Code: 0, Message: `path '${requested}' is not pinned` })); }
       } else if (req.url.startsWith('/api/v0/add?')) {
         adds++; res.writeHead(status);
         res.end(status === 200 ? JSON.stringify({ Hash: cid }) : 'storage unavailable');
@@ -292,7 +308,7 @@ test('HTTP storage capacity waits survive database claims and defer publication 
   t.after(() => keys.forEach((key, i) => {
     if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i];
   }));
-  const media = f.service(admission, { file: async () => bytes });
+  const media = f.service(admission, { withOriginal: (_scope, _short, work, signal) => work(file, signal) });
   // Chain and publisher boundaries are controlled here; HTTP transfer, CID/hash
   // verification, Redis admission, PostgreSQL claims and lifecycle are real.
   const chain = { ...f.chain, read: async () => video.publication === 'published'
@@ -301,7 +317,7 @@ test('HTTP storage capacity waits survive database claims and defer publication 
     status: async () => journal, capacity: async () => true,
     enqueue: async (id, creator) => {
       assert.equal(id, video.id); assert.equal(creator, video.creator);
-      assert.equal(media.hasPin(cid), true); assert.equal(reads, 1);
+      assert.equal(media.hasPin(cid), true); assert.equal(reads, video.files.length + 1);
       enqueued++; journal = { status: 'queued' };
     },
   } };
@@ -331,7 +347,7 @@ test('HTTP storage capacity waits survive database claims and defer publication 
   await db.query('UPDATE shorts_lifecycle_jobs SET next_at=clock_timestamp()'); await worker.reconcile();
   const [pending] = await db.query('SELECT attempts,result FROM shorts_lifecycle_jobs');
   assert.deepEqual(pending, { attempts: 0, result: 'publication_pending' });
-  assert.equal(adds, 4); assert.equal(enqueued, 1); assert.equal(reads, 1);
+  assert.equal(adds, 4); assert.equal(enqueued, 1); assert.equal(reads, video.files.length + 1);
   await db.query('UPDATE shorts_lifecycle_jobs SET next_at=clock_timestamp()'); await worker.reconcile();
   assert.equal(adds, 4, 'journaled publication must not upload or enqueue again'); assert.equal(enqueued, 1);
   video.publication = 'published';

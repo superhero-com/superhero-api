@@ -16,12 +16,12 @@ export interface ShortsArtifactIdentity {
   aciHash: string;
 }
 export interface ShortsRelease {
-  schemaVersion: 1 | 2;
+  schemaVersion: 2;
   network: 'ae_uat' | 'ae_mainnet';
   node: string;
   middleware: string;
   contract: `ct_${string}`;
-  previousContract: `ct_${string}` | null;
+  previousContract: null;
   operator: `ak_${string}`;
   treasury: `ak_${string}`;
   compiler: string;
@@ -30,10 +30,6 @@ export interface ShortsRelease {
   aciHash: string;
   likeFeeAetto: string;
   treasuryBps: number;
-  previousArtifact?: ShortsArtifactIdentity;
-  /** Stable media namespace; chain transactions always target contract above. */
-  storage?: { contract: `ct_${string}`; sourceHash: string };
-  rewardContracts?: (ShortsArtifactIdentity & { contract: `ct_${string}` })[];
 }
 
 export interface ShortsArtifact {
@@ -113,16 +109,16 @@ export function shortsRelease(
     throw new Error('Invalid Shorts release manifest');
   const v = value as Record<string, any>;
   if (
-    ![1, 2].includes(v.schemaVersion) ||
+    v.schemaVersion !== 2 ||
     !['ae_uat', 'ae_mainnet'].includes(v.network) ||
     !isAddressValid(v.contract, Encoding.ContractAddress) ||
     !isAddressValid(v.operator, Encoding.AccountAddress) ||
     !isAddressValid(v.treasury, Encoding.AccountAddress) ||
-    !(
-      v.previousContract === null ||
-      (v.previousContract !== v.contract &&
-        isAddressValid(v.previousContract, Encoding.ContractAddress))
-    ) ||
+    v.previousContract != null ||
+    v.previousArtifact !== undefined ||
+    v.storage !== undefined ||
+    (v.rewardContracts !== undefined &&
+      !(Array.isArray(v.rewardContracts) && v.rewardContracts.length === 0)) ||
     typeof v.compiler !== 'string' ||
     !/^\d+\.\d+\.\d+$/.test(v.compiler) ||
     !['sourceHash', 'bytecodeHash', 'aciHash'].every(
@@ -130,57 +126,12 @@ export function shortsRelease(
     ) ||
     typeof v.likeFeeAetto !== 'string' ||
     !/^(0|[1-9]\d{0,77})$/.test(v.likeFeeAetto) ||
-    (v.schemaVersion === 1 && v.likeFeeAetto === '0') ||
     BigInt(v.likeFeeAetto) >= 2n ** 256n ||
     !Number.isInteger(v.treasuryBps) ||
     v.treasuryBps < 0 ||
     v.treasuryBps > 10000
   )
     throw new Error('Invalid Shorts release manifest');
-  const previousArtifact =
-    v.previousContract === null
-      ? undefined
-      : artifactIdentity(v.previousArtifact);
-  if (v.previousContract === null && v.previousArtifact !== undefined)
-    throw new Error('Unexpected previous artifact in the release manifest');
-  if (
-    v.schemaVersion === 1 &&
-    (v.storage !== undefined || v.rewardContracts !== undefined)
-  )
-    throw new Error(
-      'Legacy releases cannot override their storage or reward identities',
-    );
-  const storage =
-    v.storage === undefined
-      ? undefined
-      : {
-          contract: v.storage?.contract,
-          sourceHash: v.storage?.sourceHash,
-        };
-  if (
-    storage &&
-    (!isAddressValid(storage.contract, Encoding.ContractAddress) ||
-      !/^[a-f0-9]{64}$/.test(storage.sourceHash))
-  )
-    throw new Error('Invalid Shorts storage identity');
-  if (
-    v.rewardContracts !== undefined &&
-    (!Array.isArray(v.rewardContracts) || v.rewardContracts.length > 16)
-  )
-    throw new Error('Invalid reward contracts');
-  const seen = new Set([v.contract, v.previousContract]);
-  const rewardContracts = v.rewardContracts?.map((item: any) => {
-    if (
-      !isAddressValid(item?.contract, Encoding.ContractAddress) ||
-      seen.has(item.contract)
-    )
-      throw new Error('Invalid or duplicate reward contract');
-    seen.add(item.contract);
-    return Object.freeze({
-      contract: item.contract,
-      ...artifactIdentity(item),
-    });
-  });
   // Copy only reviewed identity fields; deployment receipts may have extra metadata.
   return Object.freeze({
     schemaVersion: v.schemaVersion,
@@ -188,7 +139,7 @@ export function shortsRelease(
     node: endpoint(v.node, true, allowLoopback),
     middleware: endpoint(v.middleware, false, allowLoopback),
     contract: v.contract,
-    previousContract: v.previousContract,
+    previousContract: null,
     operator: v.operator,
     treasury: v.treasury,
     compiler: v.compiler,
@@ -197,34 +148,10 @@ export function shortsRelease(
     aciHash: v.aciHash,
     likeFeeAetto: v.likeFeeAetto,
     treasuryBps: v.treasuryBps,
-    ...(previousArtifact ? { previousArtifact } : {}),
-    ...(storage ? { storage: Object.freeze(storage) } : {}),
-    ...(rewardContracts
-      ? { rewardContracts: Object.freeze(rewardContracts) as any }
-      : {}),
   });
 }
 
-function artifactIdentity(value: unknown): ShortsArtifactIdentity {
-  const v = value as ShortsArtifactIdentity | undefined;
-  if (
-    !v ||
-    typeof v.compiler !== 'string' ||
-    !/^\d+\.\d+\.\d+$/.test(v.compiler) ||
-    ![v.sourceHash, v.bytecodeHash, v.aciHash].every(
-      (hash) => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash),
-    )
-  )
-    throw new Error('Invalid previous artifact in the release manifest');
-  return Object.freeze({
-    compiler: v.compiler,
-    sourceHash: v.sourceHash,
-    bytecodeHash: v.bytecodeHash,
-    aciHash: v.aciHash,
-  });
-}
-
-/** Keep existing testnet/economic guards until all clients and scoped stores are migrated. */
+/** Limit the runtime to its configured indexer network. */
 export function assertSupportedShortsRelease(
   release: ShortsRelease,
   env = process.env,
@@ -238,12 +165,6 @@ export function assertSupportedShortsRelease(
   // files. The dedicated publisher must use only its explicit environment.
   if (release.middleware !== 'https://testnet.aeternity.io/mdw')
     throw new Error('Shorts release middleware does not match the indexer');
-  if (
-    release.schemaVersion === 1 &&
-    (release.likeFeeAetto !== '100000000000000000' ||
-      release.treasuryBps !== 2000)
-  )
-    throw new Error('Unsupported Shorts Like fee or split');
 }
 
 /** All service roles consume the same reviewed manifest; no ambient config imports. */
@@ -315,19 +236,18 @@ export function assertShortsReleaseConfig(
   release: ShortsRelease,
   cfg: unknown,
 ) {
-  if (release.schemaVersion === 2) {
-    shortsContractPolicy(cfg, 2);
-    return;
-  }
+  shortsContractPolicy(cfg, release.schemaVersion);
+}
+
+/** The contract exposes its deployment mode and lifecycle in this getter. */
+export function assertActiveShortsContract(status: Record<string, unknown>) {
   if (
-    !Array.isArray(cfg) ||
-    cfg.length !== 4 ||
-    cfg[0] !== release.operator ||
-    cfg[1] !== release.treasury ||
-    String(cfg[2]) !== release.likeFeeAetto ||
-    String(cfg[3]) !== String(release.treasuryBps)
+    status?.schema !== 2n ||
+    status.importing !== false ||
+    status.import_started !== false ||
+    status.abandoned !== false ||
+    status.frozen !== false ||
+    status.reserved_source != null
   )
-    throw new Error(
-      'On-chain Shorts configuration does not match the release manifest',
-    );
+    throw new Error('Expected a fresh, active Shorts contract');
 }

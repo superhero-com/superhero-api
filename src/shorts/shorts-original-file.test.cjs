@@ -72,7 +72,7 @@ async function fixture(t, size = 2 * MiB + 137) {
     },
   };
   const reader = new ShortsSourceReaderService(objects);
-  const job = { id: 'short1', creator: 'ak_fixture', input: { objectKey: 'manifest', manifest, bytes: size, sha256: hash(original) } };
+  const job = { id: 'short1', creator: 'ak_fixture', input: { processingProfile: 'original-h264-v1', objectKey: 'manifest', manifest, bytes: size, sha256: hash(original) } };
   return { directory, path: join(directory, 'original'), original, parts, bodies, objects, reader, job,
     counters: () => ({ active, maxActive, calls }) };
 }

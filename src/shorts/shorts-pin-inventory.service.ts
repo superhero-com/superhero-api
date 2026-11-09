@@ -193,16 +193,7 @@ export class ShortsPinInventoryService {
       pinTraversalComplete: run.phase === 'complete',
       consistentSnapshot: false,
       blocksVerified: false,
-      referenceCoverage:
-        run.reference_version === 5
-          ? 'original-and-acknowledged-generation-inventory'
-          : run.reference_version === 4
-            ? 'original-and-generation-delivery-inventory'
-            : run.reference_version === 3
-              ? 'original-and-acknowledged-delivery-inventory'
-              : run.reference_version === 2
-                ? 'original-and-derivative-inventory'
-                : 'legacy-hls-inventory',
+      referenceCoverage: 'original-and-acknowledged-generation-inventory',
       referenceVersion: run.reference_version,
       deletionEnabled: false,
     };

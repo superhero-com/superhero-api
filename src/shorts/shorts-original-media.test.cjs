@@ -47,7 +47,7 @@ async function fixture(t) {
   let active = 0, acquisitions = 0;
   const media = new ShortsMediaService({ scan: async file => {
     assert.deepEqual(await readFile(file.path), original); return { status: 'no_flags', sourceSha256: file.sha256 };
-  } }, privateMedia, { shared: true, chain: { release: scope, state: { contract: scope.contract } } }, undefined, {
+  } }, privateMedia, { shared: true, chain: { release: scope, state: { contract: scope.contract } } }, {
     acquire: async () => { active++; acquisitions++; return { signal: new AbortController().signal, release: async () => { active--; } }; },
   }, scratch);
   t.after(() => media.onModuleDestroy());

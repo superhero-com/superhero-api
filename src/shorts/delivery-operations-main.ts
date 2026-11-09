@@ -6,9 +6,7 @@ import {
   isPrivateInputOperation,
   runDeliveryOperation,
 } from './shorts-delivery-operation';
-import { ShortsBackfillService } from './shorts-backfill.service';
 import { ShortsDeliveryActivationService } from './shorts-delivery-activation.service';
-import { ShortsStreamingService } from './shorts-streaming.service';
 import { ShortsApiPublicationService } from './shorts-api-publication.service';
 import { ShortsService } from './shorts.service';
 import { shortsStorageScope } from './shorts-runtime-scope';
@@ -42,10 +40,8 @@ async function bootstrap() {
     await app.get(ShortsApiPublicationService).initialize();
     const result = await runDeliveryOperation(
       input,
-      app.get(ShortsBackfillService),
       app.get(ShortsDeliveryActivationService),
       stop.signal,
-      app.get(ShortsStreamingService),
       isPrivateInputOperation(action)
         ? {
             scope: shortsStorageScope(app.get(ShortsService).chain),

@@ -12,7 +12,7 @@ const { ShortsMediaService } = require('./shorts-media.service');
 const { ShortsStreamingService } = require('./shorts-streaming.service');
 const { ShortsDeliveryPreparationService } = require('./shorts-delivery-preparation.service');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
-const { assertOriginalDeliveryEligible } = require('./shorts-delivery-eligibility');
+const { assertDeliveryEligible } = require('./shorts-delivery-eligibility');
 const { sourceKey, validateSourcePackage } = require('./hls-protocol/hls-package');
 const golden = require('./testing/hls-v3.json');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -58,7 +58,7 @@ test('retired candidate preparation reuses durable HLS without restoring encoded
 
 test('only the same reviewed source, metadata and captions qualify for candidate delivery', async () => {
   const { original, record } = await fixture();
-  assert.doesNotThrow(() => assertOriginalDeliveryEligible(original, record));
+  assert.doesNotThrow(() => assertDeliveryEligible(original, record));
   for (const change of [
     item => { item.cid = 'bafy' + 'f'.repeat(50); }, item => { item.bytes++; },
     item => { item.original.sha256 = 'a'.repeat(64); }, item => { item.original.mediaType = 'video/quicktime'; },
@@ -71,19 +71,19 @@ test('only the same reviewed source, metadata and captions qualify for candidate
     item => { item.captions = true; item.files.push({ name: 'captions.vtt', bytes: 20, sha256: 'a'.repeat(64) }); },
   ]) {
     const changed = structuredClone(record); change(changed);
-    assert.throws(() => assertOriginalDeliveryEligible(original, changed));
+    assert.throws(() => assertDeliveryEligible(original, changed));
   }
   const captioned = structuredClone(original), translated = structuredClone(record);
   for (const item of [captioned, translated]) {
     item.captions = true; item.files.push({ name: 'captions.vtt', bytes: 20, sha256: 'a'.repeat(64) });
   }
-  assert.doesNotThrow(() => assertOriginalDeliveryEligible(captioned, translated));
+  assert.doesNotThrow(() => assertDeliveryEligible(captioned, translated));
   translated.files.at(-1).sha256 = 'b'.repeat(64);
-  assert.throws(() => assertOriginalDeliveryEligible(captioned, translated), { status: 404 });
+  assert.throws(() => assertDeliveryEligible(captioned, translated), { status: 404 });
   for (const change of [item => { item.publication = 'withdrawn'; }, item => { item.moderation = 'rejected'; },
     item => { item.safety.sourceSha256 = 'f'.repeat(64); }]) {
     const changed = structuredClone(original); change(changed);
-    assert.throws(() => assertOriginalDeliveryEligible(changed, record), { status: 404 });
+    assert.throws(() => assertDeliveryEligible(changed, record), { status: 404 });
   }
 });
 
@@ -222,7 +222,7 @@ test('HLS verification streams every file, checks source identity and fails on c
     res.write(bytes.subarray(0, 64)); res.end(bytes.subarray(64));
   });
   Object.assign(process.env, { NODE_ENV: 'test', SHORTS_IPFS_API: base + '/api/v0' }); delete process.env.SHORTS_IPFS_TOKEN_FILE;
-  const media = new ShortsMediaService({}, undefined, { shared: true }, undefined, { acquire: async (_actor, signal) => {
+  const media = new ShortsMediaService({}, undefined, { shared: true }, { acquire: async (_actor, signal) => {
     assert.ok(signal instanceof AbortSignal, 'delivery verification opts into cancellable capacity waiting');
     active++; return { signal: new AbortController().signal, release: async () => { active--; } };
   } });

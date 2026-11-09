@@ -1,3 +1,4 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -62,8 +63,8 @@ for (const network of ['ae_uat', 'ae_mainnet']) test(`data and job adapters carr
     { verify: async scope => check('stream-init', scope), enqueue: async scope => check('stream', scope) });
   await stream.initialize(); await stream.enqueue('video'); await stream.onModuleDestroy();
   let released = 0;
-  const media = new ShortsMediaService({}, { file: async scope => { check('private-media', scope); return Buffer.from('preview'); } }, records, undefined, { acquire: async () => ({ signal: new AbortController().signal, release: async () => { released++; } }) });
-  const preview = await media.preview({ id: 'video', creator: 'ak_fixture', privateMedia: {} });
+  const media = new ShortsMediaService({}, { file: async scope => { check('private-media', scope); return Buffer.from('preview'); } }, records, { acquire: async () => ({ signal: new AbortController().signal, release: async () => { released++; } }) });
+  const preview = await media.preview(originalRecord('video', { creator: 'ak_fixture', privateMedia: { fence: '1', source: { processingProfile: 'original-h264-v1', bytes: 4096, sha256: '1'.repeat(64) } } }));
   assert.equal(preview.toString(), 'preview'); assert.equal(released, 1); await media.onModuleDestroy();
   const auth = new ShortsAuthService({}, chain, { challenge: async (scope, address, message) => {
     const { origin, ...deployment } = scope; check('session', deployment);

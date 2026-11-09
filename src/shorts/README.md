@@ -13,7 +13,6 @@ including module boundaries, S3 configuration, secret files and provider require
 [Private version cleanup](PRIVATE-VERSION-CLEANUP.md) coordinates deletion of verified duplicate noncurrent versions through an isolated, default-off operations process.
 [HLS index inventory](HLS-INVENTORY.md) matches prepared streaming packages to source references and holds with resumable read-only Redis scans.
 [Original-file media](ORIGINAL-MEDIA.md) defines canonical original identity, separate temporary input and retained asset packages, and dual-format reader compatibility.
-[Reward reconciliation](ACCOUNTING.md) compares indexed creator/treasury rewards and claims with contract state at a fixed block.
 
 IPFS media requests are paced at a minimum of 75 ms between starts within each
 `ShortsMediaService` instance. Responses stream independently; upstream failures,
@@ -32,19 +31,7 @@ An opt-in NestJS feature module connected to a real æternity testnet contract. 
 
 ## Database migrations
 
-Run the normal API migrations before starting the new release. The Shorts
-schema is grouped by feature. The migration runner checks the existing TypeORM
-history and applies only the missing changes within each group. Keep the old
-history rows: they preserve which changes an earlier release applied.
-
-Reverting a grouped migration runs its new changes in reverse order and
-retains changes recorded by an earlier release. Existing data and privilege
-checks still apply to each rollback. To revert further into the old history,
-use the matching older release after reverting the newer migrations. The
-profile-media cleanup step cannot restore deleted image bytes and refuses a
-rollback. Use a backup for a downgrade across that step. An older migration
-runner expects the individual history entries and must not be run against a
-fresh grouped schema.
+Run all API migrations before enabling Shorts. Each feature group creates its schema in one TypeORM migration. Deploy a fresh contract with import mode disabled and mount its release manifest and compiled artifact. All Shorts data belongs to that contract. Original MP4 or MOV uploads use shared storage and the adaptive media worker.
 
 ## Enable on staging
 
@@ -147,15 +134,7 @@ source hash is SHA-256 of the source UTF-8 bytes. Bytecode hash is SHA-256 of th
 of `JSON.stringify(artifact.aci)` encoded as UTF-8, preserving array and property
 order. Whitespace in the enclosing artifact file does not affect it. All digests
 use lowercase hex. `likeFeeAetto` is an exact integer string; `treasuryBps` uses
-10,000 basis points. `previousContract` must match `get_previous`, including
-`null` when there is no predecessor.
-
-When `previousContract` is set, also include `previousArtifact` with the previous
-contract's `compiler`, `sourceHash`, `bytecodeHash` and `aciHash`. These use the same
-formats as the current artifact. Mount that artifact and its deployment receipt
-using `SHORTS_PREVIOUS_CONTRACT_ARTIFACT` and `SHORTS_PREVIOUS_DEPLOYMENT_FILE`.
-The receipt, artifact and deployed code must agree with the pinned predecessor.
-Omit `previousArtifact` when `previousContract` is `null`.
+10,000 basis points. The canonical wire manifest contains `previousContract: null`.
 
 The website independently pins the **normalized** manifest using
 `VITE_SHORTS_RELEASE_HASH`. After building the API, calculate the public value
@@ -183,7 +162,7 @@ manifest. Editing an old paid-contract receipt cannot remove its charge.
 The compiler/source declarations, actual artifact bytecode and ACI hashes must
 agree with the manifest before node access.
 Startup then checks the node network, deployed bytecode, operator, treasury,
-fee/split and predecessor. The publisher repeats those chain checks before
+contract policy. The publisher repeats those chain checks before
 preparing a signature. A mismatch fails closed.
 
 The manifest is trusted deployment configuration, not a digital signature or
@@ -208,22 +187,16 @@ Manifest files must be ordinary files at absolute paths, at most 1 MiB; symlinks
 directories and pipes are rejected. Keep manifests mounted read-only and restart
 all roles together when changing the approved release.
 
-The loopback demo alone opens a local SQLite snapshot and encryption key. Hosted
-startup rejects a local data-directory setting or old import flags: finish the
-[offline migration](LEGACY-STORAGE.md) before removing those settings. A shared
-cutover record prevents startup after an incomplete legacy transfer.
+The loopback demo opens a local SQLite snapshot. Hosted roles use shared storage.
 On-chain history uses the shared MDW plugin pipeline and PostgreSQL. Hosted content
 and wallet sessions, upload/preparation jobs, analytics/privacy and playback dispatch
 also use PostgreSQL. [Transaction activity history](RECEIPTS.md) uses PostgreSQL
-with an explicit import for existing local receipts. Private uploaded media uses
+for the active contract. Private uploaded media uses
 encrypted S3; hosted content without private shared references blocks startup.
 Configure [shared request limits](RATE-LIMITS.md): hosted instances require the same
 `SHORTS_RATE_KEY_FILE`, the normal Redis connection and explicit `TRUST_PROXY`
 addresses/ranges (or no proxy trust for direct access). These guards protect all
 Shorts HTTP routes before controller work and multipart allocation.
-Apply all API migrations through `1791849600000-ProductionRuntimeSchema`. The trusted API role
-needs SELECT on `shorts_legacy_cutovers`; only the offline migrator needs writes.
-Do not grant these records to media-worker or publisher logins.
 Run the normal API migrations before enabling Shorts. The Shorts migrations create
 `shorts_chain_events` and `shorts_index_backfill`, then add durable block coverage,
 shared content/preparation tables and scoped authentication tables.
@@ -275,7 +248,7 @@ are not interrupted or automatically resubmitted by this deadline. These control
 bound the process queue; they do not replace ingress limits, upload concurrency
 controls, the durable preparation queue or shared transactional storage for scaling.
 
-Upload admission runs before multipart parsing on legacy uploads and chunk parts;
+Upload admission runs before multipart parsing on multipart uploads and chunk parts;
 resumable finish shares the same request capacity. `SHORTS_CONCURRENT_UPLOADS`
 defaults to 2 per API process (range 1–8). Hosted APIs also share
 `SHORTS_SHARED_CONCURRENT_UPLOADS` through Redis (default 4, range 1–64), with at
@@ -296,7 +269,7 @@ already accepted background jobs. See [shared admission operations](RATE-LIMITS.
 
 ### Resumable preparation
 
-`POST /api/shorts/uploads/:id/finish` and the legacy multipart `POST /api/shorts/upload`
+`POST /api/shorts/uploads/:id/finish` and the multipart `POST /api/shorts/upload`
 return HTTP **202** with an upload status, not a prepared video. Poll the authenticated
 `GET /api/shorts/uploads/:id` using the returned ID:
 
@@ -452,7 +425,7 @@ waits for the normal BullMQ lease recovery. It decodes the resulting signed HLS
 with FFmpeg and checks a cold origin restart without a worker or retranscoding.
 Allow several minutes; the worker's 60-second lock is not shortened.
 
-Set `SHORTS_TEST_ASSEMBLED_ORIGINAL=1` to exercise the original-file format with
+The assembled test exercises the original-file format with
 a generated portrait 1080p60 clip and stereo audio. This path verifies the exact
 original bytes from their file CID, adaptive video/audio tracks, durable HLS
 acknowledgement, signed asset ranges and recovery. With the edge enabled it also
@@ -481,7 +454,7 @@ actual upload decoder against generated boundary files: 4K/60 fps, 240 fps,
 10-bit HEVC, odd dimensions, phone rotation, duration limits and corrupt or
 truncated input. It checks the normalized output and temporary-file cleanup.
 After `npm run build`, use `SHORTS_TEST_COMPILED=1 node --test
-src/shorts/shorts-encoding.test.cjs` to exercise compiled services without a
+src/shorts/shorts-rendition-encoding.test.cjs` to exercise compiled services without a
 TypeScript loader. Run that command in the intended worker image under its
 resource quotas as well; a host run alone does not validate container capacity.
 All clips are synthetic. This check does not load the complete worker, storage
@@ -542,8 +515,7 @@ The container test is opt-in and requires the following fixture configuration:
 | `SHORTS_TEST_S3_ACCESS_KEY`, `SHORTS_TEST_S3_SECRET_KEY` | Credentials for that disposable S3 store |
 | `SHORTS_TEST_WORKER_CA_FILE` | Absolute path to the fixture CA certificate, trusted by both HTTPS fixture endpoints |
 | `SHORTS_TEST_MODERATION_TOKEN_FILE` | Absolute path to the fixture scanner token; the real, ready scanner is reachable at `https://moderation:8443` |
-| `SHORTS_TEST_WORKER_PROFILE` | `legacy` (default) or `original` |
-| `SHORTS_TEST_WORKER_ORIGINAL_FIXTURES` | Required for `original`: absolute directory containing the two owned/generated MP4 fixtures described below |
+| `SHORTS_TEST_WORKER_ORIGINAL_FIXTURES` | Absolute directory containing the two owned/generated MP4 fixtures described below |
 | `SHORTS_TEST_WORKER_HDR_FIXTURE` | Optional with `original`: absolute path to the maximum-duration 4K PQ HDR fixture described below |
 | `SHORTS_TEST_WORKER_HDR_FRAME_RATE` | Optional with the HDR fixture: `30` (default) or `60`, matching its actual cadence |
 
@@ -556,14 +528,7 @@ Docker, host FFmpeg and development dependencies are required by the test runner
 
 It starts `node dist/shorts/worker-main` with the real production configuration,
 restricted SQL role, encrypted S3 objects and no Nest provider overrides. Worker
-containers have two CPUs, 96 tasks and a read-only root. The default legacy profile
-uses 1 GiB memory with no additional swap and 512 MiB scratch tmpfs. Generated 4K/60 fps and 60-second sources exercise
-scanning, encoding, SIGTERM and replacement recovery under the normal 120-second
-lease. Results must remain private and unapproved. The test removes only its own
-workers, secret volume, bucket, schema, role and temporary files; the fixture owner
-must stop the dependency services afterwards. Allow seven minutes for this profile.
-
-The `original` profile uses 2 GiB memory with no additional swap and a 1 GiB scratch
+containers have two CPUs, 96 tasks, a read-only root, 2 GiB memory with no additional swap and a 1 GiB scratch
 tmpfs. Supply `landscape4k60.mp4` (four seconds, 3840×2160, constant 60 fps) and
 `portrait60-maxbytes.mp4` (60 seconds, 1080×1920, constant 60 fps, exactly
 100,000,000 bytes). Both must be valid SDR MP4 files; a valid MP4 `free` box may
@@ -707,52 +672,6 @@ journeys use synthetic media and do not prove external wallets, production CSP
 or a native device. Browser and Vite
 processes are closed with the other owned fixtures.
 
-### Moving existing content to PostgreSQL
-
-Run the [offline legacy migration](LEGACY-STORAGE.md) with the old API stopped.
-It transfers content, private files, accepted uploads, analytics/privacy and receipt
-history with explicit checkpoints. Start hosted services only after it succeeds,
-with no local data directory or startup-import flags. Restart reads shared state;
-it never reloads the old snapshot or replays approval decisions. Keep the source
-backup until recovery and retention requirements permit deleting it.
-
-An imported record keeps its original review evidence; import does not grant approval.
-Do not switch a migrated hosted deployment back to the local demo: the old snapshot
-no longer contains current moderation decisions. Restore matched database/file backups
-only during a controlled outage, with the hosted feature disabled until verified.
-
-The repository scopes every read/write by network and contract, binds the source
-hash and admission limits, and rejects inconsistent instance configuration. Records
-have independent revisions. Use a locked synchronous `change` for metadata counters
-and decisions, or `replace` with the expected revision for results calculated outside
-the transaction. Scan responses also carry a generation: an older response cannot
-replace a newer scan or review decision. Publication and serving re-read decisions
-after network calls before continuing. Immutable media identity cannot change. Reads use cursor pagination
-with a maximum of 100 records; this is a storage API, not permission to serve private
-or unapproved records. Callers must enforce ownership and official content policy.
-
-Preparation admission is idempotent by deployment and upload ID. Accepted input is
-immutable, with global and creator limits checked under a shared database lock.
-Workers claim jobs with `SKIP LOCKED`, a unique token and increasing fence, using the
-database clock. Renew before the 1–300 second lease expires. Expired/replaced claims
-cannot heartbeat, fail or commit. Completion saves the private unapproved draft and
-ready status in one transaction. After an uncertain completion response, read job
-status rather than creating another ID. Failed jobs require explicit retry, with at
-most three attempts; queued work alone can be cancelled. An expired third attempt
-becomes failed when a worker next checks the queue.
-
-A job contains an opaque private object key and input hash, not a download URL or
-video bytes. The API uses the metadata repository directly. The separate worker
-uses the restricted database function and login enrollment documented in
-[private storage](PRIVATE-STORAGE.md); it receives no application-table grants.
-Never return job inputs, worker claim tokens or private object keys in public API
-responses. The metadata module does not provide storage, validate a chain deployment,
-perform moderation, sign transactions or enable mainnet.
-
-To exercise the repository against an isolated local PostgreSQL database, set
-`SHORTS_TEST_PG_URL` and run `npm run test:shorts:metadata`. The test uses its own
-random schema and removes it afterward; it refuses non-loopback database URLs.
-
 ## Shared sign-in and revocation
 
 Hosted wallet challenges and sessions use PostgreSQL via `ShortsSessionsService`.
@@ -790,12 +709,7 @@ It never forwards credentials from a different API environment. If the browser i
 offline or closes before logout reaches the server, the token remains valid until
 its server expiry; a failed background logout is not proof of server revocation.
 
-Run all API migrations before enabling the hosted feature. **Existing local sessions
-and challenges are not imported**: creators sign in again once after this upgrade.
-Never copy local demo tokens into the shared tables. A rollback to local authentication
-can revive an old token, so keep Shorts disabled while clearing old session/challenge
-rows under a controlled rollback. Do not change origins or deployments to bypass
-session scope checks. Verify with `npm run test:shorts:sessions` against a disposable
+Creators sign in to the active deployment. Verify with `npm run test:shorts:sessions` against a disposable
 loopback `SHORTS_TEST_PG_URL`; it uses a temporary schema and real wallet signatures.
 
 ## Run locally
@@ -820,7 +734,7 @@ Keep the original storage volume and verify its pin inventory before stopping an
 
 Watch without a wallet. Connect a wallet configured for æternity testnet and sign the one-time sign-in challenge to upload or open private creator information. Reporting needs no wallet. Use the official testnet faucet to fund your own test wallet. Signing in does not transfer tokens.
 
-Upload an owned MP4/MOV clip (2–60 seconds, 40 MiB input maximum), title, topic, language, optional description/WebVTT captions, disclosures and rights confirmation. The web client sends resumable 1 MiB parts with an authenticated, 24-hour upload session. Both multipart upload routes authenticate before reading file bodies. Parts are encrypted, and the full SHA-256 is checked before preparation. Hosted uploads use private S3 and a separate media worker; the standalone local demo uses its encrypted local adapter. Reselect the same file and details to resume. Completing a session is idempotent. The preparation worker rejects decoding errors, limits decoder/filter/encoder threads independently, and produces a single 540×960 MP4, poster and manifest, and measures the exact package bytes. Drafts remain private until review approval and an explicit Publish request. Pending, failed, blocked and rejected decisions deny publication and official playback as well as discovery.
+Upload an owned MP4 or MOV clip lasting 2–60 seconds. The hosted API advertises the current byte limit and accepts resumable, authenticated 1 MiB parts in private S3 storage. The media worker verifies the original file hash and prepares adaptive renditions, a preview and a poster. Drafts require review approval and an explicit publish request. To exercise uploads locally, run the hosted API and media worker with local service dependencies.
 
 The standalone local adapter shares a persistent rolling-hour budget across its multipart and resumable uploads:
 10 attempts / 400 MiB per creator and 100 attempts / 4000 MiB across the instance.
@@ -856,8 +770,7 @@ transaction hash. It requires no extra signing challenge and cannot submit a pay
 - Startup verifies `ae_uat`, the configured operator, contract address and bytecode fingerprint.
 - Wallet sessions use random, single-use five-minute signature challenges and 30-minute bearer tokens. Only token hashes are stored. Hosted sessions and content survive restart in PostgreSQL; the standalone loopback demo uses SQLite WAL.
 - The worker retries pending publications every minute and at startup. Only an explicit publish request or a previously registered video creates that intent; private drafts never publish automatically.
-- Existing registered videos migrate from a verified previous contract without expiry. Previously withdrawn videos remain withdrawn. Old rewards stay claimable on the previous contract and are exposed separately; old hosting funds are left untouched in that immutable contract.
-- Hosted private source/prepared media uses AES-256-GCM with the configured S3 encryption key ring; the loopback demo and offline legacy backups retain their local key. Approved published IPFS packages are plaintext for public free viewing. Losing the relevant encryption key makes retained private files unrecoverable.
+- Hosted private source/prepared media uses AES-256-GCM with the configured S3 encryption key ring. Approved published IPFS packages are plaintext for public free viewing. Losing the relevant encryption key makes retained private files unrecoverable.
 - One offline Kubo node pins public packages. Playback verifies the returned bytes; the worker restores missing published pins from retained encrypted packages. Replication is not an API responsibility. The contract/CID and test transactions are public on testnet; the videos are not broadcast to the public IPFS swarm by this setup.
 - Publication verifies full package hashes; the separate streaming worker creates and pins HLS segments from the trusted IPFS source. Publication enqueues preparation through a durable outbox, which drops revoked jobs. Approved published videos remain available without a hosting deadline. Shared metadata, playback descriptors and analytics admission check current safety and canonical publication; denied items return 404 without public media metadata. The streaming service applies this permission to posters, captions, HLS and cache-hit authorization with a bounded status lifetime. Authenticated creator/operator preview remains available for review and appeals. Hosted recovery retains denied and withdrawn packages pending a reference-aware retention workflow, and never repairs or republishes denied content. Uncertain publication outcomes use the existing journal rather than a replacement signature. The local reconciler preserves shared CIDs and uncertain submissions before unpinning. Unpinning cannot erase cached/third-party copies or encrypted local source files.
 
@@ -920,9 +833,9 @@ rewritten by adoption. Explicit mainnet startup guards remain in place.
 ### Signature network binding
 
 Wallet transaction observations verify signatures in the release's network domain
-for Like, withdrawal and current/previous-contract claims, supporting both SDK hash
+for Like, withdrawal and current-contract claims, supporting both SDK hash
 signatures and legacy raw-byte signatures. The observer checks the live node network
-before and after reading; a changed release, selected node or predecessor invalidates
+before and after reading; a changed release, selected node invalidates
 the result, including pending and unknown transactions. It never submits transactions.
 
 Publication validation requires the deployment network explicitly when persisting or
@@ -999,7 +912,7 @@ are still required, and these metrics never determine rewards.
 
 Creator routes live under `/shorts/studio` with content, analytics, revenue, upload and per-video pages. `/performance?days=7|28|90&short=<optional-id>` requires a creator session and checks video ownership. Live reward balances are always separate from the selected reporting window. Every playback summary (current, previous, daily and per-video) exposes `views`, `watchSeconds`, `watchHours`, `averageSeconds` and `completion`. `watchHours = watchSeconds / 3600` is returned without presentation rounding. Only qualified views contribute watch time; repeated segments are excluded, capped at one clip duration per browser/Short/UTC day. These are reporting-window totals, with up to 90 days of retained measurements.
 
-Playback is counted automatically without an opt-in control, including for guests. Playback sends cumulative unique playback time after at least two seconds. Authenticated observations below that threshold do not allocate persistent viewer or playback records. The signed streaming-session timestamp anchors the first qualifying update, clipped to the current UTC day. The browser merges watched intervals and excludes repeated segments, seeks, paused, buffered and background playback; the server bounds reports by clip duration, authorized segment delivery and elapsed server time. The hosted API stores a salted browser identifier in PostgreSQL, never a wallet address, for up to 90 days. The loopback demo uses SQLite. A view requires two seconds; repeated loops are capped at clip duration and deduplicated per browser/Short/UTC day. Reach is distinct browsers within the requested creator scope. Source breakdowns need five browsers. Reports mark partial collection windows, including prior periods beyond retention, and never invent historical watch time. `/analytics/forget` removes the current browser's retained measurements and subtracts their qualified views. A salted revocation digest expires after 24 hours to reject late requests from that deleted session. Public `views` and Studio reports use the same qualified events. Anonymous lifetime view totals survive the 90-day expiry of browser records; only retained records can be removed by browser deletion. Existing qualified analytics rows migrate once, while legacy unmeasured preview views are excluded. The legacy `/:id/view` endpoint now only reads counters. These controls do not provide Sybil resistance.
+Playback is counted automatically without an opt-in control, including for guests. Playback sends cumulative unique playback time after at least two seconds. Authenticated observations below that threshold do not allocate persistent viewer or playback records. The signed streaming-session timestamp anchors the first qualifying update, clipped to the current UTC day. The browser merges watched intervals and excludes repeated segments, seeks, paused, buffered and background playback; the server bounds reports by clip duration, authorized segment delivery and elapsed server time. The hosted API stores a salted browser identifier in PostgreSQL, never a wallet address, for up to 90 days. The loopback demo uses SQLite. A view requires two seconds; repeated loops are capped at clip duration and deduplicated per browser/Short/UTC day. Reach is distinct browsers within the requested creator scope. Source breakdowns need five browsers. Reports mark partial collection windows, including prior periods beyond retention, and never invent historical watch time. `/analytics/forget` removes the current browser's retained measurements and subtracts their qualified views. A salted revocation digest expires after 24 hours to reject late requests from that deleted session. Public `views` and Studio reports use the same qualified events. Anonymous lifetime view totals survive the 90-day expiry of browser records; only retained records can be removed by browser deletion. The legacy `/:id/view` endpoint now only reads counters. These controls do not provide Sybil resistance.
 
 For You receives a bounded engagement score from the last seven days: 70% watched fraction and 30% completion, averaged per browser before aggregation. Scores stay neutral below five distinct browsers and use twenty neutral prior browsers to temper small samples. The web client combines this with interests, follows, freshness and creator diversity. Recent stays chronological. Likes, rewards and wallet balances never influence engagement scoring.
 
@@ -1051,7 +964,7 @@ SHORTS_TEST_PG_URL=postgres://postgres@127.0.0.1:55439/postgres npm run test:sho
 ```
 
 The suite creates and removes a unique schema. It covers duplicate delivery,
-rollback, previous-contract earnings, reorg deletion, version replay, interrupted
+rollback, reorg deletion, version replay, interrupted
 backfill and aggregate totals beyond the old history limit.
 
 
@@ -1085,20 +998,9 @@ Missing, failed or blocked scans deny publication, pin repair, direct-link playb
 
 Sampled frames can miss brief content, and model scores have false positives/negatives. Initial thresholds require representative evaluation; this does not certify a pornography-free service or detect every illegal category. The model service has no signing, publication or IPFS authority.
 
-## Upgrading the loopback demo contract
-
-The following contract migration applies only to the standalone loopback demo.
-Moving its existing deployment into the hosted API uses the separate
-[offline storage migration](LEGACY-STORAGE.md); that command does not change
-contracts or publish content.
-
-Back up the SQLite database, previous artifact and deployment receipt before switching. Deploy the contract with `SHORTS_PREVIOUS_CONTRACT` set to the previous address. Point `SHORTS_DEPLOYMENT_FILE` and `SHORTS_CONTRACT_ARTIFACT` to the new deployment/artifact, and supply `SHORTS_PREVIOUS_DEPLOYMENT_FILE` plus `SHORTS_PREVIOUS_CONTRACT_ARTIFACT` for the verified old deployment. These paths and private keys stay outside Git.
-
-Startup verifies both contracts, imports only records already registered on the old contract, and queues operator-funded publication. A stored registry for an unrelated contract is rejected. Prior Like counts and duplicate-Like protection carry forward. The event index reads verified Like/claim events from both contracts; Studio shows the earlier claimable balance separately. No hosting funds or rewards are moved by migration.
-
 ## Separate public playback
 
-Public media is delivered by `superhero-video-streaming`, not this API. Start that repository with `make start`. Feed/Studio records return IDs, metadata and a `captions` boolean; they no longer return API media URLs. `GET /api/shorts/playback/:id` returns only the published CID and allowlisted file names/sizes/hashes. It checks the current on-chain owner, CID, byte count and withdrawal state, and never exposes a draft. Both feed discovery and direct-link playback require current content approval; publication alone never bypasses screening or a restriction. The old `/media/:id/:file` route returns 410. Private authenticated review previews and upload-time full-file IPFS verification remain in this module. Testnet lifecycle tests use `SHORTS_STREAM_URL` (default `http://127.0.0.1:3335`) for playback. The service provides expiring HLS playlists and segments; its former full-MP4 route returns 410. It prepares existing videos without changing their contract CID. Original and prepared HLS packages are pinned in IPFS. Playback caches are disposable; eviction does not require transcoding again. Configure SHORTS_STREAM_INTERNAL_URL and SHORTS_STREAM_KEY_FILE for the private authenticated preparation endpoint. The hosted [PostgreSQL publication outbox](STREAMING-OUTBOX.md) commits preparation jobs with content publication, retries failed delivery and recovers expired dispatcher claims. The migration seeds existing published records; the local demo retains its SQLite outbox. The streaming service caches publication descriptors for a fixed 15 seconds by default; withdrawal can take that long to reach playback, including edge cache hits. SHORTS_STREAM_URL remains the test client’s public playback URL.
+Public media is delivered by `superhero-video-streaming`, not this API. Start that repository with `make start`. Feed/Studio records return IDs, metadata and a `captions` boolean; they no longer return API media URLs. `GET /api/shorts/playback/:id` returns only the published CID and allowlisted file names/sizes/hashes. It checks the current on-chain owner, CID, byte count and withdrawal state, and never exposes a draft. Both feed discovery and direct-link playback require current content approval; publication alone never bypasses screening or a restriction. The old `/media/:id/:file` route returns 410. Private authenticated review previews and upload-time full-file IPFS verification remain in this module. Testnet lifecycle tests use `SHORTS_STREAM_URL` (default `http://127.0.0.1:3335`) for playback. The service provides expiring HLS playlists and segments; its former full-MP4 route returns 410. It prepares existing videos without changing their contract CID. Original and prepared HLS packages are pinned in IPFS. Playback caches are disposable; eviction does not require transcoding again. Configure SHORTS_STREAM_INTERNAL_URL and SHORTS_STREAM_KEY_FILE for the private authenticated preparation endpoint. The hosted [PostgreSQL publication outbox](STREAMING-OUTBOX.md) commits preparation jobs with content publication, retries failed delivery and recovers expired dispatcher claims. The local demo uses its SQLite outbox. The streaming service caches publication descriptors for a fixed 15 seconds by default; withdrawal can take that long to reach playback, including edge cache hits. SHORTS_STREAM_URL remains the test client’s public playback URL.
 
 ## Isolated hosted publication
 
@@ -1138,4 +1040,4 @@ rollout/rollback and the separate infrastructure and HTTP-ingress limits.
 [IPFS pin and capacity inventory](PIN-INVENTORY.md) records physical pin observations
 and compares them with original/HLS references using a separate read-only storage key.
 
-Current free-contract account responses use zero current rewards without calling removed accounting getters. Verified earlier reward contracts remain separate and keep their existing claim paths. Historical withdrawal markers continue to govern playback and migration; the current contract does not expose withdrawal.
+The fresh contract supports free Likes. Account responses report zero rewards.

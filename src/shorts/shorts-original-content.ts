@@ -55,7 +55,7 @@ export function derivedFileCid(
   short: Pick<ShortRecord, 'cid' | 'derivatives'>,
   name: string,
 ) {
-  if (!short.derivatives) return short.cid;
+  if (!short.derivatives) throw new Error('Missing adaptive derivatives');
   if ((SHORTS_ASSET_NAMES as readonly string[]).includes(name))
     return short.derivatives.assetsCid;
   if ((SHORTS_INPUT_NAMES as readonly string[]).includes(name))
@@ -65,10 +65,7 @@ export function derivedFileCid(
 const cidPattern = /^b[a-z2-7]{20,118}$/;
 const shaPattern = /^[a-f0-9]{64}$/;
 
-/** New records bind original identity and separate prepared delivery; legacy records remain distinct. */
 export function validateOriginalContent(short: ShortRecord) {
-  if (short.original === undefined && short.derivatives === undefined)
-    return false;
   const original = short.original,
     delivery = short.derivatives;
   if (

@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsOriginalUploads: Migration,
 } = schemaMigrations;
@@ -49,8 +49,8 @@ test('original upload migration, frozen admission, 96 direct parts, enqueue and 
   const enabled = new ShortsUploadPolicyService({ originals: true, maxOriginalBytes: 100000000 });
   const input = enabled.accept({ bytes: 100000000, sha256: sha, title: 'Original', topic: 'Art', rights: true, details: {} }, policy);
   await records.create(scope, 'original', creator, input);
-  const disabled = new ShortsUploadPolicyService(shortsUploadPolicyConfig({}));
-  assert.throws(() => disabled.accept(input, policy), { status: 400 });
+  const reduced = new ShortsUploadPolicyService(shortsUploadPolicyConfig({ SHORTS_ORIGINAL_UPLOAD_MAX_BYTES: '1000' }));
+  assert.throws(() => reduced.accept(input, policy), { status: 400 });
   assert.equal(shortsAcceptedSource((await records.get(scope, 'original', creator)).input).maxBytes, 100000000);
   for (let index = 0; index < 96; index++) {
     const object = { key: `${'a'.repeat(402)}${String(index).padStart(3, '0')}/${'a'.repeat(32)}/${sha}`, keyId: 'a'.repeat(32), bytes: Math.min(1048576, input.bytes - index * 1048576), sha256: sha };

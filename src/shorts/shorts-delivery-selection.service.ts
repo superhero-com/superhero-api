@@ -125,7 +125,7 @@ export class ShortsDeliverySelectionService {
       throw new NotFoundException('Delivery generation is unavailable');
     if (record.id !== original.id) assertDeliveryEligible(original, record);
     const descriptor = {
-      ...shortsPlaybackDescriptor(record, scope, original),
+      ...shortsPlaybackDescriptor(record, scope),
       id: original.id,
     };
     if (

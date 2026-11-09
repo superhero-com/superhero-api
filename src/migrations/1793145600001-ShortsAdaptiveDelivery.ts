@@ -14,13 +14,12 @@ async function shortsOriginalContentBoundary(
     ],
     [
       'AND attempts<3 AND ((status=',
-      `AND (input->>'processingProfile' IS NULL OR (input->>'processingProfile'='original-h264-v1' AND payload->'mediaProtocol'='2'::jsonb))
+      `AND (input->>'processingProfile'='original-h264-v1' AND payload->'mediaProtocol'='2'::jsonb)
             AND attempts<3 AND ((status=`,
     ],
     [
       "output=payload->'record';",
       `output=payload->'record';
-      IF job.input ? 'processingProfile' THEN
         IF job.input->>'processingProfile' IS DISTINCT FROM 'original-h264-v1'
           OR NOT (output ? 'original') OR NOT (output ? 'derivatives')
           OR output->'bytes' IS DISTINCT FROM job.input->'bytes'
@@ -29,14 +28,11 @@ async function shortsOriginalContentBoundary(
           OR output->'original'->'sha256' IS DISTINCT FROM job.input->'sha256' THEN
           RAISE EXCEPTION 'Prepared original differs from accepted upload' USING ERRCODE='SH400';
         END IF;
-        PERFORM ${s}.shorts_validate_original(output);
-      ELSIF output ? 'original' OR output ? 'derivatives' THEN
-        RAISE EXCEPTION 'Legacy job cannot change content format' USING ERRCODE='SH400';
-      END IF;`,
+        PERFORM ${s}.shorts_validate_original(output);`,
     ],
     [
       "(output->>'bytes')::bigint NOT BETWEEN 1 AND 67108864",
-      "(output->>'bytes')::numeric NOT BETWEEN 1 AND (CASE WHEN output ? 'original' THEN 100000000 ELSE 67108864 END)",
+      "(output->>'bytes')::numeric NOT BETWEEN 1 AND 100000000",
     ],
     [
       "IF jsonb_array_length(output->'files') NOT BETWEEN 3 AND 4 THEN",
@@ -48,7 +44,7 @@ async function shortsOriginalContentBoundary(
     ],
     [
       "(file->>'bytes')::bigint NOT BETWEEN 1 AND 67108864",
-      "(file->>'bytes')::numeric NOT BETWEEN 1 AND (CASE WHEN output ? 'original' THEN 100000000 ELSE 67108864 END)",
+      "(file->>'bytes')::numeric NOT BETWEEN 1 AND 100000000",
     ],
     [
       "file_total<>(output->>'bytes')::bigint",
@@ -212,9 +208,9 @@ ${oldGuard}`;
 }
 
 export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
-  readonly changes = {
-    /** Versioned original-file identity; legacy directory records keep their existing meaning. */
-    ShortsOriginalContent1793145600000: {
+  readonly steps = {
+    /** Require an immutable original and its adaptive derivatives. */
+    ShortsOriginalContent: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -227,7 +223,6 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
         file jsonb; video jsonb; rate text[]; fps numeric; total numeric=0; asset_total numeric=0;
         names text[]=ARRAY[]::text[]; videos text[]=ARRAY[]::text[];
       BEGIN
-        IF NOT (content ? 'original' OR content ? 'derivatives') THEN RETURN; END IF;
         IF jsonb_typeof(original) IS DISTINCT FROM 'object' OR jsonb_typeof(delivery) IS DISTINCT FROM 'object'
           OR original->'version' IS DISTINCT FROM '1'::jsonb OR original->>'sha256' IS NULL OR original->>'sha256' !~ '^[a-f0-9]{64}$'
           OR original->>'mediaType' IS NULL OR original->>'mediaType' NOT IN ('video/mp4','video/quicktime')
@@ -333,21 +328,20 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
       },
     },
 
-    ShortsAdaptiveInventory1793145601000: {
+    ShortsAdaptiveInventory: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`
-      ALTER TABLE shorts_hls_inventory_runs ADD COLUMN reference_version smallint NOT NULL DEFAULT 1
-        CHECK(reference_version IN (1,2,3,4,5));
+      ALTER TABLE shorts_hls_inventory_runs ADD COLUMN reference_version smallint NOT NULL DEFAULT 5 CHECK(reference_version=5);
       ALTER TABLE shorts_hls_inventory_roots ADD COLUMN pins jsonb NOT NULL DEFAULT '[]'
         CHECK(jsonb_typeof(pins)='array' AND jsonb_array_length(pins)<=64);
       CREATE INDEX shorts_hls_inventory_root_pins ON shorts_hls_inventory_roots USING gin(pins jsonb_path_ops);
-      ALTER TABLE shorts_hls_inventory_entries ADD COLUMN version smallint NOT NULL DEFAULT 2 CHECK(version IN (2,3));
+      ALTER TABLE shorts_hls_inventory_entries ADD COLUMN version smallint NOT NULL DEFAULT 3 CHECK(version=3);
       ALTER TABLE shorts_hls_inventory_entries DROP CONSTRAINT shorts_hls_inventory_entries_bytes_check;
       ALTER TABLE shorts_hls_inventory_entries DROP CONSTRAINT shorts_hls_inventory_entries_files_check;
       ALTER TABLE shorts_hls_inventory_entries ADD CONSTRAINT shorts_hls_inventory_entries_bytes_check
-        CHECK(bytes BETWEEN 1 AND CASE WHEN version=3 THEN 201326592 ELSE 100000000 END);
+        CHECK(bytes BETWEEN 1 AND 201326592);
       ALTER TABLE shorts_hls_inventory_entries ADD CONSTRAINT shorts_hls_inventory_entries_files_check
-        CHECK(jsonb_typeof(files)='array' AND jsonb_array_length(files) BETWEEN 3 AND CASE WHEN version=3 THEN 256 ELSE 34 END);
+        CHECK(jsonb_typeof(files)='array' AND jsonb_array_length(files) BETWEEN 7 AND 256);
     `);
       },
       async down(db: QueryRunner): Promise<void> {
@@ -371,7 +365,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
     },
 
     /** Durable acknowledgements for the initial, immutable original-media generation. */
-    ShortsDeliveryPackages1793145602000: {
+    ShortsDeliveryPackages: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -446,7 +440,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
     },
 
     /** Reuse fenced media execution without creating another post for a replacement encode. */
-    ShortsDeliveryGenerations1793145603000: {
+    ShortsDeliveryGenerations: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -560,8 +554,8 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
       },
     },
 
-    /** File-backed renditions may exceed the legacy in-memory object ceiling. */
-    ShortsFileStorageReferences1793145604000: {
+    /** File-backed renditions may exceed the in-memory object ceiling. */
+    ShortsFileStorageReferences: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`ALTER TABLE shorts_storage_references
       DROP CONSTRAINT shorts_storage_references_bytes_check,
@@ -585,7 +579,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
     },
 
     /** Acknowledging a replacement never selects it for public playback. */
-    ShortsGenerationDeliveryPackages1793145605000: {
+    ShortsGenerationDeliveryPackages: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`ALTER TABLE shorts_delivery_packages
       DROP CONSTRAINT shorts_delivery_packages_network_contract_short_id_key,
@@ -611,7 +605,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
       },
     },
 
-    ShortsDeliveryStaging1793145606000: {
+    ShortsDeliveryStaging: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -693,7 +687,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
     },
 
     /** Append-only selection history; the canonical post is never rewritten. */
-    ShortsDeliverySelection1793145607000: {
+    ShortsDeliverySelection: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',
@@ -805,7 +799,7 @@ export class ShortsAdaptiveDelivery1793145600001 extends FeatureMigration {
     },
 
     /** Retires a generation's processing inputs, never its original or delivery. */
-    ShortsDeliveryInputRetirement1793145608000: {
+    ShortsDeliveryInputRetirement: {
       async up(db: QueryRunner): Promise<void> {
         const [{ schema }] = await db.query(
           'SELECT current_schema() AS schema',

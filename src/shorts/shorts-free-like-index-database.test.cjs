@@ -5,8 +5,7 @@ const {
   ShortsAnalytics,
   ShortsStudio,
   ShortsReceipts,
-  ShortsImportSnapshot,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,7 +23,7 @@ const { ShortsPluginSyncService } = require('../plugins/shorts/shorts-plugin-syn
 
 // No node, wallet or signing key is used. RPC canonicality is controlled, while
 // ABI decoding, middleware normalization, SQL transactions and Studio reads are real.
-test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studio counts', {
+test('sponsored free Like: PostgreSQL replay, orphan recovery and current-contract Studio counts', {
   skip: !process.env.SHORTS_TEST_PG_URL, timeout: 90000,
 }, async t => {
   const url = new URL(process.env.SHORTS_TEST_PG_URL);
@@ -46,14 +45,14 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
   const runner = { query: (...args) => db.query(...args) };
   for (const Migration of [ShortsChainIndex, ShortsCoverage,
     ShortsMetadata, ShortsAnalytics, ShortsStudio,
-    ShortsReceipts, ShortsImportSnapshot]) await new Migration().up(runner);
+    ShortsReceipts]) await new Migration().up(runner);
 
   const encoded = (value, type) => encode(Buffer.alloc(32, value), type);
   const current = encoded(1, Encoding.ContractAddress), old = encoded(2, Encoding.ContractAddress);
   const actor = encoded(3, Encoding.AccountAddress), payer = encoded(4, Encoding.AccountAddress);
   const creator = encoded(5, Encoding.AccountAddress), outerHash = encoded(6, Encoding.TxHash);
   const micro = encoded(7, Encoding.MicroBlockHash), replacement = encoded(8, Encoding.MicroBlockHash);
-  const sourceHash = 'a'.repeat(64), id = 'imported-video';
+  const sourceHash = 'a'.repeat(64), id = 'published-video';
   const paidV2 = encoded(12, Encoding.ContractAddress), artifacts = new Map();
   function abiContract(address, eventName, version) {
     const aci = [{ contract: { name: 'Shorts', kind: 'contract_main',
@@ -70,22 +69,14 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     };
     return contract;
   }
-  const contract = abiContract(current, 'Liked', 2), previous = abiContract(old, 'PaidLike', 1);
-  const paidPrevious = abiContract(paidV2, 'PaidLike', 2);
-  const chain = { contract, state: { contract: current, sourceHash },
-    release: { schemaVersion: 2, network: 'ae_uat', contract: current, sourceHash,
-      storage: { contract: old, sourceHash } }, rewardContracts: () => [previous, paidPrevious].map(contract => ({ contract, artifact: artifacts.get(contract.$options.address) })) };
+  const contract = abiContract(current, 'Liked', 2);
+  const chain = { contract, state: { contract: current, sourceHash }, release: { schemaVersion: 2, network: 'ae_uat', contract: current, sourceHash } };
   const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain));
   const studio = new ShortsStudioReadService(db, chain, index), metadata = new ShortsMetadataService(db);
   for (const address of [old, current]) await metadata.initialize({ network: 'ae_uat', contract: address }, sourceHash);
   await db.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)',
-    ['ae_uat', old, id, creator, JSON.stringify({ id, creator, createdAt: 1, title: 'Fixture', publication: 'published' })]);
-  await db.query('INSERT INTO shorts_import_snapshots(network,contract,source,cutoff_hash,cutoff_height,digest,videos,likes) VALUES($1,$2,$3,$4,4,$5,1,7)',
-    ['ae_uat', current, old, encoded(9, Encoding.KeyBlockHash), 'b'.repeat(64)]);
-  await db.query('INSERT INTO shorts_import_videos VALUES($1,$2,$3,7,false)', ['ae_uat', current, id]);
-  await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$3,true,9),($2,$3,true,100)',
-    [current, old, SHORTS_INDEX_VERSION]);
-  await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,100)', [paidV2, SHORTS_INDEX_VERSION]);
+    ['ae_uat', current, id, creator, JSON.stringify({ id, creator, createdAt: 1, title: 'Fixture', publication: 'published' })]);
+  await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,9)', [current, SHORTS_INDEX_VERSION]);
   const integer = bytes => BigInt(`0x${Buffer.from(bytes).toString('hex')}`).toString();
   function log(address, name, amount) {
     return { address, topics: [integer(hash(Buffer.from(name))), integer(decode(actor)), String(amount)],
@@ -119,35 +110,8 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
   const paid = toMdwTx(camelcaseKeysDeep({ hash: encoded(10, Encoding.TxHash), block_height: 5,
     block_hash: 'mh_old', micro_time: 86400000, signatures: [], tx: { type: 'ContractCallTx',
       caller_id: actor, contract_id: old, function: 'paid_like', return_type: 'ok', log: [log(old, 'PaidLike', 17)] } }));
-  await repo.save(paid); await processor.processTransaction(paid, 'backward');
+  await assert.rejects(processor.processTransaction(paid, 'backward'), /Unrecognized Shorts contract/);
 
-  await t.test('paid V2 predecessor uses its own getter/event positions and repairs an older projection', async () => {
-    const paidLog = log(paidV2, 'PaidLike', 23); paidLog.topics.push('0');
-    const publicationLog = log(paidV2, 'Published', 0); publicationLog.topics[1] = integer(decode(creator));
-    for (const [n, event, method] of [[13, paidLog, 'paid_like'], [14, publicationLog, 'publish']]) {
-      const row = toMdwTx(camelcaseKeysDeep({ hash: encoded(n, Encoding.TxHash), block_height: 5,
-        block_hash: 'mh_old', micro_time: 86400001, signatures: [], tx: { type: 'ContractCallTx',
-          caller_id: actor, contract_id: paidV2, function: method, return_type: 'ok', log: [event] } }));
-      row.data = { shorts: { _version: 3 }, unrelated: { preserved: true } }; await repo.save(row);
-      if (method === 'publish') await db.query('INSERT INTO shorts_chain_events VALUES($1,$2,0,5,86400001,$3,$4,$5,0,$6)',
-        [paidV2, row.hash, 'Published', actor, creator, '0']);
-    }
-    const { ShortsPlugin } = require('../plugins/shorts/shorts.plugin');
-    const plugin = new ShortsPlugin(repo, {}, processor, index, { changed: async () => {} }, { run: async () => {} });
-    try {
-      const pending = await plugin.getUpdateQueries(SHORTS_INDEX_VERSION)[0](repo, 100);
-      assert.deepEqual(pending.map(row => row.hash).sort(), [encoded(13, Encoding.TxHash), encoded(14, Encoding.TxHash)].sort());
-      await plugin.updateTransactions();
-    } finally { plugin.onModuleDestroy(); }
-    const rows = await db.query('SELECT action,short_id,amount::text,beneficiary FROM shorts_chain_events WHERE contract=$1 ORDER BY action', [paidV2]);
-    assert.deepEqual(rows, [{ action: 'PaidLike', short_id: id, amount: '23', beneficiary: creator },
-      { action: 'Published', short_id: id, amount: '0', beneficiary: creator }]);
-    for (const n of [13,14]) {
-      const row = await repo.findOneByOrFail({ hash: encoded(n, Encoding.TxHash) });
-      assert.equal(row.data.shorts._version, SHORTS_INDEX_VERSION); assert.equal(row.data.unrelated.preserved, true);
-    }
-    assert.equal((await readStudio()).likes, 7, 'historical paid Likes do not add to imported baseline');
-  });
   await t.test('real event decoding and duplicate backfill preserve outer identity and three confirmations', async () => {
     await backfill().run(11, () => false);
     const row = await repo.findOneByOrFail({ hash: outerHash });
@@ -155,25 +119,24 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     await processor.processTransaction(row, 'live'); await processor.processTransaction(row, 'backward');
     assert.deepEqual(await events(), [{ tx_hash: outerHash, log_index: 0, block_height: 10,
       action: 'Liked', actor, beneficiary: creator, amount: '0' }]);
-    assert.equal((await readStudio()).likes, 7, 'two-confirmation Like is not included');
-    await tip(12); assert.equal((await readStudio()).likes, 8);
+    assert.equal((await readStudio()).likes, 0, 'two-confirmation Like is not included');
+    await tip(12); assert.equal((await readStudio()).likes, 1);
     const ledger = await index.report(creator, 0, 172800000);
-    assert.equal(ledger.paidLikes, 2); assert.equal(ledger.earned, '0.00000000000000004');
+    assert.equal(ledger.paidLikes, 0); assert.equal(ledger.earned, '0');
     assert.equal(ledger.entries.find(entry => entry.action === 'Liked').amount, '0');
   });
   await t.test('orphan removal cascades; stale middleware cannot restore it; same envelope re-includes once', async () => {
     await repo.delete({ hash: outerHash }); await index.removed([outerHash]);
     canonical.set(10, []); await rewindCoverage();
-    assert.deepEqual(await events(), []); assert.equal((await readStudio()).likes, 7);
+    assert.deepEqual(await events(), []); assert.equal((await readStudio()).likes, 0);
     await assert.rejects(backfill().run(12, () => false), /reorganizing/);
     assert.equal((await coverage()).complete, false); assert.deepEqual(await events(), []);
     assert.equal(await repo.findOneBy({ hash: outerHash }), null);
     raw.block_height = 11; raw.block_hash = replacement;
     await backfill().run(12, () => false); await backfill().run(12, () => false);
     assert.equal((await events()).length, 1); assert.equal((await events())[0].block_height, 11);
-    assert.equal((await readStudio()).likes, 7);
-    await tip(13); assert.equal((await readStudio()).likes, 8);
-    assert.equal((await db.query('SELECT likes::text FROM shorts_import_videos'))[0].likes, '7');
+    assert.equal((await readStudio()).likes, 0);
+    await tip(13); assert.equal((await readStudio()).likes, 1);
   });
   await t.test('failed projection leaves coverage incomplete and a fresh backfill resumes exact identity', async () => {
     await repo.delete({ hash: outerHash }); await rewindCoverage();
@@ -185,7 +148,7 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     await db.query('ALTER TABLE shorts_chain_events DROP CONSTRAINT injected_failure');
     await backfill().run(12, () => false);
     assert.equal((await coverage()).complete, true); assert.equal((await events()).length, 1);
-    assert.equal((await readStudio()).likes, 8);
+    assert.equal((await readStudio()).likes, 1);
   });
   await t.test('a canonical row changing during creator lookup cannot commit a stale projection', async () => {
     await repo.delete({ hash: outerHash });
@@ -200,16 +163,16 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     assert.equal((await repo.findOneByOrFail({ hash: outerHash })).data, null);
     await repo.update({ hash: outerHash }, { block_hash: replacement });
     await processor.processTransaction(await repo.findOneByOrFail({ hash: outerHash }), 'backward');
-    assert.equal((await events()).length, 1); assert.equal((await readStudio()).likes, 8);
+    assert.equal((await events()).length, 1); assert.equal((await readStudio()).likes, 1);
   });
-  await t.test('reverted sponsored calls have no Like projection or imported-count change', async () => {
+  await t.test('reverted sponsored calls preserve the confirmed Like count', async () => {
     const failed = structuredClone(raw); failed.hash = encoded(11, Encoding.TxHash);
     failed.tx.tx.tx.return_type = 'revert';
     const row = toMdwTx(camelcaseKeysDeep(failed)); await repo.save(row);
     await processor.processTransaction(row, 'live');
-    assert.equal((await events()).length, 1); assert.equal((await readStudio()).likes, 8);
+    assert.equal((await events()).length, 1); assert.equal((await readStudio()).likes, 1);
     assert.equal((await repo.findOneByOrFail({ hash: failed.hash })).data.shorts._version, SHORTS_INDEX_VERSION);
-    assert.equal((await index.report(creator, 0, 172800000)).paidLikes, 2);
+    assert.equal((await index.report(creator, 0, 172800000)).paidLikes, 0);
   });
   await t.test('health detects unprocessed direct, both sponsored shapes and namespaced indirect calls', async () => {
     await tip(13);
@@ -218,7 +181,6 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     const indirect = encoded(21, Encoding.ContractAddress);
     const candidates = [
       { type: 'ContractCallTx', contract_id: current, raw: {} },
-      { type: 'ContractCallTx', contract_id: paidV2, raw: {} },
       { type: 'PayingForTx', contract_id: null, raw: { type: 'PayingForTx', tx: { tx: { type: 'ContractCallTx', contractId: current } } } },
       { type: 'PayingForTx', contract_id: null, raw: { type: 'PayingForTx', tx: { type: 'ContractCallTx', contractId: current } } },
       { type: 'ContractCallTx', contract_id: indirect, raw: {}, data: { shorts: { _version: SHORTS_INDEX_VERSION - 1 } } },

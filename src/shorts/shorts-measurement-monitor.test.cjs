@@ -41,7 +41,7 @@ test('operator-only HTTP telemetry classifies real proof/controller and guard ou
   const { ShortsController } = require('./shorts.controller');
   const { ShortsService } = require('./shorts.service');
   const { ShortsAuthService } = require('./shorts-auth.service');
-  const { ShortsUploadsService } = require('./shorts-uploads.service');
+  const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
   const { ShortsRateService } = require('./shorts-rate.service');
   const { ShortsAuthGuard } = require('./shorts-auth.guard');
   const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');

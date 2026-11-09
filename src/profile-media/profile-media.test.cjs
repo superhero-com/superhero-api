@@ -2,7 +2,7 @@ const {
   ProfileMedia,
   PostImages,
   ProfileMediaCleanup,
-} = require('../shorts/testing/historical-migrations.cjs');
+} = require('../shorts/testing/schema-migrations.cjs');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, webcrypto } = require('node:crypto');

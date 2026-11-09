@@ -10,9 +10,8 @@ const {
   ShortsWorkers,
   ShortsWorkerAuthority,
   ShortsStreamingOutbox,
-  ShortsSharedCutover,
   ShortsProcessingCapacity,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 const { directUploadPart } = require('./testing/direct-upload.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
@@ -31,7 +30,6 @@ const { NestFactory } = require('@nestjs/core');
 const { Module, Global, UnauthorizedException } = require('@nestjs/common');
 const { S3Client, CreateBucketCommand, PutBucketVersioningCommand, ListObjectVersionsCommand, ListObjectsV2Command, DeleteObjectsCommand, DeleteBucketCommand } = require('@aws-sdk/client-s3');
 const { shortsWorkerConfig } = require('./shorts-worker.config');
-const { ShortsEncodingService } = require('./shorts-encoding.service');
 const { ShortsPackageService } = require('./shorts-package.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMetadataModule } = require('./shorts-metadata.module');
@@ -43,12 +41,11 @@ const { ShortsService } = require('./shorts.service');
 const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
-const { ShortsUploadsService } = require('./shorts-uploads.service');
+const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsUploadPolicyService } = require('./shorts-upload-policy.service');
 const { ShortsStoreService } = require('./shorts-store.service');
 const { workerRole } = require('./testing/worker-role.cjs');
-const { ShortsLegacyImportsService } = require('./shorts-legacy-imports.service');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 test('worker startup rejects wrong networks, bypasses and unnecessary credentials', async t => {
@@ -65,20 +62,6 @@ test('worker startup rejects wrong networks, bypasses and unnecessary credential
     { SHORTS_WORKER_MIN_FREE_INODES: '127' }, { SHORTS_WORKER_MAX_USED_PERCENT: '100' }]) await assert.rejects(shortsWorkerConfig({ ...env, ...override }));
 });
 
-test('encoder rejects invalid input and cleans its private temporary directory', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'shorts-encoding-')); const saved = process.env.SHORTS_WORKER_TMP_DIR;
-  process.env.SHORTS_WORKER_TMP_DIR = dir;
-  t.after(async () => { if (saved === undefined) delete process.env.SHORTS_WORKER_TMP_DIR; else process.env.SHORTS_WORKER_TMP_DIR = saved; await rm(dir, { recursive: true, force: true }); });
-  const { ShortsScratchService, ShortsScratchProbeService } = require('./shorts-scratch.service');
-  const scratch = new ShortsScratchService({ directory: dir, minFreeBytes: 1048576, minFreeInodes: 128, maxUsedPercent: 99 }, new ShortsScratchProbeService());
-  await scratch.onModuleInit(); t.after(() => scratch.onModuleDestroy());
-  const encoder = new ShortsEncodingService(scratch);
-  await assert.rejects(encoder.encode(Buffer.from('not a video'), 'Test', 'Art'));
-  assert.deepEqual(await readdir(dir), []);
-  await assert.rejects(encoder.encode(Buffer.from('not a video'), 'Test', 'Art', {}, AbortSignal.abort()));
-  assert.deepEqual(await readdir(dir), []);
-});
-
 test('local UnixFS package identity matches actual offline Kubo for chunks and file ordering', { skip: !process.env.SHORTS_TEST_KUBO_API }, async () => {
   const endpoint = new URL(process.env.SHORTS_TEST_KUBO_API); assert.equal(endpoint.hostname, '127.0.0.1');
   const service = new ShortsPackageService();
@@ -91,10 +74,10 @@ test('local UnixFS package identity matches actual offline Kubo for chunks and f
   }
 });
 
-for (const originals of [false, true]) test(`hosted ${originals ? 'original-file' : 'legacy'} HTTP uploads survive a killed media worker and publish only through the approved API path`, {
+test(`hosted original-file HTTP uploads survive a killed media worker and publish only through the approved API path`, {
   skip: !process.env.SHORTS_TEST_PG_URL || !process.env.SHORTS_TEST_S3_ENDPOINT, timeout: process.env.SHORTS_TEST_CLEANUP_MEDIA === '1' ? 600000 : 120000,
 }, async t => {
-  const cleanupMedia = originals && process.env.SHORTS_TEST_CLEANUP_MEDIA === '1';
+  const cleanupMedia = process.env.SHORTS_TEST_CLEANUP_MEDIA === '1';
   if (cleanupMedia) {
     assert.ok(process.env.SHORTS_TEST_KUBO_API, 'Cleanup media integration requires offline Kubo');
     assert.equal(process.env.SHORTS_TEST_MINIO_STS, '1');
@@ -106,7 +89,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
   const schema = `shorts_worker_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata, ShortsLifecycle, ShortsUploads, ShortsWorkers, ShortsWorkerAuthority, ShortsStreamingOutbox, ShortsSharedCutover, ShortsProcessingCapacity, ShortsWorkerBackpressure, ShortsUploadBudget, ShortsMediaAdmission, ShortsDirectUploads, ShortsOriginalContent] };
+    migrations: [ShortsMetadata, ShortsLifecycle, ShortsUploads, ShortsWorkers, ShortsWorkerAuthority, ShortsStreamingOutbox, ShortsProcessingCapacity, ShortsWorkerBackpressure, ShortsUploadBudget, ShortsMediaAdmission, ShortsDirectUploads, ShortsOriginalContent] };
   const a = new DataSource(options), b = new DataSource(options); await a.initialize(); await b.initialize(); await a.runMigrations({ transaction: 'all' });
   if (cleanupMedia) await require('./testing/private-input-cleanup-media.cjs').migrate(a);
   const scope = { network: 'ae_uat', contract: releaseFixture().release.contract }, sourceHash = hash('test-contract');
@@ -123,7 +106,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     SHORTS_PRIVATE_S3_ENDPOINT: endpoint.origin, SHORTS_PRIVATE_S3_UPLOAD_ENDPOINT: endpoint.origin, SHORTS_PRIVATE_S3_ALLOW_LOOPBACK: '1', SHORTS_PRIVATE_S3_REGION: 'us-east-1', SHORTS_PRIVATE_S3_BUCKET: bucket,
     SHORTS_PRIVATE_S3_CREDENTIALS_FILE: join(dir, 's3.json'), SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json'),
     SHORTS_DEPLOYMENT_FILE: join(dir, 'deployment.json'), SHORTS_WORKER_LEASE_MS: '1200', SHORTS_TEST_SCHEMA: schema, SHORTS_WORKER_TMP_DIR: dir, SHORTS_WORKER_MAX_USED_PERCENT: '99' });
-  for (const key of ['SHORTS_OPERATOR_KEY_FILE', 'SHORTS_IPFS_TOKEN_FILE', 'SHORTS_STREAM_KEY_FILE', 'SHORTS_DATA_DIR', 'SHORTS_IMPORT_LEGACY_CONTENT', 'SHORTS_IMPORT_LEGACY_ANALYTICS', 'SHORTS_IMPORT_LEGACY_RECEIPTS']) delete process.env[key];
+  for (const key of ['SHORTS_OPERATOR_KEY_FILE', 'SHORTS_IPFS_TOKEN_FILE', 'SHORTS_STREAM_KEY_FILE', 'SHORTS_DATA_DIR']) delete process.env[key];
   const apps = [], children = [], ownedPins = new Set();
   t.after(async () => {
     const pinErrors = [];
@@ -160,7 +143,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     const app = await NestFactory.create({ module: class ApiTestModule {}, imports: [DatabaseModule, ShortsSharedUploadsModule, ShortsMetadataModule], controllers: [ShortsController], providers: [
       ShortsAuthGuard, ShortsUploadInterceptor, { provide: ShortsRecordsService, useValue: records }, ShortsStoreService,
       { provide: ShortsUploadsService, useClass: ShortsHostedUploadsService },
-      { provide: ShortsUploadPolicyService, useValue: new ShortsUploadPolicyService({ originals, maxOriginalBytes: 100000000 }) },
+      { provide: ShortsUploadPolicyService, useValue: new ShortsUploadPolicyService({ maxOriginalBytes: 100000000 }) },
       { provide: ShortsService, useValue: { chain } },
       { provide: ShortsAuthService, useValue: { authenticate: async auth => { if (!['Bearer creator', 'Bearer another'].includes(auth)) throw new UnauthorizedException(); return auth === 'Bearer creator' ? 'ak_creator' : 'ak_another'; } } },
     ] }, { logger: false, abortOnError: false }); apps.push(app); await app.listen(0, '127.0.0.1');
@@ -168,7 +151,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     return { app, base: await app.getUrl(), records };
   }
   const apiA = await api(a), apiB = await api(b);
-  const path = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', cleanupMedia ? 'testsrc2=s=1080x1920:r=60' : originals ? 'testsrc2=s=180x320:r=60' : 'color=c=blue:s=72x128:r=12',
+  const path = join(dir, 'input.mp4'); execFileSync('ffmpeg', ['-nostdin', '-v', 'error', '-f', 'lavfi', '-i', cleanupMedia ? 'testsrc2=s=1080x1920:r=60' : 'testsrc2=s=180x320:r=60',
     ...(cleanupMedia ? ['-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-c:a', 'aac', '-ac', '2'] : []),
     '-t', '2.2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path]);
   const video = await readFile(path);
@@ -211,34 +194,33 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
   assert.equal(stored.privateMedia.fence, '2'); assert.ok(Object.values(stored.privateMedia.files).every(ref => ref.key.includes(`/attempt/2/`)));
   assert.equal(stored.publication, undefined);
   const privateMedia = apiB.app.get(ShortsPrivateMediaService);
-  if (originals) {
+  {
     assert.equal(stored.original.sha256, hash(video)); assert.equal(stored.bytes, video.length);
     assert.equal(stored.privateMedia.source.processingProfile, 'original-h264-v1');
     await privateMedia.withOriginal(scope, stored, async file => {
       assert.deepEqual(await readFile(file.path), video);
       assert.equal(await new ShortsPackageService().originalCid(file), stored.cid);
     });
-  } else assert.deepEqual(await privateMedia.original(scope, stored), video);
+  }
   assert.ok((await privateMedia.file(scope, stored, 'video.mp4')).length > 0);
   const staleRecord = structuredClone(stored); staleRecord.privateMedia.fence = '1';
-  if (originals) staleRecord.derivatives.generation.fence = '1';
+  staleRecord.derivatives.generation.fence = '1';
   await assert.rejects(metadata.complete(scope, { id: leased.id, fence: leased.fence, leaseToken: leased.leaseToken }, staleRecord), { status: 409 });
   // Original-format validation rejects an inconsistent source/fence before the immutable-row guard.
-  await assert.rejects(metadata.change(scope, upload.id, current => { current.privateMedia.fence = '1'; }), { status: originals ? 400 : 409 });
+  await assert.rejects(metadata.change(scope, upload.id, current => { current.privateMedia.fence = '1'; }), { status: 400 });
   const snapshot = await metadata.get(scope, upload.id);
   const changedSource = structuredClone(snapshot.record);
   changedSource.privateMedia.source.sha256 = '0'.repeat(64);
-  await assert.rejects(metadata.replace(scope, changedSource, snapshot.revision), { status: originals ? 400 : 409 });
+  await assert.rejects(metadata.replace(scope, changedSource, snapshot.revision), { status: 400 });
   assert.deepEqual((await metadata.get(scope, upload.id)).record.privateMedia, stored.privateMedia);
-  const publisher = new ShortsService({ ...apiB.records.chain, read: () => assert.fail('Pending content cannot reach a chain call') }, {}, {}, {}, {}, {}, {}, {}, apiB.records);
+  const publisher = new ShortsService({ ...apiB.records.chain, read: () => assert.fail('Pending content cannot reach a chain call') }, {}, {}, {}, {}, {}, {}, apiB.records);
   await assert.rejects(publisher.publish('ak_creator', upload.id), { status: 403 });
   assert.equal((await metadata.get(scope, upload.id)).record.moderation, 'pending');
   if (process.env.SHORTS_TEST_KUBO_API) {
     for (const cid of [stored.cid, stored.derivatives?.cid, stored.derivatives?.assetsCid]) if (cid) ownedPins.add(cid);
     process.env.SHORTS_IPFS_API = process.env.SHORTS_TEST_KUBO_API;
     const { ShortsMediaService } = require('./shorts-media.service');
-    const media = new ShortsMediaService({ scan: async original => ({ status: 'no_flags', sourceSha256: hash(Buffer.isBuffer(original) ? original : await readFile(original.path)) }) }, privateMedia, apiB.records, undefined,
-      { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) }, apiB.app.get(require('./shorts-scratch.service').ShortsScratchService));
+    const media = new ShortsMediaService({ scan: async original => ({ status: 'no_flags', sourceSha256: hash(Buffer.isBuffer(original) ? original : await readFile(original.path)) }) }, privateMedia, apiB.records, { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) }, apiB.app.get(require('./shorts-scratch.service').ShortsScratchService));
     t.after(() => media.onModuleDestroy());
     assert.deepEqual(await media.preview(stored), await privateMedia.file(scope, stored, 'video.mp4'));
     assert.equal((await media.rescan(stored)).sourceSha256, hash(video));
@@ -247,7 +229,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     const approvedPublisher = new ShortsService({ ...apiB.records.chain,
       read: async method => method === 'has_liked' ? false : publication,
       write: async () => assert.fail('Hosted API must not sign'),
-    }, media, { counters: () => ({ views: 0 }) }, {}, {}, {}, { enqueue() {} }, {}, apiB.records, {
+    }, media, { counters: () => ({ views: 0 }) }, {}, {}, {}, { enqueue() {} }, apiB.records, {
       async capacity() { return true; },
       async enqueue(id, creator) { assert.equal(id, upload.id); assert.equal(creator, 'ak_creator'); admissions++; job = { status: 'queued' }; },
       async status() { return job; },
@@ -265,7 +247,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     assert.equal(published.status, 'active'); assert.equal(published.privateMedia, undefined);
     assert.deepEqual(await media.retrieve(stored, 'video.mp4'), await media.preview(stored));
     await approvedPublisher.publish('ak_creator', upload.id); assert.equal(admissions, 1);
-    if (originals) {
+    {
       const response = await fetch(`${process.env.SHORTS_TEST_KUBO_API}/cat?arg=${stored.cid}`, { method: 'POST' });
       assert.equal(response.status, 200); assert.deepEqual(Buffer.from(await response.arrayBuffer()), video);
       assert.equal(publication.cid, stored.cid); assert.equal(publication.size, video.length);
@@ -281,11 +263,4 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
     }
   }
 
-  // Hosted startup uses the durable cutover marker, never a local SQLite snapshot.
-  const imports = new ShortsLegacyImportsService(a);
-  await imports.cutover(scope, hash('legacy-snapshot'));
-  const adapter = new ShortsHostedUploadsService(apiB.records, metadata, {}, {});
-  await assert.rejects(adapter.initialize(), /Complete the offline/);
-  await imports.cutover(scope, hash('legacy-snapshot'), true);
-  await adapter.initialize();
 });

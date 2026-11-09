@@ -1,4 +1,4 @@
-const { ShortsIndexNetwork } = require('./testing/historical-migrations.cjs');
+const { ShortsIndexNetwork } = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');

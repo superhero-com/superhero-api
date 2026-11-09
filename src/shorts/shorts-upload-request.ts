@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import type { UploadInput } from './shorts-uploads.service';
+import type { UploadInput } from './shorts-upload-input';
 
 export interface UploadRequestIdentity {
   key: string;
@@ -27,7 +27,7 @@ export function shortsUploadRequest(
   if (input?.requestKey === undefined) return undefined;
   if (
     input.expectedFormat !== undefined &&
-    !['original-file-v1', 'legacy-directory-v1'].includes(input.expectedFormat)
+    input.expectedFormat !== 'original-file-v1'
   ) {
     throw new BadRequestException('Invalid upload format');
   }

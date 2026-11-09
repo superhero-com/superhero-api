@@ -114,13 +114,13 @@ export class ShortsPlaybackEvidenceService implements OnModuleInit {
       .digest('hex');
     if (viewer !== value.viewer) throw invalid();
     // Authenticate and validate the browser/time bounds before any source lookup.
-    // A source CID may differ from a legacy post's immutable published CID.
     if (value.v === 2) {
       if (!authorizeSource) throw invalid();
       return authorizeSource(value.sourceKey).then((descriptor) => {
         try {
           validateDescriptor(descriptor, short.id);
           if (
+            descriptor.cid !== short.cid ||
             descriptor.cid !== value.cid ||
             descriptor.network !== scope.network ||
             descriptor.contract !== scope.contract ||

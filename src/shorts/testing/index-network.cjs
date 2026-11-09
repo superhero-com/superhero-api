@@ -1,4 +1,4 @@
-const { ShortsIndexNetwork } = require('./historical-migrations.cjs');
+const { ShortsIndexNetwork } = require('./schema-migrations.cjs');
 // Shared SQL fixture: real persistent binding, controlled node identity.
 const { ShortsIndexNetworkService } = require('../shorts-index-network.service');
 

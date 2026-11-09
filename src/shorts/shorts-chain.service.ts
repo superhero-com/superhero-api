@@ -14,8 +14,6 @@ import {
   isAddressValid,
   Encoding,
   DryRunError,
-  decode,
-  encode,
 } from '@aeternity/aepp-sdk';
 import { shortsContractPolicy, shortsVideo } from './shorts-contract-policy';
 import { shortsInnerContractCall } from './shorts-contract-call';
@@ -37,6 +35,7 @@ import {
   loadShortsRelease,
   shortsArtifact,
   shortsLikeMode,
+  assertActiveShortsContract,
   assertShortsReleaseConfig,
 } from './shorts-release';
 
@@ -56,9 +55,6 @@ export class ShortsChainService
   operator: Pick<AccountMemory, 'address'>;
   artifact: any;
   release: ShortsRelease;
-  previous?: Contract<any>;
-  previousArtifact?: any;
-  rewards: { contract: Contract<any>; artifact: any }[] = [];
   state: LocalState = { shorts: [], receipts: [] };
   private receiptScope?: ShortsScope;
   constructor(
@@ -82,14 +78,7 @@ export class ShortsChainService
         'Shorts deployment is not initialized',
       );
     const scope = shortsRuntimeScope(this);
-    await this.receipts!.initialize(
-      scope,
-      this.state.sourceHash!,
-      this.previous?.$options.address,
-      this.state.receipts,
-      process.env.SHORTS_IMPORT_LEGACY_RECEIPTS === '1',
-      this.release.rewardContracts?.map((item) => item.contract) ?? [],
-    );
+    await this.receipts!.initialize(scope, this.state.sourceHash!);
     this.receiptScope = scope;
   }
   private readyReceiptScope() {
@@ -180,80 +169,11 @@ export class ShortsChainService
       aci: this.artifact.aci,
       address: deployment.contract,
     });
-    const previousAddress =
-      deployment.schemaVersion === 2
-        ? await this.importSource()
-        : await this.read('get_previous');
-    if ((previousAddress || null) !== deployment.previousContract)
-      throw new Error('Previous contract does not match the release manifest');
+    assertActiveShortsContract(await this.read('migration_status'));
     assertShortsReleaseConfig(deployment, await this.read('get_config'));
-    if (previousAddress) {
-      const oldDeployment = await shortsConfigJson(
-        process.env.SHORTS_PREVIOUS_DEPLOYMENT_FILE!,
-      );
-      this.previousArtifact = shortsArtifact(
-        await shortsConfigJson(process.env.SHORTS_PREVIOUS_CONTRACT_ARTIFACT!),
-        deployment.previousArtifact!,
-      );
-      const oldCode = await this.sdk.api.getContractCode(previousAddress);
-      if (
-        oldDeployment.contract !== previousAddress ||
-        oldDeployment.network !== deployment.network ||
-        oldDeployment.compiler !== this.previousArtifact.compiler ||
-        oldDeployment.sourceHash !== this.previousArtifact.sourceHash ||
-        oldDeployment.bytecodeHash !== this.previousArtifact.bytecodeHash ||
-        createHash('sha256').update(oldCode.bytecode).digest('hex') !==
-          oldDeployment.bytecodeHash
-      )
-        throw new Error('Previous deployment identity mismatch');
-      this.previous = await Contract.initialize({
-        ...this.sdk.getContext(),
-        aci: this.previousArtifact.aci,
-        address: previousAddress,
-      });
-      this.rewards.push({
-        contract: this.previous,
-        artifact: this.previousArtifact,
-      });
-    }
-    if (deployment.rewardContracts?.length) {
-      const artifacts = await shortsConfigJson(
-        process.env.SHORTS_REWARD_ARTIFACTS_FILE,
-      );
-      for (const identity of deployment.rewardContracts) {
-        const artifact = shortsArtifact(artifacts[identity.contract], identity);
-        const code = await this.sdk.api.getContractCode(identity.contract);
-        if (
-          createHash('sha256').update(code.bytecode).digest('hex') !==
-          identity.bytecodeHash
-        )
-          throw new Error('Reward contract bytecode mismatch');
-        this.rewards.push({
-          artifact,
-          contract: await Contract.initialize({
-            ...this.sdk.getContext(),
-            aci: artifact.aci,
-            address: identity.contract,
-          }),
-        });
-      }
-    }
     if (!this.sharedReceipts) this.state = this.store.load() || this.state;
-    if (this.state.contract && this.state.contract !== deployment.contract) {
-      if (this.state.contract !== previousAddress)
-        throw new Error('State belongs to another deployment');
-      // Only previously published records migrate automatically. Private drafts stay private.
-      for (const short of this.state.shorts) {
-        const old = (
-          await this.readNode(() =>
-            this.previous!.$call('get_short', [short.id], {
-              callStatic: true,
-            }),
-          )
-        ).decodedResult;
-        if (old) short.publication = old.withdrawn ? 'withdrawn' : 'pending';
-      }
-    }
+    if (this.state.contract && this.state.contract !== deployment.contract)
+      throw new Error('State belongs to another deployment');
     this.state.contract = deployment.contract;
     this.state.sourceHash = deployment.sourceHash;
     if (!this.sharedReceipts) await this.save();
@@ -327,23 +247,6 @@ export class ShortsChainService
       this.release.schemaVersion,
     );
   }
-  private async importSource() {
-    if (BigInt(await this.read('schema_version')) !== 2n)
-      throw new Error('Unsupported Shorts schema');
-    const [native, legacy] = await this.read('get_import_source');
-    const address = native || legacy?.source;
-    return address
-      ? encode(decode(address), Encoding.ContractAddress)
-      : undefined;
-  }
-  rewardContracts() {
-    // Compatibility for unit fixtures and legacy single-predecessor releases.
-    return this.rewards.length
-      ? this.rewards
-      : this.previous
-        ? [{ contract: this.previous, artifact: this.previousArtifact }]
-        : [];
-  }
   private async invoke(method: string, args: unknown[], callStatic = false) {
     for (let attempt = 0; ; attempt++) {
       try {
@@ -397,10 +300,7 @@ export class ShortsChainService
       transaction.blockHeight < 0 ||
       !call ||
       call.callerId !== address ||
-      ![
-        this.state.contract,
-        ...this.rewardContracts().map((item) => item.contract.$options.address),
-      ].includes(call.contractId) ||
+      call.contractId !== this.state.contract ||
       result?.returnType !== 'ok' ||
       result.callerId !== address ||
       result.contractId !== call.contractId ||
@@ -441,50 +341,14 @@ export class ShortsChainService
       const balance = freeLikes
         ? { available: 0n, earned: 0n, claimed: 0n }
         : await this.read('get_account', [address]);
-      const rewards = [];
-      for (const item of this.rewardContracts()) {
-        // A content predecessor may itself be a free contract with no rewards API.
-        // Keep it in the event index, but do not invent a call to a removed getter.
-        const functions = item.artifact?.aci?.flatMap(
-          (entry: any) => entry.contract?.functions || [],
-        );
-        if (
-          functions &&
-          !functions.some((fn: any) =>
-            ['get_account', 'claim'].includes(fn.name),
-          )
-        )
-          continue;
-        const old = (
-          await item.contract.$call('get_account', [address], {
-            callStatic: true,
-          })
-        ).decodedResult;
-        rewards.push({ contract: item.contract.$options.address, ...old });
-      }
       return {
         address,
         wallet: ae(
           await this.sdk.getBalance(address as `ak_${string}`).catch(() => '0'),
         ),
         available: ae(balance.available),
-        earned: ae(
-          rewards.reduce(
-            (sum, old) => sum + BigInt(old.earned || 0),
-            BigInt(balance.earned),
-          ),
-        ),
-        claimed: ae(
-          rewards.reduce(
-            (sum, old) => sum + BigInt(old.claimed || 0),
-            BigInt(balance.claimed),
-          ),
-        ),
-        previousAvailable: rewards[0] ? ae(rewards[0].available) : '0',
-        rewardAccounts: rewards.map((old) => ({
-          contract: old.contract,
-          available: ae(old.available),
-        })),
+        earned: ae(balance.earned),
+        claimed: ae(balance.claimed),
       };
     });
   }

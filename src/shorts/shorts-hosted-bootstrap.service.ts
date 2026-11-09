@@ -1,6 +1,5 @@
 import { Inject, Injectable, OnApplicationBootstrap } from '@nestjs/common';
 import { ShortsApiPublicationService } from './shorts-api-publication.service';
-import { ShortsUploadsService } from './shorts-uploads.service';
 import { ShortsHostedUploadsService } from './shorts-hosted-uploads.service';
 import { ShortsAnalyticsService } from './shorts-analytics.service';
 import { ShortsHostedAnalyticsService } from './shorts-hosted-analytics.service';
@@ -13,7 +12,6 @@ import { ShortsHostedHostingService } from './shorts-hosted-hosting.service';
 export class ShortsHostedBootstrapService implements OnApplicationBootstrap {
   constructor(
     private readonly publication: ShortsApiPublicationService,
-    @Inject(ShortsUploadsService)
     private readonly uploads: ShortsHostedUploadsService,
     @Inject(ShortsAnalyticsService)
     private readonly analytics: ShortsHostedAnalyticsService,

@@ -15,7 +15,7 @@ shared retained-upload budget.
 
 ## How work is scheduled
 
-The content migration backfills existing records. A database trigger schedules a
+A database trigger schedules a
 job in the same transaction as new content and relevant publication or moderation
 changes. A changed policy advances the job generation and invalidates an old
 claim. Unrelated report-count updates do not restart maintenance.

@@ -4,7 +4,7 @@ const {
   ShortsCatalog,
   ShortsUploadBudget,
   ShortsFollowing,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,7 +20,7 @@ const { ShortsController } = require('./shorts.controller');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
 const { ShortsAuthService } = require('./shorts-auth.service');
-const { ShortsUploadsService } = require('./shorts-uploads.service');
+const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 const { SocialGraphProjectionService } = require('../plugins/social-graph/social-graph-projection.service');
 const { SocialGraphProjection1718900000035 } = require('../migrations/1718900000035-SocialGraphProjection');
 
@@ -91,7 +91,7 @@ test('PostgreSQL Following selects the global catalog through existing graph pro
   following.reader = { identity: { network: graph.network, contract: graph.contract }, verifyIdentity: async () => {} };
   const records = new ShortsRecordsService(chain, metadata);
   records.all = () => assert.fail('No full registry read');
-  const api = new ShortsService(chain, {}, { counters: async () => ({ views: 1 }) }, {}, {}, {}, {}, {}, records, undefined, undefined, following);
+  const api = new ShortsService(chain, {}, { counters: async () => ({ views: 1 }) }, {}, {}, {}, {}, records, undefined, undefined, following);
 
   await t.test('older followed videos page across creators with stable ties, no unrelated/private fields', async () => {
     assert.ok((await api.catalog()).items.every(s => s.creator === 'ak_unrelated'));

@@ -358,22 +358,14 @@ export class ShortsRetentionService {
           record?.privateMedia?.files || {},
         )) {
           const object = ref as PrivateObjectRef;
-          if (original) {
-            const file = record.files.find((file) => file.name === name);
-            if (
-              !file ||
-              file.bytes !== object?.bytes ||
-              file.sha256 !== object?.sha256
-            )
-              throw new Error(
-                'Private output differs from original derivative',
-              );
-          }
-          this.addReference(
-            objects,
-            object,
-            original ? SHORTS_ORIGINAL_HARD_LIMIT : 67108864,
-          );
+          const file = record.files.find((file) => file.name === name);
+          if (
+            !file ||
+            file.bytes !== object?.bytes ||
+            file.sha256 !== object?.sha256
+          )
+            throw new Error('Private output differs from original derivative');
+          this.addReference(objects, object, SHORTS_ORIGINAL_HARD_LIMIT);
         }
         const reasons: string[] = [];
         if (staged && staged.state !== 'ready')
@@ -403,7 +395,6 @@ export class ShortsRetentionService {
           );
         if (job) reasons.push('source-job-reference');
         if (target) reasons.push('delivery-generation-reference');
-        // Source manifests are encrypted and may include parts absent from SQL (legacy import).
         const unresolvedManifests = !!(
           (!staged && job?.input) ||
           record?.privateMedia?.source
@@ -456,15 +447,14 @@ export class ShortsRetentionService {
           )
         )
           throw new Error('Retired source is no longer an original upload');
-        const video = record?.files?.find((file) => file.name === 'video.mp4');
         const pins: {
-          kind: 'original' | 'legacy' | 'inputs' | 'assets' | 'hls';
+          kind: 'original' | 'inputs' | 'assets' | 'hls';
           cid: string;
           bytes: number | null;
         }[] = record?.cid
           ? [
               {
-                kind: original ? 'original' : 'legacy',
+                kind: 'original',
                 cid: record.cid,
                 bytes: Number.isSafeInteger(record.bytes) ? record.bytes : null,
               },
@@ -510,21 +500,11 @@ export class ShortsRetentionService {
           retainReasons: reasons,
           cid: record?.cid || null,
           pins,
-          hlsSource: record?.cid
-            ? original
-              ? {
-                  ...shortsPlaybackDescriptor(record, this.config.scope),
-                  id: target?.id || record.id,
-                }
-              : {
-                  id: resourceId,
-                  cid: record.cid,
-                  file: video && {
-                    name: video.name,
-                    bytes: video.bytes,
-                    sha256: video.sha256,
-                  },
-                }
+          hlsSource: original
+            ? {
+                ...shortsPlaybackDescriptor(record, this.config.scope),
+                id: target?.id || record.id,
+              }
             : null,
           objects: [...objects.values()],
           manifestSources: manifestSources.map((source) => ({

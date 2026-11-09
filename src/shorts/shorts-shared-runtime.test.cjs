@@ -1,9 +1,9 @@
+const { originalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsUploads,
   ShortsUploadBudget,
   ShortsMetadata,
-  ShortsSharedCutover,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -13,21 +13,13 @@ const { randomUUID } = require('node:crypto');
 const { NestFactory } = require('@nestjs/core');
 const { DataSource } = require('typeorm');
 const { ShortsStoreService } = require('./shorts-store.service');
-const { ShortsUploadLimitsService } = require('./shorts-upload-limits.service');
 const { ShortsMediaService } = require('./shorts-media.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMetadataModule } = require('./shorts-metadata.module');
 const { ShortsRecordsService } = require('./shorts-records.service');
-const {
-  ShortsLegacyImportsService,
-} = require('./shorts-legacy-imports.service');
-
 function clean(t) {
   const keys = [
     'SHORTS_DATA_DIR',
-    'SHORTS_IMPORT_LEGACY_CONTENT',
-    'SHORTS_IMPORT_LEGACY_ANALYTICS',
-    'SHORTS_IMPORT_LEGACY_RECEIPTS',
     'SHORTS_IPFS_API',
     'SHORTS_IPFS_APIS',
     'SHORTS_IPFS_CREDENTIALS_FILE',
@@ -66,67 +58,37 @@ test('hosted providers neither create a local store nor generate quarantine file
         providers: [
           { provide: DataSource, useValue: {} },
           ShortsStoreService,
-          ShortsUploadLimitsService,
         ],
       },
       { logger: false },
     );
     apps.push(app);
-    const store = app.get(ShortsStoreService),
-      limits = app.get(ShortsUploadLimitsService);
+    const store = app.get(ShortsStoreService);
     assert.equal(store.shared, true);
     assert.throws(() => store.db, /unavailable in the hosted API/);
     assert.throws(() => store.load(), /unavailable in the hosted API/);
     assert.throws(() => store.save({}), /unavailable in the hosted API/);
-    assert.throws(
-      () => limits.reserve('ak_creator', 'owned', 1),
-      /shared admission/,
-    );
-    const media = new ShortsMediaService({}, {}, { shared: true }, undefined, { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) });
+    const media = new ShortsMediaService({}, {}, { shared: true }, { acquire: async () => ({ signal: new AbortController().signal, release: async () => {} }) });
     await media.onModuleInit();
     await assert.rejects(
       media.preview({ id: 'owned', files: [] }),
-      /Migrate private media/,
+      /Invalid original video identity/,
     );
     await assert.rejects(
       media.rescan({ id: 'owned' }),
-      /cannot read local files/,
-    );
-    await assert.rejects(media.removePrepared('owned'), /cannot delete local/);
-    await assert.rejects(
-      media.removeOrphanedPrepared(new Set()),
-      /cannot sweep local/,
-    );
-    await assert.rejects(
-      media.removeUploadParts('owned', 1),
-      /cannot delete local/,
-    );
-    await assert.rejects(
-      media.prepare('owned', Buffer.from('owned'), 'Owned', 'Art'),
-      /isolated media worker/,
+      /Invalid original video identity/,
     );
     media.onModuleDestroy();
   }
 });
 
-test('hosted startup refuses a mounted legacy store or obsolete import flags', (t) => {
-  clean(t);
-  for (const key of [
-    'SHORTS_DATA_DIR',
-    'SHORTS_IMPORT_LEGACY_CONTENT',
-    'SHORTS_IMPORT_LEGACY_ANALYTICS',
-    'SHORTS_IMPORT_LEGACY_RECEIPTS',
-  ]) {
-    process.env[key] =
-      key === 'SHORTS_DATA_DIR' ? '/existing/legacy/source' : '1';
-    assert.throws(() => new ShortsStoreService({}), /offline legacy migration/);
-    delete process.env[key];
-  }
-  assert.doesNotThrow(() => new ShortsStoreService({}).onApplicationShutdown());
+test('hosted startup rejects a local store', t => {
+  clean(t); process.env.SHORTS_DATA_DIR = '/local/data';
+  assert.throws(() => new ShortsStoreService({}), /shared storage/);
 });
 
 test(
-  'two hosted runtimes share cutover state and reject incomplete or missing media migration',
+  'two hosted runtimes share the active deployment and reject missing media references',
   {
     skip: !process.env.SHORTS_TEST_PG_URL,
     timeout: 20000,
@@ -135,7 +97,7 @@ test(
     clean(t);
     const url = new URL(process.env.SHORTS_TEST_PG_URL);
     assert.equal(url.hostname, '127.0.0.1');
-    const schema = 'shorts_cutover_' + randomUUID().replaceAll('-', '');
+    const schema = 'shorts_shared_' + randomUUID().replaceAll('-', '');
     const admin = new DataSource({ type: 'postgres', url: url.href });
     await admin.initialize();
     await admin.query(`CREATE SCHEMA ${schema}`);
@@ -146,7 +108,7 @@ test(
       extra: { options: `-c search_path=${schema}` },
       migrations: [
         ShortsMetadata, ShortsUploads,
-        ShortsSharedCutover, ShortsUploadBudget],
+        ShortsUploadBudget],
     };
     const a = new DataSource(options),
       b = new DataSource(options),
@@ -164,41 +126,20 @@ test(
     const scope = { network: 'ae_uat', contract: 'ct_owned' },
       hash = 'a'.repeat(64);
     const meta = new ShortsMetadataService(a),
-      other = new ShortsMetadataService(b),
-      imports = new ShortsLegacyImportsService(a);
+      other = new ShortsMetadataService(b);
     await meta.initialize(scope, hash);
     await Promise.all([
       meta.verifyHostedStorage(scope),
       other.verifyHostedStorage(scope),
     ]);
-    await imports.cutover(scope, 'b'.repeat(64));
-    await assert.rejects(other.verifyHostedStorage(scope), { status: 503 });
-    await assert.rejects(imports.cutover(scope, 'c'.repeat(64), true), {
-      status: 409,
-    });
-    await imports.cutover(scope, 'b'.repeat(64), true);
-    await other.verifyHostedStorage(scope);
-    const record = {
-      id: 'owned',
-      creator: 'ak_creator',
-      title: 'Owned',
-      topic: 'Art',
-      createdAt: 100,
-      bytes: 10,
-      duration: 3,
-      cid: 'bafyowned',
-      files: [],
-      moderation: 'pending',
-      views: [],
-      reports: 0,
-    };
+    const record = originalRecord('owned', { creator: 'ak_creator', title: 'Owned', topic: 'Art', createdAt: 100, duration: 3, moderation: 'pending', reports: 0, views: [] });
     await meta.insertDraft(scope, record);
     await assert.rejects(
       other.verifyHostedStorage(scope),
-      /missing private shared/,
+      /missing its private media/,
     );
     await a.query(
-      `UPDATE shorts_content SET body=body || '{"privateMedia":{"version":1}}'::jsonb WHERE id='owned'`,
+      `UPDATE shorts_content SET body=body || $1::jsonb WHERE id='owned'`, [JSON.stringify({privateMedia:{version:1,fence:record.derivatives.generation.fence,source:{processingProfile:'original-h264-v1',bytes:record.bytes,sha256:record.original.sha256}}})],
     );
     for (const db of [a, b]) {
       const app = await NestFactory.createApplicationContext(
@@ -243,18 +184,9 @@ test(
     }
     assert.equal((await one.get('owned')).reports, 20);
     assert.equal((await two.get('owned')).reports, 20);
-    // Old installations with only metadata imports must rerun the complete migrator.
-    const old = { network: 'ae_uat', contract: 'ct_old' };
-    await meta.initialize(old, hash);
-    await a.query(
-      'UPDATE shorts_runtime SET legacy_hash=$2 WHERE contract=$1',
-      [old.contract, hash],
-    );
-    await assert.rejects(other.verifyHostedStorage(old), { status: 503 });
     await assert.rejects(
       a.undoLastMigration({ transaction: 'all' }),
       /Preserve upload reservations/,
     );
-    await assert.rejects(a.transaction(manager => new ShortsSharedCutover().down(manager)), /Preserve legacy cutover/);
   },
 );

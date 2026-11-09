@@ -1,11 +1,11 @@
 {
   "release": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "network": "ae_uat",
     "node": "https://node.invalid",
     "middleware": "https://node.invalid/mdw",
     "contract": "ct_SeLqn3UAUoRymWmwW7axrzJK7JfNaBR2cHCryA6cFsgFkHEF",
-    "previousContract": "ct_tHggZ5wKxbrxY2Yt1EAviybdDcKk9Mq4DZQiwKCDWkEaXE8U",
+    "previousContract": null,
     "operator": "ak_2Kw2XL8QVSQHwJYKpWLktaxtwKuz7iYF5pqcauUHpmcvhHUVd",
     "treasury": "ak_2maNN7AsevCiv546m1TLrSxCFSDeVHif7S7pSsdPS2VXEbkbG",
     "compiler": "8.0.0",
@@ -13,13 +13,7 @@
     "bytecodeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "aciHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "likeFeeAetto": "100000000000000000",
-    "treasuryBps": 2000,
-    "previousArtifact": {
-      "compiler": "7.0.0",
-      "sourceHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "bytecodeHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "aciHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-    }
+    "treasuryBps": 2000
   },
-  "digest": "419c4fe51ba16ed212509725d38f8e4a28ef4b663d0bc6a21cd30fdf5805975b"
+  "digest": "6696430e02a2b56f83030c1a8b9368e3cec5478d39d2dadd572cbc4d2a8fa6c4"
 }

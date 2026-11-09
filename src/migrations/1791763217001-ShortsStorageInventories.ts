@@ -2,8 +2,8 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ShortsStorageInventories1791763217001 extends FeatureMigration {
-  readonly changes = {
-    ShortsStorageInventory1791763217000: {
+  readonly steps = {
+    ShortsStorageInventory: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_storage_inventory_runs (
       network varchar(32) NOT NULL, contract varchar(100) NOT NULL, id uuid NOT NULL,
@@ -47,7 +47,7 @@ export class ShortsStorageInventories1791763217001 extends FeatureMigration {
       },
     },
 
-    ShortsStorageReferences1791763218000: {
+    ShortsStorageReferences: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_storage_reconciliations (
       network varchar(32) NOT NULL,contract varchar(100) NOT NULL,id uuid NOT NULL,inventory_id uuid NOT NULL,
@@ -83,7 +83,7 @@ export class ShortsStorageInventories1791763217001 extends FeatureMigration {
       },
     },
 
-    ShortsHlsInventory1791763219000: {
+    ShortsHlsInventory: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_hls_inventory_runs (
       network varchar(32) NOT NULL,contract varchar(100) NOT NULL,id uuid NOT NULL,
@@ -126,7 +126,7 @@ export class ShortsStorageInventories1791763217001 extends FeatureMigration {
       },
     },
 
-    ShortsPinInventory1791763220000: {
+    ShortsPinInventory: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_pin_inventory_runs (
       network varchar(32) NOT NULL,contract varchar(100) NOT NULL,id uuid NOT NULL,
@@ -154,7 +154,7 @@ export class ShortsStorageInventories1791763217001 extends FeatureMigration {
       },
     },
 
-    ShortsMultipartInventory1791763221000: {
+    ShortsMultipartInventory: {
       async up(db: QueryRunner): Promise<void> {
         await db.query(`CREATE TABLE shorts_multipart_inventory_runs (
       network varchar(32) NOT NULL,contract varchar(100) NOT NULL,id uuid NOT NULL,

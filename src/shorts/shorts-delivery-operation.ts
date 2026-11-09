@@ -2,10 +2,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { backfillRequest } from './shorts-backfill-plan';
-import { ShortsBackfillService } from './shorts-backfill.service';
 import { ShortsDeliveryActivationService } from './shorts-delivery-activation.service';
-import { ShortsStreamingService } from './shorts-streaming.service';
 import type { ShortsScope } from './shorts-metadata.service';
 import type { ShortsDeliveryRetirementService } from './shorts-delivery-retirement.service';
 import type { ShortsPrivateInputRetirementService } from './shorts-private-input-retirement.service';
@@ -58,12 +55,6 @@ export interface PrivateInputOperations {
 }
 
 const fields = {
-  'dry-run': ['ids', 'budget'],
-  start: ['id', 'ids', 'budget', 'planHash'],
-  status: ['id'],
-  advance: ['id'],
-  cancel: ['id'],
-  acknowledge: ['id'],
   rollback: ['id', 'nextKey', 'expected', 'operation'],
   ...privateInputFields,
 };
@@ -165,19 +156,11 @@ export function deliveryOperation(action: string, request: any) {
     privateInputRequest(action, request);
     return { action, request };
   }
-  if (action === 'dry-run' || action === 'start')
-    backfillRequest(request.ids, request.budget);
   if (
-    action !== 'dry-run' &&
-    (typeof request.id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(request.id))
+    typeof request.id !== 'string' ||
+    !/^[a-zA-Z0-9-]{1,80}$/.test(request.id)
   )
     throw new BadRequestException('Invalid delivery operation identity');
-  if (
-    action === 'start' &&
-    (typeof request.planHash !== 'string' ||
-      !/^[a-f0-9]{64}$/.test(request.planHash))
-  )
-    throw new BadRequestException('A reviewed dry run is required');
   if (
     action === 'rollback' &&
     (typeof request.nextKey !== 'string' ||
@@ -197,10 +180,8 @@ export function deliveryOperation(action: string, request: any) {
 
 export async function runDeliveryOperation(
   input: ReturnType<typeof deliveryOperation>,
-  backfill: ShortsBackfillService,
   activation: ShortsDeliveryActivationService,
   signal: AbortSignal,
-  streaming?: ShortsStreamingService,
   inputs?: PrivateInputOperations,
 ) {
   const { action, request } = input;
@@ -274,24 +255,6 @@ export async function runDeliveryOperation(
     }
   }
   switch (action) {
-    case 'acknowledge':
-      if (!streaming) throw new Error('Canonical preparation unavailable');
-      return streaming.acknowledgeCanonical(request.id, signal);
-    case 'dry-run':
-      return backfill.dryRun(request.ids, request.budget);
-    case 'start':
-      return backfill.start(
-        request.id,
-        request.ids,
-        request.budget,
-        request.planHash,
-      );
-    case 'status':
-      return backfill.status(request.id);
-    case 'advance':
-      return backfill.advance(request.id, signal);
-    case 'cancel':
-      return backfill.cancel(request.id);
     case 'rollback':
       return activation.select(
         request.id,

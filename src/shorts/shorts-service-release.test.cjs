@@ -14,7 +14,6 @@ const { storageReconciliationConfig } = require('./shorts-storage-reconciliation
 const { hlsInventoryConfig } = require('./shorts-hls-inventory.config');
 const { pinInventoryConfig } = require('./shorts-pin-inventory.config');
 const { publishingDeployment, shortsPublisherConfig } = require('./shorts-publisher.config');
-const { legacyStorageConfig } = require('./shorts-legacy-storage.service');
 
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'shorts-service-release-'));
@@ -65,7 +64,7 @@ test('worker and operations adapters reject stale, cross-wired and unsupported m
     ...[{ network: 'ae_mainnet' }, { schemaVersion: 0 }, { contract: 'ct_unchecked' },
       { operator: f.release.contract }, { aciHash: '' }, { compiler: 'unknown' },
       { node: 'http://127.0.0.1:3333' }, { middleware: 'https://mainnet.aeternity.io/mdw' },
-      { previousContract: releaseFixture().release.contract }, { likeFeeAetto: '1' }, { treasuryBps: 0 }]
+      { previousContract: releaseFixture().release.contract }]
       .map(patch => ({ ...f.release, ...patch })),
   ];
   for (const value of cases) {
@@ -94,23 +93,4 @@ test('service configuration uses the explicit network rather than the ambient en
   t.after(() => { if (old === undefined) delete process.env.AE_NETWORK_ID; else process.env.AE_NETWORK_ID = old; });
   assert.deepEqual(await loadShortsRelease(f.env), f.release);
   for (const [, load, extra] of f.roles) assert.equal((await load({ ...f.env, ...extra })).scope.network, 'ae_uat');
-});
-
-test('legacy migration accepts only the predecessor and artifact pinned in the current release', async t => {
-  const f = await fixture(t), previous = releaseFixture().release;
-  await mkdir(join(f.dir, 'private')); await writeFile(join(f.dir, 'shorts.sqlite'), 'Existing fixture; never opened by config');
-  const previousFile = join(f.dir, 'previous.json'); await writeFile(previousFile, JSON.stringify(previous));
-  const previousArtifact = Object.fromEntries(['compiler', 'sourceHash', 'bytecodeHash', 'aciHash'].map(key => [key, previous[key]]));
-  const current = { ...f.release, previousContract: previous.contract, previousArtifact };
-  await f.save(current);
-  const env = { ...f.env, SHORTS_DATA_DIR: f.dir, SHORTS_PREVIOUS_DEPLOYMENT_FILE: previousFile };
-  assert.equal((await legacyStorageConfig(env)).previousContract, previous.contract);
-  await assert.rejects(legacyStorageConfig({ ...env, SHORTS_PREVIOUS_DEPLOYMENT_FILE: undefined }));
-  for (const patch of [{ contract: releaseFixture().release.contract }, { network: 'ae_mainnet' },
-    { compiler: '9.0.0' }, { sourceHash: 'b'.repeat(64) }, { bytecodeHash: 'b'.repeat(64) }, { aciHash: 'b'.repeat(64) }]) {
-    await writeFile(previousFile, JSON.stringify({ ...previous, ...patch }));
-    await assert.rejects(legacyStorageConfig(env));
-  }
-  await writeFile(previousFile, JSON.stringify(previous)); await f.save(f.release);
-  await assert.rejects(legacyStorageConfig(env));
 });

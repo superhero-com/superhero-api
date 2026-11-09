@@ -15,7 +15,7 @@ import {
 } from './shorts-upload-records.service';
 import { ShortsSourceService } from './shorts-source.service';
 import { creatorContent } from './shorts-eligibility';
-import type { UploadInput } from './shorts-uploads.service';
+import type { UploadInput } from './shorts-upload-input';
 import { shortsUploadRequest } from './shorts-upload-request';
 import { SHORTS_ORIGINAL_PROFILE } from './shorts-rendition-policy';
 import { SHORTS_ORIGINAL_HARD_LIMIT } from './shorts-media-file';

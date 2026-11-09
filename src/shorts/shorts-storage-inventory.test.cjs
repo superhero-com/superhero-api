@@ -1,4 +1,4 @@
-const { ShortsMetadata, ShortsStorageInventory } = require('./testing/historical-migrations.cjs');
+const { ShortsMetadata, ShortsStorageInventory } = require('./testing/schema-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');

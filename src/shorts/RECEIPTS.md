@@ -11,37 +11,14 @@ Run all normal API migrations, including `1791763207001-ShortsAnalyticsAndReceip
 `1791763209001-ShortsPublishingAndCatalog`, before starting Shorts. The trusted API database role needs SELECT, INSERT and UPDATE on
 `shorts_receipt_scopes` and `shorts_transaction_receipts`, plus its existing
 runtime/content permissions. Keep these tables inaccessible to the media-worker
-login. Initialization verifies the deployment source hash and previous-contract
-binding against the initialized runtime.
-
-For a new installation, no import flag is needed. To preserve an existing local
-receipt list:
-
-Run the [offline legacy migration](LEGACY-STORAGE.md) before starting the hosted
-API. Keep the exact deployment and previous-contract manifest, and an empty or
-matching receipt namespace. The command migrates receipts together with the other
-local state and records cutover completion. Hosted startup no longer accepts
-`SHORTS_IMPORT_LEGACY_RECEIPTS` or accesses the local snapshot.
-
-The import is atomic and fingerprinted. Repeating the migration with the same source does not replay
-old values over newer receipts. Conflicting transaction identities, a changed
-source list or a nonempty destination require reconciliation instead of a forced
-overwrite. Duplicate historical references retain their earliest activity time.
-Imported entries are labeled `legacy`; importing does not verify their chain status.
-
-New hosted receipts are never written back to SQLite. Missing tables or database
-failures fail the operation; there is no local fallback. The loopback demo retains
-its local adapter. Do not restart an older release against the stale snapshot.
-Schema rollback refuses to remove initialized history; reconcile or restore it
-explicitly before downgrading.
+login. Initialization verifies the source hash for the active contract.
 
 ## Receipt meaning
 
 | Verification | Meaning |
 |---|---|
-| `legacy` | Reference copied from the previous local history; not revalidated |
 | `submitted` | Operator publication returned a transaction hash; not a finality claim |
-| `node_observed` | The node reported a successful mined call by the authenticated wallet to this or the verified previous contract |
+| `node_observed` | The node reported a successful mined call by the authenticated wallet to the active contract |
 
 For wallet acknowledgements, the API checks the transaction checksum, node network,
 caller, target contract, successful call result, matching height and membership in

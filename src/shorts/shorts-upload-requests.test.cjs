@@ -1,4 +1,4 @@
-const schemaMigrations = require('./testing/historical-migrations.cjs');
+const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsUploadRequests: Migration,
 } = schemaMigrations;
@@ -35,7 +35,6 @@ test('creation identity binds public metadata independently of JSON key order an
   assert.throws(() => shortsUploadPolicyConfig({ SHORTS_UPLOAD_REQUEST_KEYS_ADVERTISED: 'yes' }));
   const policy = new ShortsUploadPolicyService(shortsUploadPolicyConfig({ SHORTS_UPLOAD_REQUEST_KEYS_ADVERTISED: 'true' }));
   assert.equal(policy.describe({ maxVideoBytes: 100000000 }, true).creation, 'request-key-v1');
-  assert.equal(policy.describe({ maxVideoBytes: 100000000 }, false).creation, undefined);
 });
 
 test('hosted creation survives lost replies, concurrency, policy rollback and expiry without another upload', {
@@ -97,7 +96,7 @@ test('hosted creation survives lost replies, concurrency, policy rollback and ex
     const [count] = await first.query('SELECT count(*)::int AS n FROM shorts_upload_requests WHERE request_key=$1', [value.requestKey]); assert.equal(count.n, 1);
   });
   await t.test('metadata conflict and scoped keys preserve deliberate new uploads', async () => {
-    for (const change of [{ title: 'Changed' }, { details: { language: 'fr' } }, { sha256: 'b'.repeat(64) }, { expectedFormat: 'legacy-directory-v1' }])
+    for (const change of [{ title: 'Changed' }, { details: { language: 'fr' } }, { sha256: 'b'.repeat(64) }])
       await assert.rejects(serviceA.create(actor, { ...saved.value, ...change }), { status: 409 });
     const other = await serviceB.create('ak_other', saved.value); assert.notEqual(other.id, saved.session.id);
     const deliberate = await serviceB.create(actor, { ...saved.value, requestKey: randomUUID() }); assert.notEqual(deliberate.id, saved.session.id);
@@ -108,12 +107,12 @@ test('hosted creation survives lost replies, concurrency, policy rollback and ex
   await t.test('restart and disabled or reduced admission preserve the accepted source policy', async () => {
     await second.destroy(); second = new DataSource(options); await second.initialize();
     const restarted = new ShortsUploadRecordsService(second, new ShortsMetadataService(second));
-    const disabled = new ShortsUploadPolicyService({ originals: false, maxOriginalBytes: 1 });
+    const reducedLimit = new ShortsUploadPolicyService({ maxOriginalBytes: 1 });
     const source = { assertDirectUploadsConfigured() { throw new Error('direct upload configuration unavailable'); } };
-    const recovered = await hosted(restarted, disabled, source).create(actor, saved.value);
+    const recovered = await hosted(restarted, reducedLimit, source).create(actor, saved.value);
     assert.equal(recovered.id, saved.session.id); assert.deepEqual(recovered.source, saved.session.source);
     assert.equal(recovered.source.format, 'original-file-v1'); assert.equal(recovered.source.maxBytes, 100000000);
-    await assert.rejects(hosted(restarted, disabled, source).create(actor, input()), /configuration unavailable/);
+    await assert.rejects(hosted(restarted, reducedLimit, source).create(actor, input()), /configuration unavailable/);
     const reduced = new ShortsUploadPolicyService({ originals: true, maxOriginalBytes: 1 });
     assert.equal((await hosted(restarted, reduced).create(actor, saved.value)).id, saved.session.id);
     await assert.rejects(hosted(restarted, reduced).create(actor, input()), { status: 400 });

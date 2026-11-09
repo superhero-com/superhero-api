@@ -218,24 +218,11 @@ export class ShortsWalletTransactionsService {
       throw new ServiceUnavailableException(
         'Shorts deployment is not initialized',
       );
-    if (
-      ![
-        this.chain.state.contract,
-        this.chain.previous?.$options.address,
-        ...(this.chain.rewardContracts?.() || []).map(
-          (item) => item.contract.$options.address,
-        ),
-      ].includes(contract)
-    )
+    if (contract !== this.chain.state.contract)
       throw new BadRequestException('Unrecognized Shorts contract');
     const release = this.chain.release;
     const network = release?.network;
     const currentContract = release?.contract;
-    const previousContract = release?.previousContract;
-    const rewardBinding = JSON.stringify(release?.rewardContracts ?? []);
-    const rewardInstances = (this.chain.rewardContracts?.() || [])
-      .map((item) => item.contract.$options.address)
-      .join(',');
     const node = this.chain.sdk.api;
     const assertBinding = () => {
       if (
@@ -244,14 +231,7 @@ export class ShortsWalletTransactionsService {
         this.chain.release !== release ||
         release.network !== network ||
         release.contract !== currentContract ||
-        release.previousContract !== previousContract ||
         currentContract !== this.chain.state.contract ||
-        (previousContract || undefined) !==
-          this.chain.previous?.$options.address ||
-        JSON.stringify(release.rewardContracts ?? []) !== rewardBinding ||
-        (this.chain.rewardContracts?.() || [])
-          .map((item) => item.contract.$options.address)
-          .join(',') !== rewardInstances ||
         this.chain.sdk.api !== node
       )
         throw new ServiceUnavailableException(

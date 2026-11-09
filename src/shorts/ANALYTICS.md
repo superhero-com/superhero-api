@@ -5,39 +5,9 @@ markers in PostgreSQL. Independent API connections use the same deployment-scope
 data. The loopback demo keeps its local SQLite implementation. Neither adapter
 uses paid Likes as a playback-quality signal.
 
-Financial checks are separate: [reward reconciliation](ACCOUNTING.md) compares
-creator and treasury credits, claims and liabilities at one fixed contract block.
+## Setup
 
-## Setup and existing data
-
-Apply all API migrations, including `1791763207001-ShortsAnalyticsAndReceipts` and
-`1791763209001-ShortsPublishingAndCatalog`, before enabling the hosted feature. The API database role needs SELECT, INSERT, UPDATE and DELETE on
-the four `shorts_measurement_*` tables. Keep them private; the media-worker login
-does not need any grants on these tables. PostgreSQL and its backups contain the
-measurement salt and pseudonymous browser hashes.
-
-A new installation initializes its salt and measurement start date once. Existing
-installations must migrate their local analytics deliberately:
-
-Use the [offline legacy migration](LEGACY-STORAGE.md) while the source API is
-stopped. It imports content, private media, upload state, analytics and receipts,
-then records a shared completion marker. The analytics namespace must be empty
-or match an earlier import. Hosted startup no longer accepts
-`SHORTS_IMPORT_LEGACY_ANALYTICS` or reads a local data directory. A conflicting
-source or destination never silently resets the salt, counts or deletion history.
-
-Import reads SQLite in 500-row pages while holding its existing ownership lock.
-It preserves the original salt, start date, lifetime totals, retained events and
-unexpired deletion markers in one database transaction. Malformed data, missing
-content or conflicting browser/video/day rows roll the import back. Expired raw
-events are excluded from import, while anonymous lifetime counts are preserved.
-The original local copy is not deleted by migration; include it and its backups
-in the retention and erasure procedure.
-
-Do not restart an old release against the stale SQLite snapshot after cutover.
-Schema downgrade refuses to remove initialized measurement storage. Restore and
-reconciliation must preserve subsequent deletion requests; restoring an older
-backup by itself is not a valid privacy-recovery procedure.
+Run the API migrations before enabling Shorts. The hosted analytics service verifies the configured contract and source hash, then creates a random viewer salt and records the collection start time in PostgreSQL. Replicas reuse that scope on restart.
 
 ## Measurement behavior
 

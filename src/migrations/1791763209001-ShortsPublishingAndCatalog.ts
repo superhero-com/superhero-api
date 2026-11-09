@@ -2,8 +2,8 @@ import { QueryRunner } from 'typeorm';
 import { FeatureMigration } from './support/feature-migration';
 
 export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
-  readonly changes = {
-    ShortsPublications1791763209000: {
+  readonly steps = {
+    ShortsPublications: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE TABLE shorts_publishing_accounts (
       network varchar(32) NOT NULL, operator varchar(100) NOT NULL,
@@ -70,7 +70,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
     },
 
     /** Public API and signer use distinct logins with no direct journal grants. */
-    ShortsPublisherAuthority1791763210000: {
+    ShortsPublisherAuthority: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -338,7 +338,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
       },
     },
 
-    ShortsCatalog1791763211000: {
+    ShortsCatalog: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE INDEX shorts_content_public_page
       ON shorts_content(network,contract,created_at DESC,id DESC)
@@ -349,7 +349,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
       },
     },
 
-    ShortsStudio1791763212000: {
+    ShortsStudio: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE INDEX shorts_chain_events_video
       ON shorts_chain_events(contract,beneficiary,short_id,action,block_height)
@@ -360,7 +360,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
       },
     },
 
-    ShortsLifecycle1791763213000: {
+    ShortsLifecycle: {
       async up(runner: QueryRunner): Promise<void> {
         const [{ schema }] = await runner.query(
           'SELECT current_schema() AS schema',
@@ -395,8 +395,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
       END $lifecycle$;
       REVOKE ALL ON FUNCTION ${s}.shorts_schedule_lifecycle() FROM PUBLIC;
       CREATE TRIGGER shorts_schedule_lifecycle AFTER INSERT OR UPDATE OF body ON ${s}.shorts_content
-      FOR EACH ROW EXECUTE FUNCTION ${s}.shorts_schedule_lifecycle();
-      INSERT INTO ${s}.shorts_lifecycle_jobs(network,contract,id) SELECT network,contract,id FROM ${s}.shorts_content`);
+      FOR EACH ROW EXECUTE FUNCTION ${s}.shorts_schedule_lifecycle()`);
       },
       async down(runner: QueryRunner): Promise<void> {
         await runner.query(
@@ -407,31 +406,7 @@ export class ShortsPublishingAndCatalog1791763209001 extends FeatureMigration {
       },
     },
 
-    ShortsSharedCutover1791763214000: {
-      async up(runner: QueryRunner): Promise<void> {
-        await runner.query(`CREATE TABLE shorts_legacy_cutovers (
-      network varchar(32) NOT NULL, contract varchar(100) NOT NULL,
-      fingerprint char(64) NOT NULL CHECK(fingerprint ~ '^[a-f0-9]{64}$'),
-      completed_at timestamptz,
-      PRIMARY KEY(network,contract),
-      FOREIGN KEY(network,contract) REFERENCES shorts_runtime(network,contract)
-    );
-    CREATE INDEX shorts_content_missing_private ON shorts_content(network,contract,id)
-      WHERE body->'privateMedia' IS NULL OR body->'privateMedia'='null'::jsonb`);
-      },
-      async down(runner: QueryRunner): Promise<void> {
-        const [row] = await runner.query(
-          'SELECT 1 FROM shorts_legacy_cutovers LIMIT 1',
-        );
-        if (row)
-          throw new Error('Preserve legacy cutover evidence before downgrade');
-        await runner.query(
-          'DROP INDEX shorts_content_missing_private; DROP TABLE shorts_legacy_cutovers',
-        );
-      },
-    },
-
-    ShortsFollowing1791763227000: {
+    ShortsFollowing: {
       async up(runner: QueryRunner): Promise<void> {
         await runner.query(`CREATE INDEX shorts_content_following_page
       ON shorts_content(network,contract,creator,created_at DESC,id DESC)

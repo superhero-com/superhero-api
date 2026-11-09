@@ -16,7 +16,7 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 import { ShortsMetadataService, ShortsScope } from './shorts-metadata.service';
 import type { PrivateObjectRef } from './shorts-private-objects.service';
-import type { UploadInput } from './shorts-uploads.service';
+import type { UploadInput } from './shorts-upload-input';
 import { SHORTS_TOPICS } from './shorts-labels.service';
 import { randomBytes } from 'node:crypto';
 import {
@@ -225,39 +225,42 @@ export class ShortsUploadRecordsService {
   ) {
     const params = this.params(scope, id, creator);
     this.validateInput(input);
-    return this.db.transaction(async (manager) => {
-      await this.lock(manager, params);
-      if (request) {
-        const existing = await this.replay(manager, scope, creator, request);
-        if (existing) return existing;
-      }
-      const [existing] = await manager.query(
-        'SELECT *,creator=$4 AND input=$5::jsonb AS matches FROM shorts_upload_sessions WHERE network=$1 AND contract=$2 AND id=$3',
-        [...params, JSON.stringify(input)],
-      );
-      if (existing) {
-        if (!existing.matches || request)
-          throw new ConflictException('Upload identity already exists');
-        return this.result(manager, params, await this.own(manager, params));
-      }
-      const [counts] = await manager.query(
-        `SELECT count(*)::integer AS total, count(*) FILTER(WHERE creator=$3)::integer AS own,
+    return this.db
+      .transaction(async (manager) => {
+        await this.lock(manager, params);
+        if (request) {
+          const existing = await this.replay(manager, scope, creator, request);
+          if (existing) return existing;
+        }
+        const [existing] = await manager.query(
+          'SELECT *,creator=$4 AND input=$5::jsonb AS matches FROM shorts_upload_sessions WHERE network=$1 AND contract=$2 AND id=$3',
+          [...params, JSON.stringify(input)],
+        );
+        if (existing) {
+          if (!existing.matches || request)
+            throw new ConflictException('Upload identity already exists');
+          return this.result(manager, params, await this.own(manager, params));
+        }
+        const [counts] = await manager.query(
+          `SELECT count(*)::integer AS total, count(*) FILTER(WHERE creator=$3)::integer AS own,
         COALESCE(sum(bytes),0)::bigint AS total_bytes, COALESCE(sum(bytes) FILTER(WHERE creator=$3),0)::bigint AS own_bytes
         FROM shorts_upload_admission WHERE network=$1 AND contract=$2 AND created_at>now()-interval '1 hour'`,
-        [params[0], params[1], creator],
-      );
-      if (
-        counts.own >= 10 ||
-        Number(counts.own_bytes) + input.bytes > 10 * 40 * SHORTS_PART_BYTES ||
-        counts.total >= 100 ||
-        Number(counts.total_bytes) + input.bytes > 100 * 40 * SHORTS_PART_BYTES
-      )
-        throw new HttpException(
-          'Upload capacity reached. Try again later.',
-          429,
+          [params[0], params[1], creator],
         );
-      const [active] = await manager.query(
-        `SELECT count(*)::integer AS n FROM (
+        if (
+          counts.own >= 10 ||
+          Number(counts.own_bytes) + input.bytes >
+            10 * 40 * SHORTS_PART_BYTES ||
+          counts.total >= 100 ||
+          Number(counts.total_bytes) + input.bytes >
+            100 * 40 * SHORTS_PART_BYTES
+        )
+          throw new HttpException(
+            'Upload capacity reached. Try again later.',
+            429,
+          );
+        const [active] = await manager.query(
+          `SELECT count(*)::integer AS n FROM (
           (SELECT id FROM shorts_upload_sessions WHERE network=$1 AND contract=$2
             AND expires_at>now() ORDER BY expires_at LIMIT 100)
           UNION
@@ -265,28 +268,33 @@ export class ShortsUploadRecordsService {
             WHERE j.network=$1 AND j.contract=$2 AND j.status IN ('queued','processing') LIMIT 100)
           LIMIT 100
         ) active`,
-        params.slice(0, 2),
-      );
-      if (active.n >= 100)
-        throw new ServiceUnavailableException(
-          'Upload capacity reached. Try again later.',
+          params.slice(0, 2),
         );
-      const [row] = await manager.query(
-        `INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,$3,$4,$5::jsonb) RETURNING *`,
-        [...params, JSON.stringify(input)],
-      );
-      await manager.query(
-        `INSERT INTO shorts_upload_admission(network,contract,upload_id,creator,bytes) VALUES($1,$2,$3,$4,$5)`,
-        [...params, input.bytes],
-      );
-      if (request)
+        if (active.n >= 100)
+          throw new ServiceUnavailableException(
+            'Upload capacity reached. Try again later.',
+          );
+        const [row] = await manager.query(
+          `INSERT INTO shorts_upload_sessions(network,contract,id,creator,input) VALUES($1,$2,$3,$4,$5::jsonb) RETURNING *`,
+          [...params, JSON.stringify(input)],
+        );
         await manager.query(
-          `INSERT INTO shorts_upload_requests(network,contract,creator,request_key,request_hash,upload_id)
-           VALUES($1,$2,$3,$4,$5,$6)`,
-          [params[0], params[1], creator, request.key, request.hash, id],
+          `INSERT INTO shorts_upload_admission(network,contract,upload_id,creator,bytes) VALUES($1,$2,$3,$4,$5)`,
+          [...params, input.bytes],
         );
-      return this.result(manager, params, row);
-    });
+        if (request)
+          await manager.query(
+            `INSERT INTO shorts_upload_requests(network,contract,creator,request_key,request_hash,upload_id)
+           VALUES($1,$2,$3,$4,$5,$6)`,
+            [params[0], params[1], creator, request.key, request.hash, id],
+          );
+        return this.result(manager, params, row);
+      })
+      .catch((error) => {
+        if (error?.code === 'SH409')
+          throw new ConflictException('Upload reservation identity differs');
+        throw error;
+      });
   }
   async part(
     scope: ShortsScope,

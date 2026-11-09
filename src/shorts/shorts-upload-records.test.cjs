@@ -3,7 +3,7 @@ const {
   ShortsDirectUploads,
   ShortsMetadata,
   ShortsUploads,
-} = require('./testing/historical-migrations.cjs');
+} = require('./testing/schema-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,7 +15,7 @@ const { ShortsUploadRecordsService, SHORTS_PART_BYTES } = require('./shorts-uplo
 const { ShortsSourceService } = require('./shorts-source.service');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const input = (bytes = 10) => ({ title: 'My short', topic: 'Art', rights: true, bytes, sha256: hash('source'), details: { language: 'en' } });
+const input = (bytes = 10) => ({ processingProfile: 'original-h264-v1', title: 'My short', topic: 'Art', rights: true, bytes, sha256: hash('source'), details: { language: 'en' } });
 const ref = (bytes = 10, sha256 = hash('source')) => ({ key: `private/upload/key1/${sha256}`, keyId: 'key1', bytes, sha256 });
 
 test('shared uploads: atomic admission, immutable parts, frozen input and job acceptance', { skip: !process.env.SHORTS_TEST_PG_URL, timeout: 60000 }, async t => {

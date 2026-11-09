@@ -2,7 +2,6 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { deliveryOperation, runDeliveryOperation } = require('./shorts-delivery-operation');
-const { ShortsBackfillService } = require('./shorts-backfill.service');
 const budget = { replicas: 1, maxAdditionalLogicalBytes: 3e9, maxEncodingSeconds: 5400 };
 const scope = { network: 'ae_uat', contract: 'ct_test' };
 const operation = '00000000-0000-4000-8000-000000000001';
@@ -13,21 +12,6 @@ test('delivery operations reject malformed and unexpected inputs before runtime 
     ['dry-run', { ids: ['p', 'p'], budget }], ['start', { id: 'batch', ids: ['p'], budget, planHash: 'bad' }],
     ['rollback', { id: 'p', nextKey: 'x', expected: {}, operation: 'bad' }]])
     assert.throws(() => deliveryOperation(action, input));
-  assert.equal(deliveryOperation('dry-run', { ids: ['p'], budget }).action, 'dry-run');
-});
-
-test('manual backfill context never starts automatic batch polling', async () => {
-  const previous = process.env.SHORTS_BACKFILL_ENABLED;
-  process.env.SHORTS_BACKFILL_ENABLED = 'true';
-  const service = new ShortsBackfillService({}, {}, {}, {}, {}, {}, false);
-  try {
-    service.onApplicationBootstrap();
-    assert.equal(service.timer, undefined);
-  } finally {
-    await service.onModuleDestroy();
-    if (previous === undefined) delete process.env.SHORTS_BACKFILL_ENABLED;
-    else process.env.SHORTS_BACKFILL_ENABLED = previous;
-  }
 });
 
 test('commands delegate only their requested action and rollback uses explicit expectations', async () => {
@@ -35,44 +19,21 @@ test('commands delegate only their requested action and rollback uses explicit e
   let call;
   const activation = { select: (...args) => { call = args; return 'receipt'; } };
   const input = { id: 'post', nextKey: 'a'.repeat(64), expected: { sourceKey: 'b'.repeat(64), revision: '1' }, operation: '00000000-0000-4000-8000-000000000001' };
-  assert.equal(await runDeliveryOperation(deliveryOperation('rollback', input), {}, activation, signal), 'receipt');
+  assert.equal(await runDeliveryOperation(deliveryOperation('rollback', input), activation, signal), 'receipt');
   assert.deepEqual(call, [input.id, input.nextKey, input.expected, input.operation, 'rollback', signal]);
   const aborted = AbortSignal.abort();
-  await assert.rejects(runDeliveryOperation(deliveryOperation('status', { id: 'batch' }), { status: () => assert.fail() }, {}, aborted));
+  await assert.rejects(runDeliveryOperation(deliveryOperation('rollback', input), activation, aborted));
 });
 
 
-test('canonical adoption is opt-in and uses the verified bounded prepare path', async () => {
-  const { ShortsStreamingService } = require('./shorts-streaming.service');
-  const previous = process.env.SHORTS_LEGACY_BACKFILL_ENABLED;
-  const signal = new AbortController().signal;
-  let calls = 0;
-  const service = { prepare: async (id, cid, active) => {
-    calls++; assert.equal(id, 'post'); assert.equal(cid, undefined); assert.equal(active.aborted, false); return 200;
-  } };
-  try {
-    delete process.env.SHORTS_LEGACY_BACKFILL_ENABLED;
-    await assert.rejects(ShortsStreamingService.prototype.acknowledgeCanonical.call(service, 'post', signal), /disabled/);
-    assert.equal(calls, 0);
-    process.env.SHORTS_LEGACY_BACKFILL_ENABLED = 'true';
-    assert.deepEqual(await ShortsStreamingService.prototype.acknowledgeCanonical.call(service, 'post', signal), { id: 'post', status: 'ready' });
-    assert.equal(calls, 1);
-  } finally {
-    if (previous === undefined) delete process.env.SHORTS_LEGACY_BACKFILL_ENABLED;
-    else process.env.SHORTS_LEGACY_BACKFILL_ENABLED = previous;
-  }
-});
-
-test('operations module omits hosted background bootstrap and automatic backfill', async () => {
+test('operations module omits hosted background bootstrap', async () => {
   const previous = process.env.AE_NETWORK_ID;
   process.env.AE_NETWORK_ID = 'ae_uat';
   try {
     const { ShortsTestnetModule } = require('./shorts.module');
     const { ShortsHostedBootstrapService } = require('./shorts-hosted-bootstrap.service');
-    const { SHORTS_BACKFILL_AUTOMATIC } = require('./shorts-backfill.service');
     const result = await ShortsTestnetModule.register(true, { operationsOnly: true });
     assert.equal(result.providers.includes(ShortsHostedBootstrapService), false);
-    assert.equal(result.providers.find(x => x.provide === SHORTS_BACKFILL_AUTOMATIC).useValue, false);
   } finally {
     if (previous === undefined) delete process.env.AE_NETWORK_ID;
     else process.env.AE_NETWORK_ID = previous;
@@ -123,7 +84,7 @@ test('input unpin commands bind saved roots, retain authority IDs, and never tur
     recoveries: { get: async (kind, id) => { assert.equal(kind, 'unpin'); assert.equal(id, operation); return { recovered: true }; } },
   };
   const inputs = { scope, pins };
-  const run = action => runDeliveryOperation(deliveryOperation(action, { scope, operation, ...(action === 'reclaim-input' ? { cid } : {}) }), {}, {}, signal, undefined, inputs);
+  const run = action => runDeliveryOperation(deliveryOperation(action, { scope, operation, ...(action === 'reclaim-input' ? { cid } : {}) }), {}, signal, inputs);
   const status = await run('input-reclamation-status');
   assert.equal(status.permit.state, 'uncertain');
   assert.equal(status.recovered, true);
@@ -161,12 +122,12 @@ test('retirement commands preserve exact operation and parent cancellation and r
     barriers: new Proxy({}, { get: () => assert.fail('No barrier action authorized') }),
   };
   for (const [action, kind] of [['retire-encoded-inputs', 'encoded'], ['retire-private-inputs', 'private']]) {
-    assert.deepEqual(await runDeliveryOperation(deliveryOperation(action, request), {}, {}, signal, undefined, inputs), { operation });
+    assert.deepEqual(await runDeliveryOperation(deliveryOperation(action, request), {}, signal, inputs), { operation });
     assert.deepEqual(calls.pop(), [kind, request.id, request.sourceKey, operation, signal]);
   }
-  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', { ...request, scope: { ...scope, contract: 'ct_foreign' } }), {}, {}, signal, undefined, inputs), /scope changed/);
-  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', request), {}, {}, AbortSignal.abort(), undefined, inputs));
-  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', request), {}, {}, signal), /scope changed/);
+  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', { ...request, scope: { ...scope, contract: 'ct_foreign' } }), {}, signal, inputs), /scope changed/);
+  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', request), {}, AbortSignal.abort(), inputs));
+  await assert.rejects(runDeliveryOperation(deliveryOperation('retire-private-inputs', request), {}, signal), /scope changed/);
   assert.deepEqual(calls, []);
 });
 
@@ -184,7 +145,7 @@ test('barrier mutations default off, recovery remains available, and receipts om
   const calls = [];
   const barriers = Object.fromEntries(['enrol', 'reserve', 'seal', 'get', 'cancel'].map(method => [method, (...args) => { calls.push([method, ...args]); return row; }]));
   const inputs = { scope, barriers };
-  const run = action => runDeliveryOperation(deliveryOperation(action, requests[action]), {}, {}, signal, undefined, inputs);
+  const run = action => runDeliveryOperation(deliveryOperation(action, requests[action]), {}, signal, inputs);
   try {
     delete process.env.SHORTS_PRIVATE_INPUT_BARRIERS_ENABLED;
     for (const action of ['barrier-enrol', 'barrier-reserve', 'barrier-seal']) await assert.rejects(run(action), /disabled/);
@@ -248,7 +209,7 @@ test('one barrier batch retains the exact scope, IDs and scan while returning on
       return { id: args[1], state: 'sealed', scan_id: scan, seal_scan_id: scan, reference_epoch: '12', bytes: '20', roots: [{}], object_key: 'hidden' };
     },
   } };
-  const run = value => runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', value), {}, {}, new AbortController().signal, undefined, inputs);
+  const run = value => runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', value), {}, new AbortController().signal, inputs);
   try {
     delete process.env.SHORTS_PRIVATE_INPUT_BARRIERS_ENABLED;
     await assert.rejects(run(request), /disabled/);
@@ -288,7 +249,7 @@ test('barrier batches stop immediately after a failed or cancelled committed ste
           return { roots: [] };
         },
       } };
-      await assert.rejects(runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', barrierBatch()), {}, {}, stop.signal, undefined, inputs));
+      await assert.rejects(runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', barrierBatch()), {}, stop.signal, inputs));
       assert.deepEqual(calls, mode.startsWith('reserve') ? ['reserve'] : ['reserve', 'seal']);
     }
   } finally {
@@ -307,7 +268,7 @@ test('barrier batches enforce the fixed deadline before dispatching another oper
       reserve: async () => { calls.push('reserve'); deadline.abort(); },
       seal: () => assert.fail('No seal after batch deadline'),
     } };
-    await assert.rejects(runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', barrierBatch()), {}, {}, new AbortController().signal, undefined, inputs));
+    await assert.rejects(runDeliveryOperation(deliveryOperation('barrier-reserve-seal-batch', barrierBatch()), {}, new AbortController().signal, inputs));
     assert.deepEqual(calls, ['reserve']);
   } finally {
     if (previous === undefined) delete process.env.SHORTS_PRIVATE_INPUT_BARRIERS_ENABLED;
