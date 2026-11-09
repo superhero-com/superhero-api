@@ -1,3 +1,4 @@
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import 'dotenv/config';
 import { Relay, finalizeEvent, nip19 } from 'nostr-tools';
 import WebSocket from 'ws';
@@ -102,7 +103,7 @@ describe('RelayWriterService (integration)', () => {
     writers.splice(0).forEach((writer) => writer.onApplicationShutdown()),
   );
   const makeWriter = (url = RELAY_URL) => {
-    const writer = new RelayWriterService(makeConfig(url));
+    const writer = new RelayWriterService(makeConfig(url), new EventEmitter2());
     writers.push(writer);
     return writer;
   };

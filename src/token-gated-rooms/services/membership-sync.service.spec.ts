@@ -12,6 +12,7 @@ import { RoomMembership } from '../entities/room-membership.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { RoomAdminsService } from './room-admins.service';
 import { NIP29_KIND } from '../nostr/nip29';
+import type { RelayWriter } from '../nostr/relay-writer.contract';
 import {
   TGR_MEMBERSHIP_CHANGED,
   type TgrMembershipChangedPayload,
@@ -70,6 +71,7 @@ function makeToken(over: Partial<Token> = {}): Token {
 }
 
 interface Harness {
+  relay: { isHealthy: jest.Mock };
   service: MembershipSyncService;
   membershipRepo: jest.Mocked<Repository<RoomMembership>>;
   communityRoomRepo: jest.Mocked<Repository<CommunityRoom>>;
@@ -133,6 +135,7 @@ function setup(
   const membershipAccess = {
     recordAccessTransition: jest.fn().mockResolvedValue(undefined),
   };
+  const relay = { isHealthy: jest.fn().mockReturnValue(true) };
 
   const service = new MembershipSyncService(
     membershipRepo,
@@ -152,11 +155,13 @@ function setup(
       reconcileBatchSize: 500,
       reconcileIntervalSec: 600,
     } as any,
+    relay as unknown as RelayWriter,
     undefined, // groupMissing (optional)
     membershipAccess as any, // access-transition ledger (sole push emitter)
   );
 
   return {
+    relay,
     service,
     membershipRepo,
     communityRoomRepo,
@@ -535,6 +540,155 @@ describe('MembershipSyncService — idempotency (Req 10)', () => {
 });
 
 describe('MembershipSyncService — scan predicate + idempotency', () => {
+  it('does not lose a readiness event while an interrupted membership scan is unwinding', async () => {
+    const h = setup({
+      room: makeRoom(),
+      token: makeToken(),
+      relayConfigured: true,
+    });
+    const rows = [makeMembership({ relay_state: 'pending_remove' })];
+    h.relay.isHealthy.mockReturnValue(false);
+    await h.service.scanAndPublishPending();
+    let finish: (batch: RoomMembership[]) => void;
+    const query = queryBuilderReturning([]);
+    query.getMany.mockImplementationOnce(
+      () =>
+        new Promise<RoomMembership[]>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    h.membershipRepo.createQueryBuilder
+      .mockReturnValueOnce(query)
+      .mockReturnValueOnce(queryBuilderReturning([rows]));
+    h.relay.isHealthy.mockReturnValue(true);
+    const catchUp = h.service.onRelayReady();
+    h.relay.isHealthy.mockReturnValue(false);
+    finish(rows);
+    queueMicrotask(() => {
+      h.relay.isHealthy.mockReturnValue(true);
+      void h.service.onRelayReady();
+    });
+    await catchUp;
+    expect(h.membershipRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+    expect(h.queue.add).toHaveBeenCalledTimes(1);
+    expect(h.queue.add.mock.calls[0][0].template.kind).toBe(9001);
+  });
+
+  it('catches up pending additions and removals once after verified recovery', async () => {
+    const rows = [
+      makeMembership({ id: 1, relay_state: 'pending_add' }),
+      makeMembership({ id: 2, relay_state: 'pending_remove' }),
+    ];
+    const h = setup({
+      room: makeRoom(),
+      token: makeToken(),
+      relayConfigured: true,
+    });
+    h.membershipRepo.createQueryBuilder.mockImplementation(() =>
+      queryBuilderReturning([rows]),
+    );
+    await h.service.onRelayReady();
+    expect(h.queue.add).not.toHaveBeenCalled();
+    h.relay.isHealthy.mockReturnValue(false);
+    await h.service.scanAndPublishPending();
+
+    h.relay.isHealthy.mockReturnValue(true);
+    await Promise.all([h.service.onRelayReady(), h.service.onRelayReady()]);
+    await h.service.onRelayReady();
+    expect(h.queue.add.mock.calls.map(([job]) => job.template.kind)).toEqual([
+      9000, 9001,
+    ]);
+    expect(h.membershipRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(h.membershipRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('stops between members on health loss, leaving remaining removals pending', async () => {
+    const rows = [
+      makeMembership({ id: 1, relay_state: 'pending_add' }),
+      makeMembership({ id: 2, relay_state: 'pending_remove' }),
+    ];
+    const h = setup({
+      room: makeRoom(),
+      token: makeToken(),
+      relayConfigured: true,
+    });
+    h.membershipRepo.createQueryBuilder
+      .mockReturnValueOnce(queryBuilderReturning([rows]))
+      .mockReturnValueOnce(queryBuilderReturning([[rows[1]]]));
+    h.queue.add.mockImplementationOnce(async () => {
+      h.relay.isHealthy.mockReturnValue(false);
+    });
+    expect(await h.service.scanAndPublishPending()).toBe(1);
+    expect(h.queue.add).toHaveBeenCalledTimes(1);
+    expect(rows[1].relay_state).toBe('pending_remove');
+
+    h.relay.isHealthy.mockReturnValue(true);
+    await h.service.onRelayReady();
+    expect(h.queue.add.mock.calls.map(([job]) => job.template.kind)).toEqual([
+      9000, 9001,
+    ]);
+  });
+
+  it('retains event-driven add/remove/add ordering while maintenance is paused', async () => {
+    const row = makeMembership();
+    const h = setup({ room: makeRoom(), membership: row });
+    h.relay.isHealthy.mockReturnValue(false);
+    for (const state of [
+      'pending_add',
+      'pending_remove',
+      'pending_add',
+    ] as const) {
+      row.relay_state = state;
+      await h.service.onEligibilityChanged({
+        saleAddress: SALE,
+        memberAddress: row.member_address,
+        eligible: state === 'pending_add',
+      });
+    }
+    expect(h.queue.add.mock.calls.map(([job]) => job.template.kind)).toEqual([
+      9000, 9001, 9000,
+    ]);
+    expect(
+      h.queue.add.mock.calls.every(
+        ([, options]) => options.jobId === undefined,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not restart deferred membership scans after shutdown', async () => {
+    const h = setup({ relayConfigured: true });
+    h.relay.isHealthy.mockReturnValue(false);
+    await h.service.scanAndPublishPending();
+    h.service.onApplicationShutdown();
+    h.relay.isHealthy.mockReturnValue(true);
+    await h.service.onRelayReady();
+    expect(h.membershipRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('does not accumulate pending additions or removals across a day of unhealthy scans', async () => {
+    const rows = [
+      makeMembership({ id: 1, relay_state: 'pending_add' }),
+      makeMembership({ id: 2, relay_state: 'pending_remove' }),
+    ];
+    const h = setup({ room: makeRoom(), token: makeToken() });
+    h.relay.isHealthy.mockReturnValue(false);
+    h.membershipRepo.createQueryBuilder = jest
+      .fn()
+      .mockImplementation(() => queryBuilderReturning([rows]));
+
+    for (let tick = 0; tick < 144; tick++) {
+      await h.service.scanAndPublishPending();
+    }
+
+    expect(h.queue.add).not.toHaveBeenCalled();
+    expect(h.membershipRepo.createQueryBuilder).not.toHaveBeenCalled();
+    expect(h.membershipRepo.update).not.toHaveBeenCalled();
+    expect(rows.map((row) => row.relay_state)).toEqual([
+      'pending_add',
+      'pending_remove',
+    ]);
+  });
+
   it('scan selects only created rooms; pending_add(+pubkey)→9000, pending_remove→9001', async () => {
     const add = makeMembership({ id: 1, relay_state: 'pending_add' });
     const remove = makeMembership({

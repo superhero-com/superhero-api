@@ -2,9 +2,9 @@ import type { RelayWriter } from './relay-writer.contract';
 import {
   ABUSE_VECTOR_NOTE,
   RELAY_ADMIN_PUBKEY_ENV,
-  RelayAdminHealthService,
   wsUrlToHttp,
-} from './relay-admin-health';
+} from './relay-admin-identity';
+import { RelayAdminHealthService } from './relay-admin-health';
 
 const hex = (n: number): string =>
   (n.toString(16).padStart(2, '0') + 'a'.repeat(62)).slice(0, 64);
@@ -144,5 +144,22 @@ describe('RelayAdminHealthService.verify', () => {
       .mockRejectedValue(new Error('ECONNREFUSED')) as any;
     process.env[RELAY_ADMIN_PUBKEY_ENV] = BOT;
     await expect(build(makeRelay(BOT, true)).verify()).resolves.toBeUndefined();
+  });
+
+  it('bounds a stalled NIP-11 fetch so admin verification can be retried', async () => {
+    global.fetch = jest.fn(
+      (_url, { signal }: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    ) as any;
+    await expect(
+      build(makeRelay(), {
+        ...makeConfig(),
+        publishAckTimeoutMs: 25,
+      }).verify(),
+    ).rejects.toThrow('could not determine the relay admin pubkey');
   });
 });

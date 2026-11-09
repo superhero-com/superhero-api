@@ -23,6 +23,7 @@ import type { PublishNip29Job } from './publish-nip29.types';
 import {
   isAlreadyExists,
   isGroupNotFound,
+  isRelayAdminReject,
   isTerminalReject,
   pubkeyFromTags,
   TerminalPublishError,
@@ -141,6 +142,11 @@ export class PublishNip29Processor
     }
 
     if (isTerminalReject(reason)) {
+      // An admin rejection affects the whole connection, not just this room.
+      // The writer re-verifies admin identity on reconnect before health returns.
+      if (isRelayAdminReject(reason)) {
+        await this.pauseForOutage();
+      }
       // Permanent (D7 / 9008-deleted): fail fast, surface for alerting, ack false.
       this.logger.error(
         `terminal publish reject kind ${template.kind} for ${groupId}: ${reason}`,

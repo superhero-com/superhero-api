@@ -108,6 +108,7 @@ d('Community-room state indexer (integration)', () => {
       emitter,
       new SchedulerRegistry(),
       { backfillBatchSize: 1, roomProvisionBatchSize: 500 } as any, // tiny batches exercise resumability
+      { isHealthy: () => true } as any,
     );
   }, 60_000);
 

@@ -147,6 +147,7 @@ d('MembershipSyncService (integration)', () => {
         reconcileBatchSize: 2,
         reconcileIntervalSec: 600,
       } as any,
+      { isHealthy: () => true } as any,
       undefined, // groupMissing (optional)
       membershipAccess,
     );
@@ -454,14 +455,17 @@ d('MembershipSyncService (integration)', () => {
       relayAvailable =
         !!process.env.TG_RELAY_URL || (await relayReachable(RELAY_URL));
       if (relayAvailable) {
-        writer = new RelayWriterService({
-          nostrRelayUrl: RELAY_URL,
-          nostrBotNsec: RELAY_ADMIN_NSEC,
-          publishAckTimeoutMs: 5000,
-          publishRatePerSec: 100,
-          publishMaxRetries: 5,
-          relayHealthPauseSec: 1,
-        } as any);
+        writer = new RelayWriterService(
+          {
+            nostrRelayUrl: RELAY_URL,
+            nostrBotNsec: RELAY_ADMIN_NSEC,
+            publishAckTimeoutMs: 5000,
+            publishRatePerSec: 100,
+            publishMaxRetries: 5,
+            relayHealthPauseSec: 1,
+          } as any,
+          new EventEmitter2(),
+        );
         await writer.onModuleInit();
       } else {
         console.warn(
