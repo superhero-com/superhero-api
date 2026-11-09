@@ -9,7 +9,7 @@ It does not start the API, media workers or signer. Enabled testnet only.
 
 ## Configure
 
-1. Apply API migrations through `1793145606000-ShortsDeliveryStaging` and build with
+1. Apply API migrations through `1793145600001-ShortsAdaptiveDelivery` and build with
    `npm run build`. Complete an HLS inventory for the same deployment first.
 2. In `superhero-ipfs`, enable the distinct `IPFS_INVENTORY_TOKEN_FILE` credential
    and recreate Kubo and the TLS proxy. Fresh `make setup` installations include

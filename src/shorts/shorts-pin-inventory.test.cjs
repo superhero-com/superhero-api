@@ -1,4 +1,12 @@
-const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
+const {
+  ShortsDeliveryPackages,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsRetentionHolds,
+  ShortsHlsInventory,
+  ShortsAdaptiveInventory,
+  ShortsPinInventory,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -11,12 +19,6 @@ const {join}=require('node:path');
 const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
 const {DataSource}=require('typeorm');
-const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsMetadata');
-const {ShortsUploads1791763202000}=require('../migrations/1791763202000-ShortsUploads');
-const {ShortsRetentionHolds1791763216000}=require('../migrations/1791763216000-ShortsRetentionHolds');
-const {ShortsHlsInventory1791763219000}=require('../migrations/1791763219000-ShortsHlsInventory');
-const {ShortsAdaptiveInventory1793145601000}=require('../migrations/1793145601000-ShortsAdaptiveInventory');
-const {ShortsPinInventory1791763220000}=require('../migrations/1791763220000-ShortsPinInventory');
 const {ShortsDatabaseService}=require('./shorts-database.service');
 const {ShortsRetentionService}=require('./shorts-retention.service');
 const {ShortsPinInventoryService}=require('./shorts-pin-inventory.service');
@@ -101,9 +103,9 @@ test('real Kubo and restricted PostgreSQL retain partial scans and reconcile ori
   const config=await pinInventoryConfig(env),admin=new DataSource({type:'postgres',url:pg.href});await admin.initialize();let owner,db,roleCreated=false;
   t.after(async()=>{if(db?.isInitialized)await db.onModuleDestroy();if(owner?.isInitialized)await owner.destroy();if(roleCreated)await admin.query(`DROP OWNED BY ${role};DROP ROLE ${role}`);await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.destroy();for(const pin of created)await rpc('pin/rm?arg='+pin);await rm(dir,{recursive:true,force:true});});
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000,ShortsPinInventory1791763220000,ShortsAdaptiveInventory1793145601000]};
+  const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata,ShortsUploads,ShortsRetentionHolds,ShortsHlsInventory,ShortsPinInventory,ShortsAdaptiveInventory]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
-  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
+  await owner.transaction(db => new ShortsDeliveryPackages().up(db));
   const args=[scope.network,scope.contract];await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[...args,sourceHash]);
   await owner.query(`INSERT INTO shorts_hls_inventory_runs(network,contract,id,source_hash,storage_id,namespace,phase,reference_version) VALUES($1,$2,$3,$4,$4,'test','complete',3)`,[...args,hlsRun,sourceHash]);
   for(const [resource,cid,sourceKey,holds] of [['video-1',sourceCid,'b'.repeat(64),1],['video-2',directCid,'c'.repeat(64),0],['missing','b'+'c'.repeat(58),'d'.repeat(64),0]]){

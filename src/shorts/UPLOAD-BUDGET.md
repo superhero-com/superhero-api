@@ -4,7 +4,7 @@ Hosted uploads reserve shared capacity in PostgreSQL before a new upload session
 is accepted or private objects are written. The budget belongs to one network/contract. All API replicas use the
 same counters; starting another process does not reset or multiply them.
 
-Apply migration `1791763224000-ShortsUploadBudget` with the migration owner before
+Apply migration `1791763222001-ShortsUploadAdmission` with the migration owner before
 opening uploads. It locks the affected tables while backfilling existing upload
 sessions, ingestion jobs and content, counting each ID once. Run this migration
 in a coordinated maintenance window. Inconsistent historical ownership or

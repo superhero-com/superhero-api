@@ -1,10 +1,10 @@
+const { ShortsPrivateVersionCleanup: Migration } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { fixture, scope, candidate, current } = require('./testing/private-version-http.cjs');
-const { ShortsPrivateVersionCleanup1793232008000: Migration } = require('../migrations/1793232008000-ShortsPrivateVersionCleanup');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { ShortsSourceReaderService } = require('./shorts-source-reader.service');
 const { ShortsStorageReconciliationService } = require('./shorts-storage-reconciliation.service');

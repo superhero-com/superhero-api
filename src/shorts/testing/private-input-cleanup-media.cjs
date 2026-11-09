@@ -1,3 +1,4 @@
+const schemaMigrations = require('./historical-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { mkdir, writeFile, readdir } = require('node:fs/promises');
@@ -41,22 +42,22 @@ const drain = async (step, field) => {
 // Opt-in local integration: migrations not already installed by the worker fixture.
 exports.migrate = owner => owner.transaction(async runner => {
   for (const name of [
-    '1791763216000-ShortsRetentionHolds', '1791763217000-ShortsStorageInventory',
-    '1791763218000-ShortsStorageReferences', '1791763219000-ShortsHlsInventory',
-    '1793145601000-ShortsAdaptiveInventory', '1793145602000-ShortsDeliveryPackages',
-    '1793145603000-ShortsDeliveryGenerations', '1793145604000-ShortsFileStorageReferences',
-    '1793145605000-ShortsGenerationDeliveryPackages', '1793145606000-ShortsDeliveryStaging',
-    '1793145607000-ShortsDeliverySelection', '1793145608000-ShortsDeliveryInputRetirement',
-    '1793232000000-ShortsOriginalUploads', '1793232008000-ShortsPrivateVersionCleanup',
-    '1793491200000-ShortsPrivateInputRetirement', '1793491201000-ShortsAcceptedManifests',
-    '1793491202000-ShortsPrivateReferenceBarriers', '1793491203000-ShortsPrivateInputCleanupJournal',
-  ]) await new (Object.values(require('../../migrations/' + name))[0])().up(runner);
+    'ShortsRetentionHolds', 'ShortsStorageInventory',
+    'ShortsStorageReferences', 'ShortsHlsInventory',
+    'ShortsAdaptiveInventory', 'ShortsDeliveryPackages',
+    'ShortsDeliveryGenerations', 'ShortsFileStorageReferences',
+    'ShortsGenerationDeliveryPackages', 'ShortsDeliveryStaging',
+    'ShortsDeliverySelection', 'ShortsDeliveryInputRetirement',
+    'ShortsOriginalUploads', 'ShortsPrivateVersionCleanup',
+    'ShortsPrivateInputRetirement', 'ShortsAcceptedManifests',
+    'ShortsPrivateReferenceBarriers', 'ShortsPrivateInputCleanupJournal',
+  ]) await new schemaMigrations[name]().up(runner);
   if (process.env.SHORTS_TEST_INPUT_RECLAMATION === '1') {
     for (const name of [
-      '1793145609000-ShortsInputReclamationReservations', '1793145610000-ShortsPinTransfers',
-      '1793145611000-ShortsInputReclamationPermits', '1793145612000-ShortsStorageWriteEpochs',
-      '1793232001000-ShortsReclamationRelease', '1793232002000-ShortsStorageRecovery',
-    ]) await new (Object.values(require('../../migrations/' + name))[0])().up(runner);
+      'ShortsInputReclamationReservations', 'ShortsPinTransfers',
+      'ShortsInputReclamationPermits', 'ShortsStorageWriteEpochs',
+      'ShortsReclamationRelease', 'ShortsStorageRecovery',
+    ]) await new schemaMigrations[name]().up(runner);
   }
 });
 

@@ -1,3 +1,4 @@
+const { ShortsMetadata, ShortsLikeSponsorship } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,8 +8,6 @@ const { join } = require('node:path');
 const { DataSource } = require('typeorm');
 const { AccountMemory, buildTx, buildTxHash, encode, Encoding, Tag, unpackTx } = require('@aeternity/aepp-sdk');
 const { AciContractCallEncoder } = require('@aeternity/aepp-calldata');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsLikeSponsorship1792454400000 } = require('../migrations/1792454400000-ShortsLikeSponsorship');
 const { ShortsLikeSponsorshipRepository } = require('./shorts-like-sponsorship-repository.service');
 const { ShortsLikeSponsorWorker } = require('./shorts-like-sponsor-worker.service');
 const { PublisherAttempt } = require('./shorts-publisher-attempt');
@@ -44,7 +43,7 @@ test('Like sponsorship PostgreSQL authority, concurrency and durable recovery', 
   await admin.query(`CREATE SCHEMA ${schema}`);
   owner = await new DataSource({ type: 'postgres', url: url.href, schema,
     extra: { options: `-c search_path=${schema}`, max: 12, statement_timeout: 10000 }, logging: false,
-    migrations: [ShortsMetadata1791763200000, ShortsLikeSponsorship1792454400000],
+    migrations: [ShortsMetadata, ShortsLikeSponsorship],
   }).initialize();
   await owner.runMigrations({ transaction: 'all' });
 

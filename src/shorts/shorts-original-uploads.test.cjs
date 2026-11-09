@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsOriginalUploads: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,7 +11,6 @@ const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsUploadRecordsService } = require('./shorts-upload-records.service');
 const { ShortsUploadPolicyService, shortsUploadPolicyConfig } = require('./shorts-upload-policy.service');
 const { shortsAcceptedSource } = require('./shorts-upload-policy');
-const { ShortsOriginalUploads1793232000000: Migration } = require('../migrations/1793232000000-ShortsOriginalUploads');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
 const { workerRole } = require('./testing/worker-role.cjs');
 const sha = createHash('sha256').update('original').digest('hex');
@@ -29,11 +32,11 @@ test('original upload migration, frozen admission, 96 direct parts, enqueue and 
   db = new DataSource({ type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 4 } });
   await db.initialize();
   await db.transaction(async manager => {
-    for (const name of ['1791763200000-ShortsMetadata','1791763202000-ShortsUploads','1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority','1791763215000-ShortsProcessingCapacity','1791763216000-ShortsRetentionHolds',
-      '1791763222000-ShortsWorkerBackpressure','1791763224000-ShortsUploadBudget','1792022400000-ShortsDirectUploads',
-      '1793145600000-ShortsOriginalContent','1793145602000-ShortsDeliveryPackages','1793145603000-ShortsDeliveryGenerations',
-      '1793145606000-ShortsDeliveryStaging']) await new (Object.values(require('../migrations/' + name))[0])().up(manager);
+    for (const name of ['ShortsMetadata','ShortsUploads','ShortsWorkers',
+      'ShortsWorkerAuthority','ShortsProcessingCapacity','ShortsRetentionHolds',
+      'ShortsWorkerBackpressure','ShortsUploadBudget','ShortsDirectUploads',
+      'ShortsOriginalContent','ShortsDeliveryPackages','ShortsDeliveryGenerations',
+      'ShortsDeliveryStaging']) await new schemaMigrations[name]().up(manager);
     await new Migration().up(manager);
   });
   await db.transaction(manager => new Migration().down(manager));

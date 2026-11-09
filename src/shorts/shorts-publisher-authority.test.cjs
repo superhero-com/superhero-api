@@ -1,13 +1,15 @@
-const { ShortsPublicationAdmission1791763223000 } = require('../migrations/1791763223000-ShortsPublicationAdmission');
+const {
+  ShortsPublicationAdmission,
+  ShortsMetadata,
+  ShortsPublications,
+  ShortsPublisherAuthority,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { AccountMemory, encode, Encoding, buildTx, buildTxHash, Tag } = require('@aeternity/aepp-sdk');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsPublications1791763209000 } = require('../migrations/1791763209000-ShortsPublications');
-const { ShortsPublisherAuthority1791763210000 } = require('../migrations/1791763210000-ShortsPublisherAuthority');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsPublicationsService } = require('./shorts-publications.service');
 const { ShortsPublicationBoundaryService } = require('./shorts-publication-boundary.service');
@@ -21,7 +23,7 @@ test('publication database boundary separates creator admission from isolated si
   const schema = `shorts_publisher_authority_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 },
-    migrations: [ShortsMetadata1791763200000, ShortsPublications1791763209000, ShortsPublisherAuthority1791763210000, ShortsPublicationAdmission1791763223000] };
+    migrations: [ShortsMetadata, ShortsPublications, ShortsPublisherAuthority, ShortsPublicationAdmission] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' }).catch(error => { const at = Number(error.position || error.driverError?.position); console.error({ position: at, where: error.driverError?.where, context: error.query?.slice(Math.max(0, at - 150), at + 150) }); throw error; });
   const principals = [], meta = new ShortsMetadataService(owner), journal = new ShortsPublicationsService(owner);
   t.after(async () => { for (const p of principals) { await p.db.destroy(); await p.dispose(); } await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
@@ -198,7 +200,7 @@ test('publication database boundary separates creator admission from isolated si
     const before = await get(claim.id);
     const functionIdentity = async () => (await owner.query("SELECT oid,proowner,proacl,proconfig FROM pg_proc WHERE oid='shorts_publication(text,jsonb)'::regprocedure"))[0];
     const identityBefore = await functionIdentity();
-    const migration = new ShortsPublicationAdmission1791763223000();
+    const migration = new ShortsPublicationAdmission();
     await owner.transaction(db => migration.down(db));
     await assert.rejects(f.api.repo.verify(f.deployment, 'api'), { status: 403 });
     assert.deepEqual(await get(claim.id), before);
@@ -219,7 +221,7 @@ test('publication database boundary separates creator admission from isolated si
     await assert.rejects(signed(f, next), { status: 409 });
   });
   await t.test('downgrade cannot silently remove active principal protection', async () => {
-    await assert.rejects(new ShortsPublisherAuthority1791763210000().down(owner.createQueryRunner()), /reconcile publication principals/);
+    await assert.rejects(new ShortsPublisherAuthority().down(owner.createQueryRunner()), /reconcile publication principals/);
   });
   await t.test('runtime Nest module resolves only the boundary client with a restricted connection', async () => {
     const f = await fixture(), { Module, Global } = require('@nestjs/common'), { Test } = require('@nestjs/testing');

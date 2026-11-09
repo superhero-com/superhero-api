@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsFileStorageReferences: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,7 +11,6 @@ const { ShortsRetentionService } = require('./shorts-retention.service');
 const { ShortsStorageReconciliationService } = require('./shorts-storage-reconciliation.service');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
 const { ShortsSourceReaderService } = require('./shorts-source-reader.service');
-const { ShortsFileStorageReferences1793145604000: Migration } = require('../migrations/1793145604000-ShortsFileStorageReferences');
 const fixture = require('./testing/hls-v3.json');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
@@ -27,11 +30,11 @@ test('maximum original sources and large renditions remain accounted for without
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 } };
   owner = new DataSource(options); await owner.initialize();
   await owner.transaction(async runner => {
-    for (const name of ['1791763200000-ShortsMetadata', '1791763202000-ShortsUploads', '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763216000-ShortsRetentionHolds',
-      '1791763217000-ShortsStorageInventory', '1791763218000-ShortsStorageReferences',
-      '1791763222000-ShortsWorkerBackpressure', '1791763224000-ShortsUploadBudget', '1793145600000-ShortsOriginalContent',
-      '1793145602000-ShortsDeliveryPackages']) await new (Object.values(require('../migrations/' + name))[0])().up(runner);
+    for (const name of ['ShortsMetadata', 'ShortsUploads', 'ShortsWorkers',
+      'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsRetentionHolds',
+      'ShortsStorageInventory', 'ShortsStorageReferences',
+      'ShortsWorkerBackpressure', 'ShortsUploadBudget', 'ShortsOriginalContent',
+      'ShortsDeliveryPackages']) await new schemaMigrations[name]().up(runner);
   });
   const scope = { network: 'ae_uat', contract: 'ct_protocol' }, args = [scope.network, scope.contract], prefix = 'shorts-private-v1';
   const config = { scope, prefix, sourceHash: hash('source'), storageId: hash('storage'), objectPrefix: `${prefix}/${hash(JSON.stringify(args))}/` };

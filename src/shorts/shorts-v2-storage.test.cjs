@@ -1,24 +1,26 @@
+const {
+  ShortsMetadata,
+  ShortsReceipts,
+  ShortsPublications,
+  ShortsPublisherAuthority,
+  ShortsPublicationAdmission,
+  ShortsPublicationContentScope,
+  ShortsImportSnapshot,
+  ShortsUploads,
+  ShortsLifecycle,
+  ShortsUploadBudget,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { AccountMemory, encode, Encoding } = require('@aeternity/aepp-sdk');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
-const { ShortsPublications1791763209000 } = require('../migrations/1791763209000-ShortsPublications');
-const { ShortsPublisherAuthority1791763210000 } = require('../migrations/1791763210000-ShortsPublisherAuthority');
-const { ShortsPublicationAdmission1791763223000 } = require('../migrations/1791763223000-ShortsPublicationAdmission');
-const { ShortsPublicationContentScope1792368000000 } = require('../migrations/1792368000000-ShortsPublicationContentScope');
-const { ShortsImportSnapshot1792368001000 } = require('../migrations/1792368001000-ShortsImportSnapshot');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsPublicationsService } = require('./shorts-publications.service');
 const { ShortsPublicationBoundaryService } = require('./shorts-publication-boundary.service');
 const { ShortsReceiptsService } = require('./shorts-receipts.service');
 const { publisherRole } = require('./testing/publisher-role.cjs');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
 const { ShortsPublisherSetupService } = require('./shorts-publisher-setup.service');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const encoded = kind => encode(randomBytes(32), kind);
@@ -27,7 +29,7 @@ test('V2 publication preserves old encrypted content, independent journals, role
   const url = new URL(process.env.SHORTS_TEST_PG_URL); assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname));
   const schema = `shorts_vtwo_storage_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
-  const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 }, migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsReceipts1791763208000, ShortsPublications1791763209000, ShortsPublisherAuthority1791763210000, ShortsLifecycle1791763213000, ShortsPublicationAdmission1791763223000, ShortsUploadBudget1791763224000] };
+  const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 }, migrations: [ShortsMetadata, ShortsUploads, ShortsReceipts, ShortsPublications, ShortsPublisherAuthority, ShortsLifecycle, ShortsPublicationAdmission, ShortsUploadBudget] };
   const db = new DataSource(options); await db.initialize(); await db.runMigrations({ transaction: 'all' });
   const roles = [];
   t.after(async () => { for (const p of roles) { await p.db.destroy(); await p.dispose(); } await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
@@ -48,7 +50,7 @@ test('V2 publication preserves old encrypted content, independent journals, role
   await db.query("UPDATE shorts_publication_jobs SET status='cancelled' WHERE contract=$1", [old.contract]);
   const before = (await db.query('SELECT * FROM shorts_publication_jobs WHERE contract=$1', [old.contract]))[0];
   const runner = db.createQueryRunner(); await runner.connect(); await runner.startTransaction();
-  try { await new ShortsPublicationContentScope1792368000000().up(runner); await new ShortsImportSnapshot1792368001000().up(runner); await runner.commitTransaction(); } catch (error) { await runner.rollbackTransaction(); throw error; } finally { await runner.release(); }
+  try { await new ShortsPublicationContentScope().up(runner); await new ShortsImportSnapshot().up(runner); await runner.commitTransaction(); } catch (error) { await runner.rollbackTransaction(); throw error; } finally { await runner.release(); }
   const after = (await db.query('SELECT * FROM shorts_publication_jobs WHERE contract=$1', [old.contract]))[0];
   assert.equal(after.content_contract, old.contract); delete after.content_contract; assert.deepEqual(after, before);
   await journal.initialize(active, newHash, operator, policy, { contract: old.contract, sourceHash: oldHash });
@@ -56,7 +58,7 @@ test('V2 publication preserves old encrypted content, independent journals, role
   await assert.rejects(oldApi.rpc.verify(deployment, 'api'), { status: 403 });
   const { mkdtemp, writeFile, rm } = require('node:fs/promises'); const { join } = require('node:path'); const { tmpdir } = require('node:os');
   const dir = await mkdtemp(join(tmpdir(), 'v2-role-transition-')); t.after(() => rm(dir, { recursive: true, force: true }));
-  const snapshot = { destination: active.contract, network: active.network, source: old.contract, cutoff: { hash: encoded(Encoding.KeyBlockHash), height: 50 }, commitment: 'c'.repeat(64), videos: [{ id: record.id, likes: [], withdrawn: false }] };
+  const snapshot = { version: 1, destination: active.contract, network: active.network, source: old.contract, cutoff: { hash: encoded(Encoding.KeyBlockHash), height: 50 }, commitment: 'c'.repeat(64), videos: [{ id: record.id, likes: [], withdrawn: false }] };
   const env = { AE_NETWORK_ID: 'ae_uat', ENABLE_SHORTS: 'true', SHORTS_TESTNET_MVP: '1', SHORTS_DEPLOYMENT_FILE: join(dir, 'deployment.json'), SHORTS_PUBLISHING_POLICY_FILE: join(dir, 'policy.json'), SHORTS_PUBLISHER_API_ROLE: oldApi.role, SHORTS_PUBLISHER_DB_ROLE: oldSigner.role, SHORTS_REPLACE_PUBLISHER_CONTRACT: old.contract, SHORTS_LEGACY_SNAPSHOT_FILE: join(dir, 'snapshot.json'), SHORTS_CONTRACT_MIGRATION_CONFIG: join(dir, 'migration.json') };
   const { release } = releaseFixture({ ...active, sourceHash: newHash, schemaVersion: 2, operator, storage: deployment.content });
   for (const [file, value] of [[env.SHORTS_DEPLOYMENT_FILE, release], [env.SHORTS_PUBLISHING_POLICY_FILE, policy], [env.SHORTS_LEGACY_SNAPSHOT_FILE, snapshot], [env.SHORTS_CONTRACT_MIGRATION_CONFIG, {}]]) await writeFile(file, JSON.stringify(value));

@@ -1,4 +1,10 @@
-const { ShortsWorkerBackpressure1791763222000 } = require('../migrations/1791763222000-ShortsWorkerBackpressure');
+const {
+  ShortsWorkerBackpressure,
+  ShortsMetadata,
+  ShortsWorkers,
+  ShortsWorkerAuthority,
+  ShortsProcessingCapacity,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,10 +15,6 @@ const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
 const { ShortsMediaWorkerService } = require('./shorts-media-worker.service');
 const { workerRole } = require('./testing/worker-role.cjs');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsWorkers1791763203000 } = require('../migrations/1791763203000-ShortsWorkers');
-const { ShortsWorkerAuthority1791763204000 } = require('../migrations/1791763204000-ShortsWorkerAuthority');
-const { ShortsProcessingCapacity1791763215000 } = require('../migrations/1791763215000-ShortsProcessingCapacity');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) {
   for (let i = 0; i < 100; i++) { if (await fn()) return; await sleep(20); }
@@ -27,9 +29,9 @@ test('PostgreSQL processing capacity applies to restricted workers and legacy cl
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 10 },
-    migrations: [ShortsMetadata1791763200000, ShortsWorkers1791763203000, ShortsWorkerAuthority1791763204000, ShortsProcessingCapacity1791763215000] };
+    migrations: [ShortsMetadata, ShortsWorkers, ShortsWorkerAuthority, ShortsProcessingCapacity] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' });
-  await new ShortsWorkerBackpressure1791763222000().up(owner);
+  await new ShortsWorkerBackpressure().up(owner);
   const identities = [], clients = []; const metadata = new ShortsMetadataService(owner); const hash = 'a'.repeat(64);
   t.after(async () => {
     for (const db of clients) await db.destroy(); await owner.destroy();
@@ -109,13 +111,13 @@ test('PostgreSQL processing capacity applies to restricted workers and legacy cl
     await owner.query('ALTER TABLE shorts_ingestion ENABLE TRIGGER shorts_processing_capacity');
     await owner.query("UPDATE shorts_ingestion SET status='queued',error_code=NULL,lease_until=NULL,lease_token=NULL,lease_principal=NULL WHERE status='processing' OR error_code='capacity_wait'");
     const before = await owner.query('SELECT network,contract,id,status,attempts FROM shorts_ingestion ORDER BY contract,id');
-    await owner.transaction(manager => new ShortsWorkerBackpressure1791763222000().down(manager));
+    await owner.transaction(manager => new ShortsWorkerBackpressure().down(manager));
     await assert.rejects(previous.workers[0].repo.verifyRuntime(previous.scope, hash), { status: 503 });
     await owner.undoLastMigration({ transaction: 'all' });
     await assert.rejects(previous.workers[0].repo.verifyRuntime(previous.scope, hash), { status: 503 });
     assert.deepEqual(await owner.query('SELECT network,contract,id,status,attempts FROM shorts_ingestion ORDER BY contract,id'), before);
     await owner.runMigrations({ transaction: 'all' });
-    await new ShortsWorkerBackpressure1791763222000().up(owner);
+    await new ShortsWorkerBackpressure().up(owner);
     assert.deepEqual(await owner.query('SELECT network,contract,id,status,attempts FROM shorts_ingestion ORDER BY contract,id'), before);
     const f = await fixture(1, 2); await f.workers[0].repo.verifyRuntime(f.scope, hash);
     assert.ok(await f.workers[0].repo.claim(f.scope));
@@ -161,7 +163,7 @@ test('PostgreSQL processing capacity applies to restricted workers and legacy cl
     const forced = await owner.query(`UPDATE shorts_ingestion SET status='processing',lease_token=gen_random_uuid(),
       lease_until=clock_timestamp()+interval '1 minute',attempts=attempts+1,fence=fence+1 WHERE contract=$1 AND id=$2 RETURNING id`, [f.scope.contract, current.id]);
     assert.equal(forced[1], 0, 'older callers cannot ignore the not-before time');
-    await assert.rejects(owner.transaction(manager => new ShortsWorkerBackpressure1791763222000().down(manager)), /Drain processing/);
+    await assert.rejects(owner.transaction(manager => new ShortsWorkerBackpressure().down(manager)), /Drain processing/);
     await owner.query("UPDATE shorts_ingestion SET updated_at=clock_timestamp()-interval '6 seconds' WHERE contract=$1 AND id=$2", [f.scope.contract, current.id]);
     const resumed = await b.repo.claim(f.scope); assert.equal(resumed.id, current.id); assert.equal(resumed.attempts, 2); assert.equal(resumed.fence, '3');
     assert.equal(await a.repo.defer(f.scope, current), false);

@@ -1,3 +1,4 @@
+const { ShortsMetadata, ShortsMultipartInventory } = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -19,12 +20,6 @@ const {
   DeleteBucketCommand,
   ListMultipartUploadsCommand,
 } = require('@aws-sdk/client-s3');
-const {
-  ShortsMetadata1791763200000,
-} = require('../migrations/1791763200000-ShortsMetadata');
-const {
-  ShortsMultipartInventory1791763221000,
-} = require('../migrations/1791763221000-ShortsMultipartInventory');
 const { ShortsDatabaseService } = require('./shorts-database.service');
 const { ShortsStorageListService } = require('./shorts-storage-list.service');
 const {
@@ -316,8 +311,8 @@ test(
       schema,
       extra: { options: `-c search_path=${schema}`, max: 2 },
       migrations: [
-        ShortsMetadata1791763200000,
-        ShortsMultipartInventory1791763221000,
+        ShortsMetadata,
+        ShortsMultipartInventory,
       ],
     };
     owner = new DataSource(options);

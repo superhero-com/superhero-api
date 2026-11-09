@@ -1,6 +1,13 @@
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsWorkerBackpressure1791763222000 } = require('../migrations/1791763222000-ShortsWorkerBackpressure');
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsUploadBudget,
+  ShortsUploads,
+  ShortsWorkerBackpressure,
+  ShortsMetadata,
+  ShortsWorkers,
+  ShortsWorkerAuthority,
+  ShortsLifecycle,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,24 +15,20 @@ const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsWorkers1791763203000 } = require('../migrations/1791763203000-ShortsWorkers');
-const { ShortsWorkerAuthority1791763204000 } = require('../migrations/1791763204000-ShortsWorkerAuthority');
 const { workerRole } = require('./testing/worker-role.cjs');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
 
 test('media worker database authority survives direct SQL and forged RPC requests', { skip: !process.env.SHORTS_TEST_PG_URL, timeout: 45000 }, async t => {
   const url = new URL(process.env.SHORTS_TEST_PG_URL); assert.equal(url.hostname, '127.0.0.1');
   const schema = `shorts_authority_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 1 },
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsWorkers1791763203000, ShortsWorkerAuthority1791763204000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsWorkers, ShortsWorkerAuthority] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' });
   // Keep the authority rollback test focused while exercising the later content trigger.
-  await new ShortsLifecycle1791763213000().up(owner);
-  await new (require('../migrations/1791763215000-ShortsProcessingCapacity').ShortsProcessingCapacity1791763215000)().up(owner);
-  await new ShortsWorkerBackpressure1791763222000().up(owner);
-  await owner.transaction(manager => new ShortsUploadBudget1791763224000().up(manager));
+  await new ShortsLifecycle().up(owner);
+  await new schemaMigrations.ShortsProcessingCapacity().up(owner);
+  await new ShortsWorkerBackpressure().up(owner);
+  await owner.transaction(manager => new ShortsUploadBudget().up(manager));
   const metadata = new ShortsMetadataService(owner), hash = 'a'.repeat(64);
   const scope = { network: 'ae_uat', contract: `ct_${randomUUID().replaceAll('-', '')}` };
   const otherScope = { ...scope, contract: `ct_${randomUUID().replaceAll('-', '')}` };

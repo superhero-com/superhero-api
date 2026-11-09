@@ -9,7 +9,7 @@ policies. No API route or background scheduler starts this process.
 
 ## Prerequisites
 
-- Apply migrations through `1793232008000-ShortsPrivateVersionCleanup` and build
+- Apply migrations through `1793232008001-ShortsPrivateMediaCleanup` and build
   the API. Use the existing enabled testnet deployment configuration from
   [storage reconciliation](STORAGE-REFERENCES.md).
 - Keep bucket versioning enabled. Automatic lifecycle rules must be disabled;

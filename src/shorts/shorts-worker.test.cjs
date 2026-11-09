@@ -1,13 +1,22 @@
+const {
+  ShortsDirectUploads,
+  ShortsOriginalContent,
+  ShortsLifecycle,
+  ShortsWorkerBackpressure,
+  ShortsUploadBudget,
+  ShortsMediaAdmission,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsWorkers,
+  ShortsWorkerAuthority,
+  ShortsStreamingOutbox,
+  ShortsSharedCutover,
+  ShortsProcessingCapacity,
+} = require('./testing/historical-migrations.cjs');
 const { directUploadPart } = require('./testing/direct-upload.cjs');
-const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
-const { ShortsOriginalContent1793145600000 } = require('../migrations/1793145600000-ShortsOriginalContent');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
-const { ShortsWorkerBackpressure1791763222000 } = require('../migrations/1791763222000-ShortsWorkerBackpressure');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsMediaAdmission1791763225000 } = require('../migrations/1791763225000-ShortsMediaAdmission');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -38,14 +47,7 @@ const { ShortsUploadsService } = require('./shorts-uploads.service');
 const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsUploadPolicyService } = require('./shorts-upload-policy.service');
 const { ShortsStoreService } = require('./shorts-store.service');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsWorkers1791763203000 } = require('../migrations/1791763203000-ShortsWorkers');
-const { ShortsWorkerAuthority1791763204000 } = require('../migrations/1791763204000-ShortsWorkerAuthority');
-const { ShortsStreamingOutbox1791763206000 } = require('../migrations/1791763206000-ShortsStreamingOutbox');
 const { workerRole } = require('./testing/worker-role.cjs');
-const { ShortsSharedCutover1791763214000 } = require('../migrations/1791763214000-ShortsSharedCutover');
-const { ShortsProcessingCapacity1791763215000 } = require('../migrations/1791763215000-ShortsProcessingCapacity');
 const { ShortsLegacyImportsService } = require('./shorts-legacy-imports.service');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -104,7 +106,7 @@ for (const originals of [false, true]) test(`hosted ${originals ? 'original-file
   const schema = `shorts_worker_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata1791763200000, ShortsLifecycle1791763213000, ShortsUploads1791763202000, ShortsWorkers1791763203000, ShortsWorkerAuthority1791763204000, ShortsStreamingOutbox1791763206000, ShortsSharedCutover1791763214000, ShortsProcessingCapacity1791763215000, ShortsWorkerBackpressure1791763222000, ShortsUploadBudget1791763224000, ShortsMediaAdmission1791763225000, ShortsDirectUploads1792022400000, ShortsOriginalContent1793145600000] };
+    migrations: [ShortsMetadata, ShortsLifecycle, ShortsUploads, ShortsWorkers, ShortsWorkerAuthority, ShortsStreamingOutbox, ShortsSharedCutover, ShortsProcessingCapacity, ShortsWorkerBackpressure, ShortsUploadBudget, ShortsMediaAdmission, ShortsDirectUploads, ShortsOriginalContent] };
   const a = new DataSource(options), b = new DataSource(options); await a.initialize(); await b.initialize(); await a.runMigrations({ transaction: 'all' });
   if (cleanupMedia) await require('./testing/private-input-cleanup-media.cjs').migrate(a);
   const scope = { network: 'ae_uat', contract: releaseFixture().release.contract }, sourceHash = hash('test-contract');

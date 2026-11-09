@@ -17,8 +17,8 @@ flowchart LR
 
 ## Configuration
 
-Apply all API migrations, including `1791763206000-ShortsStreamingOutbox` and
-`1791763214000-ShortsSharedCutover`, before starting the hosted API. Its database role needs SELECT, INSERT, UPDATE and DELETE on
+Apply all API migrations, including `1791763200001-ShortsMediaIngestion` and
+`1791763209001-ShortsPublishingAndCatalog`, before starting the hosted API. Its database role needs SELECT, INSERT, UPDATE and DELETE on
 `shorts_stream_jobs`, in addition to its existing content/runtime permissions.
 Publication also writes this table through a security-invoker trigger, so a trusted
 content-import or repair identity needs the corresponding outbox permissions.

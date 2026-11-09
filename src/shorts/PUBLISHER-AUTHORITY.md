@@ -1,6 +1,6 @@
 # Publication database authority
 
-Migration `1791763210000-ShortsPublisherAuthority` adds the scoped
+Migration `1791763209001-ShortsPublishingAndCatalog` adds the scoped
 `shorts_publication(text,jsonb)` boundary. It is consumed by
 `ShortsPublicationBoundaryService`. The hosted API and isolated publisher use
 different database logins. Neither receives direct access to publication-journal
@@ -12,7 +12,7 @@ Use the documented coordinated setup when upgrading an existing deployment;
 adding the migration alone does not enroll runtime logins or start the worker.
 The remaining local-state restrictions still limit the full API to one instance.
 
-Apply migrations through `1791763223000-ShortsPublicationAdmission` before starting
+Apply migrations through `1791763222001-ShortsUploadAdmission` before starting
 the current API or publisher. This extends the existing function with a capacity
 check; startup verifies its capability version. The migration preserves function
 ownership, execution grants, search path and journal contents. Its downgrade leaves

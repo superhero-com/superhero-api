@@ -1,15 +1,13 @@
-const { ShortsMediaAdmission1791763225000 } = require('../migrations/1791763225000-ShortsMediaAdmission');
+const {
+  ShortsMediaAdmission,
+  ShortsMetadata,
+  ShortsLifecycle,
+} = require('./testing/historical-migrations.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { DataSource } = require('typeorm');
-const {
-  ShortsMetadata1791763200000,
-} = require('../migrations/1791763200000-ShortsMetadata');
-const {
-  ShortsLifecycle1791763213000,
-} = require('../migrations/1791763213000-ShortsLifecycle');
 const {
   ShortsLifecycleJobsService,
 } = require('./shorts-lifecycle-jobs.service');
@@ -302,8 +300,8 @@ test(
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);
       await admin.destroy();
     });
-    const migration = new ShortsLifecycle1791763213000();
-    await new ShortsMetadata1791763200000().up(a);
+    const migration = new ShortsLifecycle();
+    await new ShortsMetadata().up(a);
     await a.query(`INSERT INTO shorts_runtime VALUES($1,$2,$3,NULL,50,5)`, [
       scope.network,
       scope.contract,
@@ -317,7 +315,7 @@ test(
     for (let i = 0; i < 125; i++)
       await insert(`short${String(i).padStart(3, '0')}`);
     await migration.up(a);
-    await new ShortsMediaAdmission1791763225000().up(a);
+    await new ShortsMediaAdmission().up(a);
     const jobs = new ShortsLifecycleJobsService(a),
       other = new ShortsLifecycleJobsService(b);
     await jobs.verify(scope, hash);

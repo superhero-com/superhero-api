@@ -1,3 +1,4 @@
+const { ShortsMetadata, ShortsStreamingOutbox } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,8 +10,6 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { createServer } = require('node:http');
 const { DataSource } = require('typeorm');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsStreamingOutbox1791763206000 } = require('../migrations/1791763206000-ShortsStreamingOutbox');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsStreamJobsService } = require('./shorts-stream-jobs.service');
 const { ShortsStreamingService } = require('./shorts-streaming.service');
@@ -27,7 +26,7 @@ test('shared playback outbox: atomic publication, independent dispatchers and cr
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema,
     extra: { options: `-c search_path=${schema}`, max: 8, statement_timeout: 10000 },
-    migrations: [ShortsMetadata1791763200000, ShortsStreamingOutbox1791763206000] };
+    migrations: [ShortsMetadata, ShortsStreamingOutbox] };
   const one = new DataSource(options), two = new DataSource(options);
   const directory = await mkdtemp(join(tmpdir(), 'shorts-shared-outbox-'));
   const key = join(directory, 'key'); await writeFile(key, 'a'.repeat(64), { mode: 0o600 });

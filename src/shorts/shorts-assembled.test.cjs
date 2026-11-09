@@ -181,8 +181,8 @@ test('complete hosted module shares upload, media and publication controls acros
     const missing = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: apiRole.url });
     await assert.rejects(missing.wait('ready'), /Apply the Shorts media-admission migration/);
     assert.equal(scans, 0);
-    const { ShortsMediaAdmission1791763225000 } = require('../migrations/1791763225000-ShortsMediaAdmission');
-    await new ShortsMediaAdmission1791763225000().up(owner);
+    const schemaMigrations = require('./testing/historical-migrations.cjs');
+    await new schemaMigrations.ShortsMediaAdmission().up(owner);
   });
   const a = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: apiRole.url }); a.base = (await a.wait('ready')).base;
   const b = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: apiRole.url }); b.base = (await b.wait('ready')).base;

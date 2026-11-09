@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsDeliverySelection: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,7 +13,6 @@ const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generati
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
 const { ShortsDeliverySelectionService, SHORTS_DELIVERY_RETAIN_SECONDS } = require('./shorts-delivery-selection.service');
 const { ShortsDeliveryActivationService } = require('./shorts-delivery-activation.service');
-const { ShortsDeliverySelection1793145607000: Migration } = require('../migrations/1793145607000-ShortsDeliverySelection');
 const { ShortsService } = require('./shorts.service');
 const { validateSourcePackage } = require('./hls-protocol/hls-package');
 const { workerRole } = require('./testing/worker-role.cjs');
@@ -27,19 +30,19 @@ test('delivery selection is atomic, reversible, scoped and independent of canoni
   t.after(async () => { await workerDb?.destroy(); await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`);
     await identity?.dispose(); await admin.destroy(); });
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata', '1791763202000-ShortsUploads', '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory', '1791763220000-ShortsPinInventory', '1791763222000-ShortsWorkerBackpressure',
-      '1791763224000-ShortsUploadBudget', '1793145600000-ShortsOriginalContent', '1793145601000-ShortsAdaptiveInventory',
-      '1793145602000-ShortsDeliveryPackages', '1793145603000-ShortsDeliveryGenerations',
-      '1793145605000-ShortsGenerationDeliveryPackages', '1793145606000-ShortsDeliveryStaging',
-      '1793232004000-ShortsLegacyDeliveryPackages'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata', 'ShortsUploads', 'ShortsWorkers',
+      'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsRetentionHolds',
+      'ShortsHlsInventory', 'ShortsPinInventory', 'ShortsWorkerBackpressure',
+      'ShortsUploadBudget', 'ShortsOriginalContent', 'ShortsAdaptiveInventory',
+      'ShortsDeliveryPackages', 'ShortsDeliveryGenerations',
+      'ShortsGenerationDeliveryPackages', 'ShortsDeliveryStaging',
+      'ShortsLegacyDeliveryPackages'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));
-  for (const name of ['1793232003000-ShortsLegacyDeliverySources', '1793232005000-ShortsLegacyDeliverySelection'])
-    await owner.transaction(db => new (Object.values(require('../migrations/' + name))[0])().up(db));
+  for (const name of ['ShortsLegacyDeliverySources', 'ShortsLegacyDeliverySelection'])
+    await owner.transaction(db => new schemaMigrations[name]().up(db));
 
   const original = { ...structuredClone(golden.descriptor), creator: 'ak_creator', title: 'Original title', topic: 'Art', duration: 4,
     publication: 'published', moderation: 'approved', safety: { status: 'no_flags', sourceSha256: golden.descriptor.original.sha256 },

@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsLegacyDeliveryPackages: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -5,7 +9,6 @@ const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
 const { DataSource } = require('typeorm');
-const { ShortsLegacyDeliveryPackages1793232004000: Migration } = require('../migrations/1793232004000-ShortsLegacyDeliveryPackages');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
 const { ShortsDeliveryAcknowledgementService } = require('./shorts-delivery-acknowledgement.service');
 const { ShortsMediaService } = require('./shorts-media.service');
@@ -49,16 +52,16 @@ test('PostgreSQL retains a physically verified legacy package without changing c
     if (db.isInitialized) await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); process.env = env;
   });
   await db.transaction(async runner => {
-    for (const name of ['1791763200000-ShortsMetadata','1791763202000-ShortsUploads','1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority','1791763215000-ShortsProcessingCapacity','1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory','1791763220000-ShortsPinInventory','1791763222000-ShortsWorkerBackpressure',
-      '1791763224000-ShortsUploadBudget','1792022400000-ShortsDirectUploads','1793145600000-ShortsOriginalContent',
-      '1793145601000-ShortsAdaptiveInventory','1793145602000-ShortsDeliveryPackages','1793145603000-ShortsDeliveryGenerations',
-      '1793145605000-ShortsGenerationDeliveryPackages','1793145606000-ShortsDeliveryStaging','1793145607000-ShortsDeliverySelection',
-      '1793145608000-ShortsDeliveryInputRetirement','1793145609000-ShortsInputReclamationReservations','1793145610000-ShortsPinTransfers',
-      '1793145611000-ShortsInputReclamationPermits','1793145612000-ShortsStorageWriteEpochs','1793232000000-ShortsOriginalUploads',
-      '1793232001000-ShortsReclamationRelease','1793232002000-ShortsStorageRecovery','1793232003000-ShortsLegacyDeliverySources'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(runner);
+    for (const name of ['ShortsMetadata','ShortsUploads','ShortsWorkers',
+      'ShortsWorkerAuthority','ShortsProcessingCapacity','ShortsRetentionHolds',
+      'ShortsHlsInventory','ShortsPinInventory','ShortsWorkerBackpressure',
+      'ShortsUploadBudget','ShortsDirectUploads','ShortsOriginalContent',
+      'ShortsAdaptiveInventory','ShortsDeliveryPackages','ShortsDeliveryGenerations',
+      'ShortsGenerationDeliveryPackages','ShortsDeliveryStaging','ShortsDeliverySelection',
+      'ShortsDeliveryInputRetirement','ShortsInputReclamationReservations','ShortsPinTransfers',
+      'ShortsInputReclamationPermits','ShortsStorageWriteEpochs','ShortsOriginalUploads',
+      'ShortsReclamationRelease','ShortsStorageRecovery','ShortsLegacyDeliverySources'])
+      await new schemaMigrations[name]().up(runner);
     await new Migration().up(runner);
   });
   await db.transaction(r => new Migration().down(r)); await db.transaction(r => new Migration().up(r));

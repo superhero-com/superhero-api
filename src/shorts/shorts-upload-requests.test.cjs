@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsUploadRequests: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,7 +12,6 @@ const { ShortsUploadRecordsService } = require('./shorts-upload-records.service'
 const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsUploadPolicyService, shortsUploadPolicyConfig } = require('./shorts-upload-policy.service');
 const { shortsUploadRequest, validateUploadRequest } = require('./shorts-upload-request');
-const { ShortsUploadRequests1793232007000: Migration } = require('../migrations/1793232007000-ShortsUploadRequests');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const { workerRole } = require('./testing/worker-role.cjs');
 const sha = createHash('sha256').update('source').digest('hex');
@@ -51,12 +54,12 @@ test('hosted creation survives lost replies, concurrency, policy rollback and ex
   await admin.query(`CREATE SCHEMA ${schema}`);
   first = new DataSource(options); second = new DataSource(options); await first.initialize(); await second.initialize();
   await first.transaction(async manager => {
-    for (const name of ['1791763200000-ShortsMetadata','1791763202000-ShortsUploads','1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority','1791763215000-ShortsProcessingCapacity','1791763216000-ShortsRetentionHolds',
-      '1791763222000-ShortsWorkerBackpressure','1791763224000-ShortsUploadBudget','1792022400000-ShortsDirectUploads',
-      '1793145600000-ShortsOriginalContent','1793145602000-ShortsDeliveryPackages','1793145603000-ShortsDeliveryGenerations',
-      '1793145606000-ShortsDeliveryStaging','1793232000000-ShortsOriginalUploads'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(manager);
+    for (const name of ['ShortsMetadata','ShortsUploads','ShortsWorkers',
+      'ShortsWorkerAuthority','ShortsProcessingCapacity','ShortsRetentionHolds',
+      'ShortsWorkerBackpressure','ShortsUploadBudget','ShortsDirectUploads',
+      'ShortsOriginalContent','ShortsDeliveryPackages','ShortsDeliveryGenerations',
+      'ShortsDeliveryStaging','ShortsOriginalUploads'])
+      await new schemaMigrations[name]().up(manager);
     await new Migration().up(manager);
   });
   await first.transaction(manager => new Migration().down(manager));

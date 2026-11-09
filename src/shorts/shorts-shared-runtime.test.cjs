@@ -1,5 +1,9 @@
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
+const {
+  ShortsUploads,
+  ShortsUploadBudget,
+  ShortsMetadata,
+  ShortsSharedCutover,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -17,12 +21,6 @@ const { ShortsRecordsService } = require('./shorts-records.service');
 const {
   ShortsLegacyImportsService,
 } = require('./shorts-legacy-imports.service');
-const {
-  ShortsMetadata1791763200000,
-} = require('../migrations/1791763200000-ShortsMetadata');
-const {
-  ShortsSharedCutover1791763214000,
-} = require('../migrations/1791763214000-ShortsSharedCutover');
 
 function clean(t) {
   const keys = [
@@ -147,8 +145,8 @@ test(
       schema,
       extra: { options: `-c search_path=${schema}` },
       migrations: [
-        ShortsMetadata1791763200000, ShortsUploads1791763202000,
-        ShortsSharedCutover1791763214000, ShortsUploadBudget1791763224000],
+        ShortsMetadata, ShortsUploads,
+        ShortsSharedCutover, ShortsUploadBudget],
     };
     const a = new DataSource(options),
       b = new DataSource(options),
@@ -257,6 +255,6 @@ test(
       a.undoLastMigration({ transaction: 'all' }),
       /Preserve upload reservations/,
     );
-    await assert.rejects(a.transaction(manager => new ShortsSharedCutover1791763214000().down(manager)), /Preserve legacy cutover/);
+    await assert.rejects(a.transaction(manager => new ShortsSharedCutover().down(manager)), /Preserve legacy cutover/);
   },
 );

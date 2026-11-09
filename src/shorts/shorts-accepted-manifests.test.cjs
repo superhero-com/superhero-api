@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsAcceptedManifests: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -13,7 +17,6 @@ const { ShortsPrivateObjectsService } = require('./shorts-private-objects.servic
 const { ShortsDeliveryStagingService } = require('./shorts-delivery-staging.service');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
-const { ShortsAcceptedManifests1793491201000: Migration } = require('../migrations/1793491201000-ShortsAcceptedManifests');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
 test('accepted manifests bind every ordinary and restaged source child atomically without changing public jobs', {
@@ -35,8 +38,8 @@ test('accepted manifests bind every ordinary and restaged source child atomicall
   db = new DataSource(options); await db.initialize();
   await db.transaction(async runner => {
     await migratePrivateVersionTables(runner);
-    for (const name of ['1792022400000-ShortsDirectUploads', '1793232000000-ShortsOriginalUploads'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(runner);
+    for (const name of ['ShortsDirectUploads', 'ShortsOriginalUploads'])
+      await new schemaMigrations[name]().up(runner);
   });
   const sourceHash = hash('source'), metadata = new ShortsMetadataService(db), records = new ShortsUploadRecordsService(db, metadata);
   await metadata.initialize(scope, sourceHash, 30, 30);

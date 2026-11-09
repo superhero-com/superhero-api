@@ -11,7 +11,7 @@ The command is currently limited to enabled testnet deployments.
 
 ## Setup
 
-1. Apply API migrations through `1791763217000-ShortsStorageInventory` with the
+1. Apply API migrations through `1791763217001-ShortsStorageInventories` with the
    migration owner. Build the API image/code with `npm run build`.
 2. Provision a separate S3 identity with **`s3:ListBucketVersions`** restricted
    to the private bucket and deployment prefix. Do not grant object reads,

@@ -1,3 +1,9 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsDeliveryGenerations: Migration,
+  ShortsLegacyDeliverySources: LegacySourcesMigration,
+  ShortsGenerationDeliveryPackages: PackagesMigration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -6,9 +12,6 @@ const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
-const { ShortsDeliveryGenerations1793145603000: Migration } = require('../migrations/1793145603000-ShortsDeliveryGenerations');
-const { ShortsLegacyDeliverySources1793232003000: LegacySourcesMigration } = require('../migrations/1793232003000-ShortsLegacyDeliverySources');
-const { ShortsGenerationDeliveryPackages1793145605000: PackagesMigration } = require('../migrations/1793145605000-ShortsGenerationDeliveryPackages');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
 const { validateSourcePackage } = require('./hls-protocol/hls-package');
 const { workerRole } = require('./testing/worker-role.cjs');
@@ -42,11 +45,11 @@ test('replacement jobs use fenced workers, preserve the post and expose no creat
   t.after(async () => { for (const db of clients) await db.destroy(); await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`);
     for (const identity of identities) await identity.dispose(); await admin.destroy(); });
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata', '1791763202000-ShortsUploads', '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763216000-ShortsRetentionHolds', '1791763219000-ShortsHlsInventory',
-      '1791763220000-ShortsPinInventory', '1791763222000-ShortsWorkerBackpressure', '1791763224000-ShortsUploadBudget', '1793145600000-ShortsOriginalContent',
-      '1793145601000-ShortsAdaptiveInventory', '1793145602000-ShortsDeliveryPackages'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata', 'ShortsUploads', 'ShortsWorkers',
+      'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsRetentionHolds', 'ShortsHlsInventory',
+      'ShortsPinInventory', 'ShortsWorkerBackpressure', 'ShortsUploadBudget', 'ShortsOriginalContent',
+      'ShortsAdaptiveInventory', 'ShortsDeliveryPackages'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));

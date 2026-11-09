@@ -2,7 +2,7 @@
 
 The catalog offers bounded pages for clients migrating off the original
 whole-library endpoints. Apply the Shorts metadata migrations, including
-`1791763211000-ShortsCatalog`, through the API's normal TypeORM migration command.
+`1791763209001-ShortsPublishingAndCatalog`, through the API's normal TypeORM migration command.
 This migration adds a partial public-catalog index and does not change content.
 
 ## Endpoints
@@ -70,7 +70,7 @@ transport. It reads the plugin's `social_graph_projection_scopes` and
 database role needs SELECT on those two tables; no new service, key or writable
 follow store is required. The existing social-graph worker remains their writer.
 
-Apply `1791763227000-ShortsFollowing` through the normal migrations before enabling
+Apply `1791763209001-ShortsPublishingAndCatalog` through the normal migrations before enabling
 the new release. Its partial creator index supports seeking within each followed
 creator's published, approved videos. Each creator contributes at most 21 rows
 before the global chronological page is selected. Unrelated uploads and private
@@ -169,7 +169,7 @@ own verification and do not trust a catalog row as authorization.
 A REPEATABLE READ transaction gives each response consistent counts, index height,
 rows and period measurements. Library views come directly from the selected UTC
 period, not the bounded analytics breakdown. Only the selected page's record bodies
-and lifetime totals are returned. `1791763212000-ShortsStudio` adds the per-video
+and lifetime totals are returned. `1791763209001-ShortsPublishingAndCatalog` adds the per-video
 chain-event lookup index. Global sorting/counting still has database cost; measure
 it with the expected data volume before raising upload admission.
 

@@ -1,13 +1,16 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsMetadata,
+  ShortsAnalytics,
+  ShortsChainIndex,
+  ShortsCoverage,
+  ShortsStudio,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsAnalytics1791763207000 } = require('../migrations/1791763207000-ShortsAnalytics');
-const { ShortsChainIndex1791676800000 } = require('../migrations/1791676800000-ShortsChainIndex');
-const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-ShortsCoverage');
-const { ShortsStudio1791763212000 } = require('../migrations/1791763212000-ShortsStudio');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMeasurementsService } = require('./shorts-measurements.service');
 const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('./shorts-index.service');
@@ -37,7 +40,7 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     CREATE TABLE sync_state(id text PRIMARY KEY,tip_height int,updated_at timestamptz);
     CREATE TABLE plugin_failed_transaction(plugin_name text,tx_hash varchar);
     INSERT INTO sync_state VALUES('global',20,now());`);
-  for (const Migration of [ShortsChainIndex1791676800000, ShortsCoverage1791734400000, ShortsMetadata1791763200000, ShortsAnalytics1791763207000, ShortsStudio1791763212000]) await new Migration().up({ query: (sql, args) => db.query(sql, args) });
+  for (const Migration of [ShortsChainIndex, ShortsCoverage, ShortsMetadata, ShortsAnalytics, ShortsStudio]) await new Migration().up({ query: (sql, args) => db.query(sql, args) });
   const scope = { network: 'ae_uat', contract: 'ct_current' }, hash = 'a'.repeat(64);
   const chain = { release: { schemaVersion: 1, network: 'ae_uat', contract: scope.contract }, rewardContracts: () => [], state: { contract: scope.contract, sourceHash: hash }, contract: { $options: { address: scope.contract } },
     address: value => value, account: async address => ({ address, available: '1', earned: '2', claimed: '1' }),
@@ -138,10 +141,10 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     assert.ok(performance.topShorts.every(r => r.creator === 'ak_creator' && performance.videos[r.id].views === 4));
   });
   await t.test('V2 retains media analytics and combines imported memberships once with only new V2 events', async () => {
-    const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
-    const { ShortsImportSnapshot1792368001000 } = require('../migrations/1792368001000-ShortsImportSnapshot');
+    const ShortsReceipts = schemaMigrations.ShortsReceipts;
+    const ShortsImportSnapshot = schemaMigrations.ShortsImportSnapshot;
     const runner = { query: (sql, args) => db.query(sql, args) };
-    await new ShortsReceipts1791763208000().up(runner); await new ShortsImportSnapshot1792368001000().up(runner);
+    await new ShortsReceipts().up(runner); await new ShortsImportSnapshot().up(runner);
     await meta.initialize({ network: 'ae_uat', contract: 'ct_vtwo' }, 'b'.repeat(64));
     await db.query("INSERT INTO shorts_import_snapshots(network,contract,source,cutoff_hash,cutoff_height,digest,videos,likes) VALUES('ae_uat','ct_vtwo','ct_current','kh_cutoff',5,$1,3,7)", ['c'.repeat(64)]);
     await db.query("INSERT INTO shorts_import_videos(network,contract,id,likes,withdrawn) VALUES('ae_uat','ct_vtwo',$1,7,false),('ae_uat','ct_vtwo',$2,0,true),('ae_uat','ct_vtwo',$3,0,false)", [rows[3].id, rows[6].id, rows[0].id]);
@@ -157,6 +160,6 @@ test('Studio read model: complete counts, global sorts, canonical rollback and b
     // Historical rewards still retain every original payment, independent of membership deduplication.
     assert.equal(Number((await db.query("SELECT count(*) FROM shorts_chain_events WHERE contract='ct_current' AND action='PaidLike' AND short_id=$1", [rows[3].id]))[0].count), 3);
   });
-  const migration = new ShortsStudio1791763212000(); await migration.down({ query: (sql, args) => db.query(sql, args) });
+  const migration = new ShortsStudio(); await migration.down({ query: (sql, args) => db.query(sql, args) });
   assert.equal((await db.query("SELECT to_regclass('shorts_chain_events_video') AS name"))[0].name, null);
 });

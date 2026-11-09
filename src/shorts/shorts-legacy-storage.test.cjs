@@ -1,5 +1,13 @@
+const {
+  ShortsUploadBudget,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsLegacyStorage,
+  ShortsAnalytics,
+  ShortsReceipts,
+  ShortsSharedCutover,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,12 +36,6 @@ const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service'
 const { SHORTS_PRIVATE_OBJECT_CONFIG } = require('./shorts-private-objects.service');
 const { ShortsPackageService } = require('./shorts-package.service');
 const { legacyUploads } = require('./shorts-legacy-snapshot');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsLegacyStorage1791763205000 } = require('../migrations/1791763205000-ShortsLegacyStorage');
-const { ShortsAnalytics1791763207000 } = require('../migrations/1791763207000-ShortsAnalytics');
-const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
-const { ShortsSharedCutover1791763214000 } = require('../migrations/1791763214000-ShortsSharedCutover');
 const hash = bytes=>createHash('sha256').update(bytes).digest('hex');
 const PART=1048576;
 
@@ -45,7 +47,7 @@ test('offline legacy storage migration preserves media, sessions, decisions and 
   const schema=`shorts_legacy_${randomUUID().replaceAll('-','')}`;
   const admin=new DataSource({type:'postgres',url:url.href});await admin.initialize();await admin.query(`CREATE SCHEMA ${schema}`);
   const db=new DataSource({type:'postgres',url:url.href,schema,extra:{options:`-c search_path=${schema}`},
-    migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsLegacyStorage1791763205000,ShortsAnalytics1791763207000,ShortsReceipts1791763208000,ShortsSharedCutover1791763214000, ShortsUploadBudget1791763224000]});await db.initialize();await db.runMigrations({transaction:'all'});
+    migrations:[ShortsMetadata,ShortsUploads,ShortsLegacyStorage,ShortsAnalytics,ShortsReceipts,ShortsSharedCutover, ShortsUploadBudget]});await db.initialize();await db.runMigrations({transaction:'all'});
   const credentials={accessKeyId:process.env.SHORTS_TEST_S3_ACCESS_KEY,secretAccessKey:process.env.SHORTS_TEST_S3_SECRET_KEY};
   const raw=new S3Client({endpoint:endpoint.origin,region:'us-east-1',forcePathStyle:true,credentials});
   const bucket=`shorts-legacy-${randomUUID()}`;await raw.send(new CreateBucketCommand({Bucket:bucket}));
@@ -201,7 +203,7 @@ test('offline legacy storage migration preserves media, sessions, decisions and 
   await t.test('a downgrade refuses to discard admission history or completed migration checkpoints',async()=>{
     const rows=await db.query('SELECT network,contract,kind,id,fingerprint FROM shorts_storage_imports ORDER BY contract,kind,id');
     await assert.rejects(db.undoLastMigration({transaction:'all'}),/Preserve upload reservations/);
-    await assert.rejects(db.transaction(manager => new ShortsSharedCutover1791763214000().down(manager)),/Preserve legacy cutover/);
+    await assert.rejects(db.transaction(manager => new ShortsSharedCutover().down(manager)),/Preserve legacy cutover/);
     assert.deepEqual(await db.query('SELECT network,contract,kind,id,fingerprint FROM shorts_storage_imports ORDER BY contract,kind,id'),rows);
     await f.adapter.initialize();
   });

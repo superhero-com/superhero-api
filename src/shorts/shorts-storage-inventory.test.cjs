@@ -1,3 +1,4 @@
+const { ShortsMetadata, ShortsStorageInventory } = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -11,8 +12,6 @@ const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
 const {DataSource}=require('typeorm');
 const {S3Client,CreateBucketCommand,PutBucketVersioningCommand,PutObjectCommand,DeleteObjectCommand,ListObjectVersionsCommand,DeleteObjectsCommand,DeleteBucketCommand}=require('@aws-sdk/client-s3');
-const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsMetadata');
-const {ShortsStorageInventory1791763217000}=require('../migrations/1791763217000-ShortsStorageInventory');
 const {ShortsStorageListService}=require('./shorts-storage-list.service');
 const {ShortsStorageInventoryService}=require('./shorts-storage-inventory.service');
 const {ShortsDatabaseService}=require('./shorts-database.service');
@@ -101,7 +100,7 @@ test('durable inventory checkpoints, restricted roles and actual versioned S3 li
     } raw?.destroy();await rm(dir,{recursive:true,force:true});
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const options={type:'postgres',url:url.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata1791763200000,ShortsStorageInventory1791763217000]};
+  const options={type:'postgres',url:url.href,schema,extra:{options:`-c search_path=${schema}`,max:2},migrations:[ShortsMetadata,ShortsStorageInventory]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
   await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[scope.network,scope.contract,sourceHash]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;

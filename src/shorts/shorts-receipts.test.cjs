@@ -1,14 +1,16 @@
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
+const {
+  ShortsUploads,
+  ShortsUploadBudget,
+  ShortsMetadata,
+  ShortsReceipts,
+  ShortsSharedCutover,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { AccountMemory, encode, Encoding } = require('@aeternity/aepp-sdk');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
-const { ShortsSharedCutover1791763214000 } = require('../migrations/1791763214000-ShortsSharedCutover');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsReceiptsService } = require('./shorts-receipts.service');
 const { ShortsChainService } = require('./shorts-chain.service');
@@ -20,7 +22,7 @@ test('shared receipt history: scoped identity, idempotent persistence and honest
   const schema = `shorts_receipts_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsReceipts1791763208000, ShortsSharedCutover1791763214000, ShortsUploadBudget1791763224000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsReceipts, ShortsSharedCutover, ShortsUploadBudget] };
   const one = new DataSource(options), two = new DataSource(options);
   const originalEnv = { ...process.env };
   t.after(async () => { process.env = originalEnv; await two.destroy(); await one.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });

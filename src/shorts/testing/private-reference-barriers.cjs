@@ -1,7 +1,9 @@
+const {
+  ShortsPrivateReferenceBarriers: Migration,
+  ShortsAcceptedManifests: Manifests,
+} = require('./historical-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
-const { ShortsPrivateReferenceBarriers1793491202000: Migration } = require('../../migrations/1793491202000-ShortsPrivateReferenceBarriers');
-const { ShortsAcceptedManifests1793491201000: Manifests } = require('../../migrations/1793491201000-ShortsAcceptedManifests');
 const { ShortsPrivateReferenceBarriersService } = require('../shorts-private-reference-barriers.service');
 const { ShortsStorageReconciliationService } = require('../shorts-storage-reconciliation.service');
 const hash = value => createHash('sha256').update(value).digest('hex');

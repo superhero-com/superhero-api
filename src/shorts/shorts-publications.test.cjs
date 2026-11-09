@@ -1,3 +1,4 @@
+const { ShortsMetadata, ShortsPublications } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,8 +8,6 @@ const { once } = require('node:events');
 const { resolve } = require('node:path');
 const { DataSource } = require('typeorm');
 const { AccountMemory, encode, Encoding, buildTx, buildTxHash, Tag } = require('@aeternity/aepp-sdk');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsPublications1791763209000 } = require('../migrations/1791763209000-ShortsPublications');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsPublicationsService } = require('./shorts-publications.service');
 const { publicationCalldata, publicationTransaction } = require('./shorts-publication-transaction');
@@ -62,7 +61,7 @@ test('durable publisher journal serializes account authority and preserves uncer
   const schema = `shorts_publications_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
-    migrations: [ShortsMetadata1791763200000, ShortsPublications1791763209000] };
+    migrations: [ShortsMetadata, ShortsPublications] };
   const one = new DataSource(options), two = new DataSource(options); await one.initialize(); await two.initialize();
   t.after(async () => { await two.destroy(); await one.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
   await one.runMigrations({ transaction: 'all' });
@@ -224,6 +223,6 @@ test('durable publisher journal serializes account authority and preserves uncer
     try { assert.ok(module.get(ShortsPublicationsService)); } finally { await module.close(); }
   });
   await t.test('schema rollback refuses to erase initialized signing authority', async () => {
-    await assert.rejects(new ShortsPublications1791763209000().down(one.createQueryRunner()), /preserve the signed publication journal/);
+    await assert.rejects(new ShortsPublications().down(one.createQueryRunner()), /preserve the signed publication journal/);
   });
 });

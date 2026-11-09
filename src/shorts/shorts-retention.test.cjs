@@ -1,4 +1,10 @@
-const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
+const {
+  ShortsDeliveryPackages,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsDirectUploads,
+  ShortsRetentionHolds,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -10,10 +16,6 @@ const { join } = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { DataSource } = require('typeorm');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
-const { ShortsRetentionHolds1791763216000 } = require('../migrations/1791763216000-ShortsRetentionHolds');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { retentionConfig } = require('./shorts-retention.config');
 const { ShortsDatabaseService } = require('./shorts-database.service');
@@ -69,13 +71,13 @@ test('restricted retention inventory and hold history survive concurrent operati
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 },
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsRetentionHolds1791763216000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsRetentionHolds] };
   owner = new DataSource(options); await owner.initialize();
   await owner.runMigrations({ transaction: 'all' });
   // Empty rollback/reapply is supported; used hold history later refuses rollback.
   await owner.undoLastMigration({ transaction: 'all' });
   await owner.runMigrations({ transaction: 'all' });
-  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
+  await owner.transaction(db => new ShortsDeliveryPackages().up(db));
   await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending)
     VALUES($1,$2,$3,8,2),($1,'ct_other',$3,8,2)`, [scope.network,scope.contract,sourceHash]);
   async function principal() {
@@ -102,7 +104,7 @@ test('restricted retention inventory and hold history survive concurrent operati
     try {
       await writer.query(`INSERT INTO shorts_retention_holds(network,contract,id,resource_id,reason,reference)
         VALUES($1,$2,$3,'rollback-root','recovery','case-rollback')`,[...sqlScope,holdId]);
-      outcome = new ShortsRetentionHolds1791763216000().down(owner).then(()=>({ok:true}),error=>({error}));
+      outcome = new ShortsRetentionHolds().down(owner).then(()=>({ok:true}),error=>({error}));
       const deadline = Date.now()+3000;
       let waiting = false;
       while (Date.now()<deadline) {
@@ -220,7 +222,7 @@ test('restricted retention inventory and hold history survive concurrent operati
 
   await t.test('unsealed uploads, expired roots and hold-only roots stay visible with bounded cursor pages', async () => {
     // Keep the earlier assertions exercising pre-migration inventory compatibility.
-    await new ShortsDirectUploads1792022400000().up(owner);
+    await new ShortsDirectUploads().up(owner);
     await upload('active-upload','sealed',new Date(Date.now()+60000));
     await upload('expired-upload','uploading',new Date(0));
     const intended = ref('expired-upload','direct-part/0');

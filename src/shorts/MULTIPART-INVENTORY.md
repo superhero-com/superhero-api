@@ -12,7 +12,7 @@ limited to enabled testnet deployments.
 
 ## Setup
 
-1. Apply migrations through `1791763221000-ShortsMultipartInventory` with the
+1. Apply migrations through `1791763217001-ShortsStorageInventories` with the
    migration owner, then build with `npm run build`.
 2. Provision a separate operations credential with `s3:ListBucketMultipartUploads`
    for the private bucket and `s3:ListMultipartUploadParts` for its deployment

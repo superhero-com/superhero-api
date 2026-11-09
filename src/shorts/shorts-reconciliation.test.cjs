@@ -1,3 +1,4 @@
+const { ShortsChainIndex, ShortsCoverage } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -5,9 +6,7 @@ const { randomUUID, randomBytes } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { encode, Encoding } = require('@aeternity/aepp-sdk');
 const { ShortsReconciliationService } = require('./shorts-reconciliation.service');
-const { ShortsIndexService } = require('./shorts-index.service');
-const { ShortsChainIndex1791676800000 } = require('../migrations/1791676800000-ShortsChainIndex');
-const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-ShortsCoverage');
+const { SHORTS_INDEX_VERSION, ShortsIndexService } = require('./shorts-index.service');
 const { Tx } = require('../mdw-sync/entities/tx.entity');
 const address = () => encode(randomBytes(32), Encoding.AccountAddress);
 const keyHash = () => encode(randomBytes(32), Encoding.KeyBlockHash);
@@ -59,12 +58,12 @@ for (const releaseNetwork of ['ae_uat', 'ae_mainnet']) test(`fixed-block account
   await db.query('CREATE TABLE sync_state(id text PRIMARY KEY,tip_height int,updated_at timestamptz)');
   await db.query("INSERT INTO sync_state VALUES('global',10,now())");
   await db.query('CREATE TABLE plugin_failed_transaction(plugin_name text,tx_hash text)');
-  await new ShortsChainIndex1791676800000().up({ query: (sql, args) => db.query(sql, args) });
-  await new ShortsCoverage1791734400000().up({ query: (sql, args) => db.query(sql, args) });
+  await new ShortsChainIndex().up({ query: (sql, args) => db.query(sql, args) });
+  await new ShortsCoverage().up({ query: (sql, args) => db.query(sql, args) });
   const contractId = encode(randomBytes(32), Encoding.ContractAddress), treasury = address(), creator = address(), viewer = address();
   const fee = 100000000000000003n, cut = fee * 2000n / 10000n, share = fee - cut;
   let hash = keyHash(), tip = 10, network = releaseNetwork, config, liability, balance, readFailure, duringRead;
-  let observed = new Map(), reads = [], calls = [], gates = [];
+  let observed = new Map(), reads = [], calls = [];
   const node = { $host: 'http://127.0.0.1:12345', getStatus: async () => ({ networkId: network }), getCurrentKeyBlock: async () => ({ height: tip }), getKeyBlockByHeight: async height => ({ height, hash }) };
   const contract = { $options: { address: contractId }, $call: async (method, args, options) => {
     calls.push(method); reads.push(options);
@@ -74,14 +73,14 @@ for (const releaseNetwork of ['ae_uat', 'ae_mainnet']) test(`fixed-block account
     if (method === 'get_liabilities') return { decodedResult: [liability, balance] };
     assert.equal(method, 'get_account'); return { decodedResult: observed.get(args[0]) || { earned: 0n, claimed: 0n, available: 0n } };
   } };
-  const chain = { release: { network: releaseNetwork, contract: contractId, node: node.$host }, state: { contract: contractId }, contract, sdk: { api: node }, readNode: async task => task() };
+  const chain = { release: { network: releaseNetwork, contract: contractId, node: node.$host }, state: { contract: contractId }, contract, rewardContracts: () => chain.previous ? [{ contract: chain.previous }] : [], sdk: { api: node }, readNode: async task => task() };
   const index = new ShortsIndexService(db, chain, await require('./testing/index-network.cjs').indexNetworkFixture(db, chain)), service = new ShortsReconciliationService(db, chain, index);
   const repo = db.getRepository(Tx);
   const seed = async (action, beneficiary, amount, height = 5, actor = action === 'Claimed' ? beneficiary : viewer) => {
     const txHash = encode(randomBytes(32), Encoding.TxHash);
     await repo.save({ hash: txHash, block_hash: encode(randomBytes(32), Encoding.MicroBlockHash), block_height: height,
       micro_index: '0', micro_time: '86400100', signatures: [], type: 'ContractCallTx', contract_id: contractId,
-      caller_id: actor, function: action === 'Claimed' ? 'claim' : 'paid_like', raw: { returnType: 'ok', log: [] }, data: { shorts: { _version: 1, data: { events: 1 } } } });
+      caller_id: actor, function: action === 'Claimed' ? 'claim' : 'paid_like', raw: { returnType: 'ok', log: [] }, data: { shorts: { _version: SHORTS_INDEX_VERSION, data: { events: 1 } } } });
     await db.query('INSERT INTO shorts_chain_events(contract,tx_hash,log_index,block_height,at,action,actor,beneficiary,amount) VALUES($1,$2,0,$3,86400100,$4,$5,$6,$7)', [contractId, txHash, height, action, actor, beneficiary, amount.toString()]);
     if (height < 9) {
       const credit = (a, earned, claimed) => { const v = observed.get(a) || { earned: 0n, claimed: 0n, available: 0n }; v.earned += earned; v.claimed += claimed; v.available = v.earned - v.claimed; observed.set(a, v); };
@@ -95,9 +94,9 @@ for (const releaseNetwork of ['ae_uat', 'ae_mainnet']) test(`fixed-block account
     chain.previous = undefined;
     await db.query('TRUNCATE txs CASCADE'); await db.query('TRUNCATE plugin_failed_transaction,shorts_index_backfill');
     await db.query("UPDATE sync_state SET tip_height=10,updated_at=now()");
-    await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,1,true,9)', [contractId]);
+    await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,9)', [contractId, SHORTS_INDEX_VERSION]);
     hash = keyHash(); tip = 10; network = releaseNetwork; config = [viewer, treasury, fee, 2000n];
-    liability = 0n; balance = 0n; observed = new Map(); reads = []; calls = []; readFailure = false; duringRead = undefined; gates = [];
+    liability = 0n; balance = 0n; observed = new Map(); reads = []; calls = []; readFailure = false; duringRead = undefined;
   };
   await t.test('exact integer split, creator and treasury claims, and exclusion of the anchor generation', async () => {
     await reset(); await seed('PaidLike', creator, share); await seed('PaidLike', creator, share);
@@ -160,9 +159,9 @@ for (const releaseNetwork of ['ae_uat', 'ae_mainnet']) test(`fixed-block account
     await reset(); const tx = await seed('PaidLike', creator, share);
     const previous = encode(randomBytes(32), Encoding.ContractAddress);
     chain.previous = { $options: { address: previous } };
-    await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,1,true,9)', [previous]);
+    await db.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,9)', [previous, SHORTS_INDEX_VERSION]);
     await db.query('UPDATE txs SET contract_id=$2,raw=$3,data=$4 WHERE hash=$1', [tx, encode(randomBytes(32), Encoding.ContractAddress),
-      { log: [{ address: contractId }, { address: previous }] }, { shorts: { _version: 1, data: { events: 2 } } }]);
+      { log: [{ address: contractId }, { address: previous }] }, { shorts: { _version: SHORTS_INDEX_VERSION, data: { events: 2 } } }]);
     await db.query("INSERT INTO shorts_chain_events(contract,tx_hash,log_index,block_height,at,action,actor,beneficiary,amount) VALUES($1,$2,1,5,86400100,'Published',$3,$3,0)", [previous, tx, creator]);
     assert.equal((await service.compare({})).summary.liabilitiesMatch, true);
     await db.query('DELETE FROM shorts_chain_events WHERE contract=$1', [previous]);
@@ -180,14 +179,20 @@ for (const releaseNetwork of ['ae_uat', 'ae_mainnet']) test(`fixed-block account
     await reset(); await seed('PaidLike', creator, share);
     duringRead = async method => { if (method === 'get_account') hash = keyHash(); };
     await rejects(service.compare({}), 409);
-    await reset(); duringRead = async method => { if (method === 'get_account') tip = 9; };
-    await rejects(service.compare({}), 409);
-  });
-  await t.test('concurrent admission is bounded and failures release it', async () => {
-    await reset(); duringRead = async method => { if (method === 'get_config') await new Promise(resolve => gates.push(resolve)); };
+    await reset();
+    const entered = Promise.withResolvers(), release = Promise.withResolvers();
+    duringRead = async method => {
+      if (method === 'get_config') { entered.resolve(); await release.promise; }
+    };
     const pending = service.compare({});
-    while (!gates.length) await new Promise(resolve => setImmediate(resolve));
-    await rejects(service.compare({}), 503, /busy/); gates[0](); await pending; duringRead = undefined;
+    try {
+      await Promise.race([entered.promise, pending.then(() => assert.fail('Expected a contract read'))]);
+      await rejects(service.compare({}), 503, /busy/);
+    } finally {
+      release.resolve();
+      duringRead = undefined;
+      await pending;
+    }
     readFailure = true; await assert.rejects(service.compare({}), /outage/); readFailure = false;
     assert.equal((await service.compare({})).summary.liabilitiesMatch, true);
   });

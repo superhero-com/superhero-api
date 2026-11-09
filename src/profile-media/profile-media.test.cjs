@@ -1,3 +1,8 @@
+const {
+  ProfileMedia,
+  PostImages,
+  ProfileMediaCleanup,
+} = require('../shorts/testing/historical-migrations.cjs');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, webcrypto } = require('node:crypto');
@@ -9,9 +14,6 @@ const { Module, Global, ValidationPipe } = require('@nestjs/common');
 const { AccountMemory } = require('@aeternity/aepp-sdk');
 const request = require('supertest');
 const sharp = require('sharp');
-const { ProfileMedia1792954800000 } = require('../migrations/1792954800000-ProfileMedia');
-const { PostImages1793012400000 } = require('../migrations/1793012400000-PostImages');
-const { ProfileMediaCleanup1793008800000 } = require('../migrations/1793008800000-ProfileMediaCleanup');
 const { ProfileMediaModule } = require('./profile-media.module');
 const { ProfileMediaChain } = require('./profile-media-chain.service');
 const { profileImageHash } = require('./profile-media-storage.service');
@@ -75,9 +77,9 @@ before(async () => {
   source = new DataSource({ type: 'postgres', url, extra: { options: `-c search_path=${schema}` } });
   await source.initialize(); await source.query(`CREATE SCHEMA ${schema}`);
   const runner = source.createQueryRunner(); await runner.connect();
-  await new ProfileMedia1792954800000().up(runner);
-  await new ProfileMediaCleanup1793008800000().up(runner);
-  await new PostImages1793012400000().up(runner); await runner.release();
+  await new ProfileMedia().up(runner);
+  await new ProfileMediaCleanup().up(runner);
+  await new PostImages().up(runner); await runner.release();
   class TestDatabaseModule {}
   Global()(TestDatabaseModule);
   Module({ providers: [{ provide: DataSource, useValue: source }], exports: [DataSource] })(TestDatabaseModule);

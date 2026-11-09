@@ -10,8 +10,8 @@ creator and treasury credits, claims and liabilities at one fixed contract block
 
 ## Setup and existing data
 
-Apply all API migrations, including `1791763207000-ShortsAnalytics` and
-`1791763214000-ShortsSharedCutover`, before enabling the hosted feature. The API database role needs SELECT, INSERT, UPDATE and DELETE on
+Apply all API migrations, including `1791763207001-ShortsAnalyticsAndReceipts` and
+`1791763209001-ShortsPublishingAndCatalog`, before enabling the hosted feature. The API database role needs SELECT, INSERT, UPDATE and DELETE on
 the four `shorts_measurement_*` tables. Keep them private; the media-worker login
 does not need any grants on these tables. PostgreSQL and its backups contain the
 measurement salt and pseudonymous browser hashes.

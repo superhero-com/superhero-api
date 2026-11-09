@@ -1,3 +1,11 @@
+const {
+  ShortsMetadata,
+  ShortsSessions,
+  ShortsUploads,
+  ShortsLifecycle,
+  ShortsSharedCutover,
+  ShortsUploadBudget,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -19,12 +27,6 @@ const { ShortsSessionsService } = require('./shorts-sessions.service');
 const { ShortsRateService } = require('./shorts-rate.service');
 const { shortsClientIdentity } = require('./shorts-rate.config');
 const { ShortsWorkQueueService } = require('./shorts-work-queue.service');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsSessions1791763201000 } = require('../migrations/1791763201000-ShortsSessions');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
-const { ShortsSharedCutover1791763214000 } = require('../migrations/1791763214000-ShortsSharedCutover');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
 
 function deferred() {
   let resolve;
@@ -45,9 +47,9 @@ test('hosted content actions stay responsive and durable across two HTTP runtime
   const admin = new DataSource({ type: 'postgres', url: pg.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const owner = new DataSource({ type: 'postgres', url: pg.href, schema, synchronize: false,
-    extra: { options: `-c search_path=${schema}`, max: 4 }, migrations: [ShortsMetadata1791763200000,
-      ShortsSessions1791763201000, ShortsUploads1791763202000, ShortsLifecycle1791763213000,
-      ShortsSharedCutover1791763214000, ShortsUploadBudget1791763224000] });
+    extra: { options: `-c search_path=${schema}`, max: 4 }, migrations: [ShortsMetadata,
+      ShortsSessions, ShortsUploads, ShortsLifecycle,
+      ShortsSharedCutover, ShortsUploadBudget] });
   const runtimes = [], entered = deferred(), finish = deferred(), redis = new Redis(redisUrl.href);
   let scanResult;
   t.after(async () => {

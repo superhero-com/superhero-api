@@ -1,3 +1,9 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsBackfillBatches: BatchMigration,
+  ShortsLegacyDeliverySelection: SelectionMigration,
+  ShortsLegacyDeliverySources: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,9 +33,6 @@ const { sourceKey } = require('./hls-protocol/hls-package');
 const { ShortsBackfillService } = require('./shorts-backfill.service');
 const { ShortsBackfillBatchesService } = require('./shorts-backfill-batches.service');
 const { backfillRequest, backfillCost } = require('./shorts-backfill-plan');
-const { ShortsBackfillBatches1793232006000: BatchMigration } = require('../migrations/1793232006000-ShortsBackfillBatches');
-const { ShortsLegacyDeliverySelection1793232005000: SelectionMigration } = require('../migrations/1793232005000-ShortsLegacyDeliverySelection');
-const { ShortsLegacyDeliverySources1793232003000: Migration } = require('../migrations/1793232003000-ShortsLegacyDeliverySources');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
 const { ShortsDeliveryStagingService } = require('./shorts-delivery-staging.service');
@@ -95,23 +98,23 @@ test('retained legacy source is authenticated, restaged and encoded privately wi
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 4 } };
   owner = new DataSource(options); await owner.initialize();
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata','1791763202000-ShortsUploads','1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority','1791763215000-ShortsProcessingCapacity','1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory','1791763220000-ShortsPinInventory',
-      '1791763222000-ShortsWorkerBackpressure','1791763224000-ShortsUploadBudget','1792022400000-ShortsDirectUploads',
-      '1793145600000-ShortsOriginalContent','1793145601000-ShortsAdaptiveInventory',
-      '1793145602000-ShortsDeliveryPackages','1793145603000-ShortsDeliveryGenerations',
-      '1793145605000-ShortsGenerationDeliveryPackages','1793145606000-ShortsDeliveryStaging',
-      '1793145607000-ShortsDeliverySelection','1793145608000-ShortsDeliveryInputRetirement',
-      '1793145609000-ShortsInputReclamationReservations','1793145610000-ShortsPinTransfers',
-      '1793145611000-ShortsInputReclamationPermits','1793145612000-ShortsStorageWriteEpochs',
-      '1793232000000-ShortsOriginalUploads','1793232001000-ShortsReclamationRelease','1793232002000-ShortsStorageRecovery'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata','ShortsUploads','ShortsWorkers',
+      'ShortsWorkerAuthority','ShortsProcessingCapacity','ShortsRetentionHolds',
+      'ShortsHlsInventory','ShortsPinInventory',
+      'ShortsWorkerBackpressure','ShortsUploadBudget','ShortsDirectUploads',
+      'ShortsOriginalContent','ShortsAdaptiveInventory',
+      'ShortsDeliveryPackages','ShortsDeliveryGenerations',
+      'ShortsGenerationDeliveryPackages','ShortsDeliveryStaging',
+      'ShortsDeliverySelection','ShortsDeliveryInputRetirement',
+      'ShortsInputReclamationReservations','ShortsPinTransfers',
+      'ShortsInputReclamationPermits','ShortsStorageWriteEpochs',
+      'ShortsOriginalUploads','ShortsReclamationRelease','ShortsStorageRecovery'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));
   await owner.transaction(async db => {
-    await new (require('../migrations/1793232004000-ShortsLegacyDeliveryPackages').ShortsLegacyDeliveryPackages1793232004000)().up(db);
+    await new schemaMigrations.ShortsLegacyDeliveryPackages().up(db);
     await new SelectionMigration().up(db);
   });
   await owner.transaction(db => new SelectionMigration().down(db)); await owner.transaction(db => new SelectionMigration().up(db));

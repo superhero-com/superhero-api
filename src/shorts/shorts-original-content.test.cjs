@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsOriginalContent: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -6,7 +10,6 @@ const { DataSource } = require('typeorm');
 const { validateOriginalContent } = require('./shorts-original-content');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { workerRole } = require('./testing/worker-role.cjs');
-const { ShortsOriginalContent1793145600000: Migration } = require('../migrations/1793145600000-ShortsOriginalContent');
 const hash = 'a'.repeat(64), cid = 'bafy' + 'a'.repeat(50);
 const profile = 'original-h264-v1';
 function input(id, original = true) {
@@ -77,9 +80,9 @@ test('PostgreSQL fences original identity, handles mixed workers and rejects for
       if (identity) await identity.dispose(); await admin.destroy();
     });
     await owner.transaction(async manager => {
-      for (const name of ['1791763200000-ShortsMetadata', '1791763203000-ShortsWorkers',
-        '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763222000-ShortsWorkerBackpressure']) {
-        const M = Object.values(require('../migrations/' + name))[0]; await new M().up(manager);
+      for (const name of ['ShortsMetadata', 'ShortsWorkers',
+        'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsWorkerBackpressure']) {
+        const M = schemaMigrations[name]; await new M().up(manager);
       }
       await new Migration().up(manager);
     });

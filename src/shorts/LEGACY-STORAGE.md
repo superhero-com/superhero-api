@@ -11,7 +11,7 @@ contract signer or IPFS publishing access. It is currently testnet-only.
    entire directory, its key, the public deployment manifest and PostgreSQL.
    Retain the original local files throughout the migration. Do not copy a live
    SQLite database without its committed WAL state.
-2. Apply the API migrations, including `1791763214000-ShortsSharedCutover`.
+2. Apply the API migrations, including `1791763209001-ShortsPublishingAndCatalog`.
 3. Prepare a dedicated secret environment using `migration.env.example`. Set
    `SHORTS_DATA_DIR` to the existing absolute directory and use the exact deployment
    manifest matching its contract and source hash. The original `quarantine.key`

@@ -1,4 +1,11 @@
-const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
+const {
+  ShortsDeliveryPackages,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsRetentionHolds,
+  ShortsHlsInventory,
+  ShortsAdaptiveInventory,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -11,11 +18,6 @@ const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
 const {Redis}=require('ioredis');
 const {DataSource}=require('typeorm');
-const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsMetadata');
-const {ShortsUploads1791763202000}=require('../migrations/1791763202000-ShortsUploads');
-const {ShortsRetentionHolds1791763216000}=require('../migrations/1791763216000-ShortsRetentionHolds');
-const {ShortsHlsInventory1791763219000}=require('../migrations/1791763219000-ShortsHlsInventory');
-const {ShortsAdaptiveInventory1793145601000}=require('../migrations/1793145601000-ShortsAdaptiveInventory');
 const {ShortsDatabaseService}=require('./shorts-database.service');
 const {ShortsRetentionService}=require('./shorts-retention.service');
 const {ShortsHlsInventoryService}=require('./shorts-hls-inventory.service');
@@ -69,9 +71,9 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
   await control.acl('SETUSER',user,'reset','on',`>${password}`,`~${namespace}:prepared:*`,'-@all','+ping','+select','+eval_ro','+scan','+strlen','+pttl','+get','+info');aclCreated=true;
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options={type:'postgres',url:pg.href,schema,extra:{options:`-c search_path=${schema}`,max:2},
-    migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsHlsInventory1791763219000,ShortsAdaptiveInventory1793145601000]};
+    migrations:[ShortsMetadata,ShortsUploads,ShortsRetentionHolds,ShortsHlsInventory,ShortsAdaptiveInventory]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
-  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
+  await owner.transaction(db => new ShortsDeliveryPackages().up(db));
   const args=[scope.network,scope.contract];await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[...args,sourceHash]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${dbPassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;
   await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};GRANT SELECT ON ${['shorts_runtime','shorts_content','shorts_ingestion','shorts_upload_sessions','shorts_upload_parts','shorts_delivery_packages','shorts_retention_holds'].map(x=>`${schema}.${x}`).join(',')} TO ${role};

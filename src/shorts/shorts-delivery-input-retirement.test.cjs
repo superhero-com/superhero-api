@@ -1,3 +1,11 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsDeliveryInputRetirement: Migration,
+  ShortsInputReclamationReservations: ReservationsMigration,
+  ShortsPinTransfers: TransfersMigration,
+  ShortsInputReclamationPermits: PermitsMigration,
+  ShortsStorageWriteEpochs: EpochsMigration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,14 +18,9 @@ const { ShortsDeliverySelectionService } = require('./shorts-delivery-selection.
 const { ShortsDeliveryInputRetirementService } = require('./shorts-delivery-input-retirement.service');
 const { ShortsDeliveryRetirementService } = require('./shorts-delivery-retirement.service');
 const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
-const { ShortsDeliveryInputRetirement1793145608000: Migration } = require('../migrations/1793145608000-ShortsDeliveryInputRetirement');
-const { ShortsInputReclamationReservations1793145609000: ReservationsMigration } = require('../migrations/1793145609000-ShortsInputReclamationReservations');
 const { ShortsInputReclamationReservationsService } = require('./shorts-input-reclamation-reservations.service');
 const { ShortsPinTransfersService } = require('./shorts-pin-transfers.service');
-const { ShortsPinTransfers1793145610000: TransfersMigration } = require('../migrations/1793145610000-ShortsPinTransfers');
-const { ShortsInputReclamationPermits1793145611000: PermitsMigration } = require('../migrations/1793145611000-ShortsInputReclamationPermits');
 const { ShortsInputReclamationPermitsService } = require('./shorts-input-reclamation-permits.service');
-const { ShortsStorageWriteEpochs1793145612000: EpochsMigration } = require('../migrations/1793145612000-ShortsStorageWriteEpochs');
 const { workerRole } = require('./testing/worker-role.cjs');
 const golden = structuredClone(require('./testing/hls-v3.json'));
 const legacyInputCid='QmPVGjYFugq4XUyBfoTHG6c3qxfBS26jEdaFM1gdAVuMZ2';
@@ -36,13 +39,13 @@ test('input retirement preserves original identity and delivery while enforcing 
   t.after(async () => { await workerDb?.destroy(); await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`);
     await identity?.dispose(); await admin.destroy(); });
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata', '1791763202000-ShortsUploads', '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory', '1791763220000-ShortsPinInventory', '1791763222000-ShortsWorkerBackpressure',
-      '1791763224000-ShortsUploadBudget', '1793145600000-ShortsOriginalContent', '1793145601000-ShortsAdaptiveInventory',
-      '1793145602000-ShortsDeliveryPackages', '1793145603000-ShortsDeliveryGenerations',
-      '1793145605000-ShortsGenerationDeliveryPackages', '1793145606000-ShortsDeliveryStaging', '1793145607000-ShortsDeliverySelection'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata', 'ShortsUploads', 'ShortsWorkers',
+      'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsRetentionHolds',
+      'ShortsHlsInventory', 'ShortsPinInventory', 'ShortsWorkerBackpressure',
+      'ShortsUploadBudget', 'ShortsOriginalContent', 'ShortsAdaptiveInventory',
+      'ShortsDeliveryPackages', 'ShortsDeliveryGenerations',
+      'ShortsGenerationDeliveryPackages', 'ShortsDeliveryStaging', 'ShortsDeliverySelection'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));

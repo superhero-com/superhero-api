@@ -1,3 +1,10 @@
+const {
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsCatalog,
+  ShortsUploadBudget,
+  ShortsFollowing,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -16,11 +23,6 @@ const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsUploadsService } = require('./shorts-uploads.service');
 const { SocialGraphProjectionService } = require('../plugins/social-graph/social-graph-projection.service');
 const { SocialGraphProjection1718900000035 } = require('../migrations/1718900000035-SocialGraphProjection');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsCatalog1791763211000 } = require('../migrations/1791763211000-ShortsCatalog');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsFollowing1791763227000 } = require('../migrations/1791763227000-ShortsFollowing');
 
 const scope = { network: 'ae_uat', contract: 'ct_catalog' }, hash = 'a'.repeat(64);
 const graph = { network: 'ae_uat', contract: 'ct_social', generation: '9' };
@@ -53,8 +55,8 @@ test('PostgreSQL Following selects the global catalog through existing graph pro
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}` }, synchronize: false,
-    migrations: [SocialGraphProjection1718900000035, ShortsMetadata1791763200000, ShortsUploads1791763202000,
-      ShortsCatalog1791763211000, ShortsUploadBudget1791763224000, ShortsFollowing1791763227000] };
+    migrations: [SocialGraphProjection1718900000035, ShortsMetadata, ShortsUploads,
+      ShortsCatalog, ShortsUploadBudget, ShortsFollowing] };
   const db = new DataSource(options), other = new DataSource(options);
   await db.initialize(); await other.initialize();
   t.after(async () => { await other.destroy(); await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });

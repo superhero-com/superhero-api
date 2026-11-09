@@ -112,7 +112,7 @@ API or migration role. See database enrollment below.
 
 ## Shared processing capacity
 
-Processing capacity is enforced by migration `1791763215000` at the ingestion
+Processing capacity is enforced by migration `1791763215001` at the ingestion
 row transition, including calls made through the restricted worker function. The
 worker refuses startup when this trigger is absent or disabled. Use PostgreSQL's
 normal READ COMMITTED isolation for claims and renewals. Contention returns no
@@ -176,7 +176,7 @@ before releasing the reservation. This sampled check is not a hard quota. Keep
 container limits, host monitoring and placement controls; filesystem statistics
 may not expose project quotas or changes from other processes between samples.
 
-Apply migration `1791763222000` before starting the new worker image. Startup
+Apply migration `1791763222001` before starting the new worker image. Startup
 requires its capacity-deferral capability. Pressure before a claim leaves attempts
 untouched. Pressure during encoding returns the current valid claim to the queue
 with a five-second delay and refunds only that claim's attempt. The database
@@ -198,7 +198,7 @@ omit `accepting`, so an inspection may still receive backpressure after admissio
 
 Inspections run before encoding. HTTP 408/429/5xx, transport failures and inspection
 deadlines return the current live claim to the same fenced capacity queue, using
-migration `1791763222000`. No new migration or queue is required. The durable
+migration `1791763222001`. No new migration or queue is required. The durable
 five-second cooldown survives worker replacement; each worker also backs off
 between 5 and 60 seconds, with jitter, while availability checks fail. These waits
 do not consume the video's processing retries or delete its encrypted S3 source.
@@ -213,7 +213,7 @@ requires operator attention. There is no implied maximum queue-retention period.
 
 ## Worker database enrollment
 
-Apply migration `1791763204000` with the normal trusted migration identity. The
+Apply migration `1791763200001` with the normal trusted migration identity. The
 function has a fixed search path, qualified application relations and no PUBLIC
 execute grant. Its owner must remain a trusted migration identity, never the media
 worker. This follows PostgreSQL's [security-definer guidance](https://www.postgresql.org/docs/16/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY).

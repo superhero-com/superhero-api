@@ -1,3 +1,4 @@
+const schemaMigrations = require('./historical-migrations.cjs');
 require('reflect-metadata');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -5,31 +6,29 @@ const { DataSource } = require('typeorm');
 
 async function migratePrivateVersionTables(runner) {
   for (const name of [
-    '1791763200000-ShortsMetadata',
-    '1791763202000-ShortsUploads',
-    '1791763203000-ShortsWorkers',
-    '1791763204000-ShortsWorkerAuthority',
-    '1791763215000-ShortsProcessingCapacity',
-    '1791763216000-ShortsRetentionHolds',
-    '1791763217000-ShortsStorageInventory',
-    '1791763218000-ShortsStorageReferences',
-    '1791763219000-ShortsHlsInventory',
-    '1791763222000-ShortsWorkerBackpressure',
-    '1791763224000-ShortsUploadBudget',
-    '1793145600000-ShortsOriginalContent',
-    '1793145601000-ShortsAdaptiveInventory',
-    '1793145602000-ShortsDeliveryPackages',
-    '1793145603000-ShortsDeliveryGenerations',
-    '1793145604000-ShortsFileStorageReferences',
-    '1793145605000-ShortsGenerationDeliveryPackages',
-    '1793145606000-ShortsDeliveryStaging',
+    'ShortsMetadata',
+    'ShortsUploads',
+    'ShortsWorkers',
+    'ShortsWorkerAuthority',
+    'ShortsProcessingCapacity',
+    'ShortsRetentionHolds',
+    'ShortsStorageInventory',
+    'ShortsStorageReferences',
+    'ShortsHlsInventory',
+    'ShortsWorkerBackpressure',
+    'ShortsUploadBudget',
+    'ShortsOriginalContent',
+    'ShortsAdaptiveInventory',
+    'ShortsDeliveryPackages',
+    'ShortsDeliveryGenerations',
+    'ShortsFileStorageReferences',
+    'ShortsGenerationDeliveryPackages',
+    'ShortsDeliveryStaging',
   ])
-    await new (Object.values(require('../../migrations/' + name))[0])().up(
+    await new schemaMigrations[name]().up(
       runner,
     );
-  await new (Object.values(
-    require('../../migrations/1793232008000-ShortsPrivateVersionCleanup'),
-  )[0])().up(runner);
+  await new schemaMigrations.ShortsPrivateVersionCleanup().up(runner);
 }
 
 async function privateVersionDatabase(t, config, ref) {

@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsPrivateInputRetirement: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,7 +22,6 @@ const { ShortsPrivateObjectsService } = require('./shorts-private-objects.servic
 const { ShortsSourceReaderService } = require('./shorts-source-reader.service');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { ShortsStorageReconciliationService } = require('./shorts-storage-reconciliation.service');
-const { ShortsPrivateInputRetirement1793491200000: Migration } = require('../migrations/1793491200000-ShortsPrivateInputRetirement');
 const golden = structuredClone(require('./testing/hls-v3.json'));
 golden.descriptor.bytes = 100000000;
 const { sourceKey } = require('./hls-protocol/hls-package');
@@ -76,9 +79,9 @@ test('private retirement binds authenticated source references without deleting 
   owner = new DataSource(options); await owner.initialize();
   await owner.transaction(async runner => {
     await migratePrivateVersionTables(runner);
-    for (const name of ['1792022400000-ShortsDirectUploads', '1793232000000-ShortsOriginalUploads',
-      '1793145607000-ShortsDeliverySelection', '1793145608000-ShortsDeliveryInputRetirement'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(runner);
+    for (const name of ['ShortsDirectUploads', 'ShortsOriginalUploads',
+      'ShortsDeliverySelection', 'ShortsDeliveryInputRetirement'])
+      await new schemaMigrations[name]().up(runner);
     await new Migration().up(runner);
   });
   await owner.transaction(runner => new Migration().down(runner));

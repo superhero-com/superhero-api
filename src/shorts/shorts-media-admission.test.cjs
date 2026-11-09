@@ -1,3 +1,8 @@
+const {
+  ShortsMetadata,
+  ShortsLifecycle,
+  ShortsMediaAdmission,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,9 +26,6 @@ const { ShortsChainService } = require('./shorts-chain.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { SHORTS_RATE_CONFIG } = require('./shorts-rate.config');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
-const { ShortsMediaAdmission1791763225000 } = require('../migrations/1791763225000-ShortsMediaAdmission');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function gate() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 async function until(check) {
@@ -255,12 +257,12 @@ test('HTTP storage capacity waits survive database claims and defer publication 
   const admin = await new DataSource({ type: 'postgres', url: url.href }).initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const db = await new DataSource({ type: 'postgres', url: url.href, extra: { options: `-c search_path=${schema}` } }).initialize();
   t.after(async () => { await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
-  await new ShortsMetadata1791763200000().up(db); await new ShortsLifecycle1791763213000().up(db);
+  await new ShortsMetadata().up(db); await new ShortsLifecycle().up(db);
   const scope = f.chain.release, hash = f.chain.state.sourceHash;
   await db.query('INSERT INTO shorts_runtime VALUES($1,$2,$3,NULL,8,2)', [scope.network, scope.contract, hash]);
   const jobs = new ShortsLifecycleJobsService(db);
   await assert.rejects(jobs.verify(scope, hash), { status: 503 });
-  await new ShortsMediaAdmission1791763225000().up(db); await jobs.verify(scope, hash);
+  await new ShortsMediaAdmission().up(db); await jobs.verify(scope, hash);
   const bytes = Buffer.from('owned durable storage recovery fixture');
   const cid = await new ShortsPackageService().cid([{ name: 'video.mp4', data: bytes }]);
   const video = { ...short(), cid, bytes: bytes.length, moderation: 'approved', safety: { status: 'no_flags' }, publication: 'pending',
@@ -318,7 +320,7 @@ test('HTTP storage capacity waits survive database claims and defer publication 
     assert.equal(enqueued, 0); assert.equal(reads, 0); assert.equal(media.hasPin(cid), false);
     assert.equal(admission.leases.size, 0);
   }
-  await assert.rejects(new ShortsMediaAdmission1791763225000().down(db), { code: '23514' });
+  await assert.rejects(new ShortsMediaAdmission().down(db), { code: '23514' });
   await jobs.verify(scope, hash);
   status = 403;
   await db.query('UPDATE shorts_lifecycle_jobs SET next_at=clock_timestamp()'); await worker.reconcile();

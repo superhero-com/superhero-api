@@ -1,4 +1,11 @@
-const { ShortsDeliveryPackages1793145602000 } = require('../migrations/1793145602000-ShortsDeliveryPackages');
+const {
+  ShortsDeliveryPackages,
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsRetentionHolds,
+  ShortsStorageInventory,
+  ShortsStorageReferences,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -11,11 +18,6 @@ const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
 const {DataSource}=require('typeorm');
 const {S3Client,CreateBucketCommand,PutBucketVersioningCommand,PutObjectCommand,DeleteObjectCommand,ListObjectVersionsCommand,DeleteObjectsCommand,DeleteBucketCommand}=require('@aws-sdk/client-s3');
-const {ShortsMetadata1791763200000}=require('../migrations/1791763200000-ShortsMetadata');
-const {ShortsUploads1791763202000}=require('../migrations/1791763202000-ShortsUploads');
-const {ShortsRetentionHolds1791763216000}=require('../migrations/1791763216000-ShortsRetentionHolds');
-const {ShortsStorageInventory1791763217000}=require('../migrations/1791763217000-ShortsStorageInventory');
-const {ShortsStorageReferences1791763218000}=require('../migrations/1791763218000-ShortsStorageReferences');
 const {ShortsStorageListService}=require('./shorts-storage-list.service');
 const {ShortsStorageInventoryService}=require('./shorts-storage-inventory.service');
 const {ShortsStorageReconciliationService}=require('./shorts-storage-reconciliation.service');
@@ -75,10 +77,10 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options={type:'postgres',url:url.href,schema,extra:{options:`-c search_path=${schema}`,max:2},
-    migrations:[ShortsMetadata1791763200000,ShortsUploads1791763202000,ShortsRetentionHolds1791763216000,ShortsStorageInventory1791763217000,ShortsStorageReferences1791763218000]};
+    migrations:[ShortsMetadata,ShortsUploads,ShortsRetentionHolds,ShortsStorageInventory,ShortsStorageReferences]};
   owner=new DataSource(options);await owner.initialize();await owner.runMigrations({transaction:'all'});
   await owner.undoLastMigration({transaction:'all'});await owner.runMigrations({transaction:'all'});
-  await owner.transaction(db => new ShortsDeliveryPackages1793145602000().up(db));
+  await owner.transaction(db => new ShortsDeliveryPackages().up(db));
   await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,$2,$3,8,2)`,[scope.network,scope.contract,sourceHash]);
   await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);roleCreated=true;
   await admin.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role};

@@ -2,7 +2,7 @@
 
 The enabled hosted Shorts module uses `ShortsHostedHostingService` and PostgreSQL
 `shorts_lifecycle_jobs` to resume maintenance after a restart. Run the normal API
-migrations before starting it, including `ShortsMediaAdmission1791763225000`.
+migrations before starting it, including `ShortsUploadAdmission1791763222001`.
 Startup refuses a schema without the `capacity_wait` result. No additional service
 is needed: media admission uses the existing shared Redis connection. Its optional
 `SHORTS_SHARED_CONCURRENT_MEDIA` setting defaults to two transfers. This adapter requires the shared metadata repository, the separate

@@ -1,3 +1,11 @@
+const {
+  ShortsMetadata,
+  ShortsUploads,
+  ShortsUploadBudget,
+  ShortsPublications,
+  ShortsPublisherAuthority,
+  ShortsPublicationAdmission,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
@@ -14,12 +22,6 @@ const { ShortsDatabaseService } = require('./shorts-database.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsUploadRecordsService } = require('./shorts-upload-records.service');
 const { shortsUploadBudgetConfig } = require('./shorts-upload-budget');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsPublications1791763209000 } = require('../migrations/1791763209000-ShortsPublications');
-const { ShortsPublisherAuthority1791763210000 } = require('../migrations/1791763210000-ShortsPublisherAuthority');
-const { ShortsPublicationAdmission1791763223000 } = require('../migrations/1791763223000-ShortsPublicationAdmission');
 const { ShortsPublicationBoundaryService } = require('./shorts-publication-boundary.service');
 const hash = 'a'.repeat(64);
 const input = (bytes = 10) => ({ bytes, title: 'Owned video', topic: 'Art', rights: true, sha256: hash, details: {} });
@@ -48,7 +50,7 @@ test('shared retained upload budgets survive competing requests, recovery, histo
   const queries = [];
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
     logging: ['query'], logger: { logQuery: (sql, params) => queries.push({ sql, params }), logQueryError() {}, logQuerySlow() {}, logSchemaBuild() {}, logMigration() {}, log() {} },
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsPublications1791763209000, ShortsPublisherAuthority1791763210000, ShortsPublicationAdmission1791763223000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsPublications, ShortsPublisherAuthority, ShortsPublicationAdmission] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' });
   const adminMeta = new ShortsMetadataService(owner), guards = [], roles = [], connections = [];
   t.after(async () => {
@@ -68,16 +70,16 @@ test('shared retained upload budgets survive competing requests, recovery, histo
   await assert.rejects(adminMeta.verifyUploadBudget(old), { status: 503 });
   // Failed backfill must roll back its DDL and leave historical records intact.
   await owner.query("UPDATE shorts_content SET creator='ak_inconsistent',body=jsonb_set(body,'{creator}','\"ak_inconsistent\"') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget1791763224000().up(manager)), /inconsistent upload identities/);
+  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
   assert.equal((await owner.query("SELECT to_regclass('shorts_upload_budgets') AS relation"))[0].relation, null);
   await owner.query("UPDATE shorts_content SET creator='ak_creator',body=jsonb_set(body,'{creator}','\"ak_creator\"') WHERE contract=$1", [old.contract]);
   await owner.query("UPDATE shorts_ingestion SET input=jsonb_set(input,'{bytes}','11') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget1791763224000().up(manager)), /inconsistent upload identities/);
+  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
   await owner.query("UPDATE shorts_ingestion SET input=jsonb_set(input,'{bytes}','10') WHERE contract=$1", [old.contract]);
   await owner.query("UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia}','{\"source\":{\"bytes\":11}}') WHERE contract=$1", [old.contract]);
-  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget1791763224000().up(manager)), /inconsistent upload identities/);
+  await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().up(manager)), /inconsistent upload identities/);
   await owner.query("UPDATE shorts_content SET body=body-'privateMedia' WHERE contract=$1", [old.contract]);
-  await owner.transaction(manager => new ShortsUploadBudget1791763224000().up(manager));
+  await owner.transaction(manager => new ShortsUploadBudget().up(manager));
   await adminMeta.verifyUploadBudget(old);
   assert.deepEqual(await adminMeta.uploadBudget(old), { maxUploads: '50', maxSourceBytes: '2097152000', usedUploads: '61', usedSourceBytes: '610', exhausted: true });
 
@@ -263,7 +265,7 @@ test('shared retained upload budgets survive competing requests, recovery, histo
 
   await t.test('downgrade refuses to remove admitted reservations', async () => {
     const before = await a.metadata.uploadBudget(old);
-    await assert.rejects(owner.transaction(manager => new ShortsUploadBudget1791763224000().down(manager)), /Preserve upload reservations/);
+    await assert.rejects(owner.transaction(manager => new ShortsUploadBudget().down(manager)), /Preserve upload reservations/);
     assert.deepEqual(await a.metadata.uploadBudget(old), before);
   });
 

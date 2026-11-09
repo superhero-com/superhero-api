@@ -115,7 +115,7 @@ small immutable identity rows remain, without retaining source bytes, captions
 or request metadata. Enqueued jobs remain recoverable and cancellation never
 silently allocates another upload.
 
-Apply migration 1793232007000 and grant the hosted API SELECT/INSERT on
+Apply migration 1793232000001 and grant the hosted API SELECT/INSERT on
 `shorts_upload_requests` before enabling this API version. No worker permissions
 are needed. Deploy the protocol on every API replica before enabling its capability
 advertisement; stale replicas that ignore keys cannot provide this guarantee.
@@ -256,7 +256,7 @@ identity includes all public source files; it never substitutes the compressed
 video hash for the retained original hash. With expiring writes enabled, adoption
 also requires fresh HLS pin authority and an atomic ledger settlement.
 
-Migration `1793232004000` admits this legacy format separately from adaptive
+Migration `1793232003001` admits this legacy format separately from adaptive
 packages. Acknowledgements are immutable, retries converge, and rollback of the
 migration refuses to discard a used legacy acknowledgement. The canonical content
 row, old source key and engagement remain unchanged. Deploy the migration and
@@ -304,7 +304,7 @@ restores temporary encoded inputs merely to perform a switch. Current canonical
 publication is rechecked around asynchronous work.
 
 Legacy upgrades additionally require `SHORTS_LEGACY_PLAYBACK_ENABLED=true` (default
-off). Migration `1793232005000` binds accepted candidate originals to the retained
+off). Migration `1793232003001` binds accepted candidate originals to the retained
 upload's verified bytes and SHA-256, while preserving original-format CID equality.
 Candidate safety, creator metadata, duration and captions must still match the
 published post. The initial legacy package must be acknowledged before activation
@@ -373,7 +373,7 @@ operations may run concurrently, with a five-minute deadline and shutdown/parent
 cancellation. A retry of a committed operation returns its receipt without media
 I/O, including when new retirements are disabled, but still checks serving policy.
 
-Migration `1793145608000-ShortsDeliveryInputRetirement` binds each receipt to the
+Migration `1793145600001-ShortsAdaptiveDelivery` binds each receipt to the
 acknowledged source key, input CID and generation job. The database requires an
 eligible published original, an eligible previously selected replacement when
 applicable, no active per-post/generation hold, no pending appeal or unresolved
@@ -403,7 +403,7 @@ automatic cleanup disabled until those protections are connected.
 
 ### Verified private processing references
 
-Migration `1793491201000-ShortsAcceptedManifests` preserves each accepted upload's
+Migration `1793232008001-ShortsPrivateMediaCleanup` preserves each accepted upload's
 exact source manifest on its ingestion job. Ordinary shared uploads and replacement
 staging save it in the job-admission transaction. The internal generation admission
 method also accepts this document. Database validation binds its bytes and SHA-256
@@ -429,7 +429,7 @@ It permits two concurrent operations with a five-minute deadline and shutdown or
 parent cancellation. Committed UUID retries return metadata-only receipts without
 repeating media reads, including when new retirement is disabled.
 
-Migration `1793491200000-ShortsPrivateInputRetirement` captures the exact source
+Migration `1793232008001-ShortsPrivateMediaCleanup` captures the exact source
 manifest and deduplicated object references from private rendition files, source
 parts, upload parts and direct-upload permissions. Its database guard rechecks the
 existing retirement policy and completed source job, then validates the manifest's
@@ -460,7 +460,7 @@ object is not itself a cleanup success or a reason to skip reference validation.
 
 ### Private-object reference barriers
 
-Migration `1793491202000-ShortsPrivateReferenceBarriers` provides an internal,
+Migration `1793232008001-ShortsPrivateMediaCleanup` provides an internal,
 explicit per-scope enrollment for retiring temporary encrypted objects. Enrollment
 is permanent and initially empty. It requires new or changed opaque source claims
 to have an authenticated document bound to the ingestion job. Existing legacy
@@ -560,7 +560,7 @@ still requires its own reviewed privileges and a fresh durable-media proof.
 
 ### Private version cleanup journal and verification
 
-Migration `1793491203000-ShortsPrivateInputCleanupJournal` records an immutable
+Migration `1793232008001-ShortsPrivateMediaCleanup` records an immutable
 operation for one inventoried version behind an already sealed reference barrier.
 `shorts_private_input_verifications` stores the media verifier's proof;
 `shorts_private_input_attempts` consumes that proof once; and
@@ -694,7 +694,7 @@ with `historyTruncated` when older history exists; all history remains in SQL.
 
 ### Shared-CID reclamation reservations
 
-Migration `1793145609000-ShortsInputReclamationReservations` adds a persistent
+Migration `1793145609001-ShortsStorageReclamation` adds a persistent
 reference barrier for retired input CIDs. The internal
 `ShortsInputReclamationReservationsService` reserves one CID with a UUID operation,
 returns its bounded set of reference roots, verifies it again, or cancels it. It
@@ -728,7 +728,7 @@ idempotent; the same operation cannot reopen a released reservation, while a new
 operation can reserve a safely reused CID after rechecking all references.
 
 The reservation itself is not a destructive permit. Migration
-`1793145611000-ShortsInputReclamationPermits` adds a separate immutable permit ledger.
+`1793145609001-ShortsStorageReclamation` adds a separate immutable permit ledger.
 `ShortsInputReclamationPermitsService` issues at most one operation per reservation,
 under the CID lock and a fresh reference/policy check. Database time fixes a
 20-second expiry and another 30-second quiet period. Retries return the same
@@ -750,7 +750,7 @@ The ledger itself dispatches no storage request. The internal
 `ShortsInputReclamationService.reclaim(cid, operation)` coordinates physical input
 unpinning when `SHORTS_DELIVERY_INPUT_RECLAMATION_ENABLED=true`. It defaults off,
 requires expiring API writers and a strict gateway with clock protection, and has
-no public route or scheduler. Apply `1793232001000-ShortsReclamationRelease` first.
+no public route or scheduler. Apply `1793145609001-ShortsStorageReclamation` first.
 The operation reserves all references, verifies the original, assets and durable
 HLS for every root, then obtains and binds an expiring permit. Roots outside the
 coordinator's configured deployment fail closed; a cross-deployment coordinator
@@ -798,7 +798,7 @@ object/version deletion, garbage collection and automatic cleanup remain disable
 
 ### Outstanding storage writes
 
-Migration `1793145610000-ShortsPinTransfers` records CID-bound pin intents in the
+Migration `1793145609001-ShortsStorageReclamation` records CID-bound pin intents in the
 shared database. `ShortsPinTransfersService` issues a UUID with a database-generated
 180-second expiry and a further 30-second quiet period. Identity, purpose, scope
 and timestamps are immutable. The same operation returns its existing receipt
@@ -814,7 +814,7 @@ cannot be recorded after its authority expires. Neither an HTTP timeout nor a
 service restart proves that an importer stopped; uncertain outcomes require node
 recovery and pin reconciliation before reclamation can proceed.
 
-Migration `1793145612000-ShortsStorageWriteEpochs` adds immutable node bindings
+Migration `1793145609001-ShortsStorageReclamation` adds immutable node bindings
 (`node_peer_id`, `node_epoch`, `storage_bound_at`) to both pin transfers and unpin
 permits. Issue authority first, negotiate the gateway, then bind its peer ID and
 process epoch in the database before sending a mutation. Only an unexpired issued
@@ -859,7 +859,7 @@ recovery after an uncertain mutation.
 
 ### Recovery after a storage-process restart
 
-Apply `1793232002000-ShortsStorageRecovery` before enabling
+Apply `1793145609001-ShortsStorageReclamation` before enabling
 `SHORTS_STORAGE_RECOVERY_ENABLED=true`. It defaults off and requires expiring API
 writers. The internal `ShortsStorageRecoveryService.recover(kind, operation)` accepts
 `pin` or `unpin`, and observes an already restarted paired guard/Kubo process. It
@@ -915,7 +915,7 @@ CIDs and derivative formats remain unchanged.
 
 ## Reader compatibility
 
-Apply migrations through `1793145612000-ShortsStorageWriteEpochs`, including
+Apply migrations through `1793145609001-ShortsStorageReclamation`, including
 the file-reference size migration, before admitting this profile. API, streaming origin/worker and inventory readers must support the
 same descriptor. Shared `hls-v3` compatibility vectors bind required network and
 contract, original identity, both directory CIDs, recipe fingerprint, generation

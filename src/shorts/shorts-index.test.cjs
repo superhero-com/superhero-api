@@ -1,9 +1,8 @@
+const { ShortsCoverage, ShortsChainIndex } = require('./testing/historical-migrations.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
-const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-ShortsCoverage');
-const { ShortsChainIndex1791676800000 } = require('../migrations/1791676800000-ShortsChainIndex');
 const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('./shorts-index.service');
 const { ShortsGateway } = require('./shorts.gateway');
 const { ShortsPluginSyncService } = require('../plugins/shorts/shorts-plugin-sync.service');
@@ -23,10 +22,10 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
   await db.query('CREATE TABLE sync_state(id text PRIMARY KEY,tip_height int,updated_at timestamptz)');
   await db.query("INSERT INTO sync_state VALUES('global',10,now())");
   await db.query('CREATE TABLE plugin_failed_transaction(plugin_name text,tx_hash text)');
-  const migration = new ShortsChainIndex1791676800000();
+  const migration = new ShortsChainIndex();
   await migration.up({ query: (sql, args) => db.query(sql, args) });
   await db.query("INSERT INTO shorts_index_backfill(contract,version,complete,cursor) VALUES('ct_old_checkpoint',1,true,'/v3/contracts/logs?cursor=old')");
-  const coverageMigration = new ShortsCoverage1791734400000();
+  const coverageMigration = new ShortsCoverage();
   await coverageMigration.up({ query: (sql, args) => db.query(sql, args) });
   const [upgraded] = await db.query("SELECT * FROM shorts_index_backfill WHERE contract='ct_old_checkpoint'");
   assert.equal(upgraded.complete, false); assert.equal(upgraded.cursor, null);

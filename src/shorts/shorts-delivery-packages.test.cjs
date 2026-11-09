@@ -1,10 +1,13 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsDeliveryPackages: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
-const { ShortsDeliveryPackages1793145602000: Migration } = require('../migrations/1793145602000-ShortsDeliveryPackages');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { sourceKey, validateSourcePackage } = require('./hls-protocol/hls-package');
 const { adaptiveSourceIdentity } = require('./hls-protocol/playback-descriptor');
@@ -39,11 +42,11 @@ test('PostgreSQL delivery acknowledgement survives restart, fences conflicts and
     if (owner.isInitialized) await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy();
   });
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata', '1791763202000-ShortsUploads', '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority', '1791763215000-ShortsProcessingCapacity', '1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory', '1791763222000-ShortsWorkerBackpressure', '1793145600000-ShortsOriginalContent',
-      '1793145601000-ShortsAdaptiveInventory'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata', 'ShortsUploads', 'ShortsWorkers',
+      'ShortsWorkerAuthority', 'ShortsProcessingCapacity', 'ShortsRetentionHolds',
+      'ShortsHlsInventory', 'ShortsWorkerBackpressure', 'ShortsOriginalContent',
+      'ShortsAdaptiveInventory'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));

@@ -10,7 +10,7 @@ objects. Do not configure bucket expiration or bulk IPFS unpinning from this rep
 
 ## Setup
 
-1. Apply the normal API migrations through `1793145606000-ShortsDeliveryStaging`
+1. Apply the normal API migrations through `1793145600001-ShortsAdaptiveDelivery`
    using the migration owner. The command never runs migrations.
 2. Have the DBA create a dedicated login. It must not own the schema/tables, have
    role memberships, schema creation rights, superuser or bypass-RLS privileges.

@@ -41,7 +41,7 @@ distributed ingress and capacity validation remain incomplete.
    plus `SHORTS_PUBLISHER_API_ROLE` and `SHORTS_PUBLISHER_DB_ROLE`. Do **not** provide
    `SHORTS_OPERATOR_KEY_FILE` to setup. The command initializes immutable bindings
    and enrolls the pre-created logins; it does not create passwords or transfer AE.
-   Apply `1791763224000-ShortsUploadBudget` first. Setup grants the API read access
+   Apply `1791763222001-ShortsUploadAdmission` first. Setup grants the API read access
    to the shared [retained upload budget](UPLOAD-BUDGET.md). Set both
    `SHORTS_MAX_RETAINED_UPLOADS` and `SHORTS_MAX_RETAINED_SOURCE_BYTES` in this
    setup environment only when explicitly changing that budget; omitting them

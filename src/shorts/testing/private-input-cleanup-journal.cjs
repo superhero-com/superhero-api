@@ -1,7 +1,7 @@
+const { ShortsPrivateInputCleanupJournal: Migration } = require('./historical-migrations.cjs');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
-const { ShortsPrivateInputCleanupJournal1793491203000: Migration } = require('../../migrations/1793491203000-ShortsPrivateInputCleanupJournal');
 const { ShortsPrivateInputCleanupJournalService: Journal } = require('../shorts-private-input-cleanup-journal.service');
 const { ShortsPrivateInputCleanupVerifierService: Verifier } = require('../shorts-private-input-cleanup-verifier.service');
 const { ShortsDeliverySelectionService } = require('../shorts-delivery-selection.service');

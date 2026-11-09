@@ -1,3 +1,7 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsDeliveryStaging: Migration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,7 +24,6 @@ const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.se
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { ShortsScratchService, ShortsScratchProbeService } = require('./shorts-scratch.service');
 const { hashMediaFile } = require('./shorts-media-file');
-const { ShortsDeliveryStaging1793145606000: Migration } = require('../migrations/1793145606000-ShortsDeliveryStaging');
 const { workerRole } = require('./testing/worker-role.cjs');
 const fixture = require('./testing/hls-v3.json');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -44,11 +47,11 @@ test('pinned-original restaging reserves before writes, resumes partial transfer
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 4 } };
   owner = new DataSource(options); await owner.initialize();
   await owner.transaction(async db => {
-    for (const name of ['1791763200000-ShortsMetadata','1791763202000-ShortsUploads','1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority','1791763215000-ShortsProcessingCapacity','1791763216000-ShortsRetentionHolds',
-      '1791763222000-ShortsWorkerBackpressure','1791763224000-ShortsUploadBudget','1793145600000-ShortsOriginalContent',
-      '1793145602000-ShortsDeliveryPackages','1793145603000-ShortsDeliveryGenerations'])
-      await new (Object.values(require('../migrations/' + name))[0])().up(db);
+    for (const name of ['ShortsMetadata','ShortsUploads','ShortsWorkers',
+      'ShortsWorkerAuthority','ShortsProcessingCapacity','ShortsRetentionHolds',
+      'ShortsWorkerBackpressure','ShortsUploadBudget','ShortsOriginalContent',
+      'ShortsDeliveryPackages','ShortsDeliveryGenerations'])
+      await new schemaMigrations[name]().up(db);
     await new Migration().up(db);
   });
   await owner.transaction(db => new Migration().down(db)); await owner.transaction(db => new Migration().up(db));

@@ -1,7 +1,12 @@
-const { ShortsMediaAdmission1791763225000 } = require('../migrations/1791763225000-ShortsMediaAdmission');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
+const {
+  ShortsMediaAdmission,
+  ShortsUploads,
+  ShortsUploadBudget,
+  ShortsLifecycle,
+  ShortsMetadata,
+  ShortsSharedCutover,
+  ShortsProcessingCapacity,
+} = require('./testing/historical-migrations.cjs');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
 require('reflect-metadata');
@@ -15,9 +20,6 @@ const { NestFactory } = require('@nestjs/core');
 const { Module, Global } = require('@nestjs/common');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMetadataModule } = require('./shorts-metadata.module');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsSharedCutover1791763214000 } = require('../migrations/1791763214000-ShortsSharedCutover');
-const { ShortsProcessingCapacity1791763215000 } = require('../migrations/1791763215000-ShortsProcessingCapacity');
 
 test('shared Shorts metadata: real PostgreSQL isolation, competing workers and crash recovery', { skip: !process.env.SHORTS_TEST_PG_URL, timeout: 45000 }, async t => {
   const url = new URL(process.env.SHORTS_TEST_PG_URL);
@@ -27,7 +29,7 @@ test('shared Shorts metadata: real PostgreSQL isolation, competing workers and c
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema,
     extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsLifecycle1791763213000, ShortsSharedCutover1791763214000, ShortsProcessingCapacity1791763215000, ShortsUploadBudget1791763224000, ShortsMediaAdmission1791763225000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsLifecycle, ShortsSharedCutover, ShortsProcessingCapacity, ShortsUploadBudget, ShortsMediaAdmission] };
   const first = new DataSource(options), second = new DataSource(options);
   let app;
   t.after(async () => {

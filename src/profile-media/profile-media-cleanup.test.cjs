@@ -1,12 +1,14 @@
+const {
+  ProfileMedia,
+  PostImages,
+  ProfileMediaCleanup: CleanupMigration,
+} = require('../shorts/testing/historical-migrations.cjs');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomUUID } = require('node:crypto');
 require('reflect-metadata');
 const { DataSource } = require('typeorm');
 const { AccountMemory } = require('@aeternity/aepp-sdk');
-const { ProfileMedia1792954800000 } = require('../migrations/1792954800000-ProfileMedia');
-const { PostImages1793012400000 } = require('../migrations/1793012400000-PostImages');
-const { ProfileMediaCleanup1793008800000 } = require('../migrations/1793008800000-ProfileMediaCleanup');
 const { ProfileMediaRetention } = require('./profile-media-retention.service');
 const { ProfileMediaCleanup } = require('./profile-media-cleanup.service');
 const { ProfileMediaService } = require('./profile-media.service');
@@ -30,9 +32,9 @@ before(async () => {
   db = new DataSource({ type: 'postgres', url, extra: { options: `-c search_path=${schema}`, max: 6 } });
   await db.initialize(); await db.query(`CREATE SCHEMA ${schema}`);
   const runner = db.createQueryRunner(); await runner.connect();
-  await new ProfileMedia1792954800000().up(runner);
-  await new ProfileMediaCleanup1793008800000().up(runner);
-  await new PostImages1793012400000().up(runner); await runner.release();
+  await new ProfileMedia().up(runner);
+  await new CleanupMigration().up(runner);
+  await new PostImages().up(runner); await runner.release();
 });
 after(async () => { if (db) { await db.query(`DROP SCHEMA ${schema} CASCADE`); await db.destroy(); } });
 const row = async c => (await db.query('SELECT * FROM profile_media_assets WHERE scope=$1 AND cid=$2', [config.scope, c]))[0];

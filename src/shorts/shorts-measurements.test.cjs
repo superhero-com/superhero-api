@@ -1,11 +1,10 @@
+const { ShortsMetadata, ShortsAnalytics } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { DatabaseSync } = require('node:sqlite');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsAnalytics1791763207000 } = require('../migrations/1791763207000-ShortsAnalytics');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMeasurementsService } = require('./shorts-measurements.service');
 const { ShortsHostedAnalyticsService } = require('./shorts-hosted-analytics.service');
@@ -22,7 +21,7 @@ test('shared analytics and privacy: consistent counts, deletion, bounded reports
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
-    migrations: [ShortsMetadata1791763200000, ShortsAnalytics1791763207000] };
+    migrations: [ShortsMetadata, ShortsAnalytics] };
   const one = new DataSource(options), two = new DataSource(options); const locals = [], services = [];
   const env = { ...process.env };
   t.after(async () => {

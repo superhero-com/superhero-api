@@ -1,5 +1,9 @@
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsDirectUploads1792022400000 } = require('../migrations/1792022400000-ShortsDirectUploads');
+const {
+  ShortsUploadBudget,
+  ShortsDirectUploads,
+  ShortsMetadata,
+  ShortsUploads,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,8 +14,6 @@ const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsUploadRecordsService, SHORTS_PART_BYTES } = require('./shorts-upload-records.service');
 const { ShortsSourceService } = require('./shorts-source.service');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const input = (bytes = 10) => ({ title: 'My short', topic: 'Art', rights: true, bytes, sha256: hash('source'), details: { language: 'en' } });
 const ref = (bytes = 10, sha256 = hash('source')) => ({ key: `private/upload/key1/${sha256}`, keyId: 'key1', bytes, sha256 });
@@ -21,7 +23,7 @@ test('shared uploads: atomic admission, immutable parts, frozen input and job ac
   const schema = `shorts_uploads_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 }, synchronize: false,
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsUploadBudget1791763224000, ShortsDirectUploads1792022400000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsUploadBudget, ShortsDirectUploads] };
   const first = new DataSource(options), second = new DataSource(options);
   t.after(async () => { if (first.isInitialized) await first.destroy(); if (second.isInitialized) await second.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
   await first.initialize(); await second.initialize(); await first.runMigrations({ transaction: 'all' });

@@ -29,7 +29,7 @@ deployments. The ordinary API and workers do not start it.
 
 ## Setup
 
-1. Apply migrations through `1793145606000-ShortsDeliveryStaging`, then build
+1. Apply migrations through `1793145600001-ShortsAdaptiveDelivery`, then build
    with `npm run build`. Finish a storage inventory for this exact deployment,
    endpoint, region, bucket, prefix and addressing mode.
    Original-media outputs are matched to their declared file name, size and hash
@@ -59,7 +59,7 @@ deployments. The ordinary API and workers do not start it.
      public.shorts_storage_references TO shorts_storage_reconciliation;
    ```
 
-   If migration `1793491200000-ShortsPrivateInputRetirement` is installed, also
+   If migration `1793232008001-ShortsPrivateMediaCleanup` is installed, also
    grant SELECT on `shorts_private_input_retirements`. The source reader verifies
    that access is complete and read-only; it rejects even column-level writes.
    Older schemas without the retirement table keep the encrypted-manifest path.

@@ -1,8 +1,13 @@
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
+const {
+  ShortsUploads,
+  ShortsUploadBudget,
+  ShortsPublicationAdmission,
+  ShortsLifecycle,
+  ShortsMetadata,
+  ShortsPublications,
+  ShortsPublisherAuthority,
+} = require('./testing/historical-migrations.cjs');
 const { releaseFixture, digest } = require('./shorts-release.fixture.cjs');
-const { ShortsPublicationAdmission1791763223000 } = require('../migrations/1791763223000-ShortsPublicationAdmission');
-const { ShortsLifecycle1791763213000 } = require('../migrations/1791763213000-ShortsLifecycle');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
 const { ShortsHostedHostingService } = require('./shorts-hosted-hosting.service');
 require('reflect-metadata');
@@ -11,9 +16,6 @@ const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { AccountMemory, encode, Encoding, buildTx, buildTxHash, Tag } = require('@aeternity/aepp-sdk');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsPublications1791763209000 } = require('../migrations/1791763209000-ShortsPublications');
-const { ShortsPublisherAuthority1791763210000 } = require('../migrations/1791763210000-ShortsPublisherAuthority');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsPublicationsService } = require('./shorts-publications.service');
 const { ShortsPublicationBoundaryService } = require('./shorts-publication-boundary.service');
@@ -36,7 +38,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
   const schema = `shorts_publisher_authority_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 },
-    migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsPublications1791763209000, ShortsPublisherAuthority1791763210000, ShortsLifecycle1791763213000, ShortsPublicationAdmission1791763223000, ShortsUploadBudget1791763224000] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsPublications, ShortsPublisherAuthority, ShortsLifecycle, ShortsPublicationAdmission, ShortsUploadBudget] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' }).catch(error => { const at = Number(error.position || error.driverError?.position); console.error({ position: at, where: error.driverError?.where, context: error.query?.slice(Math.max(0, at - 150), at + 150) }); throw error; });
   const principals = [], meta = new ShortsMetadataService(owner), journal = new ShortsPublicationsService(owner);
   t.after(async () => { for (const p of principals) { await p.db.destroy(); await p.dispose(); } await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });

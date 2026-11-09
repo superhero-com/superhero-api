@@ -1,3 +1,8 @@
+const schemaMigrations = require('./testing/historical-migrations.cjs');
+const {
+  ShortsReclamationRelease: Migration,
+  ShortsStorageRecovery: RecoveryMigration,
+} = schemaMigrations;
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -25,9 +30,6 @@ const {
 const {
   ShortsInputReclamationService,
 } = require('./shorts-input-reclamation.service');
-const {
-  ShortsReclamationRelease1793232001000: Migration,
-} = require('../migrations/1793232001000-ShortsReclamationRelease');
 const { ShortsMediaService } = require('./shorts-media.service');
 const { ShortsPinTransfersService } = require('./shorts-pin-transfers.service');
 const {
@@ -36,9 +38,6 @@ const {
 const {
   ShortsStorageRecoveryService,
 } = require('./shorts-storage-recovery.service');
-const {
-  ShortsStorageRecovery1793232002000: RecoveryMigration,
-} = require('../migrations/1793232002000-ShortsStorageRecovery');
 const { reclamationStorage } = require('./shorts-reclamation-storage');
 const { workerRole } = require('./testing/worker-role.cjs');
 const golden = structuredClone(require('./testing/hls-v3.json'));
@@ -111,30 +110,30 @@ async function fixture(t, withRecovery = false) {
   });
   await db.transaction(async (sql) => {
     for (const name of [
-      '1791763200000-ShortsMetadata',
-      '1791763202000-ShortsUploads',
-      '1791763203000-ShortsWorkers',
-      '1791763204000-ShortsWorkerAuthority',
-      '1791763215000-ShortsProcessingCapacity',
-      '1791763216000-ShortsRetentionHolds',
-      '1791763219000-ShortsHlsInventory',
-      '1791763220000-ShortsPinInventory',
-      '1791763222000-ShortsWorkerBackpressure',
-      '1791763224000-ShortsUploadBudget',
-      '1793145600000-ShortsOriginalContent',
-      '1793145601000-ShortsAdaptiveInventory',
-      '1793145602000-ShortsDeliveryPackages',
-      '1793145603000-ShortsDeliveryGenerations',
-      '1793145605000-ShortsGenerationDeliveryPackages',
-      '1793145606000-ShortsDeliveryStaging',
-      '1793145607000-ShortsDeliverySelection',
-      '1793145608000-ShortsDeliveryInputRetirement',
-      '1793145609000-ShortsInputReclamationReservations',
-      '1793145610000-ShortsPinTransfers',
-      '1793145611000-ShortsInputReclamationPermits',
-      '1793145612000-ShortsStorageWriteEpochs',
+      'ShortsMetadata',
+      'ShortsUploads',
+      'ShortsWorkers',
+      'ShortsWorkerAuthority',
+      'ShortsProcessingCapacity',
+      'ShortsRetentionHolds',
+      'ShortsHlsInventory',
+      'ShortsPinInventory',
+      'ShortsWorkerBackpressure',
+      'ShortsUploadBudget',
+      'ShortsOriginalContent',
+      'ShortsAdaptiveInventory',
+      'ShortsDeliveryPackages',
+      'ShortsDeliveryGenerations',
+      'ShortsGenerationDeliveryPackages',
+      'ShortsDeliveryStaging',
+      'ShortsDeliverySelection',
+      'ShortsDeliveryInputRetirement',
+      'ShortsInputReclamationReservations',
+      'ShortsPinTransfers',
+      'ShortsInputReclamationPermits',
+      'ShortsStorageWriteEpochs',
     ])
-      await new (Object.values(require('../migrations/' + name))[0])().up(sql);
+      await new schemaMigrations[name]().up(sql);
     await new Migration().up(sql);
   });
   await db.transaction((sql) => new Migration().down(sql));

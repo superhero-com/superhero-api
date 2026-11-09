@@ -1,3 +1,12 @@
+const {
+  ShortsChainIndex,
+  ShortsCoverage,
+  ShortsMetadata,
+  ShortsAnalytics,
+  ShortsStudio,
+  ShortsReceipts,
+  ShortsImportSnapshot,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,13 +16,6 @@ const { Contract, encode, decode, Encoding, hash } = require('@aeternity/aepp-sd
 const camelcaseKeysDeep = require('camelcase-keys-deep');
 const { Tx } = require('../mdw-sync/entities/tx.entity');
 const { toMdwTx } = require('../mdw-sync/utils/to-mdw-tx');
-const { ShortsChainIndex1791676800000 } = require('../migrations/1791676800000-ShortsChainIndex');
-const { ShortsCoverage1791734400000 } = require('../migrations/1791734400000-ShortsCoverage');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsAnalytics1791763207000 } = require('../migrations/1791763207000-ShortsAnalytics');
-const { ShortsStudio1791763212000 } = require('../migrations/1791763212000-ShortsStudio');
-const { ShortsReceipts1791763208000 } = require('../migrations/1791763208000-ShortsReceipts');
-const { ShortsImportSnapshot1792368001000 } = require('../migrations/1792368001000-ShortsImportSnapshot');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsIndexService, SHORTS_INDEX_VERSION } = require('./shorts-index.service');
 const { ShortsStudioReadService } = require('./shorts-studio-read.service');
@@ -42,9 +44,9 @@ test('sponsored free Like: PostgreSQL replay, orphan recovery and imported Studi
     INSERT INTO sync_state VALUES('global',11,now());
     CREATE TABLE plugin_failed_transaction(plugin_name text,tx_hash text);`);
   const runner = { query: (...args) => db.query(...args) };
-  for (const Migration of [ShortsChainIndex1791676800000, ShortsCoverage1791734400000,
-    ShortsMetadata1791763200000, ShortsAnalytics1791763207000, ShortsStudio1791763212000,
-    ShortsReceipts1791763208000, ShortsImportSnapshot1792368001000]) await new Migration().up(runner);
+  for (const Migration of [ShortsChainIndex, ShortsCoverage,
+    ShortsMetadata, ShortsAnalytics, ShortsStudio,
+    ShortsReceipts, ShortsImportSnapshot]) await new Migration().up(runner);
 
   const encoded = (value, type) => encode(Buffer.alloc(32, value), type);
   const current = encoded(1, Encoding.ContractAddress), old = encoded(2, Encoding.ContractAddress);

@@ -30,6 +30,22 @@ and scans keep their existing fail-fast admission behavior.
 
 An opt-in NestJS feature module connected to a real æternity testnet contract. It can run inside the normal API on staging, or separately for local development without the main databases and relays. The web feature runs within Superhero's existing application and wallet providers.
 
+## Database migrations
+
+Run the normal API migrations before starting the new release. The Shorts
+schema is grouped by feature. The migration runner checks the existing TypeORM
+history and applies only the missing changes within each group. Keep the old
+history rows: they preserve which changes an earlier release applied.
+
+Reverting a grouped migration runs its new changes in reverse order and
+retains changes recorded by an earlier release. Existing data and privilege
+checks still apply to each rollback. To revert further into the old history,
+use the matching older release after reverting the newer migrations. The
+profile-media cleanup step cannot restore deleted image bytes and refuses a
+rollback. Use a backup for a downgrade across that step. An older migration
+runner expects the individual history entries and must not be run against a
+fresh grouped schema.
+
 ## Enable on staging
 
 Shorts is disabled by default. Set **`ENABLE_SHORTS=true`** on the API to load its
@@ -378,7 +394,7 @@ on the same connection that persists the state, holding ownership across commits
 
 `ShortsMetadataModule` provides a PostgreSQL repository for content and preparation
 jobs through Nest dependency injection. Its schema is managed by the API's normal
-TypeORM migrations (`ShortsMetadata1791763200000`); it never creates tables during
+TypeORM migrations (`ShortsMediaIngestion1791763200001`); it never creates tables during
 an HTTP request or starts a decoder or wallet. The hosted module uses this repository
 through `ShortsRecordsService` for uploads, content lists, publication, moderation,
 reports, appeals, playback authorization and recovery. The standalone loopback demo
@@ -874,7 +890,7 @@ still enforce their explicit testnet startup guards.
 
 ### Dedicated chain-index network
 
-Apply `1791763228000-ShortsIndexNetwork` through the normal API migration command
+Apply `1791676800001-ShortsChainIndexing` through the normal API migration command
 before enabling Shorts. The normal Shorts Nest module binds the shared index to its
 reviewed release network at startup; it has no switch or API to change that binding.
 Use a separate database for another network, including testnet versus mainnet.
@@ -1014,7 +1030,7 @@ and totals are computed independently of that display limit. PostgreSQL
 LISTEN/NOTIFY broadcasts `shorts-updated` after commit through the dedicated
 `/shorts` Socket.IO namespace at transport path `/shorts/socket.io/`. Reconnect
 and reorg also invalidate the web view. Apply migration
-`1791763226000-ShortsContentUpdates` through the normal API migration command:
+`1791763222001-ShortsUploadAdmission` through the normal API migration command:
 content creation, publication, review and removal then notify the same channel
 in their database transaction, including changes made by workers or another API.
 Rolled-back changes and unchanged content bodies do not notify. Notifications
@@ -1112,7 +1128,7 @@ own schema; do not use an application database.
 
 ### Shared media processing capacity
 
-Apply migration `1791763215000` before starting the current media worker. It limits
+Apply migration `1791763215001` before starting the current media worker. It limits
 active preparation leases across all workers in one network/contract, default two.
 Adding worker replicas does not raise that ceiling. Workers check the database
 guard at startup and cancel processing if lease renewal stalls. See

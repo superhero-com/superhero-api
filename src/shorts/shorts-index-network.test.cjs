@@ -1,3 +1,4 @@
+const { ShortsIndexNetwork } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -6,7 +7,6 @@ const { DataSource } = require('typeorm');
 const { Encoding, encode } = require('@aeternity/aepp-sdk');
 const { ShortsIndexNetworkService } = require('./shorts-index-network.service');
 const { ShortsIndexService } = require('./shorts-index.service');
-const { ShortsIndexNetwork1791763228000 } = require('../migrations/1791763228000-ShortsIndexNetwork');
 const keyHash = () => encode(randomBytes(32), Encoding.KeyBlockHash);
 
 function runtime(network = 'ae_uat') {
@@ -53,7 +53,7 @@ test('persistent index ownership with real PostgreSQL', { skip: !process.env.SHO
       CREATE TABLE txs(hash text PRIMARY KEY);
       CREATE TABLE shorts_chain_events(tx_hash text PRIMARY KEY);
       CREATE TABLE shorts_index_backfill(contract text PRIMARY KEY);`);
-    const migration = new ShortsIndexNetwork1791763228000();
+    const migration = new ShortsIndexNetwork();
     const migrate = method => db.transaction(manager => migration[method](manager.queryRunner));
     await migrate('up');
     const row = async () => (await db.query('SELECT * FROM shorts_index_network'))[0];

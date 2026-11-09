@@ -12,7 +12,7 @@ currently limited to enabled testnet deployments.
 
 ## Setup
 
-1. Apply API migrations through `1793145606000-ShortsDeliveryStaging`, then
+1. Apply API migrations through `1793145600001-ShortsAdaptiveDelivery`, then
    `npm run build`. Use the same deployment manifest as the API.
 2. Create a dedicated Redis 7+ read account for the streaming namespace. For
    example, its ACL needs these permissions (supply its password privately):

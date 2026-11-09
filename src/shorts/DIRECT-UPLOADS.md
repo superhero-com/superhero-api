@@ -66,7 +66,7 @@ sequenceDiagram
 
 ## Deploy in order
 
-Apply migration `1792022400000-ShortsDirectUploads`. It adds bounded per-part
+Apply migration `1791763222001-ShortsUploadAdmission`. It adds bounded per-part
 permission records to upload sessions and preserves all existing records.
 Deploy updated media workers **before** enabling the new API and web client:
 workers must support the `SHPRIV02` envelope. Old encrypted objects still use
@@ -121,7 +121,7 @@ frozen admission limit. Status never returns private object references or grants
 Clients hash the original incrementally and verify this identity before resuming.
 
 Original-file admission is disabled by default. Apply migration
-`1793232000000-ShortsOriginalUploads` and qualify the original-file readers,
+`1793232000001-ShortsOriginalUploadRequests` and qualify the original-file readers,
 moderation service, publisher and streaming delivery before enabling it on the
 hosted API. The migration permits 96 parts and larger bounded metadata, preserves
 existing sessions, and prevents workers without the larger-source capability

@@ -1,3 +1,4 @@
+const { ShortsSessions } = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -6,7 +7,6 @@ const { DataSource } = require('typeorm');
 const { AccountMemory } = require('@aeternity/aepp-sdk');
 const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsSessionsService } = require('./shorts-sessions.service');
-const { ShortsSessions1791763201000 } = require('../migrations/1791763201000-ShortsSessions');
 
 test('shared wallet sessions: real signatures, atomic admission, replay and revocation', { skip: !process.env.SHORTS_TEST_PG_URL, timeout: 45000 }, async t => {
   const url = new URL(process.env.SHORTS_TEST_PG_URL);
@@ -15,7 +15,7 @@ test('shared wallet sessions: real signatures, atomic admission, replay and revo
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 8 },
-    migrations: [ShortsSessions1791763201000], synchronize: false };
+    migrations: [ShortsSessions], synchronize: false };
   const first = new DataSource(options), second = new DataSource(options);
   await first.initialize(); await second.initialize(); await first.runMigrations({ transaction: 'all' });
   const saved = { ...process.env };

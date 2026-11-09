@@ -1,5 +1,9 @@
-const { ShortsUploadBudget1791763224000 } = require('../migrations/1791763224000-ShortsUploadBudget');
-const { ShortsUploads1791763202000 } = require('../migrations/1791763202000-ShortsUploads');
+const {
+  ShortsUploadBudget,
+  ShortsUploads,
+  ShortsMetadata,
+  ShortsCatalog,
+} = require('./testing/historical-migrations.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -16,8 +20,6 @@ const { ShortsAuthService } = require('./shorts-auth.service');
 const { ShortsAuthGuard } = require('./shorts-auth.guard');
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
 const { ShortsUploadsService } = require('./shorts-uploads.service');
-const { ShortsMetadata1791763200000 } = require('../migrations/1791763200000-ShortsMetadata');
-const { ShortsCatalog1791763211000 } = require('../migrations/1791763211000-ShortsCatalog');
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(r => setImmediate(r));
@@ -298,7 +300,7 @@ test('PostgreSQL catalog pages read beyond the legacy cap with independent conne
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize();
   await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}` },
-    synchronize: false, migrations: [ShortsMetadata1791763200000, ShortsUploads1791763202000, ShortsCatalog1791763211000, ShortsUploadBudget1791763224000] };
+    synchronize: false, migrations: [ShortsMetadata, ShortsUploads, ShortsCatalog, ShortsUploadBudget] };
   const db = new DataSource(options), other = new DataSource(options);
   await db.initialize(); await other.initialize();
   t.after(async () => { await other.destroy(); await db.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
@@ -347,5 +349,5 @@ test('PostgreSQL catalog pages read beyond the legacy cap with independent conne
   assert.deepEqual(refreshed.items.map(s => s.id), ['clip-0001']);
   const indices = await db.query("SELECT indexdef FROM pg_indexes WHERE schemaname=$1 AND indexname='shorts_content_public_page'", [schema]);
   assert.match(indices[0].indexdef, /WHERE/);
-  await db.transaction(manager => new ShortsCatalog1791763211000().down(manager)); assert.equal((await f.api.catalog()).items.length, 20);
+  await db.transaction(manager => new ShortsCatalog().down(manager)); assert.equal((await f.api.catalog()).items.length, 20);
 });

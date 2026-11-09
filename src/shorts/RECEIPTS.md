@@ -7,8 +7,8 @@ Shorts chain-indexing plugin; receipt history does not calculate or authorize th
 
 ## Setup and migration
 
-Run all normal API migrations, including `1791763208000-ShortsReceipts` and
-`1791763214000-ShortsSharedCutover`, before starting Shorts. The trusted API database role needs SELECT, INSERT and UPDATE on
+Run all normal API migrations, including `1791763207001-ShortsAnalyticsAndReceipts` and
+`1791763209001-ShortsPublishingAndCatalog`, before starting Shorts. The trusted API database role needs SELECT, INSERT and UPDATE on
 `shorts_receipt_scopes` and `shorts_transaction_receipts`, plus its existing
 runtime/content permissions. Keep these tables inaccessible to the media-worker
 login. Initialization verifies the deployment source hash and previous-contract
