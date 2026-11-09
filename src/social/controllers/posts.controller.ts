@@ -32,6 +32,7 @@ import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
+import { SocialGraphService } from '@/plugins/social-graph/social-graph.service';
 import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
@@ -56,6 +57,7 @@ export class PostsController {
     private readonly readsService: ReadsService,
     private readonly profileReadService: ProfileReadService,
     private readonly communityFactoryService: CommunityFactoryService,
+    private readonly socialGraphService: SocialGraphService,
   ) {
     //
   }
@@ -230,6 +232,12 @@ export class PostsController {
     description:
       'Return only posts detected as this script/language. Posts with no detected language are excluded.',
   })
+  @ApiQuery({
+    name: 'followed_by',
+    type: 'string',
+    required: false,
+    description: 'Return only posts from accounts this address follows',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -248,6 +256,8 @@ export class PostsController {
     account_address?: string,
     @Query('topics') topics?: string,
     @Query('language') language?: string,
+    @Query('followed_by', OptionalAeAccountAddressPipe)
+    followed_by?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -273,6 +283,9 @@ export class PostsController {
         `Invalid language value: ${language}. Allowed values: ${POST_LANGUAGE_FILTERS.join(', ')}`,
       );
     }
+    const following = followed_by
+      ? await this.socialGraphService.followingSubquery(followed_by)
+      : undefined;
     // Build base query for filtering to get distinct post IDs
     // This prevents duplicates when posts have multiple topics
     const baseQuery = this.postRepository
@@ -293,6 +306,13 @@ export class PostsController {
       baseQuery.andWhere('post.sender_address = :account_address', {
         account_address,
       });
+    }
+
+    if (following) {
+      baseQuery.andWhere(
+        `post.sender_address IN (${following.sql})`,
+        following.params,
+      );
     }
 
     if (language) {
@@ -373,6 +393,13 @@ export class PostsController {
       totalCountQuery.andWhere('post.sender_address = :account_address', {
         account_address,
       });
+    }
+
+    if (following) {
+      totalCountQuery.andWhere(
+        `post.sender_address IN (${following.sql})`,
+        following.params,
+      );
     }
 
     if (language) {

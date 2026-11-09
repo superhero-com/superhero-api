@@ -74,6 +74,20 @@ export class SocialGraphQueryService {
       );
     return { ...scope, address, ...rows[0] };
   }
+  followingSubquery(scope: ProjectionScope, address: string) {
+    this.account(address);
+    return {
+      sql: `SELECT to_address FROM social_graph_projection_edges
+      WHERE network=:graphNetwork AND contract=:graphContract AND generation=:graphGeneration
+      AND from_address=:graphFollower AND kind='follow'`,
+      params: {
+        graphNetwork: scope.network,
+        graphContract: scope.contract,
+        graphGeneration: scope.generation,
+        graphFollower: address,
+      },
+    };
+  }
   async connections(
     scope: ProjectionScope,
     address: string,
