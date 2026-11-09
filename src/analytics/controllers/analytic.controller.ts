@@ -1,9 +1,11 @@
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
 import {
   BadRequestException,
   Controller,
   Get,
   Query,
   Render,
+  UseInterceptors,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
@@ -115,6 +117,8 @@ export class AnalyticController {
   }
 
   @Get('past-24-hours')
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(60_000)
   @ApiQuery({ name: 'address', type: 'string', required: false })
   @ApiOperation({
     operationId: 'getPast24HoursAnalytics',
