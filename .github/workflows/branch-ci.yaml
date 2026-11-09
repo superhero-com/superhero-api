@@ -25,6 +25,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          # argon2 0.28's source fallback doesn't compile as C++20, Node 24's default.
+          CXXFLAGS: -std=gnu++17
 
       - name: Run lint
         run: npm run lint
@@ -202,6 +205,8 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          CXXFLAGS: -std=gnu++17
 
       # In band: the specs create and drop their own databases. Social-graph
       # starts its own server and already runs above.

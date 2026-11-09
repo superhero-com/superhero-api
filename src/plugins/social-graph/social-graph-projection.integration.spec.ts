@@ -456,6 +456,34 @@ const bin = findPostgresBinDir();
         ).rejects.toThrow('not ready');
       },
     );
+    it('selects only current follows of the account for the posts filter', async () => {
+      const queries = new SocialGraphQueryService(db);
+      await service.applyEvent(scope, event('following-1'), [
+        edge,
+        { ...edge, to: 'ak_c' },
+        { ...edge, to: 'ak_d', kind: 'block' },
+        { ...edge, from: 'ak_e', to: 'ak_a' },
+      ]);
+      await service.applyEvent(scope, event('following-2'), [
+        { ...edge, present: false },
+      ]);
+      await service.applyEvent(
+        { ...scope, contract: 'ct_destination' },
+        event('following-3'),
+        [{ ...edge, to: 'ak_f' }],
+      );
+      const { sql, params } = queries.followingSubquery(
+        await queries.ready(scope.network, scope.contract),
+        'ak_a',
+      );
+      const rows = await db.query(
+        ...db.driver.escapeQueryWithParameters(sql, params, {}),
+      );
+      expect(rows.map((row) => row.to_address)).toEqual(['ak_c']);
+      expect(() => queries.followingSubquery(scope, 'ak_a OR 1=1')).toThrow(
+        'Invalid account',
+      );
+    });
     it('serves scoped keyset pages and fails closed after generation cutover', async () => {
       const queries = new SocialGraphQueryService(db);
       await service.applyEvent(scope, event('page-1'), [

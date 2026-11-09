@@ -1,4 +1,7 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { PostsController } from './posts.controller';
 import { paginate } from 'nestjs-typeorm-paginate';
 
@@ -26,6 +29,9 @@ describe('PostsController', () => {
   let emptyResultQueryBuilder: {
     where: jest.Mock;
   };
+  let socialGraphService: {
+    followingSubquery: jest.Mock;
+  };
 
   beforeEach(() => {
     baseQueryBuilder = {
@@ -50,6 +56,12 @@ describe('PostsController', () => {
         .mockReturnValueOnce(baseQueryBuilder)
         .mockReturnValueOnce(emptyResultQueryBuilder),
     };
+    socialGraphService = {
+      followingSubquery: jest.fn().mockResolvedValue({
+        sql: 'SELECT to_address FROM edges',
+        params: { graphFollower: 'ak_viewer' },
+      }),
+    };
 
     controller = new PostsController(
       postRepository as any,
@@ -58,6 +70,7 @@ describe('PostsController', () => {
       {} as any,
       {} as any,
       {} as any,
+      socialGraphService as any,
     );
   });
 
@@ -146,6 +159,7 @@ describe('PostsController', () => {
         getCurrentFactory: jest.fn().mockResolvedValue({ collections: {} }),
         mapCollectionInfo: jest.fn().mockReturnValue(null),
       } as any,
+      {} as any,
     );
 
     await popularController.popular({
@@ -162,6 +176,49 @@ describe('PostsController', () => {
       expect.any(Object),
       undefined,
     );
+  });
+
+  it('limits the posts list to accounts the viewer follows', async () => {
+    await controller.listAll(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'ak_viewer',
+    );
+
+    expect(socialGraphService.followingSubquery).toHaveBeenCalledWith(
+      'ak_viewer',
+    );
+    expect(baseQueryBuilder.andWhere).toHaveBeenCalledWith(
+      'post.sender_address IN (SELECT to_address FROM edges)',
+      { graphFollower: 'ak_viewer' },
+    );
+  });
+
+  it('fails the followed_by list while the social graph is unavailable', async () => {
+    socialGraphService.followingSubquery.mockRejectedValue(
+      new ServiceUnavailableException('Social graph projection is not ready'),
+    );
+
+    await expect(
+      controller.listAll(
+        1,
+        100,
+        'created_at',
+        'DESC',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'ak_viewer',
+      ),
+    ).rejects.toThrow(ServiceUnavailableException);
+    expect(postRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   it('forwards the language filter to popular ranking', async () => {
@@ -188,6 +245,7 @@ describe('PostsController', () => {
         getCurrentFactory: jest.fn().mockResolvedValue({ collections: {} }),
         mapCollectionInfo: jest.fn().mockReturnValue(null),
       } as any,
+      {} as any,
     );
 
     await popularController.popular({
@@ -302,6 +360,7 @@ describe('PostsController', () => {
         {} as any,
         {} as any,
         communityFactoryService as any,
+        {} as any,
       );
 
       return {
