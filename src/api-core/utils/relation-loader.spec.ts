@@ -2,16 +2,25 @@ import { BadRequestException } from '@nestjs/common';
 import {
   ENTITY_CONFIGS,
   KEY_BLOCK_CONFIG,
-  MICRO_BLOCK_CONFIG,
   TX_CONFIG,
 } from '@/mdw-sync/config/entity-configs';
+import {
+  BLOCK_CONFIG,
+  GENERATION_CONFIG,
+  INCLUDE_GRAPH_CONFIGS,
+  ITEM_CONFIG,
+} from '@/test/harness/include-graph';
 import { parseIncludesToTree } from './includes-parser';
 import {
   createEntityConfigRegistry,
   validateIncludesTree,
 } from './relation-loader';
 
-const registry = createEntityConfigRegistry(ENTITY_CONFIGS);
+// The two graphs share no entity, so neither reaches the other's configs.
+const registry = createEntityConfigRegistry([
+  ...ENTITY_CONFIGS,
+  ...INCLUDE_GRAPH_CONFIGS,
+]);
 
 describe('validateIncludesTree', () => {
   const validate = (config: any, includes: string) => () =>
@@ -19,21 +28,22 @@ describe('validateIncludesTree', () => {
 
   it.each([
     { config: KEY_BLOCK_CONFIG, includes: 'txs', joinsArray: true },
-    { config: KEY_BLOCK_CONFIG, includes: 'microBlocks', joinsArray: true },
-    {
-      config: KEY_BLOCK_CONFIG,
-      includes: 'microBlocks,microBlocks.txs',
-      joinsArray: true,
-    },
-    { config: MICRO_BLOCK_CONFIG, includes: 'keyBlock,txs', joinsArray: true },
-    { config: MICRO_BLOCK_CONFIG, includes: 'txs.keyBlock', joinsArray: true },
     { config: TX_CONFIG, includes: 'keyBlock', joinsArray: false },
-    { config: TX_CONFIG, includes: 'keyBlock.microBlocks', joinsArray: true },
     {
       config: KEY_BLOCK_CONFIG,
       includes: 'unknown,unknown.nested',
       joinsArray: false,
     },
+    { config: GENERATION_CONFIG, includes: 'blocks', joinsArray: true },
+    {
+      config: GENERATION_CONFIG,
+      includes: 'blocks,blocks.items',
+      joinsArray: true,
+    },
+    { config: BLOCK_CONFIG, includes: 'generation,items', joinsArray: true },
+    { config: BLOCK_CONFIG, includes: 'items.generation', joinsArray: true },
+    { config: ITEM_CONFIG, includes: 'generation', joinsArray: false },
+    { config: ITEM_CONFIG, includes: 'generation.blocks', joinsArray: true },
   ])(
     'accepts $includes on $config.routePrefix',
     ({ config, includes, joinsArray }) => {
@@ -47,9 +57,9 @@ describe('validateIncludesTree', () => {
       config: KEY_BLOCK_CONFIG,
       includes: 'txs.keyBlock.txs.keyBlock.txs.keyBlock.txs',
     },
-    { config: KEY_BLOCK_CONFIG, includes: 'microBlocks.keyBlock' },
-    { config: MICRO_BLOCK_CONFIG, includes: 'keyBlock.microBlocks' },
     { config: TX_CONFIG, includes: 'keyBlock.txs' },
+    { config: GENERATION_CONFIG, includes: 'blocks.generation' },
+    { config: BLOCK_CONFIG, includes: 'generation.blocks' },
   ])(
     'rejects the cycle $includes on $config.routePrefix',
     ({ config, includes }) => {
@@ -59,9 +69,9 @@ describe('validateIncludesTree', () => {
   );
 
   it.each([
-    { config: KEY_BLOCK_CONFIG, includes: 'txs,microBlocks' },
-    { config: KEY_BLOCK_CONFIG, includes: 'txs,microBlocks.txs' },
-    { config: MICRO_BLOCK_CONFIG, includes: 'txs,keyBlock.txs' },
+    { config: GENERATION_CONFIG, includes: 'items,blocks' },
+    { config: GENERATION_CONFIG, includes: 'items,blocks.items' },
+    { config: BLOCK_CONFIG, includes: 'items,generation.items' },
   ])(
     'rejects the cross product $includes on $config.routePrefix',
     ({ config, includes }) => {

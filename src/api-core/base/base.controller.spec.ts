@@ -6,10 +6,11 @@ import {
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import request from 'supertest';
+import { ENTITY_CONFIGS } from '@/mdw-sync/config/entity-configs';
 import {
-  ENTITY_CONFIGS,
-  KEY_BLOCK_CONFIG,
-} from '@/mdw-sync/config/entity-configs';
+  GENERATION_CONFIG,
+  INCLUDE_GRAPH_CONFIGS,
+} from '@/test/harness/include-graph';
 import { createBaseController } from './base.controller';
 import { EntityConfig } from '../types/entity-config.interface';
 import { parseIncludesToTree } from '../utils/includes-parser';
@@ -99,15 +100,19 @@ describe('createBaseController maxPage', () => {
 
 describe('createBaseController includes docs', () => {
   const documentedIncludes: Record<string, string> = {
-    'v2/mdw/txs': 'keyBlock, keyBlock.microBlocks',
-    'v2/mdw/micro-blocks': 'keyBlock, keyBlock.txs, txs, txs.keyBlock',
-    'v2/mdw/key-blocks': 'txs, microBlocks, microBlocks.txs',
+    'v2/mdw/txs': 'keyBlock',
+    'v2/mdw/key-blocks': 'txs',
+    generations: 'items, blocks, blocks.items',
+    blocks: 'generation, generation.items, items, items.generation',
+    items: 'generation, generation.blocks',
   };
 
-  it.each(ENTITY_CONFIGS.filter((config) => config.relations?.length))(
+  const configs = [...ENTITY_CONFIGS, ...INCLUDE_GRAPH_CONFIGS];
+
+  it.each(configs.filter((config) => config.relations?.length))(
     'documents only includes that pass validation for $routePrefix',
     (config) => {
-      const registry = createEntityConfigRegistry(ENTITY_CONFIGS);
+      const registry = createEntityConfigRegistry(configs);
       const Controller = createBaseController(config as any, registry);
       // @nestjs/swagger keeps DECORATORS.API_PARAMETERS out of its exports map.
       const { description } = Reflect.getMetadata(
@@ -140,13 +145,13 @@ describe('createBaseController includes (HTTP)', () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [
         createBaseController(
-          KEY_BLOCK_CONFIG,
-          createEntityConfigRegistry(ENTITY_CONFIGS),
+          GENERATION_CONFIG,
+          createEntityConfigRegistry(INCLUDE_GRAPH_CONFIGS),
         ),
       ],
       providers: [
         {
-          provide: getRepositoryToken(KEY_BLOCK_CONFIG.entity),
+          provide: getRepositoryToken(GENERATION_CONFIG.entity),
           useValue: repository,
         },
       ],
@@ -171,16 +176,13 @@ describe('createBaseController includes (HTTP)', () => {
   });
 
   it.each([
-    ['/v2/mdw/key-blocks?includes=txs,microBlocks', 'cannot be combined'],
+    ['/generations?includes=items,blocks', 'cannot be combined'],
+    ['/generations?includes=items&includes=blocks', 'cannot be combined'],
     [
-      '/v2/mdw/key-blocks?includes=txs&includes=microBlocks',
-      'cannot be combined',
+      '/generations?includes=items.generation.items',
+      'leads back to Generation',
     ],
-    ['/v2/mdw/key-blocks?includes=txs.keyBlock.txs', 'leads back to KeyBlock'],
-    [
-      '/v2/mdw/key-blocks/kh_1?includes=microBlocks.keyBlock',
-      'leads back to KeyBlock',
-    ],
+    ['/generations/g_1?includes=blocks.generation', 'leads back to Generation'],
   ])('answers %s with 400 before querying', async (url, message) => {
     const response = await request(app.getHttpServer()).get(url).expect(400);
 
@@ -189,8 +191,8 @@ describe('createBaseController includes (HTTP)', () => {
   });
 
   it.each([
-    '/v2/mdw/key-blocks?includes=microBlocks,microBlocks.txs',
-    '/v2/mdw/key-blocks?includes=unknown.nested',
+    '/generations?includes=blocks,blocks.items',
+    '/generations?includes=unknown.nested',
   ])('serves %s', async (url) => {
     await request(app.getHttpServer()).get(url).expect(200);
 

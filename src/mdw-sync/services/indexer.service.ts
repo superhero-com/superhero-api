@@ -5,14 +5,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource, Repository } from 'typeorm';
 import { KeyBlock } from '../entities/key-block.entity';
-import { MicroBlock } from '../entities/micro-block.entity';
 import { PluginSyncState } from '../entities/plugin-sync-state.entity';
 import { SyncState } from '../entities/sync-state.entity';
 import { Tx } from '../entities/tx.entity';
 import { BlockValidationService } from './block-validation.service';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { PluginRegistryService } from './plugin-registry.service';
-import { MicroBlockService } from './micro-block.service';
 import { BlockSyncService } from './block-sync.service';
 
 @Injectable()
@@ -26,8 +24,6 @@ export class IndexerService implements OnModuleInit {
     private txRepository: Repository<Tx>,
     @InjectRepository(KeyBlock)
     private blockRepository: Repository<KeyBlock>,
-    @InjectRepository(MicroBlock)
-    private microBlockRepository: Repository<MicroBlock>,
     @InjectRepository(SyncState)
     private syncStateRepository: Repository<SyncState>,
     @InjectRepository(PluginSyncState)
@@ -38,7 +34,6 @@ export class IndexerService implements OnModuleInit {
     private eventEmitter: EventEmitter2,
     private pluginBatchProcessor: PluginBatchProcessorService,
     private pluginRegistryService: PluginRegistryService,
-    private microBlockService: MicroBlockService,
     private blockSyncService: BlockSyncService,
   ) {}
 
