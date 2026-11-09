@@ -3,12 +3,7 @@ import { Tx } from '../entities/tx.entity';
 import { PluginBatchProcessorService } from './plugin-batch-processor.service';
 import { PluginRegistryService } from './plugin-registry.service';
 
-/**
- * Dedicated coverage for the predicate-aggregation logic that decides whether
- * a transaction should be persisted at all. The processBatch / reorg paths
- * are covered elsewhere; here we only care about the pre-save gate.
- */
-describe('PluginBatchProcessorService filtering', () => {
+describe('PluginBatchProcessorService', () => {
   const buildPlugin = (name: string, filters: PluginFilter[]): Plugin =>
     ({
       name,
@@ -170,6 +165,7 @@ describe('PluginBatchProcessorService filtering', () => {
       } as unknown as PluginRegistryService;
       const failedTransactionService = {
         recordFailure: jest.fn().mockResolvedValue(undefined),
+        clearFailures: jest.fn().mockResolvedValue(undefined),
       } as any;
       const pluginSyncStateRepository = {
         findOne: jest.fn().mockResolvedValue({
@@ -243,6 +239,155 @@ describe('PluginBatchProcessorService filtering', () => {
       );
 
       expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+    });
+
+    it('clears parked rows only for the transactions that went through', async () => {
+      const badTx = tx({ hash: 'th_bad', block_height: 10 }) as Tx;
+      const processBatch = jest
+        .fn()
+        .mockResolvedValue({ failed: [{ tx: badTx, error: new Error('x') }] });
+      const plugin = buildProcessingPlugin('bcl', processBatch);
+      const { service, failedTransactionService } = setupProcessing(plugin);
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx, badTx],
+        SyncDirectionEnum.Backward as any,
+      );
+
+      expect(failedTransactionService.clearFailures).toHaveBeenCalledWith(
+        'bcl',
+        ['th_ok'],
+      );
+    });
+
+    it('parks every transaction and leaves heights alone when the whole batch throws', async () => {
+      const error = new Error('timeout exceeded when trying to connect');
+      const processBatch = jest.fn().mockRejectedValue(error);
+      const plugin = buildProcessingPlugin('bcl', processBatch);
+      const { service, failedTransactionService, pluginSyncStateRepository } =
+        setupProcessing(plugin);
+      const txs = [
+        tx({ hash: 'th_a', block_height: 9 }) as Tx,
+        tx({ hash: 'th_b', block_height: 10 }) as Tx,
+      ];
+
+      await service.processBatch(txs, SyncDirectionEnum.Backward as any);
+
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledTimes(2);
+      expect(failedTransactionService.recordFailure).toHaveBeenCalledWith(
+        'bcl',
+        txs[1],
+        error,
+        7,
+      );
+      const cleared = failedTransactionService.clearFailures.mock.calls.flatMap(
+        ([, hashes]: [string, string[]]) => hashes,
+      );
+      expect(cleared).toEqual([]);
+      expect(pluginSyncStateRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('does not park a processed batch when only the sync-height update fails', async () => {
+      // Before this, a pool timeout on the reporting-only height update parked
+      // every tx of a batch that had been processed fine.
+      const processBatch = jest.fn().mockResolvedValue({ failed: [] });
+      const plugin = buildProcessingPlugin('dex', processBatch);
+      const { service, failedTransactionService, pluginSyncStateRepository } =
+        setupProcessing(plugin);
+      pluginSyncStateRepository.update.mockRejectedValue(
+        new Error('timeout exceeded when trying to connect'),
+      );
+
+      await service.processBatch(
+        [tx({ hash: 'th_ok', block_height: 9 }) as Tx],
+        SyncDirectionEnum.Live as any,
+      );
+
+      expect(pluginSyncStateRepository.update).toHaveBeenCalledWith(
+        { plugin_name: 'dex' },
+        expect.objectContaining({ live_synced_height: 9 }),
+      );
+      expect(failedTransactionService.recordFailure).not.toHaveBeenCalled();
+      expect(failedTransactionService.clearFailures).toHaveBeenCalledWith(
+        'dex',
+        ['th_ok'],
+      );
+    });
+  });
+
+  describe('handleReorg', () => {
+    const reorgPlugin = (
+      name: string,
+      onReorg: jest.Mock = jest.fn().mockResolvedValue(undefined),
+    ) => ({ name, onReorg }) as unknown as Plugin & { onReorg: jest.Mock };
+
+    const setupReorg = (plugins: Plugin[]) => {
+      const failedTransactionService = {
+        clearFailuresForTxs: jest.fn().mockResolvedValue(undefined),
+      };
+      const service = new PluginBatchProcessorService(
+        {
+          getPlugins: jest.fn(() => plugins),
+        } as unknown as PluginRegistryService,
+        failedTransactionService as any,
+        {} as any,
+      );
+      return { service, failedTransactionService };
+    };
+
+    it('does nothing for an empty hash list', async () => {
+      const plugin = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([plugin]);
+
+      await service.handleReorg([]);
+
+      expect(plugin.onReorg).not.toHaveBeenCalled();
+      expect(
+        failedTransactionService.clearFailuresForTxs,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('clears parked rows of reorged-out transactions', async () => {
+      const plugin = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([plugin]);
+
+      await service.handleReorg(['th_gone']);
+
+      expect(plugin.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(failedTransactionService.clearFailuresForTxs).toHaveBeenCalledWith(
+        ['th_gone'],
+      );
+    });
+
+    it('notifies the other plugins and clears parked rows when one plugin throws', async () => {
+      const failing = reorgPlugin(
+        'social-graph',
+        jest.fn().mockRejectedValue(new Error('pool timeout')),
+      );
+      const dex = reorgPlugin('dex');
+      const bcl = reorgPlugin('bcl');
+      const { service, failedTransactionService } = setupReorg([
+        failing,
+        dex,
+        bcl,
+      ]);
+      const logError = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(service.handleReorg(['th_gone'])).resolves.toBeUndefined();
+
+      expect(dex.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(bcl.onReorg).toHaveBeenCalledWith(['th_gone']);
+      expect(failedTransactionService.clearFailuresForTxs).toHaveBeenCalledWith(
+        ['th_gone'],
+      );
+      // Without the catch, allSettled would drop the error silently; the log
+      // is the only trace of the data the failing plugin left behind.
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('[social-graph]'),
+        expect.any(Error),
+      );
     });
   });
 

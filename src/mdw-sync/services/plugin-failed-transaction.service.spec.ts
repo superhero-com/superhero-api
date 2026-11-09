@@ -1,76 +1,134 @@
-import { PluginFailedTransactionService } from './plugin-failed-transaction.service';
-import { Tx } from '../entities/tx.entity';
+import {
+  FAILED_TX_RETRY_LOCK_KEY,
+  nextRetryAt,
+  PluginFailedTransactionService,
+} from './plugin-failed-transaction.service';
 
-describe('Plugin failed transaction retries', () => {
-  const one = { hash: 'th_one' } as Tx;
-  const two = { hash: 'th_two' } as Tx;
-  function setup() {
-    const query = {
-      delete: jest.fn().mockReturnThis(),
-      from: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      execute: jest.fn().mockResolvedValue({}),
+// The due-row selection is SQL; see plugin-failed-transaction.service.integration.spec.ts.
+describe('PluginFailedTransactionService', () => {
+  const setup = (config: Record<string, unknown> = {}) => {
+    const failedTransactionRepository = {
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
-    const failed = {
-      find: jest.fn().mockResolvedValue([one, two]),
-      findOne: jest.fn().mockResolvedValue({}),
-      upsert: jest.fn(),
-      delete: jest.fn(),
-      createQueryBuilder: () => query,
+    const syncStateRepository = { findOne: jest.fn() };
+    const queryRunner = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      query: jest.fn().mockResolvedValue([{ locked: true }]),
+      release: jest.fn().mockResolvedValue(undefined),
     };
-    const txs = {
-      find: jest.fn().mockResolvedValue([one, two]),
-      findOne: jest.fn().mockResolvedValue(one),
+    const dataSource = { createQueryRunner: jest.fn(() => queryRunner) };
+    const plugin = { name: 'bcl', version: 2, processBatch: jest.fn() };
+    const pluginRegistryService = { getPlugins: jest.fn(() => [plugin]) };
+    const values: Record<string, unknown> = {
+      'mdw.disableMdwSync': false,
+      ...config,
     };
-    const plugin = { version: 2, processBatch: jest.fn() };
+    const configService = {
+      get: jest.fn((key: string, fallback?: unknown) =>
+        key in values ? values[key] : fallback,
+      ),
+    };
+
     const service = new PluginFailedTransactionService(
-      failed as any,
-      txs as any,
+      failedTransactionRepository as any,
       {} as any,
-      { getPluginByName: () => plugin } as any,
+      syncStateRepository as any,
+      dataSource as any,
+      pluginRegistryService as any,
+      configService as any,
     );
-    return { service, failed, plugin, query };
-  }
 
-  it('keeps per-transaction failures and removes only successful retries', async () => {
-    const { service, failed, plugin, query } = setup();
-    plugin.processBatch.mockResolvedValue({
-      failed: [{ tx: two, error: new Error('decode failed') }],
+    return { service, failedTransactionRepository, queryRunner, dataSource };
+  };
+
+  describe('retryDueFailedTransactions', () => {
+    it('does nothing while MDW sync is disabled', async () => {
+      const { service, dataSource } = setup({ 'mdw.disableMdwSync': true });
+
+      await service.retryDueFailedTransactions();
+
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
-    await service.retryFailedTransactions('shorts', 1, 2);
-    expect(query.andWhere).toHaveBeenCalledWith('tx_hash IN (:...hashes)', {
-      hashes: ['th_one'],
+
+    it('skips the run when another instance holds the lock', async () => {
+      const { service, queryRunner } = setup();
+      queryRunner.query.mockResolvedValueOnce([{ locked: false }]);
+      const retryDue = jest.spyOn(service, 'retryDue');
+
+      await service.retryDueFailedTransactions();
+
+      expect(retryDue).not.toHaveBeenCalled();
+      expect(queryRunner.query).toHaveBeenCalledTimes(1);
+      expect(queryRunner.release).toHaveBeenCalled();
     });
-    expect(failed.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tx_hash: 'th_two',
-        version: 2,
-        error_message: 'decode failed',
-      }),
-      ['plugin_name', 'tx_hash'],
-    );
+
+    it('unlocks and releases the connection after a run', async () => {
+      const { service, queryRunner } = setup();
+      const retryDue = jest
+        .spyOn(service, 'retryDue')
+        .mockResolvedValue(undefined);
+
+      await service.retryDueFailedTransactions();
+
+      expect(retryDue).toHaveBeenCalled();
+      expect(queryRunner.query).toHaveBeenLastCalledWith(
+        'SELECT pg_advisory_unlock($1)',
+        [FAILED_TX_RETRY_LOCK_KEY],
+      );
+      expect(queryRunner.release).toHaveBeenCalled();
+    });
+
+    it('runs again after a failed run', async () => {
+      const { service, dataSource, queryRunner } = setup();
+      jest
+        .spyOn(service, 'retryDue')
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValueOnce(undefined);
+
+      await service.retryDueFailedTransactions();
+      await service.retryDueFailedTransactions();
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(2);
+      expect(queryRunner.query).toHaveBeenCalledWith(
+        'SELECT pg_advisory_unlock($1)',
+        [FAILED_TX_RETRY_LOCK_KEY],
+      );
+    });
   });
 
-  it('reports a failed single retry as failure instead of deleting it', async () => {
-    const { service, failed, plugin } = setup();
-    plugin.processBatch.mockResolvedValue({
-      failed: [{ tx: one, error: new Error('offline') }],
+  describe('nextRetryAt', () => {
+    const now = new Date('2026-11-05T00:00:00Z');
+    const minutesAfter = (attempts: number) =>
+      (nextRetryAt(attempts, now).getTime() - now.getTime()) / 60_000;
+
+    it('doubles from 10 minutes and caps at a day', () => {
+      expect(minutesAfter(1)).toBe(10);
+      expect(minutesAfter(2)).toBe(20);
+      expect(minutesAfter(4)).toBe(80);
+      expect(minutesAfter(9)).toBe(24 * 60);
+      expect(minutesAfter(20)).toBe(24 * 60);
     });
-    expect(await service.retryFailedTransaction('shorts', one.hash)).toBe(
-      false,
-    );
-    expect(failed.delete).not.toHaveBeenCalled();
-    expect(failed.upsert).toHaveBeenCalled();
   });
 
-  it('still supports plugins returning void and removes successful single retries', async () => {
-    const { service, failed, plugin } = setup();
-    plugin.processBatch.mockResolvedValue(undefined);
-    expect(await service.retryFailedTransaction('shorts', one.hash)).toBe(true);
-    expect(failed.delete).toHaveBeenCalledWith({
-      plugin_name: 'shorts',
-      tx_hash: one.hash,
+  describe('clearFailures', () => {
+    it('skips the query for an empty list', async () => {
+      const { service, failedTransactionRepository } = setup();
+
+      await service.clearFailures('bcl', []);
+
+      expect(failedTransactionRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('never throws into indexing', async () => {
+      const { service, failedTransactionRepository } = setup();
+      failedTransactionRepository.delete.mockRejectedValue(new Error('down'));
+
+      await expect(
+        service.clearFailures('bcl', ['th_a']),
+      ).resolves.toBeUndefined();
+      await expect(
+        service.clearFailuresForTxs(['th_a']),
+      ).resolves.toBeUndefined();
     });
   });
 });

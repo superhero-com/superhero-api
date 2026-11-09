@@ -3,7 +3,6 @@ import { Logger } from '@nestjs/common';
 import { DataSource, EntitySchema, EntityManager } from 'typeorm';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
 import { Token } from '../entities/token.entity';
-import { TokensService } from '../tokens.service';
 import { RefreshTokenRanksService } from './refresh-token-ranks.service';
 
 const d = process.env.DB_HOST ? describe : describe.skip;
@@ -68,39 +67,13 @@ d('Token maintenance concurrency', () => {
     await db?.drop();
   });
 
-  function operations(
+  function rankService(
     transaction = db.dataSource.transaction.bind(db.dataSource),
   ) {
-    const repository = db.dataSource.getRepository(Token);
-    const scopedRepository = new Proxy(repository, {
-      get(target, key) {
-        if (key === 'manager') return { transaction };
-        const value = Reflect.get(target, key);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
-    const cleanup = new TokensService(
-      scopedRepository,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-    );
-    const rank = new RefreshTokenRanksService({ transaction } as DataSource);
-    return {
-      cleanup: () => cleanup.deleteTokensWhereDaoAddressIsNull(),
-      rank: () => rank.refreshRanks(),
-    };
+    return new RefreshTokenRanksService({ transaction } as DataSource);
   }
 
-  function heldOperations(rollback = false) {
+  function heldRefresh(rollback = false) {
     const prepared = latch();
     const release = latch();
     const transaction = async (work: (manager: EntityManager) => unknown) =>
@@ -112,84 +85,74 @@ d('Token maintenance concurrency', () => {
         if (rollback) throw new Error('rollback fixture');
         return result;
       });
-    return { actions: operations(transaction as any), prepared, release };
+    return { service: rankService(transaction as any), prepared, release };
   }
 
-  it.each([
-    ['rank', 'cleanup'],
-    ['cleanup', 'rank'],
-    ['rank', 'rank'],
-  ] as const)(
-    'defers %s overlap with %s until a later run',
-    async (first, second) => {
-      const held = heldOperations();
-      const pending = held.actions[first]();
-      let timeout: ReturnType<typeof setTimeout>;
-      try {
-        await Promise.race([
-          held.prepared.promise,
-          new Promise((_, reject) => {
-            timeout = setTimeout(
-              () => reject(new Error('first job did not prepare')),
-              3_000,
-            );
-          }),
-        ]);
-        clearTimeout(timeout!);
-        const next = operations(async (work: any) =>
-          db.dataSource.transaction(async (manager) => {
-            await manager.query("SET LOCAL statement_timeout = '500ms'");
-            return work(manager);
-          }),
-        );
-        // Must finish successfully while the first transaction still owns its
-        // locks. A blocked statement/error swallowed by rank refresh fails too.
-        await next[second]();
-        expect(errors).not.toHaveBeenCalled();
-      } finally {
-        clearTimeout(timeout!);
-        held.release.resolve();
-        await pending;
-      }
-
-      const next = operations();
-      await next.cleanup();
-      await next.rank();
-      expect(
-        await db.dataSource.query(
-          'SELECT sale_address, rank FROM token ORDER BY sale_address',
-        ),
-      ).toEqual([
-        { sale_address: 'ct_b', rank: 1 },
-        { sale_address: 'ct_c', rank: 1 },
-        { sale_address: 'ct_hidden', rank: 77 },
-        { sale_address: 'ct_zero', rank: 3 },
+  it('defers overlapping rank refreshes until a later run', async () => {
+    const held = heldRefresh();
+    const pending = held.service.refreshRanks();
+    let timeout: ReturnType<typeof setTimeout>;
+    try {
+      await Promise.race([
+        held.prepared.promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('first job did not prepare')),
+            3_000,
+          );
+        }),
       ]);
+      clearTimeout(timeout!);
+      const next = rankService(async (work: any) =>
+        db.dataSource.transaction(async (manager) => {
+          await manager.query("SET LOCAL statement_timeout = '500ms'");
+          return work(manager);
+        }),
+      );
+      // Must finish successfully while the first transaction still owns its
+      // locks. A blocked statement/error swallowed by rank refresh fails too.
+      await next.refreshRanks();
       expect(errors).not.toHaveBeenCalled();
-    },
-    10_000,
-  );
+    } finally {
+      clearTimeout(timeout!);
+      held.release.resolve();
+      await pending;
+    }
 
-  it('rolls back cleanup and releases the lock after a transaction failure', async () => {
-    const held = heldOperations(true);
-    const failed = held.actions.cleanup();
-    const rejection = expect(failed).rejects.toThrow('rollback fixture');
+    await rankService().refreshRanks();
+    expect(
+      await db.dataSource.query(
+        'SELECT sale_address, rank FROM token ORDER BY sale_address',
+      ),
+    ).toEqual([
+      { sale_address: 'ct_b', rank: 1 },
+      { sale_address: 'ct_c', rank: 1 },
+      { sale_address: 'ct_hidden', rank: 77 },
+      { sale_address: 'ct_hidden_incomplete', rank: 77 },
+      { sale_address: 'ct_incomplete', rank: 3 },
+      { sale_address: 'ct_zero', rank: 4 },
+    ]);
+    expect(errors).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('rolls back ranks and releases the lock after a transaction failure', async () => {
+    const held = heldRefresh(true);
+    const pending = held.service.refreshRanks();
     try {
       await held.prepared.promise;
-      await operations().rank();
+      await rankService().refreshRanks();
       expect(errors).not.toHaveBeenCalled();
     } finally {
       held.release.resolve();
-      await rejection;
+      await pending;
     }
-    expect(
-      await db.dataSource.query('SELECT count(*)::int AS count FROM token'),
-    ).toEqual([{ count: 6 }]);
-    await operations().rank();
-    expect(
-      await db.dataSource.query(
+    expect(errors).toHaveBeenCalledTimes(1);
+    const rank = () =>
+      db.dataSource.query(
         "SELECT rank FROM token WHERE sale_address='ct_incomplete'",
-      ),
-    ).toEqual([{ rank: 3 }]);
+      );
+    expect(await rank()).toEqual([{ rank: 77 }]);
+    await rankService().refreshRanks();
+    expect(await rank()).toEqual([{ rank: 3 }]);
   }, 10_000);
 });

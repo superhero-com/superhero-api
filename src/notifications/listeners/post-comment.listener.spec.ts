@@ -1,3 +1,4 @@
+import { NotificationGateService } from '../services/notification-gate.service';
 import { PostCommentListener } from './post-comment.listener';
 
 describe('PostCommentListener', () => {
@@ -34,8 +35,7 @@ describe('PostCommentListener', () => {
     listener = new PostCommentListener(
       notifications,
       accountLabel,
-      redis,
-      preferences,
+      new NotificationGateService(preferences, redis),
       config,
     );
   });

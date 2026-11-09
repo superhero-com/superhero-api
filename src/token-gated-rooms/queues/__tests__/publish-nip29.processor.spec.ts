@@ -178,7 +178,7 @@ describe('PublishNip29Processor', () => {
     expect(emitted[0].payload.kind).toBe(9007);
   });
 
-  it('terminal "Only relay admin…" reject: throws TerminalPublishError, ack ok:false', async () => {
+  it('terminal "Only relay admin…" reject: discards (no retry), throws TerminalPublishError, ack ok:false', async () => {
     relay.publish.mockResolvedValue({
       ok: false,
       id: 'evt3',
@@ -186,26 +186,32 @@ describe('PublishNip29Processor', () => {
         'Only relay admin can create a managed group from an unmanaged one',
       timedOut: false,
     });
+    const job = makeJob(groupJob());
 
-    await expect(processor.process(makeJob(groupJob()))).rejects.toBeInstanceOf(
+    await expect(processor.process(job)).rejects.toBeInstanceOf(
       TerminalPublishError,
     );
+    expect(job.discard).toHaveBeenCalledTimes(1);
     expect(emitted).toHaveLength(1);
     expect(emitted[0].payload.ok).toBe(false);
+    expect(queue.pause).toHaveBeenCalledTimes(1);
   });
 
-  it('terminal "…was deleted" reject: throws TerminalPublishError, ack ok:false', async () => {
+  it('terminal "…was deleted" reject: discards (no retry), throws TerminalPublishError, ack ok:false', async () => {
     relay.publish.mockResolvedValue({
       ok: false,
       id: 'evt3b',
       reason: 'Group existed before and was deleted',
       timedOut: false,
     });
+    const job = makeJob(groupJob());
 
-    await expect(processor.process(makeJob(groupJob()))).rejects.toBeInstanceOf(
+    await expect(processor.process(job)).rejects.toBeInstanceOf(
       TerminalPublishError,
     );
+    expect(job.discard).toHaveBeenCalledTimes(1);
     expect(emitted[0].payload.ok).toBe(false);
+    expect(queue.pause).not.toHaveBeenCalled();
   });
 
   it('"Group not found" on a 9000 add: discards (no retry), emits TGR_GROUP_MISSING + ack ok:false', async () => {
@@ -258,12 +264,10 @@ describe('PublishNip29Processor', () => {
       reason: 'connection reset',
       timedOut: false,
     });
+    const job = makeJob(membershipJob(), { attempts: 6, attemptsMade: 0 });
 
-    await expect(
-      processor.process(
-        makeJob(membershipJob(), { attempts: 6, attemptsMade: 0 }),
-      ),
-    ).rejects.toThrow('connection reset');
+    await expect(processor.process(job)).rejects.toThrow('connection reset');
+    expect(job.discard).not.toHaveBeenCalled();
     expect(emitted).toHaveLength(0);
   });
 
@@ -291,12 +295,12 @@ describe('PublishNip29Processor', () => {
 
   it('unhealthy relay: pauses the queue and throws WITHOUT publishing or acking', async () => {
     relay.isHealthy.mockReturnValue(false);
+    const job = makeJob(membershipJob());
 
-    await expect(processor.process(makeJob(membershipJob()))).rejects.toThrow(
-      /unhealthy/,
-    );
+    await expect(processor.process(job)).rejects.toThrow(/unhealthy/);
     expect(relay.publish).not.toHaveBeenCalled();
     expect(queue.pause).toHaveBeenCalled();
+    expect(job.discard).not.toHaveBeenCalled();
     expect(emitted).toHaveLength(0);
   });
 
@@ -307,13 +311,11 @@ describe('PublishNip29Processor', () => {
       reason: 'relay ACK timed out after 5000ms',
       timedOut: true,
     });
+    const job = makeJob(membershipJob(), { attempts: 6, attemptsMade: 0 });
 
-    await expect(
-      processor.process(
-        makeJob(membershipJob(), { attempts: 6, attemptsMade: 0 }),
-      ),
-    ).rejects.toThrow(/timed out/);
+    await expect(processor.process(job)).rejects.toThrow(/timed out/);
     expect(queue.pause).toHaveBeenCalled();
+    expect(job.discard).not.toHaveBeenCalled();
     expect(emitted).toHaveLength(0);
   });
 

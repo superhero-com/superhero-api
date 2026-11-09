@@ -2,7 +2,9 @@ import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { decode } from '@aeternity/aepp-sdk';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import camelcaseKeysDeep from 'camelcase-keys-deep';
 import { SyncDirectionEnum } from '@/mdw-sync/types/sync-direction';
+import { toMdwTx } from '@/mdw-sync/utils/to-mdw-tx';
 import { AddressLinksPluginSyncService } from './address-links-plugin-sync.service';
 import { Account } from '@/account/entities/account.entity';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -88,12 +90,15 @@ describe('AddressLinksPluginSyncService', () => {
     service = moduleRef.get(AddressLinksPluginSyncService);
   });
 
-  const baseTx = (overrides: Partial<Tx> = {}): Tx =>
+  const baseTx = ({ raw, ...overrides }: Partial<Tx> = {}): Tx =>
     ({
       hash: 'th_principal',
       micro_time: '1000',
       function: 'link_principal',
+      ...overrides,
       raw: {
+        // Stored rows are camel-cased, so the call outcome is `returnType`.
+        returnType: 'ok',
         // Middleware returns contract-call arguments positionally as
         // { type, value } with no `name` field, matching the ACI signature
         // link_principal(principal, signer, provider, value, nonce, sig).
@@ -103,8 +108,8 @@ describe('AddressLinksPluginSyncService', () => {
           { type: 'string', value: 'prefaens' },
           { type: 'string', value: 'hero.chain' },
         ],
+        ...raw,
       },
-      ...overrides,
     }) as Tx;
 
   it('updates accounts.links from link call arguments without fetching logs', async () => {
@@ -300,6 +305,121 @@ describe('AddressLinksPluginSyncService', () => {
     );
 
     fetchSpy.mockRestore();
+  });
+
+  describe('call outcome', () => {
+    const nostrArgs = {
+      link: [
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'string', value: 'npub1attacker' },
+        { type: 'int', value: '1' },
+      ],
+      unlink: [
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'int', value: '1' },
+      ],
+      link_principal: [
+        { type: 'string', value: 'hero.chain' },
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+        { type: 'string', value: 'npub1attacker' },
+      ],
+      unlink_principal: [
+        { type: 'string', value: 'hero.chain' },
+        { type: 'address', value: SIGNER_ADDRESS },
+        { type: 'string', value: 'nostr' },
+      ],
+    };
+
+    const expectUntouched = (fetchSpy: jest.SpyInstance) => {
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(accountRepo.findOne).not.toHaveBeenCalled();
+      expect(queryBuilder.update).not.toHaveBeenCalled();
+      expect(profileCacheService.syncFromAccountLinks).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    };
+
+    it.each(Object.keys(nostrArgs))(
+      'ignores a reverted %s call despite its decoded arguments',
+      async (fn) => {
+        const fetchSpy = jest.spyOn(global, 'fetch');
+
+        await service.processTransaction(
+          baseTx({
+            function: fn,
+            raw: {
+              result: 'ok',
+              returnType: 'revert',
+              arguments: nostrArgs[fn],
+            },
+          }),
+          SyncDirectionEnum.Live,
+        );
+
+        expectUntouched(fetchSpy);
+        fetchSpy.mockRestore();
+      },
+    );
+
+    it('ignores a call without a return type', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch');
+
+      await service.processTransaction(
+        baseTx({
+          function: 'link',
+          raw: { returnType: undefined, arguments: nostrArgs.link },
+        }),
+        SyncDirectionEnum.Live,
+      );
+
+      expectUntouched(fetchSpy);
+      fetchSpy.mockRestore();
+    });
+
+    it('applies only the successful call from middleware payloads', async () => {
+      // Shaped like the reverted duplicates at height 1324445: only
+      // return_type tells a revert apart, result is "ok" either way.
+      const fromMiddleware = (hash: string, returnType: string, npub: string) =>
+        toMdwTx(
+          camelcaseKeysDeep({
+            hash,
+            micro_time: 1000,
+            tx: {
+              type: 'ContractCallTx',
+              function: 'link',
+              arguments: [
+                { type: 'address', value: SIGNER_ADDRESS },
+                { type: 'string', value: 'nostr' },
+                { type: 'string', value: npub },
+                { type: 'int', value: '1' },
+              ],
+              result: 'ok',
+              return_type: returnType,
+            },
+          }),
+        ) as Tx;
+
+      await service.processTransaction(
+        fromMiddleware('th_revert', 'revert', 'npub1attacker'),
+        SyncDirectionEnum.Live,
+      );
+      await service.processTransaction(
+        fromMiddleware('th_ok', 'ok', 'npub1owner'),
+        SyncDirectionEnum.Live,
+      );
+
+      expect(queryBuilder.update).toHaveBeenCalledTimes(1);
+      expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+        'value',
+        'npub1owner',
+      );
+      expect(queryBuilder.setParameter).not.toHaveBeenCalledWith(
+        'value',
+        'npub1attacker',
+      );
+    });
   });
 
   describe('tgr.link.changed seam (Task 05)', () => {

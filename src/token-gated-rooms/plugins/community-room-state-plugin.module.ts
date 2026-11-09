@@ -14,6 +14,7 @@ import { CommunityRoomBackfillService } from '../services/community-room-backfil
 import { ReorgEvictionService } from '../services/reorg-eviction.service';
 import { CommunityRoomStateSyncService } from './community-room-state-sync.service';
 import { CommunityRoomStatePlugin } from './community-room-state.plugin';
+import { PublishNip29Module } from '../queues/publish-nip29.module';
 
 /**
  * Community-room state indexer module (Task 04, MAIN process).
@@ -41,6 +42,7 @@ import { CommunityRoomStatePlugin } from './community-room-state.plugin';
       RoomMembership,
     ]),
     AeModule,
+    PublishNip29Module,
   ],
   providers: [
     RoomStateService,

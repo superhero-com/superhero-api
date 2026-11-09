@@ -30,28 +30,36 @@ export class FixTokensService {
     }
     this.fixingTokens = true;
 
-    // find all tokens where address is null
-    const tokens = await this.tokensRepository.find({
-      where: {
-        address: IsNull(),
-      },
-      order: {
-        total_supply: 'DESC',
-      },
-      take: 100,
-    });
-    for (const token of tokens) {
-      try {
-        await this.tokensService.getTokenAex9Address(token);
-      } catch (error: any) {
-        this.logger.error(
-          `FixTokensService: ${token.sale_address} - ${error.message}`,
-          error.stack,
-        );
-        await this.tokensRepository.delete(token.sale_address);
+    try {
+      const tokens = await this.tokensRepository.find({
+        where: {
+          address: IsNull(),
+        },
+        order: {
+          total_supply: 'DESC',
+        },
+        take: 100,
+      });
+      for (const token of tokens) {
+        try {
+          await this.tokensService.getTokenAex9Address(token);
+        } catch (error: any) {
+          // An unsupported sale resolves to null, so this is a node or DB
+          // error: keep the token for the next run.
+          this.logger.error(
+            `FixTokensService: ${token.sale_address} - ${error.message}`,
+            error.stack,
+          );
+        }
       }
+    } catch (error: any) {
+      this.logger.error(
+        `FixTokensService.fixTokensAddresses: ${error.message}`,
+        error.stack,
+      );
+    } finally {
+      this.fixingTokens = false;
     }
-    this.fixingTokens = false;
   }
 
   isFixingTokensWithNoPrice = false;
@@ -61,16 +69,24 @@ export class FixTokensService {
       return;
     }
     this.isFixingTokensWithNoPrice = true;
-    const tokens = await this.tokensRepository
-      .createQueryBuilder('token')
-      .where('token.price = :price', { price: '0' })
-      .orderBy('token.created_at', 'DESC')
-      .take(100)
-      .getMany();
-    for (const token of tokens) {
-      await this.tokensService.syncTokenPrice(token);
+    try {
+      const tokens = await this.tokensRepository
+        .createQueryBuilder('token')
+        .where('token.price = :price', { price: '0' })
+        .orderBy('token.created_at', 'DESC')
+        .take(100)
+        .getMany();
+      for (const token of tokens) {
+        await this.tokensService.syncTokenPrice(token);
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `FixTokensService.fixTokensWithNoPrice: ${error.message}`,
+        error.stack,
+      );
+    } finally {
+      this.isFixingTokensWithNoPrice = false;
     }
-    this.isFixingTokensWithNoPrice = false;
   }
 
   isFixingTokensWithNoCollection = false;

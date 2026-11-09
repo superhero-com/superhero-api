@@ -1086,6 +1086,9 @@ export class PostService implements OnApplicationBootstrap, OnModuleDestroy {
 
       // Use a transaction to ensure data consistency
       await this.postRepository.manager.transaction(async (manager) => {
+        // These scan whole tables, and a cancelled statement rethrows out of the
+        // unawaited boot sync(), which exits the process.
+        await manager.query('SET LOCAL statement_timeout = 0');
         // Until POST_SYNC_VERSION was shared, the social plugin stamped 6 on
         // rows identical to version 8 ones, so every boot deleted the posts it
         // had indexed. Relabel them as 8, not the current version, so a later

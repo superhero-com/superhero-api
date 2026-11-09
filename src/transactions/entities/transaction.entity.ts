@@ -31,7 +31,6 @@ import {
 // Expression index TypeORM can't declare; created by migration 1718900000036.
 @Index('IDX_TRANSACTION_SALE_ADDRESS_PRICE_AE', { synchronize: false })
 export class Transaction {
-  @Index()
   @PrimaryColumn()
   tx_hash: string;
 

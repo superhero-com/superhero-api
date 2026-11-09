@@ -6,11 +6,15 @@ import { SyncDirection } from '../../plugin.interface';
 import { AeSdkService } from '@/ae/ae-sdk.service';
 import { ACTIVE_NETWORK, TX_FUNCTIONS } from '@/configs';
 import { Contract, Encoded } from '@aeternity/aepp-sdk';
-import factoryInterface from 'dex-contracts-v2/build/AedexV2Factory.aci.json';
 import routerInterface from 'dex-contracts-v2/build/AedexV2Router.aci.json';
 import moment from 'moment';
 import BigNumber from 'bignumber.js';
-import { fetchJson } from '@/utils/common';
+import {
+  fetchJson,
+  FetchJsonHttpError,
+  normalizeEventTopics,
+  sanitizeJsonForPostgres,
+} from '@/utils/common';
 import { DEX_CONTRACTS } from '@/dex/config/dex-contracts.config';
 import { DexToken } from '@/dex/entities/dex-token.entity';
 import { PairTransaction } from '@/dex/entities/pair-transaction.entity';
@@ -38,7 +42,6 @@ type ContractInstance = Awaited<ReturnType<typeof Contract.initialize>>;
 export class DexTransactionProcessorService {
   private readonly logger = new Logger(DexTransactionProcessorService.name);
   private routerContract: ContractInstance | null = null;
-  private factoryContract: ContractInstance | null = null;
 
   constructor(
     @InjectRepository(DexToken)
@@ -115,10 +118,7 @@ export class DexTransactionProcessorService {
     return removed;
   }
 
-  /**
-   * Initialize contracts lazily
-   */
-  private async ensureContractsInitialized(): Promise<void> {
+  private async getRouterContract(): Promise<ContractInstance> {
     if (!this.routerContract) {
       this.routerContract = await Contract.initialize({
         ...this.aeSdkService.sdk.getContext(),
@@ -126,55 +126,40 @@ export class DexTransactionProcessorService {
         address: DEX_CONTRACTS.router as Encoded.ContractAddress,
       });
     }
-    if (!this.factoryContract) {
-      this.factoryContract = await Contract.initialize({
-        ...this.aeSdkService.sdk.getContext(),
-        aci: factoryInterface,
-        address: DEX_CONTRACTS.factory as Encoded.ContractAddress,
-      });
-    }
+    return this.routerContract;
   }
 
   /**
    * Process a DEX transaction
    * @param tx - Transaction entity from MDW sync
    * @param syncDirection - Sync direction (backward/live/reorg)
-   * @returns PairTransaction if processed successfully, null otherwise
+   * @returns PairTransaction if processed, null if the tx is not a DEX trade.
+   *   Errors propagate so the batch processor parks the tx for retry.
    */
   async processTransaction(
     tx: Tx,
     syncDirection: SyncDirection,
   ): Promise<PairTransaction | null> {
     void syncDirection;
-    try {
-      // Check if this is a DEX router transaction
-      if (tx.contract_id !== DEX_CONTRACTS.router) {
-        this.logger.debug(
-          `Skipping non-DEX router transaction ${tx.hash ?? ''}`,
-        );
-        return null;
-      }
-
-      // Extract pair info from transaction
-      const pairInfo = await this.extractPairInfoFromTransaction(tx);
-      if (!pairInfo) {
-        return null;
-      }
-
-      // Wrap operations in a transaction for consistency
-      return await this.dexPairTransactionRepository.manager.transaction(
-        async (manager) => {
-          const pair = await this.saveDexPair(pairInfo, tx, manager);
-          return await this.saveDexPairTransaction(pair, pairInfo, tx, manager);
-        },
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to process DEX transaction ${tx.hash}`,
-        error.stack,
-      );
+    // Check if this is a DEX router transaction
+    if (tx.contract_id !== DEX_CONTRACTS.router) {
+      this.logger.debug(`Skipping non-DEX router transaction ${tx.hash ?? ''}`);
       return null;
     }
+
+    // Extract pair info from transaction
+    const pairInfo = await this.extractPairInfoFromTransaction(tx);
+    if (!pairInfo) {
+      return null;
+    }
+
+    // Wrap operations in a transaction for consistency
+    return await this.dexPairTransactionRepository.manager.transaction(
+      async (manager) => {
+        const pair = await this.saveDexPair(pairInfo, tx, manager);
+        return await this.saveDexPairTransaction(pair, pairInfo, tx, manager);
+      },
+    );
   }
 
   /**
@@ -192,116 +177,90 @@ export class DexTransactionProcessorService {
   }
 
   /**
+   * The two tokens of the pair a transaction is recorded under: the last hop
+   * of a swap path, or the pair a liquidity call names. Order is the caller's.
+   * Nothing in the router runs after the last hop, so that pair's newest events
+   * are the router's own; an earlier hop's pair can still be called by a later
+   * hop's callback. Stored rows use the last hop too.
+   */
+  private getRecordedPairTokens(tx: Tx): [string, string] | null {
+    const args = tx.raw?.arguments ?? [];
+    const lastHop = (path: unknown) =>
+      Array.isArray(path) ? [path.at(-2)?.value, path.at(-1)?.value] : [];
+    let tokenA: string | undefined;
+    let tokenB: string | undefined;
+    switch (tx.function) {
+      case TX_FUNCTIONS.swap_exact_tokens_for_tokens:
+      case TX_FUNCTIONS.swap_tokens_for_exact_tokens:
+      case TX_FUNCTIONS.swap_exact_tokens_for_ae:
+      case TX_FUNCTIONS.swap_tokens_for_exact_ae:
+        [tokenA, tokenB] = lastHop(args[2]?.value);
+        break;
+      case TX_FUNCTIONS.swap_exact_ae_for_tokens:
+      case TX_FUNCTIONS.swap_ae_for_exact_tokens:
+        [tokenA, tokenB] = lastHop(args[1]?.value);
+        break;
+      case TX_FUNCTIONS.add_liquidity:
+      case TX_FUNCTIONS.remove_liquidity:
+        tokenA = args[0]?.value;
+        tokenB = args[1]?.value;
+        break;
+      case TX_FUNCTIONS.add_liquidity_ae:
+      case TX_FUNCTIONS.remove_liquidity_ae:
+        tokenA = args[0]?.value;
+        tokenB = DEX_CONTRACTS.wae;
+        break;
+      default:
+        this.logger.debug(
+          `Unhandled DEX function: ${tx.function} for tx ${tx.hash}`,
+        );
+        return null;
+    }
+    return tokenA && tokenB ? [tokenA, tokenB] : null;
+  }
+
+  /**
    * Extract pair information from transaction
    */
   private async extractPairInfoFromTransaction(
     tx: Tx,
   ): Promise<PairInfo | null> {
-    // Ensure contracts are initialized
-    await this.ensureContractsInitialized();
-
-    // The middleware stores event `topics` as decimal strings, but aepp-sdk's
-    // `$decodeEvents` matches them against the BigInt event-name hash with
-    // strict equality (`BigInt(hash) === topic`). A string topic never matches,
-    // so with `omitUnknown: true` every event is silently dropped and the pair
-    // can never be extracted. Normalise topics to BigInt before decoding.
-    //
-    // Guard per-topic: a single unconvertible topic (null/empty/non-numeric)
-    // from an unrelated log line in the same transaction must NOT abort the
-    // whole batch. Leave such topics untouched — `omitUnknown` then drops only
-    // that entry, while the valid pair events still decode.
-    const toBigIntTopic = (topic: any): any => {
-      if (typeof topic === 'bigint') return topic;
-      try {
-        return BigInt(topic);
-      } catch {
-        return topic;
-      }
-    };
-    const eventLog = (tx.raw?.log ?? []).map((entry: any) => ({
-      ...entry,
-      topics: Array.isArray(entry?.topics)
-        ? entry.topics.map(toBigIntTopic)
-        : entry?.topics,
-    }));
-
-    let decodedEvents = null;
-    try {
-      if (this.routerContract) {
-        decodedEvents = this.routerContract.$decodeEvents(eventLog, {
-          omitUnknown: true,
-        });
-      }
-    } catch (error: any) {
-      // Try factory contract if router fails
-    }
-
-    if (!decodedEvents || decodedEvents.length === 0) {
-      try {
-        if (this.factoryContract) {
-          decodedEvents = this.factoryContract.$decodeEvents(eventLog, {
-            omitUnknown: true,
-          });
-        }
-      } catch (error: any) {
-        this.logger.debug(`Failed to decode events for transaction ${tx.hash}`);
-      }
-    }
-
-    if (!decodedEvents || decodedEvents.length === 0) {
+    const log: any[] = tx.raw?.log ?? [];
+    // A reverted call has no events and may name a pair that was never created.
+    if (log.length === 0) {
       return null;
     }
 
-    const pairAddress = decodedEvents.find(
-      (event) => event.contract?.name === 'IAedexV2Pair',
-    )?.contract?.address;
+    const recordedTokens = this.getRecordedPairTokens(tx);
+    if (!recordedTokens) {
+      return null;
+    }
 
+    // Tokens and swap callbacks run inside the same call and can emit events
+    // named like the pair's, so only the router's pair is trusted. The log is
+    // newest-first, so without this filter a token's event emitted after
+    // `pair.burn` would be read as the pair's.
+    const pairAddress = await this.pairService.getFactoryPairAddress(
+      ...recordedTokens,
+    );
     if (!pairAddress) {
-      return null;
-    }
-
-    let token0Address: string | null = null;
-    let token1Address: string | null = null;
-    const args = tx.raw.arguments;
-    const txFunction = tx.function;
-
-    // Extract token addresses based on function type
-    if (
-      txFunction === TX_FUNCTIONS.swap_exact_tokens_for_tokens ||
-      txFunction === TX_FUNCTIONS.swap_tokens_for_exact_tokens ||
-      txFunction === TX_FUNCTIONS.swap_exact_tokens_for_ae ||
-      txFunction === TX_FUNCTIONS.swap_tokens_for_exact_ae
-    ) {
-      token0Address = args[2]?.value?.[0]?.value;
-      token1Address = args[2]?.value?.[1]?.value;
-    } else if (
-      txFunction === TX_FUNCTIONS.swap_exact_ae_for_tokens ||
-      txFunction === TX_FUNCTIONS.swap_ae_for_exact_tokens
-    ) {
-      token0Address = args[1]?.value?.[0]?.value;
-      token1Address = args[1]?.value?.[1]?.value;
-    } else if (
-      txFunction === TX_FUNCTIONS.add_liquidity ||
-      txFunction === TX_FUNCTIONS.remove_liquidity
-    ) {
-      token0Address = args[0]?.value;
-      token1Address = args[1]?.value;
-    } else if (
-      txFunction === TX_FUNCTIONS.add_liquidity_ae ||
-      txFunction === TX_FUNCTIONS.remove_liquidity_ae
-    ) {
-      token0Address = DEX_CONTRACTS.wae;
-      token1Address = args[0]?.value;
-    } else {
-      this.logger.debug(
-        `Unhandled DEX function: ${txFunction} for tx ${tx.hash}`,
+      // The call succeeded, so the router found this pair. Throwing parks the
+      // tx until the node we ask has caught up.
+      throw new Error(
+        `Factory has no pair for ${recordedTokens.join('/')} in tx ${tx.hash}`,
       );
+    }
+    const pairLog = log.filter((entry) => entry?.address === pairAddress);
+    if (pairLog.length === 0) {
+      this.logger.error(`No events from pair ${pairAddress} in tx ${tx.hash}`);
       return null;
     }
 
-    if (!token0Address || !token1Address) {
-      return null;
-    }
+    const routerContract = await this.getRouterContract();
+    const decodedEvents: any[] = routerContract.$decodeEvents(
+      normalizeEventTopics(pairLog),
+      { omitUnknown: true },
+    );
 
     // Extract swap info
     let volume0 = '0';
@@ -376,9 +335,10 @@ export class DexTransactionProcessorService {
       volume1 = '0';
     }
 
-    // Get or create tokens
-    const token0 = await this.getOrCreateToken(token0Address);
-    const token1 = await this.getOrCreateToken(token1Address);
+    // Reserves and event amounts follow the pair's token order, not the caller's.
+    const pairTokens = await this.pairService.getPairTokens(pairAddress);
+    const token0 = await this.getOrCreateToken(pairTokens.token0);
+    const token1 = await this.getOrCreateToken(pairTokens.token1);
 
     return {
       pairAddress,
@@ -410,16 +370,23 @@ export class DexTransactionProcessorService {
         `${ACTIVE_NETWORK.middlewareUrl}/v3/aex9/${address}`,
       );
 
+      // The deployer picks these, and a NUL byte or a missing value would fail
+      // the save on every retry and lose the swap.
       token = await this.dexTokenRepository.save({
         address,
-        name: tokenData.name,
-        symbol: tokenData.symbol,
+        name: sanitizeJsonForPostgres(tokenData.name) || 'Unknown',
+        symbol: sanitizeJsonForPostgres(tokenData.symbol) || 'UNK',
         decimals: tokenData.decimals,
         is_ae: tokenData.address === DEX_CONTRACTS.wae,
       });
     } catch (error) {
+      // Nothing repairs the placeholder later, so only settle for it when the
+      // middleware says it doesn't know the token. Anything else is transient
+      // and the swap is parked for retry.
+      if (!(error instanceof FetchJsonHttpError && error.status === 404)) {
+        throw error;
+      }
       this.logger.error(`Failed to fetch token data for ${address}`, error);
-      // Create a basic token entry if fetch fails
       token = await this.dexTokenRepository.save({
         address,
         name: 'Unknown',

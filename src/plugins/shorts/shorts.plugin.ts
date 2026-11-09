@@ -24,6 +24,8 @@ export class ShortsPlugin extends BasePlugin implements OnModuleDestroy {
   protected readonly logger = new Logger(ShortsPlugin.name);
   readonly name = 'shorts';
   readonly version = SHORTS_INDEX_VERSION;
+  // Shorts replays parked rows in chain order with its own retry scheduler.
+  readonly retryParkedFailures = false;
   private retry?: NodeJS.Timeout;
   private stopped = false;
   private updating?: Promise<void>;

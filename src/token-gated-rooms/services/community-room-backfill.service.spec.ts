@@ -6,6 +6,7 @@ import {
 } from './community-room-backfill.service';
 import { TGR_COMMUNITY_UPSERTED } from '../events';
 import type { Token } from '@/tokens/entities/token.entity';
+import type { RelayWriter } from '../nostr/relay-writer.contract';
 
 /**
  * Unit coverage for the resumable backfill loop (Task 04 req §6) + the roomless-
@@ -28,6 +29,7 @@ describe('CommunityRoomBackfillService', () => {
     tokenRepo: any;
     qb: any;
     scheduler: SchedulerRegistry;
+    relay: { isHealthy: jest.Mock };
     setBatches: (batches: Token[][]) => void;
   };
 
@@ -88,6 +90,7 @@ describe('CommunityRoomBackfillService', () => {
     const emitter = new EventEmitter2();
     const emitSpy = jest.spyOn(emitter, 'emit');
     const scheduler = new SchedulerRegistry();
+    const relay = { isHealthy: jest.fn().mockReturnValue(true) };
 
     const service = new CommunityRoomBackfillService(
       tokenRepo,
@@ -96,6 +99,7 @@ describe('CommunityRoomBackfillService', () => {
       emitter,
       scheduler,
       config,
+      relay as unknown as RelayWriter,
     );
 
     return {
@@ -106,6 +110,7 @@ describe('CommunityRoomBackfillService', () => {
       tokenRepo,
       qb,
       scheduler,
+      relay,
       setBatches: (b) => {
         batches = b;
       },
@@ -187,6 +192,99 @@ describe('CommunityRoomBackfillService', () => {
 
   // ── roomless-token provisioning cron (room_id source-of-truth) ──────────────
   describe('provisionRoomlessTokens', () => {
+    it('does not lose a readiness event while an interrupted scan is unwinding', async () => {
+      const h = makeHarness(undefined, { relayConfigured: true });
+      h.relay.isHealthy.mockReturnValue(false);
+      await h.service.provisionRoomlessTokens(100);
+      let finish: (rows: Token[]) => void;
+      h.qb.getMany
+        .mockImplementationOnce(
+          () =>
+            new Promise<Token[]>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockResolvedValueOnce([makeToken('pending')]);
+      h.relay.isHealthy.mockReturnValue(true);
+      const catchUp = h.service.onRelayReady();
+      h.relay.isHealthy.mockReturnValue(false);
+      finish([makeToken('pending')]);
+      queueMicrotask(() => {
+        h.relay.isHealthy.mockReturnValue(true);
+        void h.service.onRelayReady();
+      });
+      await catchUp;
+      expect(h.qb.getMany).toHaveBeenCalledTimes(2);
+      expect(h.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs one deferred catch-up on readiness without adding a scan to normal startup', async () => {
+      const h = makeHarness(async () => ({ emitted: false }), {
+        relayConfigured: true,
+      });
+      h.qb.getMany.mockResolvedValue([makeToken('pending')]);
+      await h.service.onRelayReady();
+      expect(h.qb.getMany).not.toHaveBeenCalled();
+
+      h.relay.isHealthy.mockReturnValue(false);
+      await h.service.provisionRoomlessTokens(100);
+      h.relay.isHealthy.mockReturnValue(true);
+      await Promise.all([h.service.onRelayReady(), h.service.onRelayReady()]);
+      await h.service.onRelayReady();
+
+      expect(h.qb.getMany).toHaveBeenCalledTimes(1);
+      expect(h.upsert).toHaveBeenCalledTimes(1);
+      expect(h.emitSpy).toHaveBeenCalledWith(TGR_COMMUNITY_UPSERTED, {
+        saleAddress: 'pending',
+      });
+    });
+
+    it('stops between rooms on health loss and catches up the remaining room after recovery', async () => {
+      const h = makeHarness(undefined, { relayConfigured: true });
+      const first = makeToken('first');
+      const second = makeToken('second');
+      h.qb.getMany
+        .mockResolvedValueOnce([first, second])
+        .mockResolvedValueOnce([second]);
+      h.upsert.mockImplementationOnce(async () => {
+        h.relay.isHealthy.mockReturnValue(false);
+        return { emitted: false };
+      });
+      expect(await h.service.provisionRoomlessTokens(100)).toBe(1);
+      expect(h.upsert).not.toHaveBeenCalledWith(second);
+
+      h.relay.isHealthy.mockReturnValue(true);
+      await h.service.onRelayReady();
+      expect(h.upsert).toHaveBeenCalledTimes(2);
+      expect(h.upsert).toHaveBeenLastCalledWith(second);
+    });
+
+    it('does not restart deferred provisioning after shutdown', async () => {
+      const h = makeHarness(undefined, { relayConfigured: true });
+      h.relay.isHealthy.mockReturnValue(false);
+      await h.service.provisionRoomlessTokens(100);
+      h.service.onApplicationShutdown();
+      h.relay.isHealthy.mockReturnValue(true);
+      await h.service.onRelayReady();
+      expect(h.qb.getMany).not.toHaveBeenCalled();
+    });
+
+    it('does not accumulate repeated provisioning jobs across a day of unhealthy scans', async () => {
+      const h = makeHarness(async () => ({ emitted: false }));
+      h.relay.isHealthy.mockReturnValue(false);
+      h.qb.getMany.mockResolvedValue([makeToken('pending')]);
+      const queued: number[] = [];
+      h.emitter.on(TGR_COMMUNITY_UPSERTED, () => queued.push(9007, 9002));
+
+      for (let tick = 0; tick < 288; tick++) {
+        await h.service.provisionRoomlessTokens(100);
+      }
+
+      expect(queued).toHaveLength(0);
+      expect(h.qb.getMany).not.toHaveBeenCalled();
+      expect(h.upsert).not.toHaveBeenCalled();
+    });
+
     it('calls readAndUpsertRoomState per token and force-emits ONLY when !emitted', async () => {
       // "a" emits on its own (first creation); "b" does not (community_room exists,
       // room_id still NULL → retry case) → force-emit fires only for "b".

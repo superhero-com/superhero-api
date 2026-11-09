@@ -14,9 +14,11 @@ import { Token } from '@/tokens/entities/token.entity';
 import { CommunityRoom } from '../entities/community-room.entity';
 import { RoomStateService } from './room-state.service';
 import tgrConfig, { isRelayConfigured } from '../config/tgr.config';
+import { RELAY_WRITER, type RelayWriter } from '../nostr/relay-writer.contract';
 import {
   TGR_BALANCE_CHANGED,
   TGR_COMMUNITY_UPSERTED,
+  TGR_RELAY_READY,
   type TgrBalanceChangedPayload,
 } from '../events';
 
@@ -61,6 +63,8 @@ export class CommunityRoomBackfillService
 
   /** Single-flight guard so overlapping 5-minute ticks never stack. */
   private provisionRunning = false;
+  private provisionDeferred = false;
+  private stopped = false;
 
   constructor(
     @InjectRepository(Token)
@@ -72,6 +76,8 @@ export class CommunityRoomBackfillService
     private readonly scheduler: SchedulerRegistry,
     @Inject(tgrConfig.KEY)
     private readonly config: ConfigType<typeof tgrConfig>,
+    @Inject(RELAY_WRITER)
+    private readonly relay: RelayWriter,
   ) {}
 
   /**
@@ -106,6 +112,7 @@ export class CommunityRoomBackfillService
 
   /** Tear down the interval on shutdown so tests / restarts don't leak timers. */
   onApplicationShutdown(): void {
+    this.stopped = true;
     try {
       if (this.scheduler.doesExist?.('interval', ROOM_PROVISION_SCAN_JOB)) {
         this.scheduler.deleteInterval(ROOM_PROVISION_SCAN_JOB);
@@ -117,7 +124,7 @@ export class CommunityRoomBackfillService
 
   /** Run the provisioning scan with single-flight + error isolation (interval cb). */
   private async runProvisionSafely(): Promise<void> {
-    if (this.provisionRunning) {
+    if (this.provisionRunning || this.stopped) {
       return;
     }
     this.provisionRunning = true;
@@ -129,6 +136,18 @@ export class CommunityRoomBackfillService
       );
     } finally {
       this.provisionRunning = false;
+      // Readiness may arrive while this scan is still unwinding. Do not lose
+      // that recovery edge, or wait another five minutes to catch up.
+      if (this.provisionDeferred && this.relay.isHealthy() && !this.stopped) {
+        await this.runProvisionSafely();
+      }
+    }
+  }
+
+  @OnEvent(TGR_RELAY_READY, { async: true, promisify: true })
+  async onRelayReady(): Promise<void> {
+    if (this.provisionDeferred && isRelayConfigured(this.config)) {
+      await this.runProvisionSafely();
     }
   }
 
@@ -151,6 +170,11 @@ export class CommunityRoomBackfillService
    * @returns the number of tokens processed.
    */
   async provisionRoomlessTokens(limit: number): Promise<number> {
+    if (!this.relay.isHealthy()) {
+      this.provisionDeferred = true;
+      return 0;
+    }
+    this.provisionDeferred = false;
     const tokens = await this.tokenRepository
       .createQueryBuilder('token')
       .where('token.room_id IS NULL')
@@ -163,6 +187,10 @@ export class CommunityRoomBackfillService
 
     let processed = 0;
     for (const token of tokens) {
+      if (!this.relay.isHealthy()) {
+        this.provisionDeferred = true;
+        break;
+      }
       try {
         const result =
           await this.roomStateService.readAndUpsertRoomState(token);

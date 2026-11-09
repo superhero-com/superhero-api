@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { registerAs } from '@nestjs/config';
+import { pushServiceHosts } from './web-push/push-endpoint';
 
 export const NOTIFICATIONS_CONFIG = 'notifications';
 
@@ -116,6 +117,38 @@ export default registerAs(NOTIFICATIONS_CONFIG, () => ({
   ),
 
   /**
+   * Per-recipient rate cap on mention notifications, same fixed-window shape
+   * as the post-comment cap: a mention storm against one account (each post a
+   * distinct txHash) would otherwise page it once per spam post.
+   */
+  postMentionRateCap: parsePositiveInt(
+    process.env.NOTIF_POST_MENTION_RATE_CAP,
+    20,
+    'NOTIF_POST_MENTION_RATE_CAP',
+  ),
+  postMentionRateWindowSec: parsePositiveInt(
+    process.env.NOTIF_POST_MENTION_RATE_WINDOW_SEC,
+    3600,
+    'NOTIF_POST_MENTION_RATE_WINDOW_SEC',
+  ),
+
+  /**
+   * Per-recipient rate cap on tip notifications. A tip costs only the dust
+   * amount plus fee, so a burst of tiny tips would otherwise evict real
+   * entries from the recipient's capped feed.
+   */
+  tipReceivedRateCap: parsePositiveInt(
+    process.env.NOTIF_TIP_RECEIVED_RATE_CAP,
+    20,
+    'NOTIF_TIP_RECEIVED_RATE_CAP',
+  ),
+  tipReceivedRateWindowSec: parsePositiveInt(
+    process.env.NOTIF_TIP_RECEIVED_RATE_WINDOW_SEC,
+    3600,
+    'NOTIF_TIP_RECEIVED_RATE_WINDOW_SEC',
+  ),
+
+  /**
    * Lifetime of a web-feed bearer session, minted from a single æternity
    * signature (the SIWE-style bootstrap) and used to authorize feed reads,
    * mark-read, and the socket handshake. Default 7 days = re-sign weekly.
@@ -215,4 +248,7 @@ export default registerAs(NOTIFICATIONS_CONFIG, () => ({
     10_000,
     'WEB_PUSH_FETCH_TIMEOUT_MS',
   ),
+
+  /** Push-service host suffixes a subscription endpoint may point at. */
+  webPushAllowedHosts: pushServiceHosts(),
 }));

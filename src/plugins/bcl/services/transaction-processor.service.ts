@@ -82,6 +82,12 @@ export class TransactionProcessorService {
         try {
           transactionToken = await this.tokenService.getToken(saleAddress);
         } catch (error) {
+          // A buy/sell would otherwise be skipped as "token unavailable" on a
+          // transient DB/node error; throwing parks it for retry instead.
+          // create_community still falls back to the raw-tx path below.
+          if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
+            throw error;
+          }
           this.logger.error(`Error getting token ${saleAddress}`, error);
         }
 

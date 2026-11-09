@@ -6,6 +6,7 @@ import {
   Int,
   ResolveField,
   Parent,
+  ComplexityEstimatorArgs,
 } from '@nestjs/graphql';
 import { InjectRepository, getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, Inject, Optional, Type } from '@nestjs/common';
@@ -24,6 +25,14 @@ const MAX_GRAPHQL_PAGE_SIZE = 100;
 // `EntityConfig.maxPage`.
 const MAX_GRAPHQL_PAGE = 500;
 const ALLOWED_ORDER_DIRECTIONS = new Set(['ASC', 'DESC']);
+
+// Roughly rows loaded, enforced by the query limits plugin: each list
+// multiplies the cost of its children by its limit.
+const listComplexity = ({ args, childComplexity }: ComplexityEstimatorArgs) =>
+  Math.max(1, args.limit ?? MAX_GRAPHQL_PAGE_SIZE) * (1 + childComplexity);
+// paginate() runs COUNT(*) over the whole table for every root list, however
+// small its limit.
+const ROOT_LIST_COST = 1_000;
 
 function validateGraphqlPagination(
   page: number,
@@ -101,7 +110,10 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
       });
     }
 
-    @Query(() => PaginatedResponseType, { name: config.queryNames.plural })
+    @Query(() => PaginatedResponseType, {
+      name: config.queryNames.plural,
+      complexity: (options) => ROOT_LIST_COST + listComplexity(options),
+    })
     async findAll(
       @Args('page', { type: () => Int, nullable: true, defaultValue: 1 })
       page: number = 1,
@@ -346,6 +358,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
         ResolveField(() => relation.returnType(), {
           name: relation.field,
           nullable: relation.nullable || false,
+          complexity: listComplexity,
         })(BaseResolver.prototype, resolveMethodName, descriptor);
 
         // Apply @Parent decorator to first parameter
@@ -421,6 +434,7 @@ export function createBaseResolver<T>(config: EntityConfig<T>) {
         ResolveField(() => relation.returnType(), {
           name: relation.field,
           nullable: relation.nullable !== false,
+          complexity: 1,
         })(BaseResolver.prototype, resolveMethodName, descriptor);
 
         Parent()(BaseResolver.prototype, resolveMethodName, 0);

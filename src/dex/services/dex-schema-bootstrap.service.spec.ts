@@ -114,8 +114,24 @@ describe('DexSchemaBootstrapService', () => {
     await service.onModuleInit();
 
     const calls = query.mock.calls.map((call) => call[0] as string);
-    expect(calls[0]).toMatch(/pg_advisory_lock/);
-    expect(calls[calls.length - 1]).toMatch(/pg_advisory_unlock/);
+    expect(calls[0]).toBe('SET statement_timeout = 0');
+    expect(calls[1]).toMatch(/pg_advisory_lock/);
+    expect(calls[calls.length - 2]).toMatch(/pg_advisory_unlock/);
+    expect(calls[calls.length - 1]).toBe('RESET statement_timeout');
+    expect(queryRunner.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the connection even when resetting the timeout fails', async () => {
+    const query = jest
+      .fn()
+      .mockImplementation((sql: string) =>
+        sql === 'RESET statement_timeout'
+          ? Promise.reject(new Error('connection lost'))
+          : Promise.resolve(undefined),
+      );
+    const { service, queryRunner } = makeService(query);
+
+    await expect(service.onModuleInit()).rejects.toThrow('connection lost');
     expect(queryRunner.release).toHaveBeenCalledTimes(1);
   });
 
@@ -134,6 +150,7 @@ describe('DexSchemaBootstrapService', () => {
     // Lock must be released and the connection returned even on failure.
     const calls = query.mock.calls.map((call) => call[0] as string);
     expect(calls.some((sql) => /pg_advisory_unlock/.test(sql))).toBe(true);
+    expect(calls[calls.length - 1]).toBe('RESET statement_timeout');
     expect(queryRunner.release).toHaveBeenCalledTimes(1);
   });
 

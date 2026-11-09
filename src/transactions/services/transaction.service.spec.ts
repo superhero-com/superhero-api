@@ -132,7 +132,7 @@ describe('TransactionService', () => {
       {
         tx: {
           function: BCL_FUNCTIONS.create_community,
-          contractId: 'ct_123',
+          contractId: 'test_factory',
           callerId: 'ak_123',
           decodedData: [
             { name: 'Mint', args: [null, '100'] },
@@ -242,7 +242,7 @@ describe('TransactionService', () => {
     const transaction = {
       tx: {
         function: BCL_FUNCTIONS.create_community,
-        contractId: 'ct_123',
+        contractId: 'test_factory',
         callerId: 'ak_123',
         decodedData: [
           { name: 'Mint', args: [null, '100'] },
@@ -269,6 +269,44 @@ describe('TransactionService', () => {
       expect.stringContaining('INSERT INTO token_trade_eligibility_counts'),
       expect.anything(),
     );
+  });
+
+  it('ignores a create_community call on another contract that returns a real sale', async () => {
+    const deleteOldCreateCommunityQuery = {
+      delete: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    transactionRepository.createQueryBuilder.mockReturnValue(
+      deleteOldCreateCommunityQuery,
+    );
+    tokenService.getToken = jest.fn().mockResolvedValue({
+      sale_address: 'ct_real_sale',
+      factory_address: 'test_factory',
+    } as Token);
+
+    const result = await service.saveTransaction({
+      tx: {
+        function: BCL_FUNCTIONS.create_community,
+        contractId: 'ct_attacker',
+        callerId: 'ak_attacker',
+        returnType: 'ok',
+        return: {
+          value: [{ value: 'ct_attacker_dao' }, { value: 'ct_real_sale' }],
+        },
+        arguments: [{ value: 'default' }, { value: 'REAL' }],
+      },
+      hash: 'th_attack',
+      blockHeight: 100,
+      microTime: moment().valueOf(),
+    } as any);
+
+    expect(result).toBeUndefined();
+    expect(deleteOldCreateCommunityQuery.execute).not.toHaveBeenCalled();
+    expect(tokenService.getToken).not.toHaveBeenCalled();
+    expect(tokenService.createTokenFromRawTransaction).not.toHaveBeenCalled();
+    expect(transactionRepository.save).not.toHaveBeenCalled();
   });
 
   it('should handle parseTransactionData correctly', async () => {

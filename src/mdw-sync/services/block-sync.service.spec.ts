@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { BlockSyncService } from './block-sync.service';
-import { fetchJson } from '@/utils/common';
+import { fetchJson, InvalidMiddlewareNextUrlError } from '@/utils/common';
 
 jest.mock('@/utils/common', () => {
   const actual = jest.requireActual('@/utils/common');
@@ -36,18 +36,11 @@ describe('BlockSyncService', () => {
     } as any;
     const blockRepository = {
       upsert: jest.fn().mockResolvedValue(undefined),
-      find: jest.fn(),
-    } as any;
-    const microBlockRepository = {
-      upsert: jest.fn(),
     } as any;
     const configService = {
       get: jest.fn((key: string) => {
         if (key === 'mdw.middlewareUrl') {
           return 'https://mdw.test';
-        }
-        if (key === 'mdw.microBlocksParallelBatchSize') {
-          return 4;
         }
         if (key === 'mdw.pageLimit') {
           return 100;
@@ -62,17 +55,12 @@ describe('BlockSyncService', () => {
       filterRelevantTransactions: jest.fn((txs: any[]) => txs),
       isRelevantTransaction: jest.fn(() => true),
     } as any;
-    const microBlockService = {
-      fetchMicroBlocksForKeyBlock: jest.fn().mockResolvedValue([]),
-    } as any;
 
     const service = new BlockSyncService(
       txRepository,
       blockRepository,
-      microBlockRepository,
       configService,
       pluginBatchProcessor,
-      microBlockService,
     );
 
     return {
@@ -200,6 +188,132 @@ describe('BlockSyncService', () => {
       'BlockSyncService.syncBlocks: stopping pagination after invalid next URL',
       expect.any(Error),
     );
+  });
+
+  it('rejects an invalid next URL while collecting hashes for block validation', async () => {
+    const { service } = setup();
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [buildMiddlewareTransaction()],
+      next: 'https://evil.test/v3/transactions?cursor=2',
+    });
+
+    await expect(
+      service.syncTransactions(123, 124, true, false, true),
+    ).rejects.toThrow(InvalidMiddlewareNextUrlError);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops transaction pagination without failing on an invalid next URL when not collecting hashes', async () => {
+    const { service, txRepository } = setup();
+    const loggerWarn = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    txRepository.upsert.mockResolvedValue(undefined);
+    txRepository.find.mockResolvedValue([]);
+    (fetchJson as jest.Mock).mockResolvedValueOnce({
+      data: [buildMiddlewareTransaction()],
+      next: 'https://evil.test/v3/transactions?cursor=2',
+    });
+
+    await expect(
+      service.syncTransactions(123, 124, true, true, false),
+    ).resolves.toEqual(new Map());
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(loggerWarn).toHaveBeenCalledWith(
+      'BlockSyncService.processTransactionPage: stopping pagination after invalid next URL',
+      expect.any(Error),
+    );
+  });
+
+  it('syncs a range from key blocks and transactions only', async () => {
+    const { service, txRepository, blockRepository } = setup();
+    txRepository.upsert.mockResolvedValue(undefined);
+    txRepository.find.mockResolvedValue([]);
+    (fetchJson as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [{ hash: 'kh_123', height: 123, time: 1700000000000 }],
+        next: null,
+      })
+      .mockResolvedValueOnce({
+        data: [buildMiddlewareTransaction()],
+        next: null,
+      });
+
+    await expect(service.syncBlockRange(123, 123)).resolves.toEqual(
+      new Map([[123, ['th_test_1']]]),
+    );
+
+    expect((fetchJson as jest.Mock).mock.calls.map(([url]) => url)).toEqual([
+      'https://mdw.test/v3/key-blocks?scope=gen:123-123&limit=1',
+      expect.stringMatching(/^https:\/\/mdw\.test\/v3\/transactions\?/),
+    ]);
+    expect(blockRepository.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('collects the hashes of every page while collecting for block validation', async () => {
+    const { service, txRepository } = setup();
+    txRepository.upsert.mockResolvedValue(undefined);
+    txRepository.find.mockResolvedValue([]);
+    (fetchJson as jest.Mock)
+      .mockResolvedValueOnce({
+        data: [buildMiddlewareTransaction()],
+        next: '/v3/transactions?cursor=2',
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            ...buildMiddlewareTransaction(),
+            hash: 'th_test_2',
+            block_height: 124,
+          },
+        ],
+        next: null,
+      });
+
+    const result = await service.syncTransactions(123, 124, true, false, true);
+
+    expect(fetchJson).toHaveBeenLastCalledWith(
+      'https://mdw.test/v3/transactions?cursor=2',
+    );
+    expect(result).toEqual(
+      new Map([
+        [123, ['th_test_1']],
+        [124, ['th_test_2']],
+      ]),
+    );
+  });
+
+  it('accepts an empty window while collecting hashes for block validation', async () => {
+    const { service } = setup();
+    (fetchJson as jest.Mock).mockResolvedValueOnce({ data: [], next: null });
+
+    await expect(
+      service.syncTransactions(123, 124, true, false, true),
+    ).resolves.toEqual(new Map());
+  });
+
+  it.each([
+    ['a 204', null],
+    ['a body without data', {}],
+  ])(
+    'rejects %s while collecting hashes for block validation',
+    async (_label, body) => {
+      const { service } = setup();
+      (fetchJson as jest.Mock).mockResolvedValueOnce(body);
+
+      await expect(
+        service.syncTransactions(123, 124, true, false, true),
+      ).rejects.toThrow('Middleware returned no transaction page');
+    },
+  );
+
+  it('ends transaction pagination on a 204 when not collecting hashes', async () => {
+    const { service } = setup();
+    (fetchJson as jest.Mock).mockResolvedValueOnce(null);
+
+    await expect(
+      service.syncTransactions(123, 124, true, true, false),
+    ).resolves.toEqual(new Map());
   });
 
   it('fails fast on pool timeouts instead of falling back to repository.save', async () => {

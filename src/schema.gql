@@ -20,7 +20,6 @@ type KeyBlock {
   hash: String!
   height: Int!
   info: String!
-  microBlocks(gas: String, limit: Int = 100, micro_block_index: String, offset: Int = 0, orderBy: String, orderDirection: String, transactions_count: String, version: String): [MicroBlock!]!
   micro_blocks_count: Int!
   miner: String!
   nonce: String!
@@ -35,33 +34,8 @@ type KeyBlock {
   version: Int!
 }
 
-type MicroBlock {
-  created_at: DateTime!
-  flags: String!
-  gas: Int!
-  hash: String!
-  height: Int!
-  keyBlock: KeyBlock
-  micro_block_index: Int!
-  pof_hash: String!
-  prev_hash: String!
-  prev_key_hash: String!
-  signature: String!
-  state_hash: String!
-  time: String!
-  transactions_count: Int!
-  txs(caller_id: String, contract_id: String, function: String, limit: Int = 100, offset: Int = 0, orderBy: String, orderDirection: String, recipient_id: String, sender_id: String, type: String): [Tx!]!
-  txs_hash: String!
-  version: Int!
-}
-
 type PaginatedKeyBlockResponse {
   items: [KeyBlock!]!
-  metaInfo: PaginationMeta!
-}
-
-type PaginatedMicroBlockResponse {
-  items: [MicroBlock!]!
   metaInfo: PaginationMeta!
 }
 
@@ -102,8 +76,6 @@ type PluginSyncState {
 type Query {
   keyBlock(hash: String!): KeyBlock
   keyBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedKeyBlockResponse!
-  microBlock(hash: String!): MicroBlock
-  microBlocks(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedMicroBlockResponse!
   pluginSyncState(plugin_name: String!): PluginSyncState
   pluginSyncStates(limit: Int = 100, orderBy: String, orderDirection: String, page: Int = 1): PaginatedPluginSyncStateResponse!
   syncState(id: String!): SyncState

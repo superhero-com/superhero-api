@@ -3,6 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WebPushSubscription } from '../entities/web-push-subscription.entity';
 
+/**
+ * Bounds the per-notification fan-out. The least recently seen rows are evicted
+ * rather than new ones refused: the web app re-posts on every start, so a live
+ * browser stays recent and an evicted one re-registers itself.
+ */
+export const MAX_WEB_PUSH_SUBSCRIPTIONS_PER_ADDRESS = 10;
+
 export interface WebPushSubscriptionInput {
   endpoint: string;
   p256dh: string;
@@ -75,6 +82,17 @@ export class WebPushSubscriptionService {
         last_seen_at: () => 'CURRENT_TIMESTAMP(6)',
       },
       ['endpoint'],
+    );
+
+    await this.repo.query(
+      `DELETE FROM web_push_subscriptions
+        WHERE address = $1
+          AND id NOT IN (
+            SELECT id FROM web_push_subscriptions
+             WHERE address = $1
+             ORDER BY last_seen_at DESC, id DESC
+             LIMIT $2)`,
+      [address, MAX_WEB_PUSH_SUBSCRIPTIONS_PER_ADDRESS],
     );
   }
 

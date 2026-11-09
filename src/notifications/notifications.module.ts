@@ -3,6 +3,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Account } from '@/account/entities/account.entity';
+import { Token } from '@/tokens/entities/token.entity';
+import { TokenPriceAlert } from './entities/token-price-alert.entity';
+import { PriceAlertService } from './price-alerts/price-alert.service';
+import { PriceAlertsController } from './controllers/price-alerts.controller';
 import { DeviceToken } from './entities/device-token.entity';
 import { DeviceChallenge } from './entities/device-challenge.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
@@ -28,6 +32,7 @@ import { DeviceChallengeService } from './services/device-challenge.service';
 import { DeviceService } from './services/device.service';
 import { AccountLabelService } from './services/account-label.service';
 import { NotificationPreferencesService } from './services/notification-preferences.service';
+import { NotificationGateService } from './services/notification-gate.service';
 import { NotificationFeedService } from './services/notification-feed.service';
 import { WebPushSubscriptionService } from './services/web-push-subscription.service';
 import { FeedSessionService } from './services/feed-session.service';
@@ -38,6 +43,8 @@ import { ChainTransferListener } from './listeners/chain-transfer.listener';
 import { InvitationClaimedListener } from './listeners/invitation-claimed.listener';
 import { PostCommentListener } from './listeners/post-comment.listener';
 import { NewFollowListener } from './listeners/new-follow.listener';
+import { TipReceivedListener } from './listeners/tip-received.listener';
+import { PostMentionListener } from './listeners/post-mention.listener';
 import { SendExpoNotificationQueue } from './queues/send-expo-notification.queue';
 import { ExpoReceiptQueue } from './queues/expo-receipt.queue';
 import { SendWebPushQueue } from './queues/send-web-push.queue';
@@ -98,6 +105,8 @@ function webPushSendLimiter(): { max: number; duration: number } {
       NotificationRecord,
       WebPushSubscription,
       Account,
+      Token,
+      TokenPriceAlert,
     ]),
     BullModule.registerQueue(
       { name: SEND_EXPO_NOTIFICATION_QUEUE, limiter: expoSendLimiter() },
@@ -110,6 +119,7 @@ function webPushSendLimiter(): { max: number; duration: number } {
     PreferencesController,
     FeedController,
     WebPushController,
+    PriceAlertsController,
   ],
   providers: [
     NotificationService,
@@ -120,6 +130,7 @@ function webPushSendLimiter(): { max: number; duration: number } {
     DeviceService,
     AccountLabelService,
     NotificationPreferencesService,
+    NotificationGateService,
     NotificationFeedService,
     WebPushSubscriptionService,
     FeedSessionService,
@@ -138,6 +149,9 @@ function webPushSendLimiter(): { max: number; duration: number } {
     InvitationClaimedListener,
     PostCommentListener,
     NewFollowListener,
+    PriceAlertService,
+    TipReceivedListener,
+    PostMentionListener,
     // Channel registry: append a provider here to add a channel.
     {
       provide: NOTIFICATION_CHANNELS,

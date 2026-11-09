@@ -17,6 +17,8 @@ import { GovernanceDelegationService } from './services/governance-delegation.se
 import { GovernanceDelegationsController } from './controllers/governance-delegations.controller';
 import { GovernancePopularRankingService } from './services/governance-popular-ranking.service';
 import { GovernancePollRegistry } from './services/governance-poll-registry.service';
+import { GovernancePowerService } from './services/governance-power.service';
+import { GovernancePowerController } from './controllers/governance-power.controller';
 
 @Module({
   imports: [
@@ -38,8 +40,13 @@ import { GovernancePollRegistry } from './services/governance-poll-registry.serv
     GovernanceVoteService,
     GovernanceDelegationService,
     GovernancePopularRankingService,
+    GovernancePowerService,
   ],
-  controllers: [GovernanceVotesController, GovernanceDelegationsController],
+  controllers: [
+    GovernanceVotesController,
+    GovernanceDelegationsController,
+    GovernancePowerController,
+  ],
   exports: [GovernancePlugin, GovernancePopularRankingService],
 })
 export class GovernancePluginModule {}

@@ -58,6 +58,19 @@ export class PluginFailedTransaction {
   @Sortable()
   version: number;
 
+  /** Retry-job attempts only; the validation pass's re-runs don't count. */
+  @Column({ type: 'integer', default: 0 })
+  @Field(() => Int)
+  @ApiProperty()
+  @Sortable()
+  attempts: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  @Field(() => Date, { nullable: true })
+  @ApiProperty({ required: false })
+  @Sortable()
+  next_retry_at: Date | null;
+
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

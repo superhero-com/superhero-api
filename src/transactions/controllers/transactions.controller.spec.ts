@@ -7,7 +7,6 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { paginate, Pagination } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
 import { Transaction } from '../entities/transaction.entity';
-import { TransactionService } from '../services/transaction.service';
 import { TransactionsController } from './transactions.controller';
 
 jest.mock('nestjs-typeorm-paginate', () => ({
@@ -20,7 +19,6 @@ describe('TransactionsController', () => {
   let transactionsRepository: Repository<Transaction>;
   let tokenService: TokensService;
   let communityFactoryService: CommunityFactoryService;
-  let transactionService: { saveTransaction: jest.Mock };
 
   beforeEach(async () => {
     (paginate as jest.Mock).mockReset();
@@ -50,12 +48,6 @@ describe('TransactionsController', () => {
               .mockResolvedValue({ address: 'test_factory' }),
           },
         },
-        {
-          provide: TransactionService,
-          useValue: {
-            saveTransaction: jest.fn(),
-          },
-        },
       ],
     }).compile();
 
@@ -67,7 +59,6 @@ describe('TransactionsController', () => {
     communityFactoryService = module.get<CommunityFactoryService>(
       CommunityFactoryService,
     );
-    transactionService = module.get(TransactionService);
   });
 
   it('should be defined', () => {
@@ -214,19 +205,18 @@ describe('TransactionsController', () => {
       expect(result).toEqual(mockTransaction);
     });
 
-    it('should throw NotFoundException if transaction does not exist', async () => {
+    it('throws NotFoundException for a hash that is not indexed', async () => {
       jest.spyOn(transactionsRepository, 'createQueryBuilder').mockReturnValue({
         where: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         getRawOne: jest.fn().mockResolvedValue(null),
       } as any);
-      transactionService.saveTransaction.mockRejectedValueOnce(
-        new Error('transaction not found'),
-      );
 
       await expect(
-        controller.getTransactionByHash('invalid_hash'),
-      ).rejects.toThrow(NotFoundException);
+        controller.getTransactionByHash('th_unindexed'),
+      ).rejects.toThrow(
+        new NotFoundException('Transaction with hash th_unindexed not found'),
+      );
     });
   });
 });

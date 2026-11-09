@@ -49,7 +49,10 @@ const CURSOR: TxPageCursor = {
 
 describe('plugin getUpdateQueries pagination', () => {
   const plugins: [string, any][] = [
-    ['bcl', new BclPlugin({} as any, {} as any, {} as any, {} as any)],
+    [
+      'bcl',
+      new BclPlugin({} as any, {} as any, {} as any, {} as any, {} as any),
+    ],
     [
       'governance',
       new GovernancePlugin(
@@ -95,7 +98,13 @@ describe('plugin getUpdateQueries pagination', () => {
 
   it('bcl selects on logs, the only field it writes', async () => {
     const { repo, fragments } = recordingRepo();
-    const plugin = new BclPlugin({} as any, {} as any, {} as any, {} as any);
+    const plugin = new BclPlugin(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
     const [query] = plugin.getUpdateQueries(1);
     await query(repo, 100, undefined);
 

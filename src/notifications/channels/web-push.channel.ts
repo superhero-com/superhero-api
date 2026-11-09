@@ -70,9 +70,10 @@ export class WebPushChannel implements NotificationChannel {
       );
     }
 
-    const subs = await this.subscriptions.getActiveForAddress(
-      notifiable.address,
-    );
+    // Rows stored before the push-host allowlist existed are never contacted.
+    const subs = (
+      await this.subscriptions.getActiveForAddress(notifiable.address)
+    ).filter((sub) => this.client.acceptsEndpoint(sub.endpoint));
     if (subs.length === 0) {
       return;
     }

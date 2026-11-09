@@ -19,20 +19,26 @@ export class XLinkVerifierService {
     address: string,
     dto: ClaimXLinkDto,
   ): Promise<VerifiedClaim> {
-    const accessToken = await this.resolveAccessToken(dto);
+    // Only a code exchanged with our client secret proves the user signed in
+    // through our app; a bare access token could come from any X app.
+    const accessToken = await this.oauthService.exchangeXCodeForAccessToken(
+      dto.x_code,
+      dto.x_code_verifier,
+      dto.x_redirect_uri,
+    );
 
     const oauthUser = await this.oauthService.verifyAccessToken(
       'x',
       accessToken,
     );
-    const xUsername = oauthUser.username || oauthUser.name;
-    if (!xUsername) {
+    // Never the display name: anyone can set it to someone else's handle.
+    const value = oauthUser.username?.trim().toLowerCase();
+    if (!value) {
       throw new BadRequestException(
         'Unable to extract X username from OAuth profile',
       );
     }
 
-    const value = xUsername.trim().toLowerCase();
     const expiry = Date.now() + ADDRESS_LINK_VERIFICATION_TTL_SECONDS * 1000;
     const verificationToken = createVerificationToken({
       address,
@@ -59,23 +65,5 @@ export class XLinkVerifierService {
     if (payload.value !== dto.value) {
       throw new BadRequestException('Verification token value mismatch');
     }
-  }
-
-  private async resolveAccessToken(dto: ClaimXLinkDto): Promise<string> {
-    if (dto.x_access_token) {
-      return dto.x_access_token;
-    }
-
-    if (dto.x_code && dto.x_code_verifier && dto.x_redirect_uri) {
-      return this.oauthService.exchangeXCodeForAccessToken(
-        dto.x_code,
-        dto.x_code_verifier,
-        dto.x_redirect_uri,
-      );
-    }
-
-    throw new BadRequestException(
-      'X link requires either x_access_token or x_code + x_code_verifier + x_redirect_uri',
-    );
   }
 }

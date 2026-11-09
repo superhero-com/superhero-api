@@ -1,4 +1,8 @@
-import { Plugin, SyncDirection } from '@/plugins/plugin.interface';
+import {
+  Plugin,
+  PluginBatchFailure,
+  SyncDirection,
+} from '@/plugins/plugin.interface';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -94,81 +98,99 @@ export class PluginBatchProcessorService {
       if (matchingTransactions.length === 0) {
         return;
       }
-      // Process batch - errors are handled inside processBatch
+
+      let failures: PluginBatchFailure[];
+      let batchThrew = false;
       try {
         const result = await plugin.processBatch(
           matchingTransactions,
           syncDirection,
         );
-
-        // Park per-transaction failures for retry. Previously these were caught
-        // and logged deep inside processBatch and then dropped — yet the sync
-        // checkpoint still advanced past their block height, so a transient
-        // failure (middleware/DB hiccup) on a single tx silently and
-        // permanently lost it. Recording them here puts them in the
-        // failed-transactions table so they are retried (version-bump or manual)
-        // exactly like whole-batch failures.
-        const failures = result && result.failed ? result.failed : [];
-        for (const failure of failures) {
-          await this.failedTransactionService.recordFailure(
-            plugin.name,
-            failure.tx,
-            failure.error,
-            syncState.version,
-          );
-        }
-        if (failures.length > 0) {
-          this.logger.warn(
-            `[${plugin.name}] Parked ${failures.length}/${matchingTransactions.length} failed transactions for retry`,
-          );
-        }
-
-        // Update sync state with the highest block height processed
-        const maxHeight = Math.max(
-          ...matchingTransactions.map((tx) => tx.block_height),
-        );
-
-        // Update appropriate height field based on sync direction
-        const updateData: Partial<PluginSyncState> = {
-          last_synced_height: maxHeight, // Keep for backward compatibility
-        };
-
-        if (syncDirection === SyncDirectionEnum.Backward) {
-          updateData.backward_synced_height = maxHeight;
-        } else if (syncDirection === SyncDirectionEnum.Live) {
-          updateData.live_synced_height = maxHeight;
-        }
-        // Reorg direction doesn't update sync state heights
-
-        await this.pluginSyncStateRepository.update(
-          { plugin_name: plugin.name },
-          updateData,
-        );
-
-        this.logger.debug(
-          `[${plugin.name}] Processed ${matchingTransactions.length} transactions`,
-        );
+        failures = (result && result.failed) || [];
       } catch (error: any) {
-        // If the entire batch fails, record failures for each transaction
-        const pluginVersion = syncState.version;
-        for (const tx of matchingTransactions) {
-          await this.failedTransactionService.recordFailure(
-            plugin.name,
-            tx,
-            error,
-            pluginVersion,
-          );
-        }
+        batchThrew = true;
+        failures = matchingTransactions.map((tx) => ({ tx, error }));
         this.logger.error(
           `[${plugin.name}] Failed to process batch of ${matchingTransactions.length} transactions`,
           error,
         );
       }
+
+      // Past the validation window nothing re-runs a tx, so these rows are
+      // the only way a failure gets processed again (see
+      // PluginFailedTransactionService.retryDueFailedTransactions).
+      for (const failure of failures) {
+        await this.failedTransactionService.recordFailure(
+          plugin.name,
+          failure.tx,
+          failure.error,
+          syncState.version,
+        );
+      }
+      if (failures.length > 0 && !batchThrew) {
+        this.logger.warn(
+          `[${plugin.name}] Parked ${failures.length}/${matchingTransactions.length} failed transactions for retry`,
+        );
+      }
+
+      // A tx parked earlier may have just gone through (e.g. on a validation
+      // re-run); leaving its row would replay it for nothing.
+      const failedHashes = new Set(failures.map((failure) => failure.tx.hash));
+      await this.failedTransactionService.clearFailures(
+        plugin.name,
+        matchingTransactions
+          .map((tx) => tx.hash)
+          .filter((hash) => !failedHashes.has(hash)),
+      );
+
+      if (batchThrew) {
+        return;
+      }
+      await this.updateSyncHeights(
+        plugin.name,
+        matchingTransactions,
+        syncDirection,
+      );
+
+      this.logger.debug(
+        `[${plugin.name}] Processed ${matchingTransactions.length} transactions`,
+      );
     } catch (error: any) {
       this.logger.error(
         `[${plugin.name}] Error in processBatchForPlugin`,
         error,
       );
+    }
+  }
+
+  /**
+   * These heights are only reported (MdwController), nothing replays from
+   * them, so a failed update is logged rather than parking a processed batch.
+   */
+  private async updateSyncHeights(
+    pluginName: string,
+    transactions: Tx[],
+    syncDirection: SyncDirection,
+  ): Promise<void> {
+    const maxHeight = Math.max(...transactions.map((tx) => tx.block_height));
+
+    const updateData: Partial<PluginSyncState> = {
+      last_synced_height: maxHeight, // Keep for backward compatibility
+    };
+    if (syncDirection === SyncDirectionEnum.Backward) {
+      updateData.backward_synced_height = maxHeight;
+    } else if (syncDirection === SyncDirectionEnum.Live) {
+      updateData.live_synced_height = maxHeight;
+    }
+    // Reorg direction doesn't update sync state heights
+
+    try {
+      await this.pluginSyncStateRepository.update(
+        { plugin_name: pluginName },
+        updateData,
+      );
+    } catch (error: any) {
+      this.logger.error(`[${pluginName}] Failed to update sync heights`, error);
     }
   }
 
@@ -269,6 +291,7 @@ export class PluginBatchProcessorService {
     );
 
     await Promise.allSettled(pluginPromises);
+    await this.failedTransactionService.clearFailuresForTxs(removedTxHashes);
   }
 
   /**

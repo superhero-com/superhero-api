@@ -180,7 +180,7 @@ test('hosted Shorts index: real PostgreSQL replay, rollback, accounting, backfil
       const registry = new PluginRegistryService([plugin], {});
       const state = { findOne: async () => ({ ...(await db.query("SELECT * FROM sync_state WHERE id='global'"))[0], backward_synced_height: 0 }),
         update: async (_, values) => db.query("UPDATE sync_state SET tip_height=$1,updated_at=now() WHERE id='global'", [values.tip_height]) };
-      return new IndexerService(repo, {}, {}, state, {}, {}, config, db, {}, {}, registry, {}, {});
+      return new IndexerService(repo, {}, state, {}, {}, config, db, {}, {}, registry, {});
     }
     globalThis.fetch = async value => {
       const url = new URL(value);

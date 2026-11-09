@@ -125,7 +125,22 @@ export class AccountService {
       transactionRepository,
     );
     if (!aggregated) {
-      return existing;
+      if (!existing || !existing.total_tx_count) {
+        return existing;
+      }
+      // Every trade of this address was deleted (reorg, stale create cleanup).
+      // The full rebuild only visits addresses that still trade, so reset here.
+      await accountRepository.update(
+        { address },
+        {
+          total_tx_count: 0,
+          total_buy_tx_count: 0,
+          total_sell_tx_count: 0,
+          total_created_tokens: 0,
+          total_volume: new BigNumber(0),
+        },
+      );
+      return accountRepository.findOne({ where: { address } });
     }
 
     await accountRepository.upsert(aggregated, {

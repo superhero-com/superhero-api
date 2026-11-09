@@ -52,13 +52,17 @@ export function isAlreadyExists(e: unknown): boolean {
 }
 
 /**
- * True when a relay reject is PERMANENT and must fail fast (no retry, surface for
- * alerting): the bot is not the relay admin, or the group was deleted (9008).
+ * True when the relay explicitly denies admin authority for this connection.
  */
+export function isRelayAdminReject(e: unknown): boolean {
+  return reasonText(e).includes('only relay admin');
+}
+
+/** Permanent job rejection: missing relay-admin authority or a deleted group. */
 export function isTerminalReject(e: unknown): boolean {
   const msg = reasonText(e);
   return (
-    msg.includes('only relay admin') ||
+    isRelayAdminReject(e) ||
     (msg.includes('was deleted') && msg.includes('existed before')) ||
     msg.includes('group existed before and was deleted')
   );
@@ -76,7 +80,7 @@ export function isGroupNotFound(e: unknown): boolean {
   return reasonText(e).includes('group not found');
 }
 
-/** A non-retryable error wrapper so Bull does not re-attempt terminal rejects. */
+/** Terminal reject. Bull ignores the error type: the processor must also discard the job. */
 export class TerminalPublishError extends Error {
   readonly terminal = true as const;
   constructor(message: string) {

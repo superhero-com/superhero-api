@@ -10,6 +10,7 @@ import {
   UseGuards,
   BadRequestException,
   HttpStatus,
+  Type,
 } from '@nestjs/common';
 import {
   ApiOperation,
@@ -33,7 +34,7 @@ import {
   applyIncludesToQueryBuilder,
   EntityConfigRegistry,
   resolveRelation,
-  checkHasArrayRelations,
+  validateIncludesTree,
 } from '../utils/relation-loader';
 import { RateLimitGuard } from '../guards/rate-limit.guard';
 
@@ -52,6 +53,7 @@ const MAX_PAGE = 500;
  * @param configRegistry - Registry to look up related entity configs
  * @param depth - Current recursion depth (to prevent infinite loops)
  * @param parentPath - Path prefix for nested relations (e.g., "txs.")
+ * @param pathEntities - Entities already on the path, which validateIncludesTree rejects
  * @returns Description string listing available relations
  */
 function buildIncludesDescription(
@@ -59,6 +61,7 @@ function buildIncludesDescription(
   configRegistry?: EntityConfigRegistry,
   depth: number = 0,
   parentPath: string = '',
+  pathEntities: Type<any>[] = [entityConfig.entity],
 ): string {
   if (depth > 3) {
     return ''; // Prevent infinite recursion
@@ -71,6 +74,9 @@ function buildIncludesDescription(
   const relationNames: string[] = [];
 
   for (const relation of entityConfig.relations) {
+    if (pathEntities.includes(relation.relatedEntity)) {
+      continue;
+    }
     const relationPath = parentPath
       ? `${parentPath}.${relation.field}`
       : relation.field;
@@ -89,6 +95,7 @@ function buildIncludesDescription(
           configRegistry,
           depth + 1,
           relationPath,
+          [...pathEntities, relation.relatedEntity],
         );
         if (nestedNames) {
           // Add nested relations to the list
@@ -191,9 +198,15 @@ export function createBaseController<T>(
     exampleRelation = firstRelation.field;
     // Try to find a nested relation example
     if (firstRelation.isArray && configRegistry) {
-      const relatedConfig = configRegistry.get(firstRelation.relatedEntity);
-      if (relatedConfig?.relations && relatedConfig.relations.length > 0) {
-        exampleRelation = `${firstRelation.field},${firstRelation.field}.${relatedConfig.relations[0].field}`;
+      const nestedRelation = configRegistry
+        .get(firstRelation.relatedEntity)
+        ?.relations?.find(
+          (relation) =>
+            relation.relatedEntity !== config.entity &&
+            relation.relatedEntity !== firstRelation.relatedEntity,
+        );
+      if (nestedRelation) {
+        exampleRelation = `${firstRelation.field},${firstRelation.field}.${nestedRelation.field}`;
       }
     }
 
@@ -333,10 +346,10 @@ export function createBaseController<T>(
       const _queryStartTime = Date.now();
       const _queryDate = new Date().toISOString();
 
-      // Check if we have array relations that would cause pagination issues
+      // Array relations would cause pagination issues
       const hasArrayRelations =
         includes && this.configRegistry
-          ? checkHasArrayRelations(
+          ? validateIncludesTree(
               config,
               parseIncludesToTree(includes),
               this.configRegistry,
@@ -536,6 +549,14 @@ export function createBaseController<T>(
       @Param(config.primaryKey) id: string,
       @Query('includes') includes?: string,
     ) {
+      if (includes && this.configRegistry) {
+        validateIncludesTree(
+          config,
+          parseIncludesToTree(includes),
+          this.configRegistry,
+        );
+      }
+
       // Performance monitoring
       const _queryStartTime = Date.now();
       const _queryDate = new Date().toISOString();

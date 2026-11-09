@@ -69,6 +69,9 @@ export class DexSchemaBootstrapService implements OnModuleInit {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     try {
+      // The DDL waits for table locks and may build indexes, so it must not be
+      // cut off by DB_STATEMENT_TIMEOUT_MS (a cancelled ALTER aborts boot).
+      await queryRunner.query('SET statement_timeout = 0');
       await queryRunner.query('SELECT pg_advisory_lock($1)', [
         DexSchemaBootstrapService.ADVISORY_LOCK_KEY,
       ]);
@@ -94,7 +97,11 @@ export class DexSchemaBootstrapService implements OnModuleInit {
         ]);
       }
     } finally {
-      await queryRunner.release();
+      try {
+        await queryRunner.query('RESET statement_timeout');
+      } finally {
+        await queryRunner.release();
+      }
     }
   }
 }

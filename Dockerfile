@@ -73,6 +73,7 @@ WORKDIR /src
 # Copy only executable output, production dependencies and required assets.
 COPY --from=build --chown=node:node /src/dist ./dist
 COPY --from=build --chown=node:node /src/node_modules ./node_modules
+RUN node -e "require('argon2')"
 COPY --from=build --chown=node:node /src/package.json ./package.json
 COPY --from=build --chown=node:node /src/views ./views
 COPY --from=build --chown=node:node /src/scripts/migrate-with-lock.js ./scripts/migrate-with-lock.js

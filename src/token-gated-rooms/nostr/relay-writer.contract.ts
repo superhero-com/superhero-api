@@ -32,7 +32,7 @@ export interface PublishResult {
 export interface RelayWriter {
   /** Bot/relay-admin public key (hex). */
   readonly pubkey: string;
-  /** Whether the relay socket is connected + AUTHed (gates the queue). */
+  /** Connected, authenticated and verified as relay admin (gates the queue). */
   isHealthy(): boolean;
   /** Finalize+sign+publish and wait for the relay ACK; never throws on reject. */
   publish(template: Nip29Template): Promise<PublishResult>;

@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
+import { PRICE_CURRENCY_CODES } from '@/configs';
 import { TokensService } from '@/tokens/tokens.service';
 import {
   buildSparklineSvg,
@@ -41,12 +42,12 @@ export class HistoricalController {
   @ApiQuery({
     name: 'interval',
     type: 'number',
-    description: 'Interval in seconds',
+    description: `Interval in seconds; the date range may span at most ${TransactionHistoryService.MAX_HISTORICAL_CANDLES} intervals`,
     required: false,
   })
   @ApiQuery({
     name: 'convertTo',
-    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    enum: PRICE_CURRENCY_CODES,
     required: false,
   })
   @ApiQuery({
@@ -55,8 +56,18 @@ export class HistoricalController {
     required: false,
   })
   // startDate
-  @ApiQuery({ name: 'start_date', type: 'string', required: false })
-  @ApiQuery({ name: 'end_date', type: 'string', required: false })
+  @ApiQuery({
+    name: 'start_date',
+    type: 'string',
+    description: 'ISO 8601, defaults to 2 days ago',
+    required: false,
+  })
+  @ApiQuery({
+    name: 'end_date',
+    type: 'string',
+    description: 'ISO 8601, defaults to now',
+    required: false,
+  })
   @ApiParam({
     name: 'address',
     type: 'string',
@@ -98,7 +109,7 @@ export class HistoricalController {
   })
   @ApiQuery({
     name: 'convertTo',
-    enum: ['ae', 'usd', 'eur', 'aud', 'brl', 'cad', 'chf', 'gbp', 'xau'],
+    enum: PRICE_CURRENCY_CODES,
     required: false,
   })
   @ApiParam({

@@ -1,4 +1,4 @@
-import { Type } from '@nestjs/common';
+import { BadRequestException, Type } from '@nestjs/common';
 import { SelectQueryBuilder } from 'typeorm';
 import { EntityConfig, RelationConfig } from '../types/entity-config.interface';
 import { IncludesTree } from './includes-parser';
@@ -41,41 +41,71 @@ export function resolveRelation(
 }
 
 /**
- * Checks if the includes tree contains any array relations (OneToMany)
- * @param entityConfig - The entity config
- * @param includesTree - The includes tree
- * @param configRegistry - Registry to look up related entity configs
- * @returns true if any array relations are included
+ * Every include is a LEFT JOIN, so rows multiply when a path comes back to an
+ * entity already on it (txs.keyBlock.txs) or when array relations sit on
+ * separate branches (two array includes side by side): both are rejected.
+ * @returns whether the includes join an array relation
  */
-export function checkHasArrayRelations(
+export function validateIncludesTree(
   entityConfig: EntityConfig,
   includesTree: IncludesTree,
   configRegistry: EntityConfigRegistry,
 ): boolean {
+  return validateIncludesBranch(
+    entityConfig,
+    includesTree,
+    configRegistry,
+    [entityConfig.entity],
+    '',
+  );
+}
+
+/** Returns whether the branch joins an array relation. */
+function validateIncludesBranch(
+  entityConfig: EntityConfig,
+  includesTree: IncludesTree,
+  configRegistry: EntityConfigRegistry,
+  pathEntities: Type<any>[],
+  parentPath: string,
+): boolean {
+  const arrayBranches: string[] = [];
+
   for (const [relationField, nestedIncludes] of Object.entries(includesTree)) {
     const relationConfig = resolveRelation(entityConfig, relationField);
-    if (relationConfig && relationConfig.isArray) {
-      return true;
+    const relatedEntityConfig =
+      relationConfig && configRegistry.get(relationConfig.relatedEntity);
+    // Unknown relations are skipped by applyIncludesToQueryBuilder as well.
+    if (!relationConfig || !relatedEntityConfig) {
+      continue;
     }
 
-    // Recursively check nested includes
-    if (Object.keys(nestedIncludes).length > 0) {
-      const relatedEntityConfig = configRegistry.get(
-        relationConfig!.relatedEntity,
+    const path = parentPath ? `${parentPath}.${relationField}` : relationField;
+    if (pathEntities.includes(relationConfig.relatedEntity)) {
+      throw new BadRequestException(
+        `includes "${path}" leads back to ${relationConfig.relatedEntity.name}, which is already loaded`,
       );
-      if (
-        relatedEntityConfig &&
-        checkHasArrayRelations(
-          relatedEntityConfig,
-          nestedIncludes,
-          configRegistry,
-        )
-      ) {
-        return true;
-      }
+    }
+
+    const nestedHasArray =
+      Object.keys(nestedIncludes).length > 0 &&
+      validateIncludesBranch(
+        relatedEntityConfig,
+        nestedIncludes,
+        configRegistry,
+        [...pathEntities, relationConfig.relatedEntity],
+        path,
+      );
+    if (relationConfig.isArray || nestedHasArray) {
+      arrayBranches.push(path);
     }
   }
-  return false;
+
+  if (arrayBranches.length > 1) {
+    throw new BadRequestException(
+      `includes ${arrayBranches.map((p) => `"${p}"`).join(' and ')} cannot be combined; request them separately`,
+    );
+  }
+  return arrayBranches.length > 0;
 }
 
 /**
@@ -97,7 +127,7 @@ function generateJoinAlias(parentAlias: string, relationField: string): string {
  * @param includesTree - The parsed includes tree structure
  * @param configRegistry - Registry to look up related entity configs
  * @param parentAlias - The current table alias (defaults to entityConfig.tableAlias)
- * @param parentPath - The property path for mapping (e.g., "microBlock.txs")
+ * @param parentPath - The property path for mapping (e.g., "tx.keyBlock")
  * @param depth - Current recursion depth (to prevent infinite loops)
  */
 export function applyIncludesToQueryBuilder<T>(
@@ -147,8 +177,8 @@ export function applyIncludesToQueryBuilder<T>(
     const joinCondition = `${parentAlias}.${relationConfig.joinCondition.parentField} = ${joinAlias}.${relationConfig.joinCondition.localField}`;
 
     // Build the property path for mapping
-    // For root level relations, use rootAlias.relationField (e.g., "micro_block.keyBlock")
-    // For nested relations, use parentPath.relationField (e.g., "micro_block.txs.block")
+    // For root level relations, use rootAlias.relationField (e.g., "tx.keyBlock")
+    // For nested relations, use parentPath.relationField (e.g., "tx.keyBlock.<relation>")
     const mapPath =
       depth === 0
         ? `${rootAlias}.${relationField}`

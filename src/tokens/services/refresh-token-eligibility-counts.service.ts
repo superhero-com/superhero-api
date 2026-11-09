@@ -300,6 +300,8 @@ export class RefreshTokenEligibilityCountsService {
   }
 
   private async rebuildAllCounts(manager: QueryExecutor): Promise<number> {
+    // A single INSERT over every post; the incremental path keeps the limit.
+    await manager.query('SET LOCAL statement_timeout = 0');
     await manager.query('TRUNCATE TABLE token_eligibility_counts');
     await manager.query(`
       INSERT INTO token_eligibility_counts (

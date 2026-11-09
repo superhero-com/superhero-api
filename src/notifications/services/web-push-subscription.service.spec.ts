@@ -1,5 +1,8 @@
 import { Logger } from '@nestjs/common';
-import { WebPushSubscriptionService } from './web-push-subscription.service';
+import {
+  MAX_WEB_PUSH_SUBSCRIPTIONS_PER_ADDRESS,
+  WebPushSubscriptionService,
+} from './web-push-subscription.service';
 
 describe('WebPushSubscriptionService', () => {
   let repo: any;
@@ -11,8 +14,26 @@ describe('WebPushSubscriptionService', () => {
       delete: jest.fn().mockResolvedValue(undefined),
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
+      query: jest.fn().mockResolvedValue([]),
     };
     service = new WebPushSubscriptionService(repo);
+  });
+
+  it('trims the address to its most recently seen subscriptions after the upsert', async () => {
+    await service.upsert('ak_owner', {
+      endpoint: 'https://push.example/abc',
+      p256dh: 'p',
+      auth: 'a',
+    });
+    const [sql, params] = repo.query.mock.calls[0];
+    expect(sql).toMatch(/DELETE FROM web_push_subscriptions/);
+    expect(params).toEqual([
+      'ak_owner',
+      MAX_WEB_PUSH_SUBSCRIPTIONS_PER_ADDRESS,
+    ]);
+    expect(repo.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      repo.query.mock.invocationCallOrder[0],
+    );
   });
 
   it('upserts on the endpoint so a re-subscribe re-points instead of duplicating', async () => {
