@@ -43,13 +43,15 @@ import {
 type ImageRequest = Request & { imageAddress: string };
 @Injectable()
 export class ProfileMediaGate implements CanActivate {
-  private readonly client = shortsClientIdentity();
+  private readonly client?: ReturnType<typeof shortsClientIdentity>;
   constructor(
     private readonly auth: ProfileMediaAuth,
-    @Inject(PROFILE_MEDIA_CONFIG) private readonly config: ProfileMediaConfig,
-  ) {}
+    @Inject(PROFILE_MEDIA_CONFIG) config: ProfileMediaConfig,
+  ) {
+    if (config.enabled) this.client = shortsClientIdentity();
+  }
   async canActivate(context: ExecutionContext) {
-    if (!this.config.enabled)
+    if (!this.client)
       throw new ServiceUnavailableException('Profile images are unavailable');
     await this.auth.rate(
       `ip:${this.client(context.switchToHttp().getRequest<Request>())}`,
