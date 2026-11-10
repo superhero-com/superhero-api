@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { ShortsVersionReadbackService } from './shorts-version-readback.service';
+import { Inject, Injectable } from '@nestjs/common';
 import type { ShortsScope } from './shorts-metadata.service';
 import {
   PrivateObjectRef,
@@ -24,7 +25,11 @@ export type PrivateVersionIssuer = (
 @Injectable()
 export class ShortsPrivateInputVersionStorageService {
   constructor(
-    private readonly objects: ShortsPrivateObjectsService,
+    @Inject(ShortsVersionReadbackService)
+    private readonly versions: Pick<
+      ShortsPrivateObjectsService,
+      'verifyStoredVersion' | 'validateReference'
+    >,
     private readonly storage: ShortsPrivateVersionStorageService,
   ) {}
 
@@ -54,7 +59,7 @@ export class ShortsPrivateInputVersionStorageService {
     });
     // An immutable candidate must authenticate completely before any removal grant.
     // Verifying a different current copy is insufficient when this is the last copy.
-    await this.objects.verifyStoredVersion(scope, ref, version, signal);
+    await this.versions.verifyStoredVersion(scope, ref, version, signal);
     await this.storage.preflightRetired(ref.key, version, ref.bytes, signal);
     signal.throwIfAborted();
     let used = false;
@@ -95,7 +100,7 @@ export class ShortsPrivateInputVersionStorageService {
     version: string,
     signal: AbortSignal,
   ) {
-    this.objects.validateReference(scope, ref);
+    this.versions.validateReference(scope, ref);
     const { key, bytes } = ref;
     await this.storage.ready(signal);
     return this.storage.retiredVersionAbsent(key, version, bytes, signal);

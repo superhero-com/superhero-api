@@ -266,10 +266,36 @@ export class ShortsController {
     @Param('id') id: string,
     @Headers('authorization') authorization: string,
     @Res() res: Response,
+    @Headers('x-shorts-review-gateway') gateway?: string,
   ) {
     const address = await this.auth.authenticate(authorization);
     const short = await this.shorts.item(id);
     if (address !== short.creator) await this.auth.operator(authorization);
+    if (
+      this.shorts.media.remotePreviewEnabled &&
+      gateway === 'internal-redirect-v1'
+    ) {
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.once('close', cancel);
+      try {
+        if (res.destroyed) controller.abort();
+        const location = await this.shorts.media.previewRedirect(
+          short,
+          controller.signal,
+        );
+        controller.signal.throwIfAborted();
+        return res
+          .status(200)
+          .set({
+            'X-Accel-Redirect': location,
+            'Cache-Control': 'private, no-store',
+          })
+          .end();
+      } finally {
+        res.off('close', cancel);
+      }
+    }
     const data = await this.shorts.media.preview(short);
     return res
       .set({

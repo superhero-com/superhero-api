@@ -1,3 +1,4 @@
+import { ShortsVersionReadbackService } from './shorts-version-readback.service';
 import { Module } from '@nestjs/common';
 import { ShortsPrivateVersionCleanupService } from './shorts-private-version-cleanup.service';
 import { ShortsPrivateVersionStorageService } from './shorts-private-version-storage.service';
@@ -46,6 +47,7 @@ import { ShortsStorageReconciliationService } from './shorts-storage-reconciliat
       useFactory: (config: StorageReconciliationConfig) => config.objects,
     },
     ShortsPrivateObjectsService,
+    ShortsVersionReadbackService,
     ShortsSourceReaderService,
     ShortsRetentionService,
     ShortsStorageReconciliationService,

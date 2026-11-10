@@ -10,7 +10,7 @@ function fixture(patch = {}) {
   const chain = { release, artifact, operator: { address: release.operator }, state: { contract: release.contract } };
   chain.policy = async () => shortsContractPolicy([release.operator, release.treasury, release.likeFeeAetto, release.treasuryBps], 1);
   chain.rewardContracts = () => [];
-  const media = { health: async () => true, safety: { health: async () => false } };
+  const media = { health: async () => true, moderationHealth: async () => false };
   return { chain, media, service: new ShortsService(chain, media, { since: 1234 }, { realtime: true }) };
 }
 for (const network of ['ae_uat', 'ae_mainnet']) {
@@ -61,7 +61,7 @@ test('free Like configuration advertises sponsorship only for the bound zero-pay
   const chain = { release, artifact, state: { contract: release.contract }, rewardContracts: () => [],
     policy: async () => ({ version: '0', operator: release.operator, treasury: release.treasury,
       likeFeeAetto: '0', treasuryBps: 2000, publishingEnabled: true, likesEnabled: true, commentsEnabled: true }) };
-  const media = { health: async () => true, safety: { health: async () => true } };
+  const media = { health: async () => true, moderationHealth: async () => true };
   const service = new ShortsService(chain, media, { since: 1234 }, {});
   const withoutSponsor = await service.config();
   assert.equal(withoutSponsor.likeMode, 'free'); assert.equal(withoutSponsor.likeFee, '0');

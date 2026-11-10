@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   privateBucketConfig,
+  privateStorageIdentity,
   PrivateBucketConfig,
 } from './shorts-private-objects.service';
 import { retentionConfig, RetentionConfig } from './shorts-retention.config';
@@ -43,12 +44,6 @@ export async function storageInventoryConfig(
     ...deployment,
     storage,
     objectPrefix: `${storage.prefix}/${hash([deployment.scope.network, deployment.scope.contract])}/`,
-    storageId: hash([
-      storage.endpoint,
-      storage.region,
-      storage.bucket,
-      storage.prefix,
-      storage.forcePathStyle,
-    ]),
+    storageId: privateStorageIdentity(storage),
   };
 }

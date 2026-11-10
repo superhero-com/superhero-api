@@ -10,8 +10,10 @@ import {
   OnModuleDestroy,
   Optional,
 } from '@nestjs/common';
-import { readFile } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import {
+  shortsStreamConnection,
+  shortsStreamKey,
+} from './shorts-stream-connection';
 import { ShortsStoreService } from './shorts-store.service';
 import { ShortsSafetyService } from './shorts-safety.service';
 import { officialContentPolicy } from './shorts-eligibility';
@@ -43,18 +45,15 @@ export class ShortsStreamingService
   implements OnApplicationBootstrap, OnModuleDestroy
 {
   private readonly logger = new Logger(ShortsStreamingService.name);
-  private readonly endpoint = process.env.SHORTS_STREAM_INTERNAL_URL?.replace(
-    /\/$/,
-    '',
-  );
-  private readonly keyFile = process.env.SHORTS_STREAM_KEY_FILE;
+  private readonly connection = shortsStreamConnection();
   private timer?: ReturnType<typeof setInterval>;
   private pending?: Promise<void>;
   private stopped = false;
   private readonly shutdown = new AbortController();
   constructor(
     private readonly store: ShortsStoreService,
-    private readonly safety: ShortsSafetyService,
+    @Inject(ShortsSafetyService)
+    private readonly safety: ShortsSafetyService | null,
     @Optional() private readonly records?: ShortsRecordsService,
     @Optional() private readonly jobs?: ShortsStreamJobsService,
     @Optional()
@@ -71,30 +70,6 @@ export class ShortsStreamingService
       store.db.exec(`CREATE TABLE IF NOT EXISTS shorts_stream_outbox (
       id TEXT PRIMARY KEY, ready INTEGER NOT NULL DEFAULT 0,
       attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0)`);
-    if (this.endpoint) {
-      const url = new URL(this.endpoint);
-      const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-      if (
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash ||
-        url.pathname !== '/' ||
-        (url.protocol !== 'https:' &&
-          !(
-            local &&
-            url.protocol === 'http:' &&
-            process.env.NODE_ENV !== 'production'
-          ))
-      )
-        throw new Error(
-          'SHORTS_STREAM_INTERNAL_URL requires an HTTPS origin (HTTP only for local development)',
-        );
-      if (!this.keyFile || !isAbsolute(this.keyFile))
-        throw new Error(
-          'SHORTS_STREAM_KEY_FILE must be an absolute server-only key path',
-        );
-    }
   }
   private scope(): ShortsScope {
     const contract = this.records?.chain.state.contract;
@@ -133,7 +108,7 @@ export class ShortsStreamingService
     }
   }
   start() {
-    if (!this.endpoint || this.timer || this.stopped) return;
+    if (!this.connection || this.timer || this.stopped) return;
     this.timer = setInterval(() => {
       void this.dispatch();
     }, 15000);
@@ -141,7 +116,7 @@ export class ShortsStreamingService
     void this.dispatch();
   }
   dispatch() {
-    if (this.stopped || !this.endpoint) return Promise.resolve();
+    if (this.stopped || !this.connection) return Promise.resolve();
     if (this.pending) return this.pending;
     this.pending = this.runDispatch()
       .catch(() =>
@@ -248,15 +223,12 @@ export class ShortsStreamingService
       );
     };
     signal.throwIfAborted();
-    const key = (
-      await readFile(this.keyFile!, { encoding: 'utf8', signal })
-    ).trim();
-    if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid streaming key');
+    const key = await shortsStreamKey(this.connection!.keyFile, signal);
     const source = await eligible();
     if (this.stopped || !source) return null;
     const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
     const response = await fetch(
-      `${this.endpoint}/internal/videos/${encodeURIComponent(id)}/prepare`,
+      `${this.connection!.origin}/internal/videos/${encodeURIComponent(id)}/prepare`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },
@@ -325,8 +297,7 @@ export class ShortsStreamingService
       !descriptor.original ||
       !job ||
       job === descriptor.id ||
-      !this.endpoint ||
-      !this.keyFile ||
+      !this.connection ||
       this.stopped
     )
       throw new Error('Generation preparation is unavailable');
@@ -336,12 +307,9 @@ export class ShortsStreamingService
       ...(parent ? [parent] : []),
     ]);
     signal.throwIfAborted();
-    const key = (
-      await readFile(this.keyFile, { encoding: 'utf8', signal })
-    ).trim();
-    if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid streaming key');
+    const key = await shortsStreamKey(this.connection!.keyFile, signal);
     const response = await fetch(
-      `${this.endpoint}/internal/videos/${encodeURIComponent(descriptor.id)}/generations/${encodeURIComponent(job)}/prepare`,
+      `${this.connection!.origin}/internal/videos/${encodeURIComponent(descriptor.id)}/generations/${encodeURIComponent(job)}/prepare`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },

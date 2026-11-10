@@ -95,7 +95,7 @@ export class ShortsService {
     const release = shortsRelease(this.chain.release, true);
     const [ipfs, visualModeration, policy] = await Promise.all([
       this.media.health(),
-      this.media.safety.health(),
+      this.media.moderationHealth(),
       this.chain.policy(),
     ]);
     const likeMode = shortsLikeMode(release, this.chain.artifact, policy);

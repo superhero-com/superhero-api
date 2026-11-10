@@ -20,6 +20,7 @@ export interface DeliveryStagingClaim {
   state: 'staging' | 'ready' | 'failed';
   fence: string;
   token?: string;
+  expiresAt?: number;
 }
 
 /** Internal coordinator metadata. No media bytes, public route or worker grants. */
@@ -48,6 +49,9 @@ export class ShortsDeliveryStagingService {
       state: row.state,
       fence: String(row.fence),
       token: row.lease_token ?? undefined,
+      expiresAt: row.lease_until
+        ? new Date(row.lease_until).getTime()
+        : undefined,
     };
   }
   async get(

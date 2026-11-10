@@ -305,3 +305,110 @@ test('inspection response deadline returns queued backpressure without approving
   await assert.rejects(safety.scan(Buffer.from('owned'), undefined, true), ShortsModerationUnavailableError);
   assert.equal(cancel, true);
 });
+
+test('remote rescans reject replayed decisions, modified evidence and a changed canonical pin', async t => {
+  const { ShortsMediaTransferClientService } = require('./shorts-media-transfer-client.service');
+  const { ShortsMediaService } = require('./shorts-media.service');
+  const { inspectionProof } = require('./shorts-transfer-protocol');
+  const { originalRecord } = require('./testing/original-record.cjs');
+  const env = { ...process.env }, nativeFetch = global.fetch;
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-rescan-'));
+  t.after(async () => {
+    process.env = env;
+    global.fetch = nativeFetch;
+    await rm(dir, { recursive: true, force: true });
+  });
+  delete process.env.SHORTS_MEDIA_TRANSFER_URL;
+  delete process.env.SHORTS_MEDIA_TRANSFER_RESCAN;
+  assert.equal(new ShortsMediaTransferClientService().rescanEnabled, false);
+  process.env.SHORTS_MEDIA_TRANSFER_RESCAN = 'true';
+  assert.throws(() => new ShortsMediaTransferClientService(), /transfer origin/);
+  const key = 'ab'.repeat(32), keyFile = join(dir, 'key');
+  await writeFile(keyFile, key, { mode: 0o600 });
+  Object.assign(process.env, { NODE_ENV: 'test', SHORTS_MEDIA_TRANSFER_URL: 'http://127.0.0.1:3336', SHORTS_MEDIA_TRANSFER_KEY_FILE: keyFile });
+  const scope = { network: 'ae_uat', contract: 'ct_fixture' }, sourceHash = 'a'.repeat(64);
+  const short = originalRecord(), sourceSha256 = short.original.sha256;
+  const labels = [{ topic: 'Nature', score: 0.8 }];
+  const evidence = { duration: 2, reason: 'Flagged sample', sampling: '2 fps', labels,
+    models: { safety: { repository: 'safety', revision: 'a'.repeat(40) }, topics: { repository: 'topics', revision: 'b'.repeat(40) } },
+    sourceSha256, evidenceHash: 'c'.repeat(64), policy: 'visual-review-v1', status: 'review', frameCount: 5, maxNsfwScore: 0.4,
+    humanReviewRequired: true, frames: [0, 0.5, 1, 1.5, 2].map(at => ({ at, nsfwScore: 0.4, sha256: 'd'.repeat(64), labels })) };
+  const client = new ShortsMediaTransferClientService(), signal = new AbortController().signal;
+  let reply, message;
+  global.fetch = async (url, args) => {
+    assert.equal(url, 'http://127.0.0.1:3336/internal/media/inspect');
+    assert.equal(args.headers.Authorization, 'Bearer ' + key);
+    message = JSON.parse(args.body);
+    return reply(args.body);
+  };
+  const signed = (raw, ev) => ({ version: 1, evidence: ev, proof: inspectionProof(key, raw, ev) });
+  const inspect = () => client.inspect(scope, sourceHash, short, 'pinned', signal);
+  let old;
+  reply = raw => Response.json(old = signed(raw, evidence));
+  assert.equal((await inspect()).status, 'review');
+  assert.equal(message.source, 'pinned');
+  assert.equal(message.staging, undefined);
+  reply = () => Response.json(old);
+  await assert.rejects(inspect(), /acknowledgement/);
+  reply = raw => Response.json({ ...signed(raw, evidence), evidence: { ...evidence, reason: 'changed' } });
+  await assert.rejects(inspect(), /acknowledgement/);
+  reply = raw => Response.json(signed(raw, { ...evidence, sourceSha256: '0'.repeat(64) }));
+  await assert.rejects(inspect(), /acknowledgement/);
+  reply = raw => Response.json(signed(raw, { ...evidence, status: 'no_flags' }));
+  await assert.rejects(inspect(), /safety decision/);
+  reply = raw => Response.json(signed(raw, { ...evidence, frames: evidence.frames.slice(0, 3), frameCount: 3 }));
+  await assert.rejects(inspect(), /temporal coverage/);
+  reply = raw => Response.json(signed(raw, { ...evidence, status: 'error' }));
+  const failed = await inspect();
+  assert.equal(failed.status, 'error');
+  assert.equal(failed.evidenceHash, undefined);
+  reply = () => Response.json({}, { status: 503 });
+  await assert.rejects(inspect(), { status: 503 });
+
+  reply = raw => Response.json(signed(raw, evidence));
+  const record = { ...short, publication: 'published', creator: 'ak_fixture' };
+  const chain = { release: scope, state: { contract: scope.contract, sourceHash } };
+  let releases = 0;
+  const media = new ShortsMediaService({}, undefined, { chain, shared: true }, {
+    acquire: async () => ({ signal, release: async () => { releases++; } }),
+  }, undefined, undefined, undefined, client);
+  const pins = [true, false];
+  media.pinned = async () => pins.shift();
+  await assert.rejects(media.rescan(record), /pin changed/);
+  assert.deepEqual(pins, []);
+  assert.equal(releases, 1);
+  await media.onModuleDestroy();
+});
+
+test('the production API obtains scanner readiness through the transfer service without holding the scanner token', async t => {
+  const { ShortsTestnetModule } = require('./shorts.module');
+  const { ShortsMediaTransferClientService } = require('./shorts-media-transfer-client.service');
+  const { ShortsMediaService } = require('./shorts-media.service');
+  const provider = Reflect.getMetadata('providers', ShortsTestnetModule).find(value => value.provide === ShortsSafetyService);
+  const saved = { ...process.env }, previousFetch = global.fetch;
+  const directory = await mkdtemp(join(tmpdir(), 'shorts-ready-'));
+  t.after(async () => { process.env = saved; global.fetch = previousFetch; await rm(directory, {recursive:true, force:true}); });
+  delete process.env.SHORTS_MODERATION_TOKEN_FILE;
+  delete process.env.SHORTS_MODERATION_URL;
+  const keyFile = join(directory, 'key');
+  await writeFile(keyFile, 'a'.repeat(64), {mode:0o600});
+  Object.assign(process.env, {NODE_ENV:'production',SHORTS_MEDIA_TRANSFER_URL:'https://transfer.example',SHORTS_MEDIA_TRANSFER_KEY_FILE:keyFile,SHORTS_MEDIA_TRANSFER_RESCAN:'true'});
+  const client = new ShortsMediaTransferClientService();
+  const scope = { network: 'ae_uat', contract: 'ct_fixture' }, sourceHash = 'b'.repeat(64);
+  const scanner = provider.useFactory(client);
+  assert.equal(scanner, null);
+  const media = new ShortsMediaService(scanner, undefined, { shared:true, chain:{release:scope,state:{contract:scope.contract,sourceHash}} }, undefined, undefined, undefined, undefined, client);
+  let ready = true;
+  global.fetch = async (url, args) => {
+    assert.equal(url, 'https://transfer.example/internal/media/inspection-health');
+    const request = JSON.parse(args.body);
+    assert.deepEqual(request.scope, scope); assert.equal(request.sourceHash, sourceHash);
+    return Response.json({version:1,ready});
+  };
+  assert.equal(await media.moderationHealth(),true); ready=false; assert.equal(await media.moderationHealth(),false);
+  global.fetch = async () => { throw new TypeError('fixture offline'); };
+  assert.equal(await media.moderationHealth(),false);
+  process.env.SHORTS_MEDIA_TRANSFER_RESCAN='false';
+  assert.throws(()=>provider.useFactory(new ShortsMediaTransferClientService()), /Moderation requires HTTPS|moderation service credential/);
+  await media.onModuleDestroy();
+});

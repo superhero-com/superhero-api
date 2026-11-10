@@ -130,3 +130,17 @@ It grants no unconditional key deletion and excludes the current version and
 `DeleteObject` to bypass an authorization failure. Production cleanup still
 requires qualification of that provider's permissions, retention controls and
 clock behavior; a local compatibility test does not authorize enabling it.
+
+## Delegated integrity checks
+
+Storage reconciliation, duplicate cleanup and retired-input cleanup can ask
+the Shorts media service to authenticate immutable object versions. Configure
+`SHORTS_VERSION_READBACK_URL` with the private HTTPS origin and
+`SHORTS_VERSION_READBACK_KEY_FILE` with the absolute path to the dedicated
+version verification credential in each participating maintenance process.
+The media service must use the same release and storage identity, its scoped
+version reader and the matching credential. The coordinator verifies a new
+signed receipt for each check and retains its own retention, journal, provider
+and dispatch checks before removal. An unavailable verifier stops the operation.
+To restore local verification, remove both settings and restart the process
+with its existing storage read access.

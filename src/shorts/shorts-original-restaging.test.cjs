@@ -184,3 +184,47 @@ test('pinned-original restaging reserves before writes, resumes partial transfer
     for (const sql of ['DELETE FROM shorts_delivery_staging','TRUNCATE shorts_delivery_staging']) await assert.rejects(owner.query(sql), { code: 'SH409' });
   });
 });
+
+test('remote restaging authenticates a maximum-sized plan, its caption bytes and the exact leased destinations', async t => {
+  const { ShortsMediaTransferClientService } = require('./shorts-media-transfer-client.service');
+  const { restagingProof, restagingTargetHash } = require('./shorts-transfer-protocol');
+  const { originalRecord } = require('./testing/original-record.cjs');
+  const env = { ...process.env }, oldFetch = global.fetch;
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-staging-control-'));
+  t.after(async () => { process.env = env; global.fetch = oldFetch; await rm(dir, {recursive:true,force:true}); });
+  delete process.env.SHORTS_MEDIA_TRANSFER_RESTAGING;
+  assert.equal(new ShortsMediaTransferClientService().restagingEnabled, false);
+  const key = randomBytes(32).toString('hex'), keyFile = join(dir, 'key');
+  await writeFile(keyFile, key, {mode:0o600});
+  Object.assign(process.env, {NODE_ENV:'test',SHORTS_MEDIA_TRANSFER_RESTAGING:'true',SHORTS_MEDIA_TRANSFER_URL:'http://127.0.0.1:3336',SHORTS_MEDIA_TRANSFER_KEY_FILE:keyFile});
+  const client=new ShortsMediaTransferClientService(), short=originalRecord(), scope={network:'ae_uat',contract:'ct_test'};
+  short.bytes=100000000;
+  const caption=Buffer.alloc(8192,65); short.captions=true;
+  short.files.push({name:'captions.vtt',bytes:caption.length,sha256:hash(caption)});
+  const hashes=Array.from({length:96},(_,i)=>hash(String(i)));
+  const plan={hashes,captions:caption.toString('base64')},job='replacement',source=hash('scope'),signal=new AbortController().signal;
+  const refs=hashes.map((sha256,index)=>({key:'prefix/'+job+'/restage-part/'+index+'/key/'+sha256,keyId:'key',sha256,bytes:Math.min(1048576,short.bytes-index*1048576)}));
+  const manifest=JSON.stringify({parts:refs.map((object,index)=>({index,object}))});
+  const claim={jobId:job,shortId:short.id,creator:'ak_test',state:'staging',fence:'3',token:randomUUID(),expiresAt:Date.now()+80000,manifest,input:{manifest:{sha256:hash(manifest)}}};
+  let handler, saved, count=0;
+  global.fetch=async(url,init)=>{
+    count++;
+    const req=JSON.parse(init.body),phase=new URL(url).pathname.split('-').at(-1);
+    assert.ok(Buffer.byteLength(init.body)<32768); assert.ok(!init.body.includes(claim.token));
+    assert.equal(req.descriptor.cid,short.cid);assert.equal(req.sourceHash,source);
+    const sign=result=>({version:1,result,proof:restagingProof(key,init.body,phase,result)});
+    if(phase==='write'){assert.equal(req.expires,claim.expiresAt);assert.equal(req.grant.leaseHash,hash(claim.token));assert.equal(req.grant.fence,claim.fence);}
+    return Response.json(handler(req,sign));
+  };
+  const planRequest=()=>client.planRestaging(scope,source,short,job,signal);
+  const write=()=>client.writeRestaging(scope,source,short,claim,refs,signal);
+  handler=(_,sign)=>saved=sign(plan);assert.deepEqual(await planRequest(),{hashes,captions:caption.toString()});
+  handler=()=>saved;await assert.rejects(planRequest(),/acknowledgement mismatch/);
+  handler=(_,sign)=>sign({...plan,captions:Buffer.alloc(8192,66).toString('base64')});await assert.rejects(planRequest(),/captions differ/);
+  handler=(_,sign)=>sign({...plan,hashes:hashes.slice(1)});await assert.rejects(planRequest(),/Invalid original restaging plan/);
+  const ack={targetHash:restagingTargetHash(refs),parts:96};
+  handler=(_,sign)=>saved=sign(ack);await write();
+  handler=()=>saved;await assert.rejects(write(),/acknowledgement mismatch/);
+  handler=(_,sign)=>sign({...ack,targetHash:hash('other destination')});await assert.rejects(write(),/differ from reservation/);
+  claim.expiresAt=Date.now()-50;const previous=count;await assert.rejects(write(),/expired/);assert.equal(count,previous);
+});

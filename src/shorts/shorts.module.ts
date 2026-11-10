@@ -19,6 +19,8 @@ import { ShortsCoreModule } from './shorts-core.module';
 import { ShortsController } from './shorts.controller';
 import { ShortsService } from './shorts.service';
 import { ShortsHostingService } from './shorts-hosting.service';
+import { ShortsMediaTransferClientService } from './shorts-media-transfer-client.service';
+import { ShortsHlsReadbackService } from './shorts-hls-readback.service';
 import { ShortsMediaService } from './shorts-media.service';
 import { ShortsOriginalRestagingService } from './shorts-original-restaging.service';
 import { ShortsDeliveryPreparationService } from './shorts-delivery-preparation.service';
@@ -71,13 +73,20 @@ import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service'
     ShortsPlaybackEvidenceService,
     ShortsMeasurementMonitorService,
     ShortsStreamingService,
-    ShortsSafetyService,
+    {
+      provide: ShortsSafetyService,
+      inject: [ShortsMediaTransferClientService],
+      useFactory: (client: ShortsMediaTransferClientService) =>
+        client.rescanEnabled ? null : new ShortsSafetyService(),
+    },
     { provide: ShortsAnalyticsService, useClass: LocalShortsAnalyticsService },
     ShortsLabelsService,
     ShortsAuthService,
     ShortsAuthGuard,
     ShortsUploadInterceptor,
     ShortsMediaService,
+    ShortsHlsReadbackService,
+    ShortsMediaTransferClientService,
     ShortsService,
     ShortsHostingService,
   ],

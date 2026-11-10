@@ -300,3 +300,35 @@ test('offline Kubo reproduces all three CIDs and keeps durable assets readable a
       }
     }
   });
+
+test('delegated review previews authenticate the exact request, node, expiry and file identity', async t => {
+  const { randomBytes } = require('node:crypto');
+  const { ShortsMediaTransferClientService } = require('./shorts-media-transfer-client.service');
+  const { previewProof } = require('./shorts-transfer-protocol');
+  const { originalRecord } = require('./testing/original-record.cjs');
+  const env = { ...process.env }, oldFetch=global.fetch, dir=await mkdtemp(join(tmpdir(),'review-grant-'));
+  t.after(async()=>{global.fetch=oldFetch;process.env=env;await rm(dir,{recursive:true,force:true})});
+  delete process.env.SHORTS_MEDIA_TRANSFER_URL; delete process.env.SHORTS_MEDIA_TRANSFER_PREVIEW;
+  assert.equal(new ShortsMediaTransferClientService().previewEnabled,false);
+  const key=randomBytes(32).toString('hex'),keyFile=join(dir,'key');
+  await writeFile(keyFile,key,{mode:0o600});
+  Object.assign(process.env,{NODE_ENV:'test',SHORTS_MEDIA_TRANSFER_URL:'http://127.0.0.1:3336',SHORTS_MEDIA_TRANSFER_PREVIEW:'true',SHORTS_MEDIA_TRANSFER_KEY_FILE:keyFile});
+  const client=new ShortsMediaTransferClientService(),short=originalRecord(),file=short.files.find(f=>f.name==='video.mp4');
+  short.privateMedia={fence:short.derivatives.generation.fence,source:{processingProfile:short.derivatives.profile,bytes:short.bytes,sha256:short.original.sha256},files:{'video.mp4':{key:'private',keyId:'active',bytes:file.bytes,sha256:file.sha256},'poster.jpg':{key:'unused'}}};
+  const receipt={node:'media-1',ticket:'c'.repeat(64),bytes:file.bytes,sha256:file.sha256,expires:Date.now()+9000};
+  const invoke=()=>client.preparePreview({network:'ae_uat',contract:'ct_test'},'d'.repeat(64),short,new AbortController().signal);
+  let reply,last,request;
+  global.fetch=async(url,opts)=>{
+    request=JSON.parse(opts.body);
+    assert.equal(url,'http://127.0.0.1:3336/internal/media/review-preview');assert.equal(opts.redirect,'error');
+    assert.equal(opts.headers.Authorization,'Bearer '+key);assert.equal(opts.body.includes('unused'),false);
+    return Response.json(reply(value=>({version:1,receipt:value,proof:previewProof(key,opts.body,value)})));
+  };
+  reply=sign=>last=sign(receipt);assert.equal(await invoke(),'/_shorts_review_preview/media-1/'+receipt.ticket);
+  assert.equal(request.source,'private');assert.deepEqual(Object.keys(request.staging.files),['video.mp4']);
+  reply=()=>last;await assert.rejects(invoke(),/acknowledgement/);
+  for(const fields of [{ticket:'../video.mp4'},{node:'other/../node'},{expires:Date.now()-1},{bytes:file.bytes+1},{sha256:'b'.repeat(64)}]){
+    reply=sign=>sign({...receipt,...fields});await assert.rejects(invoke(),/acknowledgement/);
+  }
+  short.publication='withdrawn';delete short.privateMedia;reply=sign=>sign(receipt);await invoke();assert.equal(request.source,'pinned');assert.equal(request.staging,undefined);
+});

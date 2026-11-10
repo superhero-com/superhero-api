@@ -39,6 +39,7 @@ const MAX_FILE_BYTES = 100_000_000;
 const MAGIC = Buffer.from('SHPRIV01');
 const DIRECT_MAGIC = Buffer.from('SHPRIV02');
 const OVERHEAD = MAGIC.length + 12 + 16;
+export { OVERHEAD as PRIVATE_OBJECT_OVERHEAD };
 const hash = (data: Buffer | string) =>
   createHash('sha256').update(data).digest('hex');
 
@@ -60,6 +61,17 @@ export interface PrivateBucketConfig {
     secretAccessKey: string;
     sessionToken?: string;
   };
+}
+export function privateStorageIdentity(storage: PrivateBucketConfig) {
+  return hash(
+    JSON.stringify([
+      storage.endpoint,
+      storage.region,
+      storage.bucket,
+      storage.prefix,
+      storage.forcePathStyle,
+    ]),
+  );
 }
 export interface PrivateObjectConfig extends PrivateBucketConfig {
   activeKeyId: string;

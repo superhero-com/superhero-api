@@ -1,3 +1,4 @@
+import { ShortsVersionReadbackService } from './shorts-version-readback.service';
 import {
   BadRequestException,
   ConflictException,
@@ -26,7 +27,11 @@ export class ShortsPrivateVersionCleanupService implements OnModuleDestroy {
     @Inject(ShortsDatabaseService) private readonly db: DataSource,
     @Inject(SHORTS_STORAGE_RECONCILIATION_CONFIG)
     private readonly config: StorageReconciliationConfig,
-    private readonly objects: ShortsPrivateObjectsService,
+    @Inject(ShortsVersionReadbackService)
+    private readonly versions: Pick<
+      ShortsPrivateObjectsService,
+      'verifyStoredVersion' | 'verifyVersionCopies'
+    >,
     private readonly storage: ShortsPrivateVersionStorageService,
     private readonly inspection: ShortsStorageReconciliationService,
     private readonly retention: ShortsRetentionService,
@@ -161,7 +166,7 @@ export class ShortsPrivateVersionCleanupService implements OnModuleDestroy {
       .at(-1);
     if (!attempt) return saved;
     const op = saved.operation;
-    await this.objects.verifyStoredVersion(
+    await this.versions.verifyStoredVersion(
       this.config.scope,
       this.ref(op),
       attempt.retained_version,
@@ -250,7 +255,7 @@ export class ShortsPrivateVersionCleanupService implements OnModuleDestroy {
         Number(op.bytes) !== proof.plaintextBytes
       )
         throw new ConflictException('Cleanup content changed');
-      const copies = await this.objects.verifyVersionCopies(
+      const copies = await this.versions.verifyVersionCopies(
         this.config.scope,
         this.ref(op),
         op.candidate_version,

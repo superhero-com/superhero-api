@@ -96,3 +96,59 @@ test('original HLS outbox settles only after a bounded, source-matched durable a
   value = { ...good, extra: 'x'.repeat(147456) }; assert.equal(await retry(), 0); assert.equal(saved, 0);
   value = good; assert.equal(await retry(), 1); assert.equal(saved, 1);
 });
+
+test('prepared verification requires a new receipt for the exact source and file index, bracketed by recursive pin checks', async t => {
+  const { createHmac } = require('node:crypto');
+  const { ShortsMediaService } = require('./shorts-media.service');
+  const { validateSourcePackage } = require('./hls-protocol/hls-package');
+  const sample = require('./testing/hls-v3.json');
+  const descriptor = sample.descriptor;
+  const record = { ...descriptor, creator: 'fixture' };
+  const prepared = validateSourcePackage(descriptor, sample.package);
+  const env = { ...process.env }, originalFetch = global.fetch;
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-readback-')), keyFile = join(dir, 'key');
+  t.after(async () => { process.env = env; global.fetch = originalFetch; await rm(dir, { recursive: true, force: true }); });
+  delete process.env.SHORTS_STREAM_VERIFY_HLS;
+  const local = new ShortsMediaService();
+  local.pinned = async () => true;
+  let localReads = 0;
+  local.verifyPinnedBytes = async () => { localReads++; };
+  await local.verifyPreparedDelivery(record, descriptor, prepared);
+  assert.equal(localReads, prepared.files.length);
+
+  const key = '1a'.repeat(32);
+  await writeFile(keyFile, key, { mode: 0o600 });
+  Object.assign(process.env, { NODE_ENV: 'test', SHORTS_STREAM_VERIFY_HLS: 'true',
+    SHORTS_STREAM_INTERNAL_URL: 'http://127.0.0.1:3337', SHORTS_STREAM_KEY_FILE: keyFile });
+  let alter = x => x, checks = [], transport = 0;
+  global.fetch = async (url, init) => {
+    assert.equal(url, 'http://127.0.0.1:3337/internal/videos/' + descriptor.id + '/verify-prepared');
+    assert.equal(init.redirect, 'error');
+    assert.equal(init.headers.Authorization, 'Bearer ' + key);
+    const q = JSON.parse(init.body);
+    assert.equal(q.source, sample.sourceKey); assert.equal(q.generation, descriptor.derivatives.generation.job);
+    const proof = createHmac('sha256', Buffer.from(key, 'hex'))
+      .update(JSON.stringify(['shorts-hls-readback-v1', q.challenge, q.source, prepared])).digest('hex');
+    transport++;
+    return Response.json(alter({ version: 1, challenge: q.challenge, source: q.source, cid: q.cid, proof }));
+  };
+  const remote = new ShortsMediaService();
+  remote.pinned = async cid => { checks.push(cid); return true; };
+  remote.verifyPinnedBytes = async () => assert.fail('Unexpected local readback');
+  let previous;
+  alter = x => (previous = x);
+  assert.deepEqual(await remote.verifyPreparedDelivery(record, descriptor, prepared), prepared);
+  assert.deepEqual(checks, [prepared.cid, descriptor.cid, descriptor.derivatives.assetsCid, prepared.cid]);
+  for (const mutation of [() => previous, x => ({ ...x, source: '0'.repeat(64) }),
+    x => ({ ...x, cid: descriptor.cid }), x => ({ ...x, proof: '0'.repeat(64) }),
+    x => ({ ...x, proof: createHmac('sha256', Buffer.from(key, 'hex'))
+      .update(JSON.stringify(['shorts-hls-readback-v1', x.challenge, x.source, { ...prepared, files: prepared.files.slice(1) }]))
+      .digest('hex') })]) {
+    alter = mutation; checks = [];
+    await assert.rejects(remote.verifyPreparedDelivery(record, descriptor, prepared), /receipt mismatch/);
+    assert.deepEqual(checks, [prepared.cid]);
+  }
+  const before = transport; remote.pinned = async () => false;
+  await assert.rejects(remote.verifyPreparedDelivery(record, descriptor, prepared), /not recursively pinned/);
+  assert.equal(transport, before);
+});

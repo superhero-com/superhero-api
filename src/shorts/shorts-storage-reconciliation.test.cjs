@@ -6,6 +6,7 @@ const {
   ShortsStorageInventory,
   ShortsStorageReferences,
 } = require('./testing/schema-migrations.cjs');
+const { originalRecord } = require('./testing/original-record.cjs');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
@@ -52,7 +53,7 @@ test('manifest-only expansion validates ownership and parts without fetching vid
   } finally {validate.onModuleDestroy();}
 });
 
-test('reference reconciliation preserves encrypted legacy parts, shared references and holds across resumes',{
+test('reference reconciliation preserves encrypted upload parts, shared references and holds across resumes',{
   skip:!process.env.SHORTS_TEST_PG_URL||!process.env.SHORTS_TEST_S3_ENDPOINT,timeout:120000,
 },async t=>{
   const url=new URL(process.env.SHORTS_TEST_PG_URL),endpoint=new URL(process.env.SHORTS_TEST_S3_ENDPOINT);
@@ -95,9 +96,13 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
   const args=[scope.network,scope.contract];
   await raw.send(new CreateBucketCommand({Bucket:storage.bucket}));bucketCreated=true;
   await raw.send(new PutBucketVersioningCommand({Bucket:storage.bucket,VersioningConfiguration:{Status:'Enabled'}}));
-  const part=await objects.put(scope,'a-legacy','part/0',Buffer.from('source bytes'));
-  const manifest=await objects.put(scope,'a-legacy','source-manifest',Buffer.from(JSON.stringify({version:1,id:'a-legacy',creator:'ak_creator',bytes:part.bytes,sha256:part.sha256,parts:[{index:0,object:part}]})));
-  const input={objectKey:manifest.key,manifest,sha256:part.sha256,bytes:part.bytes};
+  const part=await objects.put(scope,'a-upload','part/0',Buffer.from('source bytes'));
+  async function source(id) {
+    const document = {version:1,id,creator:'ak_creator',bytes:part.bytes,sha256:part.sha256,parts:[{index:0,object:part}]};
+    const manifest = await objects.put(scope,id,'source-manifest',Buffer.from(JSON.stringify(document)));
+    return {processingProfile:'original-h264-v1',objectKey:manifest.key,manifest,sha256:part.sha256,bytes:part.bytes};
+  }
+  const input=await source('a-upload'), manifest=input.manifest, preparedSource=await source('b-ready');
   const rendered=await objects.put(scope,'b-ready','attempt/1/video',Buffer.from('prepared'));
   const deleted=await objects.put(scope,'b-ready','attempt/1/deleted',Buffer.from('gone'));
   await raw.send(new DeleteObjectCommand({Bucket:storage.bucket,Key:deleted.key}));
@@ -106,9 +111,16 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
   const missing=ref('b-ready','attempt/1/missing');
   const heldOrphan=await objects.put(scope,'c-held','attempt/1/orphan',Buffer.from('orphan but held'));
   const orphan=await objects.put(scope,'d-orphan','attempt/1/orphan',Buffer.from('unknown ownership'));
-  await owner.query(`INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,'a-legacy','ak_creator',$3)`,[...args,JSON.stringify(input)]);
+  await owner.query(`INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,'a-upload','ak_creator',$3)`,[...args,JSON.stringify(input)]);
+  const record=originalRecord('b-ready',{creator:'ak_creator',publication:'withdrawn',reports:1,bytes:part.bytes});
+  record.original.sha256=part.sha256;
+  const files={'video.mp4':rendered,'poster.jpg':deleted,'video-rescue.mp4':mismatch,'manifest.json':missing};
+  for(const [name,object] of Object.entries(files)) {
+    Object.assign(record.files.find(file=>file.name===name),{bytes:object.bytes,sha256:object.sha256});
+  }
+  record.privateMedia={source:preparedSource,fence:record.derivatives.generation.fence,files};
   await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,'b-ready','ak_creator',0,$3)`,
-    [...args,JSON.stringify({id:'b-ready',creator:'ak_creator',publication:'withdrawn',reports:1,privateMedia:{files:{shared:part,rendered,deleted,mismatch,missing}}})]);
+    [...args,JSON.stringify(record)]);
   const holds=new ShortsRetentionService(owner,config);
   await holds.hold({id:randomUUID(),resourceId:'c-held',reason:'recovery',reference:'case-held'});
   const inventory=new ShortsStorageInventoryService(owner,config,list),inventoryId=randomUUID();await inventory.start(inventoryId);
@@ -132,15 +144,16 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
       const first=await s.step(runId);assert.equal(first.roots,'1');assert.equal(first.references,'2');assert.equal(first.referenceTraversalComplete,false);
       assert.deepEqual(reads,[manifest.key]);await assert.rejects(s.references(runId),{status:409});
       assert.equal((await service().step(runId)).roots,'2');assert.equal((await service().step(runId)).referenceTraversalComplete,true);
+      assert.deepEqual(reads,[manifest.key,preparedSource.manifest.key]);
       const previous=reads.length;await s.step(runId);assert.equal(reads.length,previous);
     }finally{objects.get=original;}
-    const r=await s.status(runId);assert.equal(r.references,'7');assert.equal(r.roots,'3');assert.equal(r.deletionEnabled,false);assert.equal(r.consistentSnapshot,false);
+    const r=await s.status(runId);assert.equal(r.references,'8');assert.equal(r.roots,'3');assert.equal(r.deletionEnabled,false);assert.equal(r.consistentSnapshot,false);
     await assert.rejects(owner.undoLastMigration({transaction:'all'}),/Preserve storage reference history/);
   });
   await t.test('both directions report shared, held, absent, deleted and size-mismatched observations',async()=>{
     let page=await s.references(runId,'',2),all=[...page.items];
     while(page.next){page=await s.references(runId,page.next,2);all.push(...page.items);}
-    assert.equal(all.length,7);assert.equal(all.filter(r=>r.key===part.key).length,2);
+    assert.equal(all.length,8);assert.equal(all.filter(r=>r.key===part.key).length,2);
     for(const [r,state] of [[part,'observed'],[missing,'not-observed'],[deleted,'delete-marker'],[mismatch,'size-mismatch']])assert.equal(all.find(x=>x.key===r.key).availability,state);
     page=await s.objects(runId,'',2);const physical=[...page.items];while(page.next){page=await s.objects(runId,page.next,2);physical.push(...page.items);}
     assert.equal(physical.find(x=>x.key===part.key).references,'2');assert.equal(physical.find(x=>x.key===heldOrphan.key).classification,'held');
@@ -174,10 +187,14 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
   await t.test('manifest failure, changed live holds and conflicting roots cannot silently advance',async()=>{
     const id=randomUUID();await s.start(id,inventoryId);
     await assert.rejects(service(db,{manifestParts:async()=>{throw new Error('missing manifest');}}).step(id),/missing manifest/);assert.equal((await s.status(id)).roots,'0');
-    const reader={manifestParts:async(...p)=>{const result=await sources.manifestParts(...p);await holds.hold({id:randomUUID(),resourceId:'a-legacy',reason:'safety',reference:'case-new'});return result;}};
+    const reader={manifestParts:async(...p)=>{const result=await sources.manifestParts(...p);await holds.hold({id:randomUUID(),resourceId:'a-upload',reason:'safety',reference:'case-new'});return result;}};
     await assert.rejects(service(db,reader).step(id),{status:409});assert.equal((await s.status(id)).roots,'0');await s.step(id);
     const previous=(await owner.query("SELECT body FROM shorts_content WHERE id='b-ready'"))[0].body;
-    await owner.query("UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,shared,bytes}','13') WHERE id='b-ready'");
+    const conflict=structuredClone(previous);
+    const inconsistent={...part,bytes:part.bytes+1};
+    conflict.privateMedia.files['poster.jpg']=inconsistent;
+    Object.assign(conflict.files.find(file=>file.name==='poster.jpg'),{bytes:inconsistent.bytes,sha256:part.sha256});
+    await owner.query("UPDATE shorts_content SET body=$1 WHERE id='b-ready'",[conflict]);
     await assert.rejects(s.step(id),{status:409});assert.equal((await s.status(id)).roots,'1');
     await owner.query("UPDATE shorts_content SET body=$1 WHERE id='b-ready'",[previous]);await s.step(id);
   });
@@ -193,8 +210,69 @@ test('reference reconciliation preserves encrypted legacy parts, shared referenc
     for(const change of [{SHORTS_OPERATOR_KEY_FILE:'/unneeded'},{AWS_ACCESS_KEY_ID:'ambient'},{SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE:undefined},{ENABLE_SHORTS:'false'},{AE_NETWORK_ID:'ae_mainnet'}])await assert.rejects(storageReconciliationConfig({...env,...change}));
     const run=async(action,input)=>{await writeFile(request,JSON.stringify(input));const r=await promisify(execFile)(process.execPath,['dist/shorts/storage-reconciliation-main.js',action,request],{env,timeout:15000});assert.equal(r.stderr,'');return JSON.parse(r.stdout);};
     const id=randomUUID();assert.equal((await run('start',{id,inventoryId})).roots,'0');assert.equal((await run('scan',{id,pages:1})).roots,'1');
-    assert.equal((await run('scan',{id})).referenceTraversalComplete,true);assert.equal((await run('status',{id})).references,'7');
+    assert.equal((await run('scan',{id})).referenceTraversalComplete,true);assert.equal((await run('status',{id})).references,'8');
     assert.equal((await run('objects',{id,limit:1})).items.length,1);assert.equal((await run('references',{id,limit:1})).items.length,1);
     await assert.rejects(run('scan',{id,pages:101}));await assert.rejects(run('objects',{id,delete:true}));
   });
+});
+
+test('delegated version verification binds each receipt to its challenge and version before cleanup', async t => {
+  const { randomBytes } = require('node:crypto');
+  const { ShortsVersionReadbackService } = require('./shorts-version-readback.service');
+  const { versionReadbackProof } = require('./shorts-transfer-protocol');
+  const dir = await mkdtemp(join(tmpdir(), 'shorts-version-proof-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const vars = ['SHORTS_VERSION_READBACK_URL', 'SHORTS_VERSION_READBACK_KEY_FILE'];
+  const original = vars.map(name => process.env[name]);
+  const nativeFetch = global.fetch;
+  t.after(() => {
+    global.fetch = nativeFetch;
+    vars.forEach((name, i) => {
+      if (original[i] === undefined) delete process.env[name];
+      else process.env[name] = original[i];
+    });
+  });
+  vars.forEach(name => delete process.env[name]);
+  const object = ref('clip', 'part/0');
+  const deployment = { scope, sourceHash, storageId: digest(['bucket']) };
+  const stored = { key: object.key, plaintextBytes: object.bytes, storedBytes: object.bytes + 36,
+    sha256: object.sha256, candidateVersion: 'before', retainedVersion: 'current' };
+  let localReads = 0;
+  const objects = {
+    validateReference(s, r) { assert.deepEqual(s, scope); assert.equal(r, object); },
+    async verifyVersionCopies() { localReads++; return stored; },
+    async verifyStoredVersion() { localReads++; },
+  };
+  const local = new ShortsVersionReadbackService(deployment, objects);
+  assert.deepEqual(await local.verifyVersionCopies(scope, object, 'before'), stored);
+  await local.verifyStoredVersion(scope, object, 'current');
+  const key = randomBytes(32).toString('hex');
+  process.env.SHORTS_VERSION_READBACK_KEY_FILE = join(dir, 'version-token');
+  assert.throws(() => new ShortsVersionReadbackService(deployment, objects));
+  await writeFile(process.env.SHORTS_VERSION_READBACK_KEY_FILE, key, { mode: 0o600 });
+  process.env.SHORTS_VERSION_READBACK_URL = 'https://versions.test';
+  const remote = new ShortsVersionReadbackService(deployment, objects);
+  let captured;
+  const answer = (body, receipt) => ({ version: 1, receipt, proof: versionReadbackProof(key, body, receipt) });
+  global.fetch = async (url, options) => {
+    assert.equal(url, 'https://versions.test/internal/media/verify-versions');
+    assert.equal(options.headers.Authorization, 'Bearer ' + key);
+    assert.equal(options.redirect, 'error');
+    const req = JSON.parse(options.body);
+    assert.deepEqual(req.object, object);
+    assert.equal(req.storageId, deployment.storageId);
+    captured = answer(options.body, stored);
+    return Response.json(captured);
+  };
+  assert.deepEqual(await remote.verifyVersionCopies(scope, object, 'before'), stored);
+  global.fetch = async () => Response.json(captured);
+  await assert.rejects(remote.verifyVersionCopies(scope, object, 'before'), /could not be verified/);
+  for (const change of [{ retainedVersion: 'before' }, { candidateVersion: 'other' },
+    { sha256: '0'.repeat(64) }, { key: 'other' }, { storedBytes: 1 }]) {
+    global.fetch = async (_, options) => Response.json(answer(options.body, { ...stored, ...change }));
+    await assert.rejects(remote.verifyVersionCopies(scope, object, 'before'), /could not be verified/);
+  }
+  global.fetch = async () => new Response(null, { status: 503 });
+  await assert.rejects(remote.verifyStoredVersion(scope, object, 'current'), /could not be verified/);
+  assert.equal(localReads, 2);
 });

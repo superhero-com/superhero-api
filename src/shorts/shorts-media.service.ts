@@ -1,12 +1,18 @@
+import type { ShortsScope } from './shorts-metadata.service';
+import { pinPackageCid } from './shorts-transfer-protocol';
 import {
   SHORTS_IPFS_IMPORT_OPTIONS,
   SHORTS_IPFS_IMPORT_QUERY,
 } from './shorts-ipfs-import-profile';
-import { shortsStorageScope } from './shorts-runtime-scope';
+import {
+  shortsStorageScope,
+  shortsStorageSourceHash,
+} from './shorts-runtime-scope';
 import { reclamationStorage } from './shorts-reclamation-storage';
 import type { InputReclamationPermit } from './shorts-input-reclamation-permits.service';
 import {
   Injectable,
+  Inject,
   OnModuleInit,
   OnModuleDestroy,
   Optional,
@@ -26,6 +32,13 @@ import {
   ScratchCapacityError,
   ShortsScratchService,
 } from './shorts-scratch.service';
+import { ShortsMediaTransferClientService } from './shorts-media-transfer-client.service';
+import type {
+  TransferGrant,
+  TransferPurpose,
+  StoragePinReceipt,
+} from './shorts-transfer-protocol';
+import { ShortsHlsReadbackService } from './shorts-hls-readback.service';
 import { ShortRecord } from './shorts.types';
 import {
   ShortsSafetyService,
@@ -68,12 +81,16 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     .trim()
     .replace(/\/$/, '');
   constructor(
-    readonly safety: ShortsSafetyService,
+    @Inject(ShortsSafetyService) readonly safety: ShortsSafetyService | null,
     @Optional() private readonly privateMedia?: ShortsPrivateMediaService,
     @Optional() private readonly records?: ShortsRecordsService,
     @Optional() private readonly admission?: ShortsMediaAdmissionService,
     @Optional() private readonly scratch?: ShortsScratchService,
     @Optional() private readonly pinTransfers?: ShortsPinTransfersService,
+    @Optional()
+    private readonly hlsReadback: ShortsHlsReadbackService = new ShortsHlsReadbackService(),
+    @Optional()
+    private readonly remoteMedia: ShortsMediaTransferClientService = new ShortsMediaTransferClientService(),
   ) {
     const flag = process.env.SHORTS_IPFS_EXPIRING_WRITES ?? 'false';
     if (!['true', 'false'].includes(flag))
@@ -158,6 +175,8 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     // Validate storage configuration before accepting uploads.
     await this.ipfsHeaders();
+    if (this.remoteMedia.enabled && !this.records?.shared)
+      throw new Error('Remote media transfers require shared Shorts metadata');
     if (this.expiringWrites && (!this.records?.shared || !this.pinTransfers))
       throw new Error(
         'Expiring IPFS writes require shared pin transfer metadata',
@@ -310,6 +329,51 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     purpose: PinPurpose,
     signal: AbortSignal,
   ) {
+    return this.withPinIntent(
+      short,
+      cid,
+      purpose,
+      signal,
+      async (grant, active, reject) => {
+        const query = new URLSearchParams({
+          expected: cid,
+          epoch: grant.epoch,
+          operation: grant.operation,
+          expires: String(grant.expires),
+          'wrap-with-directory': String(directory),
+          ...SHORTS_IPFS_IMPORT_OPTIONS,
+          pin: 'true',
+          'only-hash': 'false',
+        });
+        const pinned = await this.ipfsFetch(`shorts/add?${query}`, {
+          method: 'POST',
+          body: form,
+          signal: active,
+        });
+        if (pinned.status !== 200) {
+          discardShortsResponse(pinned);
+          if ([400, 401, 403, 409, 413, 415, 422, 429].includes(pinned.status))
+            reject();
+          if ([429, 503].includes(pinned.status))
+            throw new ShortsMediaUnavailableError();
+          throw new Error('Expiring IPFS import refused');
+        }
+        return readShortsJson(pinned, 2048, active);
+      },
+    );
+  }
+
+  private async withPinIntent(
+    short: ShortRecord,
+    cid: string,
+    purpose: PinPurpose,
+    signal: AbortSignal,
+    submit: (
+      grant: Extract<TransferGrant, { mode: 'expiring' }>,
+      active: AbortSignal,
+      reject: () => void,
+    ) => Promise<StoragePinReceipt | null>,
+  ) {
     if (!short || !this.records?.shared || !this.pinTransfers)
       throw new Error('Pin transfer metadata unavailable');
     signal.throwIfAborted();
@@ -374,32 +438,20 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
         AbortSignal.timeout(Math.max(1, intent.expires - Date.now())),
       ]);
       active.throwIfAborted();
-      const query = new URLSearchParams({
-        expected: cid,
-        epoch: caps.nodeEpoch,
-        operation: intent.operationId,
-        expires: String(intent.expires),
-        'wrap-with-directory': String(directory),
-        ...SHORTS_IPFS_IMPORT_OPTIONS,
-        pin: 'true',
-        'only-hash': 'false',
-      });
       sent = true;
-      const pinned = await this.ipfsFetch(`shorts/add?${query}`, {
-        method: 'POST',
-        body: form,
-        signal: active,
-      });
-      if (pinned.status !== 200) {
-        discardShortsResponse(pinned);
-        rejected = [400, 401, 403, 409, 413, 415, 422, 429].includes(
-          pinned.status,
-        );
-        if ([429, 503].includes(pinned.status))
-          throw new ShortsMediaUnavailableError();
-        throw new Error('Expiring IPFS import refused');
-      }
-      const receipt = await readShortsJson(pinned, 2048, active);
+      const receipt = await submit(
+        {
+          mode: 'expiring',
+          operation: intent.operationId,
+          epoch: caps.nodeEpoch,
+          peerId: caps.peerId,
+          expires: intent.expires,
+        },
+        active,
+        () => {
+          rejected = true;
+        },
+      );
       if (
         receipt?.version !== 1 ||
         receipt.cid !== cid ||
@@ -447,6 +499,36 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
       // Consume through verification without retaining media in memory.
       void chunk;
     }
+  }
+  get remoteRestagingEnabled() {
+    return this.remoteMedia.restagingEnabled;
+  }
+  async withRestagingTransfer<T>(
+    scope: ShortsScope,
+    short: ShortRecord,
+    parent: AbortSignal,
+    work: (
+      client: ShortsMediaTransferClientService,
+      sourceHash: string,
+      signal: AbortSignal,
+    ) => Promise<T>,
+  ) {
+    const release = this.scope();
+    if (
+      !this.remoteMedia.restagingEnabled ||
+      release.network !== scope.network ||
+      release.contract !== scope.contract
+    )
+      throw new Error('Original restaging deployment mismatch');
+    return this.withCapacity(short, parent, async (signal) => {
+      if (!(await this.pinned(short.cid, signal)))
+        throw new Error('Canonical original is not recursively pinned');
+      return work(
+        this.remoteMedia,
+        shortsStorageSourceHash(this.records!.chain),
+        signal,
+      );
+    });
   }
   /** Download only the canonical original; callers receive a verified owned file. */
   async withPinnedOriginal<T>(
@@ -537,8 +619,12 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
       async (signal) => {
         if (!(await this.pinned(prepared.cid, signal)))
           throw new Error('Prepared HLS is not recursively pinned');
-        for (const file of prepared.files)
-          await this.verifyPinnedBytes(prepared.cid, file.name, file, signal);
+        if (this.hlsReadback.enabled) {
+          await this.hlsReadback.verify(descriptor, prepared, signal);
+        } else {
+          for (const file of prepared.files)
+            await this.verifyPinnedBytes(prepared.cid, file.name, file, signal);
+        }
         for (const cid of [
           short.cid,
           ...(short.derivatives ? [short.derivatives.assetsCid] : []),
@@ -565,6 +651,11 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
       short,
       parent,
       async (signal) => {
+        if (this.remoteMedia.enabled) {
+          await this.transferPackage(short, 'original', signal, false);
+          await this.transferPackage(short, 'assets', signal, false);
+          return;
+        }
         await this.verifyPinnedBytes(
           short.cid,
           undefined,
@@ -583,13 +674,52 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     );
     return this.verifyPreparedDelivery(short, descriptor, value, parent);
   }
+  private async transferPackage(
+    short: ShortRecord,
+    purpose: TransferPurpose,
+    signal: AbortSignal,
+    restore: boolean,
+  ) {
+    const scope = this.scope(),
+      sourceHash = shortsStorageSourceHash(this.records!.chain);
+    const cid = pinPackageCid(short, purpose);
+    const send = (
+      grant: TransferGrant | null,
+      active: AbortSignal,
+      reject?: () => void,
+    ) =>
+      this.remoteMedia.transfer(
+        scope,
+        sourceHash,
+        short,
+        purpose,
+        grant,
+        active,
+        reject,
+      );
+    if (!restore || (await this.pinned(cid, signal))) await send(null, signal);
+    else if (this.expiringWrites)
+      await this.withPinIntent(short, cid, purpose, signal, send);
+    else await send({ mode: 'add' }, signal);
+    signal.throwIfAborted();
+    if (!(await this.pinned(cid, signal)))
+      throw new Error('Verified package is not recursively pinned');
+  }
+
   private async pinOriginal(
     short: ShortRecord,
     signal: AbortSignal,
     includeInputs = true,
   ) {
-    if (!validateOriginalContent(short) || !this.privateMedia)
-      throw new Error('Original media unavailable');
+    validateOriginalContent(short);
+    if (this.remoteMedia.enabled) {
+      await this.transferPackage(short, 'original', signal, true);
+      await this.transferPackage(short, 'assets', signal, true);
+      if (includeInputs)
+        await this.transferPackage(short, 'inputs', signal, true);
+      return;
+    }
+    if (!this.privateMedia) throw new Error('Original media unavailable');
     const packages = new ShortsPackageService();
     if (!(await this.pinned(short.cid, signal))) {
       await this.privateMedia.withOriginal(
@@ -648,6 +778,21 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
     signal.throwIfAborted();
     this.rememberPin(short.cid);
   }
+  get remotePreviewEnabled() {
+    return this.remoteMedia.previewEnabled;
+  }
+  async previewRedirect(short: ShortRecord, parent: AbortSignal) {
+    if (!this.remoteMedia.previewEnabled)
+      throw new ShortsMediaUnavailableError();
+    return this.withCapacity(short, parent, (signal) =>
+      this.remoteMedia.preparePreview(
+        this.scope(),
+        shortsStorageSourceHash(this.records!.chain),
+        short,
+        signal,
+      ),
+    );
+  }
   async preview(short: ShortRecord) {
     return this.withCapacity(short, undefined, (signal) =>
       validateOriginalContent(short) &&
@@ -656,14 +801,46 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
         : this.preparedFile(short, 'video.mp4', signal),
     );
   }
+  async moderationHealth() {
+    if (!this.remoteMedia.rescanEnabled) return this.safety?.health() ?? false;
+    try {
+      return await this.remoteMedia.inspectionHealth(
+        this.scope(),
+        shortsStorageSourceHash(this.records!.chain),
+        this.shutdown.signal,
+      );
+    } catch {
+      return false;
+    }
+  }
   async rescan(short: ShortRecord, parent?: AbortSignal) {
     validateOriginalContent(short);
+    if (this.remoteMedia.rescanEnabled) {
+      const pinned =
+        short.publication === 'published' || short.publication === 'withdrawn';
+      return this.withCapacity(short, parent, async (signal) => {
+        if (pinned && !(await this.pinned(short.cid, signal)))
+          throw new Error('Canonical original is not recursively pinned');
+        const evidence = await this.remoteMedia.inspect(
+          this.scope(),
+          shortsStorageSourceHash(this.records!.chain),
+          short,
+          pinned ? 'pinned' : 'private',
+          signal,
+        );
+        if (pinned && !(await this.pinned(short.cid, signal)))
+          throw new Error('Canonical original pin changed during inspection');
+        return evidence;
+      });
+    }
+    const safety = this.safety;
+    if (!safety) throw new ShortsMediaUnavailableError();
     // Published originals remain the inspection source after staging retirement.
     // Do not nest admission: withPinnedOriginal owns its transfer and scratch.
     if (short.publication === 'published' || short.publication === 'withdrawn')
       return this.withPinnedOriginal(
         short,
-        (file, signal) => this.safety.scan(file, signal, true),
+        (file, signal) => safety.scan(file, signal, true),
         parent,
       );
     return this.withCapacity(short, parent, async (signal) => {
@@ -671,7 +848,7 @@ export class ShortsMediaService implements OnModuleInit, OnModuleDestroy {
       return this.privateMedia.withOriginal(
         this.scope(),
         short,
-        (file, active) => this.safety.scan(file, active, true),
+        (file, active) => safety.scan(file, active, true),
         signal,
       );
     });

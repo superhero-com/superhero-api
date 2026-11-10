@@ -157,10 +157,26 @@ directory and verify the recorded file hash. These paths also apply after a
 published post is withdrawn; inspection does not grant playback permission.
 They do not fall back to encrypted processing storage when a durable source is
 missing or corrupt. Pending uploads continue to use their private source and
-preview..
+preview.
 Each operation owns one admission reservation; cancelled inspection drains before
 releasing its scratch file. Storage retirement still requires the separate
 retention, durable-delivery and reference checks.
+
+The review URL also supports `SHORTS_MEDIA_TRANSFER_PREVIEW=true` with the
+private transfer origin and its internal Nginx locations. A gateway request
+marked `X-Shorts-Review-Gateway: internal-redirect-v1` receives its video
+from the instance that verified it. The gateway strips Studio credentials from
+the internal fetch. Direct API access and the default-off deployment keep
+the local preview implementation.
+
+To delegate rescans, configure `SHORTS_MEDIA_TRANSFER_URL` and
+`SHORTS_MEDIA_TRANSFER_KEY_FILE`, enable scanner access on the transfer service,
+then set `SHORTS_MEDIA_TRANSFER_RESCAN=true` on the hosted API. The API checks
+the signed response against the request, original, and current scan generation.
+It validates the frame coverage and safety decision before updating the review
+record. Scanner readiness also comes from the transfer service. Local scanning
+resumes when the API has its scanner endpoint and credential and the flag is
+set to `false`.
 
 `npm run test:shorts:worker` covers original-file HTTP uploads through
 real PostgreSQL and S3-compatible storage when `SHORTS_TEST_PG_URL` and the
@@ -238,7 +254,15 @@ before readiness; retries reuse their reserved keys even after active-key rotati
 Three staging attempts are allowed. Recovery of an expired final attempt marks it
 failed and releases its pending-job slot. Retrying a failed job still obeys queue
 admission and the one-active-replacement limit. This is an explicit internal
-operation, with no public endpoint or automatic scheduling. The coordinator login
+operation, with no public endpoint or automatic scheduling. Set `SHORTS_MEDIA_TRANSFER_RESTAGING=true` with the transfer URL and key to perform
+original and caption reads on the media service. The API reserves the same part
+keys and issues a grant bound to the lease, generation and destination objects.
+The service verifies the original CID, writes each encrypted part with a create-only
+condition, and reads it back. The API verifies the response and the canonical pin,
+saves and checks the metadata manifest, then finishes the fenced staging claim.
+The local coordinator can resume the same reservation when the flag is disabled.
+
+The coordinator login
 needs SELECT, INSERT and UPDATE on the staging table; media workers need no new
 grants. Inventory logins need read-only access to this table once installed.
 

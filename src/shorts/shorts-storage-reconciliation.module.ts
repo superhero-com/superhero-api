@@ -1,3 +1,4 @@
+import { ShortsVersionReadbackService } from './shorts-version-readback.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DATABASE_CONFIG } from '../configs/database';
@@ -44,6 +45,7 @@ import { ShortsStorageReconciliationService } from './shorts-storage-reconciliat
       useFactory: (config: StorageReconciliationConfig) => config.objects,
     },
     ShortsPrivateObjectsService,
+    ShortsVersionReadbackService,
     ShortsSourceReaderService,
     ShortsRetentionService,
     ShortsStorageReconciliationService,

@@ -32,6 +32,12 @@ do not give it direct table grants.
 - `SHORTS_STREAM_URL`: public playback URL used by lifecycle tests; it is not a
   substitute for the private preparation origin.
 
+Enable `SHORTS_STREAM_VERIFY_HLS=true` after deploying the streaming origin's
+prepared-file verification endpoint. The API authenticates a fresh readback
+receipt for the exact delivery generation and file index before recording the
+acknowledgement. A failed verification leaves the job eligible for retry.
+With this option unset, the API performs its existing IPFS readback.
+
 An unset preparation endpoint leaves jobs pending without sending requests.
 Hosted startup still verifies the deployment identity and shared table. The
 loopback-only local demo uses its existing SQLite outbox.

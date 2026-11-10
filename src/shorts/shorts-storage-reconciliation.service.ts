@@ -1,3 +1,4 @@
+import { ShortsVersionReadbackService } from './shorts-version-readback.service';
 import {
   BadRequestException,
   ConflictException,
@@ -49,6 +50,11 @@ export class ShortsStorageReconciliationService {
     private readonly records: ShortsRetentionService,
     private readonly sources: ShortsSourceReaderService,
     private readonly privateObjects: ShortsPrivateObjectsService,
+    @Inject(ShortsVersionReadbackService)
+    private readonly versions: Pick<
+      ShortsPrivateObjectsService,
+      'verifyVersionCopies'
+    > = privateObjects,
   ) {}
   private args(id: string) {
     validId(id);
@@ -363,7 +369,7 @@ export class ShortsStorageReconciliationService {
   }
   async verifyVersions(id: string, identity: string, signal?: AbortSignal) {
     const candidate = await this.versionCandidate(id, identity, signal);
-    const copies = await this.privateObjects.verifyVersionCopies(
+    const copies = await this.versions.verifyVersionCopies(
       this.config.scope,
       candidate.ref,
       candidate.version,

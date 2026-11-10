@@ -39,6 +39,80 @@ export function visualAllows(short: {
   );
 }
 
+/** Validate the scanner's decision and frame coverage before accepting its evidence. */
+export function validateVisualEvidence(result: any, sourceSha256: string) {
+  const validScore = (n: unknown) =>
+    typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+  const topics = new Set([
+    'Art',
+    'Nature',
+    'Technology',
+    'Music',
+    'Gaming',
+    'Learning',
+    'Other',
+  ]);
+  const validLabels = (labels: unknown) =>
+    Array.isArray(labels) &&
+    labels.length > 0 &&
+    labels.length <= 7 &&
+    labels.every(
+      (label) => topics.has(label?.topic) && validScore(label?.score),
+    );
+  if (
+    result.sourceSha256 !== sourceSha256 ||
+    !['no_flags', 'review', 'blocked'].includes(result.status) ||
+    result.policy !== 'visual-review-v1' ||
+    !/^[a-f0-9]{64}$/.test(result.evidenceHash) ||
+    !Array.isArray(result.frames) ||
+    result.frames.length < 3 ||
+    result.frames.length > 145 ||
+    result.frameCount !== result.frames.length ||
+    !Number.isFinite(result.duration) ||
+    result.duration < 2 ||
+    result.duration > 60 ||
+    result.frameCount < Math.floor(result.duration * 2) - 1 ||
+    typeof result.reason !== 'string' ||
+    result.reason.length > 1000 ||
+    typeof result.sampling !== 'string' ||
+    result.sampling.length > 200 ||
+    !validLabels(result.labels) ||
+    !['safety', 'topics'].every(
+      (name) =>
+        typeof result.models?.[name]?.repository === 'string' &&
+        /^[a-f0-9]{40}$/.test(result.models?.[name]?.revision || ''),
+    ) ||
+    !validScore(result.maxNsfwScore) ||
+    result.frames.some(
+      (f: any) =>
+        !validScore(f.nsfwScore) ||
+        !/^[a-f0-9]{64}$/.test(f.sha256) ||
+        !validLabels(f.labels) ||
+        !Number.isFinite(f.at) ||
+        f.at < 0 ||
+        f.at > result.duration,
+    ) ||
+    result.humanReviewRequired !== true
+  )
+    throw new Error('Invalid visual evidence');
+  const peak = Math.max(...result.frames.map((f: any) => f.nsfwScore));
+  const timestamps = result.frames
+    .map((f: any) => f.at)
+    .sort((a: number, b: number) => a - b);
+  if (
+    timestamps[0] > 0.5 ||
+    result.duration - timestamps.at(-1) > 0.6 ||
+    timestamps.some(
+      (at: number, i: number) => i > 0 && at - timestamps[i - 1] > 0.6,
+    )
+  )
+    throw new Error('Incomplete temporal coverage');
+  const expected =
+    peak >= 0.8 ? 'blocked' : peak >= 0.3 ? 'review' : 'no_flags';
+  if (result.status !== expected || result.maxNsfwScore !== peak)
+    throw new Error('Invalid safety decision');
+}
+
 /** Infrastructure backpressure, never a safety verdict about the video. */
 export class ShortsModerationUnavailableError extends Error {
   constructor() {
@@ -179,76 +253,7 @@ export class ShortsSafetyService implements OnModuleDestroy {
           throw error;
         },
       );
-      const validScore = (n: unknown) =>
-        typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
-      const topics = new Set([
-        'Art',
-        'Nature',
-        'Technology',
-        'Music',
-        'Gaming',
-        'Learning',
-        'Other',
-      ]);
-      const validLabels = (labels: unknown) =>
-        Array.isArray(labels) &&
-        labels.length > 0 &&
-        labels.length <= 7 &&
-        labels.every(
-          (label) => topics.has(label?.topic) && validScore(label?.score),
-        );
-      if (
-        result.sourceSha256 !== base.sourceSha256 ||
-        !['no_flags', 'review', 'blocked'].includes(result.status) ||
-        result.policy !== 'visual-review-v1' ||
-        !/^[a-f0-9]{64}$/.test(result.evidenceHash) ||
-        !Array.isArray(result.frames) ||
-        result.frames.length < 3 ||
-        result.frames.length > 145 ||
-        result.frameCount !== result.frames.length ||
-        !Number.isFinite(result.duration) ||
-        result.duration < 2 ||
-        result.duration > 60 ||
-        result.frameCount < Math.floor(result.duration * 2) - 1 ||
-        typeof result.reason !== 'string' ||
-        result.reason.length > 1000 ||
-        typeof result.sampling !== 'string' ||
-        result.sampling.length > 200 ||
-        !validLabels(result.labels) ||
-        !['safety', 'topics'].every(
-          (name) =>
-            typeof result.models?.[name]?.repository === 'string' &&
-            /^[a-f0-9]{40}$/.test(result.models?.[name]?.revision || ''),
-        ) ||
-        !validScore(result.maxNsfwScore) ||
-        result.frames.some(
-          (f: any) =>
-            !validScore(f.nsfwScore) ||
-            !/^[a-f0-9]{64}$/.test(f.sha256) ||
-            !validLabels(f.labels) ||
-            !Number.isFinite(f.at) ||
-            f.at < 0 ||
-            f.at > result.duration,
-        ) ||
-        result.humanReviewRequired !== true
-      )
-        throw new Error('Invalid visual evidence');
-      const peak = Math.max(...result.frames.map((f: any) => f.nsfwScore));
-      const timestamps = result.frames
-        .map((f: any) => f.at)
-        .sort((a: number, b: number) => a - b);
-      if (
-        timestamps[0] > 0.5 ||
-        result.duration - timestamps.at(-1) > 0.6 ||
-        timestamps.some(
-          (at: number, i: number) => i > 0 && at - timestamps[i - 1] > 0.6,
-        )
-      )
-        throw new Error('Incomplete temporal coverage');
-      const expected =
-        peak >= 0.8 ? 'blocked' : peak >= 0.3 ? 'review' : 'no_flags';
-      if (result.status !== expected || result.maxNsfwScore !== peak)
-        throw new Error('Invalid safety decision');
+      validateVisualEvidence(result, base.sourceSha256);
       return { ...result, ...base };
     } catch (error) {
       if (

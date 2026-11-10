@@ -108,3 +108,42 @@ test('expiring write configuration rejects misspellings and requires shared meta
   process.env.SHORTS_IPFS_EXPIRING_WRITES='true';const media=new ShortsMediaService({});
   await assert.rejects(media.addWithIntent(new FormData(),false,{id:'post'},cid,'original',new AbortController().signal),/metadata unavailable/);
 });
+
+test('delegated pin receipts bind every request and only verified definite refusals release an issued write', async t => {
+  const { mkdtemp, writeFile, rm } = require('node:fs/promises');
+  const { tmpdir } = require('node:os'); const { join } = require('node:path');
+  const { ShortsMediaTransferClientService } = require('./shorts-media-transfer-client.service');
+  const { pinTransferProof } = require('./shorts-transfer-protocol');
+  const { originalRecord } = require('./testing/original-record.cjs');
+  const local = await mkdtemp(join(tmpdir(),'shorts-pin-client-')), keyFile = join(local,'key');
+  const env={...process.env}, oldFetch=global.fetch, key='ac'.repeat(32);
+  t.after(async()=>{process.env=env;global.fetch=oldFetch;await rm(local,{recursive:true,force:true});});
+  delete process.env.SHORTS_MEDIA_TRANSFER_URL;
+  assert.equal(new ShortsMediaTransferClientService().enabled,false);
+  Object.assign(process.env,{NODE_ENV:'test',SHORTS_MEDIA_TRANSFER_URL:'http://127.0.0.1:8899',SHORTS_MEDIA_TRANSFER_KEY_FILE:keyFile});
+  await writeFile(keyFile,key,{mode:0o600}); const service=new ShortsMediaTransferClientService();
+  const short=originalRecord(),scope={network:'ae_uat',contract:'ct_fixture'},sourceHash='a'.repeat(64);
+  const grant={mode:'expiring',operation:randomUUID(),epoch:'c'.repeat(64),peerId:'Qm'+'a'.repeat(44),expires:Date.now()+30000};
+  short.creator='ak_creator';short.privateMedia={version:1,fence:short.derivatives.generation.fence,source:{bytes:short.bytes,sha256:short.original.sha256,
+    processingProfile:short.derivatives.profile,objectKey:'manifest-key',manifest:{key:'manifest-key'},details:{private:'unused'}},files:{}};
+  let response, rejected=0, last, lastRequest;
+  global.fetch=async (url,init)=>{
+    assert.equal(url,'http://127.0.0.1:8899/internal/media/pin'); assert.equal(init.redirect,'error');assert.equal(init.headers.Authorization,'Bearer '+key);
+    const req=JSON.parse(init.body);assert.equal(req.sourceHash,sourceHash);assert.equal(req.descriptor.network,scope.network);
+    assert.equal(req.descriptor.derivatives.generation.job,short.id);
+    assert.equal(init.body.includes('unused'),false);lastRequest=req;
+    return response(init.body);
+  };
+  const transfer=g=>service.transfer(scope,sourceHash,short,'original',g,new AbortController().signal,()=>{rejected++;});
+  const sign=(raw,receipt)=>({version:1,cid:short.cid,receipt,proof:pinTransferProof(key,raw,short.cid,receipt)});
+  const receipt={version:1,cid:short.cid,status:'pinned',epoch:grant.epoch,operation:grant.operation,expires:grant.expires};
+  response=raw=>Response.json(last=sign(raw,receipt));
+  assert.deepEqual(await transfer(grant),receipt);assert.ok(lastRequest.staging.manifest);assert.equal(rejected,0);
+  response=()=>Response.json(last);await assert.rejects(transfer(grant),/acknowledgement mismatch/);
+  response=raw=>Response.json(sign(raw,{...receipt,epoch:'f'.repeat(64)}));await assert.rejects(transfer(grant),/acknowledgement mismatch/);
+  response=raw=>Response.json(sign(raw,'rejected'),{status:409});await assert.rejects(transfer(grant));assert.equal(rejected,1);
+  response=raw=>Response.json({...sign(raw,'rejected'),proof:'0'.repeat(64)},{status:409});
+  await assert.rejects(transfer(grant),/acknowledgement mismatch/);assert.equal(rejected,1);
+  response=()=>new Response(null,{status:503});await assert.rejects(transfer(grant));assert.equal(rejected,1);
+  response=raw=>Response.json(sign(raw,null));await transfer(null);assert.equal(lastRequest.staging,undefined);
+});
