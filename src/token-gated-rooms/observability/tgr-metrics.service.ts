@@ -133,8 +133,9 @@ export class TgrMetricsService {
 
   /**
    * Compute the full metrics report (the controller body + the cron source).
-   * Read-only: indexed `GROUP BY`/counts + Bull `getJobCounts()` — no full scans,
-   * no relay reads (drift uses the STORED ledger, not a live `39002` read).
+   * Read-only, but the token and room_membership aggregates scan whole tables,
+   * so keep the metrics cron infrequent. No relay reads (drift uses the STORED
+   * ledger, not a live `39002` read).
    *
    * @param processLocal whether the worker-local counters/flags are authoritative
    *   in this process (true in the worker; the controller passes false from main).

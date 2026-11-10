@@ -5,11 +5,9 @@ import {
 } from '../tgr-metrics.constants';
 
 describe('resolveMetricsCron', () => {
-  it('defaults to the 1-min cron when unset/blank', () => {
-    expect(resolveMetricsCron({})).toBe(TGR_METRICS_CRON_DEFAULT);
-    expect(resolveMetricsCron({ TG_METRICS_CRON: '   ' })).toBe(
-      TGR_METRICS_CRON_DEFAULT,
-    );
+  it('defaults to every 15 minutes when unset/blank', () => {
+    expect(resolveMetricsCron({})).toBe('*/15 * * * *');
+    expect(resolveMetricsCron({ TG_METRICS_CRON: '   ' })).toBe('*/15 * * * *');
   });
 
   it('accepts a 5- or 6-field crontab', () => {
