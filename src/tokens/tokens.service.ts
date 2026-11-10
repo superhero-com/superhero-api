@@ -142,6 +142,17 @@ export class TokensService {
   // hashtext(aex9_address), so holder syncs serialise per token, not globally.
   private static readonly HOLDER_SYNC_LOCK_NS = 0x746b686c; // 'tkhl'
   private static readonly MAX_CACHED_CONTRACTS = 200;
+  // What createTokenFromRawTransaction takes from the create tx, besides
+  // created_at.
+  private static readonly CREATE_TX_FIELDS = [
+    'dao_address',
+    'factory_address',
+    'collection',
+    'creator_address',
+    'name',
+    'symbol',
+    'create_tx_hash',
+  ] as const;
   // The order and total lag up to 15 s. Each page re-reads its rows, so
   // prices, ranks and unlisting stay live.
   private static readonly RANK_ORDER_TTL_MS = 15_000;
@@ -1155,14 +1166,30 @@ export class TokensService {
     const existingTokenBySaleAddress = await this.findOne(saleAddress);
     const isNewToken = !existingTokenBySaleAddress;
 
-    // Mirror createToken() so concurrent requests converge instead of surfacing
-    // duplicate-key errors when they race to create the same row.
-    // Do not use skipUpdateIfNoValuesChanged here because Token has json columns
-    // and PostgreSQL cannot compare json values with "=" during that optimization.
-    await this.tokensRepository.upsert(tokenData, {
-      conflictPaths: ['sale_address'],
-    });
-    const token = await this.findOne(saleAddress);
+    // The daily sweep replays every create tx. When the row already holds what
+    // the tx says, the upsert would only write back the snapshot read above,
+    // over anything a concurrent trade stored since. Without `tokenExists` the
+    // upsert resets fields, so that case is never skipped.
+    const createDataStored =
+      !!tokenExists &&
+      !!existingTokenBySaleAddress &&
+      TokensService.CREATE_TX_FIELDS.every(
+        (field) => existingTokenBySaleAddress[field] === tokenData[field],
+      ) &&
+      existingTokenBySaleAddress.created_at?.getTime?.() ===
+        tokenData.created_at.getTime();
+
+    let token = existingTokenBySaleAddress;
+    if (!createDataStored) {
+      // Mirror createToken() so concurrent requests converge instead of surfacing
+      // duplicate-key errors when they race to create the same row.
+      // Do not use skipUpdateIfNoValuesChanged here because Token has json columns
+      // and PostgreSQL cannot compare json values with "=" during that optimization.
+      await this.tokensRepository.upsert(tokenData, {
+        conflictPaths: ['sale_address'],
+      });
+      token = await this.findOne(saleAddress);
+    }
     if (!token) {
       throw new Error(
         `Failed to create or retrieve token for sale address: ${saleAddress}`,

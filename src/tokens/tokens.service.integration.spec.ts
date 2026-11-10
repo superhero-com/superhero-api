@@ -29,6 +29,109 @@ const LISTED: [string, number, number][] = [
   ['ct_i', 5, 6],
 ];
 
+d('TokensService.createTokenFromRawTransaction (integration)', () => {
+  let db: IsolatedDb;
+  let ds: DataSource;
+  let service: TokensService;
+
+  const createTx = (callerId = 'ak_creator') => ({
+    hash: 'th_create',
+    micro_time: 1793759698409,
+    tx: {
+      contract_id: FACTORY,
+      caller_id: callerId,
+      function: 'create_community',
+      return_type: 'ok',
+      arguments: [{ value: 'word' }, { value: 'BLA' }],
+      return: { value: [{ value: 'ct_dao' }, { value: 'ct_sale' }] },
+    },
+  });
+  const tokens = () => ds.getRepository(Token);
+  const stored = () => tokens().findOneBy({ sale_address: 'ct_sale' });
+  const rowVersion = async () =>
+    (
+      await ds.query(
+        `SELECT xmin::text AS xmin, ctid::text AS ctid
+         FROM token WHERE sale_address = 'ct_sale'`,
+      )
+    )[0];
+
+  beforeAll(async () => {
+    db = await createIsolatedDatabase({ migrations: [], entities: [Token] });
+    ds = db.dataSource;
+    await ds.synchronize();
+    service = new TokensService(
+      ds.getRepository(Token),
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        getCurrentFactory: async () => ({
+          address: FACTORY,
+          collections: { word: {} },
+        }),
+      } as any,
+      { add: jest.fn() } as any,
+      {} as any,
+    );
+  }, 60_000);
+
+  afterAll(async () => {
+    if (db) await db.drop();
+  }, 60_000);
+
+  beforeEach(async () => {
+    await tokens().clear();
+    await service.createTokenFromRawTransaction(createTx());
+    // What the token info and holder syncs fill in afterwards.
+    await tokens().update('ct_sale', { address: 'ct_aex9', holders_count: 5 });
+  });
+
+  it('leaves a replayed token unwritten when its create data is stored', async () => {
+    const synced = await rowVersion();
+
+    const replayed = await service.createTokenFromRawTransaction(createTx());
+
+    expect(await rowVersion()).toEqual(synced);
+    expect(replayed).toMatchObject({
+      sale_address: 'ct_sale',
+      address: 'ct_aex9',
+      holders_count: 5,
+      creator_address: 'ak_creator',
+      created_at: new Date(1793759698409),
+    });
+  });
+
+  it('rewrites the creator a replayed create tx changes, keeping the synced fields', async () => {
+    await service.createTokenFromRawTransaction(createTx('ak_other'));
+
+    expect(await stored()).toMatchObject({
+      address: 'ct_aex9',
+      holders_count: 5,
+      creator_address: 'ak_other',
+    });
+  });
+
+  it('restores the create name over the one the token info sync stored', async () => {
+    // pull-token-info writes the AEX9 meta info name, which can differ.
+    await tokens().update('ct_sale', { name: 'Bla' });
+
+    await service.createTokenFromRawTransaction(createTx());
+
+    expect(await stored()).toMatchObject({
+      name: 'BLA',
+      symbol: 'BLA',
+      address: 'ct_aex9',
+      holders_count: 5,
+    });
+  });
+});
+
 d('TokensService.queryTokensWithRanks (integration)', () => {
   let db: IsolatedDb;
   let ds: DataSource;
