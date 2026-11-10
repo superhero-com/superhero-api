@@ -100,7 +100,13 @@ export class TransactionProcessorService {
           rawTransaction.hash,
           manager,
         );
-        let transactionToken = resolvedToken;
+        // Another replay may complete the creation metadata while this pass
+        // waits for the transaction lock. Read the committed row before writing.
+        let transactionToken =
+          rawTransaction.function === BCL_FUNCTIONS.create_community &&
+          !resolvedToken?.factory_address
+            ? await this.tokenService.findByAddress(saleAddress, manager)
+            : resolvedToken;
         let cleanupAffectedAddresses: string[] = [];
 
         if (!transactionToken) {

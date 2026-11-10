@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { Logger } from '@nestjs/common';
 import { DataSource, EntitySchema, EntityManager } from 'typeorm';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
+import { TokenRankTable1718900000044 } from '@/migrations/1718900000044-TokenRankTable';
 import { Token } from '../entities/token.entity';
 import { RefreshTokenRanksService } from './refresh-token-ranks.service';
 
@@ -46,13 +47,19 @@ d('Token maintenance concurrency', () => {
         )`,
       ],
     });
+    const runner = db.dataSource.createQueryRunner();
+    try {
+      await new TokenRankTable1718900000044().up(runner);
+    } finally {
+      await runner.release();
+    }
   }, 30_000);
 
   beforeEach(async () => {
     errors = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
-    await db.dataSource.query('TRUNCATE token');
+    await db.dataSource.query('TRUNCATE token, token_rank');
     await db.dataSource.query(`INSERT INTO token VALUES
       ('ct_incomplete', NULL, 100, '2026-01-01', false, 77),
       ('ct_b', 'ct_dao_b', 200, '2026-01-01', false, 77),
@@ -60,6 +67,9 @@ d('Token maintenance concurrency', () => {
       ('ct_zero', 'ct_dao_zero', 0, '2026-01-01', false, 77),
       ('ct_hidden', 'ct_dao_hidden', 999, '2026-01-01', true, 77),
       ('ct_hidden_incomplete', NULL, 999, '2026-01-01', true, 77)`);
+    await db.dataSource.query(
+      'INSERT INTO token_rank (sale_address, rank) SELECT sale_address, rank FROM token',
+    );
   });
 
   afterEach(() => errors.mockRestore());
@@ -122,7 +132,7 @@ d('Token maintenance concurrency', () => {
     await rankService().refreshRanks();
     expect(
       await db.dataSource.query(
-        'SELECT sale_address, rank FROM token ORDER BY sale_address',
+        'SELECT sale_address, rank FROM token_rank ORDER BY sale_address',
       ),
     ).toEqual([
       { sale_address: 'ct_b', rank: 1 },
@@ -149,7 +159,7 @@ d('Token maintenance concurrency', () => {
     expect(errors).toHaveBeenCalledTimes(1);
     const rank = () =>
       db.dataSource.query(
-        "SELECT rank FROM token WHERE sale_address='ct_incomplete'",
+        "SELECT rank FROM token_rank WHERE sale_address='ct_incomplete'",
       );
     expect(await rank()).toEqual([{ rank: 77 }]);
     await rankService().refreshRanks();

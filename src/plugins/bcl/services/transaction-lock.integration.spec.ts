@@ -94,10 +94,18 @@ d('BCL transaction lock ordering', () => {
     const token = { sale_address: 'ct_sale', factory_address: 'ct_factory' };
     const persistence = new TransactionPersistenceService({} as any);
     jest.spyOn(persistence, 'cleanupOldTransactions').mockResolvedValue([]);
-    const getToken = jest
-      .fn()
-      .mockResolvedValueOnce({ ...token, factory_address: null })
-      .mockResolvedValue(token);
+    async function readToken(manager: EntityManager) {
+      const [row] = await manager.query(
+        'SELECT metadata_updates FROM token WHERE sale_address=$1',
+        [token.sale_address],
+      );
+      return {
+        ...token,
+        factory_address:
+          row.metadata_updates > 0 ? token.factory_address : null,
+      };
+    }
+    const getToken = jest.fn(() => readToken(db.dataSource.manager));
     const prepare = jest
       .fn()
       .mockImplementationOnce(async () => {
@@ -125,7 +133,7 @@ d('BCL transaction lock ordering', () => {
       } as any,
       {
         getToken,
-        findByAddress: async () => token,
+        findByAddress: async (_address, manager) => readToken(manager),
         updateTokenMetaDataFromCreateTx: async (_token, _tx, manager) =>
           manager.query(
             'UPDATE token SET metadata_updates=metadata_updates+1 WHERE sale_address=$1',
@@ -160,13 +168,13 @@ d('BCL transaction lock ordering', () => {
       let blocked = false;
       while (Date.now() < deadline && !blocked) {
         const [{ waiting }] = await db.dataSource.query(
-          "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",
+          "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND wait_event='advisory'",
         );
         blocked = waiting > 0;
         if (!blocked) await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(blocked).toBe(true);
-      expect(getToken).toHaveBeenCalledTimes(1);
+      expect(getToken).toHaveBeenCalledTimes(2);
     } finally {
       releaseFirst();
       const results = await Promise.allSettled([
