@@ -760,6 +760,16 @@ describe('TokensService', () => {
     expect(manager.query.mock.invocationCallOrder[0]).toBeLessThan(
       upsertRepository.upsert.mock.invocationCallOrder[0],
     );
+    // Guarded, so an unchanged count does not rewrite the token row.
+    const [criteria, values] = tokensRepository.update.mock.calls[0];
+    expect(values).toEqual({ holders_count: 2 });
+    expect(criteria.sale_address).toBe('ct_sale');
+    expect(criteria.holders_count.getSql('holders_count')).toBe(
+      'holders_count IS DISTINCT FROM :holdersCount',
+    );
+    expect(criteria.holders_count.objectLiteralParameters).toEqual({
+      holdersCount: 2,
+    });
   });
 
   it('skips the holder swap entirely when the middleware response was truncated', async () => {

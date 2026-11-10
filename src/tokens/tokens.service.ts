@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import camelcaseKeysDeep from 'camelcase-keys-deep';
-import { In, IsNull, Not, Repository, SelectQueryBuilder } from 'typeorm';
+import { In, IsNull, Not, Raw, Repository, SelectQueryBuilder } from 'typeorm';
 
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { AeSdkService } from '@/ae/ae-sdk.service';
@@ -1351,10 +1351,19 @@ export class TokensService {
         aex9Address,
         holderCount: uniqueHolders.length,
       },
+      // Most syncs find the count unchanged; the guard keeps those from
+      // writing a new row version.
       operation: () =>
-        this.tokensRepository.update(token.sale_address, {
-          holders_count: uniqueHolders.length,
-        }),
+        this.tokensRepository.update(
+          {
+            sale_address: token.sale_address,
+            holders_count: Raw(
+              (column) => `${column} IS DISTINCT FROM :holdersCount`,
+              { holdersCount: uniqueHolders.length },
+            ),
+          },
+          { holders_count: uniqueHolders.length },
+        ),
     });
 
     return { aex9Address, holders: uniqueHolders };
