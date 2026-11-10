@@ -599,23 +599,33 @@ describe('PairHistoryService', () => {
     // Route each mocked query to a sensible response by inspecting its SQL so
     // the JS-side arithmetic (price-change) actually runs against real numbers.
     const wireQueries = (opts: {
-      totalVolume?: string;
-      periodVolume?: string;
+      volumes?: Record<string, string>;
+      // Start ratio for every window, unless startPrices overrides one.
       startPrice?: string | null;
+      startPrices?: Record<string, string>;
       currentPrice?: string | null;
     }) => {
       queryRunnerMock.query.mockImplementation((sql: string) => {
-        if (sql.includes('start_price')) {
+        if (sql.includes('current_price')) {
+          const start = (period: string) =>
+            opts.startPrices?.[period] ?? opts.startPrice ?? null;
           return Promise.resolve([
             {
-              start_price: opts.startPrice ?? null,
+              start_price_24h: start('24h'),
+              start_price_7d: start('7d'),
+              start_price_30d: start('30d'),
               current_price: opts.currentPrice ?? null,
             },
           ]);
         }
-        // volume queries (total + per-period)
         return Promise.resolve([
-          { total_volume: opts.periodVolume ?? opts.totalVolume ?? '0' },
+          {
+            total_volume: '0',
+            volume_24h: '0',
+            volume_7d: '0',
+            volume_30d: '0',
+            ...opts.volumes,
+          },
         ]);
       });
     };
@@ -637,7 +647,7 @@ describe('PairHistoryService', () => {
       (aePricingMock as any).getPriceData = jest
         .fn()
         .mockResolvedValue({ ae: 0 });
-      wireQueries({ totalVolume: '0', startPrice: null, currentPrice: null });
+      wireQueries({ startPrice: null, currentPrice: null });
 
       const pair = {
         address: 'ct_p',
@@ -660,7 +670,7 @@ describe('PairHistoryService', () => {
       (aePricingMock as any).getPriceData = jest
         .fn()
         .mockResolvedValue({ ae: 0 });
-      wireQueries({ totalVolume: '0' });
+      wireQueries({});
 
       const pair = {
         address: 'ct_p',
@@ -699,8 +709,6 @@ describe('PairHistoryService', () => {
       // is the WAE side (volumeToken='1'), so otherToken='0' and priceScale is
       // 10^(dec1-dec0) = 10^12. Raw ratios 1e-12 and 1.1e-12 → human 1 and 1.1.
       wireQueries({
-        totalVolume: '0',
-        periodVolume: '0',
         startPrice: '0.000000000001',
         currentPrice: '0.0000000000011',
       });
@@ -724,8 +732,6 @@ describe('PairHistoryService', () => {
         .mockResolvedValue({ ae: 0 });
       // start_price = 0 → division guard must keep percentage at the default.
       wireQueries({
-        totalVolume: '0',
-        periodVolume: '0',
         startPrice: '0',
         currentPrice: '0.0000000000011',
       });
@@ -740,6 +746,67 @@ describe('PairHistoryService', () => {
 
       expect(result.change['24h'].price_change.percentage).toBe('0.00');
       expect(result.change['24h'].price_change.value).toBe('0');
+    });
+
+    it('reads every window from one volume query and one price query', async () => {
+      (aePricingMock as any).getPriceData = jest
+        .fn()
+        .mockImplementation(async (ae) => ({ ae: ae.toString() }));
+      // Human start prices 4 / 2 / 1 against a current price of 5 (see the
+      // decimal-normalization test above for the 1e-12 scale).
+      wireQueries({
+        volumes: {
+          total_volume: '100',
+          volume_24h: '1',
+          volume_7d: '7',
+          volume_30d: '30',
+        },
+        startPrices: {
+          '24h': '0.000000000004',
+          '7d': '0.000000000002',
+          '30d': '0.000000000001',
+        },
+        currentPrice: '0.000000000005',
+      });
+
+      const pair = {
+        address: 'ct_p',
+        token0: { address: 'ct_t', decimals: 6 },
+        token1: { address: DEX_CONTRACTS.wae, decimals: 18 },
+      } as any;
+
+      const result: any = await service.calculatePairSummary(pair);
+
+      expect(result.total_volume.ae).toBe('100');
+      expect(result.change['24h']).toEqual({
+        volume: { ae: '1' },
+        price_change: { percentage: '25', value: '1' },
+      });
+      expect(result.change['7d']).toEqual({
+        volume: { ae: '7' },
+        price_change: { percentage: '150', value: '3' },
+      });
+      expect(result.change['30d']).toEqual({
+        volume: { ae: '30' },
+        price_change: { percentage: '400', value: '4' },
+      });
+
+      const calls = queryRunnerMock.query.mock.calls;
+      expect(calls).toHaveLength(2);
+      const [volSql, volParams] = calls.find((c) =>
+        String(c[0]).includes('total_volume'),
+      );
+      const [, priceParams] = calls.find((c) =>
+        String(c[0]).includes('current_price'),
+      );
+      expect(String(volSql)).toContain('FILTER (WHERE v.created_at >= $3)');
+      // $3/$4/$5 (volume) and $2/$3/$4 (price) are the 24h/7d/30d starts.
+      const starts = volParams.slice(2) as Date[];
+      expect(volParams.slice(0, 2)).toEqual(['ct_p', DEX_CONTRACTS.wae]);
+      expect(starts).toHaveLength(3);
+      expect(starts[0].getTime()).toBeGreaterThan(starts[1].getTime());
+      expect(starts[1].getTime()).toBeGreaterThan(starts[2].getTime());
+      expect(priceParams).toEqual(['ct_p', ...starts]);
     });
   });
 
