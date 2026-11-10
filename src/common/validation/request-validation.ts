@@ -201,3 +201,11 @@ export class TopicParamPipe extends StringValidationPipe {
     return TOPIC_PATTERN.test(value);
   }
 }
+
+export class OptionalTopicParamPipe extends OptionalStringValidationPipe {
+  protected readonly description = 'a valid topic';
+
+  protected isValid(value: string): boolean {
+    return TOPIC_PATTERN.test(value);
+  }
+}

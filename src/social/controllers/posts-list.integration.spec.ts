@@ -30,6 +30,25 @@ d('GET /posts list (integration)', () => {
   const list = (query = '') =>
     request(app.getHttpServer()).get(`/posts?${query}`).expect(200);
 
+  const post = (
+    id: string,
+    minute: number,
+    topics: Topic[],
+    extra: Partial<Post> = {},
+  ) => ({
+    id,
+    tx_hash: `th_${id}`,
+    tx_args: [],
+    sender_address: alice,
+    contract_address: 'ct_posts',
+    type: 'post',
+    content: id,
+    total_comments: 0,
+    created_at: new Date(Date.UTC(2026, 0, 1, 0, minute)),
+    topics,
+    ...extra,
+  });
+
   beforeAll(async () => {
     db = await createIsolatedDatabase({
       entities: [Post, Topic, Token],
@@ -41,24 +60,6 @@ d('GET /posts list (integration)', () => {
       .getRepository(Topic)
       .save([{ name: 'ae' }, { name: 'aeternity' }, { name: 'defi' }]);
 
-    const post = (
-      id: string,
-      minute: number,
-      topics: Topic[],
-      extra: Partial<Post>,
-    ) => ({
-      id,
-      tx_hash: `th_${id}`,
-      tx_args: [],
-      sender_address: alice,
-      contract_address: 'ct_posts',
-      type: 'post',
-      content: id,
-      total_comments: 0,
-      created_at: new Date(Date.UTC(2026, 0, 1, 0, minute)),
-      topics,
-      ...extra,
-    });
     await db.dataSource.getRepository(Post).save([
       post('hidden', 50, [ae], { is_hidden: true }),
       post('newest', 40, [ae, aeternity, defi], {
@@ -170,5 +171,65 @@ d('GET /posts list (integration)', () => {
 
     expect(ids(response)).toEqual(expected);
     expect(response.body.meta.totalItems).toBe(expected.length);
+  });
+
+  it.each([
+    // "hidden" is tagged ae too.
+    ['topic=ae', ['newest', 'oldest']],
+    ['topic=AETERNITY', ['newest']],
+    // Exact, unlike topics=: no partial match.
+    ['topic=aeternit', []],
+    ['topic=defi', ['newest', 'defi-only', 'oldest']],
+    ['topic=defi&order_direction=ASC', ['oldest', 'defi-only', 'newest']],
+    [`topic=defi&account_address=${bob}`, ['oldest']],
+    ['topic=defi&search=only', ['defi-only']],
+    ['topic=defi&topics=aeternity', ['newest']],
+  ])('matches an exact topic with %s', async (query, expected) => {
+    const response = await list(query);
+
+    expect(ids(response)).toEqual(expected);
+    expect(response.body.meta.totalItems).toBe(expected.length);
+  });
+
+  it('pages an exact topic without overlap', async () => {
+    const first = await list('topic=defi&limit=2');
+    const second = await list('topic=defi&limit=2&page=2');
+
+    expect(ids(first)).toEqual(['newest', 'defi-only']);
+    expect(ids(second)).toEqual(['oldest']);
+    expect(first.body.meta).toMatchObject({ totalItems: 3, totalPages: 2 });
+  });
+
+  it('rejects a topic with a leading #', async () => {
+    await request(app.getHttpServer()).get('/posts?topic=%23ae').expect(400);
+  });
+
+  describe('posts sharing a timestamp', () => {
+    // Saved out of id order. A backward created_at index scan returns ties in
+    // reverse insertion order, which would otherwise look like id DESC.
+    const tied = ['tie-c', 'tie-a', 'tie-d', 'tie-b'];
+
+    beforeAll(async () => {
+      const [tie] = await db.dataSource
+        .getRepository(Topic)
+        .save([{ name: 'tie' }]);
+      await db.dataSource
+        .getRepository(Post)
+        .save(tied.map((id) => post(id, 35, [tie])));
+    });
+
+    afterAll(async () => {
+      await db.dataSource.getRepository(Post).delete(tied);
+      await db.dataSource.getRepository(Topic).delete({ name: 'tie' });
+    });
+
+    it('pages an exact topic through them one by one', async () => {
+      const seen: string[] = [];
+      for (let page = 1; page <= tied.length; page += 1) {
+        seen.push(...ids(await list(`topic=tie&limit=1&page=${page}`)));
+      }
+
+      expect(seen).toEqual(['tie-d', 'tie-c', 'tie-b', 'tie-a']);
+    });
   });
 });

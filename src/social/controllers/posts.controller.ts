@@ -30,12 +30,14 @@ import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformance } from '@/tokens/entities/token-performance.entity';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
+import { normalizeTopicName } from '../utils/topic-name.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SocialGraphService } from '@/plugins/social-graph/social-graph.service';
 import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
+  OptionalTopicParamPipe,
 } from '@/common/validation/request-validation';
 
 // order_by is interpolated into the ORDER BY expression, so it must never
@@ -238,6 +240,13 @@ export class PostsController {
     required: false,
     description: 'Return only posts from accounts this address follows',
   })
+  @ApiQuery({
+    name: 'topic',
+    type: 'string',
+    required: false,
+    description:
+      'Return only posts tagged with exactly this topic (case-insensitive, no leading #)',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -258,6 +267,7 @@ export class PostsController {
     @Query('language') language?: string,
     @Query('followed_by', OptionalAeAccountAddressPipe)
     followed_by?: string,
+    @Query('topic', OptionalTopicParamPipe) topic?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -294,6 +304,7 @@ export class PostsController {
     // their topics, and collapsing those again means aggregating every post
     // instead of reading one page off the created_at index.
     const matchesTopics = Boolean(search) || topicNames.length > 0;
+    const exactTopic = topic ? normalizeTopicName(topic) : undefined;
 
     const buildFilteredQuery = () => {
       const query = this.postRepository.createQueryBuilder('post');
@@ -339,6 +350,20 @@ export class PostsController {
         query.andWhere(`(${topicConditions})`, topicParams);
       }
 
+      // A semi-join yields each post once, so this filter needs none of the
+      // join's GROUP BY / COUNT(DISTINCT).
+      if (exactTopic) {
+        query.andWhere(
+          `post.id IN (
+            SELECT exact_pt.post_id
+            FROM post_topics exact_pt
+            INNER JOIN topics exact_topic ON exact_topic.id = exact_pt.topic_id
+            WHERE exact_topic.name = :exactTopic
+          )`,
+          { exactTopic },
+        );
+      }
+
       return query;
     };
 
@@ -353,9 +378,14 @@ export class PostsController {
     if (matchesTopics) {
       pageQuery.groupBy('post.id');
     }
+    pageQuery.orderBy('order_value', orderDirection);
+    // Posts from one micro block share created_at, and the topic feed pages
+    // through them, so without a tie-breaker one can fall between two pages.
+    if (exactTopic) {
+      pageQuery.addOrderBy('post.id', orderDirection);
+    }
 
     const distinctPostIds = await pageQuery
-      .orderBy('order_value', orderDirection)
       .offset(offset)
       .limit(limit)
       .getRawMany<{ id: string; order_value: any }>();
