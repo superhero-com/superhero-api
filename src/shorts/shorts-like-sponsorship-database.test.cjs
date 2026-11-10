@@ -30,8 +30,10 @@ test('Like sponsorship PostgreSQL authority, concurrency and durable recovery', 
   const admin = await new DataSource({ type: 'postgres', url: url.href, logging: false }).initialize();
   const roles = [], pools = [];
   let owner;
+  t.afterEach(async () => {
+    for (const pool of pools.splice(0)) if (pool.isInitialized) await pool.destroy();
+  });
   t.after(async () => {
-    for (const pool of pools) if (pool.isInitialized) await pool.destroy();
     if (owner?.isInitialized) await owner.destroy();
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     for (const role of roles) {

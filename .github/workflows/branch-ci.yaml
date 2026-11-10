@@ -76,6 +76,12 @@ jobs:
       - name: Test original media and delivery lifecycle
         run: npm run test:shorts:quality
 
+      - name: Test publication recovery, Following and worker permissions
+        run: |
+          npm run test:shorts:publisher
+          npm run test:shorts:following
+          npm run test:shorts:authority
+
       - name: Test shared media admission
         run: npm run test:shorts:media-admission
 

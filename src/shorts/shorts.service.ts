@@ -660,6 +660,10 @@ export class ShortsService {
           short.publication === 'withdrawn' ? 'withdrawn' : 'draft',
           { ...(await this.analytics.counters(id)), likes: 0, liked: false },
         ),
+        publicationExecution:
+          job?.status === 'signed' && job.transactionHash
+            ? await this.publisher.execution(short, job.transactionHash, signal)
+            : undefined,
         publicationRequest:
           job?.status ??
           (short.publication === 'pending' ? 'preparing' : undefined),

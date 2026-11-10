@@ -10,7 +10,7 @@ const { readFile, writeFile, mkdir, rm } = require('node:fs/promises');
 const { join, isAbsolute } = require('node:path');
 const http = require('node:http');
 const Redis = require('ioredis');
-const { assembledBrowser } = require('./assembled-browser.cjs');
+const { releaseHash, shortsRelease } = require('../shorts-release');
 const { ownedEdgeName, startOwnedEdge } = require('./owned-edge.cjs');
 const exec = promisify(execFile);
 
@@ -58,7 +58,57 @@ exports.assembledAdaptivePlayback = async (t, f) => {
   t.after(close);
   if (process.env.SHORTS_TEST_WEB_REPO) {
     assert.ok(process.env.SHORTS_TEST_EDGE_IMAGE, 'Browser integration requires the real edge');
-    viewer = await assembledBrowser(t, { id, api: b.base, port: f.webPort, release: f.release, adaptive: true });
+    const webRoot = process.env.SHORTS_TEST_WEB_REPO;
+    assert.ok(isAbsolute(webRoot));
+    const { assembledBrowser } = require(join(webRoot, 'e2e/shorts/assembled-browser.cjs'));
+    const releasePin = releaseHash(JSON.stringify(shortsRelease(f.release)));
+    viewer = await assembledBrowser(t, {
+      id, api: b.base, port: f.webPort, releasePin, adaptive: true, uploadOrigin: endpoints.S3_ENDPOINT.origin,
+      social: f.social && {
+        ...f.social,
+        // Notify from the other hosted process: the browser uses b, not c.
+        notify: accounts => f.c.command('social-notify', { scope: f.social.graph, accounts }),
+        notifyOther: () => f.c.command('social-notify', { scope: { ...f.social.graph, contract: f.scope.contract } }),
+        disconnect: () => b.command('social-disconnect'),
+        async interruptListener(change) {
+          const previous = (await b.command('social-listener')).pid;
+          assert.ok(Number.isInteger(previous));
+          await owner.query('SELECT pg_terminate_backend($1)', [previous]);
+          await change();
+          return until(async () => {
+            try { const current = (await b.command('social-listener')).pid; return current && current !== previous; }
+            catch { return false; }
+          }, 10000);
+        },
+      }, creator: f.creator, outsider: require('@aeternity/aepp-sdk').AccountMemory.generate(),
+      upload: {
+        input: f.input, startWorker: f.startUploadWorker,
+        async approve(shortId) {
+          f.rememberMedia((await f.meta.get(f.scope, shortId)).record);
+          assert.equal((await request(b, `/review/${shortId}`, { approved: true }, f.operatorToken)).status, 201);
+        },
+        async queued(shortId) {
+          await b.command('reconcile');
+          return until(async () => (await owner.query('SELECT status FROM shorts_publication_jobs WHERE id=$1', [shortId]))[0]?.status === 'queued');
+        },
+        confirm: f.registerUpload,
+        async startPlayback() { await ensureWorker(); },
+        async retire(shortId) {
+          const record = await f.meta.get(f.scope, shortId).catch(error => {
+            if (error.status === 404) return undefined;
+            throw error;
+          });
+          if (!record) return; // Upload may have stopped before media preparation.
+          assert.equal((await request(b, `/review/${shortId}`, { approved: false, reason: 'Completed owned upload fixture' }, f.operatorToken)).status, 201);
+        },
+      },
+      async verifyRevoked(token) { assert.equal((await request(b, '/studio/summary', undefined, token)).status, 401); },
+      async changeVisibility(approved, shortId = id) {
+        const result = await request(b, `/review/${shortId}`, { approved, reason: 'Owned browser policy fixture' }, f.operatorToken);
+        assert.equal(result.status, 201);
+      },
+      notify: () => owner.query('SELECT pg_notify($1,$2)', ['shorts_updated', JSON.stringify(f.scope)]),
+    });
   }
   proxy.listen(0, '127.0.0.1'); await once(proxy, 'listening'); await mkdir(workerDir); await mkdir(serverDir);
   await writeFile(join(dir, 'playback.key'), randomBytes(32).toString('hex'), { mode: 0o600 });
@@ -84,6 +134,9 @@ exports.assembledAdaptivePlayback = async (t, f) => {
     }, 15000);
     return { process: child, base: ready.base };
   };
+  async function ensureWorker() {
+    if (!worker || worker.process.exitCode !== null || worker.process.signalCode !== null) worker = await start('worker');
+  }
   const get = async (url, options = {}) => {
     const headers = new URL(url).origin === server?.base ? { 'X-Playback-Edge-Key': `Bearer ${edgeKey}`, 'X-Playback-Client-IP': '127.0.0.1' } : {};
     const response = await fetch(url, { ...options, headers: { ...headers, ...options.headers }, signal: AbortSignal.timeout(15000) });
@@ -223,10 +276,13 @@ exports.assembledAdaptivePlayback = async (t, f) => {
       assert.equal(retry.status, 201); assert.equal(retry.body.views, watched.body.views);
     }
   });
-  if (viewer) await t.test('the actual web player switches original-derived quality with audio and preserves playback controls', () => viewer.connect(edgeBase));
+  if (viewer) await viewer.runJourneys(edgeBase, async visit => {
+    await ensureWorker();
+    await f.withCatalog(visit);
+  });
   if (edgeBase) await require('./assembled-generations.cjs').assembledGenerations(t, f, {
     viewer, edgeBase, get, session, graph, sourceKey,
-    async startWorker() { worker = await start('worker'); },
+    startWorker: ensureWorker,
     async recoverIndex(source, playback) {
       assert.match(source, /^[a-f0-9]{64}$/);
       const index = `${namespace}:prepared:${source}`, job = `${namespace}:prepare:${source}`;

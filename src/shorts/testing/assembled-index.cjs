@@ -134,7 +134,35 @@ exports.assembledIndex = async (t, f) => {
     assert.equal((await finance(c)).paidLikes, 0);
   });
 
-  const playback = f.streamPort ? await assembledAdaptivePlayback(t, { ...f,
+  async function withCatalog(check) {
+    // Separate catalog identities share the approved original and its immutable assets.
+    const rows = Array.from({ length: 24 }, (_, i) => {
+      const shortId = randomUUID();
+      return { ...record, id: shortId, title: `Catalog fixture ${i + 1}`,
+        publication: 'published', createdAt: record.createdAt - (i + 1) * 1000,
+        derivatives: { ...record.derivatives, generation: { ...record.derivatives.generation, job: shortId } } };
+    });
+    const ids = rows.map(row => row.id);
+    try {
+      await owner.transaction(async manager => {
+        for (const row of rows) {
+          await manager.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,$5,$6)',
+            [scope.network, scope.contract, row.id, row.creator, row.createdAt, row]);
+          await manager.query(`INSERT INTO shorts_publication_jobs(network,contract,id,operator,creator,intent,status,block_hash,block_height)
+            SELECT network,contract,$4::varchar,operator,creator,intent || jsonb_build_object('id',$4::varchar),'reconciled',block_hash,block_height
+            FROM shorts_publication_jobs WHERE network=$1 AND contract=$2 AND id=$3`, [scope.network, scope.contract, id, row.id]);
+          state.shorts[row.id] = { ...state.shorts[id], likes: 0, likers: [] };
+        }
+      });
+      await save();
+      await check([id, ...ids]);
+    } finally {
+      await owner.query("UPDATE shorts_content SET body=body || '{\"moderation\":\"pending\"}'::jsonb WHERE network=$1 AND contract=$2 AND id=ANY($3::text[])", [scope.network, scope.contract, ids]);
+      for (const shortId of ids) delete state.shorts[shortId];
+      await save();
+    }
+  }
+  const playback = f.streamPort ? await assembledAdaptivePlayback(t, { ...f, withCatalog,
     async registerUpload(shortId) {
       // Only the external signer/chain observation is controlled. Upload,
       // approval, storage preparation, journal and plugin consumers remain real.

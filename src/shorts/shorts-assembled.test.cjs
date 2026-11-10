@@ -166,7 +166,7 @@ test('complete hosted module shares upload, media and publication controls acros
     return { process, messages, async wait(type, id) { return until(() => {
       const found = messages.find(m => m.type === type && (!id || m.id === id)); if (found) {
         assert.equal(found.error, undefined);
-        if (['ready', 'started'].includes(type)) assert.equal(found.runtime?.mode, compiled ? 'compiled' : 'typescript');
+        if (['ready', 'started'].includes(type)) assert.equal(found.runtime?.mode, worker || compiled ? 'compiled' : 'typescript');
         return found;
       }
       if (process.exitCode !== null || process.signalCode !== null) throw new Error(`Fixture child exited: ${output}`); return false;

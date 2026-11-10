@@ -73,7 +73,10 @@ test('shared limiter secret is an owner-only regular file and proxy trust fails 
 });
 
 test('all Shorts HTTP actions have policies; hosted guards cannot omit their shared provider', async()=>{
-  const methods=Object.getOwnPropertyNames(ShortsController.prototype).filter(name=>name!=='constructor');
+  const { METHOD_METADATA } = require('@nestjs/common/constants');
+  const methods = Object.entries(Object.getOwnPropertyDescriptors(ShortsController.prototype))
+    .filter(([, descriptor]) => typeof descriptor.value === 'function' && Reflect.hasMetadata(METHOD_METADATA, descriptor.value))
+    .map(([name]) => name);
   assert.deepEqual([...Object.keys(SHORTS_HTTP_POLICY)].sort(),methods.sort());
   await assert.rejects(new ShortsRateGuard({shared:true}).canActivate(execution('feed')), {status:503});
   assert.equal(await new ShortsRateGuard({shared:false}).canActivate(execution('feed')), true);

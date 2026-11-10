@@ -1,3 +1,4 @@
+const { workerRecord } = require('./testing/original-record.cjs');
 const schemaMigrations = require('./testing/schema-migrations.cjs');
 const {
   ShortsUploadBudget,
@@ -29,6 +30,7 @@ test('media worker database authority survives direct SQL and forged RPC request
   await new schemaMigrations.ShortsProcessingCapacity().up(owner);
   await new ShortsWorkerBackpressure().up(owner);
   await owner.transaction(manager => new ShortsUploadBudget().up(manager));
+  await owner.transaction(manager => new schemaMigrations.ShortsOriginalContent().up(manager));
   const metadata = new ShortsMetadataService(owner), hash = 'a'.repeat(64);
   const scope = { network: 'ae_uat', contract: `ct_${randomUUID().replaceAll('-', '')}` };
   const otherScope = { ...scope, contract: `ct_${randomUUID().replaceAll('-', '')}` };
@@ -49,7 +51,7 @@ test('media worker database authority survives direct SQL and forged RPC request
   let number = 0;
   function input(id) {
     const key = `shorts-private-v1/${hash}/${id}/source-manifest/key1/${hash}`;
-    return { objectKey: key, manifest: { key, keyId: 'key1', bytes: 100, sha256: hash }, sha256: hash, bytes: 100,
+    return { processingProfile:'original-h264-v1', acceptedMaxBytes:100000000, objectKey: key, manifest: { key, keyId: 'key1', bytes: 100, sha256: hash }, sha256: hash, bytes: 100,
       title: 'Original title', topic: 'Art', details: { description: 'Owned fixture', language: 'en' } };
   }
   async function enqueue(deployment = scope) {
@@ -57,12 +59,7 @@ test('media worker database authority survives direct SQL and forged RPC request
   }
   async function claimed(w = a) { await enqueue(); return w.repo.claim(scope); }
   function record(job) {
-    const files = ['video.mp4', 'poster.jpg', 'manifest.json'].map(name => ({ name, bytes: 100, sha256: hash }));
-    return { id: job.id, creator: job.creator, title: 'Worker altered title', topic: 'Gaming', cid: 'bafy' + 'a'.repeat(50),
-      bytes: 300, duration: 3, createdAt: 0, files, moderation: 'pending', reports: 99, views: [999],
-      safety: { status: 'no_flags', sourceSha256: hash }, privateMedia: { version: 1, fence: job.fence, source: structuredClone(job.input),
-        files: Object.fromEntries(files.map(file => [file.name, { bytes: file.bytes, sha256: file.sha256, keyId: 'key1',
-          key: `shorts-private-v1/${hash}/${job.id}/attempt/${job.fence}/${file.name.replaceAll('.', '-')}/key1/${hash}` }])) } };
+    return { ...workerRecord(job), title:'Worker altered title', topic:'Gaming', reports:99, views:[999] };
   }
   const raw = (w, action, data = {}, deployment = scope) => w.db.query('SELECT shorts_media_worker($1,$2::jsonb) AS result',
     [action, JSON.stringify({ ...data, ...deployment, sourceHash: hash })]);

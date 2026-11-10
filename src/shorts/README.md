@@ -359,7 +359,8 @@ real private S3/IPFS transfers. Configure `SHORTS_TEST_PG_URL`,
 `SHORTS_TEST_REDIS_URL`, `SHORTS_TEST_S3_ENDPOINT` and `SHORTS_TEST_KUBO_API` using
 **disposable loopback services only**. S3 fixture credentials use
 `SHORTS_TEST_S3_ACCESS_KEY` and `SHORTS_TEST_S3_SECRET_KEY` (default `test`). The
-fixture requires FFmpeg, creates owned synthetic media and cleans its temporary
+fixture requires FFmpeg and a built `superhero-shorts/ingest-worker` checkout
+selected by `SHORTS_TEST_INGEST_ROOT`. It creates synthetic media and cleans its temporary
 schemas, roles, objects and pin. Run it separately from tests that pause Redis.
 It checks startup at the default and minimum SQL budgets, missing-migration
 failure, signed sessions across processes, owner-only previews, shared media
@@ -374,8 +375,8 @@ scanner verdicts are controlled fixtures. No real signer or remote MDW ingestion
 is exercised; this is not a live-chain, model-accuracy, HLS, browser-wallet or
 production load test.
 
-For cross-service playback validation, build a local `superhero-video-streaming`
-checkout first and set `SHORTS_TEST_STREAMING_REPO` to its absolute path when
+For cross-service playback validation, build `superhero-shorts/streaming`
+and set `SHORTS_TEST_STREAMING_REPO` to that directory’s absolute path when
 running the assembled suite. The test starts the actual server and HLS worker,
 connects the API publication outbox, kills a worker during its IPFS download and
 waits for the normal BullMQ lease recovery. It decodes the resulting signed HLS
@@ -390,6 +391,8 @@ checks cache authorization, actual token expiry and measured-view deduplication
 across rendition changes. Add `SHORTS_TEST_WEB_REPO` pointing to a local web
 checkout to exercise its real player in Chromium, including High quality and
 Data Saver selection. Browser integration requires the edge option below.
+The browser drivers live in the web repository’s `e2e/shorts/` directory. The API
+suite supplies service endpoints and fixture callbacks through that exported test interface.
 `SHORTS_TEST_SCRATCH_MAX_USED_PERCENT` may explicitly adjust the disposable API
 fixture's disk admission threshold (default 85); it does not alter deployment
 configuration. These generated fixtures do not qualify camera/HDR quality,
@@ -513,26 +516,9 @@ deadlines remain unchanged. These tests validate worker isolation and recovery
 for the supplied inputs, not classifier accuracy, worst-case public capacity,
 provider IAM or an HTTP/browser upload journey.
 
-For a combined distinct-media journey, set `SHORTS_TEST_VARIED_HLS=1` with
-`SHORTS_TEST_UPLOAD_LOAD=1`, `SHORTS_TEST_STREAMING_REPO` and `SHORTS_TEST_EDGE_IMAGE`.
-The four uploaded clips receive explicit fixture approval, traverse real API
-publication preparation/pinning and a single durable journal, then enter the
-production plugin through controlled chain observations. The real HLS worker and
-edge serve separate packages; FFmpeg decodes them and checks duration/audio.
-Paced complete visits exercise cached delivery, and withdrawing one fixture
-rejects its existing signed segment while the other videos still play. No signer,
-real transaction or model verdict is involved. `SHORTS_TEST_VARIED_HLS_OUTPUT` may
-point to an absolute private evidence path. This does not replace a browser/device,
-deployed ingress, financial or production-capacity test.
-
-For external resource observation, `SHORTS_TEST_EDGE_NAME` can assign the owned
-disposable edge container a unique `sh-shorts-edge-<UUID>` name. Use a fresh UUID
-for each run; the fixture removes that container on completion. This option is
-only used by the integration test and never selects a deployed service.
-
-Run `npm run build` first, then set `SHORTS_TEST_COMPILED=1` to load the API and
-media-worker product modules from `dist` without a TypeScript loader in those
-child processes. The parent integration harness still uses TypeScript. Each
+Run `npm run build` first, then set `SHORTS_TEST_COMPILED=1` to load
+API product modules from `dist` in the API child processes. The separate ingest
+worker always runs its own compiled distribution. The parent integration harness still uses TypeScript. Each
 child reports its module mode, and compiled children reject source-TypeScript
 loads. Rebuild after any product-source change; this does not verify a deployed
 image or its container limits.
@@ -545,88 +531,11 @@ must be observed in use and every upload must finish in one attempt. The default
 SQL lease overlap does not prove simultaneous encoders: observe native processes
 when using either mode for resource measurements.
 
-Set `SHORTS_TEST_CAPACITY=1` alongside the streaming and edge options to exercise
-three new video IDs through real HLS preparation, paced full HTTP visits, a burst
-that must receive 429 responses, and successful playback after the burst. It uses
-the streaming checkout's configurable load probe and samples protected origin
-queue/cache/RSS metrics. Limits and client identity are unchanged. Optionally set
-`SHORTS_TEST_CAPACITY_OUTPUT` to an absolute private evidence path for the report.
-These IDs share a small synthetic source: this is an admission/recovery baseline,
-not upload throughput, independent viewer capacity, a decoded-playback benchmark
-or production sizing. Leave browser integration disabled for an isolated workload;
-a browser enabled in the same fixture can add playback traffic.
-
-To include the web viewer and application routes, also set `SHORTS_TEST_WEB_REPO` to a local web
-checkout with its dependencies and Playwright Chromium already installed. This
-requires both streaming and edge options above. The suite starts an ephemeral
-loopback Vite server and headless Chromium, then uses real HLS.js/MediaSource and
-the edge for decoded playback, pause/dialog behavior, unmount cleanup and denied
-playback/retry after withdrawal or restriction. It checks desktop and narrow
-viewports; `SHORTS_TEST_BROWSER_OUTPUT` may name an absolute directory for optional
-screenshots. The isolated player scenarios substitute identity/follow widgets.
-A separate journey loads the actual `main.tsx`, app shell, route tree and Shorts
-hooks without component substitutions. It uses the real hosted feed and state
-endpoints, saves/unsaves a Short, reloads Saved, checks guest Following, opens
-Studio and returns, and opens a shared link. Scoped live updates preserve a
-paused player; a committed restriction removes it and releases its media source.
-An explicit feed refresh discovers the restored candidate.
-
-The connected Studio journey uses the real app wallet detector and SDK wallet RPC
-with newly generated, disposable accounts. Creator-access messages are signed and
-verified by the hosted API; wallet transaction signing and broadcasting are denied
-by the fixture. It checks rejected access, session reuse across Studio routes and
-reload, account-switch revocation, private-content isolation and delayed signatures
-from a previous account. Chain reads and balances remain controlled observations.
-This does not validate the installed wallet extension, deep-link popup, real
-payments or physical-device behavior; those require separate acceptance testing.
-
-That connected creator also uploads an owned synthetic video through the actual
-three-step form. The server accepts a part and a finish request whose browser
-responses are deliberately lost. Reselecting the same file and details after a
-reload must reuse the upload, and reloading pending publication must reuse its
-journal. The real private-storage/FFmpeg worker prepares the draft; publication
-and public playback remain denied before approval. The harness supplies an
-operator approval and a reconciled external publisher observation for this
-synthetic video, then the actual plugin, HLS worker and edge complete playback.
-These controlled approval/chain transitions do not validate moderation accuracy,
-staffing or an installed-wallet/public-chain publication journey.
-
-To include connected Following in that journey, set `SHORTS_TEST_SOCIAL_BUILD`
-to the absolute path of the social contract's generated `build.json`. Its encoded
-bytecode must match the API's checked-in social build hash. The harness applies
-the existing social projection migration in its disposable schema and uses the
-real projection writer, Following queries and social HTTP controller. Network and
-bytecode identity verification remain enabled; external policy and relationship
-reads are controlled observations. The browser checks follow/unfollow, blocks in
-both directions, wallet account changes, unavailable-generation handling and HLS
-playback after recovery. It first uses the visible feed refresh button, then
-checks automatic updates through the existing social gateway and PostgreSQL
-notifications sent by the other hosted API process. Unchanged updates preserve a
-paused player; follow/block changes update the selection without clicking Refresh.
-Terminating the database listener and closing the browser's global transport test
-their separate reconnect/refetch paths. Foreign deployment notifications are
-filtered. The fixture controls projected relationships and external chain reads;
-it does not exercise social transaction signing or remote node event ingestion.
-
-A second application journey uses 25 published catalog observations backed by
-the owned video, with real per-ID HLS preparation. It crosses the API page boundary,
-uses button and keyboard navigation, checks that only the current player runs,
-and bounds mounted players and attached MediaSources while earlier players release
-their sources. Live refresh and removal of an earlier candidate preserve a paused
-player; restriction of the current clip releases it. Leaving for Studio releases
-all MediaSources. These additional records are controlled publication observations,
-not independent upload or signer executions. Controlled 429/503 responses on the
-session, playlist, initialization segment and video segment must recover without
-manual playback retry, respecting their Retry-After delay. Successful responses
-still come from the real services. Other temporary admission failures are recorded;
-the journey exercises the visible page retry control if needed.
-
-The app journey proxies the disposable API through Vite at its configured web
-origin, including the actual Shorts socket. Only the global SDK's public node
-reads have controlled responses; unrelated remote requests are blocked. These
-journeys use synthetic media and do not prove external wallets, production CSP
-or a native device. Browser and Vite
-processes are closed with the other owned fixtures.
+To exercise connected Following, pass the absolute path to the social contract’s
+generated `build.json` through `SHORTS_TEST_SOCIAL_BUILD`. The API verifies the
+bytecode hash and creates a disposable social projection. The web checkout owns
+the browser tests for follow, block, account changes and live updates in
+`e2e/shorts/`. Its Shorts README describes how to run the browser suite.
 
 ## Shared sign-in and revocation
 
@@ -827,16 +736,17 @@ until the other network, contract and release gates are implemented and approved
 
 ## Tests
 
-The standalone contract repository contains local-chain accounting/authorization tests. This API contains an opt-in testnet suite. It uses externally supplied disposable accounts and an owned video; it writes actual testnet transactions and leaves sample records in the local API.
+The contract repository exercises on-chain authorization. The API’s opt-in testnet smoke test reads an existing published Short, verifies the deployed bytecode and ABI, compares the contract record to the catalog, and retrieves an adaptive segment through a signed playback session. It uses public endpoints and requires no wallet credentials.
 
 ```sh
 SHORTS_TESTNET_E2E=1 \
-SHORTS_TEST_KEYS_FILE=/absolute/private/shorts/test-accounts.json \
-SHORTS_TEST_VIDEO=/absolute/path/owned-sample.mp4 \
+SHORTS_TEST_API_URL=https://example.com/api/shorts \
+SHORTS_STREAM_URL=https://example.com \
+SHORTS_TEST_VIDEO_ID=your-published-video-id \
 npm run test:shorts:testnet
 ```
 
-The operator in the supplied test accounts must match the configured contract. Run full API lint with `npm run lint` and typecheck with `npx tsc --noEmit`.
+Exercise uploads, review, publication and wallet interactions with the disposable assembled suite described above. Run full API lint with `npm run lint` and typecheck with `npx tsc --noEmit`.
 
 ## MVP boundaries
 
@@ -959,6 +869,13 @@ Sampled frames can miss brief content, and model scores have false positives/neg
 Public media is delivered by `superhero-video-streaming`, not this API. Start that repository with `make start`. Feed/Studio records return IDs, metadata and a `captions` boolean; they no longer return API media URLs. `GET /api/shorts/playback/:id` returns only the published CID and allowlisted file names/sizes/hashes. It checks the current on-chain owner, CID, byte count and withdrawal state, and never exposes a draft. Both feed discovery and direct-link playback require current content approval; publication alone never bypasses screening or a restriction. The old `/media/:id/:file` route returns 410. Private authenticated review previews and upload-time full-file IPFS verification remain in this module. Testnet lifecycle tests use `SHORTS_STREAM_URL` (default `http://127.0.0.1:3335`) for playback. The service provides expiring HLS playlists and segments; its former full-MP4 route returns 410. It prepares existing videos without changing their contract CID. Original and prepared HLS packages are pinned in IPFS. Playback caches are disposable; eviction does not require transcoding again. Configure SHORTS_STREAM_INTERNAL_URL and SHORTS_STREAM_KEY_FILE for the private authenticated preparation endpoint. The hosted [PostgreSQL publication outbox](STREAMING-OUTBOX.md) commits preparation jobs with content publication, retries failed delivery and recovers expired dispatcher claims. The local demo uses its SQLite outbox. The streaming service caches publication descriptors for a fixed 15 seconds by default; withdrawal can take that long to reach playback, including edge cache hits. SHORTS_STREAM_URL remains the test client’s public playback URL.
 
 ## Isolated hosted publication
+
+Creator publication status includes `publicationExecution` when the signed
+publication call has mined and its canonical block, exact call and execution
+receipt verify. Studio can complete the creator action on `ok` or report a
+mined `error` or `revert`. Public sharing and playback still require the settled
+publication journal and a currently eligible video.
+
 
 Hosted API instances no longer accept `SHORTS_OPERATOR_KEY_FILE`. Run the separate
 NestJS publication worker using the same API image and a dedicated database login.

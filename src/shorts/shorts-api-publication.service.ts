@@ -1,3 +1,5 @@
+import { observePublication } from './shorts-publication-observation';
+import type { PublicationIntent } from './shorts-publication-transaction';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ShortsChainService } from './shorts-chain.service';
 import {
@@ -44,6 +46,30 @@ export class ShortsApiPublicationService {
     signal?.throwIfAborted();
     return ready;
   }
+  /** Creator feedback is independent of settlement and confers no playback authority. */
+  async execution(
+    intent: PublicationIntent,
+    transactionHash: string,
+    signal?: AbortSignal,
+  ) {
+    const { scope, operator } = this.ready();
+    try {
+      const observed = await this.chain.readNode(
+        () =>
+          observePublication(
+            this.chain.sdk.api,
+            { ...scope, operator, intent, transactionHash },
+            0,
+          ),
+        signal,
+      );
+      if (observed.state === 'settled') return observed.proof.result;
+    } catch {
+      // Keep the durable request readable while its node proof is unavailable or changing.
+      signal?.throwIfAborted();
+    }
+    return undefined;
+  }
   async status(id: string, creator: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const deployment = this.ready();
@@ -61,9 +87,7 @@ export class ShortsApiPublicationService {
         this.chain.sdk.api.getGenerationByHeight(height),
         this.chain.sdk.api.getStatus(),
       ]);
-    const [tip, generation, node] = await (signal
-      ? this.chain.readNode(observe, signal)
-      : observe());
+    const [tip, generation, node] = await this.chain.readNode(observe, signal);
     signal?.throwIfAborted();
     receiptHash(generation.keyBlock.hash, 'kh_');
     if (

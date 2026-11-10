@@ -207,7 +207,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     const blockHash = encode(randomBytes(32), Encoding.MicroBlockHash);
     const chain = { release: { ...f.deployment.scope }, state: { ...f.deployment.scope, shorts: [], sourceHash }, address: value => value,
       async write() { assert.fail('API must never sign'); }, async read(method) { return method === 'get_short' ? projection : false; },
-      sdk: { api: { async getCurrentKeyBlock() { return { height: 104 }; }, async getGenerationByHeight(height) { return { keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [blockHash] }; }, async getStatus() { return { networkId: 'ae_uat' }; } } } };
+      readNode: operation => operation(), sdk: { api: { async getCurrentKeyBlock() { return { height: 104 }; }, async getGenerationByHeight(height) { return { keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [blockHash] }; }, async getStatus() { return { networkId: 'ae_uat' }; } } } };
     const api = new ShortsApiPublicationService(chain, f.api.repo); api.deployment = f.deployment;
     const records = new ShortsRecordsService(chain, meta);
     const service = new ShortsService(chain, { async ensurePinned() { pins++; } }, { async counters() { return {}; } }, undefined, undefined, undefined,
@@ -270,7 +270,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     const f = await fixture(), r = await queue(f), run = runtime(f); await run.service.tick();
     const blockHash = encode(randomBytes(32), Encoding.MicroBlockHash);
     run.node.observe = async claim => ({ state: 'settled', proof: { ...proof(claim), blockHash } }); await run.service.tick();
-    const chain = { sdk: { api: { async getCurrentKeyBlock() { return { height: 104 }; }, async getGenerationByHeight(height) { return { keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [blockHash] }; }, async getStatus() { return { networkId: 'ae_uat' }; } } } };
+    const chain = { readNode: operation => operation(), sdk: { api: { async getCurrentKeyBlock() { return { height: 104 }; }, async getGenerationByHeight(height) { return { keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [blockHash] }; }, async getStatus() { return { networkId: 'ae_uat' }; } } } };
     const api = new ShortsApiPublicationService(chain, f.api.repo); api.deployment = f.deployment;
     assert.equal((await api.status(r.id, creator)).status, 'confirmed');
     chain.sdk.api.getGenerationByHeight = async height => ({ keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [] }); await assert.rejects(api.status(r.id, creator), { status: 503 });
@@ -296,6 +296,16 @@ test('publisher node verifies canonical inclusion, call identity, depth and abse
     async getGenerationByHeight(height) { generationCalls++; return { keyBlock: { height, hash: changed && generationCalls > 1 ? encode(randomBytes(32), Encoding.KeyBlockHash) : keyHash }, microBlocks: [blockHash] }; },
     async getTransactionInfoByHash() { return { callInfo: call }; }, async getMicroBlockTransactionsByHash() { return { transactions: [{ hash: txHash }] }; },
   };
+  const creatorApi = new ShortsApiPublicationService({ sdk: { api: service.node }, readNode: op => op() }, undefined);
+  creatorApi.deployment = { scope, operator: account.address };
+  tip = tx.blockHeight;
+  assert.equal((await service.observe(claim)).state, 'pending', 'accounting depth is unchanged');
+  assert.equal(await creatorApi.execution(intent, txHash), 'ok', 'creator sees the mined result in its first block');
+  call.returnType = 'revert'; assert.equal(await creatorApi.execution(intent, txHash), 'revert'); call.returnType = 'ok';
+  assert.equal(await creatorApi.execution({ ...intent, id: randomUUID() }, txHash), undefined);
+  changed = true; generationCalls = 0;
+  assert.equal(await creatorApi.execution(intent, txHash), undefined, 'a changing generation cannot complete the creator action');
+  changed = false; tip = 104;
   assert.equal((await service.observe(claim)).state, 'settled'); tip = 103; assert.equal((await service.observe(claim)).state, 'pending'); tip = 104;
   call.callerNonce = 2; await assert.rejects(service.observe(claim), /not canonical/); call.callerNonce = 1;
   changed = true; generationCalls = 0; await assert.rejects(service.observe(claim), /confirmation changed/); changed = false;

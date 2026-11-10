@@ -1,3 +1,4 @@
+const { privateOriginalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsMetadata,
   ShortsSessions,
@@ -67,11 +68,11 @@ test('hosted content actions stay responsive and durable across two HTTP runtime
   const metadata = new ShortsMetadataService(owner); await metadata.initialize(scope, hash);
   const creator = AccountMemory.generate(), operator = AccountMemory.generate(), outsider = AccountMemory.generate();
   for (const id of ['scanned', 'live']) {
-    await metadata.insertDraft(scope, {
-    id, creator: creator.address, title: 'Owned clip', topic: 'Art', cid: `bafy${id}`, bytes: 100, createdAt: 1,
-    duration: 5, files: [], moderation: 'pending', reports: 0, views: [],
-    safety: { status: 'no_flags', checkedAt: 1 }, privateMedia: { version: 1 },
-    });
+    await metadata.insertDraft(scope, privateOriginalRecord(id, {
+    creator: creator.address, title: 'Owned clip', topic: 'Art', bytes: 100, createdAt: 1,
+    duration: 5, moderation: 'pending', reports: 0, views: [],
+    safety: { status: 'no_flags', checkedAt: 1 },
+    }));
     await metadata.change(scope, id, short => { short.moderation = 'approved'; short.publication = 'published'; });
   }
   const rateConfig = { key: randomBytes(32), client: shortsClientIdentity('127.0.0.1/32'),
@@ -89,7 +90,7 @@ test('hosted content actions stay responsive and durable across two HTTP runtime
       entered.resolve(); await finish.promise; return { status: 'no_flags', checkedAt: Date.now() };
     } };
     const shorts = new ShortsService(chain, media, { counters: async () => ({ views: 0 }) }, {}, {}, auth, undefined, records,
-      { status: async () => undefined });
+      { status: async id => ['live', 'scanned'].includes(id) ? { status: 'confirmed' } : undefined });
     const rates = new ShortsRateService(rateConfig, chain);
     const app = await NestFactory.create({ module: class HostedActions {}, controllers: [ShortsController], providers: [
       ShortsAuthGuard, ShortsUploadInterceptor, { provide: ShortsService, useValue: shorts },

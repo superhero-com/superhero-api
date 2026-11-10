@@ -1,3 +1,4 @@
+const { privateOriginalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsDeliveryPackages,
   ShortsMetadata,
@@ -198,16 +199,19 @@ test('restricted retention inventory and hold history survive concurrent operati
   }
   async function upload(id, state, expiry) {
     await owner.query(`INSERT INTO shorts_upload_sessions(network,contract,id,creator,input,state,expires_at)
-      VALUES($1,$2,$3,'ak_creator','{}',$4,$5::timestamptz)`,[...sqlScope,id,state,expiry]);
+      VALUES($1,$2,$3,'ak_creator','{"processingProfile":"original-h264-v1"}',$4,$5::timestamptz)`,[...sqlScope,id,state,expiry]);
   }
   const part = ref('clip','part/0'), manifest = ref('clip','manifest'), output = ref('clip','attempt/1/video-mp4');
   await t.test('inventory deduplicates known objects but flags manifest children and shared CIDs', async () => {
-    await content('clip',{ cid:'bafy-shared',publication:'withdrawn',reports:1,appeal:{status:'pending'},
-      privateMedia:{ source:{manifest},files:{ video:output, duplicate:part } } });
-    await content('other-clip',{cid:'bafy-shared'},'ct_other');
+    const clip = privateOriginalRecord('clip', { creator:'ak_creator', publication:'withdrawn', reports:1, appeal:{status:'pending'} });
+    Object.assign(clip.files.find(file => file.name === 'video.mp4'), { bytes:output.bytes, sha256:output.sha256 });
+    clip.privateMedia.source.manifest = manifest;
+    clip.privateMedia.files = { 'video.mp4':output };
+    await content('clip', clip);
+    await content('other-clip', { cid:clip.cid }, 'ct_other');
     await upload('clip','enqueued',new Date(Date.now()+60000));
     await owner.query('INSERT INTO shorts_upload_parts(network,contract,upload_id,part,object_ref) VALUES($1,$2,$3,0,$4::jsonb)', [...sqlScope,'clip',JSON.stringify(part)]);
-    await owner.query(`INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,'clip','ak_creator',$3::jsonb)`, [...sqlScope,JSON.stringify({manifest})]);
+    await owner.query(`INSERT INTO shorts_ingestion(network,contract,id,creator,input) VALUES($1,$2,'clip','ak_creator',$3::jsonb)`, [...sqlScope,JSON.stringify({ ...clip.privateMedia.source })]);
     const a = await service.hold({ id:randomUUID(),resourceId:'clip',reason:'appeal',reference:'case-202' });
     const page = await service.inventory(); assert.equal(page.deletionEnabled,false);
     assert.equal(page.items.length,1); const row = page.items[0];
@@ -264,12 +268,14 @@ test('restricted retention inventory and hold history survive concurrent operati
 
   await t.test('corrupt and cross-deployment object references fail the whole page', async () => {
     for (const invalid of [{...output,key:'other/'+output.key},{...output,bytes:0},{...output,bytes:67108865},{...output,keyId:'unknown'}]) {
-      await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,video}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(invalid)]);
-      await assert.rejects(service.inventory(),/invalid private object/);
+      await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,video.mp4}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(invalid)]);
+      await assert.rejects(service.inventory(),/invalid private object|Private output differs from original derivative/);
     }
-    await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,video}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify({...part,bytes:11})]);
+    // The same manifest appears in the accepted job and content record. Divergent lengths are unsafe to deduplicate.
+    await owner.query(`UPDATE shorts_content SET body=jsonb_set(jsonb_set(body,'{privateMedia,files,video.mp4}',$3::jsonb),'{privateMedia,source,manifest}',$4::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(output),JSON.stringify({...manifest,bytes:manifest.bytes+1})]);
     await assert.rejects(service.inventory(),/Conflicting private object/);
-    await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,video}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(output)]);
+    await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,source,manifest}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(manifest)]);
+    await owner.query(`UPDATE shorts_content SET body=jsonb_set(body,'{privateMedia,files,video.mp4}',$3::jsonb) WHERE network=$1 AND contract=$2 AND id='clip'`,[...sqlScope,JSON.stringify(output)]);
     await service.inventory();
   });
 

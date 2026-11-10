@@ -1,3 +1,4 @@
+const { privateOriginalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsMetadata,
   ShortsUploads,
@@ -71,10 +72,10 @@ test('PostgreSQL Following selects the global catalog through existing graph pro
     { transaction: `th_event${++eventIndex}`, index: 0, height: '100' }, [{ from, to, kind, present }]);
   const clips = [];
   for (let i = 0; i < 244; i++) {
-    const record = { id: `clip-${String(i).padStart(4, '0')}`, creator: i < 44 ? (i % 2 ? 'ak_one' : 'ak_two') : 'ak_unrelated',
-      title: `Short ${i}`, topic: 'Art', createdAt: 1000 + Math.floor(i / 3), cid: `bafy${i}`, bytes: 123, duration: 10,
+    const record = privateOriginalRecord(`clip-${String(i).padStart(4, '0')}`, { creator: i < 44 ? (i % 2 ? 'ak_one' : 'ak_two') : 'ak_unrelated',
+      title: `Short ${i}`, topic: 'Art', createdAt: 1000 + Math.floor(i / 3), bytes: 123, duration: 10,
       moderation: 'pending', safety: { status: 'no_flags' }, views: [], reports: 0,
-      files: [{ name: 'video.mp4', bytes: 123, sha256: hash }], privateMedia: { private: true } };
+    });
     await writer.insertDraft(scope, record, 300);
     await writer.change(scope, record.id, s => { s.publication = 'published'; s.moderation = 'approved'; });
     clips.push(record);

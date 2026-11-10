@@ -1,3 +1,4 @@
+const { privateOriginalRecord } = require('./testing/original-record.cjs');
 const {
   ShortsUploadBudget,
   ShortsUploads,
@@ -23,12 +24,9 @@ const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-h
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(r => setImmediate(r));
-const clip = (index, creator = 'ak_creator') => ({
-  id: `clip-${String(index).padStart(4, '0')}`, creator, title: `Short ${index}`, topic: 'Art',
-  createdAt: 1000 + Math.floor(index / 3), cid: `bafy${index}`, bytes: 123, duration: 10,
-  moderation: 'approved', publication: 'published', safety: { status: 'no_flags' },
-  views: [], reports: 0, files: [{ name: 'video.mp4', bytes: 123, sha256: 'a'.repeat(64) }],
-  privateMedia: { internal: 'never expose this' },
+const clip = (index, creator = 'ak_creator') => privateOriginalRecord(`clip-${String(index).padStart(4, '0')}`, {
+  creator, title: `Short ${index}`, topic: 'Art', createdAt: 1000 + Math.floor(index / 3), bytes: 123, duration: 10,
+  moderation: 'approved', publication: 'published', safety: { status: 'no_flags' }, views: [], reports: 0,
 });
 function service(shorts) {
   const calls = [];
@@ -235,8 +233,8 @@ test('hosted legacy reads and local preparation refuse before database, node or 
   await assert.rejects(f.records.all(), { status: 503 });
   await assert.rejects(f.api.list(), { status: 410 });
   await assert.rejects(f.api.dashboard('ak_creator'), { status: 410 });
-  await assert.rejects(f.api.upload('ak_creator', 'Title', 'Art', Buffer.alloc(1)), { status: 503 });
-  assert.throws(() => new ShortsUploadsService({}, f.api, {}), { status: 503 }, 'shared records cannot start the local worker');
+  const controller = new ShortsController(f.api, { authenticate: async () => 'ak_creator' });
+  await assert.rejects(controller.startUpload('Bearer fixture', {}), { status: 503 });
   assert.equal(f.calls.length, 0);
 });
 

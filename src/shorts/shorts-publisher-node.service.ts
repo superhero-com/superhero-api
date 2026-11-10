@@ -8,12 +8,13 @@ import {
   ShortsPublisherConfig,
   publisherJson,
 } from './shorts-publisher.config';
-import {
-  PublicationIntent,
-  publicationCalldata,
-} from './shorts-publication-transaction';
+import { PublicationIntent } from './shorts-publication-transaction';
 import { SignedPublicationClaim } from './shorts-publication-boundary.service';
-import { receiptHash } from './shorts-receipts.service';
+import {
+  observePublication,
+  publicationGeneration,
+  publicationHead,
+} from './shorts-publication-observation';
 import { currentPublisherAttempt } from './shorts-publisher-attempt';
 import {
   assertActiveShortsContract,
@@ -147,14 +148,8 @@ export class ShortsPublisherNodeService implements OnModuleInit {
     );
     assertActiveShortsContract(status);
   }
-  private async head() {
-    if ((await this.node.getStatus()).networkId !== this.config.release.network)
-      throw new Error('Publisher network changed');
-    const head = await this.node.getCurrentKeyBlock();
-    receiptHash(head.hash, 'kh_');
-    if (!Number.isSafeInteger(head.height) || head.height < 0)
-      throw new Error('Invalid node height');
-    return head;
+  private head() {
+    return publicationHead(this.node, this.config.release.network);
   }
   private matches(intent: PublicationIntent, value: any) {
     return (
@@ -165,16 +160,8 @@ export class ShortsPublisherNodeService implements OnModuleInit {
       BigInt(value.size) === BigInt(intent.bytes)
     );
   }
-  private async generation(height: number) {
-    const generation = await this.node.getGenerationByHeight(height);
-    receiptHash(generation.keyBlock.hash, 'kh_');
-    if (
-      generation.keyBlock.height !== height ||
-      !Array.isArray(generation.microBlocks)
-    )
-      throw new Error('Invalid canonical generation');
-    for (const hash of generation.microBlocks) receiptHash(hash, 'mh_');
-    return generation;
+  private generation(height: number) {
+    return publicationGeneration(this.node, height);
   }
   async existing(intent: PublicationIntent) {
     const tip = await this.head(),
@@ -245,72 +232,19 @@ export class ShortsPublisherNodeService implements OnModuleInit {
       height: head.height,
     };
   }
-  async observe(claim: SignedPublicationClaim) {
-    const tip = await this.head();
-    let tx: Awaited<ReturnType<Node['getTransactionByHash']>>;
-    try {
-      tx = await this.node.getTransactionByHash(claim.transactionHash);
-    } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'statusCode' in error &&
-        error.statusCode === 404
-      )
-        return { state: 'absent' as const };
-      throw error;
-    }
-    if (
-      tx.hash !== claim.transactionHash ||
-      tx.tx.type !== 'ContractCallTx' ||
-      tx.tx.callerId !== this.config.operator ||
-      tx.tx.contractId !== this.config.scope.contract ||
-      tx.tx.nonce !== claim.nonce ||
-      tx.tx.callData !== publicationCalldata(claim.intent) ||
-      BigInt(tx.tx.amount) !== 0n
-    )
-      throw new Error('Node returned a conflicting publication transaction');
-    if (tx.blockHeight === -1) return { state: 'pending' as const };
-    receiptHash(tx.blockHash, 'mh_');
-    if (!Number.isSafeInteger(tx.blockHeight) || tx.blockHeight < 0)
-      throw new Error('Invalid transaction height');
-    if (tip.height - tx.blockHeight < this.config.policy.confirmations)
-      return { state: 'pending' as const };
-    const [generation, info, block] = await Promise.all([
-      this.generation(tx.blockHeight),
-      this.node.getTransactionInfoByHash(claim.transactionHash),
-      this.node.getMicroBlockTransactionsByHash(tx.blockHash),
-    ]);
-    const call = info.callInfo;
-    if (
-      !generation.microBlocks.includes(tx.blockHash) ||
-      !block.transactions.some((t) => t.hash === claim.transactionHash) ||
-      !call ||
-      call.callerId !== this.config.operator ||
-      call.contractId !== this.config.scope.contract ||
-      call.callerNonce !== claim.nonce ||
-      call.height !== tx.blockHeight ||
-      !['ok', 'error', 'revert'].includes(call.returnType)
-    )
-      throw new Error('Publication receipt is not canonical');
-    const stable = await this.generation(tx.blockHeight);
-    const after = await this.head();
-    if (
-      stable.keyBlock.hash !== generation.keyBlock.hash ||
-      !stable.microBlocks.includes(tx.blockHash) ||
-      after.height - tx.blockHeight < this.config.policy.confirmations
-    )
-      throw new Error('Publication confirmation changed');
-    return {
-      state: 'settled' as const,
-      proof: {
+  observe(claim: SignedPublicationClaim) {
+    return observePublication(
+      this.node,
+      {
+        network: this.config.release.network,
+        contract: this.config.scope.contract,
+        operator: this.config.operator,
         transactionHash: claim.transactionHash,
-        blockHash: tx.blockHash,
-        height: tx.blockHeight,
-        tipHeight: after.height,
-        result: call.returnType,
+        intent: claim.intent,
+        nonce: claim.nonce,
       },
-    };
+      this.config.policy.confirmations,
+    );
   }
   async canBroadcast(claim: SignedPublicationClaim) {
     const head = await this.head(),

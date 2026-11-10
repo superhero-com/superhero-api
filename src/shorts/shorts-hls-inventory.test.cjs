@@ -174,6 +174,10 @@ test('read-only Redis HLS inventory checkpoints metadata and preserves shared/he
     const descriptor=structuredClone(require('./testing/hls-v3.json').descriptor);
     Object.assign(descriptor,{id:'z-original',network:scope.network,contract:scope.contract});
     descriptor.derivatives.generation.job=descriptor.id;
+    // This case owns one original and one set of assets. Only its input CID is intentionally shared.
+    descriptor.cid='bafy'+'j'.repeat(50);
+    descriptor.derivatives.cid='bafy'+'k'.repeat(50);
+    descriptor.derivatives.assetsCid='bafy'+'l'.repeat(50);
     await owner.query(`INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,'ak_creator',0,$4)`,
       [...args,descriptor.id,JSON.stringify({...descriptor,creator:'ak_creator',publication:'published'})]);
     await owner.query(`INSERT INTO shorts_runtime(network,contract,source_hash,max_pending,max_creator_pending) VALUES($1,'ct_other',$2,8,2)`,[scope.network,sourceHash]);
