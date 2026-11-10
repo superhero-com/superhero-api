@@ -72,11 +72,13 @@ export class BlockValidationService {
         `Validating and refreshing blocks from height ${startHeight} to ${endHeight}`,
       );
 
-      // Refetch key blocks and transactions using BlockSyncService
-      // Get transaction hashes grouped by block height that were just synced
+      // Upsert only: plugins get each tx once, from the per-block replay
+      // below, which runs after that block's reorg cleanup.
       const syncedTxHashesByBlock = await this.blockSyncService.syncBlockRange(
         startHeight,
         endHeight,
+        false,
+        true,
         false,
       );
 
@@ -160,6 +162,14 @@ export class BlockValidationService {
       });
 
       if (refetchedTxs.length > 0) {
+        // find() returns rows in no particular order, and this is the only
+        // dispatch of the sweep, so restore the middleware's chain order.
+        const chainPosition = new Map(
+          refetchedTxHashes.map((hash, index) => [hash, index]),
+        );
+        refetchedTxs.sort(
+          (a, b) => chainPosition.get(a.hash)! - chainPosition.get(b.hash)!,
+        );
         // Process through plugins (plugins may need to reprocess even if already stored)
         await this.pluginBatchProcessor.processBatch(
           refetchedTxs,
