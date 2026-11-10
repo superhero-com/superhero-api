@@ -74,7 +74,7 @@ workers must support the `SHPRIV02` envelope. Old encrypted objects still use
 retired under the agreed retention policy.
 
 Deploy API and web together. Hosted upload status advertises
-`transport: "direct-s3-v1"`; the local loopback demo keeps its existing transport.
+`transport: "direct-s3-v1"`. Studio requires this capability to start an upload.
 Hosted `POST /upload` and `POST /uploads/:id/parts/:index` reject before parsing
 binary bodies. Old browser tabs must refresh. There is no proxy fallback on a
 storage outage. Resuming an older upload skips its already accepted chunks and

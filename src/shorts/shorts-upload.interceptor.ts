@@ -1,6 +1,5 @@
 import {
   CallHandler,
-  BadRequestException,
   ExecutionContext,
   HttpException,
   Injectable,
@@ -29,7 +28,7 @@ function setting(name: string, fallback: number, min: number, max: number) {
   return value;
 }
 
-/** Reserve bounded upload capacity before multipart parsing or video preparation. */
+/** Bound concurrent upload finalization and cancel private storage work on lease loss. */
 @Injectable()
 export class ShortsUploadInterceptor
   implements NestInterceptor, OnModuleDestroy
@@ -63,13 +62,6 @@ export class ShortsUploadInterceptor
   ): Promise<Observable<unknown>> {
     const request = context.switchToHttp().getRequest<ShortsUploadRequest>();
     const actor = await this.auth.authenticate(request.headers.authorization);
-    if (
-      this.auth.shared &&
-      ['upload', 'uploadPart'].includes(context.getHandler().name)
-    )
-      throw new BadRequestException(
-        'Upload video directly to storage using a signed upload permission. Refresh Studio to continue.',
-      );
     if (this.auth.shared && !this.admission)
       throw new ServiceUnavailableException(
         'Shared upload admission unavailable',
@@ -131,8 +123,7 @@ export class ShortsUploadInterceptor
       }
       if (request.destroyed && !request.complete) interrupted();
       controller.signal.throwIfAborted();
-      // Keep this subscription until parsing AND the controller's Promise settle.
-      // A disconnected viewer must not release capacity while work still runs.
+      // A disconnected viewer must not release capacity while finalization still runs.
       const result = await lastValueFrom(next.handle());
       controller.signal.throwIfAborted();
       return of(result);

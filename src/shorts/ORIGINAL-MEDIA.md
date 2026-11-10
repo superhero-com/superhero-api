@@ -905,7 +905,8 @@ fixtures using the `SHORTS_TEST_PG_URL`, `SHORTS_TEST_S3_ENDPOINT`,
 `SHORTS_TEST_S3_ACCESS_KEY` and `SHORTS_TEST_S3_SECRET_KEY` settings, enable
 `SHORTS_TEST_MINIO_STS=1`, and set `SHORTS_TEST_KUBO_API` to an offline Kubo
 RPC endpoint including `/api/v0`. Set `SHORTS_TEST_STREAMING_REPO` to the absolute
-path of a matching `superhero-video-streaming` checkout after building that repo.
+path of the built `streaming/` module in a matching `superhero-shorts` checkout.
+Set `SHORTS_TEST_INGEST_ROOT` to its built `ingest-worker/` directory.
 The test uses FFmpeg/FFprobe from `PATH` and creates its own versioned bucket,
 database schema and restricted principals. Use isolated fixtures with no other
 workloads; the test removes its owned versions, pins and database objects.

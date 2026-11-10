@@ -14,7 +14,7 @@ source coordinator. It depends on the application's TypeORM connection and
 Apply normal API migrations before using it.
 
 Hosted `ShortsTestnetModule.register(true)` uses this module for new uploads and
-requires its S3 configuration. The loopback-only demo retains its local adapter.
+requires its S3 configuration. The loopback-only demo serves existing local state. New uploads require the hosted module.
 The hosted API accepts jobs. The standalone ingest service runs the separate Nest
 media worker. It has no HTTP listener, contract signer or IPFS write key.
 

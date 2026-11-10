@@ -8,7 +8,6 @@ import {
   Post,
   Param,
   Query,
-  UploadedFile,
   UseInterceptors,
   UseGuards,
   Res,
@@ -22,7 +21,6 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ShortsService } from './shorts.service';
@@ -42,6 +40,9 @@ import { ShortsPlaybackEvidenceService } from './shorts-playback-evidence.servic
 import { ShortsMeasurementMonitorService } from './shorts-measurement-monitor.service';
 import { ShortsCommentsService } from './shorts-comments.service';
 import { ShortsLikeSponsorshipService } from './shorts-like-sponsorship.service';
+
+const DIRECT_UPLOAD_REQUIRED =
+  'Upload video directly to storage using a signed upload permission. Refresh Studio to continue.';
 
 @ApiTags('shorts')
 @Controller('shorts')
@@ -347,27 +348,8 @@ export class ShortsController {
   }
   @Post('uploads/:id/parts/:index')
   @UseGuards(ShortsAuthGuard)
-  @UseInterceptors(
-    ShortsUploadInterceptor,
-    FileInterceptor('file', {
-      limits: { fileSize: 1024 * 1024 + 1, files: 1, fields: 0 },
-    }),
-  )
-  async uploadPart(
-    @Headers('authorization') authorization: string,
-    @Param('id') id: string,
-    @Param('index') index: string,
-    @UploadedFile() file: { buffer: Buffer },
-    @Req() request: ShortsUploadRequest,
-  ) {
-    const actor = await this.auth.authenticate(authorization);
-    return this.uploads.part(
-      actor,
-      id,
-      Number(index),
-      file?.buffer,
-      request?.[SHORTS_UPLOAD_SIGNAL],
-    );
+  uploadPart(): never {
+    throw new BadRequestException(DIRECT_UPLOAD_REQUIRED);
   }
   @Post('uploads/:id/parts/:index/prepare')
   @Header('Cache-Control', 'no-store')
@@ -425,57 +407,9 @@ export class ShortsController {
     return this.uploads.finish(actor, id, request?.[SHORTS_UPLOAD_SIGNAL]);
   }
   @Post('upload')
-  @HttpCode(202)
   @UseGuards(ShortsAuthGuard)
-  @UseInterceptors(
-    ShortsUploadInterceptor,
-    FileInterceptor('file', {
-      limits: {
-        fileSize: 40 * 1024 * 1024,
-        files: 1,
-        fields: 9,
-        fieldSize: 12000,
-      },
-    }),
-  )
-  async upload(
-    @Headers('authorization') authorization: string,
-    @Body()
-    body: {
-      title: string;
-      topic: string;
-      rights: string;
-      description?: string;
-      language?: string;
-      synthetic?: string;
-      sponsored?: string;
-      captions?: string;
-    },
-    @UploadedFile() file: { buffer: Buffer },
-    @Req() request: ShortsUploadRequest,
-  ) {
-    const address = await this.auth.authenticate(authorization);
-    if (!file || body.rights !== 'true')
-      throw new BadRequestException(
-        'Choose a video and confirm publishing rights',
-      );
-    return this.uploads.enqueueFile(
-      address,
-      {
-        title: body.title,
-        topic: body.topic,
-        rights: true,
-        details: {
-          description: body.description || '',
-          language: body.language || 'und',
-          synthetic: body.synthetic === 'true',
-          sponsored: body.sponsored === 'true',
-          captions: body.captions || '',
-        },
-      },
-      file.buffer,
-      request?.[SHORTS_UPLOAD_SIGNAL],
-    );
+  upload(): never {
+    throw new BadRequestException(DIRECT_UPLOAD_REQUIRED);
   }
   @Post('review/:id') async moderate(
     @Headers('authorization') authorization: string,

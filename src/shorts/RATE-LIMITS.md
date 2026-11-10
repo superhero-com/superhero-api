@@ -71,22 +71,13 @@ Unauthenticated attempts cannot consume the authenticated operation allowance.
 An exhausted pre-authentication budget still limits all private admission; ingress
 DDoS controls and a restricted operator network remain necessary.
 
-Hosted binary upload routes reject before multipart parsing; their parser budgets
-remain for legacy adapters. Direct uploads reserve the declared whole-file bytes in
-PostgreSQL before any permission is issued, and freeze a single object/checksum per
-part. Storage independently enforces each signed length and checksum. Rate-limit
-the public storage ingress too: repeated or concurrent signed PUT requests consume
-storage bandwidth even when conditional writes prevent duplicate objects.
+Studio reserves the declared source size in PostgreSQL before obtaining upload
+permissions. Each signed PUT fixes an object, length and checksum. The storage
+ingress needs its own rate limits because retries also consume bandwidth.
 
-Legacy multipart routes additionally share byte reservations: **128 MiB per
-client IP, 80 MiB per wallet and 512 MiB deployment-wide**, replenished over ten
-minutes. Each part reserves the parser maximum of 1 MiB + 1 byte; the compatibility
-full-file route reserves 40 MiB. Reservations happen after authentication and before
-parsing, including chunked uploads without a length header. Failed/cancelled
-requests retain their reservation; it refills normally. This conservative allowance
-is not a measurement or bill for bytes stored. Declared bodies over the media limit
-plus 64 KiB multipart overhead are rejected. File/field parser limits and body
-receive deadlines still apply.
+The API rejects raw file and chunk routes after authentication, before reading
+multipart bodies. Hosted rate controls still charge attempts against the
+existing IP, wallet and deployment request and byte limits.
 
 ## Failure and operational boundaries
 
@@ -173,8 +164,8 @@ one client allowance. Global limits can be exhausted by sustained abuse.
 
 ## Upload capacity
 
-Hosted multipart uploads, resumable parts and finish requests acquire a shared
-reservation before parsing. `SHORTS_CONCURRENT_UPLOADS` is the per-process ceiling
+Hosted upload finalization acquires a shared reservation before sealing the
+upload and writing its private manifest. `SHORTS_CONCURRENT_UPLOADS` is the per-process ceiling
 (default 2, maximum 8); `SHORTS_SHARED_CONCURRENT_UPLOADS` is the deployment-wide
 ceiling (default 4, maximum 64). Every authenticated wallet has one concurrent
 request across replicas. Reservations use deployment-scoped Redis keys; wallet

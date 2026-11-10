@@ -15,7 +15,6 @@ const { ShortsUploadAdmissionService, SHORTS_UPLOAD_ADMISSION_LIMITS } = require
 const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
 const { ShortsController } = require('./shorts.controller');
 const { ShortsService } = require('./shorts.service');
-const { ShortsHostedUploadsService: ShortsUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsHostedUploadsService } = require('./shorts-hosted-uploads.service');
 const { ShortsSourceService } = require('./shorts-source.service');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
@@ -70,7 +69,8 @@ async function fixture(t, overrides = {}) {
   }
   async function api(uploads, options = {}) {
     process.env.SHORTS_UPLOAD_OPERATION_TIMEOUT_MS = String(options.timeout || 180000);
-    const auth = { shared: options.legacyParser !== true, authenticate: async value => {
+    process.env.SHORTS_UPLOAD_BODY_TIMEOUT_MS = String(options.bodyTimeout || 120000);
+    const auth = { shared: true, authenticate: async value => {
       const actor = /^Bearer (ak_[a-zA-Z0-9]+)$/.exec(value || '')?.[1];
       if (!actor) throw new UnauthorizedException(); return actor;
     } };
@@ -82,12 +82,12 @@ async function fixture(t, overrides = {}) {
       // authentication ordering, controller/interceptor and shared capacity.
       { provide: ShortsRateService, useValue: { config, request: async () => {}, actor: async () => {} } },
       { provide: ShortsService, useValue: { chain: { ...chain, serial: fn => fn() } } },
-      { provide: ShortsUploadsService, useValue: uploads },
+      { provide: ShortsHostedUploadsService, useValue: uploads },
     ] }, { logger: false });
     apps.push(app); await app.listen(0, '127.0.0.1');
     return { app, base: await app.getUrl(), admission: app.get(ShortsUploadAdmissionService) };
   }
-  function slow(origin, actor, route = '/shorts/uploads/owned/parts/0') {
+  function slow(origin, actor, route = '/shorts/uploads/owned/finish') {
     const result = gate();
     const req = http.request(origin.base + route, { method: 'POST', headers: { Authorization: `Bearer ${actor}`,
       'Content-Type': 'multipart/form-data; boundary=owned', 'Content-Length': '1000' } }, res => {
@@ -98,11 +98,12 @@ async function fixture(t, overrides = {}) {
     req.write('--owned\r\nContent-Disposition: form-data; name="file"; filename="part"\r\n\r\npartial');
     requests.push(req); return { req, result: result.promise };
   }
-  async function part(origin, actor, signal) {
-    const body = new FormData(); body.append('file', new Blob(['owned bytes']), 'part');
-    return fetch(origin.base + '/shorts/uploads/owned/parts/0', { method: 'POST', headers: { Authorization: `Bearer ${actor}` }, body, signal });
+  function finish(origin, actor, signal) {
+    return fetch(origin.base + '/shorts/uploads/owned/finish', {
+      method: 'POST', headers: { Authorization: `Bearer ${actor}` }, signal,
+    });
   }
-  return { config, chain, limits, service, api, slow, part };
+  return { config, chain, limits, service, api, slow, finish };
 }
 
 test('shared capacity is atomic across replicas and scope; wallet identities are not stored in keys', async t => {
@@ -167,31 +168,46 @@ test('uncertain reservations are bounded, expire, and are not replayed after Red
   assert.equal(service.pending.size, 0);
 });
 
-test('legacy multipart adapters enforce capacity before parsing, and aborted bodies release it', async t => {
-  const f = await fixture(t); let calls = 0;
-  const uploads = { part: async () => { calls++; return {}; } };
-  const a = await f.api(uploads, { legacyParser: true }), b = await f.api(uploads, { legacyParser: true });
+test('concurrent upload finalization is bounded across replicas and aborted requests release slots', async t => {
+  const f = await fixture(t);
+  const wait = async (_actor, _id, signal) => {
+    await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
+  const a = await f.api({ finish: wait }), b = await f.api({ finish: wait });
   const one = f.slow(a, 'ak_one'); await until(() => a.admission.leases.size === 1);
-  assert.equal(await f.slow(b, 'ak_one').result, 429);
+  assert.equal((await f.finish(b, 'ak_one')).status, 429);
   const two = f.slow(b, 'ak_two'); await until(() => b.admission.leases.size === 1);
-  assert.equal(await f.slow(a, 'ak_three').result, 503); assert.equal(calls, 0);
+  assert.equal((await f.finish(a, 'ak_three')).status, 503);
   one.req.destroy(); two.req.destroy();
   await until(() => !a.admission.leases.size && !b.admission.leases.size);
-  const response = await f.part(b, 'ak_one'); assert.equal(response.status, 201); await response.arrayBuffer(); assert.equal(calls, 1);
+  const ready = await f.api({ finish: async () => ({ status: 'queued' }) });
+  assert.equal((await f.finish(ready, 'ak_one')).status, 202);
 });
 
-test('completed-body disconnect holds capacity until the handler settles; finish shares the same capacity', async t => {
+test('a stalled multipart request to finish loses its reservation at the body deadline', async t => {
+  const f = await fixture(t);
+  let started = false;
+  const a = await f.api({ finish: async (_actor, _id, signal) => {
+    started = true;
+    await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } }, { bodyTimeout: 1000 });
+  const slow = f.slow(a, 'ak_slow');
+  await until(() => started);
+  assert.equal(await slow.result, 'closed');
+  await until(() => !a.admission.leases.size);
+});
+
+test('a client disconnect after sending finish retains capacity until finalization settles', async t => {
   const hold = gate(), started = gate(); t.after(() => hold.resolve());
   const f = await fixture(t);
-  const uploads = { shared: true, part: async () => { started.resolve(); await hold.promise; return {}; }, finish: async () => ({ status: 'queued' }) };
-  const a = await f.api(uploads, { legacyParser: true }), b = await f.api(uploads, { legacyParser: true }); const controller = new AbortController();
-  const request = f.part(a, 'ak_owner', controller.signal).catch(() => undefined); await started.promise;
+  const a = await f.api({ finish: async () => { started.resolve(); await hold.promise; return {}; } });
+  const b = await f.api({ finish: async () => ({ status: 'queued' }) });
+  const controller = new AbortController();
+  const request = f.finish(a, 'ak_owner', controller.signal).catch(() => undefined); await started.promise;
   controller.abort(); await request;
-  const finish = await fetch(b.base + '/shorts/uploads/owned/finish', { method: 'POST', headers: { Authorization: 'Bearer ak_owner', 'Content-Type': 'application/json' }, body: '{}' });
-  assert.equal(finish.status, 429); await finish.arrayBuffer();
+  assert.equal((await f.finish(b, 'ak_owner')).status, 429);
   hold.resolve(); await until(() => !a.admission.leases.size);
-  const accepted = await fetch(b.base + '/shorts/uploads/owned/finish', { method: 'POST', headers: { Authorization: 'Bearer ak_owner', 'Content-Type': 'application/json' }, body: '{}' });
-  assert.equal(accepted.status, 202); await accepted.arrayBuffer();
+  assert.equal((await f.finish(b, 'ak_owner')).status, 202);
 });
 
 test('an unacknowledged reservation holds its wallet slot only until expiry and cannot be replayed', async t => {
@@ -210,7 +226,7 @@ test('an unacknowledged reservation holds its wallet slot only until expiry and 
   assert.equal(commits, 1, 'reconnecting must not repeat an unknown acquisition');
 });
 
-test('legacy adapter request deadline aborts real private S3 IO; same-part retry recovers a committed object without duplicate metadata', async t => {
+test('finish deadline aborts private S3 IO and a retry recovers the committed manifest without duplicate jobs', async t => {
   const f = await fixture(t); let stored, first = true, closed = false, commits = 0;
   const storage = http.createServer(async (req, res) => {
     if (req.method === 'PUT') {
@@ -226,47 +242,54 @@ test('legacy adapter request deadline aborts real private S3 IO; same-part retry
     credentials: { accessKeyId: 'fixture', secretAccessKey: 'fixture' }, activeKeyId: 'v1', keys: { v1: randomBytes(32) } });
   t.after(async () => { objects.onModuleDestroy(); storage.closeAllConnections(); await new Promise(resolve => storage.close(resolve)); });
   const bytes = Buffer.from('owned bytes');
-  const upload = { id: 'owned', creator: 'ak_owner', state: 'uploading', expiresAt: Date.now() + 60000, parts: [],
-    input: { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } };
-  const records = { get: async () => upload, part: async (_scope, _id, _actor, index, object) => { commits++; upload.parts.push({ index, object }); return object; } };
-  const metadata = { verifyRuntime: async () => {}, verifyHostedStorage: async () => {} };
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  const part = objects.plannedReference(f.chain.release, 'owned', 'part/0', { bytes: bytes.length, sha256: digest });
+  const upload = { id: 'owned', creator: 'ak_owner', state: 'sealed', expiresAt: Date.now() + 60000,
+    parts: [{ index: 0, object: part }],
+    input: { bytes: bytes.length, sha256: digest, processingProfile: 'original-h264-v1', acceptedMaxBytes: 100000000 } };
+  const manifest = JSON.stringify({ version: 1, id: upload.id, creator: upload.creator,
+    bytes: upload.input.bytes, sha256: upload.input.sha256, parts: upload.parts });
+  const job = { status: 'queued' };
+  const records = { get: async () => upload, seal: async () => upload, enqueue: async () => {
+    commits++; upload.state = 'enqueued'; return job;
+  } };
+  const metadata = { getJob: async () => job };
   const source = new ShortsSourceService(records, objects, metadata);
   const hosted = new ShortsHostedUploadsService({ shared: true, chain: f.chain }, metadata, records, source);
-  const a = await f.api(hosted, { timeout: 1000, legacyParser: true });
-  const timedOut = await f.part(a, 'ak_owner'); assert.equal(timedOut.status, 503); await timedOut.arrayBuffer();
+  const a = await f.api(hosted, { timeout: 1000 });
+  const timedOut = await f.finish(a, 'ak_owner'); assert.equal(timedOut.status, 503); await timedOut.arrayBuffer();
   await until(() => closed && !a.admission.leases.size);
-  assert.equal(commits, 0, 'aborted IO cannot attach an unacknowledged part');
-  const resumed = await f.part(a, 'ak_owner'); assert.equal(resumed.status, 201); await resumed.arrayBuffer();
-  assert.equal(commits, 1); assert.equal(upload.parts.length, 1);
-  assert.ok(!stored.includes(bytes), 'private bytes are encrypted');
+  assert.equal(commits, 0, 'unacknowledged manifest is never attached to a job');
+  const resumed = await f.finish(a, 'ak_owner'); assert.equal(resumed.status, 202); await resumed.arrayBuffer();
+  assert.equal((await f.finish(a, 'ak_owner')).status, 202);
+  assert.equal(commits, 1);
+  assert.ok(!stored.includes(Buffer.from(manifest)), 'private manifest is encrypted');
 });
 
-test('losing the shared reservation aborts parsing; shutdown cancels an active handler before releasing capacity', async t => {
-  const f = await fixture(t); const ended = gate(); let signal;
-  const uploads = { shared: true, part: async (_actor, _id, _index, _bytes, cancellation) => {
+test('lease loss and shutdown cancel active finalization before releasing capacity', async t => {
+  const f = await fixture(t); let signal;
+  const a = await f.api({ finish: async (_actor, _id, cancellation) => {
     signal = cancellation;
-    await new Promise((_, reject) => signal.addEventListener('abort', () => { ended.resolve(); reject(signal.reason); }, { once: true }));
-  } };
-  const a = await f.api(uploads, { legacyParser: true });
-  const slow = f.slow(a, 'ak_slow'); await until(() => a.admission.leases.size === 1);
+    await new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } });
+  const first = f.finish(a, 'ak_slow'); await until(() => signal);
   const lease = [...a.admission.leases][0]; await control.zrem(lease.keys[0], lease.id);
-  await a.admission.renew(lease); assert.equal(await slow.result, 'closed');
+  await a.admission.renew(lease); assert.equal((await first).status, 503);
   await until(() => !a.admission.leases.size);
-  const request = f.part(a, 'ak_owner'); await until(() => signal);
-  await a.app.get(ShortsUploadInterceptor).onModuleDestroy(); await ended.promise;
-  const response = await request; assert.equal(response.status, 503); await response.arrayBuffer();
+  signal = undefined;
+  const request = f.finish(a, 'ak_owner'); await until(() => signal);
+  await a.app.get(ShortsUploadInterceptor).onModuleDestroy();
+  assert.equal((await request).status, 503);
   assert.equal(signal.aborted, true); assert.equal(a.admission.leases.size, 0);
 });
 
-
 test('hosted HTTP servers reject binary uploads without consuming transfer slots', async t => {
-  const f = await fixture(t); let calls = 0;
-  const api = await f.api({ part: async () => { calls++; }, enqueueFile: async () => { calls++; } });
+  const f = await fixture(t);
+  const api = await f.api({});
   for (const path of ['/shorts/uploads/owned/parts/0', '/shorts/upload']) {
     assert.equal(await f.slow(api, 'ak_owner', path).result, 400);
     assert.equal(api.admission.leases.size, 0);
   }
-  assert.equal(calls, 0);
 });
 
 test('hosted upload interception cannot omit shared admission; invalid settings reject startup', async () => {

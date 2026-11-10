@@ -5,7 +5,7 @@ import {
   shortsStorageSourceHash,
 } from './shorts-runtime-scope';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { ShortsRecordsService } from './shorts-records.service';
 import { ShortsMetadataService } from './shorts-metadata.service';
 import {
@@ -122,17 +122,6 @@ export class ShortsHostedUploadsService {
     await this.source.completeDirect(this.scope(), id, actor, index);
     return this.get(actor, id);
   }
-  async part(
-    actor: string,
-    id: string,
-    index: number,
-    bytes: Buffer,
-    signal?: AbortSignal,
-  ) {
-    signal?.throwIfAborted();
-    await this.source.part(this.scope(), id, actor, index, bytes, signal);
-    return this.get(actor, id);
-  }
   async finish(actor: string, id: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const job = await this.source.finish(this.scope(), id, actor, signal);
@@ -140,36 +129,6 @@ export class ShortsHostedUploadsService {
     if (job.status === 'failed')
       await this.metadata.retry(this.scope(), actor, id);
     return this.get(actor, id);
-  }
-  async enqueueFile(
-    actor: string,
-    input: Omit<UploadInput, 'bytes' | 'sha256'>,
-    bytes: Buffer,
-    signal?: AbortSignal,
-  ) {
-    signal?.throwIfAborted();
-    if (!Buffer.isBuffer(bytes)) throw new Error('Choose a video');
-    const upload = await this.create(actor, {
-      ...input,
-      bytes: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-    });
-    for (
-      let index = 0;
-      index < Math.ceil(bytes.length / SHORTS_PART_BYTES);
-      index++
-    )
-      await this.part(
-        actor,
-        upload.id,
-        index,
-        bytes.subarray(
-          index * SHORTS_PART_BYTES,
-          (index + 1) * SHORTS_PART_BYTES,
-        ),
-        signal,
-      );
-    return this.finish(actor, upload.id, signal);
   }
   async health() {
     const [jobs, workers, budget] = await Promise.all([

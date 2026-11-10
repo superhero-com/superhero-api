@@ -205,30 +205,23 @@ are not interrupted or automatically resubmitted by this deadline. These control
 bound the process queue; they do not replace ingress limits, upload concurrency
 controls, the durable preparation queue or shared transactional storage for scaling.
 
-Upload admission runs before multipart parsing on multipart uploads and chunk parts;
-resumable finish shares the same request capacity. `SHORTS_CONCURRENT_UPLOADS`
-defaults to 2 per API process (range 1–8). Hosted APIs also share
-`SHORTS_SHARED_CONCURRENT_UPLOADS` through Redis (default 4, range 1–64), with at
-most one active upload request per authenticated wallet across replicas. A wallet
-already uploading receives 429; full or unavailable capacity returns 503. The
-loopback demo retains its process-local capacity without requiring Redis.
+The browser sends encrypted parts to private storage. Each hosted API process
+accepts up to `SHORTS_CONCURRENT_UPLOADS` concurrent finish requests (default 2,
+range 1–8). Across replicas Redis enforces `SHORTS_SHARED_CONCURRENT_UPLOADS`
+(default 4, range 1–64) and one active finalization per wallet. Duplicate concurrent
+requests from the same wallet receive 429. Exhausted or unavailable capacity
+returns 503. Binary upload attempts are rejected before any file parsing.
 
-`SHORTS_UPLOAD_BODY_TIMEOUT_MS` defaults to 120000 ms (range 1000–300000) and closes
-unfinished multipart bodies, including trickling connections.
-`SHORTS_UPLOAD_OPERATION_TIMEOUT_MS` bounds the whole upload request, including
-private storage (default 180000 ms, range 1000–600000). Shared leases cover parsing,
-S3 IO and settling metadata writes. Losing the lease, deadline expiry or shutdown
-cancels further IO and parsing. Disconnecting after the body is received does not
-free capacity while its handler still runs. A lost response can mean a part/job
-was accepted: query the upload status and resume the same upload and part bytes.
-Video preparation runs in the separate worker; these request limits do not cancel
-already accepted background jobs. See [shared admission operations](RATE-LIMITS.md#upload-capacity).
+`SHORTS_UPLOAD_OPERATION_TIMEOUT_MS` bounds finalization (default 180000 ms,
+range 1000–600000). Lease loss, timeout or shutdown cancels private storage I/O.
+The API holds the slot until the handler settles. After a lost response, read the
+existing upload's status. Accepted work continues in the standalone ingest worker.
+[Shared admission operations](RATE-LIMITS.md#upload-capacity)
 
 ### Resumable preparation
 
-`POST /api/shorts/uploads/:id/finish` and the multipart `POST /api/shorts/upload`
-return HTTP **202** with an upload status, not a prepared video. Poll the authenticated
-`GET /api/shorts/uploads/:id` using the returned ID:
+`POST /api/shorts/uploads/:id/finish` returns HTTP **202** with an upload
+status. Poll the authenticated `GET /api/shorts/uploads/:id` using the returned ID.
 
 | Status | Client action |
 |---|---|
@@ -252,19 +245,9 @@ commands. New jobs and retries share bounded admission. Shutdown or a killed wor
 leaves accepted work recoverable; a stale worker cannot replace the accepted output.
 Prepared output is never approved or published by the worker.
 
-The loopback-only demo keeps the SQLite queue and local encrypted files. Its single
-background worker runs independently of the mutation queue. `SHORTS_INGEST_QUEUE_CAPACITY`
-controls this local queue (default 8, range 1–32; two jobs per creator). The hosted
-shared queue currently uses eight jobs/two per creator. Both paths keep three attempts
-and return 503 when full. Local startup recovers interrupted processing; incomplete
-local sessions expire after 24 hours. Shared accepted jobs survive session expiry;
-shared metadata/object retention requires coordinated cleanup, not bucket-wide expiry.
-
-`GET /api/shorts/operator/ingestion` requires operator authentication. Hosted responses
-include shared queue counts, oldest queued age and recent worker count without creator
-identifiers. The standalone demo reports its local worker state. Keep one hosted API
-instance until distributed ingress limits and capacity testing support more, even
-when scaling media workers.
+Accepted jobs survive upload-session expiry. Private storage retention requires
+coordinated cleanup. The operator-only `GET /api/shorts/operator/ingestion`
+reports shared queue counts, age of the oldest queued job and recent worker count.
 
 Hosted publication/storage recovery uses [durable per-video jobs](LIFECYCLE.md).
 It processes bounded batches, checks individual IPFS pins and reuses saved
@@ -579,11 +562,14 @@ loopback `SHORTS_TEST_PG_URL`; it uses a temporary schema and real wallet signat
 
 ## Run locally
 
-Requires Node 22.13+, FFmpeg/FFprobe on PATH, Docker, and the sibling `superhero-shorts-contract`, `superhero-ipfs` and `superhero-video-moderation` repositories. Compile/deploy that repository with its documented disposable testnet accounts first.
+Use Node 22.13+ for the API. Compile and deploy `superhero-shorts-contract`
+with its documented disposable testnet accounts. Local storage uses `superhero-ipfs`.
+The standalone `superhero-shorts` images supply FFmpeg and FFprobe for media processing.
+[Media services and deployment guide](https://github.com/superhero-com/superhero-shorts#deploying-to-a-dedicated-media-server)
 
 1. Install this API's normal dependencies (`npm ci` in an independent checkout).
 2. Copy `src/shorts/shorts.env.example` to `.env.shorts-testnet`. Set absolute external paths to the operator-only key, deployment receipt and compiled contract artifact. Never supply creator or viewer private keys to the API.
-3. Run `make start` inside `superhero-ipfs` for one offline Kubo node. For authenticated remote storage, use that repository's `make setup` and deployment guide: set `SHORTS_IPFS_API` to its HTTPS `/api/v0` URL and `SHORTS_IPFS_TOKEN_FILE` to the absolute path of its mounted 64-hex-character key. No endpoint list or credential-mapping JSON is needed. Remote plaintext URLs, missing credentials and redirects are rejected; keys stay server-side and are reloaded per request for rotation. This does not remove this bootstrap's local/testnet restrictions. Follow `superhero-video-moderation/README.md` to create a private service token and run `docker compose up --build -d` there. Set `SHORTS_MODERATION_URL` and `SHORTS_MODERATION_TOKEN_FILE` in the API environment.
+3. Run `make start` inside `superhero-ipfs` for one offline Kubo node. For authenticated remote storage, use that repository's `make setup` and deployment guide: set `SHORTS_IPFS_API` to its HTTPS `/api/v0` URL and `SHORTS_IPFS_TOKEN_FILE` to the absolute path of its mounted 64-hex-character key. No endpoint list or credential-mapping JSON is needed. Remote plaintext URLs, missing credentials and redirects are rejected; keys stay server-side and are reloaded per request for rotation. This does not remove this bootstrap's local/testnet restrictions. For direct scanner access in the loopback demo, follow the standalone moderation module's instructions, then configure `SHORTS_MODERATION_URL` and `SHORTS_MODERATION_TOKEN_FILE` on the API. [Scanner setup](https://github.com/superhero-com/superhero-shorts/tree/HEAD/moderation)
 4. Run `npm run start:shorts:testnet`.
 5. In the web checkout, run `npm run start:shorts:testnet` and open `http://127.0.0.1:5180/shorts`.
 
@@ -601,15 +587,10 @@ Watch without a wallet. Connect a wallet configured for æternity testnet and si
 
 Upload an owned MP4 or MOV clip lasting 2–60 seconds. The hosted API advertises the current byte limit and accepts resumable, authenticated 1 MiB parts in private S3 storage. The media worker verifies the original file hash and prepares adaptive renditions, a preview and a poster. Drafts require review approval and an explicit publish request. To exercise uploads locally, run the hosted API and media worker with local service dependencies.
 
-The standalone local adapter shares a persistent rolling-hour budget across its multipart and resumable uploads:
-10 attempts / 400 MiB per creator and 100 attempts / 4000 MiB across the instance.
-Session creation reserves the declared input bytes; its first preparation uses that
-reservation. Failed uploads still count, and preparation retries or sessions older than
-an hour use a new attempt. Limits are checked before writing originals or preparing
-videos and return HTTP 429 when exhausted. Failed preparation removes encrypted
-originals and partial packages; resumable parts remain available until their session
-expires. Startup removes orphan prepared files while preserving registered media and
-resumable parts. These instance limits supplement normal ingress rate limits. Hosted uploads use shared PostgreSQL admission budgets; private S3 cleanup and retention follow [the shared-storage guide](PRIVATE-STORAGE.md), not the local adapter’s file cleanup.
+The loopback demo serves existing local state. To create uploads, use a hosted
+API with PostgreSQL, Redis, private S3 storage and the standalone ingest worker.
+The API reserves upload capacity in PostgreSQL before issuing storage permissions.
+[Upload budgets](UPLOAD-BUDGET.md) · [Private storage and retention](PRIVATE-STORAGE.md)
 
 Operator review can use the web Moderation tab when signed in with the operator wallet. On the local machine, the operator-only console provides the same authenticated review actions:
 
@@ -866,7 +847,25 @@ Sampled frames can miss brief content, and model scores have false positives/neg
 
 ## Separate public playback
 
-Public media is delivered by `superhero-video-streaming`, not this API. Start that repository with `make start`. Feed/Studio records return IDs, metadata and a `captions` boolean; they no longer return API media URLs. `GET /api/shorts/playback/:id` returns only the published CID and allowlisted file names/sizes/hashes. It checks the current on-chain owner, CID, byte count and withdrawal state, and never exposes a draft. Both feed discovery and direct-link playback require current content approval; publication alone never bypasses screening or a restriction. The old `/media/:id/:file` route returns 410. Private authenticated review previews and upload-time full-file IPFS verification remain in this module. Testnet lifecycle tests use `SHORTS_STREAM_URL` (default `http://127.0.0.1:3335`) for playback. The service provides expiring HLS playlists and segments; its former full-MP4 route returns 410. It prepares existing videos without changing their contract CID. Original and prepared HLS packages are pinned in IPFS. Playback caches are disposable; eviction does not require transcoding again. Configure SHORTS_STREAM_INTERNAL_URL and SHORTS_STREAM_KEY_FILE for the private authenticated preparation endpoint. The hosted [PostgreSQL publication outbox](STREAMING-OUTBOX.md) commits preparation jobs with content publication, retries failed delivery and recovers expired dispatcher claims. The local demo uses its SQLite outbox. The streaming service caches publication descriptors for a fixed 15 seconds by default; withdrawal can take that long to reach playback, including edge cache hits. SHORTS_STREAM_URL remains the test client’s public playback URL.
+The streaming module in `superhero-shorts` serves public HLS. For local development,
+run `make start` from that repository's `streaming/` directory. The hosted setup
+uses the streaming origin, HLS worker, Redis and delivery edge.
+[Deployment guide](https://github.com/superhero-com/superhero-shorts#deploying-to-a-dedicated-media-server)
+
+Feed and Studio records carry IDs and metadata. `GET /api/shorts/playback/:id`
+checks on-chain ownership, original CID, byte count, withdrawal and current
+content approval. It returns the eligible descriptor and allowlisted asset
+metadata. The streaming service serves short-lived signed playlists and segments
+from immutable IPFS packages. Cache eviction fetches prepared assets again.
+Private creator and review previews require API authorization.
+
+Configure `SHORTS_STREAM_INTERNAL_URL` and `SHORTS_STREAM_KEY_FILE` for private
+preparation requests. Publication commits a preparation job to the hosted outbox,
+which retries delivery and recovers expired claims. The loopback demo uses its
+SQLite outbox. The default 15-second streaming descriptor cache also bounds how
+quickly a withdrawal reaches cached playback. Testnet playback checks use
+`SHORTS_STREAM_URL` (default `http://127.0.0.1:3335`).
+[PostgreSQL publication outbox](STREAMING-OUTBOX.md)
 
 ## Isolated hosted publication
 

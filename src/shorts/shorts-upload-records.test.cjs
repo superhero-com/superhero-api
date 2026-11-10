@@ -146,8 +146,8 @@ test('shared uploads: atomic admission, immutable parts, frozen input and job ac
     const sourceA = module.get(ShortsSourceService), sourceB = new ShortsSourceService(b, objectsB, metadataB);
     const source = randomBytes(SHORTS_PART_BYTES + 51), request = { ...input(source.length), sha256: hash(source) };
     await a.create(s, 'source', actor, request);
-    await sourceA.part(s, 'source', actor, 0, source.subarray(0, SHORTS_PART_BYTES));
-    await sourceB.part(s, 'source', actor, 1, source.subarray(SHORTS_PART_BYTES));
+    await a.part(s, 'source', actor, 0, await objectsA.put(s, 'source', 'part/0', source.subarray(0, SHORTS_PART_BYTES)));
+    await b.part(s, 'source', actor, 1, await objectsB.put(s, 'source', 'part/1', source.subarray(SHORTS_PART_BYTES)));
     const crash = new ShortsSourceService({ seal: (...args) => a.seal(...args), enqueue: () => { throw new Error('API died after source object'); } }, objectsA, metadataA);
     await assert.rejects(crash.finish(s, 'source', actor), /API died/);
     assert.equal((await b.get(s, 'source', actor)).state, 'sealed');
@@ -157,10 +157,10 @@ test('shared uploads: atomic admission, immutable parts, frozen input and job ac
     await assert.rejects(sourceB.read(s, { ...job, input: { ...job.input, sha256: hash('tamper') } }), { status: 400 });
     // Each part is valid, but an incorrect whole-video checksum never reaches a decoder.
     await a.create(s, 'wrong-source', actor, { ...input(10), sha256: hash('wrong') });
-    await sourceA.part(s, 'wrong-source', actor, 0, Buffer.from('0123456789'));
+    await a.part(s, 'wrong-source', actor, 0, await objectsA.put(s, 'wrong-source', 'part/0', Buffer.from('0123456789')));
     const wrong = await sourceB.finish(s, 'wrong-source', actor); await assert.rejects(sourceA.read(s, wrong), { status: 400 });
-    // Body/metadata mismatch and cross-wallet access fail before writing an object.
-    await assert.rejects(sourceA.part(s, 'source', 'ak_somebody', 0, source.subarray(0, SHORTS_PART_BYTES)), { status: 404 });
-    await assert.rejects(sourceA.part(s, 'source', actor, 0, Buffer.from('too-short')), { status: 400 });
+    // Direct control requests reject foreign wallets and invalid indices before storage verification.
+    await assert.rejects(sourceA.prepareDirect(s, 'source', 'ak_somebody', 0, hash(source)), { status: 404 });
+    await assert.rejects(sourceA.completeDirect(s, 'source', actor, 2), { status: 400 });
   });
 });

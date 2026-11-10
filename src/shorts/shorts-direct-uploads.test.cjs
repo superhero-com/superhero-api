@@ -6,7 +6,8 @@ const { S3Client, CreateBucketCommand, DeleteBucketCommand, DeleteObjectsCommand
 const { Readable } = require('node:stream');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
 const { ShortsSourceService } = require('./shorts-source.service');
-const { ShortsUploadInterceptor } = require('./shorts-upload.interceptor');
+const { INTERCEPTORS_METADATA } = require('@nestjs/common/constants');
+const { ShortsController } = require('./shorts.controller');
 const scope = { network: 'ae_uat', contract: 'ct_directUploadTest' };
 const digest = value => createHash('sha256').update(value).digest('hex');
 const configuration = () => ({ endpoint: 'https://internal.example.com', uploadEndpoint: 'https://uploads.example.com',
@@ -91,11 +92,11 @@ test('completion records a part only after storage verification and rejects anot
   await assert.rejects(source.completeDirect(scope, 'one', 'ak_owner', 0)); assert.equal(events.length, 2);
 });
 
-test('hosted binary endpoints reject before multipart parsing or buffer allocation', async () => {
-  const interceptor = new ShortsUploadInterceptor({ shared: true, authenticate: async () => 'ak_owner' });
+test('raw file handlers have no multipart parser and return direct upload guidance', () => {
+  const controller = new ShortsController();
   for (const name of ['upload', 'uploadPart']) {
-    const context = { getHandler: () => ({ name }), switchToHttp: () => ({ getRequest: () => ({ headers: {} }) }) };
-    await assert.rejects(interceptor.intercept(context, { handle: () => assert.fail('Parser was invoked') }), { status: 400 });
+    assert.deepEqual(Reflect.getMetadata(INTERCEPTORS_METADATA, controller[name]) ?? [], []);
+    assert.throws(() => controller[name](), { status: 400, message: /directly to storage/ });
   }
 });
 

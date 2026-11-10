@@ -55,8 +55,8 @@ Migration downgrade refuses to discard admitted reservations.
 
 Database triggers enforce the count and byte limits atomically. No whole-library
 count is needed for each upload. Budget exhaustion returns HTTP 503 before a new
-upload session is accepted. The whole-file `/upload` route still receives
-its bounded multipart body before reservation, but cannot write it to S3 first.
+upload session is accepted. Accepted sessions reserve their declared size before
+the browser receives a signed storage permission.
 Retry the same accepted upload ID after an uncertain
 response; do not create new IDs automatically. Its saved identity and immutable
 input are checked before returning the previous result.
