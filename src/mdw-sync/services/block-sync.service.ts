@@ -81,6 +81,7 @@ export class BlockSyncService {
           operation: () =>
             this.blockRepository.upsert(batch, {
               conflictPaths: ['height'],
+              skipUpdateIfNoValuesChanged: true,
             }),
         });
       }
@@ -262,9 +263,15 @@ export class BlockSyncService {
       const batch = txs.slice(i, i + batchSize);
 
       try {
-        await this.txRepository.upsert(batch, {
-          conflictPaths: ['hash'],
-        });
+        // Skipped rows are missing from RETURNING and TypeORM merges it back by
+        // position, so it gets copies: plugins read created_at from `batch`.
+        await this.txRepository.upsert(
+          batch.map((tx) => ({ ...tx })),
+          {
+            conflictPaths: ['hash'],
+            skipUpdateIfNoValuesChanged: true,
+          },
+        );
 
         const batchHashes = batch
           .map((tx) => tx.hash)

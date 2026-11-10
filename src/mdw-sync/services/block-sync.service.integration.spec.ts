@@ -71,6 +71,10 @@ d('Block sync without micro blocks (integration)', () => {
     (fetchJson as jest.Mock).mock.calls
       .map(([url]) => url as string)
       .filter((url) => url.includes('micro-blocks'));
+  const rowVersions = async (table: 'key_blocks' | 'txs') =>
+    db.dataSource.query(
+      `SELECT hash, xmin::text, ctid::text FROM ${table} ORDER BY hash`,
+    );
 
   beforeAll(async () => {
     db = await createIsolatedDatabase({
@@ -151,6 +155,68 @@ d('Block sync without micro blocks (integration)', () => {
     );
   });
 
+  describe('re-syncing stored rows', () => {
+    it('leaves unchanged rows untouched', async () => {
+      await blockSync.syncBlockRange(100, 101);
+      const keyBlocks = await rowVersions('key_blocks');
+      const txs = await rowVersions('txs');
+
+      await blockSync.syncBlockRange(100, 101);
+
+      await expect(rowVersions('key_blocks')).resolves.toEqual(keyBlocks);
+      await expect(rowVersions('txs')).resolves.toEqual(txs);
+    });
+
+    it('still writes rows whose jsonb, NULL or scalar columns differ', async () => {
+      await blockSync.syncBlockRange(100, 101);
+      await db.dataSource.query(
+        `UPDATE key_blocks SET pow = '[9]' WHERE height = 100`,
+      );
+      await db.dataSource.query(
+        `UPDATE key_blocks SET hash = 'kh_forked' WHERE height = 101`,
+      );
+      await db.dataSource.query(
+        `UPDATE txs SET raw = '{"forked": true}' WHERE hash = 'th_100'`,
+      );
+      await db.dataSource.query(
+        `UPDATE txs SET contract_id = NULL WHERE hash = 'th_101'`,
+      );
+
+      await blockSync.syncBlockRange(100, 101);
+
+      await expect(
+        db.dataSource.query('SELECT pow, hash FROM key_blocks ORDER BY height'),
+      ).resolves.toEqual([
+        { pow: [1, 2], hash: 'kh_100' },
+        { pow: [1, 2], hash: 'kh_101' },
+      ]);
+      await expect(
+        db.dataSource.query(
+          `SELECT raw->>'type' AS type, contract_id FROM txs ORDER BY hash`,
+        ),
+      ).resolves.toEqual([
+        { type: 'ContractCallTx', contract_id: 'ct_1' },
+        { type: 'ContractCallTx', contract_id: 'ct_1' },
+      ]);
+    });
+
+    it('gives plugins each tx its own created_at when a page mixes new and unchanged rows', async () => {
+      (fetchJson as jest.Mock).mockResolvedValue({
+        data: [middlewareTx(100), middlewareTx(101)],
+        next: null,
+      });
+      await blockSync.syncTransactions(100, 101, true);
+      await db.dataSource.query(`DELETE FROM txs WHERE hash = 'th_101'`);
+      processBatch.mockClear();
+
+      await blockSync.syncTransactions(100, 101, true);
+
+      expect(
+        processBatch.mock.calls[0][0].map((tx: Tx) => tx.created_at.getTime()),
+      ).toEqual([1_700_000_000_100, 1_700_000_000_101]);
+    });
+  });
+
   it('backfills a range backward without collecting hashes', async () => {
     await expect(blockSync.syncBlockRange(100, 101, true)).resolves.toEqual(
       new Map(),
@@ -214,7 +280,7 @@ d('Block sync without micro blocks (integration)', () => {
     }
   }, 30_000);
 
-  it('saves a live key block and advances the live height', async () => {
+  it('saves a live key block, advances the live height and leaves a redelivery untouched', async () => {
     await db.dataSource.query(
       `INSERT INTO sync_state (id, last_synced_height, last_synced_hash, tip_height)
        VALUES ('global', 0, '', 0)`,
@@ -231,8 +297,11 @@ d('Block sync without micro blocks (integration)', () => {
     const logged = jest.spyOn((live as any).logger, 'error');
 
     await live.handleKeyBlock({ hash: 'kh_102', height: 102 } as any);
+    const firstWrite = await rowVersions('key_blocks');
+    await live.handleKeyBlock({ hash: 'kh_102', height: 102 } as any);
 
     expect(logged).not.toHaveBeenCalled();
+    await expect(rowVersions('key_blocks')).resolves.toEqual(firstWrite);
     expect(microBlockRequests()).toEqual([]);
     await expect(
       db.dataSource.query(
