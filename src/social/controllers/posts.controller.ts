@@ -30,12 +30,14 @@ import { Token } from '@/tokens/entities/token.entity';
 import { TokenPerformance } from '@/tokens/entities/token-performance.entity';
 import { PopularRankingContentItem } from '@/plugins/popular-ranking.interface';
 import { extractTrendMentions } from '../utils/content-parser.util';
+import { normalizeTopicName } from '../utils/topic-name.util';
 import { ProfileReadService } from '@/profile/services/profile-read.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { SocialGraphService } from '@/plugins/social-graph/social-graph.service';
 import {
   OpaqueIdPipe,
   OptionalAeAccountAddressPipe,
+  OptionalTopicParamPipe,
 } from '@/common/validation/request-validation';
 
 // order_by is interpolated into the ORDER BY expression, so it must never
@@ -238,6 +240,13 @@ export class PostsController {
     required: false,
     description: 'Return only posts from accounts this address follows',
   })
+  @ApiQuery({
+    name: 'topic',
+    type: 'string',
+    required: false,
+    description:
+      'Return only posts tagged with exactly this topic (case-insensitive, no leading #)',
+  })
   @ApiOperation({
     operationId: 'listAll',
     summary: 'Get all posts',
@@ -258,6 +267,7 @@ export class PostsController {
     @Query('language') language?: string,
     @Query('followed_by', OptionalAeAccountAddressPipe)
     followed_by?: string,
+    @Query('topic', OptionalTopicParamPipe) topic?: string,
   ) {
     if (page < 1) {
       throw new BadRequestException('Page must be greater than or equal to 1');
@@ -286,45 +296,47 @@ export class PostsController {
     const following = followed_by
       ? await this.socialGraphService.followingSubquery(followed_by)
       : undefined;
-    // Build base query for filtering to get distinct post IDs
-    // This prevents duplicates when posts have multiple topics
-    const baseQuery = this.postRepository
-      .createQueryBuilder('post')
-      .leftJoin('post.topics', 'topic')
-      .where('post.is_hidden = false');
+    const topicNames = (topics ?? '')
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    // Only matching on a topic name needs the join. It multiplies posts by
+    // their topics, and collapsing those again means aggregating every post
+    // instead of reading one page off the created_at index.
+    const matchesTopics = Boolean(search) || topicNames.length > 0;
+    const exactTopic = topic ? normalizeTopicName(topic) : undefined;
 
-    // Add search functionality
-    if (search) {
-      const searchTerm = `%${search}%`;
-      baseQuery.andWhere(
-        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
-        { searchTerm },
-      );
-    }
+    const buildFilteredQuery = () => {
+      const query = this.postRepository.createQueryBuilder('post');
+      if (matchesTopics) {
+        query.leftJoin('post.topics', 'topic');
+      }
+      query.where('post.is_hidden = false');
 
-    if (account_address) {
-      baseQuery.andWhere('post.sender_address = :account_address', {
-        account_address,
-      });
-    }
+      if (search) {
+        query.andWhere(
+          '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
+          { searchTerm: `%${search}%` },
+        );
+      }
 
-    if (following) {
-      baseQuery.andWhere(
-        `post.sender_address IN (${following.sql})`,
-        following.params,
-      );
-    }
+      if (account_address) {
+        query.andWhere('post.sender_address = :account_address', {
+          account_address,
+        });
+      }
 
-    if (language) {
-      baseQuery.andWhere('post.language = :language', { language });
-    }
+      if (following) {
+        query.andWhere(
+          `post.sender_address IN (${following.sql})`,
+          following.params,
+        );
+      }
 
-    // Add topic filtering
-    if (topics) {
-      const topicNames = topics
-        .split(',')
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0);
+      if (language) {
+        query.andWhere('post.language = :language', { language });
+      }
+
       if (topicNames.length > 0) {
         const topicConditions = topicNames
           .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
@@ -335,25 +347,45 @@ export class PostsController {
           topicParams[`topicSearch${index}`] = `%${topicName}%`;
         });
 
-        baseQuery.andWhere(`(${topicConditions})`, topicParams);
+        query.andWhere(`(${topicConditions})`, topicParams);
       }
-    }
 
-    // Get distinct post IDs using groupBy with aggregate to prevent duplicates
-    // Execute the subquery first with pagination to get the IDs, then use them in the main query
+      // A semi-join yields each post once, so this filter needs none of the
+      // join's GROUP BY / COUNT(DISTINCT).
+      if (exactTopic) {
+        query.andWhere(
+          `post.id IN (
+            SELECT exact_pt.post_id
+            FROM post_topics exact_pt
+            INNER JOIN topics exact_topic ON exact_topic.id = exact_pt.topic_id
+            WHERE exact_topic.name = :exactTopic
+          )`,
+          { exactTopic },
+        );
+      }
+
+      return query;
+    };
+
     const orderColumn = orderBy || 'created_at';
-    // Use MIN/MAX aggregate to get one value per post.id for ordering
-    const aggregateFn = orderDirection === 'DESC' ? 'MAX' : 'MIN';
 
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
-    // Execute subquery to get distinct post IDs with pagination
-    const distinctPostIds = await baseQuery
+    const pageQuery = buildFilteredQuery()
       .select('post.id', 'id')
-      .addSelect(`${aggregateFn}(post.${orderColumn})`, 'order_value')
-      .groupBy('post.id')
-      .orderBy('order_value', orderDirection)
+      .addSelect(`post.${orderColumn}`, 'order_value');
+    if (matchesTopics) {
+      pageQuery.groupBy('post.id');
+    }
+    pageQuery.orderBy('order_value', orderDirection);
+    // Posts from one micro block share created_at, and the topic feed pages
+    // through them, so without a tie-breaker one can fall between two pages.
+    if (exactTopic) {
+      pageQuery.addOrderBy('post.id', orderDirection);
+    }
+
+    const distinctPostIds = await pageQuery
       .offset(offset)
       .limit(limit)
       .getRawMany<{ id: string; order_value: any }>();
@@ -375,56 +407,8 @@ export class PostsController {
     });
 
     // Get total count for pagination metadata
-    // We need to count distinct posts matching the filters
-    const totalCountQuery = this.postRepository
-      .createQueryBuilder('post')
-      .leftJoin('post.topics', 'topic')
-      .where('post.is_hidden = false');
-
-    if (search) {
-      const searchTerm = `%${search}%`;
-      totalCountQuery.andWhere(
-        '(post.content ILIKE :searchTerm OR topic.name ILIKE :searchTerm)',
-        { searchTerm },
-      );
-    }
-
-    if (account_address) {
-      totalCountQuery.andWhere('post.sender_address = :account_address', {
-        account_address,
-      });
-    }
-
-    if (following) {
-      totalCountQuery.andWhere(
-        `post.sender_address IN (${following.sql})`,
-        following.params,
-      );
-    }
-
-    if (language) {
-      totalCountQuery.andWhere('post.language = :language', { language });
-    }
-
-    if (topics) {
-      const topicNames = topics
-        .split(',')
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0);
-      if (topicNames.length > 0) {
-        const topicConditions = topicNames
-          .map((_, index) => `topic.name ILIKE :topicSearch${index}`)
-          .join(' OR ');
-        const topicParams = {};
-        topicNames.forEach((topicName, index) => {
-          topicParams[`topicSearch${index}`] = `%${topicName}%`;
-        });
-        totalCountQuery.andWhere(`(${topicConditions})`, topicParams);
-      }
-    }
-
-    const totalCount = await totalCountQuery
-      .select('COUNT(DISTINCT post.id)', 'count')
+    const totalCount = await buildFilteredQuery()
+      .select(matchesTopics ? 'COUNT(DISTINCT post.id)' : 'COUNT(*)', 'count')
       .getRawOne<{ count: string }>();
     const totalItems = parseInt(totalCount?.count || '0', 10);
 

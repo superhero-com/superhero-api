@@ -122,7 +122,6 @@ export class TopicsController {
 
     const topic = await this.topicRepository.findOne({
       where: isUUID ? { id } : { name: normalizeTopicName(id) },
-      relations: ['posts'],
     });
     if (!topic) {
       throw new NotFoundException(
@@ -146,7 +145,6 @@ export class TopicsController {
   async getByName(@Param('name', TopicParamPipe) name: string) {
     const topic = await this.topicRepository.findOne({
       where: { name: normalizeTopicName(name) },
-      relations: ['posts'],
     });
     if (!topic) {
       throw new NotFoundException(`Topic with name "${name}" not found`);

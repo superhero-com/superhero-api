@@ -9,7 +9,7 @@ function createService(query: jest.Mock) {
 }
 
 describe('RefreshTokenRanksService', () => {
-  it('runs a single set-based UPDATE ... RANK() OVER query', async () => {
+  it('writes token ranks after acquiring the maintenance lock', async () => {
     const query = jest.fn().mockResolvedValue([{ locked: true }]);
     const service = createService(query);
 
@@ -21,7 +21,11 @@ describe('RefreshTokenRanksService', () => {
       [TOKEN_MAINTENANCE_LOCK_KEY],
     ]);
     const [sql] = query.mock.calls[1];
-    expect(sql).toContain('UPDATE "token"');
+    expect(sql).toContain('UPDATE "token_rank"');
+    expect(sql).toContain('INSERT INTO "token_rank"');
+    expect(sql).not.toMatch(/UPDATE "token"\s/);
+    expect(sql).toContain('ON CONFLICT (sale_address) DO NOTHING');
+    expect(sql).not.toMatch(/DO\s+UPDATE/i);
     expect(sql).toContain('RANK() OVER');
     expect(sql).toContain('WHERE unlisted = false');
   });

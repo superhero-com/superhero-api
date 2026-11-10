@@ -81,6 +81,15 @@ export class PopularRankingService implements OnModuleDestroy {
     expiresAt: number;
   } | null = null;
   private static readonly TRENDING_CACHE_TTL_MS = 30_000;
+  // The ranking behind these ids only changes on the 10-minute recompute, and
+  // hydration re-checks every post it returns.
+  private static readonly VERIFIED_IDS_TTL_MS = 15_000;
+  // A load stuck on a dead connection must not hold every later request.
+  private static readonly VERIFIED_IDS_LOAD_DEADLINE_MS = 30_000;
+  private readonly verifiedIdsCache = new Map<
+    string,
+    { ids: Promise<string[]>; expiresAt: number }
+  >();
 
   constructor(
     @InjectRepository(Post)
@@ -251,10 +260,45 @@ export class PopularRankingService implements OnModuleDestroy {
     return selectedItems.slice(offset, targetEnd);
   }
 
+  private getVerifiedPopularIds(
+    window: PopularWindow,
+    maxCandidates?: number,
+    language?: PostLanguageFilter,
+  ): Promise<string[]> {
+    const key = `${window}:${language ?? ''}`;
+    const cached = this.verifiedIdsCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.ids;
+    }
+
+    const entry = {
+      ids: this.loadVerifiedPopularIds(window, maxCandidates, language),
+      expiresAt:
+        Date.now() + PopularRankingService.VERIFIED_IDS_LOAD_DEADLINE_MS,
+    };
+    this.verifiedIdsCache.set(key, entry);
+    const forget = () => {
+      if (this.verifiedIdsCache.get(key) === entry) {
+        this.verifiedIdsCache.delete(key);
+      }
+    };
+    // An empty set sends callers to the cold-start fallback, which has to keep
+    // retrying until the ranking exists.
+    entry.ids.then((ids) => {
+      if (ids.length === 0) {
+        forget();
+      } else {
+        entry.expiresAt =
+          Date.now() + PopularRankingService.VERIFIED_IDS_TTL_MS;
+      }
+    }, forget);
+    return entry.ids;
+  }
+
   /**
    * Get verified popular post IDs from Redis, ensuring they exist in DB
    */
-  private async getVerifiedPopularIds(
+  private async loadVerifiedPopularIds(
     window: PopularWindow,
     maxCandidates?: number,
     language?: PostLanguageFilter,

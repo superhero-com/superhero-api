@@ -60,12 +60,22 @@ export const JOURNEY_FUNNELS: JourneyFunnel[] = [
       { label: 'Clicked Edit', event: 'profile_edit_open' },
       { label: 'Claim Superhero account', event: 'claim_account_open' },
       { label: 'Connect X', event: 'x_connect_start' },
+    ],
+  },
+  {
+    // The journey id lives in memory per page load, so the X sign-in redirect
+    // starts a new id. The steps after X sign-in are their own funnel.
+    id: 'after-x',
+    label: 'After X connected',
+    steps: [
       { label: 'X connected', event: 'x_connected' },
       { label: 'Posted', event: 'post_created' },
       { label: 'Created a token', event: 'token_created' },
     ],
   },
   {
+    // With no wallet detected, connecting leaves for the wallet app and comes
+    // back on a new id, so it shows as lost. Extension connects stay whole.
     id: 'wallet',
     label: 'Wallet connect',
     steps: [

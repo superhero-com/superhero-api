@@ -5,7 +5,6 @@ import { Tx } from '@/mdw-sync/entities/tx.entity';
 import { Token } from '@/tokens/entities/token.entity';
 import { TokensService } from '@/tokens/tokens.service';
 import { CommunityFactoryService } from '@/ae/community-factory.service';
-import { TokenWebsocketGateway } from '@/tokens/token-websocket.gateway';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { Encoded } from '@aeternity/aepp-sdk';
 import BigNumber from 'bignumber.js';
@@ -14,16 +13,21 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { PULL_TOKEN_INFO_QUEUE } from '@/tokens/queues/constants';
 
+type PriceRefresh = {
+  current: Promise<void>;
+  next: Promise<void> | null;
+};
+
 @Injectable()
 export class TokenService {
   private readonly logger = new Logger(TokenService.name);
+  private readonly priceRefreshes = new Map<string, PriceRefresh>();
 
   constructor(
     @InjectRepository(Token)
     private tokensRepository: Repository<Token>,
     private readonly tokensService: TokensService,
     private readonly communityFactoryService: CommunityFactoryService,
-    private readonly tokenWebsocketGateway: TokenWebsocketGateway,
     private readonly aePricingService: AePricingService,
     @InjectQueue(PULL_TOKEN_INFO_QUEUE)
     private readonly pullTokenInfoQueue: Queue,
@@ -51,10 +55,9 @@ export class TokenService {
     manager?: EntityManager,
   ): Promise<Token | null> {
     const repository = manager?.getRepository(Token) || this.tokensRepository;
-    // `token.rank` is already selected here, maintained by
-    // RefreshTokenRanksService. This used to recompute RANK() OVER (...) across
-    // every token of the factory on each call -- 135ms against 63k tokens, on
-    // the indexer's hot path, for a value no caller here reads.
+    // No rank here: this used to recompute RANK() OVER (...) across every
+    // token of the factory on each call -- 135ms against 63k tokens, on the
+    // indexer's hot path, for a value no caller here reads.
     return repository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
@@ -173,14 +176,51 @@ export class TokenService {
   }
 
   /**
-   * Sync token price from live data
+   * Refresh the token's live price, outside any transaction. A request made
+   * while a refresh of the same token runs is served by one follow-up run
+   * that starts after it, so the last write reads chain state from after the
+   * last committed trade. Never rejects.
    */
-  async syncTokenPrice(token: Token, manager?: EntityManager): Promise<void> {
+  refreshTokenPrice(token: Token): Promise<void> {
+    const key = token.sale_address;
+    const inFlight = this.priceRefreshes.get(key);
+    if (inFlight) {
+      inFlight.next ??= inFlight.current.then(() => this.syncTokenPrice(token));
+      return inFlight.next;
+    }
+
+    const entry: PriceRefresh = {
+      current: this.syncTokenPrice(token),
+      next: null,
+    };
+    this.priceRefreshes.set(key, entry);
+    this.advancePriceRefresh(key, entry);
+    return entry.current;
+  }
+
+  private advancePriceRefresh(key: string, entry: PriceRefresh): void {
+    // Relies on syncTokenPrice never rejecting; a rejection would leave the
+    // entry in place and every later request for the token unserved.
+    void entry.current.then(() => {
+      if (entry.next) {
+        entry.current = entry.next;
+        entry.next = null;
+        this.advancePriceRefresh(key, entry);
+      } else {
+        this.priceRefreshes.delete(key);
+      }
+    });
+  }
+
+  /**
+   * Sends no token-updated broadcast: the live path never did, and it goes to
+   * every connected client.
+   */
+  private async syncTokenPrice(token: Token): Promise<void> {
     try {
       const data = await this.getTokenLivePrice(token);
       if (!data || Object.keys(data).length === 0) return;
 
-      const repository = manager?.getRepository(Token) || this.tokensRepository;
       const updatePayload = Object.fromEntries(
         Object.entries(data ?? {}).filter(([, value]) => value !== undefined),
       );
@@ -192,15 +232,10 @@ export class TokenService {
         return;
       }
 
-      await repository.update(token.sale_address, updatePayload as any);
-
-      // re-fetch token and broadcast outside transaction
-      if (!manager) {
-        this.tokenWebsocketGateway?.handleTokenUpdated({
-          sale_address: token.sale_address,
-          data: updatePayload,
-        });
-      }
+      await this.tokensRepository.update(
+        token.sale_address,
+        updatePayload as any,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to sync token price for ${token.sale_address}`,

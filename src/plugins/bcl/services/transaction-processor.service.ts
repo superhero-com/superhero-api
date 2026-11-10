@@ -59,6 +59,32 @@ export class TransactionProcessorService {
 
     const saleAddress = validation.saleAddress;
 
+    // Resolved before the transaction opens: getToken doesn't use the
+    // transaction, and on a miss it creates the token through contract and
+    // middleware calls with retries, which would hold its connection idle.
+    let resolvedToken: Token | undefined;
+    try {
+      resolvedToken = await this.tokenService.getToken(saleAddress);
+    } catch (error) {
+      // A buy/sell would otherwise be skipped as "token unavailable" on a
+      // transient DB/node error; throwing parks it for retry instead.
+      // create_community still falls back to the raw-tx path below.
+      if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
+        throw error;
+      }
+      this.logger.error(`Error getting token ${saleAddress}`, error);
+    }
+
+    if (
+      !resolvedToken &&
+      rawTransaction.function !== BCL_FUNCTIONS.create_community
+    ) {
+      this.logger.warn(
+        `Skipping ${rawTransaction.function} tx ${rawTransaction.hash}: token unavailable for ${saleAddress}`,
+      );
+      return null;
+    }
+
     // Deferred `tgr.balance.changed` emit from updateTokenHolder — fired only
     // AFTER the transaction below commits, so room eligibility never recomputes
     // off a balance a rollback discards (or one not yet visible to its reader).
@@ -74,31 +100,10 @@ export class TransactionProcessorService {
           rawTransaction.hash,
           manager,
         );
-        let transactionToken: Token | undefined;
+        let transactionToken = resolvedToken;
         let cleanupAffectedAddresses: string[] = [];
 
-        // Resolve token first. For buy/sell this may lazily create token by sale
-        // address via TokensService.getToken().
-        try {
-          transactionToken = await this.tokenService.getToken(saleAddress);
-        } catch (error) {
-          // A buy/sell would otherwise be skipped as "token unavailable" on a
-          // transient DB/node error; throwing parks it for retry instead.
-          // create_community still falls back to the raw-tx path below.
-          if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
-            throw error;
-          }
-          this.logger.error(`Error getting token ${saleAddress}`, error);
-        }
-
         if (!transactionToken) {
-          if (rawTransaction.function !== BCL_FUNCTIONS.create_community) {
-            this.logger.warn(
-              `Skipping ${rawTransaction.function} tx ${rawTransaction.hash}: token unavailable for ${saleAddress}`,
-            );
-            return null;
-          }
-
           transactionToken =
             await this.tokenService.createTokenFromRawTransaction(
               rawTransaction,
@@ -235,10 +240,7 @@ export class TransactionProcessorService {
           };
         }
 
-        // Sync token price - only for live sync direction
         if (syncDirection === SyncDirectionEnum.Live) {
-          await this.tokenService.syncTokenPrice(transactionToken, manager);
-
           // Update token holder. The balance-changed emit is deferred and
           // fired after this transaction commits (see below).
           emitBalanceChanged = await this.tokenHolderService.updateTokenHolder(
@@ -258,6 +260,17 @@ export class TransactionProcessorService {
       },
     );
 
+    const isLiveSupported =
+      result?.isSupported && syncDirection === SyncDirectionEnum.Live;
+
+    // After commit: the refresh makes several node and middleware calls, which
+    // inside the transaction kept the token, account and trade rows locked.
+    // Awaited so the price is saved before the emit below and before the
+    // caller broadcasts the trade, as when it ran inside the transaction.
+    if (isLiveSupported) {
+      await this.tokenService.refreshTokenPrice(result.transactionToken);
+    }
+
     // Transaction committed — now it is safe to wake room eligibility off the
     // freshly-persisted (and durable) token_balance. If the transaction had
     // rolled back, `.transaction()` would have thrown and we would never reach
@@ -265,7 +278,7 @@ export class TransactionProcessorService {
     emitBalanceChanged?.();
 
     // Update token trending score (non-critical operation outside transaction)
-    if (result?.isSupported && syncDirection === SyncDirectionEnum.Live) {
+    if (isLiveSupported) {
       try {
         await this.tokenService.updateTokenTrendingScore(
           result.transactionToken,

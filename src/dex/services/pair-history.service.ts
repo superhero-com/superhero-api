@@ -695,6 +695,19 @@ export class PairHistoryService {
           volumeToken = '0';
         }
       }
+      // Get data for different time periods
+      const now = moment();
+      const periods = {
+        '24h': now.clone().subtract(24, 'hours'),
+        '7d': now.clone().subtract(7, 'days'),
+        '30d': now.clone().subtract(30, 'days'),
+      };
+      const periodStarts = [
+        periods['24h'].toDate(),
+        periods['7d'].toDate(),
+        periods['30d'].toDate(),
+      ];
+
       // Total AE volume for the pair = the WAE side that actually moved, taken
       // DIRECTLY. An earlier version reconstructed the non-WAE selected token's
       // volume as `token_volume * (reserveWAE / reserveOther)`, which explodes
@@ -704,65 +717,31 @@ export class PairHistoryService {
       // dust-safe, so the AE volume does not depend on which token is selected.
       // This mirrors the same fix already applied in DexTokenSummaryService.
       // Pairs with no WAE side yield 0 (no token price to convert with).
+      // The total and the three windows come from one pass over the swaps.
       // NB: do NOT pass an unreferenced parameter — Postgres cannot infer its
       // type and aborts the whole query with "could not determine data type of
-      // parameter $N". $2 is the WAE address (used in the CASE).
+      // parameter $N". $2 is the WAE address (used in the CASE), $3–$5 are the
+      // 24h/7d/30d window starts.
       const volumeResult = await queryRunner.query(
         `
           SELECT
-            COALESCE(SUM(
+            COALESCE(SUM(v.volume_ae), 0) as total_volume,
+            COALESCE(SUM(v.volume_ae) FILTER (WHERE v.created_at >= $3), 0) as volume_24h,
+            COALESCE(SUM(v.volume_ae) FILTER (WHERE v.created_at >= $4), 0) as volume_7d,
+            COALESCE(SUM(v.volume_ae) FILTER (WHERE v.created_at >= $5), 0) as volume_30d
+          FROM (
+            SELECT
+              pt.created_at,
               CASE
                 WHEN token0.address = $2 THEN pt.volume0 / POW(10, token0.decimals)
                 WHEN token1.address = $2 THEN pt.volume1 / POW(10, token1.decimals)
                 ELSE 0
-              END
-            ), 0) as total_volume
-          FROM pair_transactions pt
-          INNER JOIN pairs p ON pt.pair_address = p.address
-          INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
-          INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
-          WHERE pt.pair_address = $1
-            AND pt.tx_type IN (
-              'swap_exact_tokens_for_tokens',
-              'swap_tokens_for_exact_tokens',
-              'swap_exact_tokens_for_ae',
-              'swap_tokens_for_exact_ae',
-              'swap_exact_ae_for_tokens',
-              'swap_ae_for_exact_tokens'
-            )
-        `,
-        [pair.address, DEX_CONTRACTS.wae],
-      );
-
-      // Get data for different time periods
-      const now = moment();
-      const periods = {
-        '24h': now.clone().subtract(24, 'hours'),
-        '7d': now.clone().subtract(7, 'days'),
-        '30d': now.clone().subtract(30, 'days'),
-      };
-
-      const periodData = {};
-
-      for (const [period, startDate] of Object.entries(periods)) {
-        // Period AE volume — same dust-safe WAE-leg conversion as the total.
-        // $3 is the WAE address; no unreferenced params (see total query above).
-        const periodVolumeResult = await queryRunner.query(
-          `
-            SELECT
-              COALESCE(SUM(
-                CASE
-                  WHEN token0.address = $3 THEN pt.volume0 / POW(10, token0.decimals)
-                  WHEN token1.address = $3 THEN pt.volume1 / POW(10, token1.decimals)
-                  ELSE 0
-                END
-              ), 0) as total_volume
+              END as volume_ae
             FROM pair_transactions pt
             INNER JOIN pairs p ON pt.pair_address = p.address
             INNER JOIN dex_tokens token0 ON p.token0_address = token0.address
             INNER JOIN dex_tokens token1 ON p.token1_address = token1.address
             WHERE pt.pair_address = $1
-              AND pt.created_at >= $2
               AND pt.tx_type IN (
                 'swap_exact_tokens_for_tokens',
                 'swap_tokens_for_exact_tokens',
@@ -771,57 +750,69 @@ export class PairHistoryService {
                 'swap_exact_ae_for_tokens',
                 'swap_ae_for_exact_tokens'
               )
-          `,
-          [pair.address, startDate.toDate(), DEX_CONTRACTS.wae],
-        );
+          ) v
+        `,
+        [pair.address, DEX_CONTRACTS.wae, ...periodStarts],
+      );
 
-        // Get price changes for the period
-        // We want the price of the OTHER token in terms of the selected token
-        // If volumeToken is '0' (WAE), we want ratio1 (token1/token0) - price of token1 in terms of token0 (WAE)
-        // If volumeToken is '1' (WAE), we want ratio0 (token0/token1) - price of token0 in terms of token1 (WAE)
-        const otherToken = volumeToken === '0' ? '1' : '0';
-        const priceResult = await queryRunner.query(
-          `
-            SELECT 
-              (SELECT ratio${otherToken} FROM pair_transactions 
-               WHERE pair_address = $1 AND created_at >= $2 
-               ORDER BY created_at ASC LIMIT 1) as start_price,
-              (SELECT ratio${otherToken} FROM pair_transactions 
-               WHERE pair_address = $1 
-               ORDER BY created_at DESC LIMIT 1) as current_price
-          `,
-          [pair.address, startDate.toDate()],
-        );
+      // We want the price of the OTHER token in terms of the selected token
+      // If volumeToken is '0' (WAE), we want ratio1 (token1/token0) - price of token1 in terms of token0 (WAE)
+      // If volumeToken is '1' (WAE), we want ratio0 (token0/token1) - price of token0 in terms of token1 (WAE)
+      // The current price is the same for every window, so it is read once.
+      const otherToken = volumeToken === '0' ? '1' : '0';
+      const priceResult = await queryRunner.query(
+        `
+          SELECT
+            (SELECT ratio${otherToken} FROM pair_transactions
+             WHERE pair_address = $1 AND created_at >= $2
+             ORDER BY created_at ASC LIMIT 1) as start_price_24h,
+            (SELECT ratio${otherToken} FROM pair_transactions
+             WHERE pair_address = $1 AND created_at >= $3
+             ORDER BY created_at ASC LIMIT 1) as start_price_7d,
+            (SELECT ratio${otherToken} FROM pair_transactions
+             WHERE pair_address = $1 AND created_at >= $4
+             ORDER BY created_at ASC LIMIT 1) as start_price_30d,
+            (SELECT ratio${otherToken} FROM pair_transactions
+             WHERE pair_address = $1
+             ORDER BY created_at DESC LIMIT 1) as current_price
+        `,
+        [pair.address, ...periodStarts],
+      );
 
+      // Raw ratios → human price so the dust-sanity check is decimal-correct
+      // (ratio0 = reserve0/reserve1 normalises by 10^(dec1-dec0), and vice
+      // versa). The % itself is scale-invariant; we normalise so the bound
+      // and the reported `value` are meaningful.
+      const dec0 = Number(pair.token0?.decimals ?? 18);
+      const dec1 = Number(pair.token1?.decimals ?? 18);
+      const priceScale =
+        otherToken === '0'
+          ? priceScaleOf(dec1, dec0)
+          : priceScaleOf(dec0, dec1);
+
+      const volumes = volumeResult[0];
+      const prices = priceResult[0];
+      const periodData = {};
+
+      for (const period of Object.keys(periods)) {
         // Calculate volume in AE
         const periodVolumeAE = new BigNumber(
-          periodVolumeResult[0]?.total_volume || 0,
+          volumes?.[`volume_${period}`] || 0,
         );
 
         // Calculate price change
-        const priceData = priceResult[0];
+        const startRatio = prices?.[`start_price_${period}`];
+        const currentRatio = prices?.current_price;
         let priceChange = {
           percentage: '0.00',
           value: '0',
         };
 
-        if (priceData && priceData.start_price && priceData.current_price) {
-          // Raw ratios → human price so the dust-sanity check is decimal-correct
-          // (ratio0 = reserve0/reserve1 normalises by 10^(dec1-dec0), and vice
-          // versa). The % itself is scale-invariant; we normalise so the bound
-          // and the reported `value` are meaningful.
-          const dec0 = Number(pair.token0?.decimals ?? 18);
-          const dec1 = Number(pair.token1?.decimals ?? 18);
-          const priceScale =
-            otherToken === '0'
-              ? priceScaleOf(dec1, dec0)
-              : priceScaleOf(dec0, dec1);
-          const startPrice = new BigNumber(priceData.start_price).multipliedBy(
+        if (startRatio && currentRatio) {
+          const startPrice = new BigNumber(startRatio).multipliedBy(priceScale);
+          const currentPrice = new BigNumber(currentRatio).multipliedBy(
             priceScale,
           );
-          const currentPrice = new BigNumber(
-            priceData.current_price,
-          ).multipliedBy(priceScale);
 
           // Skip when either endpoint is a dust-state artifact — it would report
           // a meaningless multi-million-percent swing for a drained pool.

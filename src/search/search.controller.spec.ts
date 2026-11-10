@@ -2,7 +2,10 @@ import { SearchController } from './search.controller';
 
 describe('SearchController', () => {
   let controller: SearchController;
-  let tokensRepository: { createQueryBuilder: jest.Mock };
+  let tokensRepository: {
+    createQueryBuilder: jest.Mock;
+    manager: { query: jest.Mock };
+  };
   let postsRepository: { createQueryBuilder: jest.Mock };
   let accountService: { searchByNameOrAddress: jest.Mock };
   let tokensQueryBuilder: {
@@ -39,6 +42,7 @@ describe('SearchController', () => {
     };
     tokensRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(tokensQueryBuilder),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     postsRepository = {
       createQueryBuilder: jest.fn().mockReturnValue(postsQueryBuilder),
@@ -77,10 +81,13 @@ describe('SearchController', () => {
   });
 
   it('runs the three lookups in parallel, each capped at the clamped limit', async () => {
-    const tokens = [{ sale_address: 'ct_1' }];
+    const tokens = [{ sale_address: 'ct_1' }, { sale_address: 'ct_2' }];
     const posts = [{ id: 'post_1' }];
     const accounts = [{ address: 'ak_1', chain_name: null }];
     tokensQueryBuilder.getMany.mockResolvedValue(tokens);
+    tokensRepository.manager.query.mockResolvedValue([
+      { sale_address: 'ct_1', rank: 7 },
+    ]);
     postsQueryBuilder.getMany.mockResolvedValue(posts);
     accountService.searchByNameOrAddress.mockResolvedValue(accounts);
 
@@ -110,5 +117,9 @@ describe('SearchController', () => {
     );
 
     expect(result).toEqual({ tokens, accounts, posts });
+    // The rank the old token.rank column held: the sentinel until placed.
+    expect(result.tokens.map((token: any) => token.rank)).toEqual([
+      7, 2147483647,
+    ]);
   });
 });

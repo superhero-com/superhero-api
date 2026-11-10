@@ -129,10 +129,9 @@ export class LiveIndexerService implements OnModuleInit, OnModuleDestroy {
       };
 
       // Upsert the key block to handle duplicate key violations gracefully.
-      // Do not use skipUpdateIfNoValuesChanged because KeyBlock includes jsonb
-      // data and PostgreSQL cannot compare json/jsonb values with "=" here.
       await this.blockRepository.upsert(blockToSave, {
         conflictPaths: ['height'],
+        skipUpdateIfNoValuesChanged: true,
       });
 
       // Update live_synced_height

@@ -6,6 +6,7 @@ import {
   AeContractAddressPipe,
   AeTransactionHashPipe,
   OpaqueIdPipe,
+  OptionalTopicParamPipe,
   TopicParamPipe,
 } from './request-validation';
 
@@ -117,6 +118,24 @@ describe('request validation pipes', () => {
       expect(() => pipe.transform('汉'.repeat(129), { data: 'name' })).toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('OptionalTopicParamPipe', () => {
+    const pipe = new OptionalTopicParamPipe();
+
+    it('treats a missing or empty topic as no filter', () => {
+      expect(pipe.transform(undefined, { data: 'topic' })).toBeUndefined();
+      expect(pipe.transform('', { data: 'topic' })).toBeUndefined();
+    });
+
+    it('validates a present topic like TopicParamPipe', () => {
+      expect(pipe.transform('привет', { data: 'topic' })).toBe('привет');
+      for (const value of ['#ae', '../secret', ' ae']) {
+        expect(() => pipe.transform(value, { data: 'topic' })).toThrow(
+          BadRequestException,
+        );
+      }
     });
   });
 });

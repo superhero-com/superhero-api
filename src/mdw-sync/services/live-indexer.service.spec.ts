@@ -339,11 +339,9 @@ describe('LiveIndexerService.handleKeyBlock', () => {
     expect(fetchJson.mock.calls).toEqual([
       [`${MDW_URL}/v3/key-blocks/kh_live`],
     ]);
-    // Exact options: skipUpdateIfNoValuesChanged makes Postgres compare jsonb
-    // with "=", which it cannot do.
     expect(ctx.blockRepository.upsert).toHaveBeenCalledWith(
       { ...fullBlock, created_at: new Date(1700000000000) },
-      { conflictPaths: ['height'] },
+      { conflictPaths: ['height'], skipUpdateIfNoValuesChanged: true },
     );
     expect(ctx.syncStateRepository.update).toHaveBeenCalledWith(
       { id: 'global' },

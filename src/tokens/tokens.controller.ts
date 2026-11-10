@@ -291,6 +291,7 @@ export class TokensController {
       page,
       orderBy,
       orderDirection,
+      { reuseRankOrder: !search && !creator_address && !owner_address },
     );
 
     // Fallback: if NO token clears the trending eligibility gate, drop the gate
@@ -466,20 +467,6 @@ export class TokensController {
       };
     }
 
-    // Sentinel rank -- the refresh cron has not placed this token yet.
-    if (token.rank >= UNRANKED_TOKEN_RANK) {
-      return {
-        items: [],
-        meta: {
-          currentPage: page,
-          itemCount: 0,
-          itemsPerPage: limit,
-          totalItems: 0,
-          totalPages: 0,
-        },
-      };
-    }
-
     const factory = await this.communityFactoryService.getCurrentFactory();
 
     // `rank` spans every factory, so a token off this board still lands
@@ -497,49 +484,79 @@ export class TokensController {
       };
     }
 
+    const [rankRow] = await this.tokensRepository.query(
+      'SELECT rank FROM token_rank WHERE sale_address = $1',
+      [token.sale_address],
+    );
+    const tokenRank: number | undefined = rankRow?.rank;
+
+    // No rank -- the refresh cron has not placed this token yet.
+    if (tokenRank == null || tokenRank >= UNRANKED_TOKEN_RANK) {
+      return {
+        items: [],
+        meta: {
+          currentPage: page,
+          itemCount: 0,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0,
+        },
+      };
+    }
+
     // `rank` is not dense over this board -- other factories, unlisting and
     // the refresh lag all leave holes a BETWEEN window would return short on.
+    // Tokens the cron has not placed yet have no token_rank row, so they never
+    // show up as neighbours.
     const neighboursQuery = `
       (
         SELECT
           token.*,
+          token_rank.rank AS current_rank,
           row_to_json(token_performance.*) as performance
-        FROM token
+        FROM token_rank
+        INNER JOIN token ON token.sale_address = token_rank.sale_address
         LEFT JOIN token_performance
           ON token.sale_address = token_performance.sale_address
         WHERE token.factory_address = $1
           AND token.unlisted = false
-          AND token.rank < $2
-        ORDER BY token.rank DESC
+          AND token_rank.rank < $2
+        ORDER BY token_rank.rank DESC
         LIMIT $3
       )
       UNION ALL
       (
         SELECT
           token.*,
+          token_rank.rank AS current_rank,
           row_to_json(token_performance.*) as performance
-        FROM token
+        FROM token_rank
+        INNER JOIN token ON token.sale_address = token_rank.sale_address
         LEFT JOIN token_performance
           ON token.sale_address = token_performance.sale_address
         WHERE token.factory_address = $1
           AND token.unlisted = false
-          AND token.rank >= $2
-        ORDER BY token.rank ASC
+          AND token_rank.rank >= $2
+        ORDER BY token_rank.rank ASC
         LIMIT $3
       )
     `;
 
-    const neighbours = await this.tokensRepository.query(neighboursQuery, [
-      factory.address,
-      token.rank,
-      limit,
-    ]);
+    // `token.*` still includes the retired `token.rank` column until it is
+    // dropped, so the rank comes from current_rank.
+    const neighbours = (
+      await this.tokensRepository.query(neighboursQuery, [
+        factory.address,
+        tokenRank,
+        limit,
+      ])
+    ).map(({ current_rank, ...row }) => ({ ...row, rank: current_rank }));
 
     const above = neighbours
-      .filter((row) => row.rank < token.rank)
+      .filter((row) => row.rank < tokenRank)
       .sort((a, b) => b.rank - a.rank);
     const below = neighbours
-      .filter((row) => row.rank >= token.rank)
+      .filter((row) => row.rank >= tokenRank)
       .sort((a, b) => a.rank - b.rank);
 
     // Centre on the target, then spend whatever the short side could not use

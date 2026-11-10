@@ -14,14 +14,38 @@ import {
 } from '../dto/analytics-transactions.dto';
 import { AePricingService } from '@/ae-pricing/ae-pricing.service';
 import { DailyMarketCapSumDto } from '@/tokens/dto/daily-market-cap-sum.dto';
-import { CacheTTL } from '@nestjs/cache-manager';
 import { Token } from '@/tokens/entities/token.entity';
+import {
+  createConcurrencyLimiter,
+  mapWithConcurrency,
+} from '@/utils/concurrency.util';
+import { LRUCache } from 'lru-cache';
 
 const MAX_TOKEN_SALE_ADDRESSES = 100;
+
+const MARKET_CAP_SUM_CONCURRENCY = 20;
+const MARKET_CAP_SUM_TTL_MS = 20_000;
+// A load stuck on a dead connection must not hold its range forever.
+const MARKET_CAP_SUM_LOAD_DEADLINE_MS = 5 * 60_000;
+const MARKET_CAP_SUM_MAX_RANGES = 100;
+
+interface MarketCapSumEntry {
+  sums: Promise<DailyMarketCapSumDto[]>;
+  expiresAt: number;
+}
 
 @Controller('analytics')
 @ApiTags('Analytics')
 export class AnalyticsTransactionsController {
+  // One request still runs 20 day queries at once, but all requests together
+  // can't hold more than 20 of the pool's 40 connections.
+  private readonly marketCapSumSlots = createConcurrencyLimiter(
+    MARKET_CAP_SUM_CONCURRENCY,
+  );
+  private readonly marketCapSums = new LRUCache<string, MarketCapSumEntry>({
+    max: MARKET_CAP_SUM_MAX_RANGES,
+  });
+
   constructor(
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
@@ -206,7 +230,6 @@ export class AnalyticsTransactionsController {
     description: 'Returns the sum of market caps for all tokens per day',
     type: [DailyMarketCapSumDto],
   })
-  @CacheTTL(20_000)
   @Get('daily-market-cap-sum')
   async listDailyMarketCapSum(
     @Query('start_date') start_date?: string,
@@ -232,15 +255,66 @@ export class AnalyticsTransactionsController {
       current.add(1, 'day');
     }
 
-    const batchSize = 20;
-    const results: DailyMarketCapSumDto[] = [];
-    for (let i = 0; i < dates.length; i += batchSize) {
-      const batch = dates.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map((date) => this.getMarketCapSum(date)),
-      );
-      results.push(...batchResults);
+    if (!dates.length) {
+      return [];
     }
+    return this.getCachedMarketCapSums(dates);
+  }
+
+  // Keyed by the days rather than the URL, which differs per time of day,
+  // parameter order or unused parameter. The days are contiguous, so the first
+  // and last identify the list.
+  private getCachedMarketCapSums(
+    dates: string[],
+  ): Promise<DailyMarketCapSumDto[]> {
+    const key = `${dates[0]}:${dates[dates.length - 1]}`;
+    const cached = this.marketCapSums.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.sums;
+    }
+
+    const entry: MarketCapSumEntry = {
+      sums: this.loadMarketCapSums(dates),
+      expiresAt: Date.now() + MARKET_CAP_SUM_LOAD_DEADLINE_MS,
+    };
+    this.marketCapSums.set(key, entry);
+    entry.sums.then(
+      () => {
+        entry.expiresAt = Date.now() + MARKET_CAP_SUM_TTL_MS;
+      },
+      () => {
+        if (this.marketCapSums.get(key) === entry) {
+          this.marketCapSums.delete(key);
+        }
+      },
+    );
+    return entry.sums;
+  }
+
+  private async loadMarketCapSums(
+    dates: string[],
+  ): Promise<DailyMarketCapSumDto[]> {
+    let failure: { error: unknown } | undefined;
+    // Each request queues at most 20 days at a time, so a short request
+    // takes the next free slot instead of waiting behind a long request's
+    // whole range.
+    const results = await mapWithConcurrency(
+      dates,
+      MARKET_CAP_SUM_CONCURRENCY,
+      (date) =>
+        this.marketCapSumSlots(async () => {
+          // The request has already failed, so don't start the remaining days.
+          if (failure) {
+            throw failure.error;
+          }
+          try {
+            return await this.getMarketCapSum(date);
+          } catch (error) {
+            failure ??= { error };
+            throw error;
+          }
+        }),
+    );
 
     return results.sort((a, b) => a.date.localeCompare(b.date));
   }

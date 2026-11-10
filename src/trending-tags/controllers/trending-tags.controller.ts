@@ -22,6 +22,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { paginate } from 'nestjs-typeorm-paginate';
 import { Repository } from 'typeorm';
+import { attachTokenRanks } from '@/tokens/utils/token-rank.util';
 import { TrendingTag } from '../entities/trending-tags.entity';
 import { CreateTrendingTagsDto } from '../dto/create-trending-tags.dto';
 import { TrendingTagsService } from '../services/trending-tags.service';
@@ -98,7 +99,12 @@ export class TrendingTagsController {
       'token',
       'token.name = trending_tag.tag',
     );
-    return paginate(query, { page, limit });
+    const result = await paginate(query, { page, limit });
+    await attachTokenRanks(
+      this.trendingTagRepository.manager,
+      result.items.map((tag) => (tag as any).token),
+    );
+    return result;
   }
 
   // single trending tag

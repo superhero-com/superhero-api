@@ -2,18 +2,14 @@ import { getMetadataArgsStorage } from 'typeorm';
 import { Token, UNRANKED_TOKEN_RANK } from './token.entity';
 
 describe('Token entity', () => {
-  it('defaults rank to the unranked sentinel, not 0', () => {
-    // Guards the exact regression this constant fixes: `rank` sorts ASC
-    // (1 = highest market cap) in queryTokensWithRanks, so a default of 0
-    // would put every newly-created token ahead of the real #1 token until
-    // the next RefreshTokenRanksService tick.
+  it('does not map rank, which lives in token_rank', () => {
+    // A mapped column would be selected with every token row and read as a
+    // rank that RefreshTokenRanksService no longer updates.
     const rankColumn = getMetadataArgsStorage().columns.find(
       (column) => column.target === Token && column.propertyName === 'rank',
     );
 
-    expect(rankColumn).toBeDefined();
-    expect(rankColumn!.options.default).toBe(UNRANKED_TOKEN_RANK);
-    expect(rankColumn!.options.default).not.toBe(0);
+    expect(rankColumn).toBeUndefined();
   });
 
   it('keeps the sentinel outside any realistic rank range', () => {
