@@ -18,6 +18,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { Post } from '@/social/entities/post.entity';
 import { Token } from '@/tokens/entities/token.entity';
+import { attachTokenRanks } from '@/tokens/utils/token-rank.util';
 import { Transaction } from '@/transactions/entities/transaction.entity';
 import { PopularRankingService } from '@/social/services/popular-ranking.service';
 import {
@@ -208,7 +209,7 @@ export class FeedController {
     return query.getMany();
   }
 
-  private fetchTokenCreations(
+  private async fetchTokenCreations(
     before: Date | null,
     limit: number,
     excludeIds: string[],
@@ -225,7 +226,9 @@ export class FeedController {
       before,
       excludeIds,
     );
-    return query.getMany();
+    const tokens = await query.getMany();
+    await attachTokenRanks(this.tokensRepository.manager, tokens);
+    return tokens;
   }
 
   private fetchTrades(

@@ -394,12 +394,11 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
 
     it('counts a browser at a step only when the step comes AFTER the previous one', async () => {
       await insert([
-        // A: full path up to X connected, in order.
+        // A: full onboarding path, in order.
         [A, 'profile_view', '/users/:address', '2026-10-10T10:00:00Z'],
         [A, 'profile_edit_open', '/users/:address', '2026-10-10T10:00:10Z'],
         [A, 'claim_account_open', '/users/:address', '2026-10-10T10:01:00Z'],
         [A, 'x_connect_start', '/users/:address', '2026-10-10T10:02:00Z'],
-        [A, 'x_connected', '/users/:address', '2026-10-10T10:03:00Z'],
         // B: clicked Edit BEFORE ever opening a profile -> stops at step 1.
         [B, 'profile_edit_open', '/users/:address', '2026-10-10T09:00:00Z'],
         [B, 'profile_view', '/users/:address', '2026-10-10T09:05:00Z'],
@@ -413,7 +412,7 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       ]);
 
       const report = await queries.getFunnel(funnel, range);
-      expect(report.steps.map((s) => s.count)).toEqual([4, 2, 1, 1, 1, 0, 0]);
+      expect(report.steps.map((s) => s.count)).toEqual([4, 2, 1, 1]);
       expect(report.steps[1]).toMatchObject({
         lostFromPrevious: 2,
         pctLostFromPrevious: 50,
@@ -426,7 +425,7 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
         to: 'Clicked Edit',
         lost: 2,
       });
-      expect(report.eventsInRange).toBe(11);
+      expect(report.eventsInRange).toBe(10);
     });
 
     it('matches the earliest qualifying step so a later repeat still counts', async () => {
@@ -437,6 +436,19 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       ]);
       const report = await queries.getFunnel(funnel, range);
       expect(report.steps.map((s) => s.count).slice(0, 2)).toEqual([1, 1]);
+    });
+
+    it('counts a step recorded in the same millisecond as the previous one', async () => {
+      await insert([
+        [A, 'page_view', '/', '2026-10-10T10:00:00.000Z'],
+        [A, 'wallet_connected', '/', '2026-10-10T10:00:00.000Z'],
+        [A, 'token_created', '/trends/create', '2026-10-10T10:05:00.000Z'],
+      ]);
+      const report = await queries.getFunnel(
+        JOURNEY_FUNNELS.find((f) => f.id === 'create'),
+        range,
+      );
+      expect(report.steps.map((s) => s.count)).toEqual([1, 1, 1]);
     });
 
     it('returns zeros and eventsInRange 0 for an empty range', async () => {
@@ -578,6 +590,34 @@ describeWithDb('journey analytics (real DB + HTTP)', () => {
       expect(page.text).toContain('Biggest drop-offs');
       expect(page.text).toContain('No journey events in this range yet.');
       expect(page.text).toContain('href="/api/analytics/journey/preview"');
+    });
+
+    it('reports a journey split by the X redirect on two funnels', async () => {
+      const result = await auth.setup('operator', 'hunter2!x');
+      const cookie = `sh_affiliation_session=${(result as { token: string }).token}`;
+      await insert([
+        [A, 'profile_view', '/users/:address', '2026-10-10T10:00:00Z'],
+        [A, 'profile_edit_open', '/users/:address', '2026-10-10T10:00:10Z'],
+        [A, 'claim_account_open', '/users/:address', '2026-10-10T10:01:00Z'],
+        [A, 'x_connect_start', '/users/:address', '2026-10-10T10:02:00Z'],
+        // The return from X is a new page load, so a new id.
+        [B, 'x_connected', '/profile/x/callback', '2026-10-10T10:03:00Z'],
+        [B, 'post_created', '/', '2026-10-10T10:05:00Z'],
+        [B, 'token_created', '/trends/create', '2026-10-10T10:06:00Z'],
+      ]);
+      const counts = async (funnel: string) => {
+        const { body } = await request(server())
+          .get(
+            `/api/analytics/journey/funnel?funnel=${funnel}&start_date=2026-10-01&end_date=2026-10-30`,
+          )
+          .set(FETCH)
+          .set('Cookie', cookie)
+          .expect(200);
+        return body.steps.map((step: { count: number }) => step.count);
+      };
+
+      expect(await counts('onboarding')).toEqual([1, 1, 1, 1]);
+      expect(await counts('after-x')).toEqual([1, 1, 1]);
     });
   });
 });

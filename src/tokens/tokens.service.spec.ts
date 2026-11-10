@@ -317,6 +317,129 @@ describe('TokensService', () => {
     );
   });
 
+  describe('reused rank order', () => {
+    const IDS = ['ct_1', 'ct_2', 'ct_3', 'ct_4', 'ct_5'];
+    const listed = (params: any[] = []) =>
+      ({
+        getQueryAndParameters: () => [
+          'SELECT token.* FROM token WHERE token.unlisted = false',
+          params,
+        ],
+      }) as any;
+    const loads = () =>
+      tokensRepository.query.mock.calls.filter(([sql]) =>
+        sql.includes('ARRAY('),
+      );
+    const list = (page = 1, params: any[] = []) =>
+      service.queryTokensWithRanks(
+        listed(params),
+        2,
+        page,
+        'market_cap',
+        'DESC',
+        {
+          reuseRankOrder: true,
+        },
+      );
+
+    beforeEach(() => {
+      tokensRepository.query.mockImplementation(
+        async (sql: string, args: any[]) => {
+          if (sql.includes('ARRAY(')) {
+            return [{ total_items: IDS.length, ids: IDS }];
+          }
+          if (sql.includes('unnest(')) {
+            // `rank` is the retired token.rank column, still present.
+            return args[0].map((sale_address: string) => ({
+              sale_address,
+              rank: 999,
+              current_rank: IDS.indexOf(sale_address) + 1,
+            }));
+          }
+          return [];
+        },
+      );
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('serves every page from one order load, with live rows', async () => {
+      const first = await list(1);
+      const second = await list(2);
+
+      expect(loads()).toHaveLength(1);
+      expect(first.items).toEqual([
+        { sale_address: 'ct_1', rank: 1 },
+        { sale_address: 'ct_2', rank: 2 },
+      ]);
+      expect(second.items.map((token) => token.sale_address)).toEqual([
+        'ct_3',
+        'ct_4',
+      ]);
+      expect(second.meta).toEqual({
+        currentPage: 2,
+        itemCount: 2,
+        itemsPerPage: 2,
+        totalItems: 5,
+        totalPages: 3,
+      });
+      // market_cap DESC is rank ASC.
+      expect(loads()[0][0]).toContain('ORDER BY filtered_tokens.rank ASC');
+    });
+
+    it('loads the order again after 15 seconds', async () => {
+      const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      await list();
+      now.mockReturnValue(1_014_000);
+      await list();
+      expect(loads()).toHaveLength(1);
+
+      now.mockReturnValue(1_016_000);
+      await list();
+      expect(loads()).toHaveLength(2);
+    });
+
+    it('shares a load that is still running', async () => {
+      await Promise.all([list(1), list(2), list(3)]);
+
+      expect(loads()).toHaveLength(1);
+    });
+
+    it('forgets a failed load so the next request retries', async () => {
+      const query = tokensRepository.query.getMockImplementation();
+      tokensRepository.query.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(list()).rejects.toThrow('db down');
+      tokensRepository.query.mockImplementation(query);
+      await expect(list()).resolves.toBeDefined();
+      expect(loads()).toHaveLength(2);
+    });
+
+    it('keeps at most 64 orders, dropping the oldest', async () => {
+      for (let i = 0; i <= 64; i++) {
+        await list(1, [`ct_factory_${i}`]);
+      }
+      expect(loads()).toHaveLength(65);
+
+      await list(1, ['ct_factory_64']);
+      expect(loads()).toHaveLength(65);
+      await list(1, ['ct_factory_0']);
+      expect(loads()).toHaveLength(66);
+    });
+
+    it('queries directly for other orders, deep pages and per-viewer lists', async () => {
+      await service.queryTokensWithRanks(listed(), 2, 1, 'created_at', 'DESC', {
+        reuseRankOrder: true,
+      });
+      await service.queryTokensWithRanks(listed(), 20, 51, 'rank', 'ASC', {
+        reuseRankOrder: true,
+      });
+      await service.queryTokensWithRanks(listed(), 2, 1, 'rank', 'ASC');
+
+      expect(loads()).toHaveLength(0);
+    });
+  });
+
   it('executes a single query for ranked token pages and preserves pagination metadata', async () => {
     const queryBuilder = {
       getQueryAndParameters: jest
@@ -328,8 +451,21 @@ describe('TokensService', () => {
     } as any;
 
     tokensRepository.query.mockResolvedValue([
-      { sale_address: 'ct_1', name: 'Alpha', total_items: 2 },
-      { sale_address: 'ct_2', name: 'Beta', total_items: 2 },
+      // `rank` is the retired token.rank column, still present until dropped.
+      {
+        sale_address: 'ct_1',
+        name: 'Alpha',
+        rank: 9,
+        current_rank: 1,
+        total_items: 2,
+      },
+      {
+        sale_address: 'ct_2',
+        name: 'Beta',
+        rank: 9,
+        current_rank: 2,
+        total_items: 2,
+      },
     ]);
 
     const result = await service.queryTokensWithRanks(
@@ -343,15 +479,21 @@ describe('TokensService', () => {
     expect(tokensRepository.query).toHaveBeenCalledTimes(1);
     const [sql, params] = tokensRepository.query.mock.calls[0];
     expect(sql).toContain('WITH filtered_tokens AS MATERIALIZED');
-    expect(sql).toContain('SELECT filtered.sale_address, filtered.rank');
+    expect(sql).toContain(
+      'SELECT filtered.sale_address, COALESCE(token_rank.rank, 2147483647) AS rank',
+    );
+    expect(sql).toContain(
+      'LEFT JOIN token_rank ON token_rank.sale_address = filtered.sale_address',
+    );
+    expect(sql).toContain('ORDER BY paged_tokens.current_rank ASC');
     expect(sql).not.toContain('all_ranked_tokens');
     expect(sql).toContain('filtered_count AS');
     expect(sql).toContain('RIGHT JOIN filtered_count ON TRUE');
     expect(params).toEqual(['%alpha%', 2, 0]);
     expect(result).toEqual({
       items: [
-        { sale_address: 'ct_1', name: 'Alpha' },
-        { sale_address: 'ct_2', name: 'Beta' },
+        { sale_address: 'ct_1', name: 'Alpha', rank: 1 },
+        { sale_address: 'ct_2', name: 'Beta', rank: 2 },
       ],
       meta: {
         currentPage: 1,
@@ -1268,13 +1410,12 @@ describe('TokensService', () => {
         orWhere: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue({
           sale_address: 'ct_sale',
-          rank: 4,
           unlisted: false,
         }),
       };
       tokensRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
       tokensRepository.query.mockResolvedValue([
-        { performance: { score: 42 } },
+        { performance: { score: 42 }, rank: 4 },
       ]);
 
       const token = await service.findByAddress('ct_sale');
@@ -1284,7 +1425,27 @@ describe('TokensService', () => {
       );
       const [sql, params] = tokensRepository.query.mock.calls[0];
       expect(sql).not.toContain('RANK()');
+      expect(sql).toContain('FROM token_rank');
       expect(params).toEqual(['ct_sale']);
+    });
+
+    it('findByAddress reports no rank for a token not placed yet', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({
+          sale_address: 'ct_sale',
+          unlisted: false,
+        }),
+      };
+      tokensRepository.createQueryBuilder = jest.fn().mockReturnValue(qb);
+      tokensRepository.query.mockResolvedValue([
+        { performance: null, rank: null },
+      ]);
+
+      const token = await service.findByAddress('ct_sale');
+
+      expect(token?.['rank']).toBeUndefined();
     });
   });
 

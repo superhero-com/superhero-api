@@ -22,12 +22,16 @@ import { prefixQueue, TGR_QUEUE_NAMES } from '../config/queue-prefix';
 export const TGR_METRICS_LOG_TAG = '[TgrMetrics]';
 export const TGR_ALERT_LOG_TAG = '[TgrAlert]';
 
-/** Default metrics-emit cron (1-min); overridable via `TG_METRICS_CRON`. */
-export const TGR_METRICS_CRON_DEFAULT = '*/1 * * * *';
+/**
+ * Default metrics-emit cron (every 15 min), which is also the reset window of
+ * the counters on `GET /api/tgr/metrics`. `TG_METRICS_CRON` is not in
+ * `.env.example`, so deploys can't override it.
+ */
+export const TGR_METRICS_CRON_DEFAULT = '*/15 * * * *';
 
 /**
  * Resolve the metrics-emit cron from env (`TG_METRICS_CRON`), falling back to
- * the 1-min default for blank/garbage. A bare 5-field crontab is accepted as-is;
+ * the default for blank/garbage. A bare 5-field crontab is accepted as-is;
  * anything else falls back so a typo can never silently disable the emitter.
  */
 export function resolveMetricsCron(

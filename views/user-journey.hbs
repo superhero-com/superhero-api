@@ -96,6 +96,7 @@
   <section class="uj-card" aria-labelledby="uj-controls-title">
     <h2 id="uj-controls-title">Where people drop off</h2>
     <p class="sub">Anonymous step events from the web app. No cookies, IPs or account ids; pages are route patterns.</p>
+    <p class="sub">Counts are sessions, not people. A session is one load of the app in a tab: a reload, new tab or full redirect (X sign-in, wallet app) starts a new one, so steps across one show as lost and pages as exits. Events before 9 Nov 2026 were grouped per browser, so ranges spanning that date mix both.</p>
     <div class="uj-toolbar">
       <div class="uj-field" role="group" aria-labelledby="uj-range-label">
         <span id="uj-range-label">Date range</span>
@@ -131,7 +132,7 @@
 
   <section class="uj-card" id="uj-drops-card" aria-labelledby="uj-drops-title" hidden>
     <h2 id="uj-drops-title">Biggest drop-offs</h2>
-    <p class="sub">Steps that lose the most people in this funnel.</p>
+    <p class="sub">Steps that lose the most sessions in this funnel.</p>
     <ol class="uj-drops" id="uj-drops"></ol>
   </section>
 
@@ -151,7 +152,7 @@
           <tr>
             <th scope="col">Page</th>
             <th scope="col" class="num">Views</th>
-            <th scope="col" class="num">Visitors</th>
+            <th scope="col" class="num">Sessions</th>
             <th scope="col" class="num">Exits</th>
             <th scope="col" class="num">Exit rate</th>
             <th scope="col">Top next pages</th>
@@ -268,7 +269,7 @@
       var worst = report.topDropOffs && report.topDropOffs.length ? report.topDropOffs[0].toIndex : -1;
       var start = report.steps.length ? report.steps[0].count : 0;
       document.getElementById('uj-funnel-sub').textContent =
-        report.funnel.label + ': ' + nf.format(start) + ' people started, ' + report.range.start_date + ' to ' + report.range.end_date + '. Each step only counts people who did the previous step first.';
+        report.funnel.label + ': ' + nf.format(start) + ' sessions started, ' + report.range.start_date + ' to ' + report.range.end_date + '. Each step only counts sessions that did the previous step first.';
       report.steps.forEach(function (step, i) {
         if (i > 0) {
           var isWorst = i === worst;
@@ -277,7 +278,7 @@
             step.medianSecondsFromPrevious !== null ? el('span', { class: 'time', text: 'median ' + duration(step.medianSecondsFromPrevious) }) : null,
             isWorst ? el('span', { class: 'tag', text: 'Biggest drop-off' }) : null,
           ]);
-          loss.setAttribute('aria-label', nf.format(step.lostFromPrevious) + ' people lost between ' + report.steps[i - 1].label + ' and ' + step.label + ', ' + pct(step.pctLostFromPrevious));
+          loss.setAttribute('aria-label', nf.format(step.lostFromPrevious) + ' sessions lost between ' + report.steps[i - 1].label + ' and ' + step.label + ', ' + pct(step.pctLostFromPrevious));
           list.appendChild(loss);
         }
         var width = Math.max(0, Math.min(100, step.pctOfStart || 0));
@@ -285,7 +286,7 @@
         bar.style.width = width + '%';
         var track = el('div', {
           class: 'uj-track', role: 'img',
-          'aria-label': step.label + ': ' + nf.format(step.count) + ' people, ' + pct(step.pctOfStart) + ' of start',
+          'aria-label': step.label + ': ' + nf.format(step.count) + ' sessions, ' + pct(step.pctOfStart) + ' of start',
         }, [bar]);
         list.appendChild(el('li', { class: 'uj-step' + (i === worst ? ' worst' : '') }, [
           el('span', { class: 'label' }, [

@@ -30,3 +30,41 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(workers);
   return results;
 }
+
+/**
+ * Returns a runner that lets at most `limit` tasks run at once across every
+ * caller sharing it. The others wait in FIFO order.
+ */
+export function createConcurrencyLimiter(limit: number) {
+  const slots = Math.max(limit, 1);
+  let active = 0;
+  const waiting: Array<() => void> = [];
+
+  const acquire = (): Promise<void> => {
+    if (active < slots) {
+      active++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => waiting.push(resolve));
+  };
+
+  // Hand the slot straight to the next waiter: freeing it first would let a
+  // new caller take it before the woken waiter resumes.
+  const release = () => {
+    const next = waiting.shift();
+    if (next) {
+      next();
+    } else {
+      active--;
+    }
+  };
+
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    await acquire();
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
+}

@@ -1,4 +1,9 @@
-import { mapWithConcurrency } from './concurrency.util';
+import {
+  createConcurrencyLimiter,
+  mapWithConcurrency,
+} from './concurrency.util';
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 describe('mapWithConcurrency', () => {
   it('returns [] for an empty input without invoking the mapper', async () => {
@@ -53,5 +58,56 @@ describe('mapWithConcurrency', () => {
     });
 
     expect(maxActive).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('createConcurrencyLimiter', () => {
+  it('runs at most `limit` tasks across callers, in arrival order', async () => {
+    const run = createConcurrencyLimiter(2);
+    const started: string[] = [];
+    const finish: Record<string, () => void> = {};
+    const task = (name: string) => () => {
+      started.push(name);
+      return new Promise<void>((resolve) => (finish[name] = resolve));
+    };
+
+    const runs = ['a', 'b', 'c', 'd'].map((name) => run(task(name)));
+    await flush();
+    expect(started).toEqual(['a', 'b']);
+
+    finish.b();
+    await flush();
+    expect(started).toEqual(['a', 'b', 'c']);
+
+    // Arriving after a slot was handed over, it still queues behind d.
+    runs.push(run(task('e')));
+    await flush();
+    expect(started).toEqual(['a', 'b', 'c']);
+
+    finish.a();
+    await flush();
+    expect(started).toEqual(['a', 'b', 'c', 'd']);
+
+    finish.c();
+    await flush();
+    expect(started).toEqual(['a', 'b', 'c', 'd', 'e']);
+
+    finish.d();
+    finish.e();
+    await Promise.all(runs);
+  });
+
+  it('frees the slot when a task rejects or throws', async () => {
+    const run = createConcurrencyLimiter(1);
+
+    await expect(run(() => Promise.reject(new Error('boom')))).rejects.toThrow(
+      'boom',
+    );
+    await expect(
+      run(() => {
+        throw new Error('sync');
+      }),
+    ).rejects.toThrow('sync');
+    await expect(run(async () => 'ok')).resolves.toBe('ok');
   });
 });

@@ -17,7 +17,7 @@ import { TokenHolderDto } from './dto/token-holder.dto';
 import { TokenHolder } from './entities/token-holders.entity';
 import { Token } from './entities/token.entity';
 import { TokensService } from './tokens.service';
-import { visibleTokenRank } from './utils/token-rank.util';
+import { loadTokenRanks, visibleTokenRank } from './utils/token-rank.util';
 import {
   AeAccountAddressPipe,
   OptionalAeAccountAddressPipe,
@@ -120,12 +120,19 @@ export class AccountTokensController {
             })
             .getMany()
         : [];
+      const ranks = await loadTokenRanks(
+        this.tokenRepository.manager,
+        tokensQueryResult.items.map((token) => token.sale_address),
+      );
       return {
         ...tokensQueryResult,
         items: tokensQueryResult.items?.map((token) => ({
           token: {
             ...token,
-            rank: visibleTokenRank(token),
+            rank: visibleTokenRank({
+              rank: ranks.get(token.sale_address),
+              unlisted: token.unlisted,
+            }),
           },
           address: owner_address || creator_address,
           balance:
@@ -193,6 +200,11 @@ export class AccountTokensController {
       tokenIds as any,
     );
 
+    const ranks = await loadTokenRanks(
+      this.tokenRepository.manager,
+      tokens.map((token) => token.sale_address),
+    );
+
     tokenHolders.items.forEach((holder) => {
       if (holder.aex9_address) {
         const token = tokens.find(
@@ -200,7 +212,12 @@ export class AccountTokensController {
         );
         (holder as any).token = {
           ...token,
-          rank: token ? visibleTokenRank(token) : undefined,
+          rank: token
+            ? visibleTokenRank({
+                rank: ranks.get(token.sale_address),
+                unlisted: token.unlisted,
+              })
+            : undefined,
         };
       }
     });
