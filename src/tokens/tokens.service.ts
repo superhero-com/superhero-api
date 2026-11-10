@@ -28,7 +28,7 @@ import moment from 'moment';
 import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
-import { Token } from './entities/token.entity';
+import { Token, UNRANKED_TOKEN_RANK } from './entities/token.entity';
 import {
   PULL_TOKEN_INFO_QUEUE,
   UPDATE_TRENDING_SCORES_QUEUE,
@@ -142,6 +142,19 @@ export class TokensService {
   // hashtext(aex9_address), so holder syncs serialise per token, not globally.
   private static readonly HOLDER_SYNC_LOCK_NS = 0x746b686c; // 'tkhl'
   private static readonly MAX_CACHED_CONTRACTS = 200;
+  // The order and total lag up to 15 s. Each page re-reads its rows, so
+  // prices, ranks and unlisting stay live.
+  private static readonly RANK_ORDER_TTL_MS = 15_000;
+  // A load stuck on a dead connection must not hold every later request.
+  private static readonly RANK_ORDER_LOAD_DEADLINE_MS = 30_000;
+  // Deeper pages query directly.
+  private static readonly RANK_ORDER_DEPTH = 1_000;
+  // factory_address and collection are free-form, so keys are capped.
+  private static readonly RANK_ORDER_MAX_KEYS = 64;
+  private readonly rankOrderCache = new Map<
+    string,
+    { order: Promise<{ ids: string[]; total: number }>; expiresAt: number }
+  >();
   contracts: Record<Encoded.ContractAddress, TokenContracts> = {};
   totalTokens = 0;
   constructor(
@@ -273,12 +286,14 @@ export class TokensService {
     }
 
     const [row] = await this.tokensRepository.query(
-      'SELECT row_to_json(token_performance.*) AS performance FROM token_performance WHERE sale_address = $1',
+      `SELECT
+        (SELECT row_to_json(token_performance.*) FROM token_performance WHERE sale_address = $1) AS performance,
+        (SELECT rank FROM token_rank WHERE sale_address = $1) AS rank`,
       [token.sale_address],
     );
     return {
       ...token,
-      rank: visibleTokenRank(token),
+      rank: visibleTokenRank({ rank: row?.rank, unlisted: token.unlisted }),
       performance: row?.performance ?? null,
     } as Token & { rank: number; performance: unknown };
   }
@@ -716,6 +731,9 @@ export class TokensService {
     page: number = 1,
     orderBy: string = 'rank',
     orderDirection: 'ASC' | 'DESC' = 'ASC',
+    // Only for lists that are the same for every viewer: a user's own tokens
+    // must show a new token at once.
+    { reuseRankOrder = false }: { reuseRankOrder?: boolean } = {},
   ) {
     const [filteredTokensQuery, parameters] =
       queryBuilder.getQueryAndParameters();
@@ -727,19 +745,42 @@ export class TokensService {
     }
 
     const offset = (page - 1) * limit;
+    if (
+      reuseRankOrder &&
+      orderBy === 'rank' &&
+      offset + limit <= TokensService.RANK_ORDER_DEPTH
+    ) {
+      return this.queryTokensByRankOrder(
+        filteredTokensQuery,
+        parameters,
+        limit,
+        page,
+        orderDirection === 'DESC' ? 'DESC' : 'ASC',
+      );
+    }
     const pagedOrderClause = this.buildTokensOrderClause(
       'filtered_tokens',
       orderBy,
       orderDirection,
     );
+    // paged_tokens carries the rank as current_rank: `token.*` still includes
+    // the retired `token.rank` column until it is dropped.
     const resultOrderClause = this.buildTokensOrderClause(
       'paged_tokens',
-      orderBy,
+      orderBy === 'rank' ? 'current_rank' : orderBy,
       orderDirection,
     );
     const sortColumns = this.tokensOrderColumns(orderBy)
-      .map((column) => `filtered.${column}`)
+      .map((column) =>
+        column === 'rank'
+          ? `COALESCE(token_rank.rank, ${UNRANKED_TOKEN_RANK}) AS rank`
+          : `filtered.${column}`,
+      )
       .join(', ');
+    const rankJoin =
+      orderBy === 'rank'
+        ? 'LEFT JOIN token_rank ON token_rank.sale_address = filtered.sale_address'
+        : '';
     const limitPlaceholder = `$${parameters.length + 1}`;
     const offsetPlaceholder = `$${parameters.length + 2}`;
 
@@ -755,6 +796,7 @@ export class TokensService {
         FROM (
           ${filteredTokensQuery}
         ) filtered
+        ${rankJoin}
       ),
       filtered_count AS (
         SELECT COUNT(*)::int AS total_items
@@ -763,6 +805,7 @@ export class TokensService {
       paged_tokens AS (
         SELECT
           token.*,
+          COALESCE(token_rank.rank, ${UNRANKED_TOKEN_RANK}) AS current_rank,
           row_to_json(token_performance.*) as performance
         FROM (
           SELECT filtered_tokens.sale_address
@@ -775,6 +818,7 @@ export class TokensService {
           ON token.sale_address = page.sale_address
           AND token.unlisted = false
         LEFT JOIN token_performance ON token.sale_address = token_performance.sale_address
+        LEFT JOIN token_rank ON token.sale_address = token_rank.sale_address
       )
       SELECT 
         paged_tokens.*,
@@ -794,7 +838,10 @@ export class TokensService {
     const result = rows
       .filter((row) => row.sale_address !== null)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      .map(({ total_items, ...item }) => item);
+      .map(({ total_items, current_rank, ...item }) => ({
+        ...item,
+        rank: current_rank,
+      }));
 
     return {
       items: result,
@@ -805,6 +852,127 @@ export class TokensService {
         totalItems,
         totalPages,
       },
+    };
+  }
+
+  // Same page as the query above, from a reused rank order: sorting the whole
+  // filtered set by token_rank costs a join over every token.
+  private async queryTokensByRankOrder(
+    filteredTokensQuery: string,
+    parameters: any[],
+    limit: number,
+    page: number,
+    orderDirection: 'ASC' | 'DESC',
+  ) {
+    const { ids, total } = await this.getRankOrder(
+      filteredTokensQuery,
+      parameters,
+      orderDirection,
+    );
+    const offset = (page - 1) * limit;
+    const pageIds = ids.slice(offset, offset + limit);
+    const rows = pageIds.length
+      ? await this.tokensRepository.query(
+          `SELECT
+            token.*,
+            COALESCE(token_rank.rank, ${UNRANKED_TOKEN_RANK}) AS current_rank,
+            row_to_json(token_performance.*) as performance
+          FROM unnest($1::varchar[]) WITH ORDINALITY AS page(sale_address, position)
+          INNER JOIN token
+            ON token.sale_address = page.sale_address
+            AND token.unlisted = false
+          LEFT JOIN token_performance ON token.sale_address = token_performance.sale_address
+          LEFT JOIN token_rank ON token.sale_address = token_rank.sale_address
+          ORDER BY page.position`,
+          [pageIds],
+        )
+      : [];
+    const items = rows.map(({ current_rank, ...item }) => ({
+      ...item,
+      rank: current_rank,
+    }));
+
+    return {
+      items,
+      meta: {
+        currentPage: page,
+        itemCount: items.length,
+        itemsPerPage: limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  private getRankOrder(
+    filteredTokensQuery: string,
+    parameters: any[],
+    orderDirection: 'ASC' | 'DESC',
+  ): Promise<{ ids: string[]; total: number }> {
+    const key = JSON.stringify([
+      filteredTokensQuery,
+      parameters,
+      orderDirection,
+    ]);
+    const cached = this.rankOrderCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.order;
+    }
+
+    const entry = {
+      order: this.loadRankOrder(
+        filteredTokensQuery,
+        parameters,
+        orderDirection,
+      ),
+      expiresAt: Date.now() + TokensService.RANK_ORDER_LOAD_DEADLINE_MS,
+    };
+    this.rankOrderCache.delete(key);
+    if (this.rankOrderCache.size >= TokensService.RANK_ORDER_MAX_KEYS) {
+      this.rankOrderCache.delete(this.rankOrderCache.keys().next().value);
+    }
+    this.rankOrderCache.set(key, entry);
+    entry.order.then(
+      () => {
+        entry.expiresAt = Date.now() + TokensService.RANK_ORDER_TTL_MS;
+      },
+      () => {
+        if (this.rankOrderCache.get(key) === entry) {
+          this.rankOrderCache.delete(key);
+        }
+      },
+    );
+    return entry.order;
+  }
+
+  private async loadRankOrder(
+    filteredTokensQuery: string,
+    parameters: any[],
+    orderDirection: 'ASC' | 'DESC',
+  ): Promise<{ ids: string[]; total: number }> {
+    const [row] = await this.tokensRepository.query(
+      `WITH filtered_tokens AS MATERIALIZED (
+        SELECT
+          filtered.sale_address,
+          COALESCE(token_rank.rank, ${UNRANKED_TOKEN_RANK}) AS rank
+        FROM (
+          ${filteredTokensQuery}
+        ) filtered
+        LEFT JOIN token_rank ON token_rank.sale_address = filtered.sale_address
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM filtered_tokens) AS total_items,
+        ARRAY(
+          SELECT filtered_tokens.sale_address
+          FROM filtered_tokens
+          ORDER BY filtered_tokens.rank ${orderDirection}, filtered_tokens.sale_address ASC
+          LIMIT ${TokensService.RANK_ORDER_DEPTH}
+        ) AS ids`,
+      parameters,
+    );
+    return {
+      ids: row?.ids ?? [],
+      total: Number(row?.total_items ?? 0),
     };
   }
 

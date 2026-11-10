@@ -18,6 +18,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Token } from '@/tokens/entities/token.entity';
+import { attachTokenRanks } from '@/tokens/utils/token-rank.util';
 import { Post } from '@/social/entities/post.entity';
 import { AccountService } from '@/account/services/account.service';
 import { AccountSearchResultDto } from '@/account/dto/account-search-result.dto';
@@ -118,8 +119,8 @@ export class SearchController {
     return { tokens, accounts, posts };
   }
 
-  private searchTokens(term: string, limit: number): Promise<Token[]> {
-    return this.tokensRepository
+  private async searchTokens(term: string, limit: number): Promise<Token[]> {
+    const tokens = await this.tokensRepository
       .createQueryBuilder('token')
       .where('token.unlisted = false')
       .andWhere('token.name ILIKE :term', { term: `%${term}%` })
@@ -127,6 +128,8 @@ export class SearchController {
       .addOrderBy('token.created_at', 'DESC')
       .limit(limit)
       .getMany();
+    await attachTokenRanks(this.tokensRepository.manager, tokens);
+    return tokens;
   }
 
   private searchPosts(term: string, limit: number): Promise<Post[]> {

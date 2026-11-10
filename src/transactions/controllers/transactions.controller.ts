@@ -1,5 +1,6 @@
 import { CommunityFactoryService } from '@/ae/community-factory.service';
 import { TokensService } from '@/tokens/tokens.service';
+import { attachTokenRanks } from '@/tokens/utils/token-rank.util';
 import { ApiOkResponsePaginated } from '@/utils/api-type';
 import {
   Controller,
@@ -136,12 +137,18 @@ export class TransactionsController {
           'token.symbol',
           'token.address',
           'token.sale_address',
-          // 'token.rank',
           'token.collection',
         ]);
     }
 
-    return paginate<Transaction>(queryBuilder, { page, limit });
+    const result = await paginate<Transaction>(queryBuilder, { page, limit });
+    if (includes === 'token' || account_address) {
+      await attachTokenRanks(
+        this.transactionsRepository.manager,
+        result.items.map((transaction) => (transaction as any).token),
+      );
+    }
+    return result;
   }
 
   @ApiQuery({

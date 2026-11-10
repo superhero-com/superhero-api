@@ -26,6 +26,7 @@ import { TokenPerformanceController } from './controllers/token-performance.cont
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenTradeEligibilityCounts } from './entities/token-trade-eligibility-counts.entity';
 import { TokenPerformance } from './entities/token-performance.entity';
+import { TokenRank } from './entities/token-rank.entity';
 import { RefreshTokenEligibilityCountsService } from './services/refresh-token-eligibility-counts.service';
 import { RefreshTokenPerformanceService } from './services/refresh-token-performance.service';
 import { RefreshTokenRanksService } from './services/refresh-token-ranks.service';
@@ -40,6 +41,7 @@ import { Post } from '@/social/entities/post.entity';
       TokenEligibilityCounts,
       TokenTradeEligibilityCounts,
       TokenPerformance,
+      TokenRank,
       Transaction,
       Post,
     ]),

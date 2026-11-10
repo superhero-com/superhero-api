@@ -24,17 +24,16 @@ describe('TokenService (bcl plugin)', () => {
   };
 
   describe('findByAddress', () => {
-    it('returns the persisted rank without a second query', async () => {
+    it('returns the token row without a rank query', async () => {
       const { service, tokensRepository, queryBuilder } = createService();
       queryBuilder.getOne.mockResolvedValue({
         sale_address: 'ct_sale',
         factory_address: 'ct_factory',
-        rank: 42,
       } as Token);
 
       const token = await service.findByAddress('ct_sale');
 
-      expect(token?.rank).toBe(42);
+      expect(token?.sale_address).toBe('ct_sale');
       // A RANK() OVER (...) recompute here scanned every token of the factory
       // on the indexer's hot path: 135ms against 63k tokens, for a value no
       // caller on this path reads.
