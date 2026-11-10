@@ -97,6 +97,7 @@ export class BlockSyncService {
     useBulkMode = false,
     backward = false,
     collectHashes = true,
+    dispatchToPlugins = true,
   ): Promise<Map<number, string[]>> {
     const pageLimit = Math.min(
       this.configService.get<number>('mdw.pageLimit', 100),
@@ -113,13 +114,19 @@ export class BlockSyncService {
 
     const url = `${middlewareUrl}/v3/transactions?${queryParams}`;
     const txHashesByBlock = collectHashes ? new Map<number, string[]>() : null;
-    return this.processTransactionPage(url, useBulkMode, txHashesByBlock);
+    return this.processTransactionPage(
+      url,
+      useBulkMode,
+      txHashesByBlock,
+      dispatchToPlugins,
+    );
   }
 
   private async processTransactionPage(
     url: string,
     useBulkMode = false,
     txHashesByBlock: Map<number, string[]> | null = new Map(),
+    dispatchToPlugins = true,
   ): Promise<Map<number, string[]>> {
     let nextUrl: string | null = url;
     const middlewareUrl = this.configService.get<string>('mdw.middlewareUrl');
@@ -180,7 +187,7 @@ export class BlockSyncService {
       if (relevantTxs.length > 0) {
         if (useBulkMode) {
           try {
-            await this.bulkInsertTransactions(relevantTxs);
+            await this.bulkInsertTransactions(relevantTxs, dispatchToPlugins);
           } catch (error: any) {
             if (isDatabaseConnectionOrPoolError(error)) {
               logDatabaseIssue({
@@ -202,7 +209,7 @@ export class BlockSyncService {
             );
             const saved = await this.txRepository.save(relevantTxs);
             const savedArr = Array.isArray(saved) ? saved : [saved];
-            if (savedArr.length > 0) {
+            if (dispatchToPlugins && savedArr.length > 0) {
               await this.pluginBatchProcessor.processBatch(
                 savedArr,
                 SyncDirectionEnum.Backward,
@@ -221,7 +228,7 @@ export class BlockSyncService {
             operation: () => this.txRepository.save(relevantTxs),
           });
           const savedArr = Array.isArray(saved) ? saved : [saved];
-          if (savedArr.length > 0) {
+          if (dispatchToPlugins && savedArr.length > 0) {
             await this.pluginBatchProcessor.processBatch(
               savedArr,
               SyncDirectionEnum.Backward,
@@ -245,12 +252,14 @@ export class BlockSyncService {
 
   /**
    * Bulk insert transactions using repository.upsert() method.
-   * Processes each batch immediately after insertion for plugins.
+   * Processes each batch immediately after insertion for plugins, unless
+   * dispatchToPlugins is off.
    * Returns the successfully upserted partials (no DB re-read) so callers
    * can extract hash/block_height without doubling heap usage.
    */
   private async bulkInsertTransactions(
     txs: Partial<Tx>[],
+    dispatchToPlugins = true,
   ): Promise<Partial<Tx>[]> {
     if (txs.length === 0) {
       return [];
@@ -277,7 +286,7 @@ export class BlockSyncService {
           .map((tx) => tx.hash)
           .filter(Boolean) as string[];
 
-        if (batchHashes.length > 0) {
+        if (dispatchToPlugins && batchHashes.length > 0) {
           const existing = await this.txRepository.find({
             select: ['hash', 'logs', 'data'],
             where: { hash: In(batchHashes) },
@@ -326,7 +335,9 @@ export class BlockSyncService {
     }
 
     this.logger.log(
-      `Bulk upserted ${txs.length} transactions, processed ${accepted.length} for plugins`,
+      dispatchToPlugins
+        ? `Bulk upserted ${txs.length} transactions, processed ${accepted.length} for plugins`
+        : `Bulk upserted ${txs.length} transactions`,
     );
 
     return accepted;
@@ -341,6 +352,7 @@ export class BlockSyncService {
     endHeight: number,
     backward = false,
     collectHashes = !backward,
+    dispatchToPlugins = true,
   ): Promise<Map<number, string[]>> {
     await this.syncBlocks(startHeight, endHeight);
     return this.syncTransactions(
@@ -349,6 +361,7 @@ export class BlockSyncService {
       true,
       backward,
       collectHashes,
+      dispatchToPlugins,
     );
   }
 
