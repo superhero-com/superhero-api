@@ -26,11 +26,13 @@ describe('TransactionProcessorService', () => {
     createTokenFromRawTransaction: jest.Mock;
     update: jest.Mock;
     updateTokenMetaDataFromCreateTx: jest.Mock;
-    syncTokenPrice: jest.Mock;
+    refreshTokenPrice: jest.Mock;
     updateTokenTrendingScore: jest.Mock;
     findByAddress: jest.Mock;
   };
   let tokenHolderService: { updateTokenHolder: jest.Mock };
+  let transaction: jest.Mock;
+  let committed: boolean;
 
   beforeEach(() => {
     validationService = {
@@ -55,7 +57,7 @@ describe('TransactionProcessorService', () => {
       createTokenFromRawTransaction: jest.fn(),
       update: jest.fn(),
       updateTokenMetaDataFromCreateTx: jest.fn(),
-      syncTokenPrice: jest.fn(),
+      refreshTokenPrice: jest.fn().mockResolvedValue(undefined),
       updateTokenTrendingScore: jest.fn(),
       findByAddress: jest.fn(),
     };
@@ -63,11 +65,13 @@ describe('TransactionProcessorService', () => {
       updateTokenHolder: jest.fn(),
     };
 
-    const transactionRepository = {
-      manager: {
-        transaction: jest.fn(async (handler: any) => handler({})),
-      },
-    };
+    committed = false;
+    transaction = jest.fn(async (handler: any) => {
+      const result = await handler({});
+      committed = true;
+      return result;
+    });
+    const transactionRepository = { manager: { transaction } };
 
     service = new TransactionProcessorService(
       validationService as any,
@@ -208,7 +212,6 @@ describe('TransactionProcessorService', () => {
     persistenceService.saveTransaction.mockResolvedValue({ id: 1 });
     tokenService.update.mockResolvedValue(token);
     transactionsService.isTokenSupportedCollection.mockResolvedValue(true);
-    tokenService.syncTokenPrice.mockResolvedValue(undefined);
     tokenHolderService.updateTokenHolder.mockResolvedValue(undefined);
     tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
 
@@ -262,7 +265,6 @@ describe('TransactionProcessorService', () => {
     );
     tokenService.update.mockResolvedValue(token);
     transactionsService.isTokenSupportedCollection.mockResolvedValue(true);
-    tokenService.syncTokenPrice.mockResolvedValue(undefined);
     tokenHolderService.updateTokenHolder.mockResolvedValue(undefined);
     tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
     const loggerError = jest
@@ -277,5 +279,146 @@ describe('TransactionProcessorService', () => {
       persistenceService.refreshAccountFromTransactions,
     ).toHaveBeenCalledWith('ak_old', expect.anything());
     expect(loggerError).toHaveBeenCalled();
+  });
+
+  describe('outside the transaction', () => {
+    const rawTransaction = {
+      hash: 'th_live',
+      function: BCL_FUNCTIONS.buy,
+      block_height: 123,
+      caller_id: 'ak_test',
+      raw: { log: [] },
+    };
+    const token = {
+      sale_address: 'ct_sale',
+      factory_address: 'ct_factory',
+    };
+    let emitBalanceChanged: jest.Mock;
+
+    beforeEach(() => {
+      validationService.validateTransaction.mockResolvedValue({
+        isValid: true,
+        saleAddress: 'ct_sale',
+      });
+      tokenService.getToken.mockResolvedValue(token);
+      transactionsService.decodeTxEvents.mockResolvedValue(rawTransaction);
+      transactionsService.parseTransactionData.mockResolvedValue({
+        amount: new BigNumber(10),
+        volume: new BigNumber(2),
+        total_supply: new BigNumber(100),
+        protocol_reward: new BigNumber(1),
+        _should_revalidate: false,
+      });
+      dataService.calculatePrices.mockReturnValue({});
+      dataService.prepareTransactionData.mockResolvedValue({
+        tx_hash: rawTransaction.hash,
+      });
+      persistenceService.saveTransaction.mockResolvedValue({ id: 1 });
+      tokenService.update.mockResolvedValue(token);
+      transactionsService.isTokenSupportedCollection.mockResolvedValue(true);
+      emitBalanceChanged = jest.fn();
+      tokenHolderService.updateTokenHolder.mockResolvedValue(
+        emitBalanceChanged,
+      );
+      tokenService.updateTokenTrendingScore.mockResolvedValue(undefined);
+    });
+
+    it('resolves the token before opening the transaction', async () => {
+      await service.processTransaction(
+        rawTransaction as any,
+        SyncDirectionEnum.Live,
+      );
+
+      expect(tokenService.getToken.mock.invocationCallOrder[0]).toBeLessThan(
+        transaction.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('skips an unavailable token without opening a transaction', async () => {
+      tokenService.getToken.mockResolvedValue(null);
+
+      await expect(
+        service.processTransaction(
+          rawTransaction as any,
+          SyncDirectionEnum.Live,
+        ),
+      ).resolves.toBeNull();
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the live price after commit', async () => {
+      let committedAtRefresh: boolean | undefined;
+      tokenService.refreshTokenPrice.mockImplementation(async () => {
+        committedAtRefresh = committed;
+      });
+
+      await service.processTransaction(
+        rawTransaction as any,
+        SyncDirectionEnum.Live,
+      );
+
+      expect(committedAtRefresh).toBe(true);
+      expect(tokenService.refreshTokenPrice).toHaveBeenCalledTimes(1);
+      expect(tokenService.refreshTokenPrice).toHaveBeenCalledWith(token);
+    });
+
+    it('waits for the refresh before the balance emit and trending update', async () => {
+      let finishRefresh: () => void = () => undefined;
+      tokenService.refreshTokenPrice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        }),
+      );
+
+      const processing = service.processTransaction(
+        rawTransaction as any,
+        SyncDirectionEnum.Live,
+      );
+      await new Promise(setImmediate);
+
+      expect(tokenService.refreshTokenPrice).toHaveBeenCalled();
+      expect(emitBalanceChanged).not.toHaveBeenCalled();
+      expect(tokenService.updateTokenTrendingScore).not.toHaveBeenCalled();
+
+      finishRefresh();
+      await processing;
+
+      expect(emitBalanceChanged).toHaveBeenCalledTimes(1);
+      expect(tokenService.updateTokenTrendingScore).toHaveBeenCalledWith(token);
+    });
+
+    it('does not refresh when the transaction rolls back', async () => {
+      tokenHolderService.updateTokenHolder.mockRejectedValue(
+        new Error('holder write failed'),
+      );
+
+      await expect(
+        service.processTransaction(
+          rawTransaction as any,
+          SyncDirectionEnum.Live,
+        ),
+      ).rejects.toThrow('holder write failed');
+      expect(tokenService.refreshTokenPrice).not.toHaveBeenCalled();
+    });
+
+    it('does not refresh outside live sync', async () => {
+      await service.processTransaction(
+        rawTransaction as any,
+        SyncDirectionEnum.Backward,
+      );
+
+      expect(tokenService.refreshTokenPrice).not.toHaveBeenCalled();
+    });
+
+    it('does not refresh tokens outside a supported collection', async () => {
+      transactionsService.isTokenSupportedCollection.mockResolvedValue(false);
+
+      await service.processTransaction(
+        rawTransaction as any,
+        SyncDirectionEnum.Live,
+      );
+
+      expect(tokenService.refreshTokenPrice).not.toHaveBeenCalled();
+    });
   });
 });
