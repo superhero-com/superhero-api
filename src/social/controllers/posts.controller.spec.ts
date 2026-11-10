@@ -22,6 +22,7 @@ describe('PostsController', () => {
     addSelect: jest.Mock;
     groupBy: jest.Mock;
     orderBy: jest.Mock;
+    addOrderBy: jest.Mock;
     offset: jest.Mock;
     limit: jest.Mock;
     getRawMany: jest.Mock;
@@ -42,6 +43,7 @@ describe('PostsController', () => {
       addSelect: jest.fn().mockReturnThis(),
       groupBy: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       offset: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
@@ -163,6 +165,46 @@ describe('PostsController', () => {
       'topic',
     );
     expect(baseQueryBuilder.groupBy).toHaveBeenCalledWith('post.id');
+  });
+
+  const listByTopic = (topic: string) =>
+    controller.listAll(
+      1,
+      100,
+      'created_at',
+      'DESC',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      topic,
+    );
+
+  it('filters an exact topic with a semi-join instead of the topics join', async () => {
+    await listByTopic('AeTernity');
+
+    expect(baseQueryBuilder.andWhere).toHaveBeenCalledWith(expect.any(String), {
+      exactTopic: 'aeternity',
+    });
+    expect(baseQueryBuilder.leftJoin).not.toHaveBeenCalled();
+    expect(baseQueryBuilder.groupBy).not.toHaveBeenCalled();
+  });
+
+  it('breaks created_at ties by id for an exact topic', async () => {
+    await listByTopic('aeternity');
+
+    expect(baseQueryBuilder.orderBy).toHaveBeenCalledWith(
+      'order_value',
+      'DESC',
+    );
+    expect(baseQueryBuilder.addOrderBy).toHaveBeenCalledWith('post.id', 'DESC');
+  });
+
+  it('leaves the order of the other lists unchanged', async () => {
+    await controller.listAll(1, 100, 'created_at', 'DESC');
+
+    expect(baseQueryBuilder.addOrderBy).not.toHaveBeenCalled();
   });
 
   it('uses all-time ranking for popular posts and ignores legacy window queries', async () => {
