@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import BigNumber from 'bignumber.js';
 import { DataSource } from 'typeorm';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
 import { Token, UNRANKED_TOKEN_RANK } from './entities/token.entity';
+import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenPerformance } from './entities/token-performance.entity';
 import { TokenRank } from './entities/token-rank.entity';
@@ -377,5 +379,84 @@ d('TokensService.queryTokensWithRanks (integration)', () => {
       totalItems: 10,
       totalPages: 3,
     });
+  });
+});
+
+d('TokensService.loadAndSaveTokenHoldersFromMdw (integration)', () => {
+  let db: IsolatedDb;
+  let ds: DataSource;
+  let service: TokensService;
+
+  const holder = (address: string) => ({
+    id: `${address}_ct_aex9`,
+    aex9_address: 'ct_aex9',
+    address,
+    balance: new BigNumber(1),
+  });
+  const sync = async (addresses: string[]) => {
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: addresses.map(holder),
+      truncated: false,
+    });
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+  };
+  const tokenRow = async () =>
+    (
+      await ds.query(
+        `SELECT holders_count, xmin::text AS xmin, ctid::text AS ctid
+         FROM token WHERE sale_address = 'ct_sale'`,
+      )
+    )[0];
+
+  beforeAll(async () => {
+    db = await createIsolatedDatabase({
+      migrations: [],
+      entities: [Token, TokenHolder],
+    });
+    ds = db.dataSource;
+    await ds.synchronize();
+    await ds.getRepository(Token).insert({
+      sale_address: 'ct_sale',
+      address: 'ct_aex9',
+      name: 'BLA',
+      symbol: 'BLA',
+    });
+    service = new TokensService(
+      ds.getRepository(Token),
+      ds.getRepository(TokenHolder),
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    jest
+      .spyOn(service, 'getToken')
+      .mockImplementation((address) =>
+        ds.getRepository(Token).findOneBy({ sale_address: address }),
+      );
+  }, 60_000);
+
+  afterAll(async () => {
+    if (db) await db.drop();
+  }, 60_000);
+
+  it('rewrites the token row only when the holder count changes', async () => {
+    await sync(['ak_1', 'ak_2']);
+    const written = await tokenRow();
+    expect(written.holders_count).toBe(2);
+
+    await sync(['ak_1', 'ak_2']);
+    expect(await tokenRow()).toEqual(written);
+
+    await sync(['ak_1', 'ak_2', 'ak_3']);
+    const changed = await tokenRow();
+    expect(changed.holders_count).toBe(3);
+    expect(changed.xmin).not.toBe(written.xmin);
   });
 });
