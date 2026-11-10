@@ -5,7 +5,10 @@ import { decodeFeedCursor, encodeFeedCursor } from './feed-cursor.util';
 describe('FeedController', () => {
   let controller: FeedController;
   let postsRepository: { createQueryBuilder: jest.Mock };
-  let tokensRepository: { createQueryBuilder: jest.Mock };
+  let tokensRepository: {
+    createQueryBuilder: jest.Mock;
+    manager: { query: jest.Mock };
+  };
   let transactionsRepository: { createQueryBuilder: jest.Mock };
   let popularRankingService: { getPopularPostsPage: jest.Mock };
 
@@ -24,6 +27,7 @@ describe('FeedController', () => {
     };
     tokensRepository = {
       createQueryBuilder: jest.fn(() => makeQueryBuilder([])),
+      manager: { query: jest.fn().mockResolvedValue([]) },
     };
     transactionsRepository = {
       createQueryBuilder: jest.fn(() => makeQueryBuilder([])),
@@ -81,6 +85,29 @@ describe('FeedController', () => {
         { type: 'trade', created_at: trade.created_at, data: trade },
       ]);
       expect(result.next_cursor).toBeNull();
+    });
+
+    it('gives created tokens their rank from token_rank', async () => {
+      const placed = {
+        sale_address: 'ct_1',
+        created_at: new Date('2026-01-02T00:00:00Z'),
+      };
+      const unplaced = {
+        sale_address: 'ct_2',
+        created_at: new Date('2026-01-03T00:00:00Z'),
+      };
+      tokensRepository.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder([unplaced, placed]),
+      );
+      tokensRepository.manager.query.mockResolvedValue([
+        { sale_address: 'ct_1', rank: 7 },
+      ]);
+
+      const result = await controller.getFeed('latest', undefined, 20);
+
+      expect(result.items.map((item) => (item.data as any).rank)).toEqual([
+        2147483647, 7,
+      ]);
     });
 
     it('sets next_cursor when a source fills its own page', async () => {

@@ -97,6 +97,38 @@ describe('TransactionsController', () => {
       expect(paginate).toHaveBeenCalled();
     });
 
+    it('gives included tokens their rank from token_rank', async () => {
+      const placed = { sale_address: 'ct_1' };
+      const unplaced = { sale_address: 'ct_2' };
+      const mockPagination = {
+        items: [
+          { tx_hash: 'th_1', token: placed },
+          { tx_hash: 'th_2', token: unplaced },
+          { tx_hash: 'th_3', token: null },
+        ],
+        meta: {},
+      };
+      (paginate as jest.Mock).mockResolvedValue(mockPagination);
+      jest.spyOn(transactionsRepository, 'createQueryBuilder').mockReturnValue({
+        orderBy: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        leftJoinAndMapOne: jest.fn().mockReturnThis(),
+      } as any);
+      const query = jest
+        .fn()
+        .mockResolvedValue([{ sale_address: 'ct_1', rank: 3 }]);
+      (transactionsRepository as any).manager = { query };
+
+      await controller.listTransactions(undefined, undefined, 'token');
+
+      expect(query).toHaveBeenCalledWith(expect.any(String), [
+        ['ct_1', 'ct_2'],
+      ]);
+      expect(placed).toHaveProperty('rank', 3);
+      expect(unplaced).toHaveProperty('rank', 2147483647);
+    });
+
     it('should use a plain leftJoin (not leftJoinAndSelect) for the default listing', async () => {
       const mockPagination: Pagination<Transaction> = {
         items: [{ id: 1, tx_hash: 'test_hash' } as unknown as Transaction],

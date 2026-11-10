@@ -20,6 +20,7 @@ describe('AccountTokensController', () => {
   let tokenRepository: Repository<Token>;
   let communityFactoryService: CommunityFactoryService;
   let tokensService: jest.Mocked<TokensService>;
+  let rankQuery: jest.Mock;
   let tokenHolderQueryBuilder: {
     orderBy: jest.Mock;
     where: jest.Mock;
@@ -78,6 +79,8 @@ describe('AccountTokensController', () => {
       getRepositoryToken(TokenHolder),
     );
     tokenRepository = module.get<Repository<Token>>(getRepositoryToken(Token));
+    rankQuery = jest.fn().mockResolvedValue([]);
+    (tokenRepository as any).manager = { query: rankQuery };
     communityFactoryService = module.get<CommunityFactoryService>(
       CommunityFactoryService,
     );
@@ -113,11 +116,12 @@ describe('AccountTokensController', () => {
       tokensService.getTokensByAex9Address.mockResolvedValue([
         {
           address: 'ct_token_1',
+          sale_address: 'ct_sale_1',
           name: 'Token 1',
-          rank: 7,
           unlisted: false,
         } as any,
       ]);
+      rankQuery.mockResolvedValue([{ sale_address: 'ct_sale_1', rank: 7 }]);
 
       const result = await controller.listAccountTokens('test_address');
       expect(result).toEqual({
@@ -183,7 +187,13 @@ describe('AccountTokensController', () => {
 
     it('should merge persisted ranks and holdings for creator_address/owner_address lookups', async () => {
       (paginate as jest.Mock).mockResolvedValue({
-        items: [{ address: 'ct_token_1', rank: 3, unlisted: false } as Token],
+        items: [
+          {
+            address: 'ct_token_1',
+            sale_address: 'ct_sale_1',
+            unlisted: false,
+          } as Token,
+        ],
         meta: {
           totalItems: 1,
           itemCount: 1,
@@ -211,6 +221,7 @@ describe('AccountTokensController', () => {
       jest
         .spyOn(tokenHolderRepository, 'createQueryBuilder')
         .mockReturnValue(holderQueryBuilder as any);
+      rankQuery.mockResolvedValue([{ sale_address: 'ct_sale_1', rank: 3 }]);
       const result = await controller.listAccountTokens(
         'test_address',
         undefined,

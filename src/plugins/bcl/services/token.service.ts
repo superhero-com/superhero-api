@@ -51,10 +51,9 @@ export class TokenService {
     manager?: EntityManager,
   ): Promise<Token | null> {
     const repository = manager?.getRepository(Token) || this.tokensRepository;
-    // `token.rank` is already selected here, maintained by
-    // RefreshTokenRanksService. This used to recompute RANK() OVER (...) across
-    // every token of the factory on each call -- 135ms against 63k tokens, on
-    // the indexer's hot path, for a value no caller here reads.
+    // No rank here: this used to recompute RANK() OVER (...) across every
+    // token of the factory on each call -- 135ms against 63k tokens, on the
+    // indexer's hot path, for a value no caller here reads.
     return repository
       .createQueryBuilder('token')
       .where('token.address = :address', { address })
