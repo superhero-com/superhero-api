@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { workerRole } = require('./testing/worker-role.cjs');
 
 test('media worker database authority survives direct SQL and forged RPC requests', { skip: !process.env.SHORTS_TEST_PG_URL, timeout: 45000 }, async t => {
@@ -43,7 +43,7 @@ test('media worker database authority survives direct SQL and forged RPC request
   async function worker(deployment = scope) {
     const identity = await workerRole(admin, { url: url.href, schema, scope: deployment }); identities.push(identity);
     const db = new DataSource({ ...options, migrations: [], url: identity.url }); await db.initialize(); connections.push(db);
-    return { ...identity, db, repo: new ShortsWorkerRepositoryService(db, { scope: deployment, sourceHash: hash, leaseMs: 120000 }) };
+    return { ...identity, db, repo: new WorkerRpc(db, { scope: deployment, sourceHash: hash, leaseMs: 120000 }) };
   }
   const a = await worker(), b = await worker(), foreign = await worker(otherScope);
   let number = 0;
@@ -70,7 +70,7 @@ test('media worker database authority survives direct SQL and forged RPC request
   await t.test('restricted logins can verify only their enrolled deployment and cannot read or mutate application tables', async () => {
     await a.repo.verifyRuntime(scope, hash);
     await assert.rejects(a.repo.verifyRuntime(otherScope, hash), { status: 403 });
-    await assert.rejects(new ShortsWorkerRepositoryService(a.db, { sourceHash: 'b'.repeat(64) }).verifyRuntime(scope, 'b'.repeat(64)), { status: 403 });
+    await assert.rejects(new WorkerRpc(a.db, { sourceHash: 'b'.repeat(64) }).verifyRuntime(scope, 'b'.repeat(64)), { status: 403 });
     for (const sql of [
       'SELECT * FROM shorts_content', 'SELECT * FROM shorts_ingestion', 'SELECT * FROM shorts_worker_principals',
       'SELECT * FROM shorts_runtime', 'SELECT * FROM shorts_lifecycle_jobs',

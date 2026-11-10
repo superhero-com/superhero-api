@@ -20,7 +20,7 @@ const { ShortsPrivateObjectsService } = require('./shorts-private-objects.servic
 const { ShortsSourceReaderService } = require('./shorts-source-reader.service');
 const { ShortsDeliveryStagingService } = require('./shorts-delivery-staging.service');
 const { ShortsOriginalRestagingService } = require('./shorts-original-restaging.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { ShortsRetentionService } = require('./shorts-retention.service');
 const { ShortsScratchService, ShortsScratchProbeService } = require('./shorts-scratch.service');
 const { hashMediaFile } = require('./shorts-media-file');
@@ -65,7 +65,7 @@ test('pinned-original restaging reserves before writes, resumes partial transfer
   await owner.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,1,$5)', [...args, original.id, original.creator, original]);
   identity = await workerRole(admin, { url: url.href, schema, scope });
   worker = new DataSource({ ...options, url: identity.url }); await worker.initialize();
-  const repo = new ShortsWorkerRepositoryService(worker, { scope, sourceHash }); await repo.verifyRuntime(scope, sourceHash);
+  const repo = new WorkerRpc(worker, { scope, sourceHash }); await repo.verifyRuntime(scope, sourceHash);
   const staging = new ShortsDeliveryStagingService(owner, metadata), retention = new ShortsRetentionService(owner, { scope, sourceHash, prefix: 'quarantine' });
   scratch = new ShortsScratchService({ directory: join(directory, 'scratch'), minFreeBytes: 64*1048576, minFreeInodes: 128,
     maxUsedPercent: Number(process.env.SHORTS_TEST_SCRATCH_MAX_USED_PERCENT || 85) }, new ShortsScratchProbeService()); await scratch.onModuleInit();

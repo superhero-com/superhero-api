@@ -17,7 +17,7 @@ const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generati
 const { ShortsDeliverySelectionService } = require('./shorts-delivery-selection.service');
 const { ShortsDeliveryInputRetirementService } = require('./shorts-delivery-input-retirement.service');
 const { ShortsDeliveryRetirementService } = require('./shorts-delivery-retirement.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { ShortsInputReclamationReservationsService } = require('./shorts-input-reclamation-reservations.service');
 const { ShortsPinTransfersService } = require('./shorts-pin-transfers.service');
 const { ShortsInputReclamationPermitsService } = require('./shorts-input-reclamation-permits.service');
@@ -70,7 +70,7 @@ test('input retirement preserves original identity and delivery while enforcing 
     [...args, original.creator, JSON.stringify(original)]);
   identity = await workerRole(admin, { url: url.href, schema, scope });
   workerDb = new DataSource({ ...options, url: identity.url }); await workerDb.initialize();
-  const worker = new ShortsWorkerRepositoryService(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope,sourceHash);
+  const worker = new WorkerRpc(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope,sourceHash);
   const generations = new ShortsDeliveryGenerationsService(owner,metadata), packages = new ShortsDeliveryPackagesService(owner);
   const selections = new ShortsDeliverySelectionService(owner), retirements = new ShortsDeliveryInputRetirementService(owner);
   const scopeHash = hash(JSON.stringify([scope.network,scope.contract]));

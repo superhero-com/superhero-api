@@ -67,15 +67,11 @@ distributed ingress and capacity validation remain incomplete.
    node --env-file=/secure/publisher.env dist/shorts/publisher-main
    ```
 
-   Alternatively, use `compose.shorts-publisher.yaml` with an immutable API image
-   digest and its required file paths. Start the publisher before opening uploads.
-   Its only network dependencies are PostgreSQL and the manifest's `node` origin.
-   The optional `SHORTS_PUBLISHER_NODE_URL` override must equal that origin.
-   Configure network policy accordingly; Compose resource limits do not enforce egress.
+   Start the publisher before opening uploads. Its network dependencies are PostgreSQL
+   and the manifest's node origin. Set egress policy for those destinations. An optional
+   `SHORTS_PUBLISHER_NODE_URL` override must equal the manifest origin.
 
-The Compose template bounds Docker stdout/stderr logs to three 10 MB files per
-container. Apply changes by recreating the container; restarting alone keeps its
-old logging configuration. Export required operational logs to your controlled
+Set a log rotation budget for the publisher process in your deployment. Export required operational logs to your controlled
 logging system before they rotate. This log cap does not bound PostgreSQL/WAL,
 backups or other host storage, and is separate from media retention. Reserve and
 monitor aggregate space across replicas and stopped containers; never delete

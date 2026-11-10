@@ -29,7 +29,8 @@ const { DataSource } = require('typeorm');
 const { NestFactory } = require('@nestjs/core');
 const { Module, Global, UnauthorizedException } = require('@nestjs/common');
 const { S3Client, CreateBucketCommand, PutBucketVersioningCommand, ListObjectVersionsCommand, ListObjectsV2Command, DeleteObjectsCommand, DeleteBucketCommand } = require('@aws-sdk/client-s3');
-const { shortsWorkerConfig } = require('./shorts-worker.config');
+const { workerConfig, workerFixture } = require('./testing/standalone-ingest.cjs');
+const shortsWorkerConfig = workerConfig();
 const { ShortsPackageService } = require('./shorts-package.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMetadataModule } = require('./shorts-metadata.module');
@@ -171,7 +172,7 @@ test(`hosted original-file HTTP uploads survive a killed media worker and publis
   function child(paused, jobId = upload.id) {
     const workerEnv = { ...global.process.env, SHORTS_TEST_PG_URL: workerIdentity.url, SHORTS_TEST_UPLOAD_ID: jobId, SHORTS_TEST_PAUSE_ENCODING: paused ? '1' : '0' };
     for (const key of ['SHORTS_OPERATOR_KEY_FILE', 'SHORTS_IPFS_TOKEN_FILE', 'SHORTS_STREAM_KEY_FILE']) delete workerEnv[key];
-    const process = fork(join(__dirname, 'testing/media-worker.cjs'), [], { execArgv: ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register'],
+    const process = fork(workerFixture(), [], { execArgv: [],
       env: workerEnv, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     children.push(process); const messages = []; let errors = ''; process.on('message', message => messages.push(message)); process.stderr.on('data', data => { errors += data; }); process.stdout.resume();
     return { process, async wait(type) { for (let i = 0; i < (cleanupMedia ? 3600 : 600); i++) { const message = messages.find(message => message.type === type); if (message) return message;

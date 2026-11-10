@@ -16,7 +16,7 @@ const { ShortsSourceService } = require('./shorts-source.service');
 const { ShortsPrivateObjectsService } = require('./shorts-private-objects.service');
 const { ShortsDeliveryStagingService } = require('./shorts-delivery-staging.service');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const hash = value => createHash('sha256').update(value).digest('hex');
 
 test('accepted manifests bind every ordinary and restaged source child atomically without changing public jobs', {
@@ -217,7 +217,7 @@ test('accepted manifests bind every ordinary and restaged source child atomicall
     await assert.rejects(db.query('TRUNCATE shorts_ingestion CASCADE'), { code: 'SH409' });
     workerIdentity = await workerRole(admin, { url: url.href, schema, scope });
     workerDb = new DataSource({ ...options, url: workerIdentity.url }); await workerDb.initialize();
-    const worker = new ShortsWorkerRepositoryService(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
+    const worker = new WorkerRpc(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
     const job = await worker.claim(scope); assert.equal(job.id, 'older');
     assert.equal('source_manifest' in job, false);
     assert.equal(await worker.heartbeat(scope, job), true); assert.equal(await worker.fail(scope, job), true);

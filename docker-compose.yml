@@ -5,9 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
-      secrets:
-        - GITHUB_TOKEN
     ports:
       # Only expose the API port publicly; Postgres and Redis stay on the
       # loopback interface (see below).
@@ -52,7 +49,3 @@ services:
 volumes:
   postgres_data:
   redis_data:
-
-secrets:
-  GITHUB_TOKEN:
-    environment: GITHUB_TOKEN

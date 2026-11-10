@@ -11,7 +11,7 @@ const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsUploadRecordsService } = require('./shorts-upload-records.service');
 const { ShortsUploadPolicyService, shortsUploadPolicyConfig } = require('./shorts-upload-policy.service');
 const { shortsAcceptedSource } = require('./shorts-upload-policy');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { workerRole } = require('./testing/worker-role.cjs');
 const sha = createHash('sha256').update('original').digest('hex');
 
@@ -72,7 +72,7 @@ test('original upload migration, frozen admission, 96 direct parts, enqueue and 
   worker = new DataSource({ type: 'postgres', url: identity.url, schema, extra: { options: `-c search_path=${schema}`, max: 2 } }); await worker.initialize();
   const [{ result: older }] = await worker.query('SELECT shorts_media_worker($1,$2::jsonb) AS result', ['claim', JSON.stringify({ ...scope, sourceHash: sha, mediaProtocol: 3, leaseMs: 120000 })]);
   assert.equal(older, null, 'older workers must not consume a source their reader rejects');
-  const repo = new ShortsWorkerRepositoryService(worker, { scope, sourceHash: sha }); await repo.verifyRuntime(scope, sha);
+  const repo = new WorkerRpc(worker, { scope, sourceHash: sha }); await repo.verifyRuntime(scope, sha);
   const claimed = await repo.claim(scope);
   assert.equal(claimed.id, 'original'); assert.equal(claimed.input.acceptedMaxBytes, 100000000);
   await assert.rejects(db.transaction(manager => new Migration().down(manager)), /Preserve accepted original uploads/);

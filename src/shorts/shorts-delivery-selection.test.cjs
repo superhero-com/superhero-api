@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
 const { ShortsDeliverySelectionService, SHORTS_DELIVERY_RETAIN_SECONDS } = require('./shorts-delivery-selection.service');
@@ -50,7 +50,7 @@ test('delivery selection is atomic, reversible, scoped and independent of canoni
     [...args, original.creator, JSON.stringify(original)]);
   identity = await workerRole(admin, { url: url.href, schema, scope });
   workerDb = new DataSource({ ...options, url: identity.url }); await workerDb.initialize();
-  const worker = new ShortsWorkerRepositoryService(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
+  const worker = new WorkerRpc(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
   const generations = new ShortsDeliveryGenerationsService(owner, metadata), packages = new ShortsDeliveryPackagesService(owner);
   const selections = new ShortsDeliverySelectionService(owner), scopeHash = hash(JSON.stringify([scope.network, scope.contract]));
   const makeCandidate = async (id, changes = {}) => {

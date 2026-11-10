@@ -10,7 +10,7 @@ const { DataSource } = require('typeorm');
 const { migratePrivateVersionTables } = require('./testing/private-version-database.cjs');
 const { workerRole } = require('./testing/worker-role.cjs');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
 const { ShortsDeliveryStagingService } = require('./shorts-delivery-staging.service');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
@@ -90,7 +90,7 @@ test('private retirement binds authenticated source references without deleting 
   await metadata.initialize(scope, sourceHash, 30, 30);
   identity = await workerRole(admin, { url: url.href, schema, scope });
   workerDb = new DataSource({ ...options, url: identity.url }); await workerDb.initialize();
-  const worker = new ShortsWorkerRepositoryService(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
+  const worker = new WorkerRpc(workerDb, { scope, sourceHash }); await worker.verifyRuntime(scope, sourceHash);
   const generations = new ShortsDeliveryGenerationsService(owner, metadata);
   const staging = new ShortsDeliveryStagingService(owner, metadata);
   const packages = new ShortsDeliveryPackagesService(owner), selections = new ShortsDeliverySelectionService(owner);

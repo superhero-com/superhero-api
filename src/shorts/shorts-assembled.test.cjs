@@ -155,7 +155,9 @@ test('complete hosted module shares upload, media and publication controls acros
     REDIS_HOST: endpoints.REDIS_URL.hostname, REDIS_PORT: endpoints.REDIS_URL.port, TRUST_PROXY: 'false',
   });
   function child(file, extra, inherit = true) {
-    const process = fork(join(__dirname, 'testing', file), [], { env: { ...(inherit ? env : {}), ...extra }, execArgv: compiled ? [] : ['-r','ts-node/register','-r','tsconfig-paths/register'], stdio: ['ignore','pipe','pipe','ipc'] });
+    const worker = file === 'media-worker.cjs';
+    const entry = worker ? require('./testing/standalone-ingest.cjs').workerFixture() : join(__dirname, 'testing', file);
+    const process = fork(entry, [], { env: { ...(inherit ? env : {}), ...extra }, execArgv: worker || compiled ? [] : ['-r','ts-node/register','-r','tsconfig-paths/register'], stdio: ['ignore','pipe','pipe','ipc'] });
     children.push(process); const messages = []; let output = '';
     process.on('message', value => {
       messages.push(value);

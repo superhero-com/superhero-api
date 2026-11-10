@@ -1,32 +1,24 @@
-import { ShortsDatabaseService } from './shorts-database.service';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
-  Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import {
-  SHORTS_WORKER_CONFIG,
-  ShortsWorkerConfig,
-} from './shorts-worker.config';
 import {
   IngestionClaim,
   IngestionJob,
   ShortsScope,
   StoredShort,
-} from './shorts-metadata.service';
-import { ShortRecord } from './shorts.types';
+} from '../../src/shorts/shorts-metadata.service';
+import { ShortRecord } from '../../src/shorts/shorts.types';
 
-/** This login has no table access. PostgreSQL owns scope, leases and draft-only writes. */
-@Injectable()
-export class ShortsWorkerRepositoryService {
+/** Exercise the API-owned SQL function through a restricted test login. */
+export class WorkerRpc {
   private mediaProtocol = 2;
   constructor(
-    @Inject(ShortsDatabaseService) private readonly db: DataSource,
-    @Inject(SHORTS_WORKER_CONFIG) private readonly config: ShortsWorkerConfig,
+    private readonly db: DataSource,
+    private readonly config: { sourceHash: string },
   ) {}
   private async call(action: string, scope: ShortsScope, data: object = {}) {
     try {

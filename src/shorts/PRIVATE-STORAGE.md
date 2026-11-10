@@ -15,7 +15,7 @@ Apply normal API migrations before using it.
 
 Hosted `ShortsTestnetModule.register(true)` uses this module for new uploads and
 requires its S3 configuration. The loopback-only demo retains its local adapter.
-The hosted API accepts jobs; `npm run start:shorts:worker` runs the separate Nest
+The hosted API accepts jobs. The standalone ingest service runs the separate Nest
 media worker. It has no HTTP listener, contract signer or IPFS write key.
 
 Hosted content uses encrypted shared object references scoped to the active deployment.
@@ -57,15 +57,10 @@ and derived encryption key, never a bucket credential or the encryption key ring
 
 1. Apply API migrations and configure private S3 on the hosted API. Start the API
    first so it initializes the verified network/contract namespace in PostgreSQL.
-2. Create a separate worker environment from `worker.env.example`. Use the same
-   database, public deployment manifest, bucket/prefix and encryption key ring.
-   Give the worker its own revocable S3 and database credentials and moderation
-   credential. Do not copy the API's environment or mount its data volume.
-3. Run `npm run build`, then `npm run start:shorts:worker`. For containers, use
-   `compose.shorts-worker.yaml` with the API release image pinned by digest and
-   explicit paths to the worker environment and secret files. It has a read-only
-   filesystem, temporary scratch space, CPU/memory/PID limits and no published port.
-   Bind-mounted secret files must be owner-only and readable by UID 1000.
+2. Enroll the worker database login for the release as described below. Mount the same
+   public manifest, private bucket prefix and encryption key ring in the ingest service.
+3. Start the worker from the [standalone media deployment guide](https://github.com/superhero-com/superhero-shorts/blob/feat/modular-media/README.md#deploying-to-a-dedicated-media-server).
+   Give it dedicated storage, SQL and moderation credentials.
 4. Check authenticated `/api/shorts/operator/ingestion`: it reports shared queue
    counts, oldest queued age and workers seen within 30 seconds. Test a real upload
    and readiness before routing staging traffic to the new release.
@@ -138,7 +133,7 @@ based solely on this worker limit.
 
 ## Scratch space and capacity waits
 
-`compose.shorts-worker.yaml` limits Docker stdout/stderr logs to three 10 MB files
+The standalone ingest Compose service limits stdout/stderr logs to three 10 MB files
 per container. Recreate the container to apply logging changes; a restart preserves
 its old settings. Forward any logs needed beyond rotation to your controlled log
 store. Budget these files alongside scratch, image layers, stopped containers,
@@ -148,8 +143,7 @@ media or backup deletion as a capacity remedy.
 
 The decoder uses an instance-owned directory (`SHORTS_WORKER_TMP_DIR`). The
 Compose worker supplies a 512 MiB tmpfs; do not share it between worker processes.
-The same injectable encoder protects the local development upload path. Hosted
-API requests still never decode videos.
+The ingest service owns video decoding and its scratch space.
 
 Before claiming a job, the worker checks available bytes and inodes. Encoding
 reserves 192 MiB plus allocation slack and 16 inodes until its own temporary files

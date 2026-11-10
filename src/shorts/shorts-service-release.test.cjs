@@ -7,7 +7,7 @@ const { join } = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { releaseFixture } = require('./shorts-release.fixture.cjs');
 const { loadShortsRelease } = require('./shorts-release');
-const { shortsWorkerConfig } = require('./shorts-worker.config');
+const { workerConfig } = require('./testing/standalone-ingest.cjs');
 const { retentionConfig } = require('./shorts-retention.config');
 const { storageInventoryConfig } = require('./shorts-storage-inventory.config');
 const { storageReconciliationConfig } = require('./shorts-storage-reconciliation.config');
@@ -36,7 +36,8 @@ async function fixture(t) {
   const publisher = { SHORTS_PUBLISHING_POLICY_FILE: join(dir, 'policy.json'), SHORTS_CONTRACT_ARTIFACT: join(dir, 'artifact.json'),
     SHORTS_OPERATOR_KEY_FILE: join(dir, 'dedicated-key-not-read-during-config') };
   const roles = [
-    ['worker', shortsWorkerConfig, {}], ['retention', retentionConfig, {}],
+    ...(process.env.SHORTS_TEST_INGEST_ROOT ? [['worker', workerConfig(), {}]] : []),
+    ['retention', retentionConfig, {}],
     ['storage inventory', storageInventoryConfig, storage],
     ['storage reconciliation', storageReconciliationConfig, { ...storage, SHORTS_PRIVATE_ENCRYPTION_KEYS_FILE: join(dir, 'keys.json') }],
     ['pin inventory', pinInventoryConfig, { SHORTS_PIN_API: 'https://ipfs.invalid/api/v0', SHORTS_PIN_PEER_ID: '12D3KooW' + 'a'.repeat(44), SHORTS_PIN_TOKEN_FILE: join(dir, 'token') }],

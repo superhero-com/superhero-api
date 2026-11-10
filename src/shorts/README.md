@@ -49,55 +49,12 @@ versioned release manifest and publishing-policy file using the paths in
 `shorts.env.example`. Mount the dedicated operator key only in the separate
 [publisher process](PUBLISHER.md). Both local demo flags must be `0`; hosted startup rejects them.
 
-### Media release image
+### Media deployment
 
-The application Dockerfile can install its exact signed APKs from a retained
-archive when the upstream package index no longer carries the locked versions:
-
-```sh
-docker build --build-arg APK_SOURCE=archives \
-  --build-context apk-archives=/absolute/path/to/retained-apks \
-  --secret id=GITHUB_TOKEN,env=GITHUB_TOKEN -t superhero-api:application .
-```
-
-The archive context contains `<architecture>/api-build/*.apk` and
-`<architecture>/runtime/*.apk`, with architecture `amd64` or `arm64`. Each set
-must contain exactly the files in its `docker/apk` checksum manifest. Archive
-mode does not query package indexes or fall back to network package retrieval;
-checksums, archive count and APK signatures remain mandatory. Missing, extra or
-changed archives fail. Keep archives outside the product checkout; they are
-mounted only during installation and are not copied into the image. The default
-`APK_SOURCE=repository` retains exact-version retrieval from configured indexes.
-This option only controls OS package retrieval; npm dependencies and other source
-downloads retain their existing build and authentication requirements.
-
-Build the ordinary API image first. For a Shorts release, apply the shared
-media artifact built by `superhero-video-moderation/decoder/media.Dockerfile`:
-
-```sh
-docker build -f Dockerfile.media \
-  --build-arg APPLICATION_IMAGE="$APPLICATION_IMAGE" \
-  --build-arg MEDIA_RUNTIME_IMAGE="$MEDIA_RUNTIME_IMAGE" \
-  -t superhero-api-shorts:release .
-```
-
-Both inputs are required. Use approved registry digests, or verified image
-archives loaded into the local Docker engine. A separate BuildKit builder needs
-access to the same inputs; a tag loaded into one Docker engine is not available
-automatically to another builder. No registry publication happens in this command.
-
-The release layer preserves the application, startup command and environment.
-It checks the matching Alpine FFmpeg package ABI, replaces only the decoder
-tools/libraries, verifies their recorded hashes and compares all media
-capabilities. A changed ABI or capability fails the build. It does not upgrade
-the application or silently fetch a replacement media dependency.
-
-Deploy and test the resulting image for the API, publisher and media-worker
-roles, keeping their existing dedicated configuration and permissions. Retain
-both input identities, the final image digest/archive and its SBOM. Record the
-downstream FFmpeg source component from `/usr/share/ffmpeg/source.json` in that
-SBOM; the distribution package database alone cannot identify the replacement
-binaries. Use the same qualified media artifact for the streaming service.
+Deploy the ingest, transfer, moderation and playback roles from the [standalone media deployment guide](https://github.com/superhero-com/superhero-shorts/blob/feat/modular-media/README.md#deploying-to-a-dedicated-media-server).
+The API uses its normal release image and owns upload admission, review decisions,
+the catalog and the publication journal. Run the separate publisher with its scoped
+database login and signing key on the API side.
 
 ### Contract release identity
 
@@ -449,7 +406,7 @@ and owned HLS pin are cleaned; application data and services are not used.
 Without these opt-in variables, the assembled suite only validates the API/index
 portion. FFmpeg decoding is not a browser, mobile-device or real-wallet journey.
 
-Run `npm run test:shorts:encoding` with FFmpeg/ffprobe installed to check the
+Run `npm test` in the standalone ingest package with FFmpeg/ffprobe installed to check the
 actual upload decoder against generated boundary files: 4K/60 fps, 240 fps,
 10-bit HEVC, odd dimensions, phone rotation, duration limits and corrupt or
 truncated input. It checks the normalized output and temporary-file cleanup.
@@ -496,12 +453,11 @@ scanner decisions and controlled chain observations. This is not a classifier
 accuracy evaluation, installed-wallet test or validation of deployed worker
 container limits.
 
-For the actual production entrypoint, run `npm run test:shorts:worker-container`
-with a locally built API image and disposable Docker dependencies. The Dockerfile
-compiles native modules in a build stage; the final non-root image contains FFmpeg,
-production dependencies, compiled code, static assets and migration scripts, but
-no Python/C++ build toolchain. Supply the private dependency token through the
-existing BuildKit `GITHUB_TOKEN` secret, never a build argument or image environment.
+For the production worker image, use `npm run test:container` in the standalone
+ingest package. Set `SHORTS_TEST_API_ROOT` to this checkout with dependencies installed.
+For the API's cross-service worker and assembled tests, build that package and set
+`SHORTS_TEST_INGEST_ROOT` to its absolute path. Both test the same compiled worker used
+by the standalone service.
 
 The container test is opt-in and requires the following fixture configuration:
 

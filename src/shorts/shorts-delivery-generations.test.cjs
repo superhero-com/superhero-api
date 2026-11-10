@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { randomUUID, createHash } = require('node:crypto');
 const { DataSource } = require('typeorm');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
-const { ShortsWorkerRepositoryService } = require('./shorts-worker-repository.service');
+const { WorkerRpc } = require('../../test/shorts/worker-rpc');
 const { ShortsDeliveryGenerationsService } = require('./shorts-delivery-generations.service');
 const { ShortsDeliveryPackagesService } = require('./shorts-delivery-packages.service');
 const { validateSourcePackage } = require('./hls-protocol/hls-package');
@@ -69,7 +69,7 @@ test('replacement jobs use fenced workers, preserve the post and expose no creat
   const worker = async () => {
     const identity = await workerRole(admin, { url: url.href, schema, scope }); identities.push(identity);
     const db = new DataSource({ ...options, url: identity.url }); await db.initialize(); clients.push(db);
-    const repo = new ShortsWorkerRepositoryService(db, { scope, sourceHash: hash }); await repo.verifyRuntime(scope, hash);
+    const repo = new WorkerRpc(db, { scope, sourceHash: hash }); await repo.verifyRuntime(scope, hash);
     return { db, repo, rpc: async (action, data = {}) => (await db.query('SELECT shorts_media_worker($1,$2::jsonb) result',
       [action, JSON.stringify({ ...scope, sourceHash: hash, ...data })]))[0].result };
   };

@@ -67,34 +67,8 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install media test tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y redis-server nasm libx264-dev libx265-dev libzimg-dev
-
-      - name: Cache FFmpeg media test tools
-        uses: actions/cache@v4
-        id: media-tools
-        with:
-          path: ~/shorts-ffmpeg
-          key: shorts-ffmpeg-8.1.2-ubuntu-24.04-x264-x265-zimg-v1
-
-      - name: Build FFmpeg with the worker's media features
-        if: steps.media-tools.outputs.cache-hit != 'true'
-        working-directory: ${{ runner.temp }}
-        run: |
-          curl --fail --location --retry 3 -o ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
-          echo '464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c  ffmpeg.tar.xz' | sha256sum --check
-          tar -xf ffmpeg.tar.xz
-          cd ffmpeg-8.1.2
-          ./configure --prefix="$HOME/shorts-ffmpeg" --disable-autodetect --disable-doc --disable-debug \
-            --disable-network --disable-ffplay --enable-gpl --enable-libx264 --enable-libx265 --enable-libzimg
-          make -j"$(nproc)" ffmpeg ffprobe
-          install -d "$HOME/shorts-ffmpeg/bin"
-          install ffmpeg ffprobe "$HOME/shorts-ffmpeg/bin/"
-
-      - name: Use pinned media tools
-        run: echo "$HOME/shorts-ffmpeg/bin" >> "$GITHUB_PATH"
+      - name: Install Redis for API integration tests
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y redis-server
 
       - name: Install dependencies
         run: npm ci
@@ -159,12 +133,7 @@ jobs:
           CGO_ENABLED: '0'
         run: go install github.com/minio/minio@v0.0.0-20251015172955-9e49d5e7a648
 
-      - name: Install worker media test tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
-
-      - name: Verify storage cleanup and worker recovery
+      - name: Verify storage cleanup
         env:
           MINIO_ROOT_USER: ${{ env.SHORTS_TEST_S3_ACCESS_KEY }}
           MINIO_ROOT_PASSWORD: ${{ env.SHORTS_TEST_S3_SECRET_KEY }}
@@ -188,7 +157,6 @@ jobs:
           done
           test "$ready" = true
           npm run test:shorts:private-version-provider
-          npm run test:shorts:worker
 
   # The DB_HOST-gated integration specs skip in the job above.
   db-integration:
