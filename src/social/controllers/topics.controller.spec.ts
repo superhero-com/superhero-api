@@ -56,7 +56,6 @@ describe('TopicsController', () => {
       await expect(c.getByName('ПРИВЕТ')).resolves.toBe(stored);
       expect(findOne).toHaveBeenCalledWith({
         where: { name: 'привет' },
-        relations: ['posts'],
       });
     });
 
@@ -67,7 +66,6 @@ describe('TopicsController', () => {
       await expect(c.getByName('  GoVeRnAnCe  ')).resolves.toBe(stored);
       expect(findOne).toHaveBeenCalledWith({
         where: { name: 'governance' },
-        relations: ['posts'],
       });
     });
 
@@ -78,7 +76,6 @@ describe('TopicsController', () => {
       await expect(c.getByName('汉字')).resolves.toBe(stored);
       expect(findOne).toHaveBeenCalledWith({
         where: { name: '汉字' },
-        relations: ['posts'],
       });
     });
 
@@ -89,7 +86,6 @@ describe('TopicsController', () => {
       await expect(c.getById('ПРИВЕТ')).resolves.toBe(stored);
       expect(findOne).toHaveBeenCalledWith({
         where: { name: 'привет' },
-        relations: ['posts'],
       });
     });
 
@@ -100,7 +96,6 @@ describe('TopicsController', () => {
       await c.getById('3F2504E0-4F89-11D3-9A0C-0305E82C3301');
       expect(findOne).toHaveBeenCalledWith({
         where: { id: '3F2504E0-4F89-11D3-9A0C-0305E82C3301' },
-        relations: ['posts'],
       });
     });
   });
