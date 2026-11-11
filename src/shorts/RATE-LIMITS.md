@@ -240,25 +240,25 @@ restriction until measured, full-pipeline validation supports scaling.
 
 ## Verify changes
 
-`npm run test:shorts:rates` checks proxy handling, secret configuration and policy
+The rate-limit suite checks proxy handling, secret configuration and policy
 coverage. Set `SHORTS_TEST_REDIS_URL` to an **isolated disposable loopback Redis**
 and `SHORTS_TEST_REDIS_DISPOSABLE=1` for the two-instance HTTP/Redis suite. It creates
 scoped keys and pauses that Redis server to test deadlines and recovery. Never point
 it at an application Redis. The normal Shorts unit and index suites cover the
 feature's disabled/local/hosted wiring.
 
-`npm run test:shorts:sockets` starts its own disposable loopback Redis and Nest
+The socket suite starts its own disposable loopback Redis and Nest
 servers. It checks admission across instances, origin/proxy handling, lease
 expiry/renewal, overload, outages, malformed traffic and isolation from the main
 application socket. A local `redis-server` executable is required.
 
-`npm run test:shorts:upload-capacity` starts disposable Redis and two local Nest
+The upload capacity suite starts disposable Redis and two local Nest
 servers. It verifies cross-instance capacity/ownership, expiry, delayed or lost
 acknowledgements, shutdown and private S3 HTTP cancellation/resume. A local
 `redis-server` is required. The worker/storage suites separately validate actual
 PostgreSQL and S3-compatible persistence and recovery.
 
-`npm run test:shorts:media-admission` starts disposable loopback Redis and Nest
+The media admission suite starts disposable loopback Redis and Nest
 contexts to check shared media capacity, policy mismatch, cancellation, shutdown
 and killed-owner recovery. A local `redis-server` is required. Setting
 `SHORTS_TEST_PG_URL` to disposable loopback PostgreSQL also tests the migration,

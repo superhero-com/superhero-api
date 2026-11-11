@@ -313,17 +313,17 @@ or changes storage. API and worker credentials do not gain these operations role
 
 ## Local checks
 
-`npm run test:shorts:objects` runs adapter security tests. `npm run
-test:shorts:uploads` tests concurrent upload records with `SHORTS_TEST_PG_URL`
+Run `npm run test:shorts` for adapter security tests. The concurrent upload
+record tests run with `SHORTS_TEST_PG_URL`
 pointing to disposable loopback PostgreSQL. Set `SHORTS_TEST_S3_ENDPOINT`,
 `SHORTS_TEST_S3_ACCESS_KEY` and `SHORTS_TEST_S3_SECRET_KEY` for the S3 integration
 cases. Tests create temporary buckets and database schemas, then remove them; use
 isolated test credentials with cleanup privileges, never runtime credentials.
 
-`npm run test:shorts:authority` uses disposable PostgreSQL logins to exercise direct
+The worker authority suite uses disposable PostgreSQL logins to exercise direct
 SQL denial, forged completion, deployment/lease isolation, privilege drift and
 revocation. Its isolated test administrator needs permission to create/drop roles.
-`npm run test:shorts:worker` also uses a restricted login while testing actual media
+The worker integration test also uses a restricted login while testing actual media
 preparation and process-kill recovery through the production Nest module.
 
 `SHORTS_TEST_S3_EMULATOR=1` skips the explicit anonymous-access assertion for an
@@ -331,12 +331,12 @@ emulator without authorization enforcement. It does not disable any runtime chec
 and must not be used as proof of deployment security. PostgreSQL and S3 integration
 cases report skips when their test endpoints are absent.
 
-`npm run test:shorts:processing` checks shared processing admission with restricted
+The processing suite checks shared processing admission with restricted
 PostgreSQL workers, lease expiry, migration rollback/startup guards, stalled
 heartbeats and shutdown. Set `SHORTS_TEST_PG_URL` to an isolated disposable
 loopback database to include the database cases.
 
-`npm run test:shorts:scratch` exercises filesystem admission, reservation races,
+The scratch storage suite exercises filesystem admission, reservation races,
 probe deadlines and cancellation/cleanup of a real FFmpeg process with generated
 media. Processing tests also verify delayed claims and single refunds after a
 lost deferral response. These tests do not validate host quotas or deployed IAM.

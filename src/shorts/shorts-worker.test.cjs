@@ -30,7 +30,6 @@ const { NestFactory } = require('@nestjs/core');
 const { Module, Global, UnauthorizedException } = require('@nestjs/common');
 const { S3Client, CreateBucketCommand, PutBucketVersioningCommand, ListObjectVersionsCommand, ListObjectsV2Command, DeleteObjectsCommand, DeleteBucketCommand } = require('@aws-sdk/client-s3');
 const { workerConfig, workerFixture } = require('./testing/standalone-ingest.cjs');
-const shortsWorkerConfig = workerConfig();
 const { ShortsPackageService } = require('./shorts-package.service');
 const { ShortsMetadataService } = require('./shorts-metadata.service');
 const { ShortsMetadataModule } = require('./shorts-metadata.module');
@@ -49,7 +48,10 @@ const { ShortsStoreService } = require('./shorts-store.service');
 const { workerRole } = require('./testing/worker-role.cjs');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
-test('worker startup rejects wrong networks, bypasses and unnecessary credentials', async t => {
+test('worker startup rejects wrong networks, bypasses and unnecessary credentials', {
+  skip: !process.env.SHORTS_TEST_INGEST_ROOT && 'requires the built ingest worker (SHORTS_TEST_INGEST_ROOT)',
+}, async t => {
+  const shortsWorkerConfig = workerConfig();
   const dir = await mkdtemp(join(tmpdir(), 'shorts-worker-config-')); t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'deployment.json');
   const manifest = releaseFixture({ sourceHash: hash('contract') }).release;
@@ -76,7 +78,9 @@ test('local UnixFS package identity matches actual offline Kubo for chunks and f
 });
 
 test(`hosted original-file HTTP uploads survive a killed media worker and publish only through the approved API path`, {
-  skip: !process.env.SHORTS_TEST_PG_URL || !process.env.SHORTS_TEST_S3_ENDPOINT, timeout: process.env.SHORTS_TEST_CLEANUP_MEDIA === '1' ? 600000 : 120000,
+  skip: !process.env.SHORTS_TEST_PG_URL || !process.env.SHORTS_TEST_S3_ENDPOINT ||
+    (!process.env.SHORTS_TEST_INGEST_ROOT && 'requires the built ingest worker (SHORTS_TEST_INGEST_ROOT)'),
+  timeout: process.env.SHORTS_TEST_CLEANUP_MEDIA === '1' ? 600000 : 120000,
 }, async t => {
   const cleanupMedia = process.env.SHORTS_TEST_CLEANUP_MEDIA === '1';
   if (cleanupMedia) {

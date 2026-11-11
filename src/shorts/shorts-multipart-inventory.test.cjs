@@ -230,16 +230,17 @@ test('multipart stalled responses cancel and redirects never forward credentials
   assert.equal(calls, before);
 });
 
+const multipartEndpoint = process.env.SHORTS_TEST_MULTIPART_S3_ENDPOINT || process.env.SHORTS_TEST_S3_ENDPOINT;
+
 test(
   'durable multipart inventory with real PostgreSQL and S3 pagination',
   {
-    skip:
-      !process.env.SHORTS_TEST_PG_URL || !process.env.SHORTS_TEST_S3_ENDPOINT,
+    skip: !process.env.SHORTS_TEST_PG_URL || !multipartEndpoint,
     timeout: 150000,
   },
   async (t) => {
     const pg = new URL(process.env.SHORTS_TEST_PG_URL),
-      endpoint = new URL(process.env.SHORTS_TEST_S3_ENDPOINT);
+      endpoint = new URL(multipartEndpoint);
     assert.equal(pg.hostname, '127.0.0.1');
     assert.equal(endpoint.hostname, '127.0.0.1');
     const schema = 'multipart_' + randomUUID().replaceAll('-', ''),

@@ -160,7 +160,7 @@ exports.exercise = async f => {
       const db = new DataSource({ ...owner.options, url: url.href }); await db.initialize(); connections.push(db); return db;
     };
     const verifierDb = await principal(true), operatorDb = await principal(false);
-    process.env.SHORTS_PRIVATE_INPUT_CLEANUP_ENABLED = 'true'; process.env.SHORTS_PRIVATE_INPUT_CLEANUP_OPERATOR_ENABLED = 'true';
+    process.env.SHORTS_PRIVATE_INPUT_CLEANUP_ENABLED = 'true';
     process.env.SHORTS_STORAGE_CONTROL_TOKEN_FILE = join(dir, 'cleanup-token');
     await writeFile(process.env.SHORTS_STORAGE_CONTROL_TOKEN_FILE, randomBytes(32).toString('hex'), { mode: 0o600 });
     verifier = new Verifier(shorts, media, selections, new Journal(verifierDb));
@@ -168,6 +168,11 @@ exports.exercise = async f => {
     Module({ controllers: [Controller], providers: [Guard, { provide: Verifier, useValue: verifier }] })(ControlModule);
     control = await NestFactory.create(ControlModule, { logger: false, abortOnError: false }); control.setGlobalPrefix('api'); await control.listen(0, '127.0.0.1');
     process.env.SHORTS_STORAGE_CONTROL_URL = await control.getUrl();
+    // The verifier and operator normally start in separate processes. The
+    // operator uses its own restricted login and only the operator flag.
+    delete process.env.SHORTS_PRIVATE_INPUT_RETIREMENT_ENABLED;
+    delete process.env.SHORTS_PRIVATE_INPUT_CLEANUP_ENABLED;
+    process.env.SHORTS_PRIVATE_INPUT_CLEANUP_OPERATOR_ENABLED = 'true';
     const bucketArn = `arn:aws:s3:::${bucket}`;
     const objectArn = `${bucketArn}/${config.objectPrefix}${record.id}/*`;
     assert.ok(refs.every(ref => ref.key.startsWith(`${config.objectPrefix}${record.id}/`)));

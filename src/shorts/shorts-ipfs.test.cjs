@@ -119,7 +119,12 @@ test('storage outage pauses reconciliation without unpinning or publishing anyth
   await worker.reconcile();
 });
 
-test('real storage round trip uses one node and cleans up only its own test pin', { skip: process.env.SHORTS_IPFS_INTEGRATION !== '1' }, async t => {
+test('real storage round trip uses one node and cleans up only its own test pin', { skip: !process.env.SHORTS_TEST_KUBO_API && process.env.SHORTS_IPFS_INTEGRATION !== '1' }, async t => {
+  if (process.env.SHORTS_TEST_KUBO_API) {
+    const endpoint = new URL(process.env.SHORTS_TEST_KUBO_API);
+    assert.equal(endpoint.hostname, '127.0.0.1');
+    environment(t, { SHORTS_IPFS_API: endpoint.href });
+  }
   const media = new ShortsMediaService({});
   const bytes = Buffer.from(`shorts-storage-test-${randomUUID()}`);
   const dir = await mkdtemp(join(tmpdir(), 'shorts-original-'));

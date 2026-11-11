@@ -130,6 +130,6 @@ signing request; `queued`, `claimed` and `signed` reflect the publication journa
 Storage capacity pauses retain that intent and retry through the lifecycle queue.
 They do not cause a new wallet signature or reset the signer queue's limits.
 Neither endpoint returns raw signed bytes or submits a browser wallet transaction.
-Tests: `npm run test:shorts:publisher` plus `test:shorts:publisher-authority` with a
-disposable local `SHORTS_TEST_PG_URL`; they use unfunded fixture keys and simulated
+Run `npm run test:shorts` with a disposable local `SHORTS_TEST_PG_URL` to exercise
+publication recovery and publisher permissions. These tests use unfunded fixture keys and simulated
 node observations. Live-node staging verification is a separate deployment check.

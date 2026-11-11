@@ -77,7 +77,7 @@ they need a verified recovery procedure, not a forced row deletion or nonce rese
 
 ## Validation
 
-`npm run test:shorts:publications` validates real offline signatures. With a
+`npm run test:shorts` validates real offline signatures. With a
 disposable loopback PostgreSQL database in `SHORTS_TEST_PG_URL`, it also exercises
 competing connections, budgets, policy changes, failure rollback, lease expiry,
 actual process-kill recovery and idempotent acknowledgements. It does not contact

@@ -76,7 +76,7 @@ The hosted API no longer reads local private files or signs publications. Retain
 its single-instance deployment limit until distributed ingress limits and measured
 capacity permit scaling. Shared outboxes alone do not close those requirements.
 
-`npm run test:shorts:stream-jobs` requires a disposable loopback PostgreSQL database
+The streaming outbox suite requires a disposable loopback PostgreSQL database
 in `SHORTS_TEST_PG_URL`. It tests independent connections, transaction rollback,
 policy changes during IO, expired leases, actual dispatcher process termination,
 shutdown, and schema rollback/reapply. It does not call a deployed streaming

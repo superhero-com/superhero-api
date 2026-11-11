@@ -54,6 +54,11 @@ const { Global, Module } = require('@nestjs/common');
       readNode: async callback => callback(),
       async read(method, args) {
         if (method === 'get_short') return (await chainState()).shorts[args[0]];
+        if (method === 'get_video_stats') {
+          const video = (await chainState()).shorts[args[0]];
+          assert.ok(video, 'Expected a published fixture video');
+          return { likes: video.likes, comments: 0, comment_version: 0 };
+        }
         if (method === 'has_liked') return !!(await chainState()).shorts[args[1]]?.likers?.includes(args[0]);
         if (method === 'get_config') return configuration;
         throw new Error(`Unexpected chain read in offline fixture: ${method}`);

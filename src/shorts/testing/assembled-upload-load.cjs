@@ -12,10 +12,10 @@ const { performance } = require('node:perf_hooks');
 const { AccountMemory } = require('@aeternity/aepp-sdk');
 const run = promisify(execFile), hash = value => createHash('sha256').update(value).digest('hex');
 const mix = [
-  { name: 'short-silent', seconds: 2.2, width: 360, height: 640, audio: false },
-  { name: 'portrait-audio', seconds: 12, width: 720, height: 1280, audio: true },
-  { name: 'landscape-audio', seconds: 30, width: 1280, height: 720, audio: true },
-  { name: 'maximum-silent', seconds: 60, width: 540, height: 960, audio: false },
+  { name: 'short-silent', seconds: 2.2, width: 360, height: 640, previewSize: [360, 640], audio: false },
+  { name: 'portrait-audio', seconds: 12, width: 720, height: 1280, previewSize: [480, 852], audio: true },
+  { name: 'landscape-audio', seconds: 30, width: 1280, height: 720, previewSize: [852, 480], audio: true },
+  { name: 'maximum-silent', seconds: 60, width: 540, height: 960, previewSize: [480, 852], audio: false },
 ];
 
 exports.assembledUploadLoad = async (t, f) => {
@@ -148,7 +148,7 @@ exports.assembledUploadLoad = async (t, f) => {
       const path = join(dir, `prepared-${job.name}.mp4`); await writeFile(path, preview.body);
       const probe = JSON.parse((await run('ffprobe', ['-v','error','-show_streams','-show_format','-of','json',path], { timeout: 10000 })).stdout);
       const video = probe.streams.find(stream => stream.codec_type === 'video');
-      assert.equal(video.width, 540); assert.equal(video.height, 960);
+      assert.deepEqual([video.width, video.height], job.previewSize, job.name);
       assert.equal(probe.streams.some(stream => stream.codec_type === 'audio'), job.audio);
       assert.ok(Math.abs(Number(probe.format.duration) - job.seconds) < .2);
       await run('ffmpeg', ['-nostdin','-v','error','-i',path,'-f','null','-'], { timeout: 30000, maxBuffer: 16384 });

@@ -104,7 +104,7 @@ lease expires. It cannot recall a send already authorized or broadcast. Preserve
 the journal and reconcile chain outcomes before resetting accounts, restoring old
 backups or removing this boundary. Downgrade refuses active enrollment.
 
-`npm run test:shorts:publisher-authority` uses a disposable loopback PostgreSQL
+The publisher authority suite uses a disposable loopback PostgreSQL
 database in `SHORTS_TEST_PG_URL`, temporary dedicated logins and offline signatures.
 It exercises role separation, attempted SQL bypasses, claims, immutable bytes,
 policy changes and recovery. It does not establish deployed role configuration,

@@ -602,10 +602,10 @@ test('targeted pin inspection rejects ambiguous errors and bounded-body failures
 
 test(
   'real offline Kubo reports absent, pinned and removed package identity without full inventory',
-  { skip: !process.env.SHORTS_TEST_IPFS_API, timeout: 30000 },
+  { skip: !process.env.SHORTS_TEST_IPFS_API && !process.env.SHORTS_TEST_KUBO_API, timeout: 30000 },
   async (t) => {
     const saved = process.env.SHORTS_IPFS_API;
-    process.env.SHORTS_IPFS_API = process.env.SHORTS_TEST_IPFS_API;
+    process.env.SHORTS_IPFS_API = process.env.SHORTS_TEST_IPFS_API || process.env.SHORTS_TEST_KUBO_API;
     t.after(() => {
       if (saved === undefined) delete process.env.SHORTS_IPFS_API;
       else process.env.SHORTS_IPFS_API = saved;

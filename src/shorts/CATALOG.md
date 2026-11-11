@@ -95,7 +95,7 @@ updates, including an empty feed. A graph change during page enrichment returns
 400, and a rebuilding graph returns 503. These versions describe the committed
 index, not unconfirmed wallet actions or a guarantee that the index has no lag.
 
-Run `npm run test:shorts:following` with an isolated loopback `SHORTS_TEST_PG_URL`
+Run `npm run test:shorts` with an isolated loopback `SHORTS_TEST_PG_URL`
 for migration, pagination, block/unfollow, generation and HTTP checks. It creates
 and removes only its own schema; chain identity inputs are controlled test doubles.
 
@@ -127,7 +127,7 @@ enabling multiple API replicas. Older APIs
 without the capability flag use the existing capped feed response. The content page is a library slice;
 never compute whole-account totals from just its items.
 
-Run `npm run test:shorts:catalog` for the catalog tests. Set `SHORTS_TEST_PG_URL` to
+Run `npm run test:shorts` to exercise the catalog. Set `SHORTS_TEST_PG_URL` to
 an isolated loopback PostgreSQL database to include the migration and multi-connection
 tests. The suite creates and removes a unique schema; it does not need a wallet or
 a live blockchain. Loopback HTTP binding is required for the controller tests.
@@ -181,5 +181,5 @@ from visible rows or claim stable page numbers. Clients keep one library page,
 abort obsolete reads, discard previous-account/deployment responses and offer retry.
 Legacy/local config without `studioPaging` retains the capped dashboard.
 
-Run `npm run test:shorts:studio-read` with the isolated `SHORTS_TEST_PG_URL` described
+Run `npm run test:shorts` with the isolated `SHORTS_TEST_PG_URL` described
 above for database paging, rollback, count, sorting and authenticated HTTP checks.

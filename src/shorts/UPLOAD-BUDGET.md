@@ -84,7 +84,7 @@ sum of all deployment budgets sharing a storage system. Keep physical disk/inode
 pressure controls and storage inventories enabled. These settings alone do not
 authorize production launch or additional full API replicas.
 
-Run `npm run build`, then `npm run test:shorts:upload-budget`, with `SHORTS_TEST_PG_URL` pointing to a
+Run `npm run test:shorts` with `SHORTS_TEST_PG_URL` pointing to a
 disposable loopback PostgreSQL database. Tests cover migration, competing pools,
 restart, retained charges, rollback, restrictive role grants and indexed admission
 against retained history. They also run the compiled setup command with fixture-only credentials. They create and remove only unique fixture schemas/roles and temporary configuration files.

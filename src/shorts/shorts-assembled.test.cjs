@@ -31,7 +31,8 @@ async function until(read, timeout = 45000) {
 }
 
 test('complete hosted module shares upload, media and publication controls across process loss', {
-  skip: !['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].every(name => process.env[`SHORTS_TEST_${name}`]),
+  skip: !['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].every(name => process.env[`SHORTS_TEST_${name}`]) ||
+    (!process.env.SHORTS_TEST_INGEST_ROOT && 'requires the built ingest worker (SHORTS_TEST_INGEST_ROOT)'),
   timeout: 600000,
 }, async t => {
   const endpoints = Object.fromEntries(['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].map(name => [name, new URL(process.env[`SHORTS_TEST_${name}`])]));

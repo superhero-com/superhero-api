@@ -107,7 +107,7 @@ content.
 
 ## Provider compatibility tests
 
-`npm run test:shorts:private-version-provider` runs the SQL/coordinator checks.
+`npm run test:shorts` runs the SQL/coordinator checks.
 To also exercise actual storage, supply a disposable loopback PostgreSQL URL
 (`SHORTS_TEST_PG_URL`), MinIO endpoint (`SHORTS_TEST_S3_ENDPOINT`), fixture-only
 root credentials (`SHORTS_TEST_S3_ACCESS_KEY`, `SHORTS_TEST_S3_SECRET_KEY`) and

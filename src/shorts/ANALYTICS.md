@@ -129,7 +129,7 @@ configurable [retained upload budget](UPLOAD-BUDGET.md), separate from analytics
 retention and physical storage quotas. Signing uses the separate
 [publisher](PUBLISHER.md); [transaction history](RECEIPTS.md) also uses PostgreSQL.
 
-`npm run test:shorts:measurements` uses a disposable loopback PostgreSQL database
+The measurement suite uses a disposable loopback PostgreSQL database
 set by `SHORTS_TEST_PG_URL`. It exercises concurrency, transactional failure,
 privacy replay barriers, migration and independent HTTP API instances. It does
 not certify traffic authenticity, legal compliance, backup erasure or production

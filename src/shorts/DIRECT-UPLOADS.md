@@ -107,9 +107,9 @@ sends missing chunks directly to storage.
   in the API process. The separate publisher only handles on-chain registration.
   Public playback remains on streaming.
 
-Run `npm run test:shorts:direct-uploads` for signing, envelope and completion
-checks, and `npm run test:shorts:uploads` with `SHORTS_TEST_PG_URL` pointing to an
-isolated loopback database for concurrent reservation tests. Test a browser upload
+Run `npm run test:shorts` for signing, envelope and completion
+checks. Set `SHORTS_TEST_PG_URL` to an isolated loopback database to include
+concurrent reservation tests. Test a browser upload
 against the configured MinIO origin before enabling traffic.
 
 ## Upload capabilities and original files

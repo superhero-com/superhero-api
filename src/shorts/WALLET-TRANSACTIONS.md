@@ -52,6 +52,6 @@ finality. It does not replace the shared MDW accounting plugin, authorize a seco
 transaction or grant access to private Studio data. The existing authenticated
 `POST /receipt` remains an optional activity reference, not confirmation authority.
 
-Run `npm run test:shorts:wallet-transactions` for offline signature, identity,
-execution and reorganization cases. `test:shorts:rates` additionally exercises
+Run `npm run test:shorts` for offline signature, identity,
+execution and reorganization cases. The rate-limit tests also exercise
 real HTTP admission against disposable local Redis.

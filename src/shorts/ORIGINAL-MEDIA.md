@@ -51,7 +51,7 @@ the same five-minute limit and the worker's shared processing deadline. SDR outp
 the source HDR mastering-display, content-light, dynamic HDR and ambient-viewing
 side data after tone mapping; the retained original keeps its complete metadata.
 
-`npm run test:shorts:quality` exercises delayed starts, shorter/gapped audio,
+`npm run test:shorts` exercises delayed starts, shorter/gapped audio,
 mono/stereo/5.1, variable cadence, fractional CFR, rotation and pixel aspect using
 locally generated audiovisual markers. To include the real streaming packager,
 build that repository and set `SHORTS_TEST_STREAMING_REPO` to its absolute path.
@@ -178,7 +178,7 @@ record. Scanner readiness also comes from the transfer service. Local scanning
 resumes when the API has its scanner endpoint and credential and the flag is
 set to `false`.
 
-`npm run test:shorts:worker` covers original-file HTTP uploads through
+The worker integration test covers original-file HTTP uploads through
 real PostgreSQL and S3-compatible storage when `SHORTS_TEST_PG_URL` and the
 `SHORTS_TEST_S3_*` fixture settings are provided. It kills a worker holding a
 claim, resumes on a new worker, and checks stale-claim rejection and the persisted
@@ -863,7 +863,7 @@ again after its reference barrier has been released.
 
 ### Automated quality and lifecycle checks
 
-`npm run test:shorts:quality` runs the source-identity, encoding, streaming-file,
+`npm run test:shorts` runs the source-identity, encoding, streaming-file,
 upload-policy, delivery-generation, selection, retention and storage-authority
 suites sequentially. Install FFmpeg/ffprobe and set `SHORTS_TEST_PG_URL` to an
 isolated loopback PostgreSQL instance; these tests create and remove their own
@@ -899,7 +899,7 @@ must still succeed before the expiring importer stores blocks or changes pins.
 
 ## Combined private cleanup integration test
 
-`npm run test:shorts:worker` supports an opt-in integration path with
+The worker integration test supports an opt-in integration path with
 `SHORTS_TEST_CLEANUP_MEDIA=1`. Provide disposable loopback PostgreSQL and MinIO
 fixtures using the `SHORTS_TEST_PG_URL`, `SHORTS_TEST_S3_ENDPOINT`,
 `SHORTS_TEST_S3_ACCESS_KEY` and `SHORTS_TEST_S3_SECRET_KEY` settings, enable

@@ -104,6 +104,9 @@ exports.assembledIndex = async (t, f) => {
     const feed = await request(c, '/feed?address=' + creator.address);
     assert.equal(feed.status, 200); assert.equal(feed.body.items.length, 1);
     assert.equal(feed.body.items[0].likes, 1); assert.equal(feed.body.items[0].liked, true);
+    const stats = await request(b, `/${id}/stats`);
+    assert.equal(stats.status, 200);
+    assert.deepEqual(stats.body, { likes: '1', comments: '0', commentVersion: '0' });
     const playback = await request(b, `/playback/${id}`); assert.equal(playback.status, 200); assert.equal(playback.body.cid, record.cid);
     assert.equal((await owner.getRepository(Tx).findOneBy({ hash: like.hash })).data.other_plugin.untouched, true);
   });

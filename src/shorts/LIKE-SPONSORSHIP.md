@@ -67,6 +67,6 @@ The conservative queue permits only one active reserved/signed transaction per p
 
 ## Local verification
 
-Run `npm run test:shorts:like-sponsorship` for signature, transaction, observation and worker checks. Run `npm run test:shorts:like-sponsorship-database` with `SHORTS_TEST_PG_URL` pointing to a dedicated disposable PostgreSQL database on loopback for real SQL authority and concurrency checks. The database suite requires an administrator that may create random test roles and a random schema; it cleans up only those test-owned objects. Never point it at a shared or production database.
+Run `npm run test:shorts` for signature, transaction, observation and worker checks. Set `SHORTS_TEST_PG_URL` to a dedicated disposable PostgreSQL database on loopback to include real SQL authority and concurrency checks. The database suite requires an administrator that may create random test roles and a random schema; it cleans up only those test-owned objects. Never point it at a shared or production database.
 
 The database suite exercises the actual migration, enrollment and privilege checks, concurrent admission, shared-payer budgets, leases and fencing, immutable nonce reservations, persistence before submission, pause behavior and expiry recovery. Its worker recovery case uses real PostgreSQL commits with a simulated node transport; passing it does not replace a live wallet/node test or establish production throughput.

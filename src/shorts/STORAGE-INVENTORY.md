@@ -164,5 +164,9 @@ such a provider is unverified; keep deletion and abort automation disabled.
 The opt-in multipart integration test creates uploads both inside and outside the
 deployment prefix and verifies pagination and exact totals. A provider that fails
 that test is not qualified for multipart inventory, even if ordinary object reads,
-writes and version listing pass. Version-list continuation markers are opaque and
+writes and version listing pass. To test pagination against a second disposable
+loopback S3 provider, set `SHORTS_TEST_MULTIPART_S3_ENDPOINT` before running
+`npm run test:shorts`. It defaults to `SHORTS_TEST_S3_ENDPOINT` and uses the
+same test credentials. Branch CI uses VersityGW for this check and MinIO for
+versioned storage and restricted credentials. Version-list continuation markers are opaque and
 must be returned unchanged, including provider-specific suffixes.

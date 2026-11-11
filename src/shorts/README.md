@@ -330,13 +330,13 @@ across API instances, in addition to the existing per-process scan queue. Busy
 maintenance work waits without consuming failure retries. This does not authorize
 additional API replicas.
 
-`npm run test:shorts:hosted-actions` uses disposable loopback PostgreSQL and Redis
+The hosted actions suite uses disposable loopback PostgreSQL and Redis
 configured with `SHORTS_TEST_PG_URL` and `SHORTS_TEST_REDIS_URL`. It exercises two
 HTTP runtimes, signed sessions, concurrent decisions, shared request limits and
 reconnection. Scanner, chain and analytics responses are controlled fixtures;
 deployment and full-pipeline validation are still required.
 
-`npm run test:shorts:assembled` boots the complete enabled hosted feature in
+The assembled integration test boots the complete enabled hosted feature in
 separate processes with restricted PostgreSQL roles, shared Redis admission and
 real private S3/IPFS transfers. Configure `SHORTS_TEST_PG_URL`,
 `SHORTS_TEST_REDIS_URL`, `SHORTS_TEST_S3_ENDPOINT` and `SHORTS_TEST_KUBO_API` using
@@ -344,7 +344,8 @@ real private S3/IPFS transfers. Configure `SHORTS_TEST_PG_URL`,
 `SHORTS_TEST_S3_ACCESS_KEY` and `SHORTS_TEST_S3_SECRET_KEY` (default `test`). The
 fixture requires FFmpeg and a built `superhero-shorts/ingest-worker` checkout
 selected by `SHORTS_TEST_INGEST_ROOT`. It creates synthetic media and cleans its temporary
-schemas, roles, objects and pin. Run it separately from tests that pause Redis.
+schemas, roles, objects and pin. The test runner executes files sequentially because other
+suites pause Redis to exercise recovery.
 It checks startup at the default and minimum SQL budgets, missing-migration
 failure, signed sessions across processes, owner-only previews, shared media
 admission, API process loss and a single durable publication request after retry.
@@ -557,7 +558,7 @@ It never forwards credentials from a different API environment. If the browser i
 offline or closes before logout reaches the server, the token remains valid until
 its server expiry; a failed background logout is not proof of server revocation.
 
-Creators sign in to the active deployment. Verify with `npm run test:shorts:sessions` against a disposable
+Creators sign in to the active deployment. Verify with `npm run test:shorts` against a disposable
 loopback `SHORTS_TEST_PG_URL`; it uses a temporary schema and real wallet signatures.
 
 ## Run locally
@@ -717,6 +718,21 @@ until the other network, contract and release gates are implemented and approved
 
 ## Tests
 
+Use Node.js 24, as in CI, or Node.js 22.13+ on the 22.x line for the built-in
+SQLite tests. Install dependencies with `npm ci` in the API checkout and put
+`redis-server` on your path.
+
+```sh
+npm run test:shorts
+```
+
+The command builds the API and runs every `*.test.cjs` file under `src/shorts/`,
+including subdirectories. The [branch CI workflow](../../.github/workflows/branch-ci.yaml) configures
+disposable loopback PostgreSQL, Redis, S3 and Kubo fixtures for the API tests.
+Cross-service tests also need the built ingest worker in `SHORTS_TEST_INGEST_ROOT`.
+Tests that need an unconfigured service report a skip. Set the fixture variables
+before running the same command to include those cases.
+
 The contract repository exercises on-chain authorization. The API’s opt-in testnet smoke test reads an existing published Short, verifies the deployed bytecode and ABI, compares the contract record to the catalog, and retrieves an adaptive segment through a signed playback session. It uses public endpoints and requires no wallet credentials.
 
 ```sh
@@ -724,7 +740,7 @@ SHORTS_TESTNET_E2E=1 \
 SHORTS_TEST_API_URL=https://example.com/api/shorts \
 SHORTS_STREAM_URL=https://example.com \
 SHORTS_TEST_VIDEO_ID=your-published-video-id \
-npm run test:shorts:testnet
+npm run test:shorts
 ```
 
 Exercise uploads, review, publication and wallet interactions with the disposable assembled suite described above. Run full API lint with `npm run lint` and typecheck with `npx tsc --noEmit`.
@@ -807,7 +823,7 @@ The standalone loopback demo keeps its bounded SQLite ledger in
 PostgreSQL integration suite against a disposable local database:
 
 ```sh
-SHORTS_TEST_PG_URL=postgres://postgres@127.0.0.1:55439/postgres npm run test:shorts:index
+SHORTS_TEST_PG_URL=postgres://postgres@127.0.0.1:55439/postgres npm run test:shorts
 ```
 
 The suite creates and removes a unique schema. It covers duplicate delivery,
@@ -821,7 +837,7 @@ Anonymous reports use bounded reason/detail fields and idempotency IDs. Creator-
 
 Leave `SHORTS_JEV_ENABLED=0` until configured. Enable only with a server-side `TYPESAFE_API_KEY` and a pinned `SHORTS_JEV_MODEL=jev-x.y.z`. The adapter sends title, declared topic, description and optional creator captions to `https://api.typesafe.ai/v1/systemone`. It checks the returned version, taxonomy, confidence and output shape; uncertain or failed results fall back to manual review. Evidence hashes, taxonomy and rubric versions are retained. No viewing history or wallet data is sent. There is no raw video/audio analysis, ASR/OCR pipeline or automatic safety approval. Operators choose the final discovery topic; client matching uses that topic and local preferences.
 
-Run `npm run test:shorts:unit` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The historical paid-Like testnet suite does not qualify the zero-payment contract. The offline sponsorship checks validate signed envelopes, fee caps, canonical observation and recovery without sending transactions. Live integration of the new contract and fee-payer process is a separate release check.
+Run `npm run test:shorts` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The historical paid-Like testnet suite does not qualify the zero-payment contract. The offline sponsorship checks validate signed envelopes, fee caps, canonical observation and recovery without sending transactions. Live integration of the new contract and fee-payer process is a separate release check.
 
 ## Local Studio connection without an extra signature
 
@@ -895,7 +911,7 @@ lookup-index migration with the other migrations. See [catalog reads](CATALOG.md
 for query parameters, freshness and deployment behavior. These endpoints do not
 remove the upload admission cap or the remaining single-instance API constraint.
 
-`npm run test:shorts:shared-runtime` checks hosted startup without local storage.
+The shared runtime suite checks hosted startup without local storage.
 Set `SHORTS_TEST_PG_URL` to an isolated loopback PostgreSQL database to also test
 concurrent API contexts and incomplete-cutover refusal. It creates and removes its
 own schema; do not use an application database.
