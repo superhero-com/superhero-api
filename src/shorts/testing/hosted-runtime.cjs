@@ -48,7 +48,7 @@ const { Global, Module } = require('@nestjs/common');
       sdk: { getContext: () => ({ onNode: social.node }), api: {
         $host: manifest.node,
         getCurrentKeyBlock: async () => ({ height: (await chainState()).height }),
-        getGenerationByHeight: async height => ({ keyBlock: { height, hash: (await chainState()).keyHash }, microBlocks: [] }),
+        getGenerationByHeight: async height => ({ keyBlock: { height, hash: (await chainState()).keyHash }, microBlocks: (await chainState()).microBlocks?.[height] ?? [] }),
         getStatus: async () => ({ networkId: 'ae_uat' }),
       } },
       readNode: async callback => callback(),

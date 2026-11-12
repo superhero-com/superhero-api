@@ -1,6 +1,8 @@
 name: Branch CI
 
 on:
+  pull_request:
+    branches: [develop]
   push:
     branches-ignore:
       - main
@@ -67,6 +69,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      SHORTS_TEST_REQUIRE_ASSEMBLED: '1'
+      SHORTS_TEST_COMPILED: '1'
       SHORTS_TEST_REDIS_URL: redis://127.0.0.1:16379/0
       SHORTS_TEST_REDIS_DISPOSABLE: '1'
       SHORTS_TEST_KUBO_API: http://127.0.0.1:15001/api/v0
@@ -87,14 +91,34 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Check out pinned media services
+        uses: actions/checkout@v6
+        with:
+          repository: superhero-com/superhero-shorts
+          ref: 1d7c2f41454ff39e004045a103660946d88538e5
+          path: shorts-services
+          ssh-key: ${{ secrets.SHORTS_MEDIA_READ_KEY }}
+          persist-credentials: false
+
+      - name: Build ingest and streaming services
+        run: |
+          mv "$GITHUB_WORKSPACE/shorts-services" "$RUNNER_TEMP/shorts-services"
+          for service in ingest-worker streaming; do
+            cd "$RUNNER_TEMP/shorts-services/$service"
+            npm ci
+            npm run build
+          done
+          echo "SHORTS_TEST_INGEST_ROOT=$RUNNER_TEMP/shorts-services/ingest-worker" >> "$GITHUB_ENV"
+          echo "SHORTS_TEST_STREAMING_REPO=$RUNNER_TEMP/shorts-services/streaming" >> "$GITHUB_ENV"
+
       - name: Set up storage fixture compiler
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.9'
           cache: false
 
-      - name: Install Redis for tests that start their own server
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y redis-server
+      - name: Install media codecs and Redis
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg redis-server
 
       - name: Install dependencies
         run: npm ci
@@ -156,7 +180,8 @@ jobs:
             sleep 1
           done
           test "$ready" = true
-          npm run test:shorts
+          NODE_OPTIONS="--test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=$RUNNER_TEMP/shorts.xml" npm run test:shorts
+          python3 .github/check-shorts-journey.py "$RUNNER_TEMP/shorts.xml"
 
   # The DB_HOST-gated integration specs skip in the job above.
   db-integration:
@@ -204,3 +229,22 @@ jobs:
       # starts its own server and already runs above.
       - name: Run database integration specs
         run: npx jest --runInBand --testPathPatterns 'integration\.spec\.ts$' --testPathIgnorePatterns social-graph
+
+      - name: Run profile and post image integration suites
+        env:
+          PROFILE_MEDIA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/profile_media_test
+        run: |
+          PGPASSWORD="$DB_PASSWORD" createdb -h 127.0.0.1 -U "$DB_USER" profile_media_test
+          node -r ts-node/register/transpile-only -r tsconfig-paths/register --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout \
+            --test-reporter-destination="$RUNNER_TEMP/profile-media.xml" "src/profile-media/*.test.cjs"
+          python3 - "$RUNNER_TEMP/profile-media.xml" <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall(".//testcase")
+          files = {Path(c.get("file", "")).name for c in cases}
+          expected = {p.name for p in Path("src/profile-media").glob("*.test.cjs")}
+          if not cases or files != expected or any(c.find("skipped") is not None for c in cases):
+              sys.exit("Profile media suites must all execute without skips")
+          PY

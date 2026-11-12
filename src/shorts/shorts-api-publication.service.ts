@@ -75,12 +75,16 @@ export class ShortsApiPublicationService {
     const deployment = this.ready();
     const job = await this.boundary.status(deployment, id, creator);
     signal?.throwIfAborted();
-    if (!job || !['confirmed', 'reconciled'].includes(job.status)) return job;
+    const expired = job?.status === 'cancelled' && !!job.expiryBlockHash;
+    if (!expired && !['confirmed', 'reconciled'].includes(job?.status))
+      return job;
     // Do not turn a durable observation into playback permission after a reorg.
-    const height = Number(job.height);
+    const height = Number(expired ? job.expiryHeight : job.height);
+    const blockHash = expired ? job.expiryBlockHash : job.blockHash;
+    const keyBlock = expired || job.status === 'reconciled';
     if (!Number.isSafeInteger(height) || height < 0)
       throw new ServiceUnavailableException('Invalid publication confirmation');
-    receiptHash(job.blockHash, job.status === 'reconciled' ? 'kh_' : 'mh_');
+    receiptHash(blockHash, keyBlock ? 'kh_' : 'mh_');
     const observe = () =>
       Promise.all([
         this.chain.sdk.api.getCurrentKeyBlock(),
@@ -96,9 +100,9 @@ export class ShortsApiPublicationService {
       generation.keyBlock.height !== height ||
       !Array.isArray(generation.microBlocks) ||
       tip.height - height < deployment.policy.confirmations ||
-      (job.status === 'reconciled'
-        ? generation.keyBlock.hash !== job.blockHash
-        : !generation.microBlocks.includes(job.blockHash))
+      (keyBlock
+        ? generation.keyBlock.hash !== blockHash
+        : !generation.microBlocks.includes(blockHash))
     )
       throw new ServiceUnavailableException(
         'Publication confirmation needs reconciliation',

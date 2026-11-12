@@ -266,6 +266,26 @@ export class ShortsPublicationBoundaryService {
       fence: claim.fence,
     });
   }
+  async expire(
+    deployment: PublishingDeployment,
+    claim: SignedPublicationClaim,
+    proof: {
+      blockHash: string;
+      height: number;
+      tipHeight: number;
+      accountNonce: number;
+    },
+  ) {
+    const { hash } = this.saved(deployment, claim);
+    receiptHash(proof.blockHash, 'kh_');
+    await this.call(deployment, 'expire', {
+      ...proof,
+      id: claim.id,
+      transactionHash: hash,
+      token: claim.token,
+      fence: claim.fence,
+    });
+  }
   async settle(
     deployment: PublishingDeployment,
     claim: PublicationClaim,

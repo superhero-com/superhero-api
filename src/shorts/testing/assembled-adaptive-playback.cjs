@@ -201,13 +201,13 @@ exports.assembledAdaptivePlayback = async (t, f) => {
       const metadata = bundle.files.find(item => item.name === url.pathname.split('/').at(-1));
       if (metadata && !url.pathname.endsWith('.m3u8')) assert.equal(createHash('sha256').update(response.bytes).digest('hex'), metadata.sha256);
     }
-    try {
-      const result = await exec('ffprobe', ['-v','error','-headers',`X-Playback-Edge-Key: Bearer ${edgeKey}\r\nX-Playback-Client-IP: 127.0.0.1\r\n`,
-        '-show_streams','-of','json',manifest.href], { timeout: 30000, maxBuffer: 65536 });
-      const streams = JSON.parse(result.stdout).streams;
-      assert.ok(streams.some(stream => stream.width === 1080 && stream.height === 1920 && stream.r_frame_rate === '60/1'));
-      assert.ok(streams.some(stream => stream.codec_type === 'audio'));
-    } catch { assert.fail('Cannot probe the real adaptive HTTP stream'); }
+    const input = ['-v','error','-headers',`X-Playback-Edge-Key: Bearer ${edgeKey}\r\nX-Playback-Client-IP: 127.0.0.1\r\n`];
+    const probe = await exec('ffprobe', [...input, '-show_streams','-of','json',manifest.href], { timeout: 30000, maxBuffer: 65536 });
+    const streams = JSON.parse(probe.stdout).streams;
+    assert.ok(streams.some(stream => stream.width === 1080 && stream.height === 1920 && stream.r_frame_rate === '60/1'));
+    assert.ok(streams.some(stream => stream.codec_type === 'audio'));
+    await exec('ffmpeg', ['-nostdin','-xerror', ...input, '-i',manifest.href,'-map','0:v:0','-map','0:a:0','-t','1','-f','null','-'],
+      { timeout: 30000, maxBuffer: 65536 });
     worker.process.kill('SIGKILL'); await once(worker.process, 'exit'); server.process.kill('SIGKILL'); await once(server.process, 'exit');
     await rm(serverDir, { recursive: true }); await mkdir(serverDir); server = await start('server');
     const restored = await get(file); assert.equal(restored.status, 200); assert.deepEqual(restored.bytes, first.bytes);

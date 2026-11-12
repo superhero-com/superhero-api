@@ -6,6 +6,7 @@ const {
   ShortsMetadata,
   ShortsPublications,
   ShortsPublisherAuthority,
+  ShortsPublicationExpiry,
 } = require('./testing/schema-migrations.cjs');
 const { releaseFixture, digest } = require('./shorts-release.fixture.cjs');
 const { ShortsLifecycleJobsService } = require('./shorts-lifecycle-jobs.service');
@@ -38,7 +39,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
   const schema = `shorts_publisher_authority_${randomUUID().replaceAll('-', '')}`;
   const admin = new DataSource({ type: 'postgres', url: url.href }); await admin.initialize(); await admin.query(`CREATE SCHEMA ${schema}`);
   const options = { type: 'postgres', url: url.href, schema, extra: { options: `-c search_path=${schema}`, max: 2 },
-    migrations: [ShortsMetadata, ShortsUploads, ShortsPublications, ShortsPublisherAuthority, ShortsLifecycle, ShortsPublicationAdmission, ShortsUploadBudget] };
+    migrations: [ShortsMetadata, ShortsUploads, ShortsPublications, ShortsPublisherAuthority, ShortsLifecycle, ShortsPublicationAdmission, ShortsUploadBudget, ShortsPublicationExpiry] };
   const owner = new DataSource(options); await owner.initialize(); await owner.runMigrations({ transaction: 'all' }).catch(error => { const at = Number(error.position || error.driverError?.position); console.error({ position: at, where: error.driverError?.where, context: error.query?.slice(Math.max(0, at - 150), at + 150) }); throw error; });
   const principals = [], meta = new ShortsMetadataService(owner), journal = new ShortsPublicationsService(owner);
   t.after(async () => { for (const p of principals) { await p.db.destroy(); await p.dispose(); } await owner.destroy(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.destroy(); });
@@ -75,7 +76,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
   const get = async id => (await owner.query('SELECT * FROM shorts_publication_jobs WHERE id=$1', [id]))[0];
   const identity = claim => ({ id: claim.id, token: claim.token, fence: claim.fence });
 
-  function runtime(f, overrides = {}) {
+  function runtime(f, overrides = {}, height = 100, accountNonce = 0) {
     let prepares = 0; const sends = [];
     const node = {
       async verify() {}, async existing() {},
@@ -83,7 +84,7 @@ test('isolated publisher runtime preserves transactions and gates publication', 
         prepares++;
         return { rawTransaction: await f.account.signTransaction(buildTx({ tag: Tag.ContractCallTx, callerId: f.account.address,
           contractId: f.deployment.scope.contract, abiVersion: 3, amount: 0, callData: publicationCalldata(intent),
-          nonce: 1, ttl: 110, gasLimit: 100000, gasPrice: 1000000000, fee: '1000000000000000' }), { networkId: 'ae_uat' }), accountNonce: 0, height: 100 };
+          nonce: accountNonce + 1, ttl: height + 10, gasLimit: 100000, gasPrice: 1000000000, fee: '1000000000000000' }), { networkId: 'ae_uat' }), accountNonce, height };
       },
       async observe() { return { state: 'absent' }; }, async canBroadcast() { return true; },
       async broadcast(raw, hash) { sends.push({ raw, hash }); }, ...overrides,
@@ -115,13 +116,62 @@ test('isolated publisher runtime preserves transactions and gates publication', 
     run.node.observe = async claim => ({ state: 'settled', proof: proof(claim) });
     await run.service.tick(); assert.equal((await get(r.id)).status, 'confirmed'); assert.equal(run.prepares, 1);
   });
-  await t.test('replacement process identity resumes the same pending transaction, including expired TTL', async () => {
-    const f = await fixture(), r = await queue(f); const run = runtime(f); await run.service.tick();
-    const first = await get(r.id); f.signer = f.other;
-    const next = runtime(f, { async prepare() { throw new Error('must not sign twice'); }, async canBroadcast() { return false; } });
-    await next.service.tick(); assert.equal((await get(r.id)).raw_tx, first.raw_tx); assert.equal(next.sends.length, 0);
-    assert.equal((await get(r.id)).status, 'signed');
-    const extra = await queue(f); await next.service.tick(); assert.equal((await get(extra.id)).status, 'queued');
+  await t.test('SIGKILL after journaling: proven expiry releases the nonce for the next publication', async () => {
+    const { fork } = require('node:child_process'), { once } = require('node:events'), { join } = require('node:path');
+    const f = await fixture(), r = await queue(f), prepared = await runtime(f, {}, 100, 6).node.prepare(r);
+    const child = fork(join(__dirname, 'testing/publisher-runtime.cjs'), [], {
+      execArgv: ['-r', 'ts-node/register/transpile-only', '-r', 'tsconfig-paths/register'],
+      env: { ...process.env, DOTENV_CONFIG_PATH: '/dev/null', SHORTS_TEST_PG_URL: f.signer.url, SHORTS_TEST_PG_SCHEMA: schema,
+        SHORTS_TEST_PUBLISHER_CONFIG: JSON.stringify(f.deployment), SHORTS_TEST_SIGNED_TRANSACTION: prepared.rawTransaction,
+        SHORTS_TEST_CRASH_BEFORE_SEND: '1', SHORTS_TEST_ACCOUNT_NONCE: '6' }, stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 15000);
+    let stale;
+    try {
+      const message = await Promise.race([once(child, 'message').then(([m]) => m), once(child, 'exit').then(() => { throw new Error('Child exited before journal checkpoint'); })]);
+      assert.equal(message.journaled, true); stale = message.claim;
+    } finally { clearTimeout(timeout); if (child.exitCode === null && child.signalCode === null) { const exit = once(child, 'exit'); child.kill('SIGKILL'); await exit; } }
+    const before = await get(r.id); assert.equal(before.raw_tx, prepared.rawTransaction); assert.equal(before.broadcast_attempts, 0);
+    // A previously signed row survives both upgrade and a clean rollback.
+    await owner.transaction(async manager => {
+      const migration = new ShortsPublicationExpiry();
+      await migration.down(manager.queryRunner); await migration.up(manager.queryRunner);
+    });
+    const extra = await queue(f), first = f.signer; f.signer = f.other;
+    const expiry = { blockHash: encode(randomBytes(32), Encoding.KeyBlockHash), height: 111, tipHeight: 114, accountNonce: 6 };
+    const next = runtime(f, { async canBroadcast() { return false; }, async expiry() { return undefined; } });
+    await owner.query("UPDATE shorts_publication_jobs SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1", [r.id]);
+    await next.service.tick(); assert.equal((await get(r.id)).status, 'signed'); assert.equal((await get(extra.id)).status, 'queued');
+    next.node.expiry = async claim => {
+      assert.equal(claim.transactionHash, before.tx_hash);
+      await assert.rejects(first.repo.expire(f.deployment, stale, expiry), { status: 409 });
+      await assert.rejects(f.signer.repo.expire(f.deployment, claim, { ...expiry, accountNonce: 1 }), { status: 400 });
+      await assert.rejects(f.signer.repo.expire(f.deployment, claim, { ...expiry, tipHeight: 111 }), { status: 409 });
+      return expiry;
+    };
+    await next.service.tick();
+    const after = await get(r.id); assert.equal(after.status, 'cancelled');
+    assert.equal(after.expiry_block_hash, expiry.blockHash); assert.equal(Number(after.expiry_height), expiry.height);
+    for (const field of ['raw_tx','tx_hash','nonce','ttl','reserved_cost','broadcast_attempts']) assert.equal(after[field], before[field]);
+    assert.equal((await f.api.repo.enqueue(f.deployment, r.id, creator)).status, 'cancelled');
+    assert.equal(next.prepares, 0); assert.deepEqual(next.sends, []);
+    const chain = { sdk: { api: {
+      getStatus: async () => ({ networkId: 'ae_uat' }),
+      getCurrentKeyBlock: async () => ({ height: expiry.tipHeight }),
+      getGenerationByHeight: async height => ({ keyBlock: { height, hash: expiry.blockHash }, microBlocks: [] }),
+    } }, readNode: op => op() };
+    const api = new ShortsApiPublicationService(chain, f.api.repo); api.deployment = f.deployment;
+    assert.equal((await api.status(r.id, creator)).status, 'cancelled');
+    chain.sdk.api.getGenerationByHeight = async height => ({ keyBlock: { height, hash: encode(randomBytes(32), Encoding.KeyBlockHash) }, microBlocks: [] });
+    await assert.rejects(api.status(r.id, creator), { status: 503 });
+    const behind = runtime(f, {}, expiry.tipHeight, 5); await behind.service.tick();
+    assert.deepEqual(behind.sends, []); assert.equal((await get(extra.id)).status, 'queued');
+    const later = runtime(f, {}, expiry.tipHeight, expiry.accountNonce); await later.service.tick();
+    const submitted = await get(extra.id); assert.equal(submitted.nonce, before.nonce); assert.notEqual(submitted.tx_hash, before.tx_hash);
+    assert.deepEqual(later.sends, [{ raw: submitted.raw_tx, hash: submitted.tx_hash }]);
+    later.node.observe = async claim => ({ state: 'settled', proof: { ...proof(claim), height: 115, tipHeight: 118 } });
+    await later.service.tick(); assert.equal((await get(extra.id)).status, 'confirmed'); assert.equal(later.prepares, 1);
+    await assert.rejects(owner.transaction(manager => new ShortsPublicationExpiry().down(manager.queryRunner)), /Cannot discard/);
   });
   await t.test('known publication is adopted with no signature and API status carries its confirmation anchor', async () => {
     const f = await fixture(), r = await queue(f), anchor = { blockHash: encode(randomBytes(32), Encoding.KeyBlockHash), height: 100, tipHeight: 103 };
@@ -311,6 +361,25 @@ test('publisher node verifies canonical inclusion, call identity, depth and abse
   changed = true; generationCalls = 0; await assert.rejects(service.observe(claim), /confirmation changed/); changed = false;
   missing = true; assert.equal((await service.observe(claim)).state, 'absent'); responseError = Object.assign(new Error('outage'), { statusCode: 503 }); await assert.rejects(service.observe(claim), /outage/);
   assert.equal(await service.canBroadcast(claim), true); nonce = 1; assert.equal(await service.canBroadcast(claim), false); nonce = 0; tip = 110; assert.equal(await service.canBroadcast(claim), false);
+  responseError = undefined;
+  const accountAt = { id: account.address, kind: 'basic', nonce: 0 };
+  service.node.getAccountByPubkey = async () => ({ ...accountAt, nonce });
+  let anchorHash = keyHash, expectedHeight = 111;
+  service.node.getKeyBlockByHeight = async height => { assert.equal(height, expectedHeight); return { height, hash: anchorHash }; };
+  service.node.getAccountByPubkeyAndHash = async (address, hash) => { assert.equal(address, account.address); assert.equal(hash, keyHash); return accountAt; };
+  for (tip of [110,111,113]) assert.equal(await service.expiry(claim), undefined);
+  tip = 114;
+  assert.deepEqual(await service.expiry(claim), { height: 111, tipHeight: 114, blockHash: keyHash, accountNonce: 0 });
+  tip = 1000; expectedHeight = 997; assert.equal((await service.expiry(claim)).height, 997, 'long downtime uses a recent canonical snapshot');
+  expectedHeight = 111; nonce = 1; assert.ok(await service.expiry(claim), 'consumption after the expiry anchor cannot have been the expired transaction');
+  accountAt.nonce = 1; assert.equal(await service.expiry(claim), undefined); accountAt.nonce = 0;
+  missing = false; assert.equal(await service.expiry(claim), undefined, 'hash now mined');
+  tx.blockHeight = -1; assert.equal(await service.expiry(claim), undefined, 'hash still pending');
+  missing = true;
+  service.node.getAccountByPubkeyAndHash = async () => { anchorHash = encode(randomBytes(32), Encoding.KeyBlockHash); return accountAt; };
+  assert.equal(await service.expiry(claim), undefined, 'canonical expiry anchor changed');
+  service.node.getAccountByPubkeyAndHash = async () => { throw new Error('pruned historical state'); };
+  await assert.rejects(service.expiry(claim), /pruned/);
   service.node.getStatus = async () => ({ networkId: 'ae_mainnet' }); await assert.rejects(service.canBroadcast(claim), /network changed/);
 });
 

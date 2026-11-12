@@ -15,6 +15,7 @@ import {
   publicationGeneration,
   publicationHead,
 } from './shorts-publication-observation';
+import { receiptHash } from './shorts-receipts.service';
 import { currentPublisherAttempt } from './shorts-publisher-attempt';
 import {
   assertActiveShortsContract,
@@ -254,6 +255,51 @@ export class ShortsPublisherNodeService implements OnModuleInit {
       account.nonce === claim.nonce - 1 &&
       head.height < claim.ttl
     );
+  }
+  async expiry(claim: SignedPublicationClaim) {
+    // TTL is inclusive. When the nonce remains unused, a recent finalized
+    // snapshot suffices even if the node has pruned state at TTL + 1. If
+    // another call used the nonce later, inspect the first block after TTL.
+    const tip = await this.head();
+    const matureHeight = tip.height - this.config.policy.confirmations;
+    if (matureHeight <= claim.ttl) return;
+    const current = await this.node.getAccountByPubkey(this.config.operator);
+    if (
+      current.id !== this.config.operator ||
+      current.kind !== 'basic' ||
+      !Number.isSafeInteger(current.nonce) ||
+      current.nonce < claim.nonce - 1
+    )
+      return;
+    const height = current.nonce < claim.nonce ? matureHeight : claim.ttl + 1;
+    const anchor = await this.node.getKeyBlockByHeight(height);
+    if (anchor.height !== height) throw new Error('Invalid expiry anchor');
+    receiptHash(anchor.hash, 'kh_');
+    const account = await this.node.getAccountByPubkeyAndHash(
+      this.config.operator,
+      anchor.hash,
+    );
+    if (
+      account.id !== this.config.operator ||
+      account.kind !== 'basic' ||
+      account.nonce !== claim.nonce - 1
+    )
+      return;
+    if ((await this.observe(claim)).state !== 'absent') return;
+    const after = await this.head();
+    const canonical = await this.node.getKeyBlockByHeight(height);
+    if (
+      after.height - height < this.config.policy.confirmations ||
+      canonical.height !== height ||
+      canonical.hash !== anchor.hash
+    )
+      return;
+    return {
+      blockHash: anchor.hash,
+      height,
+      tipHeight: after.height,
+      accountNonce: account.nonce,
+    };
   }
   async broadcast(rawTransaction: string, transactionHash: string) {
     const result = await this.node.postTransaction({ tx: rawTransaction });

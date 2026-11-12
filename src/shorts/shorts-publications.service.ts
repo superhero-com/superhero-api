@@ -357,8 +357,8 @@ export class ShortsPublicationsService {
         scope.network,
       );
       const [{ nonce, cost }] = await db.query(
-        `SELECT (SELECT nonce FROM shorts_publication_jobs WHERE network=$1 AND operator=$2 AND nonce IS NOT NULL
-          ORDER BY nonce DESC LIMIT 1) AS nonce,
+        `SELECT (SELECT max(nonce - CASE WHEN status='cancelled' THEN 1 ELSE 0 END)
+          FROM shorts_publication_jobs WHERE network=$1 AND operator=$2 AND nonce IS NOT NULL) AS nonce,
         (SELECT coalesce(sum(reserved_cost),0)::text FROM shorts_publication_jobs WHERE network=$1 AND operator=$2
           AND (signed_at>statement_timestamp()-interval '24 hours' OR status='signed')) AS cost`,
         [scope.network, account.operator],

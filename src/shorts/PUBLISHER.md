@@ -102,9 +102,16 @@ publication journal rows or backup generations to relieve pressure automatically
 - Current approval is checked at admission, signature persistence and send
   authorization. Revocation prevents future sends; a transaction already sent
   cannot be recalled. Delivery still checks the current policy independently.
-- Unknown, expired, revoked or conflicting signed outcomes hold the operator queue.
-  Investigate the canonical transaction and account state. **Do not delete journal
-  rows or reset nonce reservations to clear the queue.** Reconcile before resuming.
+- An absent transaction can be cancelled when the publisher verifies an unchanged
+  canonical key block beyond TTL at the configured accounting depth, with the
+  operator nonce still unused at that block. If the nonce has since advanced,
+  it checks historical state at TTL + 1. A fresh hash lookup must still be
+  absent. The journal retains the bytes, hash, cost and expiry anchor, and the next
+  request can use the chain's next nonce. Retrying the cancelled ID returns its
+  terminal status. The API rechecks the expiry anchor before returning that
+  status. A node behind the last proven account nonce cannot advance the journal.
+  Unavailable history, pending hashes and ambiguous consumed
+  nonces keep the job under observation.
 - Publisher replicas provide recovery, not parallel throughput for a shared operator.
   The single unresolved transaction rule serializes publications until confirmation.
   Measure queue age and chain confirmation time before opening admission further;

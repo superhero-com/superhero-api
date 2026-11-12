@@ -30,9 +30,13 @@ async function until(read, timeout = 45000) {
   throw new Error('Fixture condition did not become true');
 }
 
+const missing = ['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API','INGEST_ROOT','STREAMING_REPO']
+  .filter(name => !process.env['SHORTS_TEST_' + name]);
+if (process.env.SHORTS_TEST_REQUIRE_ASSEMBLED === '1' && missing.length)
+  throw new Error('Required assembled Shorts services missing: ' + missing.join(', '));
+
 test('complete hosted module shares upload, media and publication controls across process loss', {
-  skip: !['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].every(name => process.env[`SHORTS_TEST_${name}`]) ||
-    (!process.env.SHORTS_TEST_INGEST_ROOT && 'requires the built ingest worker (SHORTS_TEST_INGEST_ROOT)'),
+  skip: missing.filter(name => name !== 'STREAMING_REPO').join(', ') || false,
   timeout: 600000,
 }, async t => {
   const endpoints = Object.fromEntries(['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API'].map(name => [name, new URL(process.env[`SHORTS_TEST_${name}`])]));
@@ -49,7 +53,7 @@ test('complete hosted module shares upload, media and publication controls acros
     for (const cid of [record.cid, record.derivatives?.cid, record.derivatives?.assetsCid]) if (cid) ownedPins.add(cid);
   };
   const compiled = process.env.SHORTS_TEST_COMPILED === '1';
-  let owner, raw, redis, bucket, scanner, c;
+  let owner, raw, redis, bucket, scanner, c, signerDb;
   t.after(async () => {
     for (const child of children) if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'exit'); }
     for (const socket of sockets) socket.destroy(); if (scanner) await new Promise(resolve => scanner.close(resolve));
@@ -67,6 +71,7 @@ test('complete hosted module shares upload, media and publication controls acros
       if (list.Contents?.length) await raw.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: list.Contents.map(o => ({ Key: o.Key })) } }));
       await raw.send(new DeleteBucketCommand({ Bucket: bucket })); raw.destroy();
     }
+    if (signerDb?.isInitialized) await signerDb.destroy();
     if (owner?.isInitialized) await owner.destroy();
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     for (const role of roles) await role.dispose();
@@ -285,7 +290,11 @@ test('complete hosted module shares upload, media and publication controls acros
     await require('./testing/assembled-real-moderation.cjs').assembledRealModeration(t, { owner, meta, scope, dir, b, c, request, until, pause,
       createWorker: extra => child('media-worker.cjs', { ...workerEnv, ...extra }, false) });
   });
-  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, video, release: deployment.release, rememberMedia,
+  const signer = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'publisher' });
+  roles.push(signer);
+  signerDb = await new DataSource({ type: 'postgres', url: signer.url, extra: { options: `-c search_path=${schema}` } }).initialize();
+  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, video, release: deployment.release, rememberMedia, signerDb,
+    publisherDeployment: { scope, sourceHash, operator: operator.address, policy },
     async startDeliveryOperations(enabled = true) {
       assert.ok(operationsRole);
       const next = child('hosted-runtime.cjs', { SHORTS_TEST_PG_URL: operationsRole.url,

@@ -72,8 +72,10 @@ private key but can be broadcast by anyone who obtains them. Keep journal backup
 restricted and consistent with deployment/content records. Rollback refuses to
 drop an initialized journal. Restoring an old backup alone is unsafe: reconcile
 all possibly broadcast transactions against the chain before resuming signing.
-Unknown, expired or revoked signed transactions intentionally hold the account;
-they need a verified recovery procedure, not a forced row deletion or nonce reset.
+A signed job holds the account until canonical settlement or verified expiry.
+The publisher can cancel an expired call with an absent hash and proof that its
+nonce was unused at a canonical key block after TTL. Cancellation
+retains the signature and rolling cost reservation. Its nonce can be reused.
 
 ## Validation
 

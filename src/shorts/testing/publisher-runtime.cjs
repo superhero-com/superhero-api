@@ -12,8 +12,14 @@ async function main() {
   const config = JSON.parse(process.env.SHORTS_TEST_PUBLISHER_CONFIG);
   const node = {
     async verify() {}, async existing() {},
-    async prepare() { return { rawTransaction: process.env.SHORTS_TEST_SIGNED_TRANSACTION, accountNonce: 0, height: 100 }; },
-    async observe() { return { state: 'absent' }; }, async canBroadcast() { return true; },
+    async prepare() { return { rawTransaction: process.env.SHORTS_TEST_SIGNED_TRANSACTION, accountNonce: Number(process.env.SHORTS_TEST_ACCOUNT_NONCE || 0), height: 100 }; },
+    async observe(claim) {
+      if (process.env.SHORTS_TEST_CRASH_BEFORE_SEND === '1') {
+        process.send({ journaled: true, claim });
+        await new Promise(() => {});
+      }
+      return { state: 'absent' };
+    }, async canBroadcast() { return true; },
     async broadcast(rawTransaction, transactionHash) {
       process.send({ submitted: true, rawTransaction, transactionHash });
       await new Promise(() => {}); // Parent kills this process before a response.

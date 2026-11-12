@@ -132,17 +132,22 @@ export class ShortsPublisherService
         );
       }
       live();
-      // Always observe saved bytes first. A timeout, missing receipt or expired TTL
-      // never authorizes a replacement signature or releases the account nonce.
+      // Reconcile the original hash before any submission or expiry transition.
       const observation = await this.node.observe(claim);
       live();
       if (observation.state === 'settled') {
         await this.boundary.settle(this.config, claim, observation.proof);
         settled = true;
-      } else if (
-        observation.state === 'absent' &&
-        (await this.node.canBroadcast(claim))
-      ) {
+      } else if (observation.state === 'absent') {
+        if (!(await this.node.canBroadcast(claim))) {
+          const expiry = await this.node.expiry(claim);
+          live();
+          if (expiry) {
+            await this.boundary.expire(this.config, claim, expiry);
+            settled = true;
+          }
+          return;
+        }
         live();
         const permitted = await this.boundary.authorizeBroadcast(
           this.config,

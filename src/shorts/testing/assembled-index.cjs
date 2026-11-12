@@ -48,8 +48,7 @@ exports.assembledIndex = async (t, f) => {
     clients.forEach(client => assert.deepEqual(client.frames.at(-1), ['shorts-updated', scope]));
   }
   const record = (await meta.get(scope, id)).record;
-  const state = { height: 100, keyHash: encode(randomBytes(32), Encoding.KeyBlockHash),
-    shorts: { [id]: { creator: creator.address, cid: record.cid, size: record.bytes, likes: 0, withdrawn: false, likers: [] } } };
+  const state = { height: 94, keyHash: encode(randomBytes(32), Encoding.KeyBlockHash), shorts: {} };
   const save = async () => { const file = join(dir, 'chain.json'); await writeFile(file + '.next', JSON.stringify(state), { mode: 0o600 }); await rename(file + '.next', file); };
   await save();
   const contract = { $options: { address: scope.contract },
@@ -91,9 +90,11 @@ exports.assembledIndex = async (t, f) => {
   const published = tx('Published', 95), like = tx('PaidLike', 99);
 
   await t.test('plugin commits refresh both sockets; API catalog and creator totals distinguish pending Likes', async () => {
-    // Seed a reconciled publisher observation only in this disposable owner schema.
-    // The API still verifies the controlled current-chain proof; no signer is run.
-    await owner.query("UPDATE shorts_publication_jobs SET status='reconciled',block_hash=$2,block_height=95 WHERE id=$1", [id, state.keyHash]);
+    await require('./assembled-publication.cjs').publishFixture({ signerDb: f.signerDb, deployment: f.publisherDeployment,
+      operator: f.operator, state, save, published, record });
+    const [job] = await owner.query('SELECT status,tx_hash,broadcast_attempts FROM shorts_publication_jobs WHERE id=$1', [id]);
+    assert.deepEqual(job, { status: 'confirmed', tx_hash: published.hash, broadcast_attempts: 1 });
+    state.height = 100; await save();
     const publication = await request(b, `/${id}/publication`, undefined, creatorToken);
     assert.equal(publication.status, 200, JSON.stringify(publication));
     assert.equal(publication.body.publicationStatus, 'published');
@@ -152,8 +153,8 @@ exports.assembledIndex = async (t, f) => {
           await manager.query('INSERT INTO shorts_content(network,contract,id,creator,created_at,body) VALUES($1,$2,$3,$4,$5,$6)',
             [scope.network, scope.contract, row.id, row.creator, row.createdAt, row]);
           await manager.query(`INSERT INTO shorts_publication_jobs(network,contract,id,operator,creator,intent,status,block_hash,block_height)
-            SELECT network,contract,$4::varchar,operator,creator,intent || jsonb_build_object('id',$4::varchar),'reconciled',block_hash,block_height
-            FROM shorts_publication_jobs WHERE network=$1 AND contract=$2 AND id=$3`, [scope.network, scope.contract, id, row.id]);
+            SELECT network,contract,$4::varchar,operator,creator,intent || jsonb_build_object('id',$4::varchar),'reconciled',$5,block_height
+            FROM shorts_publication_jobs WHERE network=$1 AND contract=$2 AND id=$3`, [scope.network, scope.contract, id, row.id, state.keyHash]);
           state.shorts[row.id] = { ...state.shorts[id], likes: 0, likers: [] };
         }
       });
