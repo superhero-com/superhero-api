@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import BigNumber from 'bignumber.js';
 import { DataSource } from 'typeorm';
 import { createIsolatedDatabase, IsolatedDb } from '@/test/harness/db';
 import { Token, UNRANKED_TOKEN_RANK } from './entities/token.entity';
+import { TokenHolder } from './entities/token-holders.entity';
 import { TokenEligibilityCounts } from './entities/token-eligibility-counts.entity';
 import { TokenPerformance } from './entities/token-performance.entity';
 import { TokenRank } from './entities/token-rank.entity';
@@ -28,6 +30,109 @@ const LISTED: [string, number, number][] = [
   ['ct_d', 3, UNRANKED_TOKEN_RANK],
   ['ct_i', 5, 6],
 ];
+
+d('TokensService.createTokenFromRawTransaction (integration)', () => {
+  let db: IsolatedDb;
+  let ds: DataSource;
+  let service: TokensService;
+
+  const createTx = (callerId = 'ak_creator') => ({
+    hash: 'th_create',
+    micro_time: 1793759698409,
+    tx: {
+      contract_id: FACTORY,
+      caller_id: callerId,
+      function: 'create_community',
+      return_type: 'ok',
+      arguments: [{ value: 'word' }, { value: 'BLA' }],
+      return: { value: [{ value: 'ct_dao' }, { value: 'ct_sale' }] },
+    },
+  });
+  const tokens = () => ds.getRepository(Token);
+  const stored = () => tokens().findOneBy({ sale_address: 'ct_sale' });
+  const rowVersion = async () =>
+    (
+      await ds.query(
+        `SELECT xmin::text AS xmin, ctid::text AS ctid
+         FROM token WHERE sale_address = 'ct_sale'`,
+      )
+    )[0];
+
+  beforeAll(async () => {
+    db = await createIsolatedDatabase({ migrations: [], entities: [Token] });
+    ds = db.dataSource;
+    await ds.synchronize();
+    service = new TokensService(
+      ds.getRepository(Token),
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        getCurrentFactory: async () => ({
+          address: FACTORY,
+          collections: { word: {} },
+        }),
+      } as any,
+      { add: jest.fn() } as any,
+      {} as any,
+    );
+  }, 60_000);
+
+  afterAll(async () => {
+    if (db) await db.drop();
+  }, 60_000);
+
+  beforeEach(async () => {
+    await tokens().clear();
+    await service.createTokenFromRawTransaction(createTx());
+    // What the token info and holder syncs fill in afterwards.
+    await tokens().update('ct_sale', { address: 'ct_aex9', holders_count: 5 });
+  });
+
+  it('leaves a replayed token unwritten when its create data is stored', async () => {
+    const synced = await rowVersion();
+
+    const replayed = await service.createTokenFromRawTransaction(createTx());
+
+    expect(await rowVersion()).toEqual(synced);
+    expect(replayed).toMatchObject({
+      sale_address: 'ct_sale',
+      address: 'ct_aex9',
+      holders_count: 5,
+      creator_address: 'ak_creator',
+      created_at: new Date(1793759698409),
+    });
+  });
+
+  it('rewrites the creator a replayed create tx changes, keeping the synced fields', async () => {
+    await service.createTokenFromRawTransaction(createTx('ak_other'));
+
+    expect(await stored()).toMatchObject({
+      address: 'ct_aex9',
+      holders_count: 5,
+      creator_address: 'ak_other',
+    });
+  });
+
+  it('restores the create name over the one the token info sync stored', async () => {
+    // pull-token-info writes the AEX9 meta info name, which can differ.
+    await tokens().update('ct_sale', { name: 'Bla' });
+
+    await service.createTokenFromRawTransaction(createTx());
+
+    expect(await stored()).toMatchObject({
+      name: 'BLA',
+      symbol: 'BLA',
+      address: 'ct_aex9',
+      holders_count: 5,
+    });
+  });
+});
 
 d('TokensService.queryTokensWithRanks (integration)', () => {
   let db: IsolatedDb;
@@ -377,5 +482,84 @@ d('TokensService.queryTokensWithRanks (integration)', () => {
       totalItems: 10,
       totalPages: 3,
     });
+  });
+});
+
+d('TokensService.loadAndSaveTokenHoldersFromMdw (integration)', () => {
+  let db: IsolatedDb;
+  let ds: DataSource;
+  let service: TokensService;
+
+  const holder = (address: string) => ({
+    id: `${address}_ct_aex9`,
+    aex9_address: 'ct_aex9',
+    address,
+    balance: new BigNumber(1),
+  });
+  const sync = async (addresses: string[]) => {
+    jest.spyOn(service, '_loadHoldersData').mockResolvedValue({
+      holders: addresses.map(holder),
+      truncated: false,
+    });
+    await service.loadAndSaveTokenHoldersFromMdw('ct_sale' as any);
+  };
+  const tokenRow = async () =>
+    (
+      await ds.query(
+        `SELECT holders_count, xmin::text AS xmin, ctid::text AS ctid
+         FROM token WHERE sale_address = 'ct_sale'`,
+      )
+    )[0];
+
+  beforeAll(async () => {
+    db = await createIsolatedDatabase({
+      migrations: [],
+      entities: [Token, TokenHolder],
+    });
+    ds = db.dataSource;
+    await ds.synchronize();
+    await ds.getRepository(Token).insert({
+      sale_address: 'ct_sale',
+      address: 'ct_aex9',
+      name: 'BLA',
+      symbol: 'BLA',
+    });
+    service = new TokensService(
+      ds.getRepository(Token),
+      ds.getRepository(TokenHolder),
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    jest
+      .spyOn(service, 'getToken')
+      .mockImplementation((address) =>
+        ds.getRepository(Token).findOneBy({ sale_address: address }),
+      );
+  }, 60_000);
+
+  afterAll(async () => {
+    if (db) await db.drop();
+  }, 60_000);
+
+  it('rewrites the token row only when the holder count changes', async () => {
+    await sync(['ak_1', 'ak_2']);
+    const written = await tokenRow();
+    expect(written.holders_count).toBe(2);
+
+    await sync(['ak_1', 'ak_2']);
+    expect(await tokenRow()).toEqual(written);
+
+    await sync(['ak_1', 'ak_2', 'ak_3']);
+    const changed = await tokenRow();
+    expect(changed.holders_count).toBe(3);
+    expect(changed.xmin).not.toBe(written.xmin);
   });
 });

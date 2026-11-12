@@ -99,6 +99,8 @@ describe('BlockValidationService', () => {
         400,
         500,
         false,
+        true,
+        false,
       );
       const heights = txRepository.find.mock.calls.map(
         ([options]) => options.where.block_height,
@@ -119,6 +121,8 @@ describe('BlockValidationService', () => {
       expect(blockSyncService.syncBlockRange).toHaveBeenCalledWith(
         1,
         50,
+        false,
+        true,
         false,
       );
     });
@@ -142,7 +146,13 @@ describe('BlockValidationService', () => {
 
     await service.validateAndRefreshBlocks();
 
-    expect(blockSyncService.syncBlockRange).toHaveBeenCalledWith(10, 10, false);
+    expect(blockSyncService.syncBlockRange).toHaveBeenCalledWith(
+      10,
+      10,
+      false,
+      true,
+      false,
+    );
     expect(txRepository.find).toHaveBeenNthCalledWith(1, {
       where: { block_height: 10, hash: Not(In(['th_keep'])) },
       select: ['hash'],
@@ -169,6 +179,29 @@ describe('BlockValidationService', () => {
       pluginBatchProcessor.processBatch.mock.invocationCallOrder[0];
     expect(deletedAt).toBeLessThan(reorgAt);
     expect(reorgAt).toBeLessThan(replayAt);
+  });
+
+  it('replays a block in the chain order of the refetch, not the order rows load in', async () => {
+    const { service, txRepository, pluginBatchProcessor, blockSyncService } =
+      setup();
+    // th_skipped is on chain but no plugin stores it.
+    blockSyncService.syncBlockRange.mockResolvedValue(
+      new Map([[10, ['th_first', 'th_skipped', 'th_second', 'th_third']]]),
+    );
+    txRepository.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { hash: 'th_third', block_height: 10 },
+      { hash: 'th_first', block_height: 10 },
+      { hash: 'th_second', block_height: 10 },
+    ]);
+
+    await service.validateAndRefreshBlocks();
+
+    expect(pluginBatchProcessor.processBatch).toHaveBeenCalledTimes(1);
+    expect(
+      pluginBatchProcessor.processBatch.mock.calls[0][0].map(
+        (tx: { hash: string }) => tx.hash,
+      ),
+    ).toEqual(['th_first', 'th_second', 'th_third']);
   });
 
   it('empties a block the middleware now reports without txs', async () => {
@@ -240,7 +273,13 @@ describe('BlockValidationService', () => {
 
     await service.validateAndRefreshBlocks();
 
-    expect(blockSyncService.syncBlockRange).toHaveBeenCalledWith(9, 10, false);
+    expect(blockSyncService.syncBlockRange).toHaveBeenCalledWith(
+      9,
+      10,
+      false,
+      true,
+      false,
+    );
     expect(pluginBatchProcessor.processBatch).toHaveBeenCalledWith(
       [tx10],
       'backward',

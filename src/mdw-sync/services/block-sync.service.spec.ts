@@ -377,6 +377,65 @@ describe('BlockSyncService', () => {
     expect(result.get(123)).toEqual(['th_test_1']);
   });
 
+  describe('with plugin dispatch off', () => {
+    it('upserts a range and collects its hashes without dispatching', async () => {
+      const { service, txRepository, pluginBatchProcessor } = setup();
+      txRepository.upsert.mockResolvedValue(undefined);
+      (fetchJson as jest.Mock)
+        .mockResolvedValueOnce({ data: [], next: null })
+        .mockResolvedValueOnce({
+          data: [buildMiddlewareTransaction()],
+          next: null,
+        });
+
+      await expect(
+        service.syncBlockRange(123, 123, false, true, false),
+      ).resolves.toEqual(new Map([[123, ['th_test_1']]]));
+
+      expect(txRepository.upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ hash: 'th_test_1' })],
+        expect.objectContaining({ conflictPaths: ['hash'] }),
+      );
+      // No logs/data re-read either: only plugins need it.
+      expect(txRepository.find).not.toHaveBeenCalled();
+      expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the save fallback', true],
+      ['non-bulk mode', false],
+    ])('saves without dispatching in %s', async (_label, useBulkMode) => {
+      const { service, txRepository, pluginBatchProcessor } = setup();
+      jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+      (fetchJson as jest.Mock).mockResolvedValueOnce({
+        data: [buildMiddlewareTransaction()],
+        next: null,
+      });
+      txRepository.upsert.mockRejectedValueOnce(
+        new Error('duplicate key value violates unique constraint'),
+      );
+      txRepository.save.mockResolvedValueOnce({
+        hash: 'th_test_1',
+        block_height: 123,
+      });
+
+      const result = await service.syncTransactions(
+        123,
+        123,
+        useBulkMode,
+        false,
+        true,
+        false,
+      );
+
+      expect(txRepository.save).toHaveBeenCalledTimes(1);
+      expect(pluginBatchProcessor.processBatch).not.toHaveBeenCalled();
+      expect(result.get(123)).toEqual(['th_test_1']);
+    });
+  });
+
   it('does not persist filtered-out transactions but still records them as observed for validation', async () => {
     // When every plugin rejects a transaction, nothing should be written to
     // the DB. However, block validation MUST still see that MDW returned

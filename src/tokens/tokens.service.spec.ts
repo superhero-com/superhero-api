@@ -760,6 +760,16 @@ describe('TokensService', () => {
     expect(manager.query.mock.invocationCallOrder[0]).toBeLessThan(
       upsertRepository.upsert.mock.invocationCallOrder[0],
     );
+    // Guarded, so an unchanged count does not rewrite the token row.
+    const [criteria, values] = tokensRepository.update.mock.calls[0];
+    expect(values).toEqual({ holders_count: 2 });
+    expect(criteria.sale_address).toBe('ct_sale');
+    expect(criteria.holders_count.getSql('holders_count')).toBe(
+      'holders_count IS DISTINCT FROM :holdersCount',
+    );
+    expect(criteria.holders_count.objectLiteralParameters).toEqual({
+      holdersCount: 2,
+    });
   });
 
   it('skips the holder swap entirely when the middleware response was truncated', async () => {
@@ -1053,6 +1063,105 @@ describe('TokensService', () => {
       }),
       { conflictPaths: ['sale_address'] },
     );
+  });
+
+  describe('createTokenFromRawTransaction for a token already stored', () => {
+    const stored = () => ({
+      sale_address: 'ct_sale',
+      name: 'BLA',
+      symbol: 'BLA',
+      address: 'ct_aex9',
+      dao_address: 'ct_dao',
+      factory_address: 'ct_factory',
+      collection: 'word',
+      creator_address: 'ak_creator',
+      create_tx_hash: 'th_hash',
+      created_at: new Date('2026-03-24T11:49:27.106Z'),
+      holders_count: 2,
+    });
+    const replay = (
+      existing: Record<string, unknown>,
+      // Separate reads, as in the service: the snapshot and the current row.
+      nameHit: Record<string, unknown> = { ...existing },
+    ) => {
+      communityFactoryService.getCurrentFactory.mockResolvedValue({
+        address: 'ct_factory',
+        collections: { word: true },
+      });
+      jest
+        .spyOn(service, 'findByNameOrSymbol')
+        .mockResolvedValue(nameHit as any);
+      tokensRepository.findOneBy.mockResolvedValue(existing);
+
+      return service.createTokenFromRawTransaction({
+        hash: 'th_hash',
+        microTime: '2026-03-24T11:49:27.106Z',
+        tx: {
+          function: 'create_community',
+          return_type: 'ok',
+          return: { value: [{ value: 'ct_dao' }, { value: 'ct_sale' }] },
+          arguments: [{ value: 'word' }, { value: 'BLA' }],
+          callerId: 'ak_creator',
+          contractId: 'ct_factory',
+        },
+      });
+    };
+
+    it('leaves a row that already holds the create data unwritten', async () => {
+      const existing = stored();
+
+      await expect(replay(existing)).resolves.toBe(existing);
+
+      expect(tokensRepository.upsert).not.toHaveBeenCalled();
+      expect(tokensRepository.delete).not.toHaveBeenCalled();
+      expect(pullTokenInfoQueue.add).toHaveBeenCalledWith(
+        { saleAddress: 'ct_sale' },
+        expect.objectContaining({ lifo: false }),
+      );
+    });
+
+    it.each([
+      ['dao_address', 'ct_other_dao'],
+      ['factory_address', 'ct_old_factory'],
+      ['collection', null],
+      ['creator_address', 'ak_other'],
+      ['name', 'OLD'],
+      ['symbol', 'OLD'],
+      ['create_tx_hash', null],
+      ['created_at', new Date('2026-03-24T11:49:27.107Z')],
+      ['created_at', null],
+    ])('rewrites the row when %s differs', async (field, value) => {
+      await replay({ ...stored(), [field]: value });
+
+      expect(tokensRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sale_address: 'ct_sale',
+          dao_address: 'ct_dao',
+          factory_address: 'ct_factory',
+          collection: 'word',
+          creator_address: 'ak_creator',
+          name: 'BLA',
+          symbol: 'BLA',
+          create_tx_hash: 'th_hash',
+          created_at: new Date('2026-03-24T11:49:27.106Z'),
+          holders_count: 2,
+        }),
+        { conflictPaths: ['sale_address'] },
+      );
+    });
+
+    it('rewrites a matching row once the name lookup hit a same-name token on another sale', async () => {
+      await replay(stored(), { sale_address: 'ct_twin', name: 'BLA' });
+
+      expect(tokensRepository.delete).toHaveBeenCalledWith('ct_twin');
+      expect(tokensRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sale_address: 'ct_sale',
+          creator_address: 'ak_creator',
+        }),
+        { conflictPaths: ['sale_address'] },
+      );
+    });
   });
 
   describe('createTokenFromRawTransaction for a same-name token', () => {
