@@ -36,6 +36,20 @@ We maintain high test coverage using the following practices:
   - `npm run test:e2e` - end-to-end tests
   - `npm run test:cov` - test coverage
 
+### Dependency Updates
+
+Use `npm ci` to reproduce `package-lock.json`. The overrides in `package.json`
+pin patched transitive dependencies where parent packages still require older
+versions. Keep these overrides until the parent dependency adopts a patched
+version, and verify the resolved tree with `npm ls` before removing them. Do not
+use `npm audit fix --force` to bypass framework compatibility checks.
+
+For dependency changes, run `npm audit --omit=dev`, `npm run build` and the full
+`npm run lint`, plus the affected tests. Proxy changes must preserve client-IP
+trust behavior for HTTP and sockets; template and GraphQL changes must still boot
+and render through their Nest adapters. Rebuild and test the production image
+after changing its lockfile; a host install does not validate Linux native modules.
+
 ### Git Commit Style
 
 We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:

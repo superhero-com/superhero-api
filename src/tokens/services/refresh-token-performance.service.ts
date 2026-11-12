@@ -37,6 +37,10 @@ export class RefreshTokenPerformanceService {
         if (!locked) {
           return null;
         }
+        // This refresh expands many JSON/subquery expressions. LLVM planning
+        // overhead can exhaust a small database's memory; keep the setting
+        // transaction-local so other workloads retain their configured policy.
+        await manager.query('SET LOCAL jit = off');
         const [{ count: removed }] = await manager.query(
           DELETE_STALE_TOKEN_PERFORMANCE_SQL,
         );

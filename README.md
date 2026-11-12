@@ -190,6 +190,10 @@ docker compose up --build
 
 The application will be available at `http://localhost:3000`.
 
+For a Shorts-enabled deployment, build the API from a clean Git checkout and keep
+local upload state and keys outside the build context. Deploy the media services
+from [superhero-shorts](https://github.com/superhero-com/superhero-shorts).
+
 ## 📦 Manual Installation
 
 If you prefer to run the services locally:
@@ -338,11 +342,25 @@ The database automatically syncs schema changes in development (`DB_SYNC=true`).
 For production deployment:
 
 1. Set appropriate environment variables
-2. Apply the required manual SQL migration files
+2. Run `node scripts/migrate-with-lock.js` as a deployment job with migration credentials
 3. Disable `DB_SYNC`
 4. Use proper secrets management
 5. Configure proper network settings
 6. Enable SSL/TLS
+
+Use the same release image for the migration job and API. Wait for the job to
+succeed, then start the API with `node dist/main` and its restricted runtime
+database credentials. The image's default command combines migration and startup;
+override it when the two roles are separate. Do not give the running API schema
+ownership or `CREATE` permissions just to run migrations.
+
+Apply `1791849600000-ProductionRuntimeSchema` before this runtime. It moves the
+legacy token eligibility tables and DEX schema additions into migrations.
+Production startup checks required columns without executing DDL. Existing data
+is preserved, including when reverting the migration. Missing indexes are built
+in the migration transaction; allow for its locks when scheduling an upgrade on
+large tables. Production GraphQL builds its schema in memory, so the application
+filesystem can be read-only.
 
 ## 🤝 Contributing
 

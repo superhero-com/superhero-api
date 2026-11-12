@@ -12,6 +12,7 @@ describe('TransactionProcessorService', () => {
     prepareTransactionData: jest.Mock;
   };
   let persistenceService: {
+    lockTransaction: jest.Mock;
     cleanupOldTransactions: jest.Mock;
     saveTransaction: jest.Mock;
     refreshAccountFromTransactions: jest.Mock;
@@ -43,6 +44,7 @@ describe('TransactionProcessorService', () => {
       prepareTransactionData: jest.fn(),
     };
     persistenceService = {
+      lockTransaction: jest.fn().mockResolvedValue(undefined),
       cleanupOldTransactions: jest.fn().mockResolvedValue([]),
       saveTransaction: jest.fn(),
       refreshAccountFromTransactions: jest.fn(),
@@ -100,6 +102,25 @@ describe('TransactionProcessorService', () => {
 
     expect(result).toBeNull();
     expect(tokenService.getToken).not.toHaveBeenCalled();
+    expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not create the token or save the trade when the transaction lock fails', async () => {
+    validationService.validateTransaction.mockResolvedValue({
+      isValid: true,
+      saleAddress: 'ct_sale',
+    });
+    persistenceService.lockTransaction.mockRejectedValue(
+      new Error('lock failed'),
+    );
+
+    await expect(
+      service.processTransaction(
+        { hash: 'th_locked', function: BCL_FUNCTIONS.create_community } as any,
+        SyncDirectionEnum.Live,
+      ),
+    ).rejects.toThrow('lock failed');
+    expect(tokenService.createTokenFromRawTransaction).not.toHaveBeenCalled();
     expect(persistenceService.saveTransaction).not.toHaveBeenCalled();
   });
 
@@ -221,6 +242,11 @@ describe('TransactionProcessorService', () => {
     );
 
     expect(tokenService.updateTokenTrendingScore).toHaveBeenCalledWith(token);
+    expect(
+      persistenceService.lockTransaction.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      persistenceService.saveTransaction.mock.invocationCallOrder[0],
+    );
   });
 
   it('continues processing when cleanup account refresh fails', async () => {

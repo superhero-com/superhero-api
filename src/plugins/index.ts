@@ -1,4 +1,6 @@
-import { Provider, Type } from '@nestjs/common';
+import 'dotenv/config';
+import { Provider, ModuleMetadata } from '@nestjs/common';
+import type { Plugin } from './plugin.interface';
 import { SocialGraphPluginModule } from './social-graph/social-graph-plugin.module';
 import { SocialGraphPlugin } from './social-graph/social-graph.plugin';
 import { MDW_PLUGIN, POPULAR_RANKING_CONTRIBUTOR } from './plugin.tokens';
@@ -27,7 +29,14 @@ import { CommunityRoomStatePluginModule } from '@/token-gated-rooms/plugins/comm
  * Export all plugin modules
  * Add new plugin modules here when registering a new plugin
  */
-export const PLUGIN_MODULES: Type[] = [
+export const PLUGIN_MODULES: ModuleMetadata['imports'] = [
+  ...(process.env.ENABLE_SHORTS === 'true'
+    ? [
+        import('./shorts/shorts-plugin.module').then((m) => ({
+          module: m.ShortsPluginModule,
+        })),
+      ]
+    : []),
   SocialGraphPluginModule,
   BclPluginModule,
   SocialPluginModule,
@@ -58,6 +67,7 @@ export const getPluginProvider = (): Provider => ({
     aex9TransferPlugin: Aex9TransferPlugin,
     communityRoomStatePlugin: CommunityRoomStatePlugin,
     socialGraphPlugin: SocialGraphPlugin,
+    shortsPlugin?: Plugin,
   ) => {
     return [
       bclPlugin,
@@ -70,6 +80,7 @@ export const getPluginProvider = (): Provider => ({
       aex9TransferPlugin,
       communityRoomStatePlugin,
       socialGraphPlugin,
+      ...(shortsPlugin ? [shortsPlugin] : []),
     ];
   },
   inject: [
@@ -83,6 +94,7 @@ export const getPluginProvider = (): Provider => ({
     Aex9TransferPlugin,
     CommunityRoomStatePlugin,
     SocialGraphPlugin,
+    { token: 'SHORTS_MDW_PLUGIN', optional: true },
   ],
 });
 

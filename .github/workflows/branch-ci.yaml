@@ -1,6 +1,8 @@
 name: Branch CI
 
 on:
+  pull_request:
+    branches: [develop]
   push:
     branches-ignore:
       - main
@@ -37,6 +39,149 @@ jobs:
 
       - name: Run build
         run: npm run build
+
+  shorts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shorts_qa
+          POSTGRES_PASSWORD: local-test-only
+          POSTGRES_DB: shorts_quality
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shorts_qa -d shorts_quality"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SHORTS_TEST_REQUIRE_ASSEMBLED: '1'
+      SHORTS_TEST_COMPILED: '1'
+      SHORTS_TEST_REDIS_URL: redis://127.0.0.1:16379/0
+      SHORTS_TEST_REDIS_DISPOSABLE: '1'
+      SHORTS_TEST_KUBO_API: http://127.0.0.1:15001/api/v0
+      SHORTS_TEST_MULTIPART_S3_ENDPOINT: http://127.0.0.1:19002
+      SHORTS_TEST_EDGE_FIXTURE_IMAGE: postgres:16
+      SHORTS_TEST_PG_URL: postgresql://shorts_qa:local-test-only@127.0.0.1:5432/shorts_quality
+      SHORTS_TEST_S3_ENDPOINT: http://127.0.0.1:19000
+      SHORTS_TEST_S3_ACCESS_KEY: shorts-local-test
+      SHORTS_TEST_S3_SECRET_KEY: shorts-local-test-only-secret
+      SHORTS_TEST_MINIO_STS: '1'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check out pinned media services
+        uses: actions/checkout@v6
+        with:
+          repository: superhero-com/superhero-shorts
+          ref: 1d7c2f41454ff39e004045a103660946d88538e5
+          path: shorts-services
+          ssh-key: ${{ secrets.SHORTS_MEDIA_READ_KEY }}
+          persist-credentials: false
+
+      - name: Build ingest and streaming services
+        run: |
+          mv "$GITHUB_WORKSPACE/shorts-services" "$RUNNER_TEMP/shorts-services"
+          for service in ingest-worker streaming; do
+            cd "$RUNNER_TEMP/shorts-services/$service"
+            npm ci
+            npm run build
+          done
+          echo "SHORTS_TEST_INGEST_ROOT=$RUNNER_TEMP/shorts-services/ingest-worker" >> "$GITHUB_ENV"
+          echo "SHORTS_TEST_STREAMING_REPO=$RUNNER_TEMP/shorts-services/streaming" >> "$GITHUB_ENV"
+
+      - name: Set up storage fixture compiler
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.9'
+          cache: false
+
+      - name: Install media codecs and Redis
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg redis-server
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          CXXFLAGS: -std=gnu++17
+
+      - name: Build pinned local storage fixture
+        env:
+          GOBIN: ${{ runner.temp }}/shorts-tools
+          GOTOOLCHAIN: local
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 768MiB
+          GOFLAGS: -p=2
+          CGO_ENABLED: '0'
+        run: go install github.com/minio/minio@v0.0.0-20251015172955-9e49d5e7a648
+
+      - name: Install offline IPFS and multipart storage fixtures
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 3 -o kubo.tar.gz https://github.com/ipfs/kubo/releases/download/v0.43.1/kubo_v0.43.1_linux-amd64.tar.gz
+          echo '3f2bf974ab2a3ec6d997fac7d8cb46f59983a7cddd0b55ef998e6ce379155fb2  kubo.tar.gz' | sha256sum --check
+          tar -xzf kubo.tar.gz kubo/ipfs
+          curl --fail --location --retry 3 -o versitygw.tar.gz https://github.com/versity/versitygw/releases/download/v1.9.0/versitygw_v1.9.0_Linux_x86_64.tar.gz
+          echo '0c28ccda3452451d7c71a0427f6aa7d0db5cac5e2b98a8e4dd2970967e1aadc1  versitygw.tar.gz' | sha256sum --check
+          tar -xzf versitygw.tar.gz --strip-components=1 versitygw_v1.9.0_Linux_x86_64/versitygw
+
+      - name: Run Shorts tests
+        env:
+          MINIO_ROOT_USER: ${{ env.SHORTS_TEST_S3_ACCESS_KEY }}
+          MINIO_ROOT_PASSWORD: ${{ env.SHORTS_TEST_S3_SECRET_KEY }}
+          IPFS_PATH: ${{ runner.temp }}/shorts-ipfs
+          MINIO_BROWSER: 'off'
+          MINIO_UPDATE: 'off'
+        run: |
+          ipfs="$RUNNER_TEMP/kubo/ipfs"
+          "$ipfs" init --profile=test
+          "$ipfs" config Addresses.API /ip4/127.0.0.1/tcp/15001
+          "$ipfs" daemon --offline > "$RUNNER_TEMP/shorts-ipfs.log" 2>&1 &
+          ipfs_pid=$!
+          mkdir -p "$RUNNER_TEMP/shorts-minio" "$RUNNER_TEMP/shorts-multipart"
+          ROOT_ACCESS_KEY="$MINIO_ROOT_USER" ROOT_SECRET_KEY="$MINIO_ROOT_PASSWORD" \
+            "$RUNNER_TEMP/versitygw" --health /health --port 127.0.0.1:19002 posix "$RUNNER_TEMP/shorts-multipart" \
+            > "$RUNNER_TEMP/shorts-multipart.log" 2>&1 &
+          multipart_pid=$!
+          "$RUNNER_TEMP/shorts-tools/minio" server "$RUNNER_TEMP/shorts-minio" \
+            --address 127.0.0.1:19000 --console-address 127.0.0.1:19001 --quiet \
+            > "$RUNNER_TEMP/shorts-minio.log" 2>&1 &
+          minio_pid=$!
+          trap 'kill "$minio_pid" "$ipfs_pid" "$multipart_pid" 2>/dev/null || true; wait || true' EXIT
+          ready=false
+          for _ in $(seq 1 60); do
+            kill -0 "$minio_pid" "$ipfs_pid" "$multipart_pid" || exit 1
+            if curl -fsS "$SHORTS_TEST_S3_ENDPOINT/minio/health/ready" >/dev/null &&
+               curl -fsS -X POST "$SHORTS_TEST_KUBO_API/id" >/dev/null &&
+               curl -fsS "$SHORTS_TEST_MULTIPART_S3_ENDPOINT/health" >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          NODE_OPTIONS="--test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=$RUNNER_TEMP/shorts.xml" npm run test:shorts
+          python3 .github/check-shorts-journey.py "$RUNNER_TEMP/shorts.xml"
 
   # The DB_HOST-gated integration specs skip in the job above.
   db-integration:
@@ -84,3 +229,22 @@ jobs:
       # starts its own server and already runs above.
       - name: Run database integration specs
         run: npx jest --runInBand --testPathPatterns 'integration\.spec\.ts$' --testPathIgnorePatterns social-graph
+
+      - name: Run profile and post image integration suites
+        env:
+          PROFILE_MEDIA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/profile_media_test
+        run: |
+          PGPASSWORD="$DB_PASSWORD" createdb -h 127.0.0.1 -U "$DB_USER" profile_media_test
+          node -r ts-node/register/transpile-only -r tsconfig-paths/register --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout \
+            --test-reporter-destination="$RUNNER_TEMP/profile-media.xml" "src/profile-media/*.test.cjs"
+          python3 - "$RUNNER_TEMP/profile-media.xml" <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall(".//testcase")
+          files = {Path(c.get("file", "")).name for c in cases}
+          expected = {p.name for p in Path("src/profile-media").glob("*.test.cjs")}
+          if not cases or files != expected or any(c.find("skipped") is not None for c in cases):
+              sys.exit("Profile media suites must all execute without skips")
+          PY
