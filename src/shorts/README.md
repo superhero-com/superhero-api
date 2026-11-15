@@ -605,7 +605,7 @@ The upload flow is Video → Details → Review → Publish. `POST /api/shorts/:
 
 IPFS write refusals with HTTP 429 or 503 leave lifecycle work in `capacity_wait`. The saved publication intent is retried after capacity becomes available without consuming failure attempts or marking the package pinned. Credential failures and integrity mismatches remain failures. Check storage admission separately from liveness: an IPFS node can serve existing videos while refusing new writes.
 
-Each Like is a wallet-signed, nonpayable `like(id, expected_config_version)` call with zero amount. Superhero initially sponsors its network fee through a dedicated fee-payer process. Sponsored Likes use the verified signed Like as action-specific authorization and require a wallet supporting inner-transaction signing; unavailable sponsorship does not silently charge the viewer. Likes create no creator or treasury reward. Claims only transfer previously accrued rewards. A withdrawal requires explicit confirmation, stops official playback permanently and cannot erase third-party copies. See [Like sponsorship](LIKE-SPONSORSHIP.md) for setup and recovery.
+Each Like is a wallet-signed, nonpayable `like(id, expected_config_version)` call with zero amount. Superhero initially sponsors its network fee through a dedicated fee-payer process. Sponsored Likes use the verified signed Like as action-specific authorization and require a wallet supporting inner-transaction signing; unavailable sponsorship does not silently charge the viewer. Likes create no creator or treasury reward. New Shorts have no on-chain withdrawal or reward claim. A moderator can restrict official playback. See [Like sponsorship](LIKE-SPONSORSHIP.md) for setup and recovery.
 
 The read-only [wallet transaction endpoint](WALLET-TRANSACTIONS.md) distinguishes
 mempool, mined, confirmed, failed, unknown and reorged observations for a saved
@@ -613,7 +613,7 @@ transaction hash. It requires no extra signing challenge and cannot submit a pay
 
 ## Trust and persistence
 
-- API signing authority is restricted to publishing verified storage packages. User payments, reward claims and withdrawals require the user's wallet.
+- API signing authority is restricted to publishing verified storage packages. Viewers sign their own Likes and comments.
 - Startup verifies `ae_uat`, the configured operator, contract address and bytecode fingerprint.
 - Wallet sessions use random, single-use five-minute signature challenges and 30-minute bearer tokens. Only token hashes are stored. Hosted sessions and content survive restart in PostgreSQL; the standalone loopback demo uses SQLite WAL.
 - The worker retries pending publications every minute and at startup. Only an explicit publish request or a previously registered video creates that intent; private drafts never publish automatically.
@@ -837,11 +837,20 @@ Anonymous reports use bounded reason/detail fields and idempotency IDs. Creator-
 
 Leave `SHORTS_JEV_ENABLED=0` until configured. Enable only with a server-side `TYPESAFE_API_KEY` and a pinned `SHORTS_JEV_MODEL=jev-x.y.z`. The adapter sends title, declared topic, description and optional creator captions to `https://api.typesafe.ai/v1/systemone`. It checks the returned version, taxonomy, confidence and output shape; uncertain or failed results fall back to manual review. Evidence hashes, taxonomy and rubric versions are retained. No viewing history or wallet data is sent. There is no raw video/audio analysis, ASR/OCR pipeline or automatic safety approval. Operators choose the final discovery topic; client matching uses that topic and local preferences.
 
-Run `npm run test:shorts` for offline analytics, privacy, JEV fallback, ownership, appeals, indexer and resumable-upload tests. The historical paid-Like testnet suite does not qualify the zero-payment contract. The offline sponsorship checks validate signed envelopes, fee caps, canonical observation and recovery without sending transactions. Live integration of the new contract and fee-payer process is a separate release check.
+Run `npm run test:shorts` for offline and disposable integration tests. For live release acceptance, publish a new QA Short through Studio and Like it from a second wallet using sponsorship. Save the publication transaction hash and the sponsor’s outer `PayingForTx` hash. The following read-only check verifies successful canonical receipts for both calls on the same deployed contract, the original CID and size, the zero-value Like, the recorded voter, and signed HLS playback.
+
+```sh
+SHORTS_TESTNET_E2E=1 SHORTS_TESTNET_WRITE_RECEIPTS=1 \
+SHORTS_TEST_API_URL=https://superhero.stream/api/shorts SHORTS_STREAM_URL=https://superhero.stream \
+SHORTS_TEST_VIDEO_ID="$VIDEO_ID" SHORTS_TEST_PUBLICATION_TX="$PUBLICATION_HASH" \
+SHORTS_TEST_SPONSORED_LIKE_TX="$SPONSORED_OUTER_HASH" node --test src/shorts/shorts.testnet.test.cjs
+```
+
+Record the deployed contract and API revision, the frontend revision and its browser/wallet test results with the receipts. Schema 2 exposes no withdrawal entrypoint. Moderation can restrict official playback, and previously imported withdrawal tombstones remain effective.
 
 ## Local Studio connection without an extra signature
 
-Set `SHORTS_DEMO_CONNECTED_WALLET=1` in the ignored local environment and restart the API to use the main app's connected address throughout Studio. The config endpoint reports `creatorAccess: "connected-wallet"`; the web client opens and renews its Studio session automatically through `POST /api/shorts/auth/connect`. Switching or disconnecting the main wallet clears the previous account's creator data. Claims and withdrawals still require wallet-signed contract calls. Sponsored Likes require cryptographic authentication and are unavailable with this connection-only demo shortcut.
+Set `SHORTS_DEMO_CONNECTED_WALLET=1` in the ignored local environment and restart the API to use the main app's connected address throughout Studio. The config endpoint reports `creatorAccess: "connected-wallet"`; the web client opens and renews its Studio session automatically through `POST /api/shorts/auth/connect`. Switching or disconnecting the main wallet clears the previous account's creator data. Sponsored Likes require cryptographic authentication and are unavailable with this connection-only demo shortcut.
 
 This is a local demo identity shortcut, not cryptographic proof of address ownership. A local caller can request a creator session for any valid address, including access to that address's drafts and analytics. It is disabled by default, requires local testnet mode and is unavailable in production. Hosted startup rejects this shortcut. Connection-only sessions expire after 30 minutes, are stored separately, cannot access operator review routes and stop working when the flag is disabled. Outside this mode, private creator access still uses signed sessions.
 

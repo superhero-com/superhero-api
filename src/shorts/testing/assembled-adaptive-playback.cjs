@@ -176,7 +176,7 @@ exports.assembledAdaptivePlayback = async (t, f) => {
   let bundle;
   await t.test('original-derived HLS survives a killed streaming worker and gets acknowledged by the API outbox', async () => {
     assert.equal((await get(server.base + `/videos/${id}/playback`, { method: 'POST', headers: { 'X-Playback-Edge-Key': '' } })).status, 403);
-    await dispatch(); assert.equal(await redis.exists(`${namespace}:prepare:${key}`), 1);
+    await until(async () => { await dispatch(); return redis.exists(`${namespace}:prepare:${key}`); }, 20000);
     assert.equal((await get(server.base + `/videos/${id}/playback`, { method: 'POST' })).status, 202);
     worker = await start('worker'); await until(() => sourceHeld, 20000);
     worker.process.kill('SIGKILL'); await once(worker.process, 'exit'); assert.equal(await redis.get(packageKey), null);
@@ -218,16 +218,25 @@ exports.assembledAdaptivePlayback = async (t, f) => {
     const name = ownedEdgeName(`sh-shorts-edge-${randomUUID()}`);
     const template = await readFile(join(repo, 'edge/nginx.conf.template'), 'utf8');
     assert.match(template, /server streaming:3335(?: resolve)?;/);
-    const config = template.replaceAll('${EDGE_KEY}', edgeKey).replace(/server streaming:3335(?: resolve)?;/, `server host.docker.internal:${streamPort};`)
+    const hostNetwork = process.platform === 'linux';
+    let listen = '8080';
+    if (hostNetwork) {
+      const reservation = http.createServer();
+      reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
+      listen = '127.0.0.1:' + reservation.address().port;
+      await new Promise(resolve => reservation.close(resolve));
+    }
+    assert.ok(template.includes('listen 8080;'));
+    const config = template.replace('listen 8080;', 'listen ' + listen + ';').replaceAll('${EDGE_KEY}', edgeKey).replace(/server streaming:3335(?: resolve)?;/, `server ${hostNetwork ? '127.0.0.1' : 'host.docker.internal'}:${streamPort};`)
       .replace('worker_processes auto;', 'worker_processes 1;').replace('max_size=5g min_free=1g', 'max_size=64m min_free=1m');
     // The parent fixture directory is private; only these files are mounted
     // read-only for the container's unprivileged nginx user.
     await writeFile(join(dir, 'nginx.conf'), config, { mode: 0o644 }); await writeFile(join(dir, 'trusted-proxies.conf'), '# Owned direct-client fixture.\n');
     removeEdge = await startOwnedEdge(exec, name, ['--user','nginx','--memory','128m','--tmpfs','/tmp:rw,size=16m,mode=1777',
-      '--tmpfs','/var/cache/nginx:rw,size=128m,mode=1777','-p','127.0.0.1::8080',
+      '--tmpfs','/var/cache/nginx:rw,size=128m,mode=1777',...(hostNetwork ? ['--network','host'] : ['-p','127.0.0.1::8080']),
       '-v',`${join(dir,'nginx.conf')}:/etc/nginx/nginx.conf:ro`,'-v',`${join(dir,'trusted-proxies.conf')}:/etc/nginx/trusted-proxies.conf:ro`,
       '--entrypoint','nginx',process.env.SHORTS_TEST_EDGE_IMAGE,'-g','daemon off;']);
-    edgeBase = 'http://' + (await exec('docker',['port',name,'8080/tcp'],{ timeout:5000 })).stdout.trim();
+    edgeBase = 'http://' + (hostNetwork ? listen : (await exec('docker',['port',name,'8080/tcp'],{ timeout:5000 })).stdout.trim());
     await until(async () => { try { return (await get(edgeBase + '/healthz')).status === 200; } catch { return false; } }, 10000);
     const manifest = await session(edgeBase), { lists, assets } = await graph(manifest);
     for (const url of [manifest, ...lists, ...assets]) {
@@ -244,7 +253,7 @@ exports.assembledAdaptivePlayback = async (t, f) => {
     // Use real expiry; expiry is not weakened or forged in the fixture.
     await pause(31000);
     assert.equal((await get(manifest)).status, 401); assert.equal((await get(edgeSegment)).status, 401);
-    // Subsequent withdrawal checks need a still-valid token, independently of
+    // Subsequent moderation checks need a still-valid token, independently of
     // the expiry case. Restart with the normal five-minute session lifetime.
     server.process.kill('SIGTERM'); await once(server.process, 'exit');
     env.STREAM_PLAYBACK_TTL_SECONDS = '300'; server = await start('server');

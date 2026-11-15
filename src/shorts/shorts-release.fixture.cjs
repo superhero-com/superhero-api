@@ -23,4 +23,13 @@ function releaseFixture(overrides = {}, artifactOverrides = {}) {
     aciHash: digest(JSON.stringify(artifact.aci)), likeFeeAetto: '100000000000000000', treasuryBps: 2000, ...overrides };
   return { artifact, release };
 }
-module.exports = { releaseFixture, digest };
+function freeReleaseFixture(overrides, artifactOverrides) {
+  const { release, artifact } = releaseFixture({ ...overrides, likeFeeAetto: '0', treasuryBps: 0 }, artifactOverrides);
+  const contract = artifact.aci[0].contract;
+  contract.functions.push({ name: 'like', arguments: [{ name: 'id', type: 'string' }, { name: 'expected_config_version', type: 'int' }],
+    returns: { tuple: [] }, payable: false, stateful: true });
+  contract.event = { variant: [{ Published: ['address', 'int', 'string'] }, { Liked: ['address', 'int', 'string'] }] };
+  release.aciHash = digest(JSON.stringify(artifact.aci));
+  return { release, artifact };
+}
+module.exports = { releaseFixture, freeReleaseFixture, digest };

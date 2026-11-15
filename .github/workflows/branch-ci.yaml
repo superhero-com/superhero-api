@@ -111,6 +111,11 @@ jobs:
           echo "SHORTS_TEST_INGEST_ROOT=$RUNNER_TEMP/shorts-services/ingest-worker" >> "$GITHUB_ENV"
           echo "SHORTS_TEST_STREAMING_REPO=$RUNNER_TEMP/shorts-services/streaming" >> "$GITHUB_ENV"
 
+      - name: Build pinned playback edge
+        run: |
+          docker build --iidfile "$RUNNER_TEMP/edge-image" "$RUNNER_TEMP/shorts-services/streaming/edge"
+          echo "SHORTS_TEST_EDGE_IMAGE=$(cat "$RUNNER_TEMP/edge-image")" >> "$GITHUB_ENV"
+
       - name: Set up storage fixture compiler
         uses: actions/setup-go@v5
         with:

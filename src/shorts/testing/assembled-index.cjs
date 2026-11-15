@@ -14,13 +14,11 @@ const { ShortsPlugin } = require('../../plugins/shorts/shorts.plugin');
 const { assembledAdaptivePlayback } = require('./assembled-adaptive-playback.cjs');
 const { ShortsBackfillService } = require('../../plugins/shorts/shorts-backfill.service');
 
-const codec = new AciContractCallEncoder([{ contract: { name: 'Shorts', kind: 'contract_main', typedefs: [], functions: [],
-  event: { variant: [{ Published: ['address', 'string'] }, { PaidLike: ['address', 'int', 'string'] },
-    { Claimed: ['address', 'int'] }, { Withdrawn: ['string'] }] } } }]);
 const integer = bytes => BigInt('0x' + Buffer.from(bytes).toString('hex')).toString();
 
 exports.assembledIndex = async (t, f) => {
   const { owner, admin, meta, scope, id, dir, creator, creatorToken, operatorToken, b, c, request, until, pause } = f;
+  const codec = new AciContractCallEncoder(f.artifact.aci);
   const sockets = [];
   t.after(() => sockets.forEach(socket => socket.terminate()));
   async function connect(api) {
@@ -53,9 +51,9 @@ exports.assembledIndex = async (t, f) => {
   await save();
   const contract = { $options: { address: scope.contract },
     $decodeEvents: logs => logs.map(log => { const [name, args] = Object.entries(codec.decodeEvent('Shorts', log.data, log.topics))[0]; return { name, args }; }),
-    $call: async (name, args) => { assert.equal(name, 'get_short'); return { decodedResult: state.shorts[args[0]] }; },
+    $call: async (name, args) => { assert.equal(name, 'get_video'); return { decodedResult: state.shorts[args[0]] }; },
   };
-  const chain = { contract, release: { network: scope.network, contract: scope.contract, schemaVersion: 1 }, state: { contract: scope.contract } };
+  const chain = { contract, release: f.release, state: { contract: scope.contract } };
   const index = new ShortsIndexService(owner, chain, await require('./index-network.cjs').indexNetworkFixture(owner, chain));
   // This journey controls chain inputs; live endpoint proof is a separate HTTP suite.
   const network = { verify: async () => {}, bindings: () => ({ middleware: f.mdwUrl }),
@@ -68,15 +66,15 @@ exports.assembledIndex = async (t, f) => {
   t.after(() => plugin.onModuleDestroy());
   await owner.query("INSERT INTO sync_state VALUES('global',100,now())");
   await owner.query('INSERT INTO shorts_index_backfill(contract,version,complete,covered_height) VALUES($1,$2,true,99)', [scope.contract, SHORTS_INDEX_VERSION]);
-  function tx(name, height, shortId = id, account = creator.address) {
-    const topics = [integer(hash(name))];
-    if (name !== 'Withdrawn') topics.push(integer(decode(account)));
-    if (name === 'PaidLike') topics.push('80000000000000000');
+  function log(name, account, value, shortId) {
+    return { address: scope.contract, data: encode(Buffer.from(shortId), Encoding.ContractBytearray),
+      topics: [integer(hash(name)), integer(decode(account)), String(value)] };
+  }
+  function publication(height, shortId = id, account = creator.address) {
     return { hash: encode(randomBytes(32), Encoding.TxHash), block_hash: encode(randomBytes(32), Encoding.MicroBlockHash),
       block_height: height, micro_index: '0', micro_time: String(Date.now()), signatures: [], type: 'ContractCallTx',
-      contract_id: scope.contract, caller_id: account,
-      function: { Published: 'publish', PaidLike: 'paid_like', Withdrawn: 'withdraw' }[name],
-      raw: { returnType: 'ok', log: [{ address: scope.contract, data: encode(Buffer.from(shortId), Encoding.ContractBytearray), topics }] },
+      contract_id: scope.contract, caller_id: f.operator.address, function: 'publish',
+      raw: { returnType: 'ok', log: [log('Published', account, 1, shortId)] },
       data: { other_plugin: { untouched: true } } };
   }
   async function ingest(row, direction = 'live') {
@@ -87,9 +85,10 @@ exports.assembledIndex = async (t, f) => {
     const response = await request(api, '/performance?days=7', undefined, creatorToken);
     assert.equal(response.status, 200, JSON.stringify(response)); return response.body.finance;
   }
-  const published = tx('Published', 95), like = tx('PaidLike', 99);
+  const published = publication(95);
+  let like;
 
-  await t.test('plugin commits refresh both sockets; API catalog and creator totals distinguish pending Likes', async () => {
+  await t.test('wallet-signed free Like refreshes both sockets, viewer membership and public counts with zero creator rewards', async () => {
     await require('./assembled-publication.cjs').publishFixture({ signerDb: f.signerDb, deployment: f.publisherDeployment,
       operator: f.operator, state, save, published, record });
     const [job] = await owner.query('SELECT status,tx_hash,broadcast_attempts FROM shorts_publication_jobs WHERE id=$1', [id]);
@@ -99,31 +98,40 @@ exports.assembledIndex = async (t, f) => {
     assert.equal(publication.status, 200, JSON.stringify(publication));
     assert.equal(publication.body.publicationStatus, 'published');
     await notified(() => ingest(published));
-    state.shorts[id].likes = 1; state.shorts[id].likers = [creator.address]; await save();
-    await notified(() => ingest(like));
-    const report = await finance(); assert.equal(report.earned, '0'); assert.equal(report.pending, 1); assert.equal(report.stale, false);
-    const feed = await request(c, '/feed?address=' + creator.address);
-    assert.equal(feed.status, 200); assert.equal(feed.body.items.length, 1);
-    assert.equal(feed.body.items[0].likes, 1); assert.equal(feed.body.items[0].liked, true);
+    like = await require('./assembled-like.cjs').submitFreeLike(f, state, save, codec, log);
+    await notified(() => ingest(like.row));
+    const [event] = await owner.query('SELECT actor,beneficiary,amount,short_id FROM shorts_chain_events WHERE tx_hash=$1 AND action=$2', [like.row.hash, 'Liked']);
+    assert.deepEqual(event, { actor: like.viewer.address, beneficiary: creator.address, amount: '0', short_id: id });
+    const report = await finance(); assert.equal(report.earned, '0'); assert.equal(report.paidLikes, 0); assert.equal(report.stale, false);
+    for (const actor of [like.viewer.address, creator.address, f.sponsor.policyFile.payer, '']) {
+      const feed = await request(c, '/feed?address=' + actor);
+      assert.equal(feed.status, 200); assert.equal(feed.body.items.length, 1);
+      assert.equal(feed.body.items[0].likes, 1); assert.equal(feed.body.items[0].liked, actor === like.viewer.address);
+    }
     const stats = await request(b, `/${id}/stats`);
     assert.equal(stats.status, 200);
     assert.deepEqual(stats.body, { likes: '1', comments: '0', commentVersion: '0' });
     const playback = await request(b, `/playback/${id}`); assert.equal(playback.status, 200); assert.equal(playback.body.cid, record.cid);
-    assert.equal((await owner.getRepository(Tx).findOneBy({ hash: like.hash })).data.other_plugin.untouched, true);
+    assert.equal((await owner.getRepository(Tx).findOneBy({ hash: like.row.hash })).data.other_plugin.untouched, true);
   });
 
-  await t.test('backfill tip invalidation advances confirmations; replay and canonical rollback do not duplicate revenue', async () => {
-    state.height = 102; await save();
-    await owner.query("UPDATE sync_state SET tip_height=102,updated_at=now() WHERE id='global'");
-    await notified(() => plugin.catchUpToHeight(102));
-    let report = await finance(c); assert.equal(report.earned, '0.08'); assert.equal(report.paidLikes, 1); assert.equal(report.pending, 0); assert.equal(report.stale, false);
+  await t.test('sponsored Like retries and canonical replay count once and reorg removes the indexed event', async () => {
+    state.height = 103; await save();
+    await owner.query("UPDATE sync_state SET tip_height=103,updated_at=now() WHERE id='global'");
+    await notified(() => plugin.catchUpToHeight(103));
+    await like.settle();
+    let report = await finance(c); assert.equal(report.earned, '0'); assert.equal(report.paidLikes, 0); assert.equal(report.pending, 0); assert.equal(report.stale, false);
     // Actual plugin version sweep and raw ABI decoder re-project this tx once.
-    await owner.query("UPDATE txs SET data=data - 'shorts' WHERE hash=$1", [like.hash]);
+    await owner.query("UPDATE txs SET data=data - 'shorts' WHERE hash=$1", [like.row.hash]);
     await notified(() => plugin.updateTransactions());
-    assert.equal((await finance()).paidLikes, 1);
-    await owner.getRepository(Tx).delete({ hash: like.hash });
+    assert.equal((await finance()).paidLikes, 0);
+    const events = () => owner.query('SELECT tx_hash FROM shorts_chain_events WHERE action=$1 AND contract=$2', ['Liked', scope.contract]);
+    assert.deepEqual(await events(), [{ tx_hash: like.row.hash }]);
+    await owner.getRepository(Tx).delete({ hash: like.row.hash });
+    delete state.transaction; delete state.callInfo; delete state.microBlocks[like.row.block_height];
     state.shorts[id].likes = 0; state.shorts[id].likers = []; await save();
-    await notified(() => plugin.onReorg([like.hash]));
+    await notified(() => plugin.onReorg([like.row.hash]));
+    assert.deepEqual(await events(), []);
     report = await finance(); assert.equal(report.earned, '0'); assert.equal(report.paidLikes, 0);
     assert.equal((await request(c, '/feed/state', { ids: [id] })).body.items[0].likes, 0);
   });
@@ -138,6 +146,7 @@ exports.assembledIndex = async (t, f) => {
     assert.equal((await finance(c)).paidLikes, 0);
   });
 
+  let catalogPage;
   async function withCatalog(check) {
     // Separate catalog identities share the approved original and its immutable assets.
     const rows = Array.from({ length: 24 }, (_, i) => {
@@ -159,7 +168,17 @@ exports.assembledIndex = async (t, f) => {
         }
       });
       await save();
-      await check([id, ...ids]);
+      const expected = [id, ...ids], items = [], cursors = new Set();
+      let next;
+      do {
+        const page = await request(b, '/feed' + (next ? '?cursor=' + encodeURIComponent(next) : ''));
+        assert.equal(page.status, 200);
+        items.push(...page.body.items.map(item => item.id));
+        next = page.body.next;
+        if (next) { assert.equal(cursors.has(next), false); cursors.add(next); }
+      } while (next);
+      catalogPage = { items, expected, pages: cursors.size + 1 };
+      await check?.(expected);
     } finally {
       await owner.query("UPDATE shorts_content SET body=body || '{\"moderation\":\"pending\"}'::jsonb WHERE network=$1 AND contract=$2 AND id=ANY($3::text[])", [scope.network, scope.contract, ids]);
       for (const shortId of ids) delete state.shorts[shortId];
@@ -176,32 +195,9 @@ exports.assembledIndex = async (t, f) => {
       state.shorts[shortId] = { creator: short.creator, cid: short.cid, size: short.bytes, likes: 0, withdrawn: false, likers: [] };
       await save();
       await owner.query("UPDATE shorts_publication_jobs SET status='reconciled',block_hash=$2,block_height=95 WHERE id=$1", [shortId, state.keyHash]);
-      await ingest(tx('Published', 95, shortId, short.creator));
-    },
-    async withdrawUpload(shortId) {
-      state.shorts[shortId].withdrawn = true; await save();
-      await ingest(tx('Withdrawn', 99, shortId, state.shorts[shortId].creator));
+      await ingest(publication(95, shortId, short.creator));
     },
   }) : undefined;
-
-  await t.test('chain withdrawal removes the feed candidate and rejects official playback on both APIs', async () => {
-    // Reuse the right client because left was deliberately disconnected above.
-    state.shorts[id].withdrawn = true; await save();
-    const withdrawn = tx('Withdrawn', 99);
-    await notified(() => ingest(withdrawn), [right]);
-    for (const api of [b, c]) {
-      assert.equal((await request(api, `/playback/${id}`)).status, 404);
-      assert.deepEqual((await request(api, '/feed/state', { ids: [id] })).body.items, []);
-      const studio = await request(api, '/studio/content', undefined, creatorToken);
-      assert.equal(studio.status, 200); assert.equal(studio.body.counts.withdrawn, 1);
-    }
-    await playback?.denied('withdrawal');
-    await owner.getRepository(Tx).delete({ hash: withdrawn.hash });
-    state.shorts[id].withdrawn = false; await save();
-    await notified(() => plugin.onReorg([withdrawn.hash]), [right]);
-    assert.equal((await request(b, `/playback/${id}`)).status, 200);
-    await playback?.restored();
-  });
 
   await t.test('committed content restrictions invalidate live clients; rolled-back metadata stays invisible', async () => {
     // Prove transaction-bound delivery, not an application callback before commit.
@@ -220,6 +216,18 @@ exports.assembledIndex = async (t, f) => {
     assert.equal((await request(c, `/playback/${id}`)).status, 404);
     assert.deepEqual((await request(c, '/feed/state', { ids: [id] })).body.items, []);
     await playback?.denied('restriction');
+    await notified(async () => {
+      const approved = await request(b, `/review/${id}`, { approved: true }, operatorToken);
+      assert.equal(approved.status, 201, JSON.stringify(approved));
+    }, [right]);
+    assert.equal((await request(c, `/playback/${id}`)).status, 200);
+    await playback?.restored();
+  });
+  await t.test('catalog pagination returns each published identity exactly once', async () => {
+    // Browser paging, when enabled, visits the same published catalog.
+    if (!catalogPage) await withCatalog();
+    assert.ok(catalogPage.pages > 1);
+    assert.deepEqual(catalogPage.items, catalogPage.expected);
   });
   await playback?.close();
 };

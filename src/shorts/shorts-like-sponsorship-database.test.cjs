@@ -3,8 +3,6 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
-const { fork } = require('node:child_process');
-const { join } = require('node:path');
 const { DataSource } = require('typeorm');
 const { AccountMemory, buildTx, buildTxHash, encode, Encoding, Tag, unpackTx } = require('@aeternity/aepp-sdk');
 const { AciContractCallEncoder } = require('@aeternity/aepp-calldata');
@@ -385,29 +383,7 @@ test('Like sponsorship PostgreSQL authority, concurrency and durable recovery', 
   });
 
   await t.test('killed signer processes recover the same durable intent across claim, reserve, sign, persist and broadcast', async t => {
-    const run = (input, kill = false) => new Promise((resolve, reject) => {
-      const child = fork(join(__dirname, 'shorts-like-sponsor-process.fixture.cjs'), [], {
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-        env: { ...process.env, SHORTS_TEST_PG_URL: '', DOTENV_CONFIG_PATH: '/dev/null' },
-      });
-      // Capture only protocol metadata. SDK diagnostics can contain signed bytes.
-      child.stdout.resume(); child.stderr.resume();
-      let result;
-      const timeout = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Child fixture deadline')); }, 20000);
-      child.on('error', error => { clearTimeout(timeout); reject(error); });
-      child.on('message', message => {
-        if (message.type === 'error') return;
-        result = message;
-        if (kill && message.type === 'boundary') child.kill('SIGKILL');
-      });
-      child.on('exit', (code, signal) => {
-        clearTimeout(timeout);
-        if ((kill && signal === 'SIGKILL' && result?.type === 'boundary')
-          || (!kill && code === 0 && result?.type === 'done')) resolve(result);
-        else reject(new Error('Child fixture did not reach its expected boundary'));
-      });
-      child.send(input);
-    });
+    const { runSponsor: run } = require('./testing/sponsor-process.cjs');
     for (const stage of ['claim', 'reserve', 'sign', 'persist', 'broadcast']) {
       const actor = AccountMemory.generate(), payer = AccountMemory.generate();
       const f = await fixture({}, undefined, payer);

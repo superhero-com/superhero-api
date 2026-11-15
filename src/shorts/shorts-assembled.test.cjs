@@ -1,5 +1,5 @@
 const { directUploadPart } = require('./testing/direct-upload.cjs');
-const { releaseFixture } = require('./shorts-release.fixture.cjs');
+const { freeReleaseFixture } = require('./shorts-release.fixture.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -32,8 +32,11 @@ async function until(read, timeout = 45000) {
 
 const missing = ['PG_URL','REDIS_URL','S3_ENDPOINT','KUBO_API','INGEST_ROOT','STREAMING_REPO']
   .filter(name => !process.env['SHORTS_TEST_' + name]);
-if (process.env.SHORTS_TEST_REQUIRE_ASSEMBLED === '1' && missing.length)
-  throw new Error('Required assembled Shorts services missing: ' + missing.join(', '));
+if (process.env.SHORTS_TEST_REQUIRE_ASSEMBLED === '1') {
+  const required = [...missing];
+  if (!process.env.SHORTS_TEST_EDGE_IMAGE) required.push('EDGE_IMAGE');
+  if (required.length) throw new Error('Required assembled Shorts services missing: ' + required.join(', '));
+}
 
 test('complete hosted module shares upload, media and publication controls across process loss', {
   skip: missing.filter(name => name !== 'STREAMING_REPO').join(', ') || false,
@@ -44,7 +47,7 @@ test('complete hosted module shares upload, media and publication controls acros
   const schema = `shorts_assembled_${randomUUID().replaceAll('-', '')}`, dir = await mkdtemp(join(tmpdir(), 'shorts-assembled-'));
   const scope = { network: 'ae_uat', contract: encode(randomBytes(32), Encoding.ContractAddress) }, sourceHash = hash('owned offline contract');
   const creator = AccountMemory.generate(), operator = AccountMemory.generate();
-  const deployment = releaseFixture({ ...scope, sourceHash, operator: operator.address }, { sourceHash });
+  const deployment = freeReleaseFixture({ ...scope, sourceHash, operator: operator.address }, { sourceHash });
   const policy = { maxTransactionCost: '2000000000000000', rollingCostLimit: '10000000000000000', maxPending: 2,
     maxCreatorPending: 1, leaseMs: 3000, maxTtlBlocks: 20, confirmations: 3 };
   const admin = await new DataSource({ type: 'postgres', url: endpoints.PG_URL.href }).initialize();
@@ -91,6 +94,7 @@ test('complete hosted module shares upload, media and publication controls acros
   const social = await require('./testing/assembled-social.cjs').socialFixture(owner, dir);
   const meta = new ShortsMetadataService(owner); await meta.initialize(scope, sourceHash);
   await new ShortsPublicationsService(owner).initialize(scope, sourceHash, operator.address, policy);
+  const sponsor = await require('./testing/assembled-like.cjs').enrollSponsor({ owner, admin, schema, roles, deployment, url: endpoints.PG_URL.href });
   const apiRole = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' }); roles.push(apiRole);
   const operationsRole = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'api' });
   if (operationsRole) roles.push(operationsRole);
@@ -100,7 +104,7 @@ test('complete hosted module shares upload, media and publication controls acros
     'shorts_measurement_viewers','shorts_measurement_plays','shorts_measurement_totals','shorts_stream_jobs','shorts_lifecycle_jobs'];
   const tables = new Set((await owner.query(`SELECT tablename FROM pg_tables WHERE schemaname=$1`, [schema])).map(row => row.tablename));
   for (const table of tables) {
-    if (/^shorts_(publishing|publication|publisher|worker_principals|retention|storage|hls|pin|multipart|upload_reservations)/.test(table)) continue;
+    if (/^shorts_(publishing|publication|publisher|like_sponsor|worker_principals|retention|storage|hls|pin|multipart|upload_reservations)/.test(table)) continue;
     for (const role of [apiRole, operationsRole].filter(Boolean))
       await owner.query(`GRANT SELECT${writeTables.includes(table) ? ',INSERT,UPDATE,DELETE' : ''} ON ${table} TO ${role.role}`);
   }
@@ -115,7 +119,7 @@ test('complete hosted module shares upload, media and publication controls acros
   bucket = `shorts-assembled-${randomUUID()}`; await raw.send(new CreateBucketCommand({ Bucket: bucket }));
   for (const [name, value] of Object.entries({
     'chain.json': JSON.stringify({ shorts: {}, height: 100 }),
-    'deployment.json': JSON.stringify(deployment.release), 'artifact.json': JSON.stringify(deployment.artifact), 'policy.json': JSON.stringify(policy),
+    'deployment.json': JSON.stringify(deployment.release), 'artifact.json': JSON.stringify(deployment.artifact), 'sponsor.json': JSON.stringify(sponsor.policyFile), 'policy.json': JSON.stringify(policy),
     's3.json': JSON.stringify(credentials), 'keys.json': JSON.stringify({ activeKeyId: 'key1', keys: { key1: randomBytes(32).toString('hex') } }),
     'rate.key': randomBytes(32).toString('hex'), 'scanner.key': randomBytes(32).toString('hex'),
   })) await writeFile(join(dir, name), value, { mode: 0o600 });
@@ -160,10 +164,12 @@ test('complete hosted module shares upload, media and publication controls acros
     ...(streamPort ? { SHORTS_STREAM_INTERNAL_URL: `http://127.0.0.1:${streamPort}`, SHORTS_STREAM_KEY_FILE: join(dir, 'stream.key') } : {}),
     REDIS_HOST: endpoints.REDIS_URL.hostname, REDIS_PORT: endpoints.REDIS_URL.port, TRUST_PROXY: 'false',
   });
+  const sponsorEnv = { SHORTS_LIKE_SPONSOR_ENABLED: 'true', SHORTS_CONTRACT_ARTIFACT: join(dir, 'artifact.json'),
+    SHORTS_LIKE_SPONSOR_DATABASE_URL: sponsor.apiUrl, SHORTS_LIKE_SPONSOR_POLICY_FILE: join(dir, 'sponsor.json') };
   function child(file, extra, inherit = true) {
     const worker = file === 'media-worker.cjs';
     const entry = worker ? require('./testing/standalone-ingest.cjs').workerFixture() : join(__dirname, 'testing', file);
-    const process = fork(entry, [], { env: { ...(inherit ? env : {}), ...extra }, execArgv: worker || compiled ? [] : ['-r','ts-node/register','-r','tsconfig-paths/register'], stdio: ['ignore','pipe','pipe','ipc'] });
+    const process = fork(entry, [], { env: { ...(inherit ? env : {}), ...(file === 'hosted-runtime.cjs' ? sponsorEnv : {}), ...extra }, execArgv: worker || compiled ? [] : ['-r','ts-node/register','-r','tsconfig-paths/register'], stdio: ['ignore','pipe','pipe','ipc'] });
     children.push(process); const messages = []; let output = '';
     process.on('message', value => {
       messages.push(value);
@@ -210,11 +216,13 @@ test('complete hosted module shares upload, media and publication controls acros
       assert.equal(config.body.network, scope.network);
       assert.equal(config.body.contract, scope.contract);
       assert.equal(config.body.mode, 'testnet');
-      assert.equal(config.body.likeFee, '0.1');
-      assert.equal(config.body.creatorShare, 80);
-      assert.equal(config.body.treasuryShare, 20);
-      assert.equal(config.body.release.likeFeeAetto, '100000000000000000');
-      assert.equal(config.body.release.treasuryBps, 2000);
+      assert.equal(config.body.likeMode, 'free');
+      assert.equal(config.body.likeSponsorship.enabled, true);
+      assert.equal(config.body.likeFee, '0');
+      assert.equal(config.body.creatorShare, 0);
+      assert.equal(config.body.treasuryShare, 0);
+      assert.equal(config.body.release.likeFeeAetto, '0');
+      assert.equal(config.body.release.treasuryBps, 0);
       assert.equal(config.body.hosting, 'platform-funded');
     }
   });
@@ -293,7 +301,7 @@ test('complete hosted module shares upload, media and publication controls acros
   const signer = await publisherRole(admin, { url: endpoints.PG_URL.href, schema, scope, kind: 'publisher' });
   roles.push(signer);
   signerDb = await new DataSource({ type: 'postgres', url: signer.url, extra: { options: `-c search_path=${schema}` } }).initialize();
-  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, video, release: deployment.release, rememberMedia, signerDb,
+  await assembledIndex(t, { owner, admin, meta, scope, id, dir, creator, creatorToken, operator, operatorToken, b, c, request, until, pause, input, social, uploaded, video, sponsor, artifact: deployment.artifact, release: deployment.release, rememberMedia, signerDb,
     publisherDeployment: { scope, sourceHash, operator: operator.address, policy },
     async startDeliveryOperations(enabled = true) {
       assert.ok(operationsRole);

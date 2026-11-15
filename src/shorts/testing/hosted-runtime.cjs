@@ -31,7 +31,8 @@ const { Global, Module } = require('@nestjs/common');
   const { ShortsGateway } = runtimeRequire('../shorts.gateway');
   const { ShortsStreamingService } = runtimeRequire('../shorts-streaming.service');
   const { shortsContractPolicy } = runtimeRequire('../shorts-contract-policy');
-  const configuration = [manifest.operator, manifest.treasury, manifest.likeFeeAetto, manifest.treasuryBps];
+  const configuration = [{ operator: manifest.operator, max_video_bytes: 100000000, max_comment_chars: 280,
+    max_comment_bytes: 1120, comment_cooldown: 0, publishing_enabled: true, likes_enabled: true, comments_enabled: true }, 3];
   const chainState = async () => JSON.parse(await readFile(join(dirname(process.env.SHORTS_DEPLOYMENT_FILE), 'chain.json'), 'utf8'));
   const social = await require('./assembled-social.cjs').socialRuntime(db);
   const module = await Test.createTestingModule({ imports: [DatabaseModule, ...social.imports, ShortsFeatureModule.register()] })
@@ -43,11 +44,19 @@ const { Global, Module } = require('@nestjs/common');
       artifact,
       contract: { $options: { address: manifest.contract } }, operator: { address: manifest.operator },
       address: value => value, serial: callback => work.run(callback),
-      policy: async () => shortsContractPolicy(configuration, 1),
+      policy: async () => shortsContractPolicy(configuration, manifest.schemaVersion),
       account: async address => ({ address, wallet: '100', available: '0', earned: '0', claimed: '0' }),
       sdk: { getContext: () => ({ onNode: social.node }), api: {
         $host: manifest.node,
-        getCurrentKeyBlock: async () => ({ height: (await chainState()).height }),
+        getCurrentKeyBlock: async () => { const { height, keyHash: hash } = await chainState(); return { height, hash }; },
+        getTransactionByHash: async hash => {
+          const { transaction } = await chainState();
+          if (transaction?.hash !== hash) throw Object.assign(new Error('Unknown fixture transaction'), { statusCode: 404 });
+          return transaction;
+        },
+        getTransactionInfoByHash: async hash => {
+          const { transaction, callInfo } = await chainState(); assert.equal(transaction.hash, hash); return { callInfo };
+        },
         getGenerationByHeight: async height => ({ keyBlock: { height, hash: (await chainState()).keyHash }, microBlocks: (await chainState()).microBlocks?.[height] ?? [] }),
         getStatus: async () => ({ networkId: 'ae_uat' }),
       } },
