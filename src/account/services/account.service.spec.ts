@@ -622,6 +622,96 @@ describe('AccountService', () => {
       expect(accountRepository.upsert).not.toHaveBeenCalled();
     });
 
+    it('recovers a name-only account after a node 404 using current ownership and pointer', async () => {
+      const { service, accountRepository } = createService();
+      const name = 'freshsponsored.chain';
+      jest.spyOn(service, 'getChainNameForAccount').mockResolvedValue(name);
+      (fetchJson as jest.Mock)
+        .mockRejectedValueOnce(new FetchJsonHttpError('Account not found', 404))
+        .mockResolvedValueOnce({
+          active: true,
+          ownership: { current: ADDRESS },
+          pointers: [{ key: 'account_pubkey', id: ADDRESS }],
+        });
+      accountRepository.findOne.mockResolvedValue({
+        address: ADDRESS,
+        chain_name: name,
+      });
+
+      expect(await service.ensureAccountFromChain(ADDRESS)).toEqual({
+        address: ADDRESS,
+        chain_name: name,
+      });
+      expect(accountRepository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ address: ADDRESS, chain_name: name }),
+        { conflictPaths: ['address'] },
+      );
+    });
+
+    it.each([
+      [
+        'expired',
+        {
+          active: false,
+          ownership: { current: ADDRESS },
+          pointers: [{ key: 'account_pubkey', id: ADDRESS }],
+        },
+      ],
+      [
+        'transferred away',
+        {
+          active: true,
+          ownership: { current: 'ak_other' },
+          pointers: [{ key: 'account_pubkey', id: ADDRESS }],
+        },
+      ],
+      [
+        'different pointer',
+        {
+          active: true,
+          ownership: { current: ADDRESS },
+          pointers: [{ key: 'account_pubkey', id: 'ak_other' }],
+        },
+      ],
+      [
+        'different pointer key',
+        {
+          active: true,
+          ownership: { current: ADDRESS },
+          pointers: [{ key: 'oracle_pubkey', id: ADDRESS }],
+        },
+      ],
+    ])(
+      'does not hydrate a name-only account from an %s name',
+      async (_label, record) => {
+        const { service, accountRepository } = createService();
+        jest
+          .spyOn(service, 'getChainNameForAccount')
+          .mockResolvedValue('freshsponsored.chain');
+        (fetchJson as jest.Mock)
+          .mockRejectedValueOnce(
+            new FetchJsonHttpError('Account not found', 404),
+          )
+          .mockResolvedValueOnce(record);
+        expect(await service.ensureAccountFromChain(ADDRESS)).toBeNull();
+        expect(accountRepository.upsert).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not trust historical name data when current verification fails', async () => {
+      const { service, accountRepository } = createService();
+      jest
+        .spyOn(service, 'getChainNameForAccount')
+        .mockResolvedValue('freshsponsored.chain');
+      (fetchJson as jest.Mock)
+        .mockRejectedValueOnce(new FetchJsonHttpError('Account not found', 404))
+        .mockRejectedValueOnce(new Error('middleware unavailable'));
+      await expect(service.ensureAccountFromChain(ADDRESS)).rejects.toThrow(
+        'middleware unavailable',
+      );
+      expect(accountRepository.upsert).not.toHaveBeenCalled();
+    });
+
     it('propagates non-404 fetch errors instead of creating a row', async () => {
       const { service, accountRepository } = createService();
       (fetchJson as jest.Mock).mockRejectedValue(

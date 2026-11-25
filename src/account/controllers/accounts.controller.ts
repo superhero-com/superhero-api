@@ -72,7 +72,6 @@ const MAX_SEARCH_LENGTH = 100;
 // silently dropped, consistent with the "at most 25 resolved" contract.
 const MAX_ADDRESSES_CSV_LENGTH = 2000;
 
-@UseInterceptors(CacheInterceptor)
 @Controller('accounts')
 @ApiTags('Accounts')
 export class AccountsController {
@@ -124,6 +123,7 @@ export class AccountsController {
       "(`links->>'nostr' IS NOT NULL`) — e.g. to suggest chat contacts.",
   })
   @ApiOperation({ operationId: 'listAll' })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(60_000)
   @Get()
   async listAll(
@@ -229,6 +229,7 @@ export class AccountsController {
       'Comma-separated nostr pubkeys (npub or 64-char hex), max 200.',
   })
   @ApiOkResponse({ type: [NostrAccountRefDto] })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(60_000)
   @Get('by-nostr')
   async resolveByNostr(
@@ -298,6 +299,7 @@ export class AccountsController {
     description: 'Max results, clamped to 1-20 (default 8).',
   })
   @ApiOkResponse({ type: [AccountSearchResultDto] })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(60_000)
   @Get('search')
   async searchAccounts(
@@ -335,7 +337,7 @@ export class AccountsController {
   @ApiOkResponse({
     description: 'Map of address -> chain_name (string) or null.',
   })
-  @CacheTTL(60_000)
+  // Read the account projection directly after a claim; cached nulls hide it.
   @Get('chain-names')
   async getChainNamesForAddresses(
     @Query('addresses') addressesCsv?: string,
@@ -402,6 +404,7 @@ export class AccountsController {
   })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/history')
   async getPortfolioHistory(
@@ -445,6 +448,7 @@ export class AccountsController {
   })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: [PortfolioHistorySnapshotDto] })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/tokens/history')
   async getTokensPnlHistory(
@@ -500,6 +504,7 @@ export class AccountsController {
   })
   @Header('Content-Type', 'image/svg+xml')
   @Header('Content-Disposition', 'inline; filename="pnl-chart.svg"')
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/pnl-chart.svg')
   async getPortfolioPnlChart(
@@ -548,6 +553,7 @@ export class AccountsController {
   @ApiOperation({ operationId: 'getPortfolioStats' })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiOkResponse({ type: TradingStatsResponseDto })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(10 * 60_000)
   @Get(':address/portfolio/stats')
   async getPortfolioStats(
@@ -588,6 +594,7 @@ export class AccountsController {
   })
   @ApiParam({ name: 'address', type: 'string', description: 'Account address' })
   @ApiQuery({ name: 'convertTo', enum: ['ae', 'usd'], required: false })
+  @UseInterceptors(CacheInterceptor)
   @CacheTTL(30_000)
   @Get(':address/portfolio/value')
   async getCurrentPortfolioValue(
@@ -601,7 +608,7 @@ export class AccountsController {
   @ApiOperation({ operationId: 'getAccount' })
   @ApiParam({ name: 'address', type: 'string' })
   @ApiOkResponse({ type: GetAccountResponseDto })
-  @CacheTTL(10 * 60_000)
+  // Claim completion updates the row immediately; do not cache the old identity.
   @Get(':address')
   async getAccount(@Param('address', AeAccountAddressPipe) address: string) {
     const account =

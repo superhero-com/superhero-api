@@ -37,6 +37,7 @@ import { ProfileChainNameService } from './profile-chain-name.service';
 import * as profileSignatureUtil from './profile-signature.util';
 import { ProfileChainNameClaim } from '../entities/profile-chain-name-claim.entity';
 import { ProfileChainNameChallenge } from '../entities/profile-chain-name-challenge.entity';
+import { Account } from '@/account/entities/account.entity';
 
 describe('ProfileChainNameService', () => {
   const validAddress = 'ak_2A9A8vXrX3tQzN5xW1TfFjBgfDkJtN2gQq7mB7cDgY7xT2R9s';
@@ -71,14 +72,19 @@ describe('ProfileChainNameService', () => {
       }),
       save: jest.fn().mockImplementation(async (value) => value),
     } as any;
+    const accountRepository = {
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
     const manager = {
       getRepository: jest.fn().mockImplementation((entity) => {
         if (entity === ProfileChainNameChallenge)
           return lockedChallengeRepository;
         if (entity === ProfileChainNameClaim) return lockedClaimRepository;
+        if (entity === Account) return accountRepository;
         return null;
       }),
     };
+    lockedClaimRepository.manager = manager;
     const dataSource = {
       transaction: jest.fn().mockImplementation(async (cb) => cb(manager)),
     } as any;
@@ -108,6 +114,7 @@ describe('ProfileChainNameService', () => {
       challengeRepository,
       lockedClaimRepository,
       lockedChallengeRepository,
+      accountRepository,
       dataSource,
       aeSdkService,
       profileSpendQueueService,
@@ -766,33 +773,86 @@ describe('ProfileChainNameService', () => {
     expect(profileSpendQueueService.enqueueSpend).not.toHaveBeenCalled();
   });
 
-  it('marks a claim complete when the name is already owned by the user', async () => {
-    const { service, claimRepository } = getService();
-    const save = jest.fn().mockResolvedValue(undefined);
+  it.each(['preclaimed', 'claimed'])(
+    'recovers a %s claim and projects its account without submitting another transaction',
+    async (status) => {
+      const {
+        service,
+        claimRepository,
+        lockedClaimRepository,
+        accountRepository,
+        profileSpendQueueService,
+      } = getService();
+      // The sponsor must differ from the new name owner.
+      profileSpendQueueService.getRewardAccount.mockReturnValue({
+        address: 'ak_sponsor',
+      });
+      const entry = {
+        address: validAddress,
+        name: 'myuniquename123.chain',
+        status,
+        salt: '123',
+        next_retry_at: new Date(),
+      };
+      claimRepository.findOne.mockResolvedValue(entry);
+      lockedClaimRepository
+        .createQueryBuilder()
+        .getOne.mockResolvedValue(entry);
+      jest.spyOn(service as any, 'getNameStateIfPresent').mockResolvedValue({
+        owner: validAddress,
+        pointers: [{ key: 'account_pubkey', id: validAddress }],
+      });
+
+      if (status === 'preclaimed')
+        await (service as any).stepClaim(validAddress);
+      else await (service as any).stepUpdatePointer(validAddress);
+
+      expect(accountRepository.upsert).toHaveBeenCalledWith(
+        {
+          address: validAddress,
+          chain_name: entry.name,
+          chain_name_updated_at: expect.any(Date),
+          chain_name_checked_at: expect.any(Date),
+        },
+        { conflictPaths: ['address'] },
+      );
+      expect(lockedClaimRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'completed', next_retry_at: null }),
+      );
+      expect(profileSpendQueueService.enqueueSpend).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not project or complete a recovered name with a different account pointer', async () => {
+    const {
+      service,
+      claimRepository,
+      lockedClaimRepository,
+      accountRepository,
+      profileSpendQueueService,
+    } = getService();
+    profileSpendQueueService.getRewardAccount.mockReturnValue({
+      address: 'ak_sponsor',
+    });
     const entry = {
       address: validAddress,
       name: 'myuniquename123.chain',
       status: 'claimed',
-      next_retry_at: new Date(),
+      retry_count: 0,
     };
     claimRepository.findOne.mockResolvedValue(entry);
-    jest
-      .spyOn(service as any, 'getNameStateIfPresent')
-      .mockResolvedValue({ owner: validAddress });
-    jest
-      .spyOn(service as any, 'withLockedClaim')
-      .mockImplementation(async (_address, work) =>
-        (work as any)({ save } as any, entry),
-      );
+    lockedClaimRepository.createQueryBuilder().getOne.mockResolvedValue(entry);
+    jest.spyOn(service as any, 'getNameStateIfPresent').mockResolvedValue({
+      owner: validAddress,
+      pointers: [{ key: 'account_pubkey', id: 'ak_other' }],
+    });
 
     await (service as any).stepUpdatePointer(validAddress);
 
-    expect(save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'completed',
-        next_retry_at: null,
-      }),
-    );
+    expect(accountRepository.upsert).not.toHaveBeenCalled();
+    expect(entry.status).toBe('claimed');
+    expect(entry.retry_count).toBe(1);
+    expect(profileSpendQueueService.enqueueSpend).not.toHaveBeenCalled();
   });
 
   it('marks a claim failed once max retries is reached', async () => {
@@ -935,7 +995,12 @@ describe('ProfileChainNameService', () => {
       jest
         .spyOn(ctx.service as any, 'getNameStateIfPresent')
         .mockImplementation(async () =>
-          chain.owner ? { owner: chain.owner } : null,
+          chain.owner
+            ? {
+                owner: chain.owner,
+                pointers: [{ key: 'account_pubkey', id: validAddress }],
+              }
+            : null,
         );
       (buildTxAsync as jest.Mock).mockReset().mockResolvedValue('tx_claim');
       (sendTransaction as jest.Mock)
