@@ -154,8 +154,9 @@ export class AccountService {
    * Confirms an address has on-chain account state at the node and, if so,
    * persists a minimal account row. A read path calls this so a valid account
    * that never appeared in indexed transactions — e.g. one reachable only
-   * through the social graph — resolves instead of 404ing. Returns null when
-   * the node reports no such account (HTTP 404).
+   * through the social graph — resolves instead of 404ing. A sponsored name
+   * recipient can own a name without having a node account yet; recover those
+   * accounts from a currently owned name pointing to them.
    */
   async ensureAccountFromChain(address: string): Promise<Account | null> {
     const accountUrl = `${ACTIVE_NETWORK.url}/v3/accounts/${encodeURIComponent(address)}`;
@@ -163,16 +164,53 @@ export class AccountService {
     try {
       const chainAccount = await fetchJson<{ id?: string }>(accountUrl);
       if (!chainAccount?.id) {
-        return null;
+        return this.ensureAccountFromChainName(address);
       }
     } catch (error) {
       if (error instanceof FetchJsonHttpError && error.status === 404) {
-        return null;
+        return this.ensureAccountFromChainName(address);
       }
       throw error;
     }
 
     return this.ensureAccountExists(address);
+  }
+
+  private async ensureAccountFromChainName(
+    address: string,
+  ): Promise<Account | null> {
+    const name = await this.getChainNameForAccount(address);
+    if (!name) return null;
+
+    // The ordinary resolver may fall back to historical pointees on an outage.
+    // Creating an account requires current ownership and account_pubkey proof.
+    const record = await fetchJson<{
+      active: boolean;
+      ownership?: { current?: string };
+      pointers?: Array<{ key: string; id: string }>;
+    }>(`${ACTIVE_NETWORK.middlewareUrl}/v3/names/${encodeURIComponent(name)}`, {
+      signal: AbortSignal.timeout(CHAIN_NAME_VERIFY_TIMEOUT_MS),
+    });
+    if (
+      !record?.active ||
+      record.ownership?.current !== address ||
+      !record.pointers?.some(
+        (pointer) => pointer.key === 'account_pubkey' && pointer.id === address,
+      )
+    )
+      return null;
+
+    const now = new Date();
+    await this.accountRepository.upsert(
+      {
+        address,
+        chain_name: name,
+        chain_name_updated_at: now,
+        chain_name_checked_at: now,
+      },
+      { conflictPaths: ['address'] },
+    );
+    return this.accountRepository.findOne({ where: { address } });
   }
 
   private async aggregateAccountRow(
