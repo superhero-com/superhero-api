@@ -1,4 +1,5 @@
 import { AeSdkService } from '@/ae/ae-sdk.service';
+import { Account } from '@/account/entities/account.entity';
 import {
   BadRequestException,
   ConflictException,
@@ -446,13 +447,7 @@ export class ProfileChainNameService {
         return;
       }
       if (onChainState?.owner === address) {
-        await this.withLockedClaim(address, async (repo, entry) => {
-          if (!entry || entry.status !== 'preclaimed') return;
-          entry.status = 'completed';
-          entry.error = null;
-          entry.next_retry_at = null;
-          await repo.save(entry);
-        });
+        await this.completeClaim(claim);
         return;
       }
 
@@ -545,13 +540,7 @@ export class ProfileChainNameService {
       const sponsorAddress = this.getSponsorAccount().address;
       const onChainState = await this.getNameStateIfPresent(claim.name);
       if (onChainState?.owner === address) {
-        await this.withLockedClaim(address, async (repo, entry) => {
-          if (!entry || entry.status !== 'claimed') return;
-          entry.status = 'completed';
-          entry.error = null;
-          entry.next_retry_at = null;
-          await repo.save(entry);
-        });
+        await this.completeClaim(claim);
         return;
       }
       if (onChainState && onChainState.owner !== sponsorAddress) {
@@ -578,14 +567,9 @@ export class ProfileChainNameService {
             address as `ak_${string}`,
           );
 
-          await this.withLockedClaim(address, async (repo, entry) => {
-            if (!entry || entry.status !== 'claimed') return;
-            entry.status = 'completed';
-            entry.update_tx_hash = updateResult.hash || null;
-            entry.transfer_tx_hash = transferResult.hash || null;
-            entry.error = null;
-            entry.next_retry_at = null;
-            await repo.save(entry);
+          await this.completeClaim(freshClaim, {
+            update_tx_hash: updateResult.hash || null,
+            transfer_tx_hash: transferResult.hash || null,
           });
 
           this.logger.log(
@@ -600,6 +584,53 @@ export class ProfileChainNameService {
       );
       this.logger.warn(`Pointer update failed for ${address}, scheduled retry`);
     }
+  }
+
+  /** Persist the profile and completion together, including crash recovery. */
+  private async completeClaim(
+    claim: ProfileChainNameClaim,
+    hashes: Partial<
+      Pick<ProfileChainNameClaim, 'update_tx_hash' | 'transfer_tx_hash'>
+    > = {},
+  ): Promise<void> {
+    // Read the node's current state, not middleware indexing or broadcast alone.
+    const state = await this.getNameStateIfPresent(claim.name);
+    if (
+      state?.owner !== claim.address ||
+      !state.pointers.some(
+        (pointer) =>
+          pointer.key === 'account_pubkey' && pointer.id === claim.address,
+      )
+    ) {
+      throw new Error(
+        'Claimed name ownership and account pointer are not confirmed',
+      );
+    }
+
+    await this.withLockedClaim(claim.address, async (repo, entry) => {
+      if (!entry || entry.status !== claim.status || entry.name !== claim.name)
+        return;
+      const now = new Date();
+      // A sponsored name recipient may never have received AE. Upsert a minimal
+      // account without replacing links, moderation flags or trading counters.
+      // A failed write rolls completion back, so the existing retry can recover
+      // from the already-transferred name without spending again.
+      await repo.manager.getRepository(Account).upsert(
+        {
+          address: entry.address,
+          chain_name: entry.name,
+          chain_name_updated_at: now,
+          chain_name_checked_at: now,
+        },
+        { conflictPaths: ['address'] },
+      );
+      Object.assign(entry, hashes, {
+        status: 'completed',
+        error: null,
+        next_retry_at: null,
+      });
+      await repo.save(entry);
+    });
   }
 
   private createNameInstance(chainName: string): Name {
