@@ -1,3 +1,4 @@
+import { ShortsFeatureModule } from './shorts/shorts-feature.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BullBoardModule } from './bull-board/bull-board.module';
 
@@ -50,6 +51,7 @@ import { FeedModule } from './feed/feed.module';
   imports: [
     ScheduleModule.forRoot(),
     ConfigModule.forRoot(),
+    ShortsFeatureModule.register(),
     CacheModule.registerAsync({
       isGlobal: true,
       useFactory: () => ({
@@ -92,7 +94,11 @@ import { FeedModule } from './feed/feed.module';
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
       path: GRAPHQL_PATH,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // Production containers can use a read-only application filesystem.
+      autoSchemaFile:
+        process.env.NODE_ENV === 'production'
+          ? true
+          : join(process.cwd(), 'src/schema.gql'),
       sortSchema: true,
       playground: false,
       // Keep introspection + GraphiQL off in production so the full schema

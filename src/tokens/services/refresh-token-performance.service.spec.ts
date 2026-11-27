@@ -14,6 +14,9 @@ function createService(locked: boolean) {
       if (sql.includes('pg_try_advisory_xact_lock')) {
         return [{ locked }];
       }
+      if (sql === 'SET LOCAL jit = off') {
+        return [];
+      }
       if (sql === DELETE_STALE_TOKEN_PERFORMANCE_SQL) {
         return [{ count: 2 }];
       }
@@ -45,6 +48,7 @@ describe('RefreshTokenPerformanceService', () => {
 
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([
       'SELECT pg_try_advisory_xact_lock($1) AS locked',
+      'SET LOCAL jit = off',
       DELETE_STALE_TOKEN_PERFORMANCE_SQL,
       UPSERT_TOKEN_PERFORMANCE_SQL,
     ]);

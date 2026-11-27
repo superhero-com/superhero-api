@@ -33,6 +33,19 @@ export class PluginRegistryService implements OnModuleInit {
     return this.plugins.find((plugin) => plugin.name === name);
   }
 
+  async catchUpToHeight(tipHeight: number): Promise<void> {
+    for (const plugin of this.plugins) {
+      if (!plugin.catchUpToHeight) continue;
+      try {
+        await plugin.catchUpToHeight(tipHeight);
+      } catch (error) {
+        // Each plugin owns its durable checkpoint. A failed range stays pending
+        // for the next shared tick, without stopping other plugins/backfill.
+        this.logger.warn(`[${plugin.name}] Coverage catch-up failed: ${error}`);
+      }
+    }
+  }
+
   getAllFilters(): PluginFilter[] {
     const allFilters: PluginFilter[] = [];
 

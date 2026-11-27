@@ -16,6 +16,11 @@ export class TransactionPersistenceService {
 
   constructor(private readonly accountService: AccountService) {}
 
+  /** Acquire before token-row writes; a lock error must abort the transaction. */
+  async lockTransaction(txHash: string, manager: EntityManager): Promise<void> {
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [txHash]);
+  }
+
   /**
    * Cleanup old create_community transactions for the same sale address
    * @param saleAddress - Sale address
@@ -67,23 +72,10 @@ export class TransactionPersistenceService {
     const transactionRepository = manager.getRepository(Transaction);
     const tokenRepository = manager.getRepository(Token);
 
-    // Serializes concurrent saves of the same tx_hash (e.g. overlapping
-    // forward/backward sync passes) so the exists-check below can't race
-    // with another connection's upsert and double-count the eligibility
-    // increment. Xact-scoped: released automatically on commit/rollback of
-    // the caller's transaction. Best-effort -- a failure here only reopens
-    // the (rare) race window, so it's logged rather than thrown, consistent
-    // with how the other non-critical steps in this method are handled.
-    try {
-      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        txData.tx_hash,
-      ]);
-    } catch (error) {
-      this.logger.error(
-        `Failed to acquire trade-eligibility lock for ${txData.tx_hash}`,
-        error instanceof Error ? error.stack : String(error),
-      );
-    }
+    // The processor already owns this transaction-scoped lock before changing
+    // token metadata. Reacquisition on the same connection is safe and also
+    // protects callers that persist directly, before their first write.
+    await this.lockTransaction(txData.tx_hash, manager);
 
     // Checked before the upsert so a re-processed tx (backward sync/reorg
     // replay of an already-persisted hash) is never double-counted below.

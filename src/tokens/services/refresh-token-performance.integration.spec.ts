@@ -125,6 +125,41 @@ d('token_performance: migration 1718900000036 and refresh', () => {
     expect(touched).toBe(0);
   });
 
+  it('disables JIT only inside the refresh transaction', async () => {
+    const session = db.dataSource.createQueryRunner();
+    await session.connect();
+    await session.query('SET jit = on');
+    const scopedSource = {
+      transaction: async (
+        work: (manager: typeof session.manager) => unknown,
+      ) => {
+        await session.startTransaction();
+        try {
+          const result = await work(session.manager);
+          expect(await session.query('SHOW jit')).toEqual([{ jit: 'off' }]);
+          await session.commitTransaction();
+          return result;
+        } catch (error) {
+          await session.rollbackTransaction();
+          throw error;
+        }
+      },
+    };
+    try {
+      const scoped = new RefreshTokenPerformanceService(
+        scopedSource as DataSource,
+      );
+      await expect(scoped.refreshPerformance()).resolves.toEqual({
+        changed: 0,
+        removed: 0,
+      });
+      expect(await session.query('SHOW jit')).toEqual([{ jit: 'on' }]);
+    } finally {
+      await session.query('RESET jit');
+      await session.release();
+    }
+  });
+
   it('rewrites only the token that traded', async () => {
     await db.dataSource.query(
       `INSERT INTO transactions VALUES ('th_new', 'ct_b', 1, $1::json, now() - interval '1 minute')`,

@@ -25,6 +25,35 @@ describe('DexSchemaBootstrapService', () => {
     jest.restoreAllMocks();
   });
 
+  it('validates the production schema without requiring owner permissions', async () => {
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'production',
+    });
+    const dataSource = {
+      query: jest.fn().mockResolvedValue([]),
+      createQueryRunner: jest.fn(),
+    };
+    await new DexSchemaBootstrapService(dataSource as any).onModuleInit();
+    expect(dataSource.query).toHaveBeenCalledWith(
+      'SELECT listed FROM dex_tokens WHERE false',
+    );
+    expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+  });
+
+  it('refuses production startup when its required column is missing', async () => {
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'production',
+    });
+    const dataSource = {
+      query: jest.fn().mockRejectedValue(new Error('column does not exist')),
+    };
+    await expect(
+      new DexSchemaBootstrapService(dataSource as any).onModuleInit(),
+    ).rejects.toThrow('column does not exist');
+  });
+
   it('runs every required and index statement on init', async () => {
     const query = jest.fn().mockResolvedValue(undefined);
     const { service } = makeService(query);

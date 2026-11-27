@@ -14,7 +14,10 @@ import { THREAD_COMMENT_COUNTS_LOCK_KEY } from '../utils/thread-comment-counts.u
 // Mock the external dependencies
 jest.mock('@/utils/common');
 jest.mock('../config/post-contracts.config');
-jest.mock('../utils/content-parser.util');
+jest.mock('../utils/content-parser.util', () => ({
+  ...jest.requireActual('../utils/content-parser.util'),
+  parsePostContent: jest.fn(),
+}));
 
 describe('PostService', () => {
   let service: PostService;

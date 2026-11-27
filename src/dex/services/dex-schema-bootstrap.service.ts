@@ -4,10 +4,9 @@ import { DataSource } from 'typeorm';
 
 /**
  * Ensures DEX schema additions that post-date the original tables exist in
- * every environment — including production, where TypeORM `synchronize` is
- * disabled (see src/configs/database.ts) and would otherwise never create the
- * new `dex_tokens.listed` column or the performance indexes the DEX endpoints
- * rely on.
+ * development environments that use TypeORM `synchronize`. Production uses
+ * the ProductionRuntimeSchema migration and validates its required column
+ * without granting DDL permissions to the running API.
  *
  * Every statement is idempotent (`IF NOT EXISTS`). The whole run is serialised
  * across application instances with a Postgres advisory lock so that concurrent
@@ -18,8 +17,7 @@ import { DataSource } from 'typeorm';
  * indexes are performance, not correctness, so a failure is logged and boot
  * continues.
  *
- * This is a deliberate stop-gap until the project adopts real TypeORM
- * migrations. Note: index builds use a plain `CREATE INDEX` and therefore take
+ * The development bootstrap uses plain `CREATE INDEX` and therefore takes
  * a brief write lock on the target table; on a very large `pair_transactions`
  * table a one-time migration with `CREATE INDEX CONCURRENTLY` is preferable.
  */
@@ -62,6 +60,10 @@ export class DexSchemaBootstrapService implements OnModuleInit {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
   async onModuleInit(): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      await this.dataSource.query('SELECT listed FROM dex_tokens WHERE false');
+      return;
+    }
     // Use a single dedicated connection so the advisory lock and the DDL run on
     // the same session (advisory locks are session-scoped).
     const queryRunner = this.dataSource.createQueryRunner();

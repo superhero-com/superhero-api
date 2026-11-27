@@ -93,7 +93,20 @@ export class TransactionProcessorService {
     // Wrap all DB operations in a single transaction
     const result = await this.transactionRepository.manager.transaction(
       async (manager) => {
-        let transactionToken = resolvedToken;
+        // Overlapping live/backfill/retry passes must take the transaction lock
+        // before token metadata writes. Taking it only during persistence can
+        // deadlock against another pass that owns this lock and needs the row.
+        await this.persistenceService.lockTransaction(
+          rawTransaction.hash,
+          manager,
+        );
+        // Another replay may complete the creation metadata while this pass
+        // waits for the transaction lock. Read the committed row before writing.
+        let transactionToken =
+          rawTransaction.function === BCL_FUNCTIONS.create_community &&
+          !resolvedToken?.factory_address
+            ? await this.tokenService.findByAddress(saleAddress, manager)
+            : resolvedToken;
         let cleanupAffectedAddresses: string[] = [];
 
         if (!transactionToken) {

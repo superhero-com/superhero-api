@@ -1,6 +1,7 @@
 import { PostService } from './post.service';
 
 jest.mock('../utils/content-parser.util', () => ({
+  ...jest.requireActual('../utils/content-parser.util'),
   parsePostContent: jest.fn(() => ({
     content: 'parsed content',
     topics: [],

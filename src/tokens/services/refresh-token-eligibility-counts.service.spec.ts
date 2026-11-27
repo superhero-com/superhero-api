@@ -24,6 +24,35 @@ describe('RefreshTokenEligibilityCountsService', () => {
     service = new RefreshTokenEligibilityCountsService(dataSource as any);
   });
 
+  afterEach(() => jest.restoreAllMocks());
+
+  it('uses migrated tables without DDL in production', async () => {
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'production',
+    });
+    dataSource.query.mockResolvedValue([]);
+    await service.onModuleInit();
+    expect(
+      dataSource.query.mock.calls.every(
+        ([sql]) => !/^\s*(CREATE|ALTER)\b/i.test(sql),
+      ),
+    ).toBe(true);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses production startup when the required schema is unavailable', async () => {
+    jest.replaceProperty(process, 'env', {
+      ...process.env,
+      NODE_ENV: 'production',
+    });
+    dataSource.query.mockRejectedValue(new Error('relation does not exist'));
+    await expect(service.onModuleInit()).rejects.toThrow(
+      'relation does not exist',
+    );
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+  });
+
   it('creates the tables and performs a full rebuild on first refresh', async () => {
     dataSource.query
       .mockResolvedValueOnce(undefined)
